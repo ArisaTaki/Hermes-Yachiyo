@@ -918,7 +918,11 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         if _desktop_window_text_context_hint(text):
             return _empty_intent("web_research", text)
-        if _dynamic_context_ui_transfer_hint(text) or _blocked_dynamic_context_ui_transfer_hint(text):
+        if (
+            _dynamic_context_transform_target_hint(text)
+            or _dynamic_context_ui_transfer_hint(text)
+            or _blocked_dynamic_context_ui_transfer_hint(text)
+        ):
             return _empty_intent("web_research", text)
         source = _task_context_source_hint(text)
         if source and safe_shortcut_hint(text):
@@ -1094,13 +1098,19 @@ class TaskIntentRouter:
                 "复盘",
             ],
         )
+        transform_target = _dynamic_context_transform_target_hint(text)
         artifact_context_source = _context_artifact_source_hint(text)
         context_source = (
-            ""
-            if artifact_context_source == "current_page_content"
-            else artifact_context_source
+            str(transform_target.get("context_source") or "").strip()
+            or (
+                ""
+                if artifact_context_source == "current_page_content"
+                else artifact_context_source
+            )
         )
         file_context = {} if artifact_context_source else _report_file_context_hint(text)
+        if score <= 0 and transform_target:
+            score = 0.24
         if score <= 0 and file_context and _contains_any(
             text,
             ["生成", "输出", "写", "总结", "摘要", "summarize", "write", "report"],
@@ -1111,22 +1121,36 @@ class TaskIntentRouter:
         inputs: dict[str, Any] = {}
         if context_source:
             inputs["context_source"] = context_source
+        target_app = str(transform_target.get("target_app_hint") or "").strip()
+        if target_app:
+            inputs["target_app_hint"] = target_app
+            inputs["target_action_hint"] = "app_paste"
         if file_context:
             inputs["file_context_hint"] = file_context
         output_target = _task_output_target_hint(text)
         if output_target:
             inputs["output_target_hint"] = output_target
-        file_context_capabilities = (
-            (
-                [
-                    "file.workspace_read",
-                    "terminal.execution",
-                    "clipboard.read_write" if output_target == "clipboard" else "artifact.write",
-                ]
-            )
-            if file_context
-            else ["clipboard.read_write" if output_target == "clipboard" else "artifact.write"]
+        output_capability = (
+            "desktop.app_control"
+            if target_app
+            else ("clipboard.read_write" if output_target == "clipboard" else "artifact.write")
         )
+        if target_app and context_source:
+            file_context_capabilities = _unique_capabilities(
+                [_context_source_required_capability(context_source), output_capability]
+            )
+        else:
+            file_context_capabilities = (
+                (
+                    [
+                        "file.workspace_read",
+                        "terminal.execution",
+                        output_capability,
+                    ]
+                )
+                if file_context
+                else [output_capability]
+            )
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "report_generation", text),
             kind="report_generation",
@@ -1143,7 +1167,15 @@ class TaskIntentRouter:
                     if context_source
                     else ["file.workspace_read", "browser.research", "data.analysis", "terminal.execution"]
                 ),
-                "clipboard.read_write" if output_target == "clipboard" else "artifact.write",
+                *(
+                    ["desktop.app_control", "desktop.ui_operation", "clipboard.read_write"]
+                    if target_app
+                    else [
+                        "clipboard.read_write"
+                        if output_target == "clipboard"
+                        else "artifact.write"
+                    ]
+                ),
             ],
             risk_level="low",
         )
@@ -1516,6 +1548,8 @@ class TaskIntentRouter:
         )
 
     def _clipboard_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        if _dynamic_context_transform_target_hint(text):
+            return _empty_intent("clipboard_operation", text)
         hint = clipboard_operation_hint(text)
         if not hint:
             return _empty_intent("clipboard_operation", text)
@@ -4068,6 +4102,33 @@ class RuntimePlanner:
                 capability_id="artifact.write",
             )
             depends_on = [step.step_id for step in context_steps]
+            target_app = str(intent.inputs.get("target_app_hint") or "").strip()
+            if target_app:
+                return [
+                    *context_steps,
+                    _step(
+                        intent,
+                        "prepare-report-target-app",
+                        "Prepare target app",
+                        "desktop.app_control",
+                        _first_allowed(
+                            ("app.focus", "app.open", "app.open_and_safe_shortcut"),
+                            allowed,
+                        ),
+                        input_preview={
+                            "app_name": target_app,
+                            "target_action": str(
+                                intent.inputs.get("target_action_hint") or "app_paste"
+                            ).strip(),
+                            "body_source": "model_generated_content",
+                        },
+                        depends_on=depends_on,
+                        reason=(
+                            "After context is inspected and transformed by the model, "
+                            "focus the requested app before inserting the generated content."
+                        ),
+                    ),
+                ]
             artifact_path = _artifact_output_path(intent.user_goal, "report.md")
             steps = [
                 *context_steps,
@@ -5537,6 +5598,28 @@ def _context_source_capability_id(source: str, tool_name: str | None, fallback: 
     if source == "file":
         return "file.workspace_read"
     return fallback
+
+
+def _context_source_required_capability(source: str) -> str:
+    clean_source = str(source or "").strip()
+    if clean_source in {"selection", "clipboard"}:
+        return "clipboard.read_write"
+    if clean_source in {"current_page_link", "current_page_content"}:
+        return "browser.research"
+    if clean_source == "visible_text":
+        return "desktop.app_discovery"
+    if clean_source == "file":
+        return "file.workspace_read"
+    return "artifact.write"
+
+
+def _unique_capabilities(capabilities: Iterable[str]) -> list[str]:
+    result: list[str] = []
+    for capability in capabilities:
+        clean_capability = str(capability or "").strip()
+        if clean_capability and clean_capability not in result:
+            result.append(clean_capability)
+    return result
 
 
 def _direct_communication_steps(
@@ -9953,6 +10036,8 @@ def _foreground_paste_hint(text: str) -> bool:
 
 def _dynamic_context_ui_transfer_hint(text: str) -> dict[str, Any]:
     value = _clean_prompt(text)
+    if _dynamic_context_transform_target_hint(value):
+        return {}
     source = _dynamic_context_source_hint(value)
     if source not in {"selection", "clipboard", "current_page_link", "current_page_content"}:
         return {}
@@ -9991,6 +10076,43 @@ def _dynamic_context_ui_transfer_hint(text: str) -> dict[str, Any]:
         "app_name": app_name,
         "mode": "open" if _explicit_app_open_request(value) else "focus",
     }
+
+
+def _dynamic_context_transform_target_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not _dynamic_context_transform_requested(value):
+        return {}
+    if not _looks_like_dynamic_context_transfer(value):
+        return {}
+    source = _dynamic_context_source_hint(value)
+    if not source and _browser_current_page_hint(value):
+        source = "current_page_content"
+    if source not in {"selection", "clipboard", "current_page_link", "current_page_content"}:
+        return {}
+    app_name = _non_notes_dynamic_context_target_app(value)
+    if not app_name:
+        return {}
+    if _normalize_artifact_output_location(app_name):
+        return {}
+    return {
+        "context_source": source,
+        "target_app_hint": app_name,
+        "target_action_hint": "app_paste",
+    }
+
+
+def _dynamic_context_transform_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    return bool(
+        re.search(
+            r"(?:总结|摘要|概括|归纳|整理|提炼|改写|润色|翻译|转成|转换成|"
+            r"变成|做成|生成|待办|任务清单|清单|"
+            r"summarize|summary|summarise|brief|organize|organise|rewrite|"
+            r"polish|translate|convert|format|todo|to-do|task list)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _blocked_dynamic_context_ui_transfer_hint(text: str) -> bool:

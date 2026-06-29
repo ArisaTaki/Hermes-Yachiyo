@@ -3476,6 +3476,100 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
     assert read_only.selected_intent.kind == "clipboard_operation"
 
 
+def test_runtime_planner_prefetches_transformed_context_before_app_write() -> None:
+    allowed = [
+        "browser.extract_text",
+        "browser.current_page",
+        "clipboard.read",
+        "app.focus",
+        "app.open",
+        "desktop.safe_shortcut",
+    ]
+    page_prefetch = {
+        "protocol": "json_fallback",
+        "tool": "browser.extract_text",
+        "input": {},
+        "source": "runtime_planner",
+        "planning_reason": "planner_prefetch_report_context",
+        "continue_to_model": True,
+    }
+    clipboard_prefetch = {
+        "protocol": "json_fallback",
+        "tool": "clipboard.read",
+        "input": {},
+        "source": "runtime_planner",
+        "planning_reason": "planner_prefetch_report_context",
+        "continue_to_model": True,
+    }
+
+    for prompt in (
+        "把当前网页总结一下并保存到 Obsidian 新笔记",
+        "把当前网页摘要写进 Obsidian",
+        "把当前网页内容整理一下写进 Obsidian",
+    ):
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed)
+
+        assert decision.selected_intent.kind == "report_generation"
+        assert decision.selected_intent.inputs == {
+            "context_source": "current_page_content",
+            "target_app_hint": "Obsidian",
+            "target_action_hint": "app_paste",
+        }
+        assert decision.selected_intent.required_capabilities == [
+            "browser.research",
+            "desktop.app_control",
+        ]
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "read-report-context",
+            "prepare-report-target-app",
+        ]
+        assert _step_by_id(decision, "read-report-context").tool_name == (
+            "browser.extract_text"
+        )
+        assert _step_by_id(decision, "prepare-report-target-app").input_preview == {
+            "app_name": "Obsidian",
+            "target_action": "app_paste",
+            "body_source": "model_generated_content",
+        }
+        assert decision.plan.tool_plan.artifacts_expected == []
+        assert planner_tool_requests(prompt, allowed) == [page_prefetch]
+        assert planner_direct_tool_requests(prompt, allowed) == [page_prefetch]
+
+    clipboard = RuntimePlanner().decision(
+        "把剪贴板内容整理成待办并写进 Obsidian",
+        allowed_tools=allowed,
+    )
+
+    assert clipboard.selected_intent.kind == "report_generation"
+    assert clipboard.selected_intent.inputs == {
+        "context_source": "clipboard",
+        "target_app_hint": "Obsidian",
+        "target_action_hint": "app_paste",
+    }
+    assert clipboard.selected_intent.required_capabilities == [
+        "clipboard.read_write",
+        "desktop.app_control",
+    ]
+    assert [step.step_id for step in clipboard.plan.tool_plan.steps] == [
+        "read-report-context",
+        "prepare-report-target-app",
+    ]
+    assert _step_by_id(clipboard, "read-report-context").tool_name == "clipboard.read"
+    assert _step_by_id(clipboard, "prepare-report-target-app").input_preview == {
+        "app_name": "Obsidian",
+        "target_action": "app_paste",
+        "body_source": "model_generated_content",
+    }
+    assert planner_tool_requests(
+        "把剪贴板内容整理成待办并写进 Obsidian",
+        allowed,
+    ) == [clipboard_prefetch]
+    assert planner_direct_tool_requests(
+        "把剪贴板内容整理成待办并写进 Obsidian",
+        allowed,
+    ) == [clipboard_prefetch]
+
+
 def test_runtime_planner_applies_artifact_output_locations() -> None:
     current_window_report = RuntimePlanner().decision(
         "把当前窗口内容总结成 markdown 文件并保存到 Downloads",
