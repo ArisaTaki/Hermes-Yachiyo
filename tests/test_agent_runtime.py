@@ -4535,12 +4535,27 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
             "ok": True,
             "action": "desktop.ui_elements",
             "summary": "Read Obsidian search result content",
-            "elements": [
-                {
-                    "role": "AXStaticText",
-                    "value": "Yachiyo runtime supports discover, act, verify, artifact.",
-                }
-            ],
+            "data": {
+                "app_name": "Obsidian",
+                "title": "Search: yachiyo runtime",
+                "count": 4,
+                "truncated": False,
+                "elements": [
+                    {"role": "AXGroup", "name": "group", "value": ""},
+                    {
+                        "role": "AXStaticText",
+                        "value": "Yachiyo runtime supports discover, act, verify, artifact.",
+                    },
+                    {
+                        "role": "AXStaticText",
+                        "value": "Yachiyo runtime supports discover, act, verify, artifact.",
+                    },
+                    {
+                        "role": "AXStaticText",
+                        "value": "Desktop content snapshots reduce raw UI tree noise.",
+                    },
+                ],
+            },
         }
 
     def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
@@ -4549,6 +4564,12 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
             assert messages[-1]["role"] == "user"
             assert messages[-1]["content"].startswith("Runtime follow-up context:")
             assert "desktop-content-report.md" in messages[-1]["content"]
+            assert "Desktop content snapshot:" in messages[-1]["content"]
+            assert "Yachiyo runtime supports discover, act, verify, artifact." in messages[-1]["content"]
+            assert "Desktop content snapshots reduce raw UI tree noise." in messages[-1]["content"]
+            assert messages[-1]["content"].count(
+                "Yachiyo runtime supports discover, act, verify, artifact."
+            ) == 1
             assert any(
                 "Tool result for desktop.ui_elements" in str(message.get("content") or "")
                 and "Yachiyo runtime supports discover" in str(message.get("content") or "")
@@ -4642,6 +4663,19 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
         assert followup["payload"]["planning_reason"] == "planner_prefetch_desktop_content"
         assert followup["payload"]["artifacts_expected"] == ["desktop-content-report.md"]
         assert followup["payload"]["artifact_write_allowed"] is True
+        assert followup["payload"]["content_snapshot"] == {
+            "source_tool": "desktop.ui_elements",
+            "ok": True,
+            "app_name": "Obsidian",
+            "title": "Search: yachiyo runtime",
+            "element_count": 4,
+            "text_item_count": 2,
+            "truncated": False,
+            "text": (
+                "Yachiyo runtime supports discover, act, verify, artifact.\n"
+                "Desktop content snapshots reduce raw UI tree noise."
+            ),
+        }
         assert len(model_calls) == 2
         assert artifact_path.read_text(encoding="utf-8").startswith("# Desktop Content Report")
     finally:
