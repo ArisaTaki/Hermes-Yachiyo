@@ -1174,6 +1174,165 @@ def test_custom_api_agent_loop_surfaces_builtin_data_analysis_followup_context()
     assert "Artifacts: analysis-report.md (markdown), analysis-chart.png (chart)" in model_calls[0][-1]["content"]
 
 
+def test_custom_api_agent_loop_writes_data_analysis_report_to_target_app() -> None:
+    budget = FakeBudget()
+    tool_runs: list[dict[str, Any]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    messages = [{"role": "user", "content": "请分析 data/sales.csv 并把报告写进 Obsidian 新笔记"}]
+    generated = "销售分析报告\n- East revenue 10\n- West revenue 20"
+
+    def fake_run_tool_requests(
+        tool_requests,
+        allowed_tools,
+        broker,
+        messages_arg,
+        timeline_arg,
+        artifacts,
+        **kwargs,
+    ):
+        tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": messages_arg,
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        for request in tool_requests:
+            tool_name = str(request.get("tool") or "")
+            input_preview = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if tool_name == "data.analyze":
+                result = {
+                    "ok": True,
+                    "path": "data/sales.csv",
+                    "source_kind": "csv",
+                    "rows": 2,
+                    "analyzed_rows": 2,
+                    "columns": ["region", "revenue"],
+                    "artifact_paths": ["analysis-report.md"],
+                    "artifact_manifest": [{"path": "analysis-report.md", "kind": "markdown"}],
+                    "summary": "Analyzed data/sales.csv: 2 rows, 2 columns. Report: analysis-report.md.",
+                }
+            elif tool_name == "app.focus_and_safe_type_text":
+                result = {
+                    "ok": True,
+                    "app_name": input_preview.get("app_name"),
+                    "text": input_preview.get("text"),
+                }
+            else:
+                result = {"ok": True}
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool_name,
+                    input_preview=input_preview,
+                    result=result,
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "data.analyze",
+                    "artifact.write",
+                    "app.focus_and_safe_shortcut",
+                    "app.focus_and_safe_type_text",
+                    "desktop.ui_elements",
+                ]
+            }
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner follow-up context.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": generated},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=fake_run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Analyst"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-data-analysis-app-write",
+    )
+
+    assert "Obsidian" in str(result)
+    assert "输入文字" in str(result)
+    assert tool_runs[0]["tool_requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "path": "data/sales.csv",
+                "artifact_path": "analysis-report.md",
+                "source_kind": "csv",
+                "requested_outputs": ["report"],
+                "artifact_manifest": [{"path": "analysis-report.md", "kind": "markdown"}],
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+            "continue_to_model": True,
+        }
+    ]
+    assert [request["tool"] for request in tool_runs[1]["tool_requests"]] == [
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert tool_runs[1]["tool_requests"][0]["input"] == {
+        "app_name": "Obsidian",
+        "action": "new_note",
+    }
+    assert tool_runs[1]["tool_requests"][1]["input"] == {
+        "app_name": "Obsidian",
+        "text": generated,
+    }
+    followup = next(
+        event for event in timeline if event["event"] == "agent.model.followup_context"
+    )
+    assert followup["followup_target"]["app_name"] == "Obsidian"
+    assert followup["followup_target"]["container_action"] == "new_note"
+    assert followup["content_snapshot"]["source_tool"] == "data.analyze"
+    assert any(
+        event["event"] == "agent.desktop.intent_planned"
+        and event["detail"] == "app.focus_and_safe_type_text"
+        and event["planning_reason"] == "planner_followup_app_write"
+        for event in timeline
+    )
+    assert len(model_calls) == 1
+    assert "Data analysis result for data/sales.csv (csv)." in model_calls[0][-1]["content"]
+    assert "written into Obsidian" in model_calls[0][-1]["content"]
+
+
 def test_model_followup_context_payload_preserves_multiple_content_snapshots() -> None:
     timeline = [
         _timeline(

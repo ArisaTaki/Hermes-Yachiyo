@@ -225,10 +225,19 @@ class TaskIntentRouter:
         communication_target = _data_analysis_communication_target_hint(text)
         if communication_target:
             inputs["communication_target_hint"] = communication_target
+        app_write_target = (
+            {}
+            if communication_target
+            else _app_write_followup_target_hint(text)
+        )
+        if app_write_target:
+            inputs.update(app_write_target)
         preferred_capabilities = [
             "data.analysis",
             *(["desktop.app_control"] if spreadsheet_app_hint else []),
         ]
+        if app_write_target:
+            preferred_capabilities.append("desktop.app_control")
         if communication_target:
             if str(communication_target.get("app_name") or "").strip() or (
                 str(communication_target.get("channel") or "").strip() == "email"
@@ -245,7 +254,12 @@ class TaskIntentRouter:
             description="Analyze structured data and produce a report or artifact.",
             inputs=inputs,
             expected_outputs=_expected_outputs(text, default=["analysis_report"]),
-            required_capabilities=["file.workspace_read", "terminal.execution", "artifact.write"],
+            required_capabilities=[
+                "file.workspace_read",
+                "terminal.execution",
+                "artifact.write",
+                *(["desktop.app_control"] if app_write_target else []),
+            ],
             preferred_capabilities=preferred_capabilities,
             missing_inputs=[] if has_source else ["data_source"],
             risk_level="medium",
@@ -6615,6 +6629,12 @@ def _append_data_analysis_followup_steps(
         artifact_paths=paths,
         depends_on=depends_on,
     )
+    followup_steps = _append_analysis_app_write_target_steps(
+        intent,
+        allowed,
+        followup_steps,
+        depends_on=depends_on,
+    )
     return _append_analysis_communication_steps(
         intent,
         allowed,
@@ -6622,6 +6642,55 @@ def _append_data_analysis_followup_steps(
         artifact_paths=paths,
         depends_on=depends_on,
     )
+
+
+def _append_analysis_app_write_target_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    depends_on: str,
+) -> list[ToolPlanStepSnapshot]:
+    target_app = str(intent.inputs.get("target_app_hint") or "").strip()
+    target_action = str(intent.inputs.get("target_action_hint") or "").strip()
+    if not target_app or target_action != "app_paste":
+        return steps
+    container_action = str(
+        intent.inputs.get("target_container_action_hint") or ""
+    ).strip()
+    return [
+        *steps,
+        _step(
+            intent,
+            "prepare-analysis-target-app",
+            "Prepare target app",
+            "desktop.app_control",
+            _first_allowed(
+                (
+                    "app.focus",
+                    "app.open",
+                    "app.focus_and_safe_shortcut",
+                    "app.open_and_safe_shortcut",
+                ),
+                allowed,
+            ),
+            input_preview={
+                "app_name": target_app,
+                "target_action": target_action,
+                **(
+                    {"container_action": container_action}
+                    if container_action
+                    else {}
+                ),
+                "body_source": "model_generated_content",
+            },
+            depends_on=[depends_on],
+            reason=(
+                "After the local data analysis artifact is available, focus the requested app "
+                "before inserting the model-generated report."
+            ),
+        ),
+    ]
 
 
 def _append_analysis_communication_steps(
@@ -10120,6 +10189,36 @@ def _dynamic_context_transform_target_hint(text: str) -> dict[str, str]:
             else {}
         ),
     }
+
+
+def _app_write_followup_target_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not _looks_like_dynamic_context_transfer(value):
+        return {}
+    app_name = _non_notes_dynamic_context_target_app(value)
+    if not app_name:
+        return {}
+    if _normalize_artifact_output_location(app_name) or _looks_like_file_output_target(app_name):
+        return {}
+    container_action = _dynamic_context_target_container_action_hint(value)
+    return {
+        "target_app_hint": app_name,
+        "target_action_hint": "app_paste",
+        **(
+            {"target_container_action_hint": container_action}
+            if container_action
+            else {}
+        ),
+    }
+
+
+def _looks_like_file_output_target(value: str) -> bool:
+    target = str(value or "").strip()
+    if not target:
+        return False
+    if target.startswith(("~", ".", "/")) or "/" in target or "\\" in target:
+        return True
+    return bool(re.search(r"\.[A-Za-z0-9]{1,8}$", target))
 
 
 def _dynamic_context_target_container_action_hint(text: str) -> str:

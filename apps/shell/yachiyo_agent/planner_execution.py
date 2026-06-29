@@ -929,7 +929,14 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
 
 
 def _data_analysis_requires_model_followup(decision: Any) -> bool:
+    inputs = getattr(getattr(decision, "selected_intent", None), "inputs", None)
+    if isinstance(inputs, Mapping):
+        target_app = str(inputs.get("target_app_hint") or "").strip()
+        target_action = str(inputs.get("target_action_hint") or "").strip()
+        if target_app and target_action == "app_paste":
+            return True
     followup_step_ids = {
+        "prepare-analysis-target-app",
         "draft-analysis-communication",
         "draft-analysis-communication-message",
         "send-analysis-communication-message",

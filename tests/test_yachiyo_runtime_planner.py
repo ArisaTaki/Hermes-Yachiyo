@@ -1396,6 +1396,85 @@ def test_planner_selection_payload_surfaces_followup_app_write_target() -> None:
     }
 
 
+def test_runtime_planner_routes_data_analysis_report_to_app_write_target() -> None:
+    prompt = "请分析 sales.csv 并把报告写进 Obsidian 新笔记"
+    allowed_tools = [
+        "data.analyze",
+        "artifact.write",
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs == {
+        "data_source_hint": "sales.csv",
+        "data_source_kind": "csv",
+        "target_app_hint": "Obsidian",
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_note",
+    }
+    assert decision.selected_intent.required_capabilities == [
+        "file.workspace_read",
+        "terminal.execution",
+        "artifact.write",
+        "desktop.app_control",
+    ]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "analyze-data-file",
+        "prepare-analysis-target-app",
+    ]
+    assert _step_by_id(decision, "prepare-analysis-target-app").input_preview == {
+        "app_name": "Obsidian",
+        "target_action": "app_paste",
+        "container_action": "new_note",
+        "body_source": "model_generated_content",
+    }
+
+    requests = planner_tool_requests(prompt, allowed_tools)
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": _data_analysis_preview("sales.csv", "csv"),
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+            "continue_to_model": True,
+        }
+    ]
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_full_plan_execution",
+    )
+    assert payload["intent_kind"] == "data_analysis"
+    assert payload["followup_target"] == {
+        "kind": "app_write",
+        "app_name": "Obsidian",
+        "target_action": "app_paste",
+        "body_source": "model_generated_content",
+        "container_action": "new_note",
+    }
+
+    english_new_page = RuntimePlanner().decision(
+        "analyze sales.csv and write the report into Notion new page",
+        allowed_tools=allowed_tools,
+    )
+
+    assert english_new_page.selected_intent.inputs == {
+        "data_source_hint": "sales.csv",
+        "data_source_kind": "csv",
+        "target_app_hint": "Notion",
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+
+
 def test_runtime_planner_marks_unavailable_steps_when_tools_are_disallowed() -> None:
     decision = RuntimePlanner().decision(
         "分析 sales.csv 并输出报告",
