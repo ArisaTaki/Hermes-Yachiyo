@@ -49,6 +49,7 @@ from .legacy_tasks import (
     MAIN_CHAT_AGENT_ID,
     _approval_id_from_decision,
     _assert_matching_pending_approval,
+    _planner_metadata_with_desktop_readiness,
 )
 from .planner_projection import (
     planner_run_event_payloads,
@@ -832,6 +833,7 @@ class LegacyStudioPort:
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
         user_goal = str(request.get("objective") or request.get("goal") or "").strip()
         metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+        planner_metadata = _planner_metadata_with_desktop_readiness(metadata)
         run = self._runtime.create_agent_run(
             {
                 "agent_id": request.get("agent_id"),
@@ -843,7 +845,7 @@ class LegacyStudioPort:
         )
         self._append_planner_run_events(
             _run_id_from_payload(run),
-            runtime_planner_decision(user_goal, metadata=metadata),
+            runtime_planner_decision(user_goal, metadata=planner_metadata),
         )
         return run
 
@@ -983,6 +985,7 @@ class LegacyStudioPort:
     def start_workflow_run(self, request: dict[str, Any]) -> dict[str, Any]:
         user_goal = str(request.get("objective") or request.get("goal") or "").strip()
         metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+        planner_metadata = _planner_metadata_with_desktop_readiness(metadata)
         run = self._runtime.create_workflow_run(
             {
                 "workflow_id": request.get("workflow_id"),
@@ -994,7 +997,7 @@ class LegacyStudioPort:
         )
         self._append_planner_run_events(
             _run_id_from_payload(run),
-            runtime_planner_decision(user_goal, metadata=metadata),
+            runtime_planner_decision(user_goal, metadata=planner_metadata),
         )
         return run
 

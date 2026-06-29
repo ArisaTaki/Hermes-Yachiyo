@@ -16450,6 +16450,50 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
     ) == []
 
 
+def test_runtime_planner_marks_foreground_blocked_desktop_steps_unavailable() -> None:
+    prompt = "打开 PixelForge 并点击导出按钮"
+    allowed = [
+        "desktop.list_apps",
+        "app.open",
+        "app.open_and_click_ui_element",
+        "screen.capture",
+    ]
+    metadata = {
+        "desktop_blocking_conditions_by_capability": {
+            "foreground_activation": ["foreground_focus_unavailable"],
+        }
+    }
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=allowed,
+        metadata=metadata,
+    )
+
+    discover = _step_by_id(decision, "discover-desktop-state")
+    operate = _step_by_id(decision, "operate-foreground-ui")
+    verify = _step_by_id(decision, "verify-desktop-result")
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert discover.status == "planned"
+    assert discover.tool_name == "desktop.list_apps"
+    assert operate.tool_name == "app.open_and_click_ui_element"
+    assert operate.status == "unavailable"
+    assert operate.input_preview["blocking_conditions"] == ["foreground_focus_unavailable"]
+    assert "foreground_focus_unavailable" in operate.reason
+    assert verify.status == "planned"
+    assert decision.plan.tool_plan.missing_capabilities == ["desktop.ui_operation"]
+    assert planner_tool_requests(prompt, allowed, metadata=metadata) == []
+    assert planner_direct_tool_requests(prompt, allowed, metadata=metadata) == []
+
+    flat_metadata_decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=allowed,
+        metadata={"blocking_conditions": "foreground_focus_unavailable desktop_session_locked"},
+    )
+
+    assert _step_by_id(flat_metadata_decision, "operate-foreground-ui").status == "unavailable"
+
+
 def test_planner_first_owns_direct_context_communication_send_sequence() -> None:
     def legacy_requests(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
         return [

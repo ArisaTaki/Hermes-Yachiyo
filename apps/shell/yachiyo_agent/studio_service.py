@@ -70,6 +70,28 @@ from .workflows import (
 )
 
 
+def _planner_metadata_with_catalog_readiness(
+    metadata: Mapping[str, Any] | None,
+    catalog: ToolCatalogSnapshot,
+) -> dict[str, Any]:
+    enriched = dict(metadata or {})
+    missing: dict[str, list[str]] = {}
+    blocking: dict[str, list[str]] = {}
+    for capability_id, capability in catalog.capabilities.items():
+        clean_id = str(capability_id or "").strip()
+        if not clean_id:
+            continue
+        if capability.missing_permissions:
+            missing[clean_id] = list(capability.missing_permissions)
+        if capability.blocking_conditions:
+            blocking[clean_id] = list(capability.blocking_conditions)
+    if missing and not isinstance(enriched.get("desktop_missing_permissions_by_capability"), dict):
+        enriched["desktop_missing_permissions_by_capability"] = missing
+    if blocking and not isinstance(enriched.get("desktop_blocking_conditions_by_capability"), dict):
+        enriched["desktop_blocking_conditions_by_capability"] = blocking
+    return enriched
+
+
 class AgentStudioService:
     """Facade for Agent Studio, groups, workflows, and runtime debugging."""
 
@@ -104,11 +126,20 @@ class AgentStudioService:
             )
             if payload is not None:
                 return PlannerDecisionSnapshot.model_validate(payload)
-        tools = list(allowed_tools) if allowed_tools is not None else self._catalog_tool_names()
+        catalog = self.list_tool_catalog()
+        tools = (
+            list(allowed_tools)
+            if allowed_tools is not None
+            else [
+                str(tool.tool_name or "").strip()
+                for tool in catalog.tools
+                if str(tool.tool_name or "").strip()
+            ]
+        )
         return RuntimePlanner().decision(
             prompt,
             allowed_tools=tools or None,
-            metadata=metadata,
+            metadata=_planner_metadata_with_catalog_readiness(metadata, catalog),
         )
 
     def list_restricted_tool_plugins(self) -> list[RestrictedToolPluginSnapshot]:

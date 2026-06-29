@@ -145,6 +145,14 @@ tool-level `blocking_conditions`, so Chat, Bubble, AgentTaskCard, Diagnostics,
 and Agent Studio can show that `app.open` still works while `app.focus` and
 foreground-input tools are currently blocked.
 
+The Runtime Planner now consumes those readiness blockers before execution:
+blocked foreground operation steps are marked `unavailable`, the affected
+capability is reported in `missing_capabilities`, and both normal and direct
+planner request conversion return no executable foreground request for that
+blocked chain. Discovery and verification steps remain planned when their
+tools are still available, so Agent Studio can show what was discoverable
+without pretending the unsafe or unavailable operation ran.
+
 The Electron desktop shell now also starts a loopback-only native runtime
 bridge and injects its URL/token into the Python backend. `app.focus` can use
 that bridge as an additional `electron_native_bridge` strategy after local

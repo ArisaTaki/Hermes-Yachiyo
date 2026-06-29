@@ -50,6 +50,25 @@ def _assert_matching_pending_approval(
     )
 
 
+def _planner_metadata_with_desktop_readiness(metadata: dict[str, Any]) -> dict[str, Any]:
+    enriched = dict(metadata or {})
+    if not isinstance(enriched.get("desktop_missing_permissions_by_capability"), dict):
+        try:
+            missing_permissions = desktop_permission_missing_by_capability()
+        except Exception:
+            missing_permissions = {"desktop_execution": ["permission_probe_failed"]}
+        if missing_permissions:
+            enriched["desktop_missing_permissions_by_capability"] = missing_permissions
+    if not isinstance(enriched.get("desktop_blocking_conditions_by_capability"), dict):
+        try:
+            blocking_conditions = desktop_runtime_blocking_conditions_by_capability()
+        except Exception:
+            blocking_conditions = {}
+        if blocking_conditions:
+            enriched["desktop_blocking_conditions_by_capability"] = blocking_conditions
+    return enriched
+
+
 class LegacyRuntimePort:
     """RuntimePort adapter for existing NativeRunEngine-like services."""
 
@@ -104,7 +123,8 @@ class LegacyRuntimePort:
         )
         conversation_id = str(request.get("conversation_id") or "").strip()
         metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
-        planner_decision = runtime_planner_decision(prompt, metadata=metadata)
+        planner_metadata = _planner_metadata_with_desktop_readiness(metadata)
+        planner_decision = runtime_planner_decision(prompt, metadata=planner_metadata)
         requested_task_id = str(
             request.get("task_id")
             or request.get("client_task_id")

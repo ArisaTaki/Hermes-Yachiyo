@@ -63,6 +63,11 @@ from .desktop_plan_hints import (
     window_list_hint,
 )
 from .file_access_plan_hints import file_access_hint
+from .policy import (
+    DESKTOP_CAPABILITY_TOOLS,
+    desktop_tool_blocking_conditions,
+    desktop_tool_missing_permissions,
+)
 from .schedule_plan_hints import schedule_context_source_hint, schedule_tool_preview
 from .system_plan_hints import system_control_hint, system_tool_preview
 from .terminal_plan_hints import terminal_command_hint
@@ -1628,7 +1633,7 @@ class RuntimePlanner:
             selected,
             _allowed_tool_set(allowed_tools),
         )
-        plan = self.plan_intent(selected, allowed_tools=allowed_tools)
+        plan = self.plan_intent(selected, allowed_tools=allowed_tools, metadata=metadata)
         return PlannerDecisionSnapshot(
             decision_id=_stable_id("decision", selected.kind, prompt),
             prompt=_clean_prompt(prompt),
@@ -1652,10 +1657,14 @@ class RuntimePlanner:
         intent: TaskIntentSnapshot,
         *,
         allowed_tools: Iterable[str] | None = None,
+        metadata: Mapping[str, Any] | None = None,
     ) -> RuntimePlanSnapshot:
         allowed = _allowed_tool_set(allowed_tools)
         intent = _normalize_intent_for_allowed_tools(intent, allowed)
         steps = self._steps_for_intent(intent, allowed)
+        readiness = _planner_readiness_context(metadata)
+        if readiness:
+            steps = _apply_readiness_to_steps(steps, readiness)
         required_capabilities = _required_capabilities_for_plan(intent, steps)
         capabilities = [*required_capabilities, *intent.preferred_capabilities]
         snapshots = capability_snapshots(
@@ -6507,6 +6516,234 @@ def _allowed_tool_set(allowed_tools: Iterable[str] | None) -> set[str] | None:
     if allowed_tools is None:
         return None
     return {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+
+
+def _planner_readiness_context(
+    metadata: Mapping[str, Any] | None,
+) -> dict[str, dict[str, list[str]]]:
+    if not isinstance(metadata, Mapping):
+        return {}
+    missing = _merge_issue_maps(
+        _metadata_issue_map(
+            metadata,
+            "desktop_missing_permissions_by_capability",
+            "desktop_missing_permissions",
+        ),
+        _capability_snapshot_issues(metadata, "missing_permissions"),
+        _flat_issue_tokens_by_capability(
+            metadata.get("missing_permissions"),
+            issue_kind="missing",
+        ),
+    )
+    blocking = _merge_issue_maps(
+        _metadata_issue_map(
+            metadata,
+            "desktop_blocking_conditions_by_capability",
+            "desktop_runtime_blocking_conditions_by_capability",
+            "desktop_runtime_blocking_conditions",
+            "desktop_blocking_conditions",
+        ),
+        _capability_snapshot_issues(metadata, "blocking_conditions"),
+        _flat_issue_tokens_by_capability(
+            metadata.get("blocking_conditions"),
+            issue_kind="blocking",
+        ),
+    )
+    context: dict[str, dict[str, list[str]]] = {}
+    if missing:
+        context["missing_permissions"] = missing
+    if blocking:
+        context["blocking_conditions"] = blocking
+    return context
+
+
+def _apply_readiness_to_steps(
+    steps: list[ToolPlanStepSnapshot],
+    readiness: Mapping[str, Mapping[str, Iterable[str]]],
+) -> list[ToolPlanStepSnapshot]:
+    updated: list[ToolPlanStepSnapshot] = []
+    for step in steps:
+        issues = _step_readiness_issues(step, readiness)
+        if not issues["missing_permissions"] and not issues["blocking_conditions"]:
+            updated.append(step)
+            continue
+        input_preview = dict(step.input_preview or {})
+        if issues["missing_permissions"]:
+            input_preview["missing_permissions"] = issues["missing_permissions"]
+        if issues["blocking_conditions"]:
+            input_preview["blocking_conditions"] = issues["blocking_conditions"]
+        reason_suffix = _readiness_reason_suffix(issues)
+        updated.append(
+            step.model_copy(
+                update={
+                    "input_preview": input_preview,
+                    "reason": f"{step.reason} {reason_suffix}".strip(),
+                    "status": "unavailable",
+                }
+            )
+        )
+    return updated
+
+
+def _step_readiness_issues(
+    step: ToolPlanStepSnapshot,
+    readiness: Mapping[str, Mapping[str, Iterable[str]]],
+) -> dict[str, list[str]]:
+    tool_name = str(step.tool_name or "").strip()
+    if not tool_name:
+        return {"missing_permissions": [], "blocking_conditions": []}
+    policy_capability_id = _desktop_policy_capability_id_for_tool(tool_name)
+    if not policy_capability_id:
+        return {"missing_permissions": [], "blocking_conditions": []}
+    missing_by_capability = readiness.get("missing_permissions") or {}
+    blocking_by_capability = readiness.get("blocking_conditions") or {}
+    return {
+        "missing_permissions": desktop_tool_missing_permissions(
+            tool_name,
+            capability_id=policy_capability_id,
+            missing_permissions=missing_by_capability,
+        ),
+        "blocking_conditions": desktop_tool_blocking_conditions(
+            tool_name,
+            capability_id=policy_capability_id,
+            blocking_conditions=blocking_by_capability,
+        ),
+    }
+
+
+def _desktop_policy_capability_id_for_tool(tool_name: str) -> str:
+    clean_tool = str(tool_name or "").strip()
+    if not clean_tool:
+        return ""
+    for capability_id, tools in DESKTOP_CAPABILITY_TOOLS.items():
+        if capability_id == "desktop_execution":
+            continue
+        if clean_tool in tools:
+            return capability_id
+    return (
+        "desktop_execution"
+        if clean_tool in DESKTOP_CAPABILITY_TOOLS["desktop_execution"]
+        else ""
+    )
+
+
+def _readiness_reason_suffix(issues: Mapping[str, Iterable[str]]) -> str:
+    missing = _issue_tokens(issues.get("missing_permissions"))
+    blocking = _issue_tokens(issues.get("blocking_conditions"))
+    parts = []
+    if missing:
+        parts.append(f"missing permissions: {', '.join(missing)}")
+    if blocking:
+        parts.append(f"runtime blockers: {', '.join(blocking)}")
+    if not parts:
+        return ""
+    return f"Current desktop readiness marks this step unavailable ({'; '.join(parts)})."
+
+
+def _metadata_issue_map(metadata: Mapping[str, Any], *keys: str) -> dict[str, list[str]]:
+    for key in keys:
+        payload = metadata.get(key)
+        if isinstance(payload, Mapping):
+            return _clean_issue_map(payload)
+    return {}
+
+
+def _capability_snapshot_issues(
+    metadata: Mapping[str, Any],
+    issue_field: str,
+) -> dict[str, list[str]]:
+    issue_map: dict[str, list[str]] = {}
+    capability_sources = []
+    for key in ("desktop_capabilities", "desktop_execution_capabilities", "capabilities"):
+        payload = metadata.get(key)
+        if isinstance(payload, Mapping):
+            capability_sources.append(payload)
+    readiness = metadata.get("readiness")
+    if isinstance(readiness, Mapping) and isinstance(readiness.get("capabilities"), Mapping):
+        capability_sources.append(readiness["capabilities"])
+    for capabilities in capability_sources:
+        for capability_id, capability in capabilities.items():
+            if not isinstance(capability, Mapping):
+                continue
+            tokens = _issue_tokens(capability.get(issue_field))
+            if tokens:
+                issue_map[str(capability_id or "").strip()] = tokens
+    return _clean_issue_map(issue_map)
+
+
+def _flat_issue_tokens_by_capability(value: Any, *, issue_kind: str) -> dict[str, list[str]]:
+    result: dict[str, list[str]] = {}
+    for token in _issue_tokens(value):
+        capability_id = _capability_id_for_flat_issue_token(token, issue_kind=issue_kind)
+        if not capability_id:
+            continue
+        result.setdefault(capability_id, [])
+        if token not in result[capability_id]:
+            result[capability_id].append(token)
+    return result
+
+
+def _capability_id_for_flat_issue_token(token: str, *, issue_kind: str) -> str:
+    clean = str(token or "").strip()
+    if issue_kind == "blocking":
+        if clean == "foreground_focus_unavailable":
+            return "foreground_activation"
+        if clean == "desktop_session_locked":
+            return "desktop_execution"
+    return {
+        "accessibility": "foreground_input",
+        "automation": "app_control",
+        "automation_or_accessibility": "active_window",
+        "chrome_cdp": "browser_control",
+        "foreground_focus": "foreground_activation",
+        "music_app": "media_control",
+        "open_command": "app_control",
+        "screen_capture_probe_failed": "screen_capture",
+        "screen_recording": "screen_capture",
+        "unsupported_platform": "desktop_execution",
+    }.get(clean, "")
+
+
+def _merge_issue_maps(*maps: Mapping[str, Iterable[str]]) -> dict[str, list[str]]:
+    merged: dict[str, list[str]] = {}
+    for issue_map in maps:
+        for capability_id, raw_tokens in issue_map.items():
+            clean_capability_id = str(capability_id or "").strip()
+            if not clean_capability_id:
+                continue
+            for token in _issue_tokens(raw_tokens):
+                values = merged.setdefault(clean_capability_id, [])
+                if token not in values:
+                    values.append(token)
+    return merged
+
+
+def _clean_issue_map(value: Mapping[str, Any]) -> dict[str, list[str]]:
+    return _merge_issue_maps(
+        {
+            str(capability_id or "").strip(): _issue_tokens(tokens)
+            for capability_id, tokens in value.items()
+        }
+    )
+
+
+def _issue_tokens(value: Any) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        raw_values = re.split(r"[,\s]+", value)
+    elif isinstance(value, Iterable) and not isinstance(value, (bytes, bytearray, Mapping)):
+        raw_values = []
+        for item in value:
+            raw_values.extend(_issue_tokens(item))
+    else:
+        raw_values = [str(value)]
+    tokens: list[str] = []
+    for item in raw_values:
+        clean = str(item or "").strip()
+        if clean and clean not in tokens:
+            tokens.append(clean)
+    return tokens
 
 
 def _normalize_intent_for_allowed_tools(

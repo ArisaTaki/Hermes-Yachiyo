@@ -301,6 +301,8 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
         return []
     requests: list[dict[str, Any]] = []
     for step in decision.plan.tool_plan.steps:
+        if not _step_available(step):
+            continue
         step_id = str(getattr(step, "step_id", "") or "").strip()
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if not tool_name or tool_name not in allowed:
@@ -338,7 +340,10 @@ def _has_unavailable_required_desktop_step(decision: Any) -> bool:
             continue
         step_id = str(getattr(step, "step_id", "") or "").strip()
         capability_id = str(getattr(step, "capability_id", "") or "").strip()
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if step_id == "verify-desktop-result":
+            continue
+        if not tool_name and step_id == "submit-foreground-ui":
             continue
         if capability_id in {"desktop.app_control", "desktop.ui_operation"}:
             return True
@@ -644,8 +649,12 @@ def _same_app_control_request(request: dict[str, Any], tool_name: str, app_name:
 
 
 def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    if _has_unavailable_required_desktop_step(decision):
+        return []
     requests: list[dict[str, Any]] = []
     for step in decision.plan.tool_plan.steps:
+        if not _step_available(step):
+            continue
         step_id = str(getattr(step, "step_id", "") or "").strip()
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if not tool_name or tool_name not in allowed:
@@ -671,6 +680,10 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
     if _weak_desktop_discovery_plan(decision, requests):
         return []
     return requests
+
+
+def _step_available(step: Any) -> bool:
+    return str(getattr(step, "status", "") or "").strip() != "unavailable"
 
 
 def _weak_desktop_discovery_plan(decision: Any, requests: list[dict[str, Any]]) -> bool:
@@ -822,7 +835,11 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
         ),
         None,
     )
-    if data_analyze_step is not None and "data.analyze" in allowed:
+    if (
+        data_analyze_step is not None
+        and _step_available(data_analyze_step)
+        and "data.analyze" in allowed
+    ):
         input_preview = getattr(data_analyze_step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
         if payload.get("path"):
@@ -971,6 +988,8 @@ def _data_analysis_spreadsheet_app_requests(
         None,
     )
     tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if not _step_available(step):
+        return []
     if not tool_name or tool_name not in allowed:
         return []
     input_preview = getattr(step, "input_preview", None)
@@ -997,6 +1016,8 @@ def _data_analysis_file_open_requests(
         None,
     )
     tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if not _step_available(step):
+        return []
     if tool_name != "desktop.open_path" or tool_name not in allowed:
         return []
     input_preview = getattr(step, "input_preview", None)
@@ -1028,6 +1049,8 @@ def _artifact_reveal_tool_requests(
         None,
     )
     tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if not _step_available(step):
+        return []
     if tool_name != "desktop.reveal_path" or tool_name not in allowed:
         return []
     input_preview = getattr(step, "input_preview", None)
@@ -1201,6 +1224,8 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
     for step_id in required_step_ids:
         step = steps_by_id.get(step_id)
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if not _step_available(step):
+            return []
         if not tool_name or tool_name not in allowed:
             return []
         input_preview = getattr(step, "input_preview", None)
@@ -1443,6 +1468,7 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
             if (
                 post_tool_name in {"browser.extract_text", "browser.current_page"}
                 and post_tool_name in allowed
+                and _step_available(post_step)
             ):
                 post_request = _request(
                     post_tool_name,
@@ -1494,6 +1520,8 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
         None,
     )
     tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if not _step_available(step):
+        return []
     if tool_name not in allowed:
         return []
     url = str(decision.selected_intent.inputs.get("url_hint") or "").strip()
@@ -1669,6 +1697,8 @@ def _current_page_find_tool_requests(decision: Any, allowed: set[str]) -> list[d
     for step_id in required_step_ids:
         step = steps_by_id.get(step_id)
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if not _step_available(step):
+            return []
         if not tool_name or tool_name not in allowed:
             return []
         input_preview = getattr(step, "input_preview", None)
@@ -1719,6 +1749,8 @@ def _dynamic_context_browser_tool_requests(decision: Any, allowed: set[str]) -> 
     for step_id in required_step_ids:
         step = steps_by_id.get(step_id)
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if not _step_available(step):
+            return []
         if not tool_name or tool_name not in allowed:
             return []
         input_preview = getattr(step, "input_preview", None)
@@ -1766,6 +1798,8 @@ def _context_prefetch_request_for_step(
     planning_reason: str,
 ) -> dict[str, Any] | None:
     tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if not _step_available(step):
+        return None
     if tool_name not in allowed:
         return None
     input_preview = getattr(step, "input_preview", None)
@@ -1986,6 +2020,8 @@ def _information_capture_artifact_request(
         None,
     )
     tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if not _step_available(step):
+        return None
     if tool_name != "artifact.write" or tool_name not in allowed:
         return None
     input_preview = getattr(step, "input_preview", None)

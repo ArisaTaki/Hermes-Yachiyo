@@ -78,6 +78,41 @@ def test_legacy_runtime_port_appends_runtime_planner_events_when_available() -> 
     assert planner_events[2][1]["payload"]["step"]["tool_name"] == "data.analyze"
 
 
+def test_legacy_runtime_port_appends_desktop_readiness_blocked_plan_events(monkeypatch) -> None:
+    runtime = _PlannerEventFakeRuntime()
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_permission_missing_by_capability",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_runtime_blocking_conditions_by_capability",
+        lambda: {
+            "foreground_activation": ["foreground_focus_unavailable"],
+        },
+    )
+
+    task = LegacyRuntimePort(runtime).start_chat_task(
+        {
+            "prompt": "打开 PixelForge 并点击导出按钮",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-1",
+        }
+    )
+
+    planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
+    plan = planner_events[1][1]["payload"]["plan"]["tool_plan"]
+    steps = {step["step_id"]: step for step in plan["steps"]}
+
+    assert task["task_id"] == "task-1"
+    assert plan["missing_capabilities"] == ["desktop.ui_operation"]
+    if "discover-desktop-state" in steps:
+        assert steps["discover-desktop-state"]["status"] == "planned"
+    assert steps["operate-foreground-ui"]["status"] == "unavailable"
+    assert steps["operate-foreground-ui"]["input_preview"]["blocking_conditions"] == [
+        "foreground_focus_unavailable"
+    ]
+
+
 def test_legacy_runtime_port_appends_read_only_file_inventory_plan_events() -> None:
     runtime = _PlannerEventFakeRuntime()
 

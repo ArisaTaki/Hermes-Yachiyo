@@ -761,6 +761,49 @@ def test_agent_studio_service_plans_task_from_tool_catalog() -> None:
     assert port.calls == [("list_tool_catalog", None)]
 
 
+def test_agent_studio_service_planner_uses_tool_catalog_readiness_blockers() -> None:
+    class PlannerCatalogPort(_FakeStudioPort):
+        def list_tool_catalog(self) -> dict[str, Any]:
+            self.calls.append(("list_tool_catalog", None))
+            return {
+                "source": "planner-catalog",
+                "tools": [
+                    {"tool_name": "desktop.list_apps", "function_name": "desktop_list_apps"},
+                    {
+                        "tool_name": "app.open_and_click_ui_element",
+                        "function_name": "app_open_and_click_ui_element",
+                    },
+                    {"tool_name": "screen.capture", "function_name": "screen_capture"},
+                ],
+                "capabilities": {
+                    "foreground_activation": {
+                        "available": False,
+                        "platform": "macos",
+                        "blocking_conditions": ["foreground_focus_unavailable"],
+                        "tools": ["app.open_and_click_ui_element"],
+                        "available_tools": [],
+                        "unavailable_tools": ["app.open_and_click_ui_element"],
+                    }
+                },
+                "plugins": [],
+            }
+
+    port = PlannerCatalogPort()
+    service = AgentStudioService(port)
+
+    decision = service.plan_task("打开 PixelForge 并点击导出按钮")
+    steps = {step.step_id: step for step in decision.plan.tool_plan.steps}
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert steps["discover-desktop-state"].status == "planned"
+    assert steps["operate-foreground-ui"].status == "unavailable"
+    assert steps["operate-foreground-ui"].input_preview["blocking_conditions"] == [
+        "foreground_focus_unavailable"
+    ]
+    assert decision.plan.tool_plan.missing_capabilities == ["desktop.ui_operation"]
+    assert port.calls == [("list_tool_catalog", None)]
+
+
 def test_agent_studio_service_prefers_port_planner_when_available() -> None:
     class PlannerPort(_FakeStudioPort):
         def plan_task(
