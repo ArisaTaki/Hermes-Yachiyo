@@ -302,14 +302,14 @@ class RuntimeCustomApiAgentLoop:
                         or execution_tool_requests[0].get("tool")
                         or ""
                     )
-                    planned_input = (
-                        pending_approval.get("input")
-                        if isinstance(pending_approval.get("input"), dict)
-                        else execution_tool_requests[0].get("input") or {}
-                    )
                     approval_request = self._planned_request_for_tool(
                         execution_tool_requests,
                         planned_tool,
+                    )
+                    planned_input = self._pending_approval_input_preview(
+                        pending_approval,
+                        approval_request,
+                        execution_tool_requests[0] if execution_tool_requests else {},
                     )
                     self._record_desktop_intent_approval_required(
                         planned_tool,
@@ -533,14 +533,14 @@ class RuntimeCustomApiAgentLoop:
                             or auto_app_write_requests[0].get("tool")
                             or ""
                         )
-                        planned_input = (
-                            pending_approval.get("input")
-                            if isinstance(pending_approval.get("input"), dict)
-                            else auto_app_write_requests[0].get("input") or {}
-                        )
                         approval_request = self._planned_request_for_tool(
                             auto_app_write_requests,
                             planned_tool,
+                        )
+                        planned_input = self._pending_approval_input_preview(
+                            pending_approval,
+                            approval_request,
+                            auto_app_write_requests[0] if auto_app_write_requests else {},
                         )
                         self._record_desktop_intent_approval_required(
                             planned_tool,
@@ -785,6 +785,22 @@ class RuntimeCustomApiAgentLoop:
             if str(request.get("tool") or "").strip() == clean_tool:
                 return request
         return planned_tool_requests[0] if planned_tool_requests else {}
+
+    @staticmethod
+    def _pending_approval_input_preview(
+        pending_approval: dict[str, Any],
+        planned_request: dict[str, Any],
+        fallback_request: dict[str, Any],
+    ) -> dict[str, Any]:
+        for candidate in (
+            pending_approval.get("input_preview"),
+            pending_approval.get("input"),
+            planned_request.get("input") if isinstance(planned_request, dict) else None,
+            fallback_request.get("input") if isinstance(fallback_request, dict) else None,
+        ):
+            if isinstance(candidate, dict):
+                return dict(candidate)
+        return {}
 
     @staticmethod
     def _approval_event_source(

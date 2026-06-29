@@ -1816,6 +1816,161 @@ def test_custom_api_agent_loop_sends_visible_text_summary_to_communication_targe
     assert "message to 文件传输助手 in WeChat" in model_calls[0][-1]["content"]
 
 
+def test_custom_api_agent_loop_pauses_followup_communication_send_for_approval() -> None:
+    budget = FakeBudget()
+    tool_runs: list[list[dict[str, Any]]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    appended_events: list[dict[str, Any]] = []
+    messages = [
+        {
+            "role": "user",
+            "content": "把当前窗口内容总结一下发给微信文件传输助手",
+        }
+    ]
+    visible_text = "Q2 sales increased 12%. Renewal risk is concentrated in East accounts."
+    generated = "当前窗口摘要：Q2 销售增长 12%，续约风险集中在 East 客户。"
+
+    def fake_run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append(list(tool_requests))
+        if len(tool_runs) == 1:
+            assert [request["tool"] for request in tool_requests] == ["desktop.ui_elements"]
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    "desktop.ui_elements",
+                    input_preview={"role_filter": "text", "limit": 80},
+                    result={
+                        "ok": True,
+                        "elements": [
+                            {
+                                "role": "text",
+                                "value": visible_text,
+                            }
+                        ],
+                    },
+                )
+            )
+            return
+        assert [request["tool"] for request in tool_requests] == [
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ]
+        raise AgentApprovalRequired(
+            {
+                "approval_id": "approval-followup-send",
+                "tool": "desktop.submit_foreground",
+                "input_preview": {"action": "send"},
+                "risk_level": "high",
+                "policy_reason": "发送前台内容需要确认。",
+            }
+        )
+
+    def fake_call_model(_base_url, _model, _api_key, model_messages, **_kwargs):
+        model_calls.append(list(model_messages))
+        return {"role": "assistant", "content": generated}
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "desktop.ui_elements",
+                    "app.focus_and_safe_shortcut",
+                    "desktop.safe_type_text",
+                    "desktop.search_submit",
+                    "desktop.submit_foreground",
+                ]
+            }
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner follow-up context.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=fake_call_model,
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=fake_run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+
+    try:
+        loop.run(
+            {"name": "Yachiyo"},
+            "ignored context",
+            broker={"broker": True},
+            timeline=timeline,
+            artifacts=[],
+            messages=messages,
+            run_id="run-visible-text-send-approval",
+        )
+    except AgentApprovalRequired as exc:
+        assert exc.pending_approval["approval_id"] == "approval-followup-send"
+    else:
+        raise AssertionError("expected AgentApprovalRequired")
+
+    assert len(model_calls) == 1
+    assert len(tool_runs) == 2
+    approval_event = timeline[-1]
+    assert approval_event == {
+        "event": "agent.desktop.intent_approval_required",
+        "detail": "desktop.submit_foreground",
+        "tool": "desktop.submit_foreground",
+        "status": "approval_required",
+        "source": "runtime_planner",
+        "reason": "tool_policy_requires_approval",
+        "input_preview": {"action": "send"},
+        "approval_id": "approval-followup-send",
+        "risk_level": "high",
+        "policy_reason": "发送前台内容需要确认。",
+        "planning_reason": "planner_followup_communication",
+    }
+    assert appended_events[-1] == {
+        "run_id": "run-visible-text-send-approval",
+        "event_type": "agent.desktop.intent_approval_required",
+        "payload": {
+            "tool": "desktop.submit_foreground",
+            "status": "approval_required",
+            "source": "runtime_planner",
+            "reason": "tool_policy_requires_approval",
+            "input_preview": {"action": "send"},
+            "approval_id": "approval-followup-send",
+            "risk_level": "high",
+            "policy_reason": "发送前台内容需要确认。",
+            "planning_reason": "planner_followup_communication",
+        },
+    }
+
+
 def test_model_followup_context_payload_preserves_multiple_content_snapshots() -> None:
     timeline = [
         _timeline(
