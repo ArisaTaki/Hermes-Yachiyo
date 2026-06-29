@@ -3106,6 +3106,71 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "desktop.ui_elements",
     ]
 
+    observe_then_create = RuntimePlanner().decision(
+        "在一个没提过的 Orbit Notes 里读取界面，然后新建一条笔记",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    )
+    assert observe_then_create.selected_intent.kind == "desktop_operation"
+    assert observe_then_create.selected_intent.inputs["app_name_hint"] == "Orbit Notes"
+    assert observe_then_create.selected_intent.inputs["safe_shortcut_hint"] == {
+        "action": "new_note"
+    }
+    assert [step.step_id for step in observe_then_create.plan.tool_plan.steps] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(observe_then_create, "inspect-app").input_preview == {
+        "app_name": "Orbit Notes",
+        "open_if_needed": True,
+        "focus": True,
+        "limit": 80,
+    }
+    assert _step_by_id(observe_then_create, "operate-foreground-ui").input_preview == {
+        "app_name": "Orbit Notes",
+        "action": "new_note",
+    }
+    assert [request["tool"] for request in planner_tool_requests(
+        "在一个没提过的 Orbit Notes 里读取界面，然后新建一条笔记",
+        [
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    )] == [
+        "desktop.inspect_app",
+        "app.open_and_safe_shortcut",
+        "desktop.ui_elements",
+    ]
+
+    english_observe_then_create = RuntimePlanner().decision(
+        "open any app PixelForge, inspect the UI, then create a new note",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    )
+    assert english_observe_then_create.selected_intent.kind == "desktop_operation"
+    assert english_observe_then_create.selected_intent.inputs["app_name_hint"] == "PixelForge"
+    assert _step_by_id(english_observe_then_create, "inspect-app").input_preview == {
+        "app_name": "PixelForge",
+        "open_if_needed": True,
+        "focus": True,
+        "limit": 80,
+    }
+    assert _step_by_id(english_observe_then_create, "operate-foreground-ui").input_preview == {
+        "app_name": "PixelForge",
+        "action": "new_note",
+    }
+
 
 def test_runtime_planner_routes_current_page_find_actions() -> None:
     static = RuntimePlanner().decision(

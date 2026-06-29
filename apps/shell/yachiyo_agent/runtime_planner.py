@@ -583,7 +583,11 @@ class TaskIntentRouter:
             screen_capture = None
         if screen_capture is not None and not str((screen_capture or {}).get("app_name") or "").strip():
             app_management = None
-        if screen_capture is not None:
+        if (
+            screen_capture is not None
+            and str((safe_shortcut or {}).get("action") or "").strip()
+            not in {"new_note", "new_document"}
+        ):
             safe_shortcut = None
             safe_shortcut_sequence = []
         if window_list is not None:
@@ -607,6 +611,11 @@ class TaskIntentRouter:
             or ""
         ).strip()
         direct_app_name_hint = _app_name_hint(text)
+        if (
+            direct_app_name_hint
+            and _is_generic_foreground_app_label(app_name_hint)
+        ):
+            app_name_hint = direct_app_name_hint
         if (
             direct_app_name_hint
             and screen_capture is not None
@@ -2172,6 +2181,8 @@ class RuntimePlanner:
             or ""
         ).strip()
         direct_app_name = _app_name_hint(intent.user_goal)
+        if direct_app_name and _is_generic_foreground_app_label(app_name):
+            app_name = direct_app_name
         if (
             direct_app_name
             and screen_capture is not None
@@ -2673,8 +2684,112 @@ class RuntimePlanner:
                 )
             )
             focus_step_added = True
+        observe_create_shortcut = (
+            safe_shortcut
+            if isinstance(safe_shortcut, Mapping) and safe_shortcut
+            else (
+                intent.inputs.get("safe_shortcut_hint")
+                if isinstance(intent.inputs.get("safe_shortcut_hint"), Mapping)
+                else {}
+            )
+        )
+        observe_then_create_action = str(
+            (observe_create_shortcut or {}).get("action") or ""
+        ).strip()
+        if (
+            app_name
+            and screen_capture is not None
+            and observe_then_create_action in {"new_note", "new_document"}
+            and not any(item for item in (click_target, type_target, safe_type_text) if item)
+        ):
+            inspect_tool = _first_allowed(("desktop.inspect_app",), allowed)
+            operation_tool = _first_allowed(
+                app_foreground_tool_candidates(mode, "safe_shortcut"),
+                allowed,
+            ) or _first_allowed(("desktop.safe_shortcut",), allowed)
+            operation_preview = (
+                {"app_name": app_name, **dict(observe_create_shortcut)}
+                if str(operation_tool or "").startswith("app.")
+                else dict(observe_create_shortcut)
+            )
+            if inspect_tool and not focus_step_added:
+                steps = [
+                    _step(
+                        intent,
+                        "inspect-app",
+                        "Inspect app",
+                        "desktop.app_discovery",
+                        inspect_tool,
+                        input_preview=_desktop_inspect_app_input_preview(
+                            app_name,
+                            {"limit": 80},
+                            open_if_needed=True,
+                            focus=True,
+                        ),
+                        reason=(
+                            "Inspect the requested app before running the requested create action."
+                        ),
+                    )
+                ]
+                operation_depends_on = ["inspect-app"]
+            else:
+                if app_name and not focus_step_added:
+                    steps.append(
+                        _step(
+                            intent,
+                            "open-or-focus-app",
+                            "Open or focus app",
+                            "desktop.app_control",
+                            _first_allowed(app_control_tool_candidates(mode), allowed),
+                            input_preview={"app_name": app_name},
+                            depends_on=["discover-desktop-state"],
+                            reason="Prepare the requested app before running the create action.",
+                        )
+                    )
+                operation_depends_on = (
+                    ["focus-app-window"]
+                    if focus_step_added
+                    else (["open-or-focus-app"] if app_name else ["discover-desktop-state"])
+                )
+            steps.append(
+                _step(
+                    intent,
+                    "operate-foreground-ui",
+                    "Operate foreground UI",
+                    "desktop.ui_operation",
+                    operation_tool,
+                    input_preview=operation_preview,
+                    risk_level=_desktop_operation_risk_level(operation_tool),
+                    approval_required=_desktop_operation_approval_required(operation_tool),
+                    depends_on=operation_depends_on,
+                    reason="Run the requested create action only after observing the target app.",
+                )
+            )
+            verify_tool = _first_allowed(
+                ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
+                allowed,
+            )
+            steps.append(
+                _step(
+                    intent,
+                    "verify-desktop-result",
+                    "Verify desktop result",
+                    "desktop.app_discovery",
+                    verify_tool,
+                    input_preview=_desktop_verify_input_preview(
+                        verify_tool,
+                        app_name=app_name,
+                        operation_preview=operation_preview,
+                    ),
+                    depends_on=["operate-foreground-ui"],
+                    reason="Observe the app after the create action.",
+                )
+            )
+            return steps
         if ui_inspection is not None and not any(
-            item for item in (hotkey, type_target, safe_type_text, submit_action) if item
+            item
+            for item in (safe_shortcut, hotkey, type_target, safe_type_text, submit_action)
+            if item
         ):
             ui_payload = {
                 key: ui_inspection[key]
@@ -2738,7 +2853,16 @@ class RuntimePlanner:
             )
             return steps
         if screen_capture is not None and not safe_click and not any(
-            item for item in (click_target, hotkey, type_target, safe_type_text, submit_action) if item
+            item
+            for item in (
+                click_target,
+                safe_shortcut,
+                hotkey,
+                type_target,
+                safe_type_text,
+                submit_action,
+            )
+            if item
         ):
             capture_payload = {
                 key: screen_capture[key]
@@ -3137,9 +3261,17 @@ class RuntimePlanner:
                 "app.open_and_click_ui_element",
                 "app.focus_and_type_into_ui_element",
                 "app.open_and_type_into_ui_element",
+                "app.focus_and_safe_shortcut",
+                "app.open_and_safe_shortcut",
             }
             and not focus_step_added
             and not app_search
+            and (
+                operation_tool
+                not in {"app.focus_and_safe_shortcut", "app.open_and_safe_shortcut"}
+                or screen_capture is not None
+                or ui_inspection is not None
+            )
         ):
             inspect_tool = _first_allowed(("desktop.inspect_app",), allowed)
             if inspect_tool:
@@ -11500,6 +11632,8 @@ def _is_generic_foreground_app_label(value: str) -> bool:
         "前台消息",
         "current",
         "foreground",
+        "any",
+        "任意",
         "currentinput",
         "foregroundinput",
         "currentfield",

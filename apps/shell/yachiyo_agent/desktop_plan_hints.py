@@ -1656,6 +1656,8 @@ def _clean_ui_app_name_hint(value: str) -> str:
         "my",
         "me",
         "its",
+        "any",
+        "任意",
         "the",
         "this",
         "and",
