@@ -608,6 +608,72 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
     }
 
 
+def test_runtime_planner_handles_natural_data_analysis_contexts() -> None:
+    generic_data = RuntimePlanner().decision(
+        "分析这份数据并输出报告",
+        allowed_tools=["workspace.list", "terminal.run", "artifact.write"],
+    )
+    latest_local_data = RuntimePlanner().decision(
+        "读取 data 目录里最新的销售表，分析并输出报告",
+        allowed_tools=["workspace.list", "terminal.run", "artifact.write"],
+    )
+    current_page_price_table = RuntimePlanner().decision(
+        "把当前网页上的价格表分析一下，生成竞品对比报告",
+        allowed_tools=["browser.extract_text", "terminal.run", "artifact.write"],
+    )
+    no_excel_ui = RuntimePlanner().decision(
+        "分析这个 Excel 文件，输出图表，不要打开 Excel",
+        allowed_tools=[
+            "app.open",
+            "data.analyze",
+            "workspace.list",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+
+    assert generic_data.selected_intent.kind == "data_analysis"
+    assert generic_data.selected_intent.missing_inputs == ["data_source"]
+    assert [step.step_id for step in generic_data.plan.tool_plan.steps] == [
+        "inspect-data-source",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(generic_data, "inspect-data-source").tool_name == "workspace.list"
+
+    assert latest_local_data.selected_intent.kind == "data_analysis"
+    assert latest_local_data.selected_intent.inputs["data_source_scope_hint"] == "data"
+    assert latest_local_data.selected_intent.inputs["data_source_kind"] == "text_table"
+    assert _step_by_id(latest_local_data, "inspect-data-source").input_preview == {
+        "path": "data",
+    }
+
+    assert current_page_price_table.selected_intent.kind == "data_analysis"
+    assert current_page_price_table.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "text_table",
+        "context_source": "current_page_content",
+    }
+    assert _step_by_id(current_page_price_table, "read-data-context").tool_name == (
+        "browser.extract_text"
+    )
+    assert _step_by_id(current_page_price_table, "write-analysis-artifact").input_preview == {
+        "paths": ["analysis-report.md"],
+        "body_source": "current_page_content",
+    }
+
+    assert no_excel_ui.selected_intent.kind == "data_analysis"
+    assert "spreadsheet_app_hint" not in no_excel_ui.selected_intent.inputs
+    assert "desktop.app_control" not in no_excel_ui.plan.tool_plan.required_capabilities
+    assert all(
+        step.step_id != "open-spreadsheet-app"
+        for step in no_excel_ui.plan.tool_plan.steps
+    )
+    assert _step_by_id(no_excel_ui, "write-analysis-artifact").input_preview == {
+        "paths": ["analysis-report.md", "analysis-chart.png"],
+    }
+
+
 def test_runtime_planner_routes_data_analysis_artifact_to_communication() -> None:
     allowed_tools = [
         "data.analyze",

@@ -31,8 +31,17 @@ def data_source_scope_hint(text: str, metadata: Mapping[str, Any] | None = None)
     if path_match:
         return path_match.group(1).rstrip("。.,")
     lowered = str(text or "").lower()
+    named_folder_match = re.search(
+        r"(?:读取|读|找一下|找下|查找|从|在|打开|使用|用)?\s*"
+        r"(?P<folder>[A-Za-z0-9_.-]+)\s*(?:目录|文件夹)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if named_folder_match:
+        return str(named_folder_match.group("folder") or "").strip()
     if re.search(
-        r"(?:桌面(?:上|里|中|内|文件夹|目录)|桌面\s*(?:的)?(?:文件|数据|表格))",
+        r"(?:桌面(?:上|里|中|内|文件夹|目录)|桌面\s*(?:的)?(?:文件|数据|表格)|"
+        r"桌面.{0,12}(?:文件|数据|表格|csv|tsv|xlsx|xls|json|销售|sales))",
         text,
         flags=re.IGNORECASE,
     ) or re.search(
@@ -76,6 +85,11 @@ def data_source_kind_hint(source_hint: str, text: str = "") -> str:
     context_kind = _context_data_source_kind_hint(lowered_text)
     if context_kind:
         return context_kind
+    if any(
+        marker in lowered_text
+        for marker in ("价格表", "销售表", "数据表", "明细表", "报表", "price table", "pricing table")
+    ):
+        return "text_table"
     if any(marker in lowered_text for marker in ("表格", "table", "tabular")):
         return "text_table"
     return "unknown"

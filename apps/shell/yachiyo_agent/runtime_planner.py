@@ -158,6 +158,8 @@ class TaskIntentRouter:
         source_hint = data_source_hint(text, metadata)
         source_scope = data_source_scope_hint(text, metadata)
         context_source = _task_context_source_hint(text)
+        if _looks_like_current_page_data_context_source(text):
+            context_source = "current_page_content"
         if _looks_like_visible_data_context_source(text):
             context_source = "visible_text"
         can_discover_source = _contains_any(
@@ -167,6 +169,12 @@ class TaskIntentRouter:
         has_source = bool(source_hint or source_scope or context_source)
         if score <= 0 and has_source and _contains_any(text, ["分析", "统计", "汇总", "可视化"]):
             score = 0.16
+        if (
+            score <= 0
+            and can_discover_source
+            and _data_analysis_action_requested(text)
+        ):
+            score = 0.14
         if (
             score <= 0
             and context_source in {"selection", "clipboard"}
@@ -6340,6 +6348,26 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     if intent.kind == "data_analysis" and external_info_lookup:
         score -= 0.36
     if (
+        intent.kind == "data_analysis"
+        and _data_source_or_output_mentioned(text)
+        and _data_analysis_action_requested(text)
+    ):
+        score += 0.22
+    if (
+        intent.kind == "data_analysis"
+        and _contains_any(text, ["workflow", "flow", "工作流", "流程"])
+        and _contains_any(text, ["run", "start", "create", "启动", "运行", "创建", "执行"])
+    ):
+        score -= 0.5
+    if intent.kind == "data_analysis" and _looks_like_current_page_data_context_source(text):
+        score += 0.28
+    if (
+        intent.kind == "report_generation"
+        and _data_source_or_output_mentioned(text)
+        and _data_analysis_action_requested(text)
+    ):
+        score -= 0.22
+    if (
         intent.kind == "web_research"
         and _contains_any(text, _UI_CONTROL_TERMS)
         and str(intent.inputs.get("browser_action") or "").strip() != "type_text"
@@ -6844,6 +6872,52 @@ def _looks_like_visible_data_context_source(text: str) -> bool:
     )
 
 
+def _looks_like_current_page_data_context_source(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    return _contains_any(
+        value,
+        [
+            "current page",
+            "current webpage",
+            "this page",
+            "this webpage",
+            "当前网页",
+            "当前页面",
+            "当前页",
+            "这个网页",
+            "这个页面",
+            "这页",
+        ],
+    ) and _contains_any(
+        value,
+        [
+            "table",
+            "tabular",
+            "spreadsheet",
+            "data",
+            "dataset",
+            "csv",
+            "tsv",
+            "xlsx",
+            "xls",
+            "json",
+            "price table",
+            "pricing table",
+            "表格",
+            "数据",
+            "数据集",
+            "电子表格",
+            "价格表",
+            "销售表",
+            "数据表",
+            "明细表",
+            "报表",
+        ],
+    )
+
+
 def _looks_like_visible_text_artifact_source(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
@@ -7125,6 +7199,18 @@ def _looks_like_external_info_lookup(text: str) -> bool:
 def _spreadsheet_ui_app_hint(text: str) -> str:
     value = _clean_prompt(text)
     app_pattern = r"(?P<app>Microsoft\s+Excel|Apple\s+Numbers|Excel|Numbers)"
+    blocked_pattern = r"(?:Microsoft\s+Excel|Apple\s+Numbers|Excel|Numbers)"
+    if re.search(
+        rf"(?:不要|别|无需|不需要|不用|不要用|不要打开|别打开|无需打开|不打开)\s*{blocked_pattern}",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        rf"(?:do\s+not|don't|dont|without|no\s+need\s+to)\s+"
+        rf"(?:open|launch|use)?\s*(?:the\s+)?{blocked_pattern}",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return ""
     patterns = (
         rf"(?:用|通过|在)\s*{app_pattern}\s*(?:里|中|上|来|去)?\s*(?:分析|统计|汇总|打开|查看|编辑)",
         rf"(?:打开|启动|开启)\s*{app_pattern}\s*(?:来|去)?\s*(?:分析|统计|汇总|打开|查看|编辑)?",
