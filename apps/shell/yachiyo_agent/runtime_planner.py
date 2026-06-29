@@ -1543,6 +1543,10 @@ class RuntimePlanner:
     ) -> PlannerDecisionSnapshot:
         candidates = self._intent_router.candidate_intents(prompt, metadata)
         selected = candidates[0] if candidates else self._intent_router.route(prompt, metadata)
+        selected = _normalize_intent_for_allowed_tools(
+            selected,
+            _allowed_tool_set(allowed_tools),
+        )
         plan = self.plan_intent(selected, allowed_tools=allowed_tools)
         return PlannerDecisionSnapshot(
             decision_id=_stable_id("decision", selected.kind, prompt),
@@ -1569,6 +1573,7 @@ class RuntimePlanner:
         allowed_tools: Iterable[str] | None = None,
     ) -> RuntimePlanSnapshot:
         allowed = _allowed_tool_set(allowed_tools)
+        intent = _normalize_intent_for_allowed_tools(intent, allowed)
         steps = self._steps_for_intent(intent, allowed)
         required_capabilities = _required_capabilities_for_plan(intent, steps)
         capabilities = [*required_capabilities, *intent.preferred_capabilities]
@@ -6273,6 +6278,24 @@ def _allowed_tool_set(allowed_tools: Iterable[str] | None) -> set[str] | None:
     if allowed_tools is None:
         return None
     return {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+
+
+def _normalize_intent_for_allowed_tools(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+) -> TaskIntentSnapshot:
+    if allowed is None or intent.kind != "web_research":
+        return intent
+    browser_action = str(intent.inputs.get("browser_action") or "").strip()
+    if (
+        browser_action == "open_url_extract"
+        and "browser.open_url_and_extract_text" not in allowed
+        and "browser.open_url" in allowed
+    ):
+        inputs = dict(intent.inputs)
+        inputs["browser_action"] = "open_search" if inputs.get("query") else "open_url"
+        return intent.model_copy(update={"inputs": inputs})
+    return intent
 
 
 def _missing_capabilities(
@@ -13093,17 +13116,39 @@ def _browser_search_deliverable_extract_requested(text: str) -> bool:
 
 
 def _plain_web_search_deliverable_extract_requested(text: str) -> bool:
+    value = _clean_prompt(text)
     return bool(
         re.search(
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:搜索|查找|查询|检索|找一下|找下|查一下|查查|查(?!看))\s+",
-            _clean_prompt(text),
+            r"(?:搜索|查找|查询|检索|找一下|找下|查一下|查查|查(?!看))\s*",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|开启|新建|开)?\s*(?:一个|个)?\s*"
+            r"(?:Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave|浏览器)"
+            r"(?:里|中|上|内)?\s*(?:搜索|查找|检索)\s*",
+            value,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
             r"(?:search|look\s+up|find\s+out\s+about)\s+",
-            _clean_prompt(text),
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:研究|调研|查研究|做(?:一份)?(?:调研|研究)|写(?:一份)?(?:关于)?.*?(?:分析|报告))",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
+            r"(?:research|investigate|write\s+(?:a\s+)?(?:research\s+)?report|"
+            r"write\s+(?:a\s+)?competitive\s+analysis)",
+            value,
             flags=re.IGNORECASE,
         )
     )
@@ -13452,6 +13497,13 @@ def _looks_like_generic_media_control_request(text: str) -> bool:
 def _clean_web_search_query(query: str) -> str:
     value = re.sub(r"^[：:，,\s]+", "", str(query or "").strip())
     value = re.sub(
+        r"^(?:网页|网上|网络|web)\s*(?:上|里|中|内)?\s*"
+        r"(?:研究|调研|了解|查找|查询|检索|搜索)(?:一下|下)?\s*",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(
         r"\s+(?:and|then)\s+(?:write|create|generate|produce|make|format|organize|summari[sz]e).*$",
         "",
         value,
@@ -13545,7 +13597,24 @@ def _clean_web_search_query(query: str) -> str:
     value = re.sub(r"\s+(?:please|pls)$", "", value, flags=re.IGNORECASE).strip()
     if not value:
         return ""
-    if value.casefold() in {"一下", "下", "查", "找", "搜索", "查找", "查询"}:
+    if value.casefold() in {
+        "一下",
+        "下",
+        "查",
+        "找",
+        "搜索",
+        "查找",
+        "查询",
+        "current page",
+        "this page",
+        "current webpage",
+        "this webpage",
+        "当前网页",
+        "当前页面",
+        "当前页",
+        "这个网页",
+        "这个页面",
+    }:
         return ""
     if _contains_any(
         value,

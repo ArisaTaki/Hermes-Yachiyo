@@ -2091,6 +2091,20 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
         "browser.open_url_and_extract_text"
     )
 
+    chinese_research_report = RuntimePlanner().decision(
+        "搜索网页研究一下 OpenAI 最新价格并输出报告",
+        allowed_tools=["browser.open_url", "browser.open_url_and_extract_text", "artifact.write"],
+    )
+    assert chinese_research_report.selected_intent.kind == "web_research"
+    assert chinese_research_report.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0%E4%BB%B7%E6%A0%BC",
+        "browser_action": "open_url_extract",
+        "query": "OpenAI 最新价格",
+    }
+    assert _step_by_id(chinese_research_report, "extract-web-url-text").tool_name == (
+        "browser.open_url_and_extract_text"
+    )
+
     browser_surface_decision = RuntimePlanner().decision(
         "帮我在任意浏览器搜索 OpenAI 最新新闻并总结",
         allowed_tools=["browser.open_url", "artifact.write", "app.open"],
@@ -2592,6 +2606,33 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "write-research-artifact",
     ]
     assert _step_by_id(chrome_search_report, "extract-web-url-text").tool_name == (
+        "browser.open_url_and_extract_text"
+    )
+
+    chrome_search_summary = RuntimePlanner().decision(
+        "打开 Chrome 搜索 OpenAI pricing 并总结",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "browser.open_url",
+            "browser.open_url_and_extract_text",
+            "artifact.write",
+        ],
+    )
+    assert chrome_search_summary.selected_intent.kind == "web_research"
+    assert chrome_search_summary.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=OpenAI+pricing",
+        "browser_action": "open_url_extract",
+        "query": "OpenAI pricing",
+        "app_name": "Google Chrome",
+        "app_mode": "open",
+    }
+    assert [step.step_id for step in chrome_search_summary.plan.tool_plan.steps] == [
+        "discover-browser-app",
+        "open-or-focus-browser",
+        "extract-web-url-text",
+    ]
+    assert _step_by_id(chrome_search_summary, "extract-web-url-text").tool_name == (
         "browser.open_url_and_extract_text"
     )
 
@@ -13609,6 +13650,41 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "planning_reason": "planner_fallback_web_research",
             "continue_to_model": True,
         }
+    ]
+    assert planner_tool_requests(
+        "搜索网页研究一下 OpenAI 最新价格并输出报告",
+        allowed_tools=[*allowed, "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {
+                "url": "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0%E4%BB%B7%E6%A0%BC"
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+    assert planner_tool_requests(
+        "打开 Chrome 搜索 OpenAI pricing 并总结",
+        allowed_tools=[*allowed, "app.open", "desktop.list_apps", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://www.google.com/search?q=OpenAI+pricing"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        },
     ]
     assert planner_tool_requests(
         "写一份关于 Hanako 和 Hermes 桌面 agent 的竞品分析报告",
