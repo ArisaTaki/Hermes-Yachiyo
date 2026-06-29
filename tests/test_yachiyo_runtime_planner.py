@@ -6851,6 +6851,55 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "text": "open hanako"
     }
 
+    any_current_search = RuntimePlanner().decision(
+        "在任何当前应用里找到搜索框输入 OpenAI 并回车",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "desktop.list_apps",
+            "app.focus",
+        ],
+    )
+    assert any_current_search.selected_intent.kind == "desktop_operation"
+    assert any_current_search.selected_intent.inputs["app_name_hint"] == ""
+    assert any_current_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "OpenAI",
+        "target": "搜索",
+        "scope": "foreground",
+    }
+    assert [step.step_id for step in any_current_search.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+    ]
+    assert _step_by_id(any_current_search, "type-app-search-query").input_preview == {
+        "text": "OpenAI"
+    }
+
+    english_current_search = RuntimePlanner().decision(
+        "in current app search for OpenAI",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ],
+    )
+    assert english_current_search.selected_intent.kind == "desktop_operation"
+    assert english_current_search.selected_intent.inputs["app_name_hint"] == ""
+    assert english_current_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "OpenAI",
+        "target": "Search",
+        "scope": "foreground",
+    }
+    assert _step_by_id(english_current_search, "type-app-search-query").input_preview == {
+        "text": "OpenAI"
+    }
+
     foreground_search_first_result = RuntimePlanner().decision(
         "在当前应用里搜索 open hanako 并打开第一个结果",
         allowed_tools=[

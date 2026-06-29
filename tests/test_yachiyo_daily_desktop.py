@@ -559,6 +559,48 @@ def test_planner_first_daily_desktop_entrypoint_requests_scope_english_app_disco
         }
     ]
 
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "在任何当前应用里找到搜索框输入 OpenAI 并回车",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "OpenAI"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
 
 def test_planner_first_daily_desktop_entrypoint_requests_scope_english_safe_operations() -> None:
     cases = (

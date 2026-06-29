@@ -10660,7 +10660,9 @@ def _clean_app_name_hint(value: str) -> str:
         "刚才关闭的标签页",
         "刚关闭的标签页",
         "当前",
+        "任何当前",
         "任意当前",
+        "任何当前应用",
         "任意当前应用",
         "当前所有",
         "当前全部",
@@ -11457,7 +11459,9 @@ def _is_generic_foreground_app_label(value: str) -> bool:
         return True
     return normalized in {
         "当前",
+        "任何当前",
         "在当前",
+        "在任何当前",
         "前台",
         "在前台",
         "当前输入框",
@@ -13545,27 +13549,36 @@ def _foreground_app_search_hint(text: str) -> dict[str, str]:
         return {}
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?\s*"
-        r"(?:在|用|通过)?\s*(?:(?:当前|现在|前台|这个|该)\s*){1,2}"
+        r"(?:在|用|通过)?\s*(?:(?:任意|任何)\s*)?(?:(?:当前|现在|前台|这个|该)\s*){1,2}"
+        r"(?:应用|app|application|窗口|界面|ui)"
+        r"(?:里|中|上|内)?\s*(?:找到|找|定位|聚焦|点击|点按|选择|选中)?(?:一下|下)?\s*"
+        r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏|search\s+field|search\s+box|search\s+input|search\s+bar)\s*"
+        r"(?:输入|键入|填写|填入|写入|写|type|enter|fill)\s*"
+        r"(?P<field_query>.+?)(?:\s*(?:并|然后|再|后|之后|and|then)?\s*"
+        r"(?:搜索|查找|检索|提交|确认|回车|search|submit|confirm|press\s+enter|hit\s+enter))?$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?\s*"
+        r"(?:在|用|通过)?\s*(?:(?:任意|任何)\s*)?(?:(?:当前|现在|前台|这个|该)\s*){1,2}"
         r"(?:应用|app|application|窗口|界面|ui)"
         r"(?:里|中|上|内)?\s*(?:搜索|查找|检索|找)(?:一下|下)?\s*"
         r"(?P<query>.+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?\s*(?:把|将)?\s*"
-        r"(?:(?:当前|现在|前台|这个|该)\s*){1,2}"
+        r"(?:(?:任意|任何)\s*)?(?:(?:当前|现在|前台|这个|该)\s*){1,2}"
         r"(?:应用|app|application|窗口|界面|ui)"
         r"(?:里|中|上|内)?\s*(?:搜索|查找|检索|找)(?:一下|下)?\s*"
         r"(?P<query_result>.+?)\s*(?:的)?(?:搜索结果|结果|内容).*$",
-        r"^(?:search|find)\s+(?P<query_en>.+?)\s+"
+        r"^(?:search|find)\s+(?:for\s+)?(?P<query_en>.+?)\s+"
         r"(?:in|inside|within)\s+(?:the\s+)?(?:current|active|foreground)\s+"
         r"(?:app|application|window|ui)$",
         r"^(?:in|inside|within)\s+(?:the\s+)?(?:current|active|foreground)\s+"
-        r"(?:app|application|window|ui)\s+(?:search|find)\s+(?P<query_en2>.+)$",
+        r"(?:app|application|window|ui)\s+(?:search|find)\s+(?:for\s+)?(?P<query_en2>.+)$",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
         if not match:
             continue
         query = _clean_app_search_query(
-            match.groupdict().get("query")
+            match.groupdict().get("field_query")
+            or match.groupdict().get("query")
             or match.groupdict().get("query_result")
             or match.groupdict().get("query_en")
             or match.groupdict().get("query_en2")
