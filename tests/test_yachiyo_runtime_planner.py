@@ -6255,6 +6255,35 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "target": "Search",
     }
 
+    for prompt, expected_target in (
+        ("在一个叫 SuperData Studio 的应用里搜索 sales.csv", "搜索"),
+        ("in an app called SuperData Studio search sales.csv", "Search"),
+        ("search sales.csv in an app called SuperData Studio", "Search"),
+    ):
+        named_file_search = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.focus",
+                "desktop.safe_shortcut",
+                "desktop.safe_type_text",
+                "desktop.search_submit",
+                "desktop.ui_elements",
+                "data.analyze",
+                "artifact.write",
+            ],
+        )
+
+        assert named_file_search.selected_intent.kind == "desktop_operation"
+        assert named_file_search.selected_intent.inputs["app_name_hint"] == "SuperData Studio"
+        assert named_file_search.selected_intent.inputs["app_search_hint"] == {
+            "query": "sales.csv",
+            "target": expected_target,
+        }
+        assert _step_by_id(named_file_search, "type-app-search-query").input_preview == {
+            "text": "sales.csv"
+        }
+
     leading = RuntimePlanner().decision(
         "Finder 找下载文件",
         allowed_tools=[
@@ -13345,6 +13374,59 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
             "protocol": "json_fallback",
             "tool": "screen.capture",
             "input": {"reason": "user asked to capture the screen"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+    named_app_file_search_requests = planner_desktop_tool_requests(
+        "在一个叫 SuperData Studio 的应用里搜索 sales.csv",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "data.analyze",
+            "artifact.write",
+        ],
+    )
+
+    assert named_app_file_search_requests == [
+        _app_discovery_request("SuperData Studio"),
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "SuperData Studio"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "sales.csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
