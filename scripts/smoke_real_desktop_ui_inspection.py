@@ -18,6 +18,7 @@ from apps.shell.agent.tools import desktop as desktop_tools
 from scripts.smoke_real_desktop_app_open import (
     DEFAULT_APP_NAME,
     _app_names,
+    _merge_blocking_evidence,
     _cleanup_evidence,
     _resolved_open_app_name,
     _status_running,
@@ -191,6 +192,7 @@ def run_smoke(
             and cleanup_result.get("attempted") is True
         ),
     }
+    blocker_evidence = _merge_blocking_evidence(focus_result, windows_result, ui_result)
     return {
         "ok": all(checks.values()),
         "mode": "real_desktop_ui_inspection_smoke",
@@ -212,6 +214,7 @@ def run_smoke(
         "menu_level_count": menu_level_count,
         "control_like_count": control_like_count,
         "deepest_ui_depth": deepest_ui_depth,
+        **blocker_evidence,
         "discovery": {"result": discovery, "names": discovered_names},
         "before_status": before_status,
         "open_result": open_result,

@@ -21,6 +21,7 @@ from scripts.smoke_real_desktop_app_open import (
     DEFAULT_APP_NAME,
     _app_names,
     _cleanup_evidence,
+    _merge_blocking_evidence,
     _resolved_open_app_name,
     _status_running,
 )
@@ -88,6 +89,7 @@ def _sign_target(elements: list[dict[str, Any]]) -> str:
 
 
 def _locked_session_evidence(app_name: str, preflight: dict[str, Any]) -> dict[str, Any]:
+    blocker_evidence = _merge_blocking_evidence(preflight)
     return {
         "ok": False,
         "mode": "real_desktop_interaction_smoke",
@@ -96,6 +98,9 @@ def _locked_session_evidence(app_name: str, preflight: dict[str, Any]) -> dict[s
         "app_name": app_name,
         "stage": "session_preflight",
         "error": "desktop_session_locked",
+        "blocking_condition": "desktop_session_locked",
+        "blocking_conditions": ["desktop_session_locked"],
+        **{key: value for key, value in blocker_evidence.items() if key != "error"},
         "preflight": preflight,
         "checks": {"desktop_session_ready": False},
     }
@@ -201,6 +206,10 @@ def run_smoke(
             before_running=before_running,
             after_running=failed_after_running,
         )
+        blocker_evidence = _merge_blocking_evidence(
+            preflight,
+            *(item for item in details.values() if isinstance(item, dict)),
+        )
         return {
             "ok": False,
             "mode": "real_desktop_interaction_smoke",
@@ -210,6 +219,7 @@ def run_smoke(
             "opened_app_name": opened_app_name,
             "stage": stage,
             "error": error,
+            **{key: value for key, value in blocker_evidence.items() if key != "error"},
             "preflight": preflight,
             "discovery": {"result": discovery, "names": discovered_names},
             "before_status": before_status,

@@ -348,7 +348,10 @@ opened Calculator successfully but stopped at `app.focus` because macOS
 reported `desktop_session_locked`. The interaction smoke failed before any
 typing or clicking and cleaned up Calculator, which is the intended guarded
 behavior until the foreground session is unlocked and the smoke can prove the
-full type -> inspect -> click -> verify loop.
+full type -> inspect -> click -> verify loop. Both opt-in smoke reports now
+surface that blocker at the top level as `error`, `blocking_condition(s)`,
+`recovery_hints`, and `recovery_actions`, so release reports and Studio-style
+debugging do not have to parse nested tool output to explain the failure.
 
 Current opt-in OpenAI-compatible provider stream evidence is reproducible, when
 `OHA_YACHIYO_SMOKE_*` credentials are configured, with:

@@ -223,7 +223,7 @@ python scripts/verify_release_candidate.py --source-only --run-real-desktop-app-
 python scripts/verify_release_candidate.py --source-only --run-real-desktop-ui-inspection-smoke --report-json tmp/source-only-real-desktop-ui-inspection.json
 ```
 
-`--run-real-desktop-ui-inspection-smoke` 会在 macOS 上执行真实 `desktop.running_apps`、`desktop.windows`、`app.focus`、`desktop.active_window` 和指定 app 的 `desktop.ui_elements(app_name=...)`。report 会记录 `focus_verified`、`window_count`、`ui_role_counts`、`menu_level_count` 和 `control_like_count`；当前环境如果只能读到菜单层或无法验证焦点，也会作为 evidence 保留，而不会宣称控件级 UI 操作已完全达标。新诊断字段 `ui_inspection_level`、`ui_unclassified_count`、`ui_visibility_limited` 和 `window_visibility_status` 用来区分控件级可读、仅菜单级可读、窗口列表不可见等状态。`desktop.permissions` 同时会把 `runtime_blocking_conditions` / `blocking_conditions` 和 `permission_targets` 分开，避免把 `desktop_session_locked` 误报成需要重新授权的权限问题。该 gate 默认不运行，避免普通源码验收打开本机应用。
+`--run-real-desktop-ui-inspection-smoke` 会在 macOS 上执行真实 `desktop.running_apps`、`desktop.windows`、`app.focus`、`desktop.active_window` 和指定 app 的 `desktop.ui_elements(app_name=...)`。report 会记录 `focus_verified`、`window_count`、`ui_role_counts`、`menu_level_count` 和 `control_like_count`；当前环境如果只能读到菜单层或无法验证焦点，也会作为 evidence 保留，而不会宣称控件级 UI 操作已完全达标。新诊断字段 `ui_inspection_level`、`ui_unclassified_count`、`ui_visibility_limited` 和 `window_visibility_status` 用来区分控件级可读、仅菜单级可读、窗口列表不可见等状态。焦点失败时，report 顶层会带 `error`、`blocking_condition(s)`、`recovery_hints` 和 `recovery_actions`，方便 RC 报告直接定位环境 blocker。`desktop.permissions` 同时会把 `runtime_blocking_conditions` / `blocking_conditions` 和 `permission_targets` 分开，避免把 `desktop_session_locked` 误报成需要重新授权的权限问题。该 gate 默认不运行，避免普通源码验收打开本机应用。
 
 需要证明源码侧已形成真实输入、UI 读取、语义控件点击和结果复核闭环时，显式运行 opt-in interaction smoke：
 
@@ -231,7 +231,7 @@ python scripts/verify_release_candidate.py --source-only --run-real-desktop-ui-i
 python scripts/verify_release_candidate.py --source-only --run-real-desktop-interaction-smoke --report-json tmp/source-only-real-desktop-interaction.json
 ```
 
-`--run-real-desktop-interaction-smoke` 默认只操作 smoke 前未运行的 Calculator：输入 `42`，读取可见值，通过 `desktop.click_ui_element` 点击“更改数值符号”控件，再确认结果变为 `-42`。脚本要求每一步都验证目标 app 与前台状态，启动、聚焦、UI app 匹配或值读取失败时会立即停止，不会继续向未知前台输入；Calculator 原本已运行时也会拒绝修改用户现有状态。macOS 会话锁定时 report 会记录 `desktop_session_locked`，而不会误报为 Automation 或 Accessibility 权限缺失。该 gate 会真实输入和点击本机 UI，只证明源码 Runtime 的桌面执行闭环，不替代 packaged app / DMG 验收。
+`--run-real-desktop-interaction-smoke` 默认只操作 smoke 前未运行的 Calculator：输入 `42`，读取可见值，通过 `desktop.click_ui_element` 点击“更改数值符号”控件，再确认结果变为 `-42`。脚本要求每一步都验证目标 app 与前台状态，启动、聚焦、UI app 匹配或值读取失败时会立即停止，不会继续向未知前台输入；Calculator 原本已运行时也会拒绝修改用户现有状态。macOS 会话锁定时 report 顶层会记录 `desktop_session_locked`、可执行 recovery action 和焦点尝试证据，而不会误报为 Automation 或 Accessibility 权限缺失。该 gate 会真实输入和点击本机 UI，只证明源码 Runtime 的桌面执行闭环，不替代 packaged app / DMG 验收。
 
 需要在 Gatekeeper 首次启动人工签核前归档 macOS 签名、spctl 和隔离属性诊断时运行：
 

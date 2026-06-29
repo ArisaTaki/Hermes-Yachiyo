@@ -248,6 +248,103 @@ def test_real_desktop_ui_inspection_smoke_fails_when_named_ui_is_not_read(monkey
     assert evidence["checks"]["cleanup_ok"] is True
 
 
+def test_real_desktop_ui_inspection_smoke_surfaces_focus_blocker(monkeypatch):
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "list_apps",
+        lambda *, query="", limit=200: {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "data": {"query": query, "apps": [{"name": "Calculator"}]},
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_status",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.status",
+            "data": {"app_name": app_name, "running": True, "status": "running"},
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_open",
+        lambda app_name: {"ok": True, "action": "app.open", "data": {"app_name": app_name}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "running_apps",
+        lambda: {"ok": True, "data": {"apps": [{"name": "Calculator"}]}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "windows",
+        lambda app_name="": {
+            "ok": True,
+            "data": {
+                "app_name": app_name,
+                "count": 0,
+                "visibility_limited": True,
+                "window_visibility_status": "running_without_visible_windows",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_focus",
+        lambda app_name: {
+            "ok": False,
+            "error": "desktop_session_locked",
+            "blocking_condition": "desktop_session_locked",
+            "data": {"app_name": app_name, "blocking_condition": "desktop_session_locked"},
+            "recovery_hints": ["Unlock the active macOS user session, then retry."],
+            "recovery_actions": [
+                {
+                    "label": "解锁后重试Calculator",
+                    "tool": "app.focus",
+                    "input": {"app_name": "Calculator"},
+                    "permission_target": "desktop_session_unlocked",
+                    "risk_level": "low",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "active_window",
+        lambda: {"ok": True, "data": {"app_name": "Codex"}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "ui_elements",
+        lambda *, app_name="", role_filter="", limit=80: {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "data": {
+                "app_name": app_name,
+                "elements": [{"depth": 0, "role": "AXMenuBar", "name": ""}],
+                "role_counts": {"AXMenuBar": 1},
+                "menu_level_count": 1,
+                "inspection_level": "menu",
+                "visibility_status": "menu_level_only",
+                "visibility_limited": True,
+            },
+        },
+    )
+
+    evidence = smoke.run_smoke(app_name="Calculator", cleanup=False)
+
+    assert evidence["ok"] is False
+    assert evidence["error"] == "desktop_session_locked"
+    assert evidence["blocking_condition"] == "desktop_session_locked"
+    assert evidence["blocking_conditions"] == ["desktop_session_locked"]
+    assert evidence["recovery_hints"] == ["Unlock the active macOS user session, then retry."]
+    assert evidence["recovery_actions"][0]["tool"] == "app.focus"
+    assert evidence["checks"]["focus_tool_returned"] is False
+
+
 def test_real_desktop_ui_inspection_smoke_cli_outputs_json(monkeypatch, capsys):
     monkeypatch.setattr(smoke.platform, "system", lambda: "Linux")
 

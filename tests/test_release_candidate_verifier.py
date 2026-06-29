@@ -949,6 +949,45 @@ def test_release_candidate_verifier_fails_when_real_desktop_ui_inspection_smoke_
     ]
 
 
+def test_release_candidate_verifier_reports_locked_real_desktop_ui_inspection(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        rc,
+        "run_real_desktop_ui_inspection_smoke",
+        lambda: {
+            "ok": False,
+            "mode": "real_desktop_ui_inspection_smoke",
+            "app_name": "Calculator",
+            "error": "desktop_session_locked",
+            "blocking_condition": "desktop_session_locked",
+            "blocking_conditions": ["desktop_session_locked"],
+            "checks": {"focus_tool_returned": False},
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        run_real_desktop_ui_inspection_smoke=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "real desktop UI inspection smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["real_desktop_ui_inspection_smoke"]
+    assert section["status"] == "failed"
+    assert section["evidence"]["blocking_conditions"] == ["desktop_session_locked"]
+    assert section["findings"] == [
+        {
+            "path": str(tmp_path / "scripts/smoke_real_desktop_ui_inspection.py"),
+            "message": "desktop_session_locked",
+        }
+    ]
+
+
 def test_release_candidate_verifier_reports_electron_native_bridge_smoke_when_requested(
     tmp_path, monkeypatch, capsys
 ):

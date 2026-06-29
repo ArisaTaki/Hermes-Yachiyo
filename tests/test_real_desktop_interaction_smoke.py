@@ -38,6 +38,8 @@ def test_real_desktop_interaction_smoke_stops_before_app_mutation_when_locked(mo
     assert evidence["ok"] is False
     assert evidence["stage"] == "session_preflight"
     assert evidence["error"] == "desktop_session_locked"
+    assert evidence["blocking_condition"] == "desktop_session_locked"
+    assert evidence["blocking_conditions"] == ["desktop_session_locked"]
     assert evidence["checks"] == {"desktop_session_ready": False}
 
 
@@ -296,6 +298,75 @@ def test_real_desktop_interaction_smoke_never_types_when_focus_fails(monkeypatch
     assert evidence["ok"] is False
     assert evidence["stage"] == "app_focus"
     assert evidence["error"] == "app_focus_not_verified"
+    assert evidence["checks"]["focus_verified"] is False
+    assert evidence["cleanup"]["attempted"] is True
+
+
+def test_real_desktop_interaction_smoke_surfaces_focus_blocker(monkeypatch):
+    statuses = iter([False, True, False])
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "active_window",
+        lambda: {"ok": True, "data": {"app_name": "Codex"}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "list_apps",
+        lambda **_kwargs: {"ok": True, "data": {"apps": [{"name": "Calculator"}]}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_status",
+        lambda app_name: {"ok": True, "data": {"running": next(statuses)}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_open",
+        lambda app_name: {"ok": True, "data": {"app_name": app_name}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_focus",
+        lambda app_name: {
+            "ok": False,
+            "error": "desktop_session_locked",
+            "blocking_condition": "desktop_session_locked",
+            "data": {"blocking_condition": "desktop_session_locked"},
+            "recovery_hints": ["Unlock the active macOS user session, then retry."],
+            "recovery_actions": [
+                {
+                    "label": "解锁后重试Calculator",
+                    "tool": "app.focus",
+                    "input": {"app_name": "Calculator"},
+                    "permission_target": "desktop_session_unlocked",
+                    "risk_level": "low",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "desktop_safe_key",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("must not send keys without verified focus")
+        ),
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_quit",
+        lambda app_name: {"ok": True, "data": {"running": False}},
+    )
+
+    evidence = smoke.run_smoke()
+
+    assert evidence["ok"] is False
+    assert evidence["stage"] == "app_focus"
+    assert evidence["error"] == "desktop_session_locked"
+    assert evidence["blocking_condition"] == "desktop_session_locked"
+    assert evidence["blocking_conditions"] == ["desktop_session_locked"]
+    assert evidence["recovery_hints"] == ["Unlock the active macOS user session, then retry."]
+    assert evidence["recovery_actions"][0]["tool"] == "app.focus"
     assert evidence["checks"]["focus_verified"] is False
     assert evidence["cleanup"]["attempted"] is True
 
