@@ -158,6 +158,14 @@ The execution broker also propagates foreground focus failures from combined
 and step-level fallback evidence. That keeps failed desktop actions replayable
 in Run Timeline instead of collapsing into a generic tool failure.
 
+Semantic foreground typing now mirrors semantic clicking when an accessibility
+target cannot be matched: the tool returns candidate UI controls, visibility
+metadata, screenshot recovery, coordinate-focus retry schema, and a follow-up
+`desktop.type_text` hint without repeating the original text in the error
+payload. This gives the agent a discover -> inspect -> recover path for
+unknown app input fields. The follow-up tool and sanitized follow-up input are
+also part of the public recovery metadata and replay context.
+
 The Electron desktop shell now also starts a loopback-only native runtime
 bridge and injects its URL/token into the Python backend. `app.focus` can use
 that bridge as an additional `electron_native_bridge` strategy after local

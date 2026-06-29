@@ -38,6 +38,11 @@ def test_recovery_action_metadata_snapshot_normalizes_task_metadata_contract() -
             "recovery_retry_artifact_kind": "image",
             "required_retry_fields": ["display_id"],
             "recommended_tools": ["screen.capture"],
+            "recovery_followup_tool": "desktop.type_text",
+            "recovery_followup_input": {
+                "text_source": "original_request",
+                "character_count": 5,
+            },
             "source_task_id": "task-source-screen",
             "ignored": "value",
         }
@@ -61,6 +66,8 @@ def test_recovery_action_metadata_snapshot_normalizes_task_metadata_contract() -
         "required_retry_fields",
         "recommended_tools",
         "recovery_retry_prompt",
+        "recovery_followup_tool",
+        "recovery_followup_input",
         "recovery_retry_source_event_type",
         "recovery_retry_source_tool_call_id",
         "source_task_id",
@@ -86,6 +93,11 @@ def test_recovery_action_metadata_snapshot_normalizes_task_metadata_contract() -
         "recovery_retry_artifact_kind": "image",
         "required_retry_fields": ["display_id"],
         "recommended_tools": ["screen.capture"],
+        "recovery_followup_tool": "desktop.type_text",
+        "recovery_followup_input": {
+            "text_source": "original_request",
+            "character_count": 5,
+        },
         "source_task_id": "task-source-screen",
     }
 
@@ -112,6 +124,11 @@ def test_recovery_retry_context_payload_projects_retry_context_for_replay() -> N
             "required_retry_fields": ["display_id"],
             "recommended_tools": ["screen.capture"],
             "recovery_retry_prompt": "截图当前屏幕",
+            "recovery_followup_tool": "desktop.type_text",
+            "recovery_followup_input": {
+                "text_source": "original_request",
+                "character_count": 5,
+            },
             "recovery_retry_source_event_type": "agent.desktop.permission_recovery",
             "recovery_retry_source_tool_call_id": "tool-call-1",
             "source_task_id": "task-source-screen",
@@ -139,6 +156,11 @@ def test_recovery_retry_context_payload_projects_retry_context_for_replay() -> N
         "retry_artifact_kind": "image",
         "required_retry_fields": ["display_id"],
         "recommended_tools": ["screen.capture"],
+        "followup_tool": "desktop.type_text",
+        "followup_input": {
+            "text_source": "original_request",
+            "character_count": 5,
+        },
         "retry_prompt": "截图当前屏幕",
         "retry_source_event_type": "agent.desktop.permission_recovery",
         "retry_source_tool_call_id": "tool-call-1",

@@ -114,6 +114,8 @@ class DesktopRecoveryActionMetadataSnapshot(_PublicSnapshot):
     required_retry_fields: list[str] = Field(default_factory=list)
     recommended_tools: list[str] = Field(default_factory=list)
     recovery_retry_prompt: str | None = None
+    recovery_followup_tool: str | None = None
+    recovery_followup_input: dict[str, Any] = Field(default_factory=dict)
     recovery_retry_source_event_type: str | None = None
     recovery_retry_source_tool_call_id: str | None = None
     source_task_id: str | None = None

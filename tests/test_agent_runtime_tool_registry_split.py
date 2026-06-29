@@ -5829,6 +5829,9 @@ def test_desktop_type_into_ui_element_returns_candidates_without_blind_typing(
         "data": {
             "app_name": "Notes",
             "title": "Draft",
+            "inspection_level": "control",
+            "visibility_status": "control_accessible",
+            "visibility_limited": False,
             "elements": [
                 {
                     "depth": 0,
@@ -5859,8 +5862,17 @@ def test_desktop_type_into_ui_element_returns_candidates_without_blind_typing(
     assert result["ok"] is False
     assert result["action"] == "desktop.type_into_ui_element"
     assert result["error"] == "ui_element_not_found"
+    assert result["fallback"] == "screen.capture"
     assert result["data"]["target"] == "Search"
     assert result["data"]["character_count"] == 5
+    assert result["data"]["inspection_level"] == "control"
+    assert result["data"]["visibility_status"] == "control_accessible"
+    assert result["data"]["visibility_limited"] is False
+    assert result["data"]["recommended_tools"] == [
+        "screen.capture",
+        "desktop.click",
+        "desktop.type_text",
+    ]
     assert result["data"]["candidates"] == [
         {
             "role": "AXTextField",
@@ -5869,6 +5881,83 @@ def test_desktop_type_into_ui_element_returns_candidates_without_blind_typing(
             "center": {"x": 44, "y": 55},
         }
     ]
+    assert result["recovery_actions"] == [
+        {
+            "label": "截取屏幕重新定位输入框",
+            "tool": "screen.capture",
+            "input": {
+                "reason": (
+                    "desktop.type_into_ui_element could not find Search; "
+                    "capture screen before coordinate focus and text entry"
+                )
+            },
+            "permission_target": "screen_observation",
+            "risk_level": "low",
+            "retry_tool": "desktop.click",
+            "recovery_retry_tool": "desktop.click",
+            "retry_input": {"click_count": 1},
+            "recovery_retry_input": {"click_count": 1},
+            "retry_input_schema": {
+                "type": "object",
+                "required": ["x", "y"],
+                "properties": {
+                    "x": {"type": "number", "minimum": 0},
+                    "y": {"type": "number", "minimum": 0},
+                    "click_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 3,
+                        "default": 1,
+                    },
+                },
+            },
+            "recovery_retry_input_schema": {
+                "type": "object",
+                "required": ["x", "y"],
+                "properties": {
+                    "x": {"type": "number", "minimum": 0},
+                    "y": {"type": "number", "minimum": 0},
+                    "click_count": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 3,
+                        "default": 1,
+                    },
+                },
+            },
+            "retry_input_source": "screen_capture_artifact",
+            "recovery_retry_input_source": "screen_capture_artifact",
+            "retry_artifact_tool": "screen.capture",
+            "recovery_retry_artifact_tool": "screen.capture",
+            "retry_artifact_kind": "image",
+            "recovery_retry_artifact_kind": "image",
+            "required_retry_fields": ["x", "y"],
+            "followup_tool": "desktop.type_text",
+            "recovery_followup_tool": "desktop.type_text",
+            "followup_input": {
+                "text_source": "original_request",
+                "character_count": 5,
+            },
+            "recovery_followup_input": {
+                "text_source": "original_request",
+                "character_count": 5,
+            },
+            "recommended_tools": ["screen.capture", "desktop.click", "desktop.type_text"],
+            "retry_prompt": (
+                "根据截图定位「Search」输入框，先用 desktop.click 点击坐标，"
+                "再用 desktop.type_text 输入原请求文本"
+            ),
+            "recovery_retry_prompt": (
+                "根据截图定位「Search」输入框，先用 desktop.click 点击坐标，"
+                "再用 desktop.type_text 输入原请求文本"
+            ),
+            "target": "Search",
+            "role_filter": "text",
+            "character_count": 5,
+        }
+    ]
+    assert result["data"]["recovery_actions"] == result["recovery_actions"]
+    assert "hello" not in str(result["recovery_actions"])
 
 
 def test_desktop_type_into_ui_element_stops_when_expected_app_mismatches(

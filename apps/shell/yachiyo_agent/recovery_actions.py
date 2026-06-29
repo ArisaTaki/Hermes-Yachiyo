@@ -26,6 +26,8 @@ RECOVERY_ACTION_TASK_METADATA_KEYS = (
     "required_retry_fields",
     "recommended_tools",
     "recovery_retry_prompt",
+    "recovery_followup_tool",
+    "recovery_followup_input",
     "recovery_retry_source_event_type",
     "recovery_retry_source_tool_call_id",
     "source_task_id",
@@ -46,6 +48,7 @@ def recovery_action_metadata_snapshot(
     recovery_input = metadata.get("recovery_input")
     retry_input = metadata.get("recovery_retry_input")
     retry_input_schema = metadata.get("recovery_retry_input_schema")
+    followup_input = metadata.get("recovery_followup_input")
     payload = {
         "daily_desktop_intent": bool(metadata.get("daily_desktop_intent", True)),
         "desktop_permission_recovery": True,
@@ -55,6 +58,9 @@ def recovery_action_metadata_snapshot(
         "recovery_retry_input": dict(retry_input) if isinstance(retry_input, Mapping) else {},
         "recovery_retry_input_schema": (
             dict(retry_input_schema) if isinstance(retry_input_schema, Mapping) else {}
+        ),
+        "recovery_followup_input": (
+            dict(followup_input) if isinstance(followup_input, Mapping) else {}
         ),
         "required_retry_fields": _metadata_text_list(metadata, "required_retry_fields"),
         "recommended_tools": _metadata_text_list(metadata, "recommended_tools"),
@@ -69,6 +75,7 @@ def recovery_action_metadata_snapshot(
         "recovery_retry_artifact_tool",
         "recovery_retry_artifact_kind",
         "recovery_retry_prompt",
+        "recovery_followup_tool",
         "recovery_retry_source_event_type",
         "recovery_retry_source_tool_call_id",
         "source_task_id",
@@ -117,6 +124,12 @@ def recovery_retry_context_payload(
     recommended_tools = payload.get("recommended_tools")
     if isinstance(recommended_tools, list) and recommended_tools:
         context_payload["recommended_tools"] = list(recommended_tools)
+    followup_tool = payload.get("recovery_followup_tool")
+    if followup_tool:
+        context_payload["followup_tool"] = str(followup_tool)
+    followup_input = payload.get("recovery_followup_input")
+    if isinstance(followup_input, dict) and followup_input:
+        context_payload["followup_input"] = dict(followup_input)
     for source_key, context_key in (
         ("desktop_permission_retry", "desktop_permission_retry"),
         ("recovery_action_kind", "recovery_action_kind"),

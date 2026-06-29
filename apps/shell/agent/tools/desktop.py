@@ -1211,11 +1211,17 @@ def type_into_ui_element(
         }
     matches = _matching_ui_elements(elements, clean_target, clean_filter)
     if not matches:
+        recovery_actions = _ui_element_type_not_found_recovery_actions(
+            clean_target,
+            clean_filter,
+            len(clean_text),
+        )
         return {
             "ok": False,
             "action": "desktop.type_into_ui_element",
             "summary": f"No foreground UI element matched for typing: {clean_target}",
             "error": "ui_element_not_found",
+            "fallback": "screen.capture",
             "data": {
                 "target": clean_target,
                 "role_filter": clean_filter,
@@ -1223,10 +1229,16 @@ def type_into_ui_element(
                 "app_name": str(observed_data.get("app_name") or ""),
                 "title": str(observed_data.get("title") or ""),
                 "observed_count": len(elements),
+                "inspection_level": str(observed_data.get("inspection_level") or ""),
+                "visibility_status": str(observed_data.get("visibility_status") or ""),
+                "visibility_limited": observed_data.get("visibility_limited") is True,
                 "candidates": _candidate_ui_element_previews(elements),
+                "recommended_tools": ["screen.capture", "desktop.click", "desktop.type_text"],
+                "recovery_actions": recovery_actions,
             },
             "permission_error": False,
             "fallback_used": False,
+            "recovery_actions": recovery_actions,
             "fallback_result": {"observe": observed},
         }
 
@@ -6739,6 +6751,79 @@ def _ui_element_not_found_recovery_actions(
             "target": clean_target,
             "role_filter": clean_filter,
             "click_count": click_count,
+        }
+    ]
+
+
+def _ui_element_type_not_found_recovery_actions(
+    target: str,
+    role_filter: str,
+    character_count: int,
+) -> list[dict[str, Any]]:
+    clean_target = str(target or "").strip()
+    clean_filter = str(role_filter or "").strip()
+    retry_input: dict[str, Any] = {"click_count": 1}
+    retry_input_schema: dict[str, Any] = {
+        "type": "object",
+        "required": ["x", "y"],
+        "properties": {
+            "x": {"type": "number", "minimum": 0},
+            "y": {"type": "number", "minimum": 0},
+            "click_count": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 3,
+                "default": 1,
+            },
+        },
+    }
+    prompt = (
+        f"根据截图定位「{clean_target}」输入框，先用 desktop.click 点击坐标，"
+        "再用 desktop.type_text 输入原请求文本"
+        if clean_target
+        else "根据截图定位输入框，先用 desktop.click 点击坐标，再用 desktop.type_text 输入原请求文本"
+    )
+    return [
+        {
+            "label": "截取屏幕重新定位输入框",
+            "tool": "screen.capture",
+            "input": {
+                "reason": (
+                    f"desktop.type_into_ui_element could not find {clean_target}; "
+                    "capture screen before coordinate focus and text entry"
+                )
+            },
+            "permission_target": "screen_observation",
+            "risk_level": "low",
+            "retry_tool": "desktop.click",
+            "recovery_retry_tool": "desktop.click",
+            "retry_input": retry_input,
+            "recovery_retry_input": retry_input,
+            "retry_input_schema": retry_input_schema,
+            "recovery_retry_input_schema": retry_input_schema,
+            "retry_input_source": "screen_capture_artifact",
+            "recovery_retry_input_source": "screen_capture_artifact",
+            "retry_artifact_tool": "screen.capture",
+            "recovery_retry_artifact_tool": "screen.capture",
+            "retry_artifact_kind": "image",
+            "recovery_retry_artifact_kind": "image",
+            "required_retry_fields": ["x", "y"],
+            "followup_tool": "desktop.type_text",
+            "recovery_followup_tool": "desktop.type_text",
+            "followup_input": {
+                "text_source": "original_request",
+                "character_count": character_count,
+            },
+            "recovery_followup_input": {
+                "text_source": "original_request",
+                "character_count": character_count,
+            },
+            "recommended_tools": ["screen.capture", "desktop.click", "desktop.type_text"],
+            "retry_prompt": prompt,
+            "recovery_retry_prompt": prompt,
+            "target": clean_target,
+            "role_filter": clean_filter,
+            "character_count": character_count,
         }
     ]
 

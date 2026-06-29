@@ -855,6 +855,11 @@ def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> Non
         required_retry_fields=["x", "y"],
         recommended_tools=["screen.capture", "desktop.click"],
         recovery_retry_prompt="截图当前屏幕",
+        recovery_followup_tool="desktop.type_text",
+        recovery_followup_input={
+            "text_source": "original_request",
+            "character_count": 5,
+        },
         recovery_retry_source_event_type="agent.desktop.permission_recovery",
         recovery_retry_source_tool_call_id="tool-call-1",
         source_task_id="task-source-screen",
@@ -881,6 +886,8 @@ def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> Non
         "required_retry_fields",
         "recommended_tools",
         "recovery_retry_prompt",
+        "recovery_followup_tool",
+        "recovery_followup_input",
         "recovery_retry_source_event_type",
         "recovery_retry_source_tool_call_id",
         "source_task_id",
@@ -890,6 +897,11 @@ def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> Non
     assert payload["desktop_permission_recovery"] is True
     assert payload["recovery_tool"] == "system.settings_open"
     assert payload["recovery_retry_tool"] == "screen.capture"
+    assert payload["recovery_followup_tool"] == "desktop.type_text"
+    assert payload["recovery_followup_input"] == {
+        "text_source": "original_request",
+        "character_count": 5,
+    }
     assert payload["required_retry_fields"] == ["x", "y"]
     with pytest.raises(ValidationError):
         DesktopRecoveryActionMetadataSnapshot(
