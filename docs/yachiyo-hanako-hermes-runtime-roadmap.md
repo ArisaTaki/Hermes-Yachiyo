@@ -167,20 +167,32 @@ event-page replay, approval resolution, completed tool call, and artifact
 metadata. Packaged-app and real NativeRunEngine approval resume remain later
 smoke requirements.
 
-Current runtime-level approval resume evidence is reproducible with
-`python scripts/smoke_runtime_approval_resume.py`; this drives the real
-`RuntimeApprovalExecutionService` and `ApprovalResumeCoordinator` with fake
-callbacks to prove claim, running projection, approved tool execution,
-remaining-tool follow-up, continuation projection, duplicate-claim suppression,
-next-approval projection, and fatal tool failure projection. It does not
-replace real provider or packaged-app smoke evidence.
+Current runtime-level approval resume evidence is reproducible with:
 
-Current route-level approval boundary evidence is reproducible with
-`python scripts/smoke_yachiyo_route_approval.py`; this calls the Chat task and
-Agent Studio run approval route handlers with fake services to prove route
-metadata, `approval_id`, event-page bounds, public task/run snapshots, and
-artifact readback shape are preserved at the shared entrypoints. It does not
-replace packaged renderer, native provider, or full `NativeRunEngine` evidence.
+```bash
+python scripts/smoke_runtime_approval_resume.py \
+  --report-json tmp/runtime-approval-resume.json
+```
+
+This drives the real `RuntimeApprovalExecutionService` and
+`ApprovalResumeCoordinator` with fake callbacks to prove claim, running
+projection, approved tool execution, remaining-tool follow-up, continuation
+projection, duplicate-claim suppression, next-approval projection, and fatal
+tool failure projection. It does not replace real provider or packaged-app smoke
+evidence.
+
+Current route-level approval boundary evidence is reproducible with:
+
+```bash
+python scripts/smoke_yachiyo_route_approval.py \
+  --report-json tmp/yachiyo-route-approval.json
+```
+
+This calls the Chat task and Agent Studio run approval route handlers with fake
+services to prove route metadata, `approval_id`, event-page bounds, public
+task/run snapshots, and artifact readback shape are preserved at the shared
+entrypoints. It does not replace packaged renderer, native provider, or full
+`NativeRunEngine` evidence.
 
 ## Phase 0 - 基线审计与保护网
 

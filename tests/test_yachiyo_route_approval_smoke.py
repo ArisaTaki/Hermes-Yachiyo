@@ -49,3 +49,18 @@ def test_yachiyo_route_approval_smoke_cli_outputs_json(capsys):
     assert output["mode"] == "yachiyo_route_approval_smoke"
     assert output["chat"]["checks"]["approve_preserves_route_approval_id"] is True
     assert output["studio"]["checks"]["artifact_route_shape"] is True
+
+
+def test_yachiyo_route_approval_smoke_cli_writes_report_json(tmp_path, capsys):
+    report_path = tmp_path / "yachiyo-route-approval.json"
+
+    assert smoke.main(["--report-json", str(report_path)]) == 0
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert output == report
+    assert report["ok"] is True
+    assert report["mode"] == "yachiyo_route_approval_smoke"
+    assert "Yachiyo route approval smoke report:" in captured.err
+    assert str(report_path) in captured.err

@@ -66,3 +66,18 @@ def test_runtime_approval_resume_smoke_cli_outputs_json(capsys):
     assert output["ok"] is True
     assert output["mode"] == "runtime_approval_resume_smoke"
     assert output["completed"]["result"]["status"] == "completed"
+
+
+def test_runtime_approval_resume_smoke_cli_writes_report_json(tmp_path, capsys):
+    report_path = tmp_path / "runtime-approval-resume.json"
+
+    assert smoke.main(["--report-json", str(report_path)]) == 0
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert output == report
+    assert report["ok"] is True
+    assert report["mode"] == "runtime_approval_resume_smoke"
+    assert "runtime approval resume smoke report:" in captured.err
+    assert str(report_path) in captured.err
