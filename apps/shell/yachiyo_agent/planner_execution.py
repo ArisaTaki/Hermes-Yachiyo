@@ -299,8 +299,11 @@ def _first_allowed(candidates: Iterable[str], allowed: set[str]) -> str:
 def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
     requests: list[dict[str, Any]] = []
     for step in decision.plan.tool_plan.steps:
+        step_id = str(getattr(step, "step_id", "") or "").strip()
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if not tool_name or tool_name not in allowed:
+            continue
+        if step_id == "write-desktop-content-artifact":
             continue
         input_preview = getattr(step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
@@ -308,13 +311,14 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
         if expanded:
             requests.extend(expanded)
             continue
-        requests.append(
-            _request(
-                tool_name,
-                _desktop_request_payload(tool_name, payload),
-                planning_reason=_desktop_step_planning_reason(step, tool_name),
-            )
+        request = _request(
+            tool_name,
+            _desktop_request_payload(tool_name, payload),
+            planning_reason=_desktop_step_planning_reason(step, tool_name),
         )
+        if step_id == "read-desktop-content":
+            request["continue_to_model"] = True
+        requests.append(request)
     if _weak_desktop_discovery_plan(decision, requests):
         return []
     return requests
@@ -668,19 +672,22 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
             continue
         if step_id == "list-app-windows" and "focus-app-window" in step_ids:
             continue
+        if step_id == "write-desktop-content-artifact":
+            continue
         input_preview = getattr(step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
         expanded = _expanded_desktop_step_requests(step, tool_name, payload, allowed)
         if expanded:
             requests.extend(expanded)
             continue
-        requests.append(
-            _request(
-                tool_name,
-                _desktop_request_payload(tool_name, payload),
-                planning_reason=_desktop_step_planning_reason(step, tool_name),
-            )
+        request = _request(
+            tool_name,
+            _desktop_request_payload(tool_name, payload),
+            planning_reason=_desktop_step_planning_reason(step, tool_name),
         )
+        if step_id == "read-desktop-content":
+            request["continue_to_model"] = True
+        requests.append(request)
     if _weak_desktop_discovery_plan(decision, requests):
         return []
     return requests
@@ -757,11 +764,16 @@ def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[st
         reason = str(payload.get("reason") or "").strip()
         return {"reason": reason} if reason else {}
     if tool_name == "desktop.ui_elements":
-        return {
+        request_payload = {
             key: payload[key]
-            for key in ("role_filter", "limit")
+            for key in ("app_name", "role_filter", "limit")
             if key in payload and payload[key] not in (None, "")
         }
+        if request_payload.get("app_name"):
+            request_payload["app_name"] = _canonical_app_name(
+                str(request_payload["app_name"] or "")
+            )
+        return request_payload
     if tool_name == "desktop.windows":
         app_name = str(payload.get("app_name") or "").strip()
         return {"app_name": _canonical_app_name(app_name)} if app_name else {}

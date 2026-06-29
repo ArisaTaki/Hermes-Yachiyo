@@ -4558,6 +4558,56 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     assert _step_by_id(decision, "submit-app-search").tool_name == "desktop.search_submit"
     assert _step_by_id(decision, "submit-app-search").approval_required is False
 
+    desktop_content_report = RuntimePlanner().decision(
+        "打开 Obsidian，搜索 yachiyo runtime，然后把当前内容总结成报告",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "artifact.write",
+        ],
+    )
+
+    assert desktop_content_report.selected_intent.kind == "desktop_operation"
+    assert desktop_content_report.selected_intent.inputs["app_name_hint"] == "Obsidian"
+    assert desktop_content_report.selected_intent.inputs["app_search_hint"] == {
+        "query": "yachiyo runtime",
+        "target": "搜索",
+    }
+    assert desktop_content_report.selected_intent.inputs["desktop_content_artifact_hint"] == {
+        "path": "desktop-content-report.md",
+        "body_source": "desktop_content",
+    }
+    assert desktop_content_report.plan.tool_plan.artifacts_expected == [
+        "desktop-content-report.md"
+    ]
+    assert [step.step_id for step in desktop_content_report.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "focus-opened-app",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "read-desktop-content",
+        "write-desktop-content-artifact",
+    ]
+    assert _step_by_id(desktop_content_report, "type-app-search-query").input_preview == {
+        "text": "yachiyo runtime"
+    }
+    assert _step_by_id(desktop_content_report, "read-desktop-content").input_preview == {
+        "role_filter": "text",
+        "limit": 120,
+        "app_name": "Obsidian",
+    }
+    assert _step_by_id(desktop_content_report, "write-desktop-content-artifact").input_preview == {
+        "path": "desktop-content-report.md",
+        "body_source": "desktop_content",
+    }
+
     called_app_search = RuntimePlanner().decision(
         "帮我打开一个叫 AtlasLab 的应用并搜索 revenue",
         allowed_tools=[
@@ -8874,9 +8924,14 @@ def test_runtime_planner_does_not_route_meeting_note_summary_to_schedule() -> No
     assert decision.selected_intent.inputs["app_name_hint"] == "Obsidian"
     assert decision.selected_intent.inputs["operation_hint"] == "open"
     assert decision.selected_intent.inputs["app_search_hint"] == {
-        "query": "到今天的会议笔记并总结成报告",
+        "query": "今天的会议笔记",
         "target": "搜索",
     }
+    assert decision.selected_intent.inputs["desktop_content_artifact_hint"] == {
+        "path": "desktop-content-report.md",
+        "body_source": "desktop_content",
+    }
+    assert decision.plan.tool_plan.artifacts_expected == ["desktop-content-report.md"]
 
 
 def test_runtime_planner_routes_iso_calendar_event_to_schedule_capability() -> None:
@@ -10700,6 +10755,69 @@ def test_planner_desktop_tool_requests_maps_arbitrary_app_typing_and_submit() ->
             "input": {"action": "confirm"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> None:
+    requests = planner_desktop_tool_requests(
+        "打开 Obsidian，搜索 yachiyo runtime，然后把当前内容总结成报告",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+            "artifact.write",
+        ],
+    )
+
+    assert requests == [
+        _app_discovery_request("Obsidian"),
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Obsidian"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Obsidian"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo runtime"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"app_name": "Obsidian", "role_filter": "text", "limit": 120},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
         },
     ]
 

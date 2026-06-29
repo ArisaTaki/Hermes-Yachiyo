@@ -236,6 +236,12 @@ class TaskIntentRouter:
             return _empty_intent("desktop_operation", text)
         if _explicit_system_settings_request(text):
             return _empty_intent("desktop_operation", text)
+        if (
+            _report_file_context_hint(text)
+            and _desktop_content_artifact_requested(text)
+            and not _app_name_hint(text)
+        ):
+            return _empty_intent("desktop_operation", text)
         ui_inspection = ui_inspection_hint(text)
         screen_capture = screen_capture_hint(text)
         app_management = app_management_hint(text)
@@ -712,6 +718,9 @@ class TaskIntentRouter:
             inputs["foreground_paste_hint"] = {"action": "paste"}
         if foreground_submit_action:
             inputs["foreground_submit_action_hint"] = foreground_submit_action
+        desktop_content_artifact = _desktop_content_artifact_hint(text)
+        if desktop_content_artifact and app_search:
+            inputs["desktop_content_artifact_hint"] = desktop_content_artifact
         risk_level = (
             "medium"
             if operation_hint
@@ -747,9 +756,17 @@ class TaskIntentRouter:
             confidence=min(0.95, 0.42 + score),
             description="Discover and operate local desktop apps through runtime tools.",
             inputs=inputs,
-            expected_outputs=["desktop_state"],
+            expected_outputs=(
+                _expected_outputs(text, default=["report"])
+                if desktop_content_artifact and app_search
+                else ["desktop_state"]
+            ),
             required_capabilities=["desktop.app_discovery"],
-            preferred_capabilities=["desktop.app_control", "desktop.ui_operation"],
+            preferred_capabilities=[
+                "desktop.app_control",
+                "desktop.ui_operation",
+                *(["artifact.write"] if desktop_content_artifact and app_search else []),
+            ],
             risk_level=risk_level,
         )
 
@@ -2992,6 +3009,16 @@ class RuntimePlanner:
                     )
                     search_terminal_step_id = "select-app-search-result"
                     app_search_needs_verify = True
+            desktop_content_artifact = _desktop_content_artifact_hint(intent.user_goal)
+            if desktop_content_artifact:
+                return _append_desktop_content_artifact_steps(
+                    intent,
+                    allowed,
+                    steps,
+                    depends_on=search_terminal_step_id,
+                    app_name=app_name,
+                    artifact_hint=desktop_content_artifact,
+                )
             if not app_search_needs_verify or not app_name:
                 return steps
             verify_tool = _first_allowed(
@@ -5876,6 +5903,68 @@ def _append_analysis_communication_steps(
     return [*steps, *communication_steps]
 
 
+def _append_desktop_content_artifact_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    depends_on: str,
+    app_name: str,
+    artifact_hint: Mapping[str, Any],
+) -> list[ToolPlanStepSnapshot]:
+    read_tool = _first_allowed(("desktop.ui_elements", "screen.capture"), allowed)
+    read_input = (
+        {"role_filter": "text", "limit": 120}
+        if read_tool == "desktop.ui_elements"
+        else {"reason": "Read the foreground app content after app search."}
+        if read_tool == "screen.capture"
+        else {}
+    )
+    if app_name and read_tool == "desktop.ui_elements":
+        read_input["app_name"] = app_name
+    artifact_path = str(artifact_hint.get("path") or "").strip() or _artifact_output_path(
+        intent.user_goal,
+        "desktop-content-report.md",
+    )
+    body_source = str(artifact_hint.get("body_source") or "").strip() or "desktop_content"
+    next_steps = [
+        *steps,
+        _step(
+            intent,
+            "read-desktop-content",
+            "Read desktop content",
+            "desktop.app_discovery",
+            read_tool,
+            input_preview=read_input,
+            depends_on=[depends_on],
+            reason=(
+                "Inspect the foreground app content after the app search before writing "
+                "the requested artifact."
+            ),
+        ),
+        _step(
+            intent,
+            "write-desktop-content-artifact",
+            "Write desktop content artifact",
+            "artifact.write",
+            _first_allowed(("artifact.write",), allowed),
+            input_preview={
+                "path": artifact_path,
+                "body_source": body_source,
+            },
+            depends_on=["read-desktop-content"],
+            reason="Produce a durable artifact from the inspected desktop app content.",
+        ),
+    ]
+    return _append_artifact_reveal_step(
+        intent,
+        allowed,
+        next_steps,
+        artifact_paths=[artifact_path],
+        depends_on="write-desktop-content-artifact",
+    )
+
+
 def _artifact_reveal_requested(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
@@ -6232,6 +6321,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and intent.inputs.get("app_name_hint")
     ):
         score += 0.28
+    if (
+        intent.kind == "desktop_operation"
+        and intent.inputs.get("app_search_hint")
+        and _desktop_content_artifact_requested(text)
+    ):
+        score += 0.32
     if intent.kind == "desktop_operation" and external_info_lookup:
         score -= 0.42
     if intent.kind == "desktop_operation" and intent.inputs.get("foreground_submit_action_hint"):
@@ -6383,6 +6478,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and not _looks_like_generic_media_control_request(text)
     ):
         score -= 0.32
+    if (
+        intent.kind == "web_research"
+        and _desktop_content_artifact_requested(text)
+        and _app_name_hint(text)
+    ):
+        score -= 0.28
     if (
         intent.kind == "web_research"
         and not str(intent.inputs.get("url_hint") or "").strip()
@@ -8737,6 +8838,37 @@ def _looks_like_explicit_group_run_request(value: str) -> bool:
     )
 
 
+def _desktop_content_artifact_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    return _contains_any(
+        value,
+        (
+            "报告",
+            "总结",
+            "摘要",
+            "整理",
+            "markdown",
+            "md",
+            "report",
+            "summary",
+            "summarize",
+            "write up",
+            "document",
+        ),
+    )
+
+
+def _desktop_content_artifact_hint(text: str) -> dict[str, str]:
+    if not _desktop_content_artifact_requested(text):
+        return {}
+    return {
+        "path": _artifact_output_path(text, "desktop-content-report.md"),
+        "body_source": "desktop_content",
+    }
+
+
 def _explicit_app_open_request(text: str) -> bool:
     return _contains_any(text, ("打开", "启动", "开启", "运行", "拉起", "open ", "launch ", "start "))
 
@@ -10773,13 +10905,13 @@ def _app_search_query_hint(text: str, app_name: str) -> str:
         if app
         else r"(?:当前\s*(?:app|应用|软件)|current\s+app|foreground\s+app)"
     )
-    chinese_search_verb = r"(?:搜索|查找|检索|找)(?!框|栏|输入|结果)"
+    chinese_search_verb = r"(?:搜索|查找|检索|找(?:到)?)(?!框|栏|输入|结果)"
     chinese_patterns = (
-        rf"(?:在|用|通过)\s*{app_pattern}\s*(?:里|中|上|内)?\s*{chinese_search_verb}\s*(?P<query>[^。！？!?，,]+)$",
+        rf"(?:在|用|通过)\s*{app_pattern}\s*(?:里|中|上|内)?\s*{chinese_search_verb}\s*(?P<query>[^。！？!?]+)$",
         rf"(?:打开|启动|切到|聚焦)\s*{app_pattern}\s*(?:[，,]\s*)?"
-        rf"(?:并|然后|再|接着|之后)?\s*{chinese_search_verb}\s*(?P<query>[^。！？!?，,]+)$",
+        rf"(?:并|然后|再|接着|之后)?\s*{chinese_search_verb}\s*(?P<query>[^。！？!?]+)$",
         rf"(?:打开|启动|切到|聚焦).{{0,30}}{app_pattern}.{{0,20}}"
-        rf"{chinese_search_verb}\s*(?P<query>[^。！？!?，,]+)$",
+        rf"{chinese_search_verb}\s*(?P<query>[^。！？!?]+)$",
     )
     for pattern in chinese_patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
@@ -10810,11 +10942,15 @@ def _clean_app_search_query(query: str) -> str:
     value = re.sub(r"[。.,，；;！!？?]+$", "", value).strip()
     value = re.split(
         r"\s*(?:并|然后|再|接着|之后|后|and\s+then|then)\s*"
-        r"(?:选择|选中|点击|点按|打开|按|choose|select|click|open|press)(?:\b)?",
+        r"(?:选择|选中|点击|点按|打开|按|"
+        r"(?:把|将)?(?:当前|前台|这份|这个|这些|搜索结果|结果|内容|文本)?"
+        r"(?:内容|结果|文本)?\s*(?:总结|摘要|整理|生成|输出|写成|写|做成)|"
+        r"choose|select|click|open|press|summari[sz]e|write|generate|output)(?:\b)?",
         value,
         maxsplit=1,
         flags=re.IGNORECASE,
     )[0].strip()
+    value = re.sub(r"[。.,，；;！!？?]+$", "", value).strip()
     value = re.sub(r"\s+(?:please|pls)$", "", value, flags=re.IGNORECASE).strip()
     return value
 
