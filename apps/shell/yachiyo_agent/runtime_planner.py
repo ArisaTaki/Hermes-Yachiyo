@@ -993,6 +993,16 @@ class TaskIntentRouter:
         browser_interaction = _browser_type_text_hint(text) or _browser_click_hint(text)
         app_scoped_safe_operation = _app_scoped_safe_operation_hint(text)
         app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
+        app_name_hint = _app_name_hint(text)
+        app_search_hint = _app_search_hint(text, app_name_hint)
+        app_search_app_name = str(app_search_hint.get("app_name") or app_name_hint).strip()
+        if (
+            app_search_hint
+            and app_search_app_name
+            and not web_search
+            and not _is_browser_or_search_app_name(app_search_app_name)
+        ):
+            return _empty_intent("web_research", text)
         if app_scoped_safe_operation and not _looks_like_external_info_lookup(text) and not browser_interaction:
             return _empty_intent("web_research", text)
         if app_scoped_desktop_operation and not web_search and not browser_interaction:
@@ -10578,7 +10588,7 @@ def _clean_app_name_hint(value: str) -> str:
         app = english_called_app_match.group("app")
     app = re.sub(
         r"^(?:一个|一款|这个|那个)?"
-        r"(?:我(?:没|没有)提过的|没见过的|未知(?:的)?|陌生的|新(?:的)?)\s*"
+        r"(?:(?:我)?(?:没|没有)提过的|从未提过的|没见过的|未知(?:的)?|陌生的|新(?:的)?)\s*"
         r"(?:新\s*)?(?:应用(?:程序)?|软件)?"
         r"(?:\s*(?:叫|名叫|名称是|名字是))?\s*",
         "",
@@ -10603,7 +10613,7 @@ def _clean_app_name_hint(value: str) -> str:
         flags=re.IGNORECASE,
     )[0].strip(" .，,。")
     app = re.sub(
-        r"^(?:一个|一款|这个|那个)?(?:我(?:没|没有)提过的|新的|未知的)?"
+        r"^(?:一个|一款|这个|那个)?(?:(?:我)?(?:没|没有)提过的|从未提过的|新的|未知的)?"
         r"(?:应用(?:程序)?|软件|\b(?:app|application)\b)"
         r"(?:\s*(?:叫|名叫|名称是|名字是|called|named))?\s*",
         "",
@@ -13857,7 +13867,7 @@ def _app_search_query_hint(text: str, app_name: str) -> str:
     value = _clean_prompt(text)
     app = str(app_name or "").strip()
     app_pattern = (
-        re.escape(app)
+        _app_search_scope_pattern(app)
         if app
         else r"(?:当前\s*(?:app|应用|软件)|current\s+app|foreground\s+app)"
     )
@@ -13894,6 +13904,20 @@ def _app_search_query_hint(text: str, app_name: str) -> str:
             if query:
                 return query
     return ""
+
+
+def _app_search_scope_pattern(app_name: str) -> str:
+    app = str(app_name or "").strip()
+    if not app:
+        return ""
+    return (
+        r"(?:(?:一个|一款|这个|那个)?"
+        r"(?:(?:我)?(?:没|没有)提过的|从未提过的|没见过的|未知(?:的)?|陌生的|新(?:的)?)?\s*"
+        r"(?:新\s*)?(?:应用(?:程序)?|软件)?\s*"
+        r"|(?:(?:an?|the)\s+)?(?:(?:new|unknown|unmentioned|unfamiliar)\s+)*"
+        r"(?:(?:app|application|software)\s+)?(?:(?:called|named)\s+)?)?"
+        + re.escape(app)
+    )
 
 
 def _named_app_search_query_hint(text: str, app_name: str) -> str:

@@ -5182,6 +5182,12 @@ def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
             {"role_filter": "button", "limit": 80},
         ),
         (
+            "在没提过的 SuperData Studio 里读取有哪些按钮",
+            "SuperData Studio",
+            {"role_filter": "button", "limit": 80, "app_name": "SuperData Studio"},
+            {"role_filter": "button", "limit": 80},
+        ),
+        (
             "launch a new app named Orbit Notes and read its UI",
             "Orbit Notes",
             {"role_filter": "", "limit": 80},
@@ -6509,6 +6515,40 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "text": "BUG-123"
     }
     assert _step_by_id(app_search_screenshot, "capture-screen").tool_name == "screen.capture"
+
+    descriptor_app_search_screenshot = RuntimePlanner().decision(
+        "在一个没提过的 PixelForge 里搜索今天的订单然后截图",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "screen.capture",
+        ],
+    )
+    assert descriptor_app_search_screenshot.selected_intent.kind == "desktop_operation"
+    assert descriptor_app_search_screenshot.selected_intent.inputs["app_name_hint"] == "PixelForge"
+    assert descriptor_app_search_screenshot.selected_intent.inputs["app_search_hint"] == {
+        "query": "今天的订单",
+        "target": "搜索",
+    }
+    assert [step.step_id for step in descriptor_app_search_screenshot.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "capture-screen",
+    ]
+    assert _step_by_id(
+        descriptor_app_search_screenshot,
+        "discover-desktop-state",
+    ).input_preview == {"query": "PixelForge", "limit": 20}
+    assert _step_by_id(
+        descriptor_app_search_screenshot,
+        "type-app-search-query",
+    ).input_preview == {"text": "今天的订单"}
 
     called_app_search = RuntimePlanner().decision(
         "帮我打开一个叫 AtlasLab 的应用并搜索 revenue",
@@ -8931,6 +8971,9 @@ def test_runtime_planner_cleans_polite_app_name_suffixes() -> None:
         ("帮我打开 Pixelmator", "Pixelmator"),
         ("打开一个我没提过的应用叫 Raycast", "Raycast"),
         ("打开一个我没提过的新应用 PixelForge", "PixelForge"),
+        ("打开一个没提过的新应用 PixelForge", "PixelForge"),
+        ("打开一个没有提过的应用 Linear", "Linear"),
+        ("打开一个从未提过的应用叫 Raycast", "Raycast"),
         ("打开未知应用 Linear", "Linear"),
         ("打开一个叫 Linear 的应用", "Linear"),
         ("打开文件夹", "Finder"),
