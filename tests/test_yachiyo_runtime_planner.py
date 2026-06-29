@@ -6808,6 +6808,39 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
             "continue_to_model": True,
         },
     ]
+    assert planner_direct_tool_requests(
+        "在 Notion 新建一个页面，标题是本周业绩总结，并把分析结果写进去",
+        [
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        _app_discovery_request("Notion"),
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Notion", "action": "new_document"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "本周业绩总结"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        },
+    ]
 
     topic_note = RuntimePlanner().decision(
         "打开 Obsidian，创建一篇关于本周业绩的笔记",

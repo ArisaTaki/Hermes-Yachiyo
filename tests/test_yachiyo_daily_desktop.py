@@ -187,6 +187,16 @@ def test_planner_first_daily_desktop_entrypoint_requests_app_scoped_creation_wit
     ]
 
     assert planner_first_daily_desktop_entrypoint_requests(
+        "在 Notion 新建一个页面，标题是本周业绩总结，并把分析结果写进去",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )[2]["input"] == {"text": "本周业绩总结"}
+
+    assert planner_first_daily_desktop_entrypoint_requests(
         "打开 Obsidian，创建一篇关于本周业绩的笔记",
         allowed_tools=[
             "desktop.list_apps",

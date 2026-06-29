@@ -95,6 +95,21 @@ _FINDER_SAFE_SHORTCUT_PHRASES: tuple[tuple[str, str], ...] = (
     ("copy", "copyselectedfile"),
 )
 
+_NON_CONTENT_TYPE_TEXTS = {
+    "进去",
+    "进来",
+    "里面",
+    "里",
+    "这里",
+    "那里",
+    "这儿",
+    "那儿",
+    "上去",
+    "下去",
+    "进去吧",
+    "进去。",
+}
+
 
 def app_control_mode(text: str) -> str:
     return (
@@ -218,9 +233,16 @@ def safe_type_text_hint(text: str) -> str:
             typed_text,
             flags=re.IGNORECASE,
         ).strip()
+        if _looks_like_non_content_type_text(typed_text):
+            continue
         if typed_text:
             return typed_text
     return ""
+
+
+def _looks_like_non_content_type_text(text: str) -> bool:
+    value = clean(text)
+    return value in _NON_CONTENT_TYPE_TEXTS
 
 
 def _looks_like_current_input_target(raw_target: str, clean_target_value: str) -> bool:

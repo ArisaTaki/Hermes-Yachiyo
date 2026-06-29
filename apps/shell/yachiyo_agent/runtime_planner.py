@@ -2152,10 +2152,15 @@ class RuntimePlanner:
         )
         if str((safe_shortcut or {}).get("action") or "").strip() == "new_message":
             foreground_compose_text = ""
+        safe_shortcut_action = str((safe_shortcut or {}).get("action") or "").strip()
         safe_type_text = (
             ""
             if type_target or str((safe_shortcut or {}).get("action") or "").strip() == "new_message"
-            else (safe_type_text_hint(intent.user_goal) or foreground_compose_text)
+            else (
+                foreground_compose_text
+                if safe_shortcut_action in {"new_note", "new_document"} and foreground_compose_text
+                else safe_type_text_hint(intent.user_goal) or foreground_compose_text
+            )
         )
         foreground_submit_action = str(
             intent.inputs.get("foreground_submit_action_hint")
@@ -2187,7 +2192,6 @@ class RuntimePlanner:
             followup_return_hotkey = _explicit_return_key_followup_hint(intent.user_goal)
         if followup_return_hotkey:
             submit_action = ""
-        safe_shortcut_action = str((safe_shortcut or {}).get("action") or "").strip()
         create_first_safe_shortcut = (
             safe_shortcut_action in {"new_note", "new_document"}
             and bool(safe_type_text)
