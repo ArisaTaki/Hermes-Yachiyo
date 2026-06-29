@@ -36,6 +36,7 @@ def runtime_tool_catalog_snapshot(
     registered_tools: Iterable[str] | None = None,
     platform_name: str | None = None,
     missing_permissions: Mapping[str, Iterable[str]] | None = None,
+    blocking_conditions: Mapping[str, Iterable[str]] | None = None,
     plugin_states: Iterable[Any] | None = None,
 ) -> ToolCatalogSnapshot:
     """Build the public Studio tool catalog from runtime descriptors."""
@@ -45,6 +46,7 @@ def runtime_tool_catalog_snapshot(
         registered_tools=clean_registered,
         platform_name=platform_name,
         missing_permissions=missing_permissions,
+        blocking_conditions=blocking_conditions,
     )
     capability_payloads = {
         capability_id: snapshot.model_dump(mode="json")
@@ -136,6 +138,11 @@ def _catalog_item_from_descriptor(
             capabilities=capabilities,
             missing_permissions=missing_permissions,
         ),
+        blocking_conditions=_blocking_conditions_for_tool(
+            tool_name,
+            capability_id=capability_id,
+            capabilities=capabilities,
+        ),
         fallback_notes=_fallback_notes_for_tool(tool_name),
         diagnostic_route=_diagnostic_route_for_tool(capability_id),
         source=_source_for_tool(tool_name),
@@ -173,6 +180,7 @@ def _catalog_item_from_payload(payload: Mapping[str, Any]) -> ToolCatalogItemSna
         input_schema=dict(input_schema),
         model_tool_schema=dict(model_tool_schema),
         missing_permissions=_string_list(payload.get("missing_permissions")),
+        blocking_conditions=_string_list(payload.get("blocking_conditions")),
         fallback_notes=_string_list(payload.get("fallback_notes")),
         diagnostic_route=_optional_string(payload.get("diagnostic_route")),
         source=str(payload.get("source") or "runtime"),
@@ -184,11 +192,13 @@ def _capability_snapshots(
     registered_tools: Iterable[str],
     platform_name: str | None,
     missing_permissions: Mapping[str, Iterable[str]] | None,
+    blocking_conditions: Mapping[str, Iterable[str]] | None,
 ) -> dict[str, DesktopExecutionCapabilitySnapshot]:
     payload = desktop_execution_capability_snapshots(
         registered_tools=registered_tools,
         platform_name=platform_name,
         missing_permissions=missing_permissions,
+        blocking_conditions=blocking_conditions,
     )
     return {
         capability_id: DesktopExecutionCapabilitySnapshot.model_validate(snapshot)
@@ -268,6 +278,20 @@ def _missing_permissions_for_tool(
         capability_id=capability_id or "",
         missing_permissions=missing_permissions,
     )
+
+
+def _blocking_conditions_for_tool(
+    tool_name: str,
+    *,
+    capability_id: str | None,
+    capabilities: Mapping[str, Mapping[str, Any]],
+) -> list[str]:
+    if not _is_desktop_or_browser_tool(tool_name) or not capability_id:
+        return []
+    capability = capabilities.get(capability_id)
+    if not isinstance(capability, Mapping):
+        return []
+    return _string_list(capability.get("blocking_conditions"))
 
 
 def _fallback_notes_for_tool(tool_name: str) -> list[str]:

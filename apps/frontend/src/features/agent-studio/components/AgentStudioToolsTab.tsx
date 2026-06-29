@@ -338,6 +338,10 @@ function ToolDetail({
   const inputSchema = toolInputSchema(tool);
   const schemaProperties = schemaPropertyRows(inputSchema);
   const missingPermissions = tool.missing_permissions || [];
+  const blockingConditions = uniqueStrings([
+    ...(tool.blocking_conditions || []),
+    ...(capability?.blocking_conditions || []),
+  ]);
   const fallbackNotes = tool.fallback_notes || [];
   const diagnosticRoute = tool.diagnostic_route || capability?.diagnostic_route || '';
   const modelFunctionName = modelToolFunctionName(tool) || tool.function_name;
@@ -391,6 +395,27 @@ function ToolDetail({
           ))}
           {!missingPermissions.length ? (
             <span className="studio-tool-permission">permissions ready</span>
+          ) : null}
+        </div>
+      </div>
+
+      <div className="studio-tool-inspector-section" data-testid="studio-tool-runtime-blockers">
+        <div className="studio-tool-inspector-heading">
+          <h3>Runtime Conditions</h3>
+          <span>{blockingConditions.length ? 'Blocked' : 'Ready'}</span>
+        </div>
+        <div className="studio-tool-pill-row">
+          {blockingConditions.map((condition) => (
+            <span
+              className="studio-tool-permission missing"
+              data-runtime-blocker={condition}
+              key={condition}
+            >
+              {runtimeBlockingLabel(condition)}
+            </span>
+          ))}
+          {!blockingConditions.length ? (
+            <span className="studio-tool-permission">runtime conditions ready</span>
           ) : null}
         </div>
       </div>
@@ -469,6 +494,11 @@ function capabilityLabel(value: string): string {
   return value.replace(/_/g, ' ');
 }
 
+function runtimeBlockingLabel(value: string): string {
+  if (value === 'desktop_session_locked') return 'desktop session locked';
+  return value.replace(/_/g, ' ');
+}
+
 type SchemaPropertyRow = {
   name: string;
   type: string;
@@ -534,4 +564,8 @@ function objectRecord(value: unknown): Record<string, unknown> {
 function stringArray(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.map((item) => String(item || '').trim()).filter(Boolean);
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter(Boolean)));
 }

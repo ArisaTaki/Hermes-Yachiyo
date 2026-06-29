@@ -1411,6 +1411,7 @@ def test_tool_catalog_snapshot_json_shape_is_stable() -> None:
                 input_schema={"type": "object"},
                 model_tool_schema={"type": "function"},
                 missing_permissions=["music_app"],
+                blocking_conditions=["desktop_session_locked"],
                 fallback_notes=["Open Music when direct playback is unavailable."],
                 diagnostic_route="/ui/native-agent/diagnostics/cache",
             )
@@ -1448,6 +1449,7 @@ def test_tool_catalog_snapshot_json_shape_is_stable() -> None:
     assert list(payload) == ["tools", "capabilities", "plugins", "source"]
     assert payload["tools"][0]["tool_name"] == "media.apple_music_play"
     assert payload["tools"][0]["input_schema"] == {"type": "object"}
+    assert payload["tools"][0]["blocking_conditions"] == ["desktop_session_locked"]
     assert payload["tools"][0]["fallback_notes"] == [
         "Open Music when direct playback is unavailable."
     ]
@@ -1481,6 +1483,9 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
         missing_permissions={
             "media_control": ["music_app"],
             "browser_control": ["chrome_cdp"],
+        },
+        blocking_conditions={
+            "foreground_input": ["desktop_session_locked"],
         },
     )
     tools = {tool.tool_name: tool for tool in catalog.tools}
@@ -1701,6 +1706,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert safe_type_text.capability_id == "foreground_input"
     assert safe_type_text.risk_level == "low"
     assert safe_type_text.input_schema["required"] == ["text"]
+    assert safe_type_text.blocking_conditions == ["desktop_session_locked"]
     assert any("explicitly provided by the user" in note for note in safe_type_text.fallback_notes)
     assert safe_click.capability_id == "foreground_input"
     assert safe_click.risk_level == "low"

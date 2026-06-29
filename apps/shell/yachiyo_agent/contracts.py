@@ -130,6 +130,7 @@ class ToolCatalogItemSnapshot(_PublicSnapshot):
     input_schema: dict[str, Any] = Field(default_factory=dict)
     model_tool_schema: dict[str, Any] = Field(default_factory=dict)
     missing_permissions: list[str] = Field(default_factory=list)
+    blocking_conditions: list[str] = Field(default_factory=list)
     fallback_notes: list[str] = Field(default_factory=list)
     diagnostic_route: str | None = None
     source: str = "runtime"

@@ -66,6 +66,7 @@ export type ToolCatalogItemSnapshot = {
   input_schema?: Record<string, unknown>;
   model_tool_schema?: Record<string, unknown>;
   missing_permissions?: string[];
+  blocking_conditions?: string[];
   fallback_notes?: string[];
   diagnostic_route?: string | null;
   source?: string;

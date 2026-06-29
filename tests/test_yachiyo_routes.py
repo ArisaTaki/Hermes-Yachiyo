@@ -7391,6 +7391,13 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
             "browser_control": ["chrome_cdp"],
         },
     )
+    monkeypatch.setattr(
+        legacy_ports,
+        "desktop_runtime_blocking_conditions_by_capability",
+        lambda: {
+            "foreground_input": ["desktop_session_locked"],
+        },
+    )
     runtime = _FakeAgentRuntime()
     request = _request(runtime)
 
@@ -7451,6 +7458,12 @@ async def test_yachiyo_studio_tool_catalog_route_surfaces_desktop_tool_metadata(
     assert tools["desktop.running_apps"]["capability_id"] == "active_window"
     assert tools["desktop.running_apps"]["risk_level"] == "low"
     assert any("foreground app list" in note for note in tools["desktop.running_apps"]["fallback_notes"])
+    assert tools["desktop.safe_type_text"]["blocking_conditions"] == [
+        "desktop_session_locked"
+    ]
+    assert catalog["capabilities"]["foreground_input"]["blocking_conditions"] == [
+        "desktop_session_locked"
+    ]
     assert tools["desktop.windows"]["capability_id"] == "active_window"
     assert tools["desktop.windows"]["risk_level"] == "low"
     assert any("window titles" in note for note in tools["desktop.windows"]["fallback_notes"])

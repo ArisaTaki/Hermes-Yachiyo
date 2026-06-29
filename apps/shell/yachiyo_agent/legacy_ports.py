@@ -24,7 +24,10 @@ from .daily_desktop import (
     planner_first_daily_desktop_entrypoint_requests,
 )
 from .app_name_hints import is_legacy_app_name_hint
-from .desktop_permissions import desktop_permission_missing_by_capability
+from .desktop_permissions import (
+    desktop_permission_missing_by_capability,
+    desktop_runtime_blocking_conditions_by_capability,
+)
 from .desktop_plan_hints import hotkey_hint
 from .desk import LocalAgentDeskStore
 from .entrypoint_tool_selection import planner_first_direct_tool_selection
@@ -648,6 +651,10 @@ class LegacyStudioPort:
             missing_permissions = desktop_permission_missing_by_capability()
         except Exception:
             missing_permissions = {"desktop_execution": ["permission_probe_failed"]}
+        try:
+            blocking_conditions = desktop_runtime_blocking_conditions_by_capability()
+        except Exception:
+            blocking_conditions = {}
         plugin_states = None
         list_plugins = getattr(self._runtime, "list_restricted_tool_plugins", None)
         if callable(list_plugins):
@@ -658,6 +665,7 @@ class LegacyStudioPort:
                 plugin_states = None
         return runtime_tool_catalog_snapshot(
             missing_permissions=missing_permissions,
+            blocking_conditions=blocking_conditions,
             plugin_states=plugin_states,
         ).model_dump(mode="json")
 
