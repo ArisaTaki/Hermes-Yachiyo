@@ -9331,6 +9331,43 @@ def test_runtime_planner_tracks_context_note_source_without_body() -> None:
     ]
 
 
+def test_runtime_planner_routes_foreground_note_context_to_visible_text() -> None:
+    allowed_tools = ["notes.create", "desktop.ui_elements", "browser.extract_text"]
+    decision = RuntimePlanner().decision(
+        "把当前窗口内容整理成笔记",
+        allowed_tools=allowed_tools,
+    )
+    page_decision = RuntimePlanner().decision(
+        "把当前网页内容整理成笔记",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.kind == "information_capture"
+    assert decision.selected_intent.inputs == {
+        "action": "create_note_from_context",
+        "source": "visible_text",
+    }
+    assert _step_by_id(decision, "read-note-context").tool_name == "desktop.ui_elements"
+    assert _step_by_id(decision, "create-note-from-context").input_preview == {
+        "body_source": "visible_text"
+    }
+    assert planner_tool_requests("把当前窗口内容整理成笔记", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_information_capture_context",
+            "continue_to_model": True,
+        }
+    ]
+    assert page_decision.selected_intent.inputs == {
+        "action": "create_note_from_context",
+        "source": "current_page_content",
+    }
+    assert _step_by_id(page_decision, "read-note-context").tool_name == "browser.extract_text"
+
+
 def test_runtime_planner_tracks_context_schedule_source_without_body() -> None:
     decision = RuntimePlanner().decision(
         "create a reminder from selected text",

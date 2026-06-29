@@ -151,13 +151,8 @@ def context_source_hint(text: str) -> str:
         (
             "current page content",
             "current page text",
-            "current window content",
-            "current window table",
             "current page table",
             "current page data",
-            "current window data",
-            "visible table",
-            "this table",
             "当前网页内容",
             "当前页面内容",
             "当前网页正文",
@@ -172,6 +167,22 @@ def context_source_hint(text: str) -> str:
             "当前页面的表格",
             "当前页里的表格",
             "当前页的表格",
+        ),
+    ):
+        return "current_page_content"
+    if _contains_any(
+        lowered,
+        (
+            "current screen",
+            "current window content",
+            "current window table",
+            "current window data",
+            "visible text",
+            "visible table",
+            "this table",
+            "当前屏幕",
+            "当前界面",
+            "屏幕内容",
             "当前窗口内容",
             "当前窗口表格",
             "当前窗口数据",
@@ -184,8 +195,6 @@ def context_source_hint(text: str) -> str:
             "这份表格",
         ),
     ):
-        return "current_page_content"
-    if _contains_any(lowered, ("current screen", "visible text", "当前屏幕", "当前界面", "屏幕内容")):
         return "visible_text"
     return ""
 
