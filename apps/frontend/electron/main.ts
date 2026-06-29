@@ -19,7 +19,7 @@ import type { IPty } from 'node-pty';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
-import http, { type IncomingMessage, type RequestOptions } from 'node:http';
+import http, { type IncomingMessage, type RequestOptions, type ServerResponse } from 'node:http';
 import https from 'node:https';
 import { createRequire } from 'node:module';
 import { createServer } from 'node:net';
@@ -34,6 +34,8 @@ const require = createRequire(import.meta.url);
 const FRONTEND_DEV_URL = process.env.OHA_YACHIYO_FRONTEND_DEV_URL || 'http://127.0.0.1:5174';
 const BRIDGE_URL_ENV = 'OHA_YACHIYO_BRIDGE_URL';
 const BRIDGE_TOKEN_ENV = 'OHA_YACHIYO_BRIDGE_TOKEN';
+const ELECTRON_NATIVE_URL_ENV = 'OHA_YACHIYO_ELECTRON_NATIVE_URL';
+const ELECTRON_NATIVE_TOKEN_ENV = 'OHA_YACHIYO_ELECTRON_NATIVE_TOKEN';
 const DESKTOP_SMOKE_MODE_ENV = 'OHA_YACHIYO_DESKTOP_SMOKE_MODE';
 const CHAT_IMAGE_PICKER_SMOKE_PATHS_ENV = 'OHA_YACHIYO_CHAT_IMAGE_PICKER_SMOKE_PATHS';
 const DEV_BRIDGE_URL = 'http://127.0.0.1:8420';
@@ -127,6 +129,35 @@ type UiSettings = {
     height?: number;
     open_chat_on_start?: boolean;
   };
+};
+
+type NativeCommandResult = {
+  exitCode: number | null;
+  signal: NodeJS.Signals | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+};
+
+type NativeFocusSnapshot = {
+  app_name: string;
+  focus_verified: boolean;
+  focus_status: 'frontmost' | 'not_frontmost';
+  frontmost_app: string;
+  process_visible?: boolean;
+  window_count?: number;
+  native_bridge: 'electron_main';
+  native_attempts: Array<Record<string, unknown>>;
+};
+
+type NativeToolResult = {
+  ok: boolean;
+  action: string;
+  summary: string;
+  data: Record<string, unknown>;
+  error?: string;
+  permission_error: boolean;
+  fallback_used: boolean;
 };
 
 type AppBuildMetadata = {
@@ -269,6 +300,8 @@ type ChatImageSelection = AvatarImageSelection & {
 };
 
 let backendProcess: ChildProcessWithoutNullStreams | null = null;
+let nativeRuntimeServer: http.Server | null = null;
+let nativeRuntimeUrl = '';
 let mainWindow: BrowserWindow | null = null;
 let chatWindow: BrowserWindow | null = null;
 let modeWindow: BrowserWindow | null = null;
@@ -320,6 +353,314 @@ function rootAssetPath(...segments: string[]): string | null {
     if (fs.existsSync(candidate)) return candidate;
   }
   return null;
+}
+
+function nativeJsonResponse(response: ServerResponse, statusCode: number, payload: NativeToolResult | Record<string, unknown>): void {
+  response.writeHead(statusCode, {
+    'content-type': 'application/json; charset=utf-8',
+    'cache-control': 'no-store',
+  });
+  response.end(JSON.stringify(payload));
+}
+
+function nativeRequestToken(request: IncomingMessage): string {
+  const value = request.headers['x-oha-yachiyo-bridge-token'];
+  if (Array.isArray(value)) return value[0] || '';
+  return typeof value === 'string' ? value : '';
+}
+
+function isLoopbackRemoteAddress(value: string | undefined): boolean {
+  return value === '127.0.0.1' || value === '::1' || value === '::ffff:127.0.0.1';
+}
+
+function nativeBridgeRequestAllowed(request: IncomingMessage): boolean {
+  return isLoopbackRemoteAddress(request.socket.remoteAddress) && nativeRequestToken(request) === bridgeSessionToken;
+}
+
+function readNativeJsonBody(request: IncomingMessage, maxBytes = 64 * 1024): Promise<unknown> {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    request.on('data', (chunk: Buffer | string) => {
+      body += chunk.toString();
+      if (Buffer.byteLength(body, 'utf8') > maxBytes) {
+        reject(new Error('request_body_too_large'));
+        request.destroy();
+      }
+    });
+    request.on('end', () => {
+      if (!body.trim()) {
+        resolve({});
+        return;
+      }
+      try {
+        resolve(JSON.parse(body));
+      } catch {
+        reject(new Error('invalid_json'));
+      }
+    });
+    request.on('error', reject);
+  });
+}
+
+function runNativeCommand(command: string, args: string[], timeoutMs = 5000): Promise<NativeCommandResult> {
+  return new Promise((resolve) => {
+    const child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] });
+    let stdout = '';
+    let stderr = '';
+    let timedOut = false;
+    let settled = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      try {
+        child.kill('SIGKILL');
+      } catch {}
+    }, timeoutMs);
+    const finish = (exitCode: number | null, signal: NodeJS.Signals | null) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve({ exitCode, signal, stdout: stdout.trim(), stderr: stderr.trim(), timedOut });
+    };
+    child.stdout.on('data', (chunk: Buffer | string) => {
+      stdout += chunk.toString();
+    });
+    child.stderr.on('data', (chunk: Buffer | string) => {
+      stderr += chunk.toString();
+    });
+    child.once('error', (error) => {
+      stderr = stderr ? `${stderr}\n${error.message}` : error.message;
+      finish(null, null);
+    });
+    child.once('exit', finish);
+  });
+}
+
+function parseNativeBoolean(value: string | undefined): boolean | undefined {
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return undefined;
+}
+
+function parseNativeInteger(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const parsed = Number.parseInt(value, 10);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function compactAppName(value: string): string {
+  return value.trim().toLocaleLowerCase().replace(/[\W_]+/gu, '');
+}
+
+function parseNativeFocusSnapshot(
+  value: string,
+  fallbackAppName: string,
+  nativeAttempts: Array<Record<string, unknown>>,
+): NativeFocusSnapshot {
+  const parts = value.trim().split('|', 6);
+  const appName = parts[1] || fallbackAppName;
+  const frontmostText = parts[2] || '';
+  const frontmostApp = parts[3] || '';
+  const focusVerified = frontmostText.toLocaleLowerCase() === 'true'
+    || Boolean(appName && frontmostApp && compactAppName(appName) === compactAppName(frontmostApp));
+  const snapshot: NativeFocusSnapshot = {
+    app_name: appName,
+    focus_verified: focusVerified,
+    focus_status: focusVerified ? 'frontmost' : 'not_frontmost',
+    frontmost_app: frontmostApp,
+    native_bridge: 'electron_main',
+    native_attempts: nativeAttempts,
+  };
+  const processVisible = parseNativeBoolean(parts[4]);
+  if (processVisible !== undefined) snapshot.process_visible = processVisible;
+  const windowCount = parseNativeInteger(parts[5]);
+  if (windowCount !== undefined) snapshot.window_count = windowCount;
+  return snapshot;
+}
+
+async function electronNativeFocusApp(appName: string): Promise<NativeToolResult> {
+  if (process.platform !== 'darwin') {
+    return {
+      ok: false,
+      action: 'electron.native.desktop.focus',
+      summary: 'electron.native.desktop.focus is not supported on this platform yet.',
+      error: 'unsupported_platform',
+      data: { platform: process.platform },
+      permission_error: false,
+      fallback_used: false,
+    };
+  }
+  const cleanAppName = appName.trim();
+  if (!cleanAppName) {
+    return {
+      ok: false,
+      action: 'electron.native.desktop.focus',
+      summary: 'electron.native.desktop.focus failed',
+      error: 'app_name_required',
+      data: {},
+      permission_error: false,
+      fallback_used: false,
+    };
+  }
+  const attempts: Array<Record<string, unknown>> = [];
+  const openResult = await runNativeCommand('/usr/bin/open', ['-a', cleanAppName], 5000);
+  attempts.push({
+    strategy: 'electron_open_a',
+    ok: openResult.exitCode === 0,
+    exit_code: openResult.exitCode,
+    timed_out: openResult.timedOut,
+    stderr: openResult.stderr || undefined,
+  });
+  const verifyScript = `
+on run argv
+  set appName to item 1 of argv
+  try
+    tell application appName to activate
+  end try
+  try
+    tell application appName to reopen
+  end try
+  delay 0.2
+  set targetFrontmost to false
+  set targetVisible to ""
+  set targetWindowCount to ""
+  set frontName to ""
+  tell application "System Events"
+    try
+      set targetProc to first application process whose name is appName
+      try
+        set visible of targetProc to true
+      end try
+      try
+        set frontmost of targetProc to true
+        delay 0.1
+      end try
+      try
+        set targetFrontmost to frontmost of targetProc
+      end try
+      try
+        set targetVisible to visible of targetProc
+      end try
+      try
+        set targetWindowCount to count of windows of targetProc
+      end try
+    end try
+    try
+      set frontName to name of first application process whose frontmost is true
+    end try
+  end tell
+  return "focused|" & appName & "|" & (targetFrontmost as text) & "|" & frontName & "|" & (targetVisible as text) & "|" & (targetWindowCount as text)
+end run
+`;
+  const verifyResult = await runNativeCommand('/usr/bin/osascript', ['-e', verifyScript, cleanAppName], 5000);
+  attempts.push({
+    strategy: 'electron_system_events_verify',
+    ok: verifyResult.exitCode === 0,
+    exit_code: verifyResult.exitCode,
+    timed_out: verifyResult.timedOut,
+    stderr: verifyResult.stderr || undefined,
+  });
+  if (verifyResult.exitCode !== 0) {
+    return {
+      ok: false,
+      action: 'electron.native.desktop.focus',
+      summary: `Electron native focus failed for ${cleanAppName}`,
+      error: verifyResult.stderr || 'native_focus_verification_failed',
+      data: { app_name: cleanAppName, native_bridge: 'electron_main', native_attempts: attempts },
+      permission_error: false,
+      fallback_used: false,
+    };
+  }
+  const snapshot = parseNativeFocusSnapshot(verifyResult.stdout, cleanAppName, attempts);
+  return {
+    ok: snapshot.focus_verified,
+    action: 'electron.native.desktop.focus',
+    summary: snapshot.focus_verified
+      ? `Focused ${snapshot.app_name} via Electron native bridge`
+      : `Could not verify ${snapshot.app_name} is foreground via Electron native bridge`,
+    ...(snapshot.focus_verified ? {} : { error: 'app_focus_not_verified' }),
+    data: snapshot,
+    permission_error: false,
+    fallback_used: false,
+  };
+}
+
+async function handleNativeRuntimeRequest(request: IncomingMessage, response: ServerResponse): Promise<void> {
+  if (!nativeBridgeRequestAllowed(request)) {
+    nativeJsonResponse(response, 403, {
+      ok: false,
+      error: 'invalid_native_bridge_token',
+      summary: 'native runtime bridge request rejected',
+    });
+    return;
+  }
+  const url = new URL(request.url || '/', nativeRuntimeUrl || 'http://127.0.0.1');
+  if (request.method === 'GET' && url.pathname === '/status') {
+    nativeJsonResponse(response, 200, {
+      ok: true,
+      service: 'oha-yachiyo-electron-native-runtime',
+      platform: process.platform,
+    });
+    return;
+  }
+  if (request.method === 'POST' && url.pathname === '/native/desktop/focus') {
+    try {
+      const body = await readNativeJsonBody(request);
+      const appName = typeof body === 'object' && body && 'app_name' in body
+        ? String((body as { app_name?: unknown }).app_name || '')
+        : '';
+      const result = await electronNativeFocusApp(appName);
+      nativeJsonResponse(response, result.ok ? 200 : 409, result);
+    } catch (error) {
+      nativeJsonResponse(response, 400, {
+        ok: false,
+        action: 'electron.native.desktop.focus',
+        summary: 'electron.native.desktop.focus failed',
+        error: error instanceof Error ? error.message : String(error),
+        data: {},
+        permission_error: false,
+        fallback_used: false,
+      });
+    }
+    return;
+  }
+  nativeJsonResponse(response, 404, {
+    ok: false,
+    error: 'native_bridge_route_not_found',
+    summary: 'native runtime bridge route not found',
+  });
+}
+
+function startNativeRuntimeServer(): Promise<void> {
+  if (nativeRuntimeServer) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const server = http.createServer((request, response) => {
+      void handleNativeRuntimeRequest(request, response);
+    });
+    server.once('error', reject);
+    server.once('listening', () => {
+      const address = server.address();
+      const port = typeof address === 'object' && address && 'port' in address ? address.port : null;
+      if (!port) {
+        server.close();
+        reject(new Error('Could not allocate native runtime bridge port'));
+        return;
+      }
+      nativeRuntimeServer = server;
+      nativeRuntimeUrl = `http://127.0.0.1:${port}`;
+      resolve();
+    });
+    server.listen({ host: '127.0.0.1', port: 0 });
+  });
+}
+
+function closeNativeRuntimeServer(): void {
+  const server = nativeRuntimeServer;
+  nativeRuntimeServer = null;
+  nativeRuntimeUrl = '';
+  if (!server) return;
+  try {
+    server.close();
+  } catch {}
 }
 
 function defaultLatestJsonUrl(branch = 'oha-develop', repository = DEFAULT_UPDATE_REPOSITORY): string {
@@ -1279,6 +1620,8 @@ function startBackend(): void {
       OHA_YACHIYO_DESKTOP_BACKEND: '1',
       [BRIDGE_URL_ENV]: bridgeUrl,
       [BRIDGE_TOKEN_ENV]: bridgeSessionToken,
+      [ELECTRON_NATIVE_URL_ENV]: nativeRuntimeUrl,
+      [ELECTRON_NATIVE_TOKEN_ENV]: bridgeSessionToken,
     },
   });
 
@@ -2884,6 +3227,11 @@ app.whenReady().then(() => {
   showMacDockIcon();
   void (async () => {
     await prepareBridgeUrlForPackagedBackend();
+    try {
+      await startNativeRuntimeServer();
+    } catch (error) {
+      console.warn('[native-runtime] failed to start Electron native bridge:', error);
+    }
     startBackend();
     createMainWindow({ view: 'main' }, lastUiSettings, { focusOnReady: false });
     hasEnteredMainExperience = true;
@@ -2916,6 +3264,7 @@ app.on('before-quit', (event) => {
     return;
   }
   stopBackend();
+  closeNativeRuntimeServer();
 });
 
 app.on('window-all-closed', () => {

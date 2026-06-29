@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import math
+import json
+import os
 import platform
 import re
 import shutil
@@ -10,7 +12,12 @@ import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
-from urllib.parse import quote_plus
+from urllib.error import HTTPError
+from urllib.parse import quote_plus, urlparse
+from urllib.request import Request, urlopen
+
+_ELECTRON_NATIVE_URL_ENV = "OHA_YACHIYO_ELECTRON_NATIVE_URL"
+_ELECTRON_NATIVE_TOKEN_ENV = "OHA_YACHIYO_ELECTRON_NATIVE_TOKEN"
 
 _COMMON_FOLDER_TARGETS = {
     "desktop": "Desktop",
@@ -2819,6 +2826,96 @@ def _localized_app_display_name(bundle_path: Path) -> str:
     return "" if value in {"", "(null)", "null"} else value
 
 
+def _electron_native_bridge_config() -> tuple[str, str] | None:
+    raw_url = os.getenv(_ELECTRON_NATIVE_URL_ENV, "").strip().rstrip("/")
+    token = os.getenv(_ELECTRON_NATIVE_TOKEN_ENV, "").strip()
+    if not raw_url or not token:
+        return None
+    parsed = urlparse(raw_url)
+    if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost", "::1"}:
+        return None
+    if not parsed.port:
+        return None
+    return raw_url, token
+
+
+def _electron_native_focus_app(app_name: str) -> dict[str, Any]:
+    config = _electron_native_bridge_config()
+    if config is None:
+        return {
+            "ok": False,
+            "action": "electron.native.desktop.focus",
+            "summary": "Electron native bridge is unavailable",
+            "error": "electron_native_bridge_unavailable",
+            "data": {"native_bridge_available": False},
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    bridge_url, token = config
+    request = Request(
+        f"{bridge_url}/native/desktop/focus",
+        data=json.dumps({"app_name": app_name}).encode("utf-8"),
+        headers={
+            "content-type": "application/json",
+            "x-oha-yachiyo-bridge-token": token,
+        },
+        method="POST",
+    )
+    try:
+        with urlopen(request, timeout=6) as response:
+            raw_body = response.read().decode("utf-8")
+            payload = json.loads(raw_body) if raw_body.strip() else {}
+            return _normalize_electron_native_focus_payload(payload, response.status)
+    except HTTPError as exc:
+        raw_body = exc.read().decode("utf-8", errors="replace")
+        try:
+            payload = json.loads(raw_body) if raw_body.strip() else {}
+        except json.JSONDecodeError:
+            payload = {
+                "ok": False,
+                "action": "electron.native.desktop.focus",
+                "summary": "Electron native bridge returned invalid JSON",
+                "error": raw_body or str(exc),
+                "data": {},
+            }
+        return _normalize_electron_native_focus_payload(payload, exc.code)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "action": "electron.native.desktop.focus",
+            "summary": "Electron native bridge request failed",
+            "error": str(exc),
+            "data": {"native_bridge_available": True},
+            "permission_error": False,
+            "fallback_used": False,
+        }
+
+
+def _normalize_electron_native_focus_payload(payload: Any, status: int | None) -> dict[str, Any]:
+    if not isinstance(payload, dict):
+        payload = {
+            "ok": False,
+            "action": "electron.native.desktop.focus",
+            "summary": "Electron native bridge returned an invalid payload",
+            "error": "invalid_native_bridge_payload",
+            "data": {},
+        }
+    result = dict(payload)
+    result.setdefault("ok", False)
+    result.setdefault("action", "electron.native.desktop.focus")
+    result.setdefault("summary", "Electron native bridge focus result")
+    result.setdefault("data", {})
+    result.setdefault("permission_error", False)
+    result.setdefault("fallback_used", False)
+    result["native_bridge_available"] = True
+    if status is not None:
+        result["http_status"] = int(status)
+    data = result.get("data")
+    if isinstance(data, dict):
+        data.setdefault("native_bridge_available", True)
+    return result
+
+
 def app_focus(app_name: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("app.focus")
@@ -2852,6 +2949,47 @@ def app_focus(app_name: str) -> dict[str, Any]:
                     "fallback_used": True,
                     "fallback_result": {"open": fallback, "appkit": appkit_result},
                 }
+            electron_native_result: dict[str, Any] | None = None
+            electron_native_data: dict[str, Any] = {}
+            if _electron_native_bridge_config() is not None:
+                electron_native_result = _electron_native_focus_app(resolved_name)
+                native_data = electron_native_result.get("data")
+                electron_native_data = native_data if isinstance(native_data, dict) else {}
+                focus_attempts.append(
+                    _app_focus_attempt(
+                        "electron_native_bridge",
+                        electron_native_result,
+                        electron_native_data,
+                    )
+                )
+                if (
+                    electron_native_result.get("ok") is True
+                    and electron_native_data.get("focus_verified") is True
+                ):
+                    return {
+                        "ok": True,
+                        "action": "app.focus",
+                        "summary": f"Focused {resolved_name} via Electron native bridge",
+                        "data": {
+                            "app_name": clean_name,
+                            **fallback_data,
+                            **electron_native_data,
+                            **_app_resolution_metadata(clean_name, resolved_name),
+                            "focus_fallback": "electron_native_bridge",
+                            "focus_attempts": focus_attempts,
+                        },
+                        "permission_error": False,
+                        "fallback_used": True,
+                        "fallback_result": {
+                            "open": fallback,
+                            "appkit": appkit_result,
+                            "electron_native": electron_native_result,
+                        },
+                    }
+            latest_observation = _latest_focus_observation(appkit_data, electron_native_data)
+            fallback_result: dict[str, Any] = {"open": fallback, "appkit": appkit_result}
+            if electron_native_result is not None:
+                fallback_result["electron_native"] = electron_native_result
             failed_data = {
                 "app_name": clean_name,
                 **fallback_data,
@@ -2859,10 +2997,13 @@ def app_focus(app_name: str) -> dict[str, Any]:
                     clean_name,
                     str(fallback_data.get("app_name") or resolved_name),
                 ),
+                **latest_observation,
                 "focus_fallback": "app.open",
                 "focus_verified": False,
                 "focus_status": "not_frontmost",
-                "frontmost_app": appkit_data.get("frontmost_app") or "",
+                "frontmost_app": latest_observation.get("frontmost_app")
+                or appkit_data.get("frontmost_app")
+                or "",
                 "focus_attempts": focus_attempts,
                 "recommended_tools": [
                     "desktop.running_apps",
@@ -2878,7 +3019,7 @@ def app_focus(app_name: str) -> dict[str, Any]:
                     "app.focus",
                     app_name=resolved_name,
                     data=failed_data,
-                    fallback_result={"open": fallback, "appkit": appkit_result},
+                    fallback_result=fallback_result,
                 )
             return {
                 "ok": False,
@@ -2894,6 +3035,7 @@ def app_focus(app_name: str) -> dict[str, Any]:
                 "permission_error": False,
                 "fallback_used": True,
                 "fallback_result": fallback,
+                "focus_fallback_result": fallback_result,
             }
         payload = _with_permission_metadata(
             "app.focus",
@@ -2984,12 +3126,50 @@ def app_focus(app_name: str) -> dict[str, Any]:
                 "permission_error": False,
                 "fallback_used": True,
             }
-    latest_observation = _latest_focus_observation(data, appkit_data, launchservices_data, dock_data)
+    electron_native_result: dict[str, Any] | None = None
+    electron_native_data: dict[str, Any] = {}
+    if _electron_native_bridge_config() is not None:
+        electron_native_result = _electron_native_focus_app(resolved_name)
+        native_data = electron_native_result.get("data")
+        electron_native_data = native_data if isinstance(native_data, dict) else {}
+        focus_attempts.append(
+            _app_focus_attempt(
+                "electron_native_bridge",
+                electron_native_result,
+                electron_native_data,
+            )
+        )
+        if (
+            electron_native_result.get("ok") is True
+            and electron_native_data.get("focus_verified") is True
+        ):
+            return {
+                "ok": True,
+                "action": "app.focus",
+                "summary": f"Focused {resolved_name} via Electron native bridge",
+                "data": {
+                    **data,
+                    **electron_native_data,
+                    "focus_fallback": "electron_native_bridge",
+                    "focus_attempts": focus_attempts,
+                },
+                "permission_error": False,
+                "fallback_used": True,
+            }
+    latest_observation = _latest_focus_observation(
+        data,
+        appkit_data,
+        launchservices_data,
+        dock_data,
+        electron_native_data,
+    )
     fallback_result: dict[str, Any] = {"appkit": appkit_result}
     if launchservices_result is not None:
         fallback_result["launchservices"] = launchservices_result
     if dock_result is not None:
         fallback_result["dock"] = dock_result
+    if electron_native_result is not None:
+        fallback_result["electron_native"] = electron_native_result
     failed_data = {
         **data,
         **latest_observation,
@@ -3028,7 +3208,12 @@ def app_focus(app_name: str) -> dict[str, Any]:
         "recovery_hints": _permission_recovery_hints_for_targets(["foreground_focus"]),
         "recovery_actions": _app_focus_recovery_actions(resolved_name),
         "permission_error": False,
-        "fallback_used": bool(launchservices_result or dock_result or resolved_name != clean_name),
+        "fallback_used": bool(
+            launchservices_result
+            or dock_result
+            or electron_native_result
+            or resolved_name != clean_name
+        ),
         "fallback_result": fallback_result,
     }
 
@@ -5392,6 +5577,9 @@ def _latest_focus_observation(*snapshots: dict[str, Any]) -> dict[str, Any]:
             "dock_status",
             "dock_item_name",
             "launchservices_returncode",
+            "native_bridge",
+            "native_bridge_available",
+            "native_attempts",
         ):
             if key in snapshot and snapshot[key] not in (None, ""):
                 latest[key] = snapshot[key]
@@ -5576,6 +5764,8 @@ def _app_focus_attempt(
                     "dock_status",
                     "dock_item_name",
                     "launchservices_returncode",
+                    "native_bridge",
+                    "native_bridge_available",
                 )
                 if key in data
             }

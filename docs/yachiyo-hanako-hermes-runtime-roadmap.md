@@ -139,6 +139,15 @@ process is launched but still cannot become frontmost, the evidence preserves
 `dock_item_name`. This distinguishes "app discovery/open works" from the
 remaining host-level foreground limitation.
 
+The Electron desktop shell now also starts a loopback-only native runtime
+bridge and injects its URL/token into the Python backend. `app.focus` can use
+that bridge as an additional `electron_native_bridge` strategy after local
+Python subprocess strategies fail. The bridge is intentionally scoped to
+authenticated local desktop operations and preserves the same focus evidence
+shape, so Agent Studio can replay whether the Electron host actually improved
+foreground control. Source/CLI smokes will not show this strategy unless the
+backend was launched by Electron.
+
 Current opt-in real desktop interaction evidence is reproducible with:
 
 ```bash
@@ -355,9 +364,9 @@ Exit evidence:
 - Desktop operations use inspect/operate/verify events.
 - High-risk operations still go through approval and policy gates.
 - Real macOS smoke evidence proves whether the Python subprocess path can
-  foreground a target app; if it cannot, the next implementation step is an
-  Electron/native foreground bridge that owns the granted desktop permissions
-  instead of hiding the failure behind app-specific rules.
+  foreground a target app; if it cannot, packaged Electron smoke evidence must
+  verify whether the `electron_native_bridge` strategy can own the granted
+  desktop permissions instead of hiding the failure behind app-specific rules.
 
 ## Phase 6 - Data Analysis Capability
 

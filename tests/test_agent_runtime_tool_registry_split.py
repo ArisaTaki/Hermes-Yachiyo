@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import io
+import json
 import os
 import subprocess
 import zipfile
@@ -3932,6 +3934,135 @@ def test_app_focus_uses_dock_fallback_when_process_has_no_visible_surface(
         "launchservices_open_a",
         "dock",
     ]
+
+
+def test_app_focus_uses_electron_native_bridge_after_local_focus_fails(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_resolve_installed_app_name", lambda app_name: app_name)
+    monkeypatch.setattr(desktop_mod, "_app_bundle_id", lambda app_name: "com.apple.calculator")
+    monkeypatch.setattr(
+        desktop_mod,
+        "_system_events_focus_app",
+        lambda app_name: {
+            "ok": True,
+            "stdout": f"focused|{app_name}|false|Codex|true|0",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_appkit_activate_app",
+        lambda app_name, *, bundle_id="": {
+            "ok": True,
+            "stdout": f"appkit|{app_name}|true|false|Codex",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_launchservices_focus_app",
+        lambda app_name: {
+            "ok": True,
+            "stdout": f"focused|{app_name}|false|Codex|true|0",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_dock_focus_app",
+        lambda app_name: {
+            "ok": True,
+            "stdout": f"dock|{app_name}|clicked|false|Codex|true|0|计算器",
+            "stderr": "",
+        },
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_electron_native_bridge_config",
+        lambda: ("http://127.0.0.1:50123", "token"),
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_electron_native_focus_app",
+        lambda app_name: {
+            "ok": True,
+            "action": "electron.native.desktop.focus",
+            "summary": f"Focused {app_name} via Electron native bridge",
+            "data": {
+                "app_name": app_name,
+                "focus_verified": True,
+                "focus_status": "frontmost",
+                "frontmost_app": app_name,
+                "process_visible": True,
+                "window_count": 1,
+                "native_bridge": "electron_main",
+                "native_bridge_available": True,
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        },
+    )
+
+    result = desktop_mod.app_focus("Calculator")
+
+    assert result["ok"] is True
+    assert result["summary"] == "Focused Calculator via Electron native bridge"
+    assert result["data"]["focus_fallback"] == "electron_native_bridge"
+    assert result["data"]["native_bridge"] == "electron_main"
+    assert result["data"]["frontmost_app"] == "Calculator"
+    assert [attempt["strategy"] for attempt in result["data"]["focus_attempts"]] == [
+        "applescript_system_events",
+        "appkit_nsrunningapplication",
+        "launchservices_open_a",
+        "dock",
+        "electron_native_bridge",
+    ]
+
+
+def test_electron_native_focus_app_parses_http_error_payload(monkeypatch) -> None:
+    monkeypatch.setenv(desktop_mod._ELECTRON_NATIVE_URL_ENV, "http://127.0.0.1:50123")
+    monkeypatch.setenv(desktop_mod._ELECTRON_NATIVE_TOKEN_ENV, "token")
+    body = json.dumps(
+        {
+            "ok": False,
+            "action": "electron.native.desktop.focus",
+            "summary": "Could not verify Calculator is foreground via Electron native bridge",
+            "error": "app_focus_not_verified",
+            "data": {
+                "app_name": "Calculator",
+                "focus_verified": False,
+                "focus_status": "not_frontmost",
+                "frontmost_app": "Codex",
+                "native_bridge": "electron_main",
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    ).encode("utf-8")
+
+    def fake_urlopen(request, timeout):
+        assert request.full_url == "http://127.0.0.1:50123/native/desktop/focus"
+        assert request.headers["X-oha-yachiyo-bridge-token"] == "token"
+        assert timeout == 6
+        raise desktop_mod.HTTPError(
+            request.full_url,
+            409,
+            "Conflict",
+            {},
+            io.BytesIO(body),
+        )
+
+    monkeypatch.setattr(desktop_mod, "urlopen", fake_urlopen)
+
+    result = desktop_mod._electron_native_focus_app("Calculator")
+
+    assert result["ok"] is False
+    assert result["http_status"] == 409
+    assert result["native_bridge_available"] is True
+    assert result["data"]["native_bridge_available"] is True
+    assert result["data"]["frontmost_app"] == "Codex"
 
 
 def test_app_focus_reports_unverified_foreground(monkeypatch) -> None:
