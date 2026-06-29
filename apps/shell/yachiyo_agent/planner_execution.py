@@ -318,7 +318,11 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
             _desktop_request_payload(tool_name, payload),
             planning_reason=_desktop_step_planning_reason(step, tool_name),
         )
-        if step_id == "read-desktop-content":
+        if step_id == "read-desktop-content" or _desktop_observation_step_needs_model_followup(
+            decision,
+            step_id,
+            tool_name,
+        ):
             request["continue_to_model"] = True
         requests.append(request)
     if _weak_desktop_discovery_plan(decision, requests):
@@ -702,7 +706,11 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
             _desktop_request_payload(tool_name, payload),
             planning_reason=_desktop_step_planning_reason(step, tool_name),
         )
-        if step_id == "read-desktop-content":
+        if step_id == "read-desktop-content" or _desktop_observation_step_needs_model_followup(
+            decision,
+            step_id,
+            tool_name,
+        ):
             request["continue_to_model"] = True
         requests.append(request)
     if _weak_desktop_discovery_plan(decision, requests):
@@ -756,6 +764,37 @@ def _desktop_step_planning_reason(step: Any, tool_name: str) -> str:
     ):
         return "planner_desktop_hotkey"
     return "planner_desktop_operation"
+
+
+def _desktop_observation_step_needs_model_followup(
+    decision: Any,
+    step_id: str,
+    tool_name: str,
+) -> bool:
+    if step_id not in {
+        "capture-screen",
+        "read-foreground-ui",
+        "verify-desktop-result",
+        "inspect-app",
+    } and tool_name not in {"screen.capture", "desktop.ui_elements", "desktop.inspect_app"}:
+        return False
+    prompt = str(getattr(getattr(decision, "selected_intent", None), "user_goal", "") or "")
+    if not prompt:
+        return False
+    return bool(
+        re.search(
+            r"(?:判断|决定|分析|识别|告诉|说明|总结|摘要|下一步|该点哪里|该点哪个|"
+            r"能否|能不能|可以点|是否可以|是否能|如果能|如果可以)",
+            prompt,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:judge|decide|analy[sz]e|identify|tell|explain|summari[sz]e|"
+            r"determine|whether|what|which|where|can|should|next)\b",
+            prompt,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:

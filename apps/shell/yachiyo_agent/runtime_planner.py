@@ -245,7 +245,11 @@ class TaskIntentRouter:
             return _empty_intent("desktop_operation", text)
         if _known_web_destination_search_hint(text):
             return _empty_intent("desktop_operation", text)
-        if _explicit_system_settings_request(text):
+        app_search_app_hint = _app_name_hint(text)
+        if (
+            _explicit_system_settings_request(text)
+            and not (app_search_app_hint and _app_search_hint(text, app_search_app_hint))
+        ):
             return _empty_intent("desktop_operation", text)
         if (
             _report_file_context_hint(text)
@@ -444,6 +448,12 @@ class TaskIntentRouter:
             score = 0.24
         if score <= 0 and app_preferences:
             score = 0.2
+        if (
+            score <= 0
+            and _app_name_hint(text)
+            and _contains_any(text, ("搜索", "查找", "检索", "search", "find", "look up"))
+        ):
+            score = 0.18
         if score <= 0 and (spotlight_search_query or spotlight_open):
             score = 0.18
         if score <= 0 and dynamic_context_transfer:
@@ -852,6 +862,9 @@ class TaskIntentRouter:
         if _finder_special_location_hint(text):
             return _empty_intent("system_control", text)
         if _browser_internal_page_hint(text):
+            return _empty_intent("system_control", text)
+        app_hint = _app_name_hint(text)
+        if app_hint and _app_search_hint(text, app_hint):
             return _empty_intent("system_control", text)
         hint = system_control_hint(text)
         if not hint:
@@ -3114,6 +3127,14 @@ class RuntimePlanner:
                     depends_on=search_terminal_step_id,
                     app_name=app_name,
                     artifact_hint=desktop_content_artifact,
+                )
+            if _desktop_content_model_followup_requested(intent.user_goal):
+                return _append_desktop_content_followup_steps(
+                    intent,
+                    allowed,
+                    steps,
+                    depends_on=search_terminal_step_id,
+                    app_name=app_name,
                 )
             if screen_capture is not None:
                 capture_payload = {
@@ -6106,6 +6127,69 @@ def _append_desktop_content_artifact_steps(
     )
 
 
+def _append_desktop_content_followup_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    depends_on: str,
+    app_name: str,
+) -> list[ToolPlanStepSnapshot]:
+    read_tool = _first_allowed(("desktop.ui_elements", "screen.capture"), allowed)
+    read_input = (
+        {"role_filter": "text", "limit": 120}
+        if read_tool == "desktop.ui_elements"
+        else {"reason": "Read the foreground app content after app search."}
+        if read_tool == "screen.capture"
+        else {}
+    )
+    if app_name and read_tool == "desktop.ui_elements":
+        read_input["app_name"] = app_name
+    return [
+        *steps,
+        _step(
+            intent,
+            "read-desktop-content",
+            "Read desktop content",
+            "desktop.app_discovery",
+            read_tool,
+            input_preview=read_input,
+            depends_on=[depends_on],
+            reason=(
+                "Inspect the foreground app content after the app search before returning "
+                "the result to the model for the requested judgment or next step."
+            ),
+        ),
+    ]
+
+
+def _desktop_content_model_followup_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"(?:并|然后|再|接着|之后|后).{0,8}"
+            r"(?:读|读取|查看|看看|看一下|看下|判断|决定|分析|识别|告诉|说明|"
+            r"下一步|该点哪里|该点哪个|能否|能不能|可以点|是否可以)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:and|then)\s+(?:read|inspect|check|judge|decide|analy[sz]e|"
+            r"tell|explain|summari[sz]e|determine)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:what|which|where|whether|can|should)\b.{0,40}"
+            r"\b(?:click|press|tap|next|do)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _artifact_reveal_requested(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
@@ -6701,6 +6785,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     if intent.kind == "report_generation":
         if _contains_any(text, ["report", "summary", "报告", "总结", "文档", "输出", "生成"]):
             score += 0.04
+        if _foreground_app_search_hint(text):
+            score -= 0.32
         if _looks_like_schedule_request(text):
             score -= 0.24
         if str(intent.inputs.get("context_source") or "").strip():
@@ -10877,7 +10963,7 @@ def _foreground_app_search_hint(text: str) -> dict[str, str]:
         return {}
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?\s*"
-        r"(?:在|用|通过)?\s*(?:当前|现在|前台|这个|该)\s*"
+        r"(?:在|用|通过)?\s*(?:(?:当前|现在|前台|这个|该)\s*){1,2}"
         r"(?:应用|app|application|窗口|界面|ui)"
         r"(?:里|中|上|内)?\s*(?:搜索|查找|检索|找)(?:一下|下)?\s*"
         r"(?P<query>.+)$",
@@ -11192,12 +11278,15 @@ def _clean_app_search_query(query: str) -> str:
     value = re.sub(r"^[：:，,\s]+", "", str(query or "").strip())
     value = re.sub(r"[。.,，；;！!？?]+$", "", value).strip()
     value = re.split(
-        r"\s*(?:并|然后|再|接着|之后|后|and\s+then|then)\s*"
+        r"\s*(?:[，,]\s*|并|然后|再|接着|之后|后|and\s+then|then)\s*"
         r"(?:选择|选中|点击|点按|打开|按|"
         r"(?:把|将)?(?:当前|前台|这份|这个|这些|搜索结果|结果|内容|文本)?"
-        r"(?:内容|结果|文本)?\s*(?:总结|摘要|整理|生成|输出|写成|写|做成)|"
+        r"(?:内容|结果|文本)?\s*(?:总结|摘要|整理|生成|输出|写成|写|做成|"
+        r"读|读取|查看|看看|看一下|看下|判断|决定|分析|识别|告诉|说明)|"
+        r"下一步|该点哪里|该点哪个|能否|能不能|可以点|是否可以|"
         r"截图|截屏|screen\s*capture|screenshot|"
-        r"choose|select|click|open|press|summari[sz]e|write|generate|output)(?:\b)?",
+        r"choose|select|click|open|press|summari[sz]e|write|generate|output|"
+        r"read|inspect|check|judge|decide|determine|tell|explain)(?:\b)?",
         value,
         maxsplit=1,
         flags=re.IGNORECASE,

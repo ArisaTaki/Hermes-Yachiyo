@@ -2388,6 +2388,203 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
     }
 
 
+def test_runtime_planner_keeps_app_scoped_searches_executable_and_observable() -> None:
+    allowed = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+        "artifact.write",
+        "screen.capture",
+        "desktop.running_apps",
+    ]
+
+    pixel_forge = RuntimePlanner().decision(
+        "打开一个叫 PixelForge 的应用，搜索 export settings，然后把当前结果总结成报告",
+        allowed_tools=allowed,
+    )
+
+    assert pixel_forge.selected_intent.kind == "desktop_operation"
+    assert pixel_forge.selected_intent.inputs == {
+        "app_name_hint": "PixelForge",
+        "operation_hint": "open",
+        "app_search_hint": {"query": "export settings", "target": "搜索"},
+        "desktop_content_artifact_hint": {
+            "path": "desktop-content-report.md",
+            "body_source": "desktop_content",
+        },
+    }
+    assert pixel_forge.selected_intent.expected_outputs == ["report"]
+    assert [step.step_id for step in pixel_forge.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "focus-opened-app",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "read-desktop-content",
+        "write-desktop-content-artifact",
+    ]
+    assert _step_by_id(pixel_forge, "type-app-search-query").input_preview == {
+        "text": "export settings"
+    }
+    assert _step_by_id(pixel_forge, "read-desktop-content").tool_name == (
+        "desktop.ui_elements"
+    )
+    assert _step_by_id(pixel_forge, "write-desktop-content-artifact").input_preview == {
+        "path": "desktop-content-report.md",
+        "body_source": "desktop_content",
+    }
+
+    system_settings = RuntimePlanner().decision(
+        "打开系统设置",
+        allowed_tools=[*allowed, "system.settings_open"],
+    )
+    assert system_settings.selected_intent.kind == "system_control"
+    assert system_settings.selected_intent.inputs["kind"] == "settings_open"
+
+
+def test_planner_tool_requests_continue_after_app_search_observations() -> None:
+    allowed = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+        "artifact.write",
+        "screen.capture",
+        "desktop.running_apps",
+    ]
+
+    assert planner_tool_requests(
+        "打开 Linear 搜索 BUG-123，读取当前结果并判断下一步该点哪里",
+        allowed_tools=allowed,
+    ) == [
+        _app_discovery_request("Linear"),
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Linear"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Linear"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "BUG-123"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"app_name": "Linear", "role_filter": "text", "limit": 120},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_desktop_content",
+            "continue_to_model": True,
+        },
+    ]
+
+    foreground_search = RuntimePlanner().decision(
+        "在当前前台应用搜索 yachiyo，然后总结当前结果",
+        allowed_tools=allowed,
+    )
+    assert foreground_search.selected_intent.kind == "desktop_operation"
+    assert foreground_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "yachiyo",
+        "target": "搜索",
+        "scope": "foreground",
+    }
+    assert [step.step_id for step in foreground_search.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "read-desktop-content",
+        "write-desktop-content-artifact",
+    ]
+    assert planner_execution_tool_requests(
+        planner_tool_requests(
+            "在当前前台应用搜索 yachiyo，然后总结当前结果",
+            allowed_tools=allowed,
+        ),
+        allowed_tools=allowed,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 120},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_desktop_content",
+            "continue_to_model": True,
+        },
+    ]
+
+    assert planner_execution_tool_requests(
+        planner_tool_requests(
+            "看一下当前屏幕，判断能否点击导出按钮，如果能就点击",
+            allowed_tools=allowed,
+        ),
+        allowed_tools=allowed,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_runtime_planner_routes_explicit_browser_url_open_actions() -> None:
     allowed = [
         "browser.open_url",
