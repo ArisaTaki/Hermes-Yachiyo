@@ -3194,16 +3194,26 @@ class RuntimePlanner:
                 )
                 app_search_prepare_step_id = "open-or-focus-app"
             search_focus_tool = _first_allowed(("desktop.safe_shortcut", "desktop.click_ui_element"), allowed)
-            search_focus_preview = (
-                {
+            if not search_focus_tool and app_name:
+                search_focus_tool = _first_allowed(
+                    app_foreground_tool_candidates(
+                        _app_search_prepare_mode(intent.user_goal, mode),
+                        "safe_shortcut",
+                    ),
+                    allowed,
+                )
+            search_focus_tool_name = str(search_focus_tool or "")
+            if search_focus_tool_name == "desktop.click_ui_element":
+                search_focus_preview = {
                     "target": search_target,
                     "role_filter": "text",
                     "click_count": 1,
                     "limit": 80,
                 }
-                if search_focus_tool == "desktop.click_ui_element"
-                else {"action": "find"}
-            )
+            elif search_focus_tool_name.startswith("app."):
+                search_focus_preview = {"app_name": app_name, "action": "find"}
+            else:
+                search_focus_preview = {"action": "find"}
             search_depends_on = ["discover-desktop-state"]
             if focus_step_added:
                 search_depends_on = ["focus-app-window"]
