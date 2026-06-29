@@ -8470,15 +8470,26 @@ def _communication_file_context_hint(
     metadata: Mapping[str, Any] | None = None,
 ) -> dict[str, str]:
     source_hint = str(data_source_hint(text, metadata) or "").strip()
-    if not source_hint:
+    if source_hint:
+        source_scope = str(data_source_scope_hint(text, metadata) or "").strip()
+        source_kind = data_source_kind_hint(source_hint, text)
+        path = _scoped_data_source_path(source_hint, source_scope)
+        hint = _data_source_inspect_input_preview(path, source_kind)
+        if source_kind:
+            hint.setdefault("source_kind", source_kind)
+        return hint
+    file_context = _report_file_context_hint(text)
+    if not file_context:
         return {}
-    source_scope = str(data_source_scope_hint(text, metadata) or "").strip()
-    source_kind = data_source_kind_hint(source_hint, text)
-    path = _scoped_data_source_path(source_hint, source_scope)
-    hint = _data_source_inspect_input_preview(path, source_kind)
-    if source_kind:
-        hint.setdefault("source_kind", source_kind)
-    return hint
+    hint: dict[str, str] = {}
+    location = str(file_context.get("location") or "").strip()
+    if location:
+        hint["path"] = location
+    for key in ("file_type", "pattern"):
+        value = str(file_context.get(key) or "").strip()
+        if value:
+            hint[key] = value
+    return hint if hint.get("path") or hint.get("pattern") else {}
 
 
 def _communication_content_transform_hint(text: str) -> str:
@@ -12323,6 +12334,12 @@ def _direct_file_context_communication_hint(
         rf"(?:请|帮我|麻烦)?(?:(?:发送|发出|发消息|发)\s*"
         rf"(?P<channel>邮件|电子邮件|消息|短信|微信|email|e-mail|mail|message)?\s*"
         rf"(?:给|到|发给|发送给|向|对)|(?:发给|发送给|发到|发送到))\s*"
+        rf"(?P<target>[^，,。；;！!？?]+?){recipient_stop}",
+        rf"(?:总结|摘要|整理|概括|做成报告|生成报告|summarize|summary|report)?\s*"
+        rf"(?:后|之后|以后|then|and then)?\s*"
+        rf"(?:(?:发给|发送给|发到|发送到|分享给|转发给|发|发送|分享|转发)\s*"
+        rf"(?P<channel>邮件|电子邮件|消息|短信|微信|email|e-mail|mail|message)?\s*"
+        rf"(?:给|到|向|对)?|(?:send|share|email|message)\s+(?:it|this|the\s+file)?\s*(?:to|with|for))\s*"
         rf"(?P<target>[^，,。；;！!？?]+?){recipient_stop}",
         r"^(?:\s+)?(?:send|email|message)\s+(?:it|this|the\s+file)?\s*"
         r"(?:to|for)\s+(?P<target>[^.!?,]+?)(?:\s+(?:saying|about|with|and)\b.*)?$",

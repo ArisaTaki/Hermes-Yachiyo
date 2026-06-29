@@ -10715,6 +10715,18 @@ def test_runtime_planner_routes_file_context_communication_without_app_alias() -
         "把 Downloads 里的 sales.csv 发给张三并说明本周业绩",
         allowed_tools=["workspace.read", "workspace.list", "artifact.write"],
     )
+    recent_pdf_decision = RuntimePlanner().decision(
+        "把刚刚下载的 PDF 总结后发给 Slack 的 Alice",
+        allowed_tools=[
+            "workspace.list",
+            "workspace.read",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
 
     assert decision.selected_intent.kind == "communication"
     assert decision.selected_intent.inputs == {
@@ -10742,6 +10754,45 @@ def test_runtime_planner_routes_file_context_communication_without_app_alias() -
     assert draft_step.tool_name == "artifact.write"
     assert draft_step.input_preview == {"body_source": "file"}
     assert draft_step.approval_required is True
+
+    assert recent_pdf_decision.selected_intent.kind == "communication"
+    assert recent_pdf_decision.selected_intent.inputs == {
+        "context_source": "file",
+        "file_context_hint": {
+            "path": "Downloads",
+            "file_type": "pdf",
+            "pattern": "*.pdf",
+        },
+        "content_transform_hint": "summary",
+        "direct_message_hint": {
+            "app_name": "Slack",
+            "recipient": "Alice",
+            "body_source": "file",
+            "mode": "focus",
+            "send_action": "send",
+            "content_transform_hint": "summary",
+        },
+    }
+    assert [step.step_id for step in recent_pdf_decision.plan.tool_plan.steps] == [
+        "read-communication-context",
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+        "send-communication-message",
+    ]
+    assert _step_by_id(recent_pdf_decision, "read-communication-context").tool_name == "workspace.list"
+    assert _step_by_id(recent_pdf_decision, "read-communication-context").input_preview == {
+        "path": "Downloads",
+        "pattern": "*.pdf",
+        "file_type": "pdf",
+    }
+    assert _step_by_id(recent_pdf_decision, "draft-communication-message").input_preview == {
+        "body_source": "file",
+        "transform": "summary",
+    }
+    assert _step_by_id(recent_pdf_decision, "send-communication-message").approval_required is True
 
 
 def test_runtime_planner_prefetches_file_before_direct_email_plan() -> None:
@@ -17311,6 +17362,27 @@ def test_planner_tool_requests_prefetches_dynamic_communication_context() -> Non
             "protocol": "json_fallback",
             "tool": "workspace.read",
             "input": {"path": "Downloads/sales.csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
+    assert planner_tool_requests(
+        "把刚刚下载的 PDF 总结后发给 Slack 的 Alice",
+        allowed_tools=[
+            "workspace.list",
+            "workspace.read",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads", "pattern": "*.pdf", "file_type": "pdf"},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_communication_context",
             "continue_to_model": True,

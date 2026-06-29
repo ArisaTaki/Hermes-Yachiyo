@@ -537,6 +537,28 @@ def test_planner_first_daily_desktop_entrypoint_requests_scope_english_app_disco
         }
     ]
 
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "把刚刚下载的 PDF 总结后发给 Slack 的 Alice",
+        allowed_tools=[
+            "workspace.list",
+            "workspace.read",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads", "pattern": "*.pdf", "file_type": "pdf"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
+
 
 def test_planner_first_daily_desktop_entrypoint_requests_scope_english_safe_operations() -> None:
     cases = (
