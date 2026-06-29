@@ -748,6 +748,53 @@ def test_runtime_planner_handles_natural_data_analysis_contexts() -> None:
     }
 
 
+def test_runtime_planner_opens_spreadsheet_app_before_reading_visible_table() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Numbers 读取当前表格，分析销售趋势并输出报告",
+        allowed_tools=["app.open", "desktop.ui_elements", "data.analyze", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "text_table",
+        "spreadsheet_app_hint": "Numbers",
+        "context_source": "visible_text",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "open-spreadsheet-app",
+        "read-data-context",
+        "analyze-data-context",
+    ]
+    assert _step_by_id(decision, "read-data-context").depends_on == [
+        "open-spreadsheet-app"
+    ]
+    assert _step_by_id(decision, "analyze-data-context").depends_on == [
+        "open-spreadsheet-app",
+        "read-data-context",
+    ]
+    assert planner_tool_requests(
+        "打开 Numbers 读取当前表格，分析销售趋势并输出报告",
+        allowed_tools=["app.open", "desktop.ui_elements", "data.analyze", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Numbers"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_data_analysis_spreadsheet_app",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        },
+    ]
+
+
 def test_runtime_planner_routes_data_analysis_artifact_to_communication() -> None:
     allowed_tools = [
         "data.analyze",
@@ -2386,6 +2433,89 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "query": "yachiyo",
         "target": "搜索",
     }
+
+
+def test_runtime_planner_cleans_web_research_query_and_tracks_delivery_target() -> None:
+    allowed = [
+        "browser.open_url",
+        "artifact.write",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+
+    generic_target = RuntimePlanner().decision(
+        "调研 OpenAI 最新价格，整理成表格和报告，然后发给 Alice",
+        allowed_tools=allowed,
+    )
+    wechat_target = RuntimePlanner().decision(
+        "调研 OpenAI 最新价格，整理成表格和报告，然后发给微信文件传输助手",
+        allowed_tools=allowed,
+    )
+
+    assert generic_target.selected_intent.kind == "web_research"
+    assert generic_target.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0%E4%BB%B7%E6%A0%BC",
+        "communication_target_hint": {
+            "recipient": "Alice",
+            "body_source": "research_artifact",
+            "mode": "focus",
+            "send_action": "send",
+            "content_transform_hint": "report",
+        },
+        "browser_action": "open_search",
+        "query": "OpenAI 最新价格",
+    }
+    assert generic_target.selected_intent.expected_outputs == ["report", "table"]
+    assert [step.step_id for step in generic_target.plan.tool_plan.steps] == [
+        "open-web-search",
+        "write-research-artifact",
+        "draft-research-communication",
+    ]
+    assert _step_by_id(generic_target, "draft-research-communication").input_preview == {
+        "recipient": "Alice",
+        "body_source": "research_artifact",
+        "artifact_path": "research-summary.md",
+        "transform": "report",
+    }
+    assert _step_by_id(generic_target, "draft-research-communication").approval_required is True
+    assert planner_tool_requests(
+        "调研 OpenAI 最新价格，整理成表格和报告，然后发给 Alice",
+        allowed_tools=allowed,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {
+                "url": "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0%E4%BB%B7%E6%A0%BC"
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+
+    assert wechat_target.selected_intent.inputs["communication_target_hint"] == {
+        "recipient": "文件传输助手",
+        "body_source": "research_artifact",
+        "mode": "focus",
+        "send_action": "send",
+        "app_name": "WeChat",
+        "content_transform_hint": "report",
+    }
+    assert [step.step_id for step in wechat_target.plan.tool_plan.steps] == [
+        "open-web-search",
+        "write-research-artifact",
+        "open-or-focus-research-communication-app",
+        "focus-research-communication-recipient-search",
+        "type-research-communication-recipient",
+        "submit-research-communication-recipient-search",
+        "draft-research-communication-message",
+        "send-research-communication-message",
+    ]
+    assert _step_by_id(wechat_target, "send-research-communication-message").approval_required is True
 
 
 def test_runtime_planner_keeps_app_scoped_searches_executable_and_observable() -> None:

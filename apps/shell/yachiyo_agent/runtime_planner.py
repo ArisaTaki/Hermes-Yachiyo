@@ -983,6 +983,9 @@ class TaskIntentRouter:
         output_target = _task_output_target_hint(text)
         if output_target:
             inputs["output_target_hint"] = output_target
+        communication_target = _web_research_communication_target_hint(text)
+        if communication_target:
+            inputs["communication_target_hint"] = communication_target
         inputs.update(browser_action)
         existing_browser_app_name = str(inputs.get("app_name") or "").strip()
         browser_app_name = existing_browser_app_name or _browser_action_app_name_hint(
@@ -1028,6 +1031,8 @@ class TaskIntentRouter:
                     else []
                 ),
                 "clipboard.read_write" if output_target == "clipboard" else "artifact.write",
+                *(["desktop.app_control"] if communication_target.get("app_name") else []),
+                *(["communication.compose"] if communication_target else []),
             ],
             risk_level=risk_level,
         )
@@ -1621,14 +1626,33 @@ class RuntimePlanner:
         source_scope = str(intent.inputs.get("data_source_scope_hint") or "").strip()
         spreadsheet_app_step = _spreadsheet_app_open_step(intent, allowed)
         if context_source and not source_hint:
-            context_steps = _data_analysis_context_source_steps(intent, allowed, context_source)
+            spreadsheet_first_steps = (
+                [spreadsheet_app_step]
+                if spreadsheet_app_step is not None and context_source == "visible_text"
+                else []
+            )
+            context_step_dependencies = [step.step_id for step in spreadsheet_first_steps]
+            context_steps = [
+                _with_step_dependencies(step, context_step_dependencies)
+                if context_step_dependencies
+                else step
+                for step in _data_analysis_context_source_steps(
+                    intent,
+                    allowed,
+                    context_source,
+                )
+            ]
             context_depends_on = [step.step_id for step in context_steps]
             spreadsheet_steps = (
                 [_with_step_dependencies(spreadsheet_app_step, context_depends_on)]
-                if spreadsheet_app_step is not None
+                if spreadsheet_app_step is not None and not spreadsheet_first_steps
                 else []
             )
-            depends_on = context_depends_on + [step.step_id for step in spreadsheet_steps]
+            depends_on = [
+                *[step.step_id for step in spreadsheet_first_steps],
+                *context_depends_on,
+                *[step.step_id for step in spreadsheet_steps],
+            ]
             artifact_paths = _artifact_output_paths(
                 intent.user_goal,
                 data_analysis_artifacts_expected(
@@ -1655,6 +1679,7 @@ class RuntimePlanner:
                 if len(artifact_paths) > 1:
                     input_preview["artifact_paths"] = artifact_paths
                 steps = [
+                    *spreadsheet_first_steps,
                     *context_steps,
                     *spreadsheet_steps,
                     _step(
@@ -1679,6 +1704,7 @@ class RuntimePlanner:
                     depends_on="analyze-data-context",
                 )
             steps = [
+                *spreadsheet_first_steps,
                 *context_steps,
                 *spreadsheet_steps,
                 _step(
@@ -3699,7 +3725,10 @@ class RuntimePlanner:
                 main_step,
             ]
             artifact_path = ""
-            if _web_research_artifact_requested(intent) and (
+            if (
+                _web_research_artifact_requested(intent)
+                or isinstance(intent.inputs.get("communication_target_hint"), Mapping)
+            ) and (
                 allowed is None or "artifact.write" in allowed
             ):
                 artifact_path = _artifact_output_path(
@@ -3729,11 +3758,18 @@ class RuntimePlanner:
                         body_source=_web_clipboard_body_source(browser_action),
                     )
                 )
-            return _append_artifact_reveal_step(
+            followup_steps = _append_artifact_reveal_step(
                 intent,
                 allowed,
                 steps,
                 artifact_paths=[artifact_path] if artifact_path else [],
+                depends_on="write-research-artifact",
+            )
+            return _append_web_research_communication_steps(
+                intent,
+                allowed,
+                followup_steps,
+                artifact_path=artifact_path,
                 depends_on="write-research-artifact",
             )
         if context_source and not url:
@@ -6268,6 +6304,155 @@ def _append_analysis_communication_steps(
     return [*steps, *communication_steps]
 
 
+def _append_web_research_communication_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    artifact_path: str,
+    depends_on: str,
+) -> list[ToolPlanStepSnapshot]:
+    target = intent.inputs.get("communication_target_hint")
+    if not isinstance(target, Mapping):
+        return steps
+    recipient = str(target.get("recipient") or "").strip()
+    if not recipient or not artifact_path:
+        return steps
+    app_name = str(target.get("app_name") or "").strip()
+    transform = str(target.get("content_transform_hint") or "").strip()
+    mode = str(target.get("mode") or "focus").strip() or "focus"
+    if not app_name:
+        draft_input = {
+            "recipient": recipient,
+            "body_source": "research_artifact",
+            "artifact_path": artifact_path,
+        }
+        if transform:
+            draft_input["transform"] = transform
+        return [
+            *steps,
+            _step(
+                intent,
+                "draft-research-communication",
+                "Draft research communication",
+                "communication.compose",
+                _first_allowed(("artifact.write",), allowed),
+                input_preview=draft_input,
+                approval_required=True,
+                risk_level="medium",
+                depends_on=[depends_on],
+                action="draft_message",
+                reason=(
+                    "Create a reviewable communication draft from the research artifact "
+                    "when the target app cannot be resolved deterministically."
+                ),
+            ),
+        ]
+
+    app_shortcut_tool = _first_allowed(
+        app_foreground_tool_candidates(mode, "safe_shortcut"),
+        allowed,
+    )
+    app_tool, shortcut_tool = _app_scoped_safe_shortcut_split_tools(app_name, mode, allowed)
+    type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
+    search_submit_tool = _first_allowed(("desktop.search_submit",), allowed)
+    send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
+    communication_steps: list[ToolPlanStepSnapshot] = []
+    focus_depends_on = [depends_on]
+    if app_tool and shortcut_tool:
+        communication_steps.append(
+            _step(
+                intent,
+                "open-or-focus-research-communication-app",
+                "Open or focus communication app",
+                "desktop.app_control",
+                app_tool,
+                input_preview={"app_name": app_name},
+                depends_on=focus_depends_on,
+                reason="Prepare the requested communication app after the research artifact is available.",
+            )
+        )
+        focus_depends_on = ["open-or-focus-research-communication-app"]
+        focus_tool = shortcut_tool
+        focus_input = {"action": "find"}
+        focus_capability = "communication.compose"
+        focus_reason = "Open foreground recipient search with a generic safe shortcut."
+    else:
+        focus_tool = app_shortcut_tool
+        focus_input = {"app_name": app_name, "action": "find"}
+        focus_capability = "communication.compose"
+        focus_reason = "Open the app's recipient search after the research artifact is available."
+
+    draft_input = {
+        "body_source": "research_artifact",
+        "artifact_path": artifact_path,
+    }
+    if transform:
+        draft_input["transform"] = transform
+    communication_steps.extend(
+        [
+            _step(
+                intent,
+                "focus-research-communication-recipient-search",
+                "Focus communication recipient search",
+                focus_capability,
+                focus_tool,
+                input_preview=focus_input,
+                action="resolve_recipient",
+                depends_on=focus_depends_on,
+                reason=focus_reason,
+            ),
+            _step(
+                intent,
+                "type-research-communication-recipient",
+                "Type communication recipient",
+                "communication.compose",
+                type_tool,
+                input_preview={"text": recipient},
+                depends_on=["focus-research-communication-recipient-search"],
+                action="type",
+                reason="Type only the explicit recipient from the user prompt.",
+            ),
+            _step(
+                intent,
+                "submit-research-communication-recipient-search",
+                "Submit communication recipient search",
+                "communication.compose",
+                search_submit_tool,
+                input_preview={},
+                depends_on=["type-research-communication-recipient"],
+                action="submit_search",
+                reason="Select or search the recipient with the dedicated safe search submit tool.",
+            ),
+            _step(
+                intent,
+                "draft-research-communication-message",
+                "Draft research communication message",
+                "communication.compose",
+                type_tool,
+                input_preview=draft_input,
+                depends_on=["submit-research-communication-recipient-search"],
+                action="draft_message",
+                reason="Draft the message from the generated research artifact before the approval-gated send step.",
+            ),
+            _step(
+                intent,
+                "send-research-communication-message",
+                "Send research communication message",
+                "communication.compose",
+                send_tool,
+                input_preview={"action": "send"},
+                risk_level="high",
+                approval_required=True,
+                depends_on=["draft-research-communication-message"],
+                action="send_message",
+                reason="Final message sending remains approval-gated.",
+            ),
+        ]
+    )
+    return [*steps, *communication_steps]
+
+
 def _append_desktop_content_artifact_steps(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
@@ -7211,6 +7396,60 @@ def _app_search_result_source_mode(text: str) -> str:
     if re.search(r"(?:打开|启动|开启|open|launch|start)", value, flags=re.IGNORECASE):
         return "open"
     return "focus"
+
+
+def _web_research_communication_target_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value or not _contains_any(value, _COMMUNICATION_ACTION_TERMS):
+        return {}
+    if not (
+        _looks_like_external_info_lookup(value)
+        or _contains_any(value, ("调研", "研究", "搜索", "查找", "查询", "检索", "research", "search"))
+    ):
+        return {}
+    target = _web_research_delivery_target_text(value)
+    if not target:
+        return {}
+    app_name, recipient = _split_communication_surface_and_recipient(target)
+    if not recipient:
+        recipient = _clean_communication_recipient_text(target)
+        if recipient and not app_name:
+            app_name = _communication_surface_for_recipient_hint(recipient)
+    if not recipient:
+        return {}
+    hint: dict[str, str] = {
+        "recipient": recipient,
+        "body_source": "research_artifact",
+        "mode": _communication_app_mode(value),
+        "send_action": "send",
+    }
+    if app_name:
+        hint["app_name"] = app_name
+    transform = _communication_content_transform_hint(value)
+    if transform:
+        hint["content_transform_hint"] = transform
+    return hint
+
+
+def _web_research_delivery_target_text(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"(?:把|将)?.{0,80}?(?:报告|摘要|总结|表格|结果|内容|调研|研究|research|report|summary)?"
+        r".{0,30}?(?:发给|发送给|发到|发送到|转发给|转发到)\s*(?P<target>[^。！？!?]+)$",
+        r"(?:send|message|forward)\s+(?:the\s+)?"
+        r"(?:research|report|summary|results?|content)?\s*"
+        r"(?:to|for)\s+(?P<target_en>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        return _clean_communication_hint_text(
+            match.groupdict().get("target")
+            or match.groupdict().get("target_en")
+            or ""
+        )
+    return ""
 
 
 def _data_analysis_communication_target_hint(text: str) -> dict[str, str]:
@@ -12484,6 +12723,12 @@ def _clean_web_search_query(query: str) -> str:
         flags=re.IGNORECASE,
     ).strip()
     value = re.sub(
+        r"\s+(?:and|then)\s+(?:send|message|forward).*$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(
         r"\s+(?:and|then)\s+(?:open|click|visit|select|choose)\s+(?:the\s+)?"
         r"(?:first|1st)\s+(?:search\s+)?(?:result|link|item).*$",
         "",
@@ -12526,8 +12771,24 @@ def _clean_web_search_query(query: str) -> str:
         flags=re.IGNORECASE,
     ).strip()
     value = re.sub(
-        r"(?:并|然后|并且|再)(?:输出|生成|写|写出|整理|总结|汇总)(?:一份|一下|成)?"
-        r"[^。.,，；;！!？?]{0,8}(?:报告|总结|文档|结果|表格|清单|table)$",
+        r"(?:[，,]\s*|并|然后|并且|再)(?:输出|生成|写|写出|整理|总结|汇总)(?:一份|一下|成)?"
+        r"[^。；;！!？?]{0,24}(?:报告|总结|文档|结果|表格|清单|table)$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(
+        r"(?:并|然后|并且|再|接着|之后|后)?\s*"
+        r"(?:把|将)?(?:报告|总结|摘要|结果|内容|表格|清单|文档)?"
+        r"\s*(?:发给|发送给|发到|发送到|转发给|转发到).*$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(r"[。.,，；;！!？?]+$", "", value).strip()
+    value = re.sub(
+        r"(?:[，,]\s*|并|然后|并且|再)(?:输出|生成|写|写出|整理|总结|汇总)(?:一份|一下|成)?"
+        r"[^。；;！!？?]{0,24}(?:报告|总结|文档|结果|表格|清单|table)$",
         "",
         value,
         flags=re.IGNORECASE,

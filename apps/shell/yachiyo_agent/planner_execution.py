@@ -942,6 +942,10 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
             ),
             planning_reason="planner_prefetch_data_source",
         )
+        if _data_analysis_opens_spreadsheet_before_context(decision):
+            if context_requests:
+                return [*app_requests, *context_requests]
+            return _mark_last_request_for_model_followup(app_requests)
         return _append_model_followup_requests(context_requests, app_requests)
     source_hint = str(inputs.get("data_source_hint") or "").strip()
     if _workspace_readable_data_source(source_hint, inputs) and "workspace.read" in allowed:
@@ -976,6 +980,17 @@ def _data_analysis_requires_model_followup(decision: Any) -> bool:
         str(getattr(step, "step_id", "") or "").strip() in followup_step_ids
         for step in decision.plan.tool_plan.steps
     )
+
+
+def _data_analysis_opens_spreadsheet_before_context(decision: Any) -> bool:
+    step_ids = [
+        str(getattr(step, "step_id", "") or "").strip()
+        for step in getattr(getattr(decision, "plan", None), "tool_plan", None).steps
+    ]
+    try:
+        return step_ids.index("open-spreadsheet-app") < step_ids.index("read-data-context")
+    except (AttributeError, ValueError):
+        return False
 
 
 def _data_analysis_spreadsheet_app_requests(
