@@ -469,6 +469,14 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "把当前窗口里的表格导出成 csv 并生成趋势图",
         allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
     )
+    current_screen_this_table = RuntimePlanner().decision(
+        "根据屏幕上这张表做数据分析",
+        allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
+    )
+    foreground_excel_table = RuntimePlanner().decision(
+        "分析前台 Excel 表格并输出报告",
+        allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
+    )
     current_page_table = RuntimePlanner().decision(
         "把当前页面里的表格复制出来，分析趋势并写报告",
         allowed_tools=[
@@ -559,6 +567,22 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "paths": ["analysis-report.md", "analysis-chart.png", "analysis-summary.csv"],
         "body_source": "visible_text",
     }
+    for visible_table in (current_screen_this_table, foreground_excel_table):
+        assert visible_table.selected_intent.kind == "data_analysis"
+        assert visible_table.selected_intent.inputs["context_source"] == "visible_text"
+        assert visible_table.selected_intent.inputs["data_source_kind"] == "text_table"
+        assert visible_table.selected_intent.missing_inputs == []
+        assert [step.step_id for step in visible_table.plan.tool_plan.steps] == [
+            "read-data-context",
+            "run-analysis",
+            "write-analysis-artifact",
+        ]
+        assert _step_by_id(visible_table, "read-data-context").tool_name == (
+            "desktop.ui_elements"
+        )
+        assert _step_by_id(visible_table, "run-analysis").depends_on == [
+            "read-data-context"
+        ]
     assert current_page_table.selected_intent.kind == "data_analysis"
     assert current_page_table.selected_intent.inputs["context_source"] == "current_page_content"
     assert [step.step_id for step in current_page_table.plan.tool_plan.steps] == [
@@ -11203,6 +11227,14 @@ def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> 
         "把当前窗口里的表格导出成 csv 并生成趋势图",
         allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
     )
+    current_screen_this_table_requests = planner_tool_requests(
+        "根据屏幕上这张表做数据分析",
+        allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
+    )
+    foreground_excel_table_requests = planner_tool_requests(
+        "分析前台 Excel 表格并输出报告",
+        allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
+    )
     current_page_table_requests = planner_tool_requests(
         "用当前网页表格输出一份数据分析报告",
         allowed_tools=["browser.extract_text", "browser.current_page", "terminal.run", "artifact.write"],
@@ -11304,6 +11336,8 @@ def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> 
             "continue_to_model": True,
         }
     ]
+    assert current_screen_this_table_requests == current_window_ui_requests
+    assert foreground_excel_table_requests == current_window_ui_requests
     assert current_page_table_requests == [
         {
             "protocol": "json_fallback",

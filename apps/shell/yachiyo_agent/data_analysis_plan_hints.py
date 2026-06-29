@@ -90,7 +90,10 @@ def data_source_kind_hint(source_hint: str, text: str = "") -> str:
         for marker in ("价格表", "销售表", "数据表", "明细表", "报表", "price table", "pricing table")
     ):
         return "text_table"
-    if any(marker in lowered_text for marker in ("表格", "table", "tabular")):
+    if any(
+        marker in lowered_text
+        for marker in ("表格", "这张表", "这个表", "当前表", "前台表", "table", "tabular")
+    ):
         return "text_table"
     return "unknown"
 

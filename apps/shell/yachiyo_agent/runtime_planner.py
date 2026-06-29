@@ -158,9 +158,15 @@ class TaskIntentRouter:
         source_hint = data_source_hint(text, metadata)
         source_scope = data_source_scope_hint(text, metadata)
         context_source = _task_context_source_hint(text)
-        if _looks_like_current_page_data_context_source(text):
+        current_page_context = _looks_like_current_page_data_context_source(text)
+        visible_context = _looks_like_visible_data_context_source(text)
+        if not context_source and current_page_context:
             context_source = "current_page_content"
-        if _looks_like_visible_data_context_source(text):
+        if (
+            visible_context
+            and not current_page_context
+            and context_source not in {"selection", "clipboard"}
+        ):
             context_source = "visible_text"
         can_discover_source = _contains_any(
             text,
@@ -6943,7 +6949,11 @@ def _looks_like_visible_data_context_source(text: str) -> bool:
         ],
     ):
         return False
-    return _contains_any(
+    return _visible_context_marker_matches(value) and _visible_data_marker_matches(value)
+
+
+def _visible_context_marker_matches(value: str) -> bool:
+    if _contains_any(
         value,
         [
             "current window",
@@ -6952,6 +6962,12 @@ def _looks_like_visible_data_context_source(text: str) -> bool:
             "current screen",
             "foreground window",
             "foreground app",
+            "visible table",
+            "visible data",
+            "visible spreadsheet",
+            "on screen",
+            "onscreen",
+            "shown on screen",
             "当前窗口",
             "当前应用",
             "当前 app",
@@ -6959,22 +6975,62 @@ def _looks_like_visible_data_context_source(text: str) -> bool:
             "当前软件",
             "前台窗口",
             "前台应用",
+            "前台",
             "当前界面",
             "当前屏幕",
+            "屏幕上",
+            "屏幕里",
+            "屏幕中的",
+            "界面上",
+            "界面里",
+            "界面中的",
+            "窗口里",
+            "窗口中的",
+            "可见",
+            "正在显示",
+            "显示的",
         ],
-    ) and _contains_any(
+    ):
+        return True
+    return bool(
+        re.search(
+            r"(?:当前|前台|打开的|正在显示的|屏幕上|界面上).{0,24}"
+            r"(?:表格|电子表格|数据)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:表格|电子表格|数据).{0,24}"
+            r"(?:当前|前台|打开的|正在显示的|屏幕上|界面上)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _visible_data_marker_matches(value: str) -> bool:
+    return _contains_any(
         value,
         [
             "table",
             "tabular",
             "spreadsheet",
+            "worksheet",
+            "sheet",
             "data",
+            "dataset",
             "csv",
+            "tsv",
             "xlsx",
+            "xls",
             "json",
             "表格",
             "数据",
             "电子表格",
+            "这张表",
+            "这个表",
+            "当前表",
+            "前台表",
         ],
     )
 
