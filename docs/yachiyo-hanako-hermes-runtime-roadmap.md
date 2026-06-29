@@ -301,6 +301,25 @@ shared artifacts, and paginated group events preserved at the service boundary.
 It does not replace packaged Agent Studio UI or real multi-agent provider
 evidence.
 
+Latest source-only release-candidate baseline, verified on June 30, 2026:
+
+```bash
+python scripts/verify_release_candidate.py --source-only \
+  --report-json tmp/source-only-rc.json
+```
+
+This passed the current source release guards, data-analysis artifact smoke,
+browser planner artifact smoke, desktop planner discovery smoke, real desktop
+discovery smoke, planner/runtime tool parity smoke, approval policy gate smoke,
+approval resume timeline smoke, runtime approval resume smoke, Yachiyo route
+approval smoke, and GroupRun timeline smoke. It intentionally skipped opt-in or
+artifact-dependent gates: real app open/UI inspection/interaction, Electron
+native bridge, built artifacts, DMG launch/screen/UI/native-file checks, real
+provider smoke, UI smokes, and manual release-candidate checks. Passing this
+baseline proves the source-level planner/runtime contracts are currently
+coherent; it is not release parity until the skipped packaged, provider, and
+manual evidence is supplied.
+
 Current opt-in OpenAI-compatible provider stream evidence is reproducible, when
 `OHA_YACHIYO_SMOKE_*` credentials are configured, with:
 
