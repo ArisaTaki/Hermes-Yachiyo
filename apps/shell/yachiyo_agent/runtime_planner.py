@@ -2726,6 +2726,50 @@ class RuntimePlanner:
                         reason="Bring the opened app to the foreground before running the generic desktop operation.",
                     )
                 )
+        inspect_preflight_step_id = ""
+        if (
+            app_name
+            and operation_uses_app_tool
+            and operation_tool
+            in {
+                "app.focus_and_click_ui_element",
+                "app.open_and_click_ui_element",
+                "app.focus_and_type_into_ui_element",
+                "app.open_and_type_into_ui_element",
+            }
+            and not focus_step_added
+            and not app_search
+        ):
+            inspect_tool = _first_allowed(("desktop.inspect_app",), allowed)
+            if inspect_tool:
+                inspect_depends_on = (
+                    []
+                    if len(steps) == 1 and steps[0].step_id == "discover-desktop-state"
+                    else [steps[-1].step_id]
+                )
+                inspect_step = _step(
+                    intent,
+                    "inspect-app",
+                    "Inspect app",
+                    "desktop.app_discovery",
+                    inspect_tool,
+                    input_preview=_desktop_inspect_app_input_preview(
+                        app_name,
+                        operation_preview,
+                        open_if_needed=True,
+                        focus=True,
+                    ),
+                    reason=(
+                        "Inspect the requested app with discovery, optional open/focus, "
+                        "windows, and named-app UI readiness before the approval-gated operation."
+                    ),
+                    depends_on=inspect_depends_on,
+                )
+                if len(steps) == 1 and steps[0].step_id == "discover-desktop-state":
+                    steps = [inspect_step]
+                elif not any(step.step_id == "inspect-app" for step in steps):
+                    steps.append(inspect_step)
+                inspect_preflight_step_id = "inspect-app"
         pre_submit_operation = any(
             item
             for item in (
@@ -2973,7 +3017,9 @@ class RuntimePlanner:
             or safe_type_text
         ) and (not foreground_submit_action or pre_submit_operation):
             operation_depends_on = ["discover-desktop-state"]
-            if focus_step_added:
+            if inspect_preflight_step_id:
+                operation_depends_on = [inspect_preflight_step_id]
+            elif focus_step_added:
                 operation_depends_on = ["focus-app-window"]
             elif any(step.step_id == "focus-opened-app" for step in steps):
                 operation_depends_on = ["focus-opened-app"]

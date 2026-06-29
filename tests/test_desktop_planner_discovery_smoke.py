@@ -22,13 +22,13 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
         "desktop.active_window",
     ]
     assert [request["tool"] for request in cases["generic_app_read_buttons"]["requests"]] == [
-        "desktop.list_apps",
-        "app.open",
-        "desktop.ui_elements",
+        "desktop.inspect_app",
     ]
+    assert cases["app_scoped_click"]["requests"][0]["tool"] == "desktop.inspect_app"
     assert cases["app_scoped_click"]["requests"][1]["tool"] == (
         "app.focus_and_click_ui_element"
     )
+    assert cases["app_scoped_type"]["requests"][0]["tool"] == "desktop.inspect_app"
     assert cases["app_scoped_type"]["requests"][1]["tool"] == (
         "app.focus_and_type_into_ui_element"
     )

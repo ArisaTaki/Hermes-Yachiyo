@@ -1414,38 +1414,72 @@ def windows(app_name: str = "") -> dict[str, Any]:
     clean_app = str(app_name or "").strip()
     resolved_app = _resolve_installed_app_name(clean_app) if clean_app else ""
     app_filter = resolved_app or clean_app
-    script = """
-    on run argv
-        set appFilter to item 1 of argv
-        tell application "System Events"
-            set windowRows to {}
-            repeat with proc in (application processes whose background only is false)
-                set appName to name of proc
-                if appFilter is "" or appName is appFilter then
-                    set appPID to unix id of proc
-                    set appFront to frontmost of proc
-                    try
-                        set winCount to count of windows of proc
-                    on error
-                        set winCount to 0
-                    end try
-                    repeat with winIndex from 1 to winCount
-                        try
-                            set winTitle to name of window winIndex of proc
-                        on error
-                            set winTitle to ""
-                        end try
-                        set end of windowRows to appName & tab & appPID & tab & winIndex & tab & appFront & tab & winTitle
-                    end repeat
+    if app_filter:
+        script = """
+        on run argv
+            set appFilter to item 1 of argv
+            tell application "System Events"
+                set windowRows to {}
+                if not (exists application process appFilter) then
+                    return ""
                 end if
-            end repeat
-            set AppleScript's text item delimiters to linefeed
-            set output to windowRows as text
-            set AppleScript's text item delimiters to ""
-            return output
-        end tell
-    end run
-    """
+                set proc to application process appFilter
+                set appName to name of proc
+                set appPID to unix id of proc
+                set appFront to frontmost of proc
+                try
+                    set winCount to count of windows of proc
+                on error
+                    set winCount to 0
+                end try
+                repeat with winIndex from 1 to winCount
+                    try
+                        set winTitle to name of window winIndex of proc
+                    on error
+                        set winTitle to ""
+                    end try
+                    set end of windowRows to appName & tab & appPID & tab & winIndex & tab & appFront & tab & winTitle
+                end repeat
+                set AppleScript's text item delimiters to linefeed
+                set output to windowRows as text
+                set AppleScript's text item delimiters to ""
+                return output
+            end tell
+        end run
+        """
+    else:
+        script = """
+        on run argv
+            set appFilter to item 1 of argv
+            tell application "System Events"
+                set windowRows to {}
+                repeat with proc in (application processes whose background only is false)
+                    set appName to name of proc
+                    if appFilter is "" or appName is appFilter then
+                        set appPID to unix id of proc
+                        set appFront to frontmost of proc
+                        try
+                            set winCount to count of windows of proc
+                        on error
+                            set winCount to 0
+                        end try
+                        repeat with winIndex from 1 to winCount
+                            try
+                                set winTitle to name of window winIndex of proc
+                            on error
+                                set winTitle to ""
+                            end try
+                            set end of windowRows to appName & tab & appPID & tab & winIndex & tab & appFront & tab & winTitle
+                        end repeat
+                    end if
+                end repeat
+                set AppleScript's text item delimiters to linefeed
+                set output to windowRows as text
+                set AppleScript's text item delimiters to ""
+                return output
+            end tell
+        end run
+        """
     result = _run_osascript(script, [app_filter])
     if not result["ok"]:
         return _with_permission_metadata(

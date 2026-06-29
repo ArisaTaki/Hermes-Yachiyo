@@ -39,12 +39,12 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "prompt": "在 Notion 点击 New Page",
         "expected_intent": "desktop_operation",
         "expected_plan_tools": [
-            "desktop.list_apps",
+            "desktop.inspect_app",
             "app.focus_and_click_ui_element",
             "desktop.ui_elements",
         ],
         "expected_request_tools": [
-            "desktop.list_apps",
+            "desktop.inspect_app",
             "app.focus",
             "desktop.click_ui_element",
             "desktop.ui_elements",

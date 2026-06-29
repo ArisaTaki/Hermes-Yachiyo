@@ -57,6 +57,7 @@ def planner_execution_tool_requests(
         return []
     if not _has_discovered_app_foreground_verification_chain(normalized_requests):
         normalized_requests = _collapse_app_foreground_direct_requests(normalized_requests, allowed)
+    normalized_requests = _drop_redundant_post_inspect_app_prepare_requests(normalized_requests)
     return _drop_redundant_execution_verification_requests(normalized_requests)
 
 
@@ -536,12 +537,40 @@ def _drop_redundant_execution_verification_requests(
     return filtered
 
 
+def _drop_redundant_post_inspect_app_prepare_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    inspect_app_name = ""
+    for request in requests:
+        tool_name = str(request.get("tool") or "").strip()
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        app_name = str(payload.get("app_name") or "").strip()
+        if (
+            tool_name in {"app.open", "app.focus"}
+            and app_name
+            and inspect_app_name
+            and app_name == inspect_app_name
+        ):
+            continue
+        filtered.append(request)
+        if tool_name == "desktop.inspect_app":
+            focus_requested = payload.get("focus", True) is not False
+            open_requested = payload.get("open_if_needed", True) is not False
+            inspect_app_name = app_name if focus_requested or open_requested else ""
+        elif tool_name not in {"app.open", "app.focus"}:
+            inspect_app_name = ""
+    return filtered
+
+
 def _keep_pre_mutation_verification_request(request: dict[str, Any]) -> bool:
     tool_name = str(request.get("tool") or "").strip()
-    if tool_name != "screen.capture":
-        return False
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
-    return bool(str(payload.get("reason") or "").strip())
+    if tool_name == "desktop.inspect_app":
+        return bool(str(payload.get("app_name") or "").strip())
+    if tool_name == "screen.capture":
+        return bool(str(payload.get("reason") or "").strip())
+    return False
 
 
 def _keep_post_mutation_verification_request(

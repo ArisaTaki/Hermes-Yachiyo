@@ -1858,6 +1858,81 @@ def test_runtime_planner_prefers_desktop_ui_for_non_browser_app_scoped_click() -
     assert _step_by_id(chrome, "click-current-page-element").tool_name == "browser.click"
 
 
+def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
+    click_tools = [
+        "desktop.inspect_app",
+        "desktop.list_apps",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+
+    click = RuntimePlanner().decision(
+        "在 Notion 点击 New Page",
+        allowed_tools=click_tools,
+    )
+
+    assert click.selected_intent.kind == "desktop_operation"
+    assert [step.step_id for step in click.plan.tool_plan.steps] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    inspect = _step_by_id(click, "inspect-app")
+    assert inspect.tool_name == "desktop.inspect_app"
+    assert inspect.approval_required is False
+    assert inspect.input_preview == {
+        "app_name": "Notion",
+        "open_if_needed": True,
+        "focus": True,
+        "limit": 80,
+    }
+    operation = _step_by_id(click, "operate-foreground-ui")
+    assert operation.tool_name == "app.focus_and_click_ui_element"
+    assert operation.approval_required is True
+    assert operation.depends_on == ["inspect-app"]
+    assert _step_by_id(click, "verify-desktop-result").depends_on == [
+        "operate-foreground-ui"
+    ]
+    assert [request["tool"] for request in planner_tool_requests("在 Notion 点击 New Page", click_tools)] == [
+        "desktop.inspect_app",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+
+    type_tools = [
+        "desktop.inspect_app",
+        "desktop.list_apps",
+        "app.focus_and_type_into_ui_element",
+        "desktop.ui_elements",
+    ]
+    typed = RuntimePlanner().decision(
+        "在 Slack 的消息框输入 hello",
+        allowed_tools=type_tools,
+    )
+
+    assert [step.step_id for step in typed.plan.tool_plan.steps] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(typed, "inspect-app").input_preview == {
+        "app_name": "Slack",
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert _step_by_id(typed, "operate-foreground-ui").tool_name == (
+        "app.focus_and_type_into_ui_element"
+    )
+    assert _step_by_id(typed, "operate-foreground-ui").depends_on == ["inspect-app"]
+    assert [request["tool"] for request in planner_tool_requests("在 Slack 的消息框输入 hello", type_tools)] == [
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.ui_elements",
+    ]
+
+
 def test_runtime_planner_routes_current_page_find_actions() -> None:
     static = RuntimePlanner().decision(
         "search current page for hello",

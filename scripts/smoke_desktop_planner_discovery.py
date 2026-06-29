@@ -54,6 +54,7 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
         "id": "app_scoped_click",
         "prompt": "在 Notion 点击 New Page",
         "allowed_tools": [
+            "desktop.inspect_app",
             "desktop.list_apps",
             "app.focus_and_click_ui_element",
             "desktop.ui_elements",
@@ -61,12 +62,12 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
         ],
         "expected_app": "Notion",
         "expected_steps": [
-            "discover-desktop-state",
+            "inspect-app",
             "operate-foreground-ui",
             "verify-desktop-result",
         ],
         "expected_request_tools": [
-            "desktop.list_apps",
+            "desktop.inspect_app",
             "app.focus_and_click_ui_element",
             "desktop.ui_elements",
         ],
@@ -75,6 +76,7 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
         "id": "app_scoped_type",
         "prompt": "在 Slack 的消息框输入 hello",
         "allowed_tools": [
+            "desktop.inspect_app",
             "desktop.list_apps",
             "app.focus_and_type_into_ui_element",
             "desktop.ui_elements",
@@ -82,12 +84,12 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
         ],
         "expected_app": "Slack",
         "expected_steps": [
-            "discover-desktop-state",
+            "inspect-app",
             "operate-foreground-ui",
             "verify-desktop-result",
         ],
         "expected_request_tools": [
-            "desktop.list_apps",
+            "desktop.inspect_app",
             "app.focus_and_type_into_ui_element",
             "desktop.ui_elements",
         ],

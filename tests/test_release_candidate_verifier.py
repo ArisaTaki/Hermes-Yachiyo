@@ -652,9 +652,11 @@ def test_release_candidate_verifier_reports_desktop_planner_discovery_smoke(
         "app.open",
         "desktop.active_window",
     ]
+    assert case_by_id["app_scoped_click"]["requests"][0]["tool"] == "desktop.inspect_app"
     assert case_by_id["app_scoped_click"]["requests"][1]["tool"] == (
         "app.focus_and_click_ui_element"
     )
+    assert case_by_id["app_scoped_type"]["requests"][0]["tool"] == "desktop.inspect_app"
     assert case_by_id["app_scoped_type"]["requests"][1]["tool"] == (
         "app.focus_and_type_into_ui_element"
     )

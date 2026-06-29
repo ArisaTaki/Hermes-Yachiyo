@@ -3652,6 +3652,7 @@ def test_chat_bridge_quick_message_requires_approval_for_browser_click_followup(
         seed_templates=False,
     )
     runtime.agent_runtime_service = service
+    inspect_calls: list[tuple[str, bool, bool, str, int]] = []
     runtime.chat_session.add_user_message("打开 GitHub")
     runtime.chat_session.add_assistant_message("已打开 GitHub。")
     focus_calls: list[str] = []
@@ -3709,6 +3710,23 @@ def test_chat_bridge_quick_message_requires_approval_for_browser_click_followup(
             "data": {"target": target, "label": target, "role": role_filter or "button"},
         }
 
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: bool = True,
+        focus: bool = True,
+        role_filter: str = "",
+        limit: int = 80,
+    ) -> dict:
+        inspect_calls.append((app_name, open_if_needed, focus, role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"Inspected {app_name}",
+            "data": {"app_name": app_name, "focus_verified": focus},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.click_ui_element", fake_click_ui_element)
     monkeypatch.setattr("apps.shell.agent.tools.browser.click", fake_browser_click)
@@ -3767,6 +3785,7 @@ def test_chat_bridge_quick_message_requires_approval_for_browser_click_followup(
         second_waiting_run = service.get_run(second_link["run_id"])
 
         assert second["ok"] is True
+        assert inspect_calls == [("Google Chrome", True, True, "button", 80)]
         assert focus_calls == []
         assert click_calls == [("text=登录", 1)]
         assert ui_click_calls == []
@@ -3818,6 +3837,7 @@ def test_chat_bridge_quick_message_opens_browser_then_requires_approval_for_page
         seed_templates=False,
     )
     runtime.agent_runtime_service = service
+    inspect_calls: list[tuple[str, bool, bool, str, int]] = []
     open_calls: list[str] = []
     focus_calls: list[str] = []
     click_calls: list[tuple[str, int]] = []
@@ -3883,6 +3903,23 @@ def test_chat_bridge_quick_message_opens_browser_then_requires_approval_for_page
             "data": {"target": target, "label": target, "role": role_filter or "button"},
         }
 
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: bool = True,
+        focus: bool = True,
+        role_filter: str = "",
+        limit: int = 80,
+    ) -> dict:
+        inspect_calls.append((app_name, open_if_needed, focus, role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"Inspected {app_name}",
+            "data": {"app_name": app_name, "focus_verified": focus},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.click_ui_element", fake_click_ui_element)
@@ -3903,6 +3940,7 @@ def test_chat_bridge_quick_message_opens_browser_then_requires_approval_for_page
         waiting_run = service.get_run(link["run_id"])
 
         assert result["ok"] is True
+        assert inspect_calls == [("Google Chrome", True, True, "button", 80)]
         assert open_calls == []
         assert focus_calls == []
         assert click_calls == []
@@ -3932,7 +3970,9 @@ def test_chat_bridge_quick_message_opens_browser_then_requires_approval_for_page
         assert click_calls == []
         assert ui_click_calls == [("登录", "button", 80, 1)]
         assert approved.status == "completed"
-        assert approved.summary == "已打开 Google Chrome 并点击前台控件：登录。"
+        assert approved.summary == (
+            "已切换到 Google Chrome。 已打开 Google Chrome 并点击前台控件：登录。"
+        )
         assert approved.needs_user_action is False
         assert approved.pending_approvals == []
         assert run["status"] == "completed"
@@ -4086,6 +4126,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_ui_click(
         seed_templates=False,
     )
     runtime.agent_runtime_service = service
+    inspect_calls: list[tuple[str, bool, bool, str, int]] = []
     focus_calls: list[str] = []
     click_calls: list[tuple[str, str, int, int]] = []
     monkeypatch.setattr(
@@ -4112,6 +4153,22 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_ui_click(
             "data": {"app_name": app_name},
         }
 
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: bool = True,
+        focus: bool = True,
+        role_filter: str = "",
+        limit: int = 80,
+    ) -> dict:
+        inspect_calls.append((app_name, open_if_needed, focus, role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"Inspected {app_name}",
+            "data": {"app_name": app_name, "focus_verified": focus},
+        }
+
     def fake_click_ui_element(
         target: str,
         *,
@@ -4127,6 +4184,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_ui_click(
             "data": {"target": target, "role_filter": role_filter},
         }
 
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.click_ui_element",
@@ -4148,6 +4206,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_ui_click(
         waiting_run = service.get_run(link["run_id"])
 
         assert result["ok"] is True
+        assert inspect_calls == [("Slack", True, True, "button", 80)]
         assert focus_calls == []
         assert click_calls == []
         assert waiting_task["status"] == "waiting_approval"
@@ -4195,6 +4254,10 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_ui_click(
         second_waiting_run = service.get_run(second_link["run_id"])
 
         assert second["ok"] is True
+        assert inspect_calls == [
+            ("Slack", True, True, "button", 80),
+            ("WeChat", True, True, "text", 80),
+        ]
         assert focus_calls == ["Slack"]
         assert click_calls == [("Send", "button", 80, 1)]
         assert second_waiting_task["status"] == "waiting_approval"
@@ -4245,6 +4308,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
         seed_templates=False,
     )
     runtime.agent_runtime_service = service
+    inspect_calls: list[tuple[str, bool, bool, str, int]] = []
     open_calls: list[str] = []
     focus_calls: list[str] = []
     click_calls: list[tuple[str, str, int, int]] = []
@@ -4296,6 +4360,23 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
             "data": {"target": target, "role_filter": role_filter},
         }
 
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: bool = True,
+        focus: bool = True,
+        role_filter: str = "",
+        limit: int = 80,
+    ) -> dict:
+        inspect_calls.append((app_name, open_if_needed, focus, role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"Inspected {app_name}",
+            "data": {"app_name": app_name, "focus_verified": focus},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr(
@@ -4318,6 +4399,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_ui_click(
         waiting_run = service.get_run(link["run_id"])
 
         assert result["ok"] is True
+        assert inspect_calls == [("Slack", True, True, "button", 80)]
         assert open_calls == []
         assert focus_calls == []
         assert click_calls == []
@@ -4370,6 +4452,7 @@ def test_chat_bridge_quick_message_continues_after_app_open_non_search_ui_click_
         seed_templates=False,
     )
     runtime.agent_runtime_service = service
+    inspect_calls: list[tuple[str, bool, bool, str, int]] = []
     open_calls: list[str] = []
     focus_calls: list[str] = []
     click_calls: list[tuple[str, str, int, int]] = []
@@ -4431,6 +4514,23 @@ def test_chat_bridge_quick_message_continues_after_app_open_non_search_ui_click_
             "data": {"character_count": len(text), "explicit_user_text": True},
         }
 
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: bool = True,
+        focus: bool = True,
+        role_filter: str = "",
+        limit: int = 80,
+    ) -> dict:
+        inspect_calls.append((app_name, open_if_needed, focus, role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"Inspected {app_name}",
+            "data": {"app_name": app_name, "focus_verified": focus},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr(
@@ -4457,6 +4557,7 @@ def test_chat_bridge_quick_message_continues_after_app_open_non_search_ui_click_
         waiting_run = service.get_run(link["run_id"])
 
         assert result["ok"] is True
+        assert inspect_calls == [("Slack", True, True, "", 80)]
         assert open_calls == []
         assert focus_calls == []
         assert click_calls == []
@@ -4511,6 +4612,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_type_into_ui_e
         seed_templates=False,
     )
     runtime.agent_runtime_service = service
+    inspect_calls: list[tuple[str, bool, bool, str, int]] = []
     open_calls: list[str] = []
     focus_calls: list[str] = []
     type_calls: list[tuple[str, str, str, int]] = []
@@ -4567,6 +4669,23 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_type_into_ui_e
             },
         }
 
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: bool = True,
+        focus: bool = True,
+        role_filter: str = "",
+        limit: int = 80,
+    ) -> dict:
+        inspect_calls.append((app_name, open_if_needed, focus, role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"Inspected {app_name}",
+            "data": {"app_name": app_name, "focus_verified": focus},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr(
@@ -4589,6 +4708,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_open_type_into_ui_e
         waiting_run = service.get_run(link["run_id"])
 
         assert result["ok"] is True
+        assert inspect_calls == [("WeChat", True, True, "text", 80)]
         assert open_calls == []
         assert focus_calls == []
         assert type_calls == []
@@ -4633,6 +4753,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_search_field
     monkeypatch,
 ):
     calls: list[tuple[str, str]] = []
+    inspect_calls: list[tuple[str, bool, bool, str, int]] = []
 
     def fake_app_open(app_name: str) -> dict:
         calls.append(("open", app_name))
@@ -4670,6 +4791,23 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_search_field
             "data": {"character_count": len(text), "explicit_user_text": True},
         }
 
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: bool = True,
+        focus: bool = True,
+        role_filter: str = "",
+        limit: int = 80,
+    ) -> dict:
+        inspect_calls.append((app_name, open_if_needed, focus, role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"Inspected {app_name}",
+            "data": {"app_name": app_name, "focus_verified": focus},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
@@ -4681,6 +4819,7 @@ def test_chat_bridge_quick_message_requires_approval_for_app_scoped_search_field
     )
 
     assert result["ok"] is True
+    assert inspect_calls == [("WeChat", True, True, "text", 80)]
     assert calls == []
     assert agent_task["status"] == "waiting_approval"
     assert agent_task["needs_user_action"] is True
