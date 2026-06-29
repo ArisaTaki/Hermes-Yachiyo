@@ -1488,6 +1488,12 @@ class RuntimePlanner:
             capability_ids=capabilities,
         )
         missing = _missing_capabilities(snapshots, required_capability_ids=required_capabilities)
+        for capability_id in _unavailable_required_step_capabilities(
+            steps,
+            required_capability_ids=required_capabilities,
+        ):
+            if capability_id not in missing:
+                missing.append(capability_id)
         tool_plan = ToolPlanSnapshot(
             plan_id=_stable_id("tool-plan", intent.kind, intent.user_goal),
             title=f"{intent.title} Tool Plan",
@@ -3070,27 +3076,27 @@ class RuntimePlanner:
                 operation_depends_on = ["capture-screen"]
             elif not operation_uses_app_tool and app_name:
                 operation_depends_on = ["open-or-focus-app"]
+            resolved_operation_tool = operation_tool or _desktop_operation_fallback_tool(
+                allowed=allowed,
+                click_target=click_target,
+                hotkey=hotkey,
+                safe_shortcut=primary_safe_shortcut,
+                safe_key=safe_key,
+                safe_scroll=safe_scroll,
+                safe_click=safe_click,
+                type_target=type_target,
+                safe_type_text=operation_safe_type_text,
+            )
             steps.append(
                 _step(
                     intent,
                     "operate-foreground-ui",
                     "Operate foreground UI",
                     "desktop.ui_operation",
-                    operation_tool
-                    or _first_allowed(
-                        (
-                            "desktop.click_ui_element",
-                            "desktop.type_into_ui_element",
-                            "desktop.safe_shortcut",
-                            "desktop.safe_key",
-                            "desktop.hotkey",
-                            "desktop.safe_type_text",
-                        ),
-                        allowed,
-                    ),
+                    resolved_operation_tool,
                     input_preview=operation_preview,
-                    risk_level=_desktop_operation_risk_level(operation_tool),
-                    approval_required=_desktop_operation_approval_required(operation_tool),
+                    risk_level=_desktop_operation_risk_level(resolved_operation_tool),
+                    approval_required=_desktop_operation_approval_required(resolved_operation_tool),
                     depends_on=operation_depends_on,
                     reason="Use observable UI operations after discovery, then verify.",
                 )
@@ -5612,6 +5618,32 @@ def _missing_capabilities(
         if tools and not available_tools:
             missing.append(capability_id)
     return [item for item in missing if item]
+
+
+def _unavailable_required_step_capabilities(
+    steps: Iterable[ToolPlanStepSnapshot],
+    *,
+    required_capability_ids: Iterable[str] | None = None,
+) -> list[str]:
+    required = {
+        str(capability_id or "").strip()
+        for capability_id in required_capability_ids or []
+        if str(capability_id or "").strip()
+    }
+    missing: list[str] = []
+    for step in steps:
+        if str(step.status or "").strip() != "unavailable":
+            continue
+        if str(step.step_id or "").strip() == "verify-desktop-result":
+            continue
+        capability_id = str(step.capability_id or "").strip()
+        if not capability_id:
+            continue
+        if required and capability_id not in required:
+            continue
+        if capability_id not in missing:
+            missing.append(capability_id)
+    return missing
 
 
 def _required_capabilities_for_plan(
@@ -12918,6 +12950,47 @@ def _desktop_operation_tool_preview(
     if click_target:
         return _first_allowed(("desktop.click_ui_element",), allowed), {**click_target, "limit": 80}
     return None, {}
+
+
+def _desktop_operation_fallback_tool(
+    *,
+    allowed: set[str] | None,
+    click_target: Mapping[str, Any] | None,
+    hotkey: Mapping[str, Any] | None,
+    safe_shortcut: Mapping[str, Any] | None,
+    safe_key: Mapping[str, Any] | None,
+    safe_scroll: Mapping[str, Any] | None,
+    safe_click: Mapping[str, Any] | None,
+    type_target: Mapping[str, Any] | None,
+    safe_type_text: str,
+) -> str | None:
+    if hotkey:
+        return _first_allowed(("desktop.hotkey",), allowed)
+    if safe_shortcut:
+        return _first_allowed(("desktop.safe_shortcut",), allowed)
+    if safe_key:
+        return _first_allowed(("desktop.safe_key",), allowed)
+    if safe_scroll:
+        return _first_allowed(("desktop.safe_scroll",), allowed)
+    if safe_click:
+        return _first_allowed(("desktop.safe_click", "desktop.click"), allowed)
+    if type_target:
+        return _first_allowed(("desktop.type_into_ui_element",), allowed)
+    if safe_type_text:
+        return _first_allowed(("desktop.safe_type_text", "desktop.type_text"), allowed)
+    if click_target:
+        return _first_allowed(("desktop.click_ui_element",), allowed)
+    return _first_allowed(
+        (
+            "desktop.click_ui_element",
+            "desktop.type_into_ui_element",
+            "desktop.safe_shortcut",
+            "desktop.safe_key",
+            "desktop.hotkey",
+            "desktop.safe_type_text",
+        ),
+        allowed,
+    )
 
 
 def _expected_outputs(text: str, *, default: list[str]) -> list[str]:

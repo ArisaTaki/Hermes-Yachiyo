@@ -297,6 +297,8 @@ def _first_allowed(candidates: Iterable[str], allowed: set[str]) -> str:
 
 
 def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    if _has_unavailable_required_desktop_step(decision):
+        return []
     requests: list[dict[str, Any]] = []
     for step in decision.plan.tool_plan.steps:
         step_id = str(getattr(step, "step_id", "") or "").strip()
@@ -322,6 +324,25 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
     if _weak_desktop_discovery_plan(decision, requests):
         return []
     return requests
+
+
+def _has_unavailable_required_desktop_step(decision: Any) -> bool:
+    plan = getattr(decision, "plan", None)
+    tool_plan = getattr(plan, "tool_plan", None)
+    steps = getattr(tool_plan, "steps", None)
+    if not isinstance(steps, list):
+        return False
+    for step in steps:
+        status = str(getattr(step, "status", "") or "").strip()
+        if status != "unavailable":
+            continue
+        step_id = str(getattr(step, "step_id", "") or "").strip()
+        capability_id = str(getattr(step, "capability_id", "") or "").strip()
+        if step_id == "verify-desktop-result":
+            continue
+        if capability_id in {"desktop.app_control", "desktop.ui_operation"}:
+            return True
+    return False
 
 
 def _keep_direct_discovery_step(step: Any, tool_name: str) -> bool:

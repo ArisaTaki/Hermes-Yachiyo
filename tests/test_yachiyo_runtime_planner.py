@@ -11794,6 +11794,70 @@ def test_planner_tool_requests_maps_app_hotkey_plan() -> None:
     ]
 
 
+def test_planner_does_not_downgrade_app_hotkey_to_click_tool_when_hotkey_is_missing() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+
+    decision = RuntimePlanner().decision(
+        "在 Notion 按 Command K",
+        allowed_tools=allowed_tools,
+    )
+    operation = _step_by_id(decision, "operate-foreground-ui")
+
+    assert operation.status == "unavailable"
+    assert operation.tool_name is None
+    assert operation.input_preview == {"key": "k", "modifiers": ["command"]}
+    assert decision.plan.tool_plan.missing_capabilities == ["desktop.ui_operation"]
+    assert planner_tool_requests("在 Notion 按 Command K", allowed_tools=allowed_tools) == []
+
+
+def test_planner_keeps_app_hotkey_discover_operate_verify_when_hotkey_is_available() -> None:
+    requests = planner_tool_requests(
+        "在 Notion 按 Command K",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.hotkey",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Notion", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Notion"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "k", "modifiers": ["command"]},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_hotkey",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_planner_tool_requests_maps_explicit_browser_url_plan() -> None:
     requests = planner_desktop_tool_requests(
         "打开 https://example.com",

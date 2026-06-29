@@ -94,6 +94,30 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
             "desktop.ui_elements",
         ],
     },
+    {
+        "id": "app_scoped_hotkey",
+        "prompt": "在 Notion 按 Command K",
+        "allowed_tools": [
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.hotkey",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+        "expected_app": "Notion",
+        "expected_steps": [
+            "discover-desktop-state",
+            "open-or-focus-app",
+            "operate-foreground-ui",
+            "verify-desktop-result",
+        ],
+        "expected_request_tools": [
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.hotkey",
+            "desktop.ui_elements",
+        ],
+    },
 )
 
 

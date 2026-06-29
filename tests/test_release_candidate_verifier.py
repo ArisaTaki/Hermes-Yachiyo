@@ -355,7 +355,7 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     }
     assert report["desktop_planner_discovery_smoke"]["status"] == "passed"
     assert report["desktop_planner_discovery_smoke"]["evidence"]["ok"] is True
-    assert report["desktop_planner_discovery_smoke"]["evidence"]["case_count"] == 4
+    assert report["desktop_planner_discovery_smoke"]["evidence"]["case_count"] == 5
     assert {
         case["id"]
         for case in report["desktop_planner_discovery_smoke"]["evidence"]["cases"]
@@ -364,6 +364,7 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "generic_app_read_buttons",
         "app_scoped_click",
         "app_scoped_type",
+        "app_scoped_hotkey",
     }
     assert report["real_desktop_discovery_smoke"]["status"] == "passed"
     assert report["real_desktop_discovery_smoke"]["evidence"]["ok"] is True
