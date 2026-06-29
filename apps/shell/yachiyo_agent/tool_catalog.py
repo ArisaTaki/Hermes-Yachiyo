@@ -25,6 +25,7 @@ from .contracts import (
 from .policy import (
     DESKTOP_CAPABILITY_DIAGNOSTIC_ROUTES,
     DESKTOP_CAPABILITY_TOOLS,
+    desktop_tool_blocking_conditions,
     desktop_tool_missing_permissions,
     desktop_execution_capability_snapshots,
     desktop_tool_risk_level,
@@ -57,6 +58,7 @@ def runtime_tool_catalog_snapshot(
             tool_name,
             capabilities=capability_payloads,
             missing_permissions=missing_permissions or {},
+            blocking_conditions=blocking_conditions or {},
         )
         for tool_name in sorted(clean_registered)
         if tool_name in TOOL_DESCRIPTORS
@@ -119,6 +121,7 @@ def _catalog_item_from_descriptor(
     *,
     capabilities: Mapping[str, Mapping[str, Any]],
     missing_permissions: Mapping[str, Iterable[str]],
+    blocking_conditions: Mapping[str, Iterable[str]],
 ) -> ToolCatalogItemSnapshot:
     descriptor = TOOL_DESCRIPTORS[tool_name]
     model_tool_schema = descriptor.to_model_tool_schema()
@@ -142,6 +145,7 @@ def _catalog_item_from_descriptor(
             tool_name,
             capability_id=capability_id,
             capabilities=capabilities,
+            blocking_conditions=blocking_conditions,
         ),
         fallback_notes=_fallback_notes_for_tool(tool_name),
         diagnostic_route=_diagnostic_route_for_tool(capability_id),
@@ -287,13 +291,15 @@ def _blocking_conditions_for_tool(
     *,
     capability_id: str | None,
     capabilities: Mapping[str, Mapping[str, Any]],
+    blocking_conditions: Mapping[str, Iterable[str]],
 ) -> list[str]:
     if not _is_desktop_or_browser_tool(tool_name) or not capability_id:
         return []
-    capability = capabilities.get(capability_id)
-    if not isinstance(capability, Mapping):
-        return []
-    return _string_list(capability.get("blocking_conditions"))
+    return desktop_tool_blocking_conditions(
+        tool_name,
+        capability_id=capability_id,
+        blocking_conditions=blocking_conditions,
+    )
 
 
 def _fallback_notes_for_tool(tool_name: str) -> list[str]:

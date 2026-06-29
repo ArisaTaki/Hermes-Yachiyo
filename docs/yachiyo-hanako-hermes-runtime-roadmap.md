@@ -139,6 +139,12 @@ process is launched but still cannot become frontmost, the evidence preserves
 `dock_item_name`. This distinguishes "app discovery/open works" from the
 remaining host-level foreground limitation.
 
+Readiness now separates foreground activation runtime blockers from permission
+gaps. `foreground_focus_unavailable` is reported through capability and
+tool-level `blocking_conditions`, so Chat, Bubble, AgentTaskCard, Diagnostics,
+and Agent Studio can show that `app.open` still works while `app.focus` and
+foreground-input tools are currently blocked.
+
 The Electron desktop shell now also starts a loopback-only native runtime
 bridge and injects its URL/token into the Python backend. `app.focus` can use
 that bridge as an additional `electron_native_bridge` strategy after local

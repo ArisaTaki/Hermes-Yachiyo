@@ -2182,6 +2182,32 @@ def test_legacy_runtime_port_readiness_reports_desktop_runtime_blockers(monkeypa
     assert runtime.calls == [("list_runnables", None)]
 
 
+def test_legacy_runtime_port_readiness_reports_foreground_activation_blocker(monkeypatch) -> None:
+    runtime = _FakeRuntime()
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_permission_missing_by_capability",
+        lambda: {},
+    )
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.legacy_tasks.desktop_runtime_blocking_conditions_by_capability",
+        lambda: {
+            "foreground_activation": ["foreground_focus_unavailable"],
+        },
+    )
+
+    readiness = LegacyRuntimePort(runtime).readiness()
+    capabilities = readiness["capabilities"]
+
+    assert capabilities["foreground_activation"]["available"] is False
+    assert capabilities["foreground_activation"]["missing_permissions"] == []
+    assert capabilities["foreground_activation"]["blocking_conditions"] == [
+        "foreground_focus_unavailable"
+    ]
+    assert "app.open" in capabilities["app_control"]["available_tools"]
+    assert "app.focus" in capabilities["app_control"]["unavailable_tools"]
+    assert runtime.calls == [("list_runnables", None)]
+
+
 def test_legacy_runtime_port_starts_and_links_chat_workflow_task() -> None:
     runtime = _FakeRuntime()
 

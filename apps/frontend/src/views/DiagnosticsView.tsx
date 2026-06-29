@@ -1025,10 +1025,12 @@ const diagnosticPermissionLabels: Record<DiagnosticPermissionAction, string> = {
 
 const diagnosticRuntimeBlockingLabels: Record<string, string> = {
   desktop_session_locked: '桌面会话已锁定',
+  foreground_focus_unavailable: '前台激活暂不可用',
 };
 
 const diagnosticRuntimeBlockingHints: Record<string, string> = {
   desktop_session_locked: '请先解锁当前 macOS 桌面会话，然后重试前台窗口、点击或输入操作。',
+  foreground_focus_unavailable: '当前运行环境无法把目标应用切到最前；请重新运行活动窗口和桌面能力探测。',
 };
 
 function diagnosticPermissionTargets(value: string): Set<DiagnosticPermissionAction> {

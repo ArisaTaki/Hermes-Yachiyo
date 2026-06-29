@@ -1093,13 +1093,16 @@ def test_desktop_execution_capability_policy_models_foreground_activation_gap() 
             "app.open_and_safe_type_text",
             "app.focus_and_safe_type_text",
         },
-        missing_permissions={
-            "foreground_activation": ["foreground_focus"],
+        blocking_conditions={
+            "foreground_activation": ["foreground_focus_unavailable"],
         },
     )
 
     assert capabilities["foreground_activation"]["available"] is False
-    assert capabilities["foreground_activation"]["missing_permissions"] == ["foreground_focus"]
+    assert capabilities["foreground_activation"]["missing_permissions"] == []
+    assert capabilities["foreground_activation"]["blocking_conditions"] == [
+        "foreground_focus_unavailable"
+    ]
     assert "app.open" in capabilities["app_control"]["available_tools"]
     assert "app.focus" in capabilities["app_control"]["unavailable_tools"]
     assert "app.open_and_safe_type_text" in capabilities["foreground_input"]["unavailable_tools"]
@@ -1758,6 +1761,25 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert any("captures the page" in note for note in browser_open_screenshot.fallback_notes)
     assert terminal.risk_level == "high"
     assert terminal.approval_required is True
+
+
+def test_runtime_tool_catalog_surfaces_foreground_activation_blockers_per_tool() -> None:
+    catalog = runtime_tool_catalog_snapshot(
+        platform_name="Darwin",
+        blocking_conditions={
+            "foreground_activation": ["foreground_focus_unavailable"],
+        },
+    )
+    tools = {tool.tool_name: tool for tool in catalog.tools}
+
+    assert tools["app.open"].blocking_conditions == []
+    assert tools["app.focus"].blocking_conditions == ["foreground_focus_unavailable"]
+    assert tools["app.open_and_safe_type_text"].blocking_conditions == [
+        "foreground_focus_unavailable"
+    ]
+    assert catalog.capabilities["foreground_activation"].blocking_conditions == [
+        "foreground_focus_unavailable"
+    ]
 
 
 def test_runtime_tool_catalog_surfaces_restricted_plugin_metadata_and_uninstall() -> None:

@@ -8,6 +8,7 @@ const desktopCapabilityIds = [
   'active_window',
   'app_control',
   'media_control',
+  'foreground_activation',
   'foreground_input',
   'browser_control',
 ];
@@ -48,10 +49,12 @@ const permissionRecoveryHints: Record<string, string> = {
 
 const blockingConditionLabels: Record<string, string> = {
   desktop_session_locked: '桌面会话已锁定',
+  foreground_focus_unavailable: '前台激活暂不可用',
 };
 
 const blockingConditionRecoveryHints: Record<string, string> = {
   desktop_session_locked: '请先解锁当前 macOS 桌面会话，然后重试前台窗口、点击或输入操作。',
+  foreground_focus_unavailable: '当前运行环境无法把目标应用切到最前；请在诊断页重新探测桌面权限和前台窗口状态。',
 };
 
 export function chatDesktopPermissionNotice(

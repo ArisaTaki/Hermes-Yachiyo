@@ -782,6 +782,7 @@ def desktop_execution_capability_snapshots(
             registered=registered,
             supported=supported,
             missing_by_capability=missing_by_capability,
+            blocking_by_capability=blocking_by_capability,
         )
         if blocking:
             available_tools = []
@@ -898,6 +899,7 @@ def _capability_tool_availability(
     registered: set[str],
     supported: bool,
     missing_by_capability: Mapping[str, Iterable[str]],
+    blocking_by_capability: Mapping[str, Iterable[str]],
 ) -> tuple[list[str], list[str], list[str]]:
     available_tools: list[str] = []
     degraded_tools: list[str] = []
@@ -911,9 +913,14 @@ def _capability_tool_availability(
             capability_id=capability_id,
             missing_by_capability=missing_by_capability,
         )
-        if supported and clean_tool in registered and not missing:
+        blocking = _tool_blocking_conditions(
+            clean_tool,
+            capability_id=capability_id,
+            blocking_by_capability=blocking_by_capability,
+        )
+        if supported and clean_tool in registered and not missing and not blocking:
             available_tools.append(clean_tool)
-        elif supported and clean_tool in registered and _tool_degrades_with_permissions(
+        elif supported and clean_tool in registered and not blocking and _tool_degrades_with_permissions(
             clean_tool,
             missing,
             missing_by_capability=missing_by_capability,
@@ -1013,6 +1020,63 @@ def desktop_tool_missing_permissions(
         tool,
         capability_id=capability_id,
         missing_by_capability=missing_permissions,
+    )
+
+
+def _tool_blocking_conditions(
+    tool: str,
+    *,
+    capability_id: str,
+    blocking_by_capability: Mapping[str, Iterable[str]],
+) -> list[str]:
+    values = [*_missing_permissions(blocking_by_capability, "desktop_execution")]
+    capability_blocking = _missing_permissions(blocking_by_capability, capability_id)
+    foreground_activation_blocking = _missing_permissions(
+        blocking_by_capability,
+        "foreground_activation",
+    )
+    foreground_input_blocking = _missing_permissions(blocking_by_capability, "foreground_input")
+    if tool in {"app.focus", "app.focus_window", "app.show"}:
+        values.extend(foreground_activation_blocking)
+    elif tool in {
+        "app.open_and_safe_type_text",
+        "app.open_and_safe_shortcut",
+        "app.open_and_safe_key",
+        "app.open_and_hotkey",
+        "app.open_and_safe_scroll",
+        "app.open_and_safe_click",
+        "app.open_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_safe_type_text",
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_key",
+        "app.focus_and_hotkey",
+        "app.focus_and_safe_scroll",
+        "app.focus_and_safe_click",
+        "app.focus_and_click_ui_element",
+        "app.focus_and_type_into_ui_element",
+    }:
+        values.extend(foreground_input_blocking)
+        values.extend(foreground_activation_blocking)
+    elif tool in {"media.music_app_open_and_play", "media.music_app_control"}:
+        values.extend(foreground_activation_blocking)
+    elif tool in {"desktop.click", "desktop.type_text"}:
+        values.extend(foreground_input_blocking)
+    else:
+        values.extend(capability_blocking)
+    return _ordered_unique(values)
+
+
+def desktop_tool_blocking_conditions(
+    tool: str,
+    *,
+    capability_id: str,
+    blocking_conditions: Mapping[str, Iterable[str]],
+) -> list[str]:
+    return _tool_blocking_conditions(
+        tool,
+        capability_id=capability_id,
+        blocking_by_capability=blocking_conditions,
     )
 
 

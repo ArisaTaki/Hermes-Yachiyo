@@ -99,6 +99,14 @@ def desktop_runtime_blocking_conditions_by_capability(
             "foreground_input",
         ):
             _add_missing(blocking, capability_id, "desktop_session_locked")
+    else:
+        result = _check_foreground_activation()
+        if not result.get("verified") and not result.get("permission_denied"):
+            _add_missing(
+                blocking,
+                "foreground_activation",
+                "foreground_focus_unavailable",
+            )
 
     if use_cache:
         _RUNTIME_BLOCKER_CACHE = (platform_id, now, _copy_missing(blocking))
@@ -171,8 +179,6 @@ def _probe_foreground_activation(missing: dict[str, list[str]]) -> None:
         return
     if result.get("permission_denied"):
         _add_missing(missing, "foreground_activation", "automation_or_accessibility")
-        return
-    _add_missing(missing, "foreground_activation", "foreground_focus")
 
 
 def _probe_foreground_input(missing: dict[str, list[str]]) -> None:

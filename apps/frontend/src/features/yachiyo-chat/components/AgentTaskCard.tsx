@@ -536,6 +536,7 @@ const permissionTargetLabels: Record<string, string> = {
 
 const blockingConditionLabels: Record<string, string> = {
   desktop_session_locked: '桌面会话已锁定',
+  foreground_focus_unavailable: '前台激活暂不可用',
 };
 
 function taskRecoveryRetryActionWithSelectedCoordinate(

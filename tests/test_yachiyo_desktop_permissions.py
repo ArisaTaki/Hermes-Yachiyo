@@ -140,7 +140,7 @@ def test_desktop_permission_probe_marks_music_automation_gap(monkeypatch) -> Non
     ) == {"media_control": ["automation"]}
 
 
-def test_desktop_permission_probe_marks_foreground_activation_gap(monkeypatch) -> None:
+def test_desktop_permission_probe_does_not_mark_foreground_activation_runtime_gap_as_permission(monkeypatch) -> None:
     monkeypatch.setattr(
         desktop_permissions_mod,
         "_check_screen_capture_permission",
@@ -172,7 +172,23 @@ def test_desktop_permission_probe_marks_foreground_activation_gap(monkeypatch) -
     assert desktop_permissions_mod.desktop_permission_missing_by_capability(
         platform_name="Darwin",
         use_cache=False,
-    ) == {"foreground_activation": ["foreground_focus"]}
+    ) == {}
+
+
+def test_desktop_runtime_blocker_probe_marks_foreground_activation_gap(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_permissions_mod, "_macos_desktop_session_locked", lambda: False)
+
+    def fake_osascript(script: str, *, timeout: float = 3.0) -> tuple[bool, str]:
+        if "foreground_activation|" in script:
+            return True, "foreground_activation|Finder|false|Codex|Codex|com.openai.codex"
+        raise AssertionError(script)
+
+    monkeypatch.setattr(desktop_permissions_mod, "_run_osascript", fake_osascript)
+
+    assert desktop_permissions_mod.desktop_runtime_blocking_conditions_by_capability(
+        platform_name="Darwin",
+        use_cache=False,
+    ) == {"foreground_activation": ["foreground_focus_unavailable"]}
 
 
 def test_desktop_permission_probe_keeps_browser_available_when_cdp_is_reachable(monkeypatch) -> None:
