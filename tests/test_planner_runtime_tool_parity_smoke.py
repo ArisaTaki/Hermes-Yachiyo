@@ -9,7 +9,7 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
     evidence = smoke.run_smoke()
 
     assert evidence["ok"] is True
-    assert evidence["case_count"] == 7
+    assert evidence["case_count"] == 8
     case_by_id = {case["id"]: case for case in evidence["cases"]}
     assert case_by_id["generic_app_open"]["request_tools"] == [
         "desktop.list_apps",
@@ -26,6 +26,13 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
         "desktop.click_ui_element"
     ]
     assert case_by_id["builtin_data_analysis"]["request_tools"] == ["data.analyze"]
+    assert case_by_id["visible_table_analysis"]["plan_tools"] == [
+        "desktop.ui_elements",
+        "data.analyze",
+    ]
+    assert case_by_id["visible_table_analysis"]["request_tools"] == [
+        "desktop.ui_elements"
+    ]
     assert case_by_id["current_page_report"]["plan_tools"] == [
         "browser.extract_text",
         "artifact.write",

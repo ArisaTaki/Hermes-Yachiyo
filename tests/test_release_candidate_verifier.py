@@ -387,7 +387,7 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     }
     assert report["planner_runtime_tool_parity_smoke"]["status"] == "passed"
     assert report["planner_runtime_tool_parity_smoke"]["evidence"]["ok"] is True
-    assert report["planner_runtime_tool_parity_smoke"]["evidence"]["case_count"] == 7
+    assert report["planner_runtime_tool_parity_smoke"]["evidence"]["case_count"] == 8
     assert {
         case["id"]
         for case in report["planner_runtime_tool_parity_smoke"]["evidence"]["cases"]
@@ -395,6 +395,7 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "generic_app_open",
         "app_scoped_ui_click",
         "builtin_data_analysis",
+        "visible_table_analysis",
         "current_page_report",
         "generic_media_playback",
         "explicit_terminal_command",
@@ -964,6 +965,9 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
     case_by_id = {case["id"]: case for case in section["evidence"]["cases"]}
     assert case_by_id["app_scoped_ui_click"]["approval_required_tools"] == [
         "desktop.click_ui_element"
+    ]
+    assert case_by_id["visible_table_analysis"]["request_tools"] == [
+        "desktop.ui_elements"
     ]
     assert case_by_id["explicit_terminal_command"]["approval_required_tools"] == [
         "terminal.run"

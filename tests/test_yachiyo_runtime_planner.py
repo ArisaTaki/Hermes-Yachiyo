@@ -473,6 +473,14 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "根据屏幕上这张表做数据分析",
         allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
     )
+    desktop_visible_table = RuntimePlanner().decision(
+        "分析桌面上这个表格并输出报告",
+        allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
+    )
+    desktop_visible_builtin = RuntimePlanner().decision(
+        "分析桌面上这个表格并输出报告",
+        allowed_tools=["desktop.ui_elements", "data.analyze", "artifact.write"],
+    )
     foreground_excel_table = RuntimePlanner().decision(
         "分析前台 Excel 表格并输出报告",
         allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
@@ -567,11 +575,16 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         "paths": ["analysis-report.md", "analysis-chart.png", "analysis-summary.csv"],
         "body_source": "visible_text",
     }
-    for visible_table in (current_screen_this_table, foreground_excel_table):
+    for visible_table in (
+        current_screen_this_table,
+        desktop_visible_table,
+        foreground_excel_table,
+    ):
         assert visible_table.selected_intent.kind == "data_analysis"
         assert visible_table.selected_intent.inputs["context_source"] == "visible_text"
         assert visible_table.selected_intent.inputs["data_source_kind"] == "text_table"
         assert visible_table.selected_intent.missing_inputs == []
+        assert "data_source_scope_hint" not in visible_table.selected_intent.inputs
         assert [step.step_id for step in visible_table.plan.tool_plan.steps] == [
             "read-data-context",
             "run-analysis",
@@ -583,6 +596,43 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
         assert _step_by_id(visible_table, "run-analysis").depends_on == [
             "read-data-context"
         ]
+    assert desktop_visible_builtin.selected_intent.kind == "data_analysis"
+    assert desktop_visible_builtin.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "text_table",
+        "context_source": "visible_text",
+    }
+    assert [step.step_id for step in desktop_visible_builtin.plan.tool_plan.steps] == [
+        "read-data-context",
+        "analyze-data-context",
+    ]
+    assert _step_by_id(desktop_visible_builtin, "read-data-context").tool_name == (
+        "desktop.ui_elements"
+    )
+    assert _step_by_id(desktop_visible_builtin, "analyze-data-context").tool_name == (
+        "data.analyze"
+    )
+    assert _step_by_id(desktop_visible_builtin, "analyze-data-context").input_preview == {
+        "content": "<captured visible_text>",
+        "display_path": "captured:visible_text",
+        "artifact_path": "analysis-report.md",
+        "source_kind": "text_table",
+        "requested_outputs": ["report"],
+        "artifact_manifest": [{"path": "analysis-report.md", "kind": "markdown"}],
+    }
+    assert planner_tool_requests(
+        "分析桌面上这个表格并输出报告",
+        ["desktop.ui_elements", "data.analyze", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
     assert current_page_table.selected_intent.kind == "data_analysis"
     assert current_page_table.selected_intent.inputs["context_source"] == "current_page_content"
     assert [step.step_id for step in current_page_table.plan.tool_plan.steps] == [
@@ -1225,6 +1275,7 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
     }
     assert desktop_scoped_decision.selected_intent.kind == "data_analysis"
     assert desktop_scoped_decision.selected_intent.inputs["data_source_scope_hint"] == "Desktop"
+    assert "context_source" not in desktop_scoped_decision.selected_intent.inputs
     assert _step_by_id(desktop_scoped_decision, "inspect-data-source").input_preview == {
         "path": "Desktop"
     }
@@ -2893,15 +2944,31 @@ def test_runtime_planner_reveals_generated_artifacts_in_finder() -> None:
     assert current_page.plan.tool_plan.artifacts_expected == ["research-summary.md"]
 
     assert current_page_table.selected_intent.kind == "data_analysis"
-    assert _step_by_id(current_page_table, "write-analysis-artifact").input_preview == {
-        "paths": ["Downloads/analysis-report.md", "Downloads/analysis-summary.csv"],
-        "body_source": "current_page_content",
+    assert [step.step_id for step in current_page_table.plan.tool_plan.steps] == [
+        "read-data-context",
+        "analyze-data-context",
+        "reveal-artifact-in-finder",
+    ]
+    assert _step_by_id(current_page_table, "analyze-data-context").input_preview == {
+        "content": "<captured current_page_content>",
+        "display_path": "captured:current_page_content",
+        "artifact_path": "Downloads/analysis-report.md",
+        "source_kind": "text_table",
+        "requested_outputs": ["table"],
+        "artifact_manifest": [
+            {"path": "Downloads/analysis-report.md", "kind": "markdown"},
+            {"path": "Downloads/analysis-summary.csv", "kind": "csv"},
+        ],
+        "artifact_paths": [
+            "Downloads/analysis-report.md",
+            "Downloads/analysis-summary.csv",
+        ],
     }
     assert _step_by_id(current_page_table, "reveal-artifact-in-finder").input_preview == {
         "path": "Downloads/analysis-summary.csv"
     }
     assert _step_by_id(current_page_table, "reveal-artifact-in-finder").depends_on == [
-        "write-analysis-artifact"
+        "analyze-data-context"
     ]
     assert current_page_table.plan.tool_plan.artifacts_expected == [
         "Downloads/analysis-report.md",

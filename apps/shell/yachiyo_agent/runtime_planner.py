@@ -160,9 +160,14 @@ class TaskIntentRouter:
         context_source = _task_context_source_hint(text)
         current_page_context = _looks_like_current_page_data_context_source(text)
         visible_context = _looks_like_visible_data_context_source(text)
-        if not context_source and current_page_context:
+        desktop_visible_context = _looks_like_desktop_visible_data_context_source(text)
+        if desktop_visible_context:
+            context_source = "visible_text"
+            if source_scope == "Desktop" and not source_hint:
+                source_scope = ""
+        elif not context_source and current_page_context:
             context_source = "current_page_content"
-        if (
+        elif (
             visible_context
             and not current_page_context
             and context_source not in {"selection", "clipboard"}
@@ -1595,6 +1600,48 @@ class RuntimePlanner:
                     intent.user_goal,
                 ),
             )
+            analysis_tool = _first_allowed(("data.analyze", "terminal.run"), allowed)
+            if analysis_tool == "data.analyze":
+                artifact_path = artifact_paths[0] if artifact_paths else "analysis-report.md"
+                source_kind = str(
+                    intent.inputs.get("data_source_kind")
+                    or data_source_kind_hint("", intent.user_goal)
+                    or "text_table"
+                ).strip()
+                input_preview = {
+                    "content": f"<captured {context_source}>",
+                    "display_path": f"captured:{context_source}",
+                    "artifact_path": artifact_path,
+                    "source_kind": source_kind,
+                    "requested_outputs": list(intent.expected_outputs),
+                    "artifact_manifest": data_analysis_artifact_manifest(artifact_paths),
+                }
+                if len(artifact_paths) > 1:
+                    input_preview["artifact_paths"] = artifact_paths
+                steps = [
+                    *context_steps,
+                    *spreadsheet_steps,
+                    _step(
+                        intent,
+                        "analyze-data-context",
+                        "Analyze captured data",
+                        "data.analysis",
+                        analysis_tool,
+                        input_preview=input_preview,
+                        depends_on=depends_on,
+                        reason=(
+                            "Analyze captured visible, selected, clipboard, or page data with "
+                            "the built-in local parser before escalating to terminal.run."
+                        ),
+                    ),
+                ]
+                return _append_data_analysis_followup_steps(
+                    intent,
+                    allowed,
+                    steps,
+                    artifact_paths=artifact_paths,
+                    depends_on="analyze-data-context",
+                )
             steps = [
                 *context_steps,
                 *spreadsheet_steps,
@@ -6994,6 +7041,40 @@ def _looks_like_visible_data_context_source(text: str) -> bool:
     ):
         return False
     return _visible_context_marker_matches(value) and _visible_data_marker_matches(value)
+
+
+def _looks_like_desktop_visible_data_context_source(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value or not _contains_any(value, ["桌面", "desktop"]):
+        return False
+    if _contains_any(
+        value,
+        [
+            "桌面文件",
+            "桌面文件夹",
+            "桌面目录",
+            "Desktop folder",
+            "desktop folder",
+            "Desktop directory",
+            "desktop directory",
+        ],
+    ):
+        return False
+    data_marker = r"(?:表格|表|数据|数据集|电子表格|table|data|dataset|spreadsheet)"
+    deictic_marker = r"(?:这个|这张|这份|这条|这组|当前|可见|正在显示(?:的)?)"
+    desktop_marker = r"(?:桌面(?:上|里|中|内)?|desktop)"
+    return bool(
+        re.search(
+            rf"{desktop_marker}.{{0,12}}{deictic_marker}.{{0,12}}{data_marker}",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            rf"{deictic_marker}.{{0,12}}{data_marker}.{{0,12}}{desktop_marker}",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _visible_context_marker_matches(value: str) -> bool:

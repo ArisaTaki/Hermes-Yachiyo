@@ -61,6 +61,15 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "approval_required": [],
     },
     {
+        "id": "visible_table_analysis",
+        "category": "orchestrator",
+        "prompt": "分析桌面上这个表格并输出报告",
+        "expected_intent": "data_analysis",
+        "expected_plan_tools": ["desktop.ui_elements", "data.analyze"],
+        "expected_request_tools": ["desktop.ui_elements"],
+        "approval_required": [],
+    },
+    {
         "id": "current_page_report",
         "category": "orchestrator",
         "prompt": "把当前网页总结成一份报告",

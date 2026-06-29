@@ -109,6 +109,85 @@ def analyze_data_file(
     }
 
 
+def analyze_data_text(
+    text: str,
+    *,
+    display_path: str,
+    artifact_path: str,
+    artifact_paths: list[str] | None = None,
+    max_rows: int = 1000,
+    source_kind: str = "text_table",
+) -> dict[str, Any]:
+    clean_max_rows = max(1, min(int(max_rows or 1000), 10000))
+    clean_artifact_paths = _artifact_paths(artifact_path, artifact_paths)
+    primary_artifact_path = clean_artifact_paths[0]
+    clean_source_kind = str(source_kind or "text_table").strip() or "text_table"
+    try:
+        if clean_source_kind == "json":
+            table = _json_table(text, max_rows=clean_max_rows)
+        elif clean_source_kind == "jsonl":
+            table = _jsonl_table(text, max_rows=clean_max_rows)
+        elif clean_source_kind == "tsv":
+            table = _delimited_table(text, delimiter="\t", max_rows=clean_max_rows)
+        elif clean_source_kind == "csv":
+            table = _delimited_table(text, delimiter=",", max_rows=clean_max_rows)
+        else:
+            table = _text_table(text, max_rows=clean_max_rows)
+            clean_source_kind = "text_table" if table["columns"] else "text"
+    except (json.JSONDecodeError, csv.Error, KeyError) as exc:
+        return _parse_error_result(display_path, source_kind=clean_source_kind, error=exc)
+
+    if not table["columns"]:
+        if clean_source_kind in {"csv", "tsv", "json", "jsonl", "xlsx"}:
+            return _empty_structured_report(
+                display_path=display_path,
+                source_kind=clean_source_kind,
+                artifact_path=primary_artifact_path,
+                artifact_paths=clean_artifact_paths,
+                table=table,
+            )
+        return _plain_text_content_report(
+            text,
+            display_path=display_path,
+            artifact_path=primary_artifact_path,
+            artifact_paths=clean_artifact_paths,
+            max_rows=clean_max_rows,
+        )
+
+    column_summaries = _column_summaries(table["rows"], table["columns"])
+    content = _markdown_report(
+        display_path=display_path,
+        source_kind=clean_source_kind,
+        artifact_path=primary_artifact_path,
+        table=table,
+        column_summaries=column_summaries,
+    )
+    extra_artifacts = _extra_table_artifacts(
+        clean_artifact_paths[1:],
+        display_path=display_path,
+        source_kind=clean_source_kind,
+        table=table,
+        column_summaries=column_summaries,
+    )
+    return {
+        "ok": True,
+        "path": display_path,
+        "source_kind": clean_source_kind,
+        "rows": table["row_count"],
+        "analyzed_rows": len(table["rows"]),
+        "columns": table["columns"],
+        "column_summaries": column_summaries,
+        "artifact_path": primary_artifact_path,
+        "artifact_paths": clean_artifact_paths,
+        "artifact_content": content,
+        "extra_artifacts": extra_artifacts,
+        "summary": (
+            f"Analyzed {display_path}: {table['row_count']} rows, "
+            f"{len(table['columns'])} columns. Report: {primary_artifact_path}."
+        ),
+    }
+
+
 def _plain_text_report(
     path: Path,
     *,
@@ -118,6 +197,23 @@ def _plain_text_report(
     max_rows: int,
 ) -> dict[str, Any]:
     text = _read_text_file(path)
+    return _plain_text_content_report(
+        text,
+        display_path=display_path,
+        artifact_path=artifact_path,
+        artifact_paths=artifact_paths,
+        max_rows=max_rows,
+    )
+
+
+def _plain_text_content_report(
+    text: str,
+    *,
+    display_path: str,
+    artifact_path: str,
+    artifact_paths: list[str],
+    max_rows: int,
+) -> dict[str, Any]:
     lines = text.splitlines()
     words = re.findall(r"\S+", text)
     preview = "\n".join(lines[: min(20, max_rows)])

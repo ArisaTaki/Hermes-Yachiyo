@@ -9,7 +9,7 @@ from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.tools import browser, desktop
-from apps.shell.agent.tools.data_analysis import analyze_data_file
+from apps.shell.agent.tools.data_analysis import analyze_data_file, analyze_data_text
 from apps.shell.agent.tools.registry import dispatch_tool_call
 from apps.shell.agent.tools.terminal import (
     _TERMINAL_PROCESS_LOCK,
@@ -430,6 +430,8 @@ class ToolBroker:
         self,
         path: str,
         *,
+        content: str = "",
+        display_path: str = "",
         artifact_path: str = "analysis-report.md",
         artifact_paths: list[str] | None = None,
         max_rows: int = 1000,
@@ -437,31 +439,50 @@ class ToolBroker:
         requested_outputs: list[str] | None = None,
         artifact_manifest: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any]:
-        target = self._resolve_workspace_path(path)
-        display_path = path or "."
-        if not target.exists():
-            return {
-                "ok": False,
-                "path": display_path,
-                "error": "路径不存在",
-                "hint": "请先用 workspace.list 查看父目录，确认要分析的文件相对路径。",
-            }
-        if target.is_dir():
-            return {
-                "ok": False,
-                "path": display_path,
-                "error": "data.analyze 只能分析文件",
-                "hint": "这是一个目录；请先用 workspace.list 选择目录中的数据文件。",
-                "suggested_tool": "workspace.list",
-            }
-        result = analyze_data_file(
-            target,
-            display_path=display_path,
-            artifact_path=artifact_path or "analysis-report.md",
-            artifact_paths=artifact_paths,
-            max_rows=max_rows,
-        )
+        clean_content = str(content or "")
+        display_source = str(display_path or path or "captured-data").strip() or "captured-data"
+        if clean_content.strip():
+            result = analyze_data_text(
+                clean_content,
+                display_path=display_source,
+                artifact_path=artifact_path or "analysis-report.md",
+                artifact_paths=artifact_paths,
+                max_rows=max_rows,
+                source_kind=source_kind or "text_table",
+            )
+        else:
+            target = self._resolve_workspace_path(path)
+            display_source = path or "."
+            if not target.exists():
+                return {
+                    "ok": False,
+                    "path": display_source,
+                    "error": "路径不存在",
+                    "hint": "请先用 workspace.list 查看父目录，确认要分析的文件相对路径。",
+                }
+            if target.is_dir():
+                return {
+                    "ok": False,
+                    "path": display_source,
+                    "error": "data.analyze 只能分析文件",
+                    "hint": "这是一个目录；请先用 workspace.list 选择目录中的数据文件。",
+                    "suggested_tool": "workspace.list",
+                }
+            result = analyze_data_file(
+                target,
+                display_path=display_source,
+                artifact_path=artifact_path or "analysis-report.md",
+                artifact_paths=artifact_paths,
+                max_rows=max_rows,
+            )
+            if not result.get("ok"):
+                return result
         if not result.get("ok"):
+            if source_kind and not result.get("source_kind"):
+                return {
+                    **result,
+                    "source_kind": source_kind,
+                }
             return result
         analysis_source_kind = str(result.get("source_kind") or source_kind or "").strip()
         clean_requested_outputs = _clean_string_list(requested_outputs)

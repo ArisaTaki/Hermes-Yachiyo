@@ -202,6 +202,37 @@ def test_tool_broker_call_analyzes_markdown_table_file(tmp_path) -> None:
     assert "mean=15.0" in content
 
 
+def test_tool_broker_call_analyzes_captured_table_content(tmp_path) -> None:
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "data.analyze",
+        {
+            "content": (
+                "| region | revenue |\n"
+                "| --- | ---: |\n"
+                "| East | 10 |\n"
+                "| West | 20 |\n"
+            ),
+            "display_path": "captured:visible_text",
+            "artifact_path": "reports/captured-table.md",
+            "source_kind": "text_table",
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["path"] == "captured:visible_text"
+    assert result["source_kind"] == "text_table"
+    assert result["rows"] == 2
+    assert result["columns"] == ["region", "revenue"]
+    assert result["artifact"]["path"] == "reports/captured-table.md"
+    content = (tmp_path / "artifacts" / "reports" / "captured-table.md").read_text(
+        encoding="utf-8"
+    )
+    assert "captured:visible_text" in content
+    assert "mean=15.0" in content
+
+
 def test_tool_broker_call_analyzes_json_file(tmp_path) -> None:
     (tmp_path / "sales.json").write_text(
         (
@@ -396,6 +427,27 @@ def test_data_analyze_schema_rejects_invalid_artifact_paths() -> None:
         ToolDescriptorRegistry.validate_payload(
             "data.analyze",
             {"path": "sales.csv", "artifact_paths": ["reports/out.md", 42]},
+        )
+
+
+def test_data_analyze_schema_accepts_path_or_content() -> None:
+    ToolDescriptorRegistry.validate_payload("data.analyze", {"path": "sales.csv"})
+    ToolDescriptorRegistry.validate_payload(
+        "data.analyze",
+        {
+            "content": "region,revenue\nEast,10\n",
+            "display_path": "captured:visible_text",
+        },
+    )
+
+    with pytest.raises(AgentRuntimeError, match="data.analyze 参数 path 或 content"):
+        ToolDescriptorRegistry.validate_payload("data.analyze", {"artifact_path": "out.md"})
+    with pytest.raises(AgentRuntimeError, match="data.analyze 参数 content"):
+        ToolDescriptorRegistry.validate_payload("data.analyze", {"content": 42})
+    with pytest.raises(AgentRuntimeError, match="data.analyze 参数 display_path"):
+        ToolDescriptorRegistry.validate_payload(
+            "data.analyze",
+            {"content": "a,b\n1,2\n", "display_path": 42},
         )
 
 

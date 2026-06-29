@@ -116,6 +116,8 @@ def _data_analyze(broker: Any, payload: dict[str, Any], _approved: bool) -> dict
     raw_artifact_manifest = payload.get("artifact_manifest")
     return broker.data_analyze(
         str(payload.get("path") or ""),
+        content=str(payload.get("content") or ""),
+        display_path=str(payload.get("display_path") or ""),
         artifact_path=str(payload.get("artifact_path") or "analysis-report.md"),
         artifact_paths=list(raw_artifact_paths) if isinstance(raw_artifact_paths, list) else None,
         max_rows=int(payload.get("max_rows") or 1000),

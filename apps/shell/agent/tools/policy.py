@@ -443,6 +443,14 @@ class ToolDescriptor:
         if "path" in payload and not isinstance(payload.get("path"), str):
             raise AgentRuntimeError(f"{self.name} 参数 path 必须是字符串")
         if self.name == "data.analyze":
+            if "content" in payload and not isinstance(payload.get("content"), str):
+                raise AgentRuntimeError("data.analyze 参数 content 必须是字符串")
+            if "display_path" in payload and not isinstance(payload.get("display_path"), str):
+                raise AgentRuntimeError("data.analyze 参数 display_path 必须是字符串")
+            if not str(payload.get("path") or "").strip() and not str(
+                payload.get("content") or ""
+            ).strip():
+                raise AgentRuntimeError("data.analyze 参数 path 或 content 必须提供一个")
             if "artifact_path" in payload and not isinstance(payload.get("artifact_path"), str):
                 raise AgentRuntimeError("data.analyze 参数 artifact_path 必须是字符串")
             if "artifact_paths" in payload:
@@ -1049,12 +1057,23 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
     "data.analyze": ToolDescriptor(
         name="data.analyze",
         description=(
-            "Analyze a workspace CSV, TSV, JSON, JSONL, XLSX, Markdown table, or text table "
-            "with the built-in local parser and write a markdown report artifact. Prefer this "
-            "before terminal.run for straightforward data summaries."
+            "Analyze a workspace CSV, TSV, JSON, JSONL, XLSX, Markdown table, text table, "
+            "or already captured table/text content with the built-in local parser and write "
+            "report artifacts. Prefer this before terminal.run for straightforward data summaries."
         ),
         properties={
-            "path": {"type": "string", "description": "Relative data file path."},
+            "path": {
+                "type": "string",
+                "description": "Relative data file path. Provide this or content.",
+            },
+            "content": {
+                "type": "string",
+                "description": "Captured CSV/TSV/JSON/text-table/plain text content. Provide this or path.",
+            },
+            "display_path": {
+                "type": "string",
+                "description": "Human-readable source label for captured content.",
+            },
             "artifact_path": {
                 "type": "string",
                 "description": "Optional markdown artifact path. Defaults to analysis-report.md.",
@@ -1089,7 +1108,7 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                 "description": "Maximum rows to inspect. Defaults to 1000.",
             },
         },
-        required=("path",),
+        required=(),
     ),
     "screen.capture": ToolDescriptor(
         name="screen.capture",
