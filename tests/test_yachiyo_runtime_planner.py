@@ -13737,6 +13737,85 @@ def test_planner_first_owns_app_scoped_ui_operations_over_legacy() -> None:
         assert legacy_calls == []
 
 
+def test_runtime_planner_preserves_app_scope_for_browser_safe_shortcuts() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+
+    new_tab_decision = RuntimePlanner().decision(
+        "在 Chrome 打开新标签页",
+        allowed_tools=allowed_tools,
+    )
+
+    assert new_tab_decision.selected_intent.kind == "desktop_operation"
+    assert new_tab_decision.selected_intent.inputs == {
+        "app_name_hint": "Chrome",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "new_tab"},
+    }
+    assert planner_tool_requests("在 Chrome 打开新标签页", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Chrome", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "new_tab"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+    copy_link_decision = RuntimePlanner().decision(
+        "在 Chrome 复制当前页面链接",
+        allowed_tools=allowed_tools,
+    )
+
+    assert copy_link_decision.selected_intent.kind == "desktop_operation"
+    assert copy_link_decision.selected_intent.inputs == {
+        "app_name_hint": "Chrome",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "copy_current_page_link"},
+    }
+    assert planner_tool_requests("在 Chrome 复制当前页面链接", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Chrome", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Google Chrome", "action": "copy_current_page_link"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_planner_first_owns_app_window_and_management_over_legacy() -> None:
     cases = (
         (

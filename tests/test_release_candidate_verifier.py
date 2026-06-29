@@ -355,7 +355,7 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     }
     assert report["desktop_planner_discovery_smoke"]["status"] == "passed"
     assert report["desktop_planner_discovery_smoke"]["evidence"]["ok"] is True
-    assert report["desktop_planner_discovery_smoke"]["evidence"]["case_count"] == 6
+    assert report["desktop_planner_discovery_smoke"]["evidence"]["case_count"] == 7
     assert {
         case["id"]
         for case in report["desktop_planner_discovery_smoke"]["evidence"]["cases"]
@@ -365,6 +365,7 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "app_scoped_click",
         "app_scoped_type",
         "app_scoped_hotkey",
+        "app_scoped_safe_shortcut",
         "app_window_focus",
     }
     assert report["real_desktop_discovery_smoke"]["status"] == "passed"
@@ -662,6 +663,15 @@ def test_release_candidate_verifier_reports_desktop_planner_discovery_smoke(
     assert case_by_id["app_scoped_type"]["requests"][1]["tool"] == (
         "app.focus_and_type_into_ui_element"
     )
+    assert [request["tool"] for request in case_by_id["app_scoped_safe_shortcut"]["requests"]] == [
+        "desktop.list_apps",
+        "app.focus_and_safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    assert case_by_id["app_scoped_safe_shortcut"]["requests"][1]["input"] == {
+        "app_name": "Safari",
+        "action": "new_tab",
+    }
     assert all(
         case["checks"]["uses_no_browser_tool"]
         for case in case_by_id.values()

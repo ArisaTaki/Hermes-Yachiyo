@@ -282,7 +282,10 @@ class TaskIntentRouter:
             and app_scoped_safe_operation.get("safe_shortcut")
         ):
             safe_shortcut = app_scoped_safe_operation["safe_shortcut"]
-        if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
+        if (
+            str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link"
+            and not app_scoped_safe_operation.get("safe_shortcut")
+        ):
             app_scoped_safe_operation = {}
         if _foreground_safe_shortcut_hint(safe_shortcut):
             app_management = None
@@ -523,7 +526,10 @@ class TaskIntentRouter:
             app_name_hint = ""
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
             app_name_hint = ""
-        if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
+        if (
+            str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link"
+            and not app_scoped_safe_operation.get("safe_shortcut")
+        ):
             app_name_hint = ""
             app_management = None
         if (
@@ -1773,7 +1779,10 @@ class RuntimePlanner:
             app_scoped_safe_operation = {}
         if safe_shortcut is None and app_scoped_safe_operation.get("safe_shortcut"):
             safe_shortcut = app_scoped_safe_operation["safe_shortcut"]
-        if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
+        if (
+            str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link"
+            and not app_scoped_safe_operation.get("safe_shortcut")
+        ):
             app_scoped_safe_operation = {}
         if _foreground_safe_shortcut_hint(safe_shortcut):
             app_management = None
@@ -1863,7 +1872,10 @@ class RuntimePlanner:
             app_search = {}
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
             app_name = ""
-        if str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link":
+        if (
+            str((safe_shortcut or {}).get("action") or "").strip() == "copy_current_page_link"
+            and not app_scoped_safe_operation.get("safe_shortcut")
+        ):
             app_name = ""
             app_management = None
         if (
@@ -10301,6 +10313,8 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         r"向下|往下|朝下|向上|往上|朝上|下滑|上滑|下滚|上滚|"
         r"下翻|上翻|下一页|上一页|滚动|滚|滑动|滑|翻页|翻|拉|"
         r"复制|粘贴|全选|撤销|重做|查找|搜索|打开搜索|刷新|后退|前进|最大化|全屏|"
+        r"打开(?:一个)?(?:新标签页|新窗口|无痕窗口|隐身窗口|私密窗口)|"
+        r"开(?:一个)?新标签页|新开(?:一个)?标签页|"
         r"新建|创建|"
         r"新建标签页|新建窗口|新建文件夹|关闭标签页|关闭当前标签页|"
         r"下一个标签|下一个标签页|切到下一个标签页|切换到下一个标签页|"
@@ -10428,7 +10442,18 @@ def _invalid_app_scoped_followup_app(app_name: str) -> bool:
         "网页",
         "页面",
         "当前页",
+        "当前页地址",
+        "当前页链接",
         "当前页面",
+        "当前页面地址",
+        "当前页面链接",
+        "当前网页地址",
+        "当前网页链接",
+        "当前链接",
+        "当前网址",
+        "链接",
+        "网址",
+        "地址",
         "标签",
         "标签页",
         "当前标签",
@@ -10468,8 +10493,15 @@ def _invalid_app_scoped_followup_app(app_name: str) -> bool:
         "webbrowser",
         "page",
         "currentpage",
+        "currentpageaddress",
+        "currentpagelink",
+        "currentpageurl",
         "currenttab",
+        "currenturl",
         "tab",
+        "link",
+        "url",
+        "address",
         "closedtab",
         "lastclosedtab",
     }

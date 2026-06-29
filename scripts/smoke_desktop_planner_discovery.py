@@ -119,6 +119,27 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
         ],
     },
     {
+        "id": "app_scoped_safe_shortcut",
+        "prompt": "在 Safari 打开新标签页",
+        "allowed_tools": [
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
+            "desktop.ui_elements",
+        ],
+        "expected_app": "Safari",
+        "expected_steps": [
+            "discover-desktop-state",
+            "operate-foreground-ui",
+            "verify-desktop-result",
+        ],
+        "expected_request_tools": [
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    },
+    {
         "id": "app_window_focus",
         "prompt": "切到 Slack 的 General 窗口",
         "allowed_tools": [

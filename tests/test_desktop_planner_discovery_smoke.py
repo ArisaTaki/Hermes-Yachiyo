@@ -16,6 +16,7 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
         "app_scoped_click",
         "app_scoped_type",
         "app_scoped_hotkey",
+        "app_scoped_safe_shortcut",
         "app_window_focus",
     }
     assert [request["tool"] for request in cases["generic_app_open"]["requests"]] == [
@@ -40,6 +41,15 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
         "desktop.hotkey",
         "desktop.ui_elements",
     ]
+    assert [request["tool"] for request in cases["app_scoped_safe_shortcut"]["requests"]] == [
+        "desktop.list_apps",
+        "app.focus_and_safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    assert cases["app_scoped_safe_shortcut"]["requests"][1]["input"] == {
+        "app_name": "Safari",
+        "action": "new_tab",
+    }
     assert [request["tool"] for request in cases["app_window_focus"]["requests"]] == [
         "desktop.list_apps",
         "desktop.windows",
