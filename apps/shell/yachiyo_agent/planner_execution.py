@@ -1407,7 +1407,7 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
         click_count = decision.selected_intent.inputs.get("click_count")
         if click_count not in (None, ""):
             click_payload["click_count"] = click_count
-        return [
+        requests = [
             *prepare_requests,
             _request(
                 "browser.open_url",
@@ -1420,6 +1420,43 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
                 planning_reason="planner_fallback_web_research",
             ),
         ]
+        if (
+            str(decision.selected_intent.inputs.get("post_followup_action") or "").strip()
+            == "extract_text"
+        ):
+            post_step = next(
+                (
+                    item
+                    for item in decision.plan.tool_plan.steps
+                    if getattr(item, "step_id", "") == "extract-clicked-web-result-text"
+                ),
+                None,
+            )
+            post_tool_name = str(getattr(post_step, "tool_name", "") or "").strip()
+            if (
+                post_tool_name in {"browser.extract_text", "browser.current_page"}
+                and post_tool_name in allowed
+            ):
+                post_request = _request(
+                    post_tool_name,
+                    {},
+                    planning_reason="planner_fallback_web_research",
+                )
+                presentation = str(
+                    decision.selected_intent.inputs.get("presentation") or ""
+                ).strip()
+                if presentation:
+                    post_request["presentation"] = presentation
+                if _web_request_needs_model_followup(
+                    decision.selected_intent.user_goal
+                ) or any(
+                    str(getattr(item, "tool_name", "") or "").strip()
+                    in {"artifact.write", "clipboard.write"}
+                    for item in decision.plan.tool_plan.steps
+                ):
+                    post_request["continue_to_model"] = True
+                requests.append(post_request)
+        return requests
     if _dynamic_context_browser_action(decision):
         return _dynamic_context_browser_tool_requests(decision, allowed)
     if str(decision.selected_intent.inputs.get("context_source") or "").strip() and not str(

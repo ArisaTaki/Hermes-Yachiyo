@@ -2224,6 +2224,10 @@ def test_runtime_planner_routes_current_page_browser_actions() -> None:
         "根据当前网页写一份竞品调研报告",
         allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
     )
+    chinese_research_report = RuntimePlanner().decision(
+        "研究当前网页并写一份竞品分析报告",
+        allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
+    )
     english_report = RuntimePlanner().decision(
         "research current page and write a report",
         allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
@@ -2259,6 +2263,15 @@ def test_runtime_planner_routes_current_page_browser_actions() -> None:
         "browser_action": "extract_text",
     }
     assert [step.step_id for step in research_report.plan.tool_plan.steps] == [
+        "extract-current-page-text",
+        "write-research-artifact",
+    ]
+    assert chinese_research_report.selected_intent.kind == "web_research"
+    assert chinese_research_report.selected_intent.inputs == {
+        "url_hint": "",
+        "browser_action": "extract_text",
+    }
+    assert [step.step_id for step in chinese_research_report.plan.tool_plan.steps] == [
         "extract-current-page-text",
         "write-research-artifact",
     ]
@@ -2636,6 +2649,40 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "browser.open_url_and_extract_text"
     )
 
+    chrome_first_result_summary = RuntimePlanner().decision(
+        "打开 Chrome 搜索 OpenAI pricing，打开第一个结果并总结",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "browser.open_url",
+            "browser.click",
+            "browser.extract_text",
+            "artifact.write",
+        ],
+    )
+    assert chrome_first_result_summary.selected_intent.kind == "web_research"
+    assert chrome_first_result_summary.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=OpenAI+pricing",
+        "browser_action": "open_search",
+        "query": "OpenAI pricing",
+        "followup_action": "click_search_result",
+        "selector": "search-result=1",
+        "click_count": 1,
+        "post_followup_action": "extract_text",
+        "app_name": "Google Chrome",
+        "app_mode": "open",
+    }
+    assert [step.step_id for step in chrome_first_result_summary.plan.tool_plan.steps] == [
+        "discover-browser-app",
+        "open-or-focus-browser",
+        "open-web-search",
+        "click-web-search-result",
+        "extract-clicked-web-result-text",
+    ]
+    assert _step_by_id(chrome_first_result_summary, "extract-clicked-web-result-text").tool_name == (
+        "browser.extract_text"
+    )
+
     chinese = RuntimePlanner().decision(
         "搜索天气",
         allowed_tools=["browser.open_url"],
@@ -2674,6 +2721,30 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
     assert discover_browser.status == "unavailable"
     browser_step = _step_by_id(first_result, "open-or-focus-browser")
     assert browser_step.tool_name is None
+
+    first_result_report = RuntimePlanner().decision(
+        "打开 Chrome 搜索 OpenAI pricing，打开第一个结果并输出报告",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "browser.open_url",
+            "browser.click",
+            "browser.extract_text",
+            "artifact.write",
+        ],
+    )
+    assert first_result_report.selected_intent.expected_outputs == ["report"]
+    assert [step.step_id for step in first_result_report.plan.tool_plan.steps] == [
+        "discover-browser-app",
+        "open-or-focus-browser",
+        "open-web-search",
+        "click-web-search-result",
+        "extract-clicked-web-result-text",
+        "write-research-artifact",
+    ]
+    assert _step_by_id(first_result_report, "write-research-artifact").depends_on == [
+        "extract-clicked-web-result-text"
+    ]
     assert browser_step.status == "unavailable"
     assert browser_step.depends_on == ["discover-browser-app"]
     assert _step_by_id(first_result, "open-web-search").input_preview == {
@@ -13430,6 +13501,16 @@ def test_planner_tool_requests_maps_current_page_browser_actions() -> None:
             "continue_to_model": True,
         }
     ]
+    assert planner_tool_requests("研究当前网页并写一份竞品分析报告", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
     assert planner_tool_requests("research current page and write a report", allowed_tools=allowed) == [
         {
             "protocol": "json_fallback",
@@ -13681,6 +13762,46 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "protocol": "json_fallback",
             "tool": "browser.open_url_and_extract_text",
             "input": {"url": "https://www.google.com/search?q=OpenAI+pricing"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        },
+    ]
+    assert planner_tool_requests(
+        "打开 Chrome 搜索 OpenAI pricing，打开第一个结果并总结",
+        allowed_tools=[
+            *allowed,
+            "browser.extract_text",
+            "app.open",
+            "desktop.list_apps",
+            "artifact.write",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI+pricing"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "search-result=1", "click_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "continue_to_model": True,

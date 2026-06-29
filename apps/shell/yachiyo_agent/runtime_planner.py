@@ -3778,23 +3778,58 @@ class RuntimePlanner:
                     "selector": str(intent.inputs.get("selector") or "search-result=1"),
                     "click_count": int(intent.inputs.get("click_count") or 1),
                 }
-                return [
+                click_step = _step(
+                    intent,
+                    "click-web-search-result",
+                    "Click web search result",
+                    "browser.research",
+                    _first_allowed(("browser.click",), allowed),
+                    input_preview=click_preview,
+                    risk_level="medium",
+                    approval_required=True,
+                    depends_on=["open-web-search"],
+                    reason="Click the requested search result only after opening the planned search URL.",
+                )
+                steps = [
                     *([discover_step] if discover_step is not None else []),
                     *([prepare_step] if prepare_step is not None else []),
                     main_step,
-                    _step(
-                        intent,
-                        "click-web-search-result",
-                        "Click web search result",
-                        "browser.research",
-                        _first_allowed(("browser.click",), allowed),
-                        input_preview=click_preview,
-                        risk_level="medium",
-                        approval_required=True,
-                        depends_on=["open-web-search"],
-                        reason="Click the requested search result only after opening the planned search URL.",
-                    ),
+                    click_step,
                 ]
+                artifact_depends_on = click_step.step_id
+                if str(intent.inputs.get("post_followup_action") or "").strip() == "extract_text":
+                    post_step = _step(
+                        intent,
+                        "extract-clicked-web-result-text",
+                        "Extract clicked web result text",
+                        "browser.research",
+                        _first_allowed(("browser.extract_text", "browser.current_page"), allowed),
+                        input_preview={},
+                        depends_on=[click_step.step_id],
+                        reason="Read the clicked result page before producing the requested summary or report.",
+                    )
+                    steps.append(post_step)
+                    artifact_depends_on = post_step.step_id
+                if _web_research_artifact_requested(intent) and (
+                    allowed is None or "artifact.write" in allowed
+                ):
+                    artifact_path = _artifact_output_path(
+                        intent.user_goal,
+                        "research-summary.md",
+                    )
+                    steps.append(
+                        _step(
+                            intent,
+                            "write-research-artifact",
+                            "Write research artifact",
+                            "artifact.write",
+                            _first_allowed(("artifact.write",), allowed),
+                            input_preview={"path": artifact_path},
+                            depends_on=[artifact_depends_on],
+                            reason="Persist the requested browser-derived report as a replayable artifact.",
+                        )
+                    )
+                return steps
             steps = [
                 *([discover_step] if discover_step is not None else []),
                 *([prepare_step] if prepare_step is not None else []),
@@ -13047,6 +13082,7 @@ def _web_search_hint(text: str, context_source: str) -> dict[str, Any]:
         followup = _web_search_followup_hint(value)
         if followup:
             hint.update(followup)
+            hint.update(_web_search_post_followup_hint(value))
         else:
             hint.update(_web_search_results_output_hint(value))
         return hint
@@ -13062,9 +13098,22 @@ def _web_search_hint(text: str, context_source: str) -> dict[str, Any]:
     followup = _web_search_followup_hint(value)
     if followup:
         hint.update(followup)
+        hint.update(_web_search_post_followup_hint(value))
     else:
         hint.update(_web_search_results_output_hint(value))
     return hint
+
+
+def _web_search_post_followup_hint(text: str) -> dict[str, Any]:
+    output_hint = _web_search_results_output_hint(text)
+    browser_action = str(output_hint.get("browser_action") or "").strip()
+    if browser_action == "open_url_extract":
+        hint: dict[str, Any] = {"post_followup_action": "extract_text"}
+        presentation = str(output_hint.get("presentation") or "").strip()
+        if presentation:
+            hint["presentation"] = presentation
+        return hint
+    return {}
 
 
 def _web_search_results_output_hint(text: str) -> dict[str, Any]:
@@ -14227,6 +14276,13 @@ def _looks_like_browser_current_page_text(value: str, lowered: str) -> bool:
         or re.search(
             r"(?:根据|基于|用|使用).{0,6}(?:当前|这个|本页).{0,8}"
             r"(?:网页|页面|标签页|页).{0,16}(?:写|生成|输出|整理|做|制作|总结|调研|分析)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:研究|调研|分析|整理|总结|摘要|写|生成|输出|制作|做).{0,8}"
+            r"(?:当前|这个|本页).{0,8}(?:网页|页面|标签页|页)"
+            r"(?:.{0,24}(?:写|生成|输出|整理|做|制作|报告|分析|总结|摘要))?",
             value,
             flags=re.IGNORECASE,
         )
