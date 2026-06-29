@@ -9765,7 +9765,7 @@ def _foreground_submit_action_hint(text: str) -> str:
     lowered = value.lower()
     app_scoped_submit = bool(_app_scoped_foreground_submit_app_name_hint(value))
     looks_like_send = _contains_any(value, ("发送", "发出", "send")) or bool(
-        re.search(r"(?<!开)发", value)
+        _looks_like_chinese_foreground_send_verb(value)
     )
     if looks_like_send and (
         _looks_like_foreground_submit_scope(value, lowered) or app_scoped_submit
@@ -9785,6 +9785,24 @@ def _foreground_submit_action_hint(text: str) -> str:
     if re.search(r"(?:提交|submit).{0,8}(?:回车|return|enter)", value, flags=re.IGNORECASE):
         return "submit"
     return ""
+
+
+def _looks_like_chinese_foreground_send_verb(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"(?:发给|发到|发往|发去|发一下|发下|发出去|发消息|发信息|发这条|发这个)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:并|然后|再|接着|之后|后|把|将)\s*发(?:给|到|出去|一下|下)?",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _foreground_search_submit_hint(text: str) -> bool:

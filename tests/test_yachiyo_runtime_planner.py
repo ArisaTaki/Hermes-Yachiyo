@@ -7849,6 +7849,16 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
             "desktop.ui_elements",
         ],
     )
+    publish_note = planner_direct_tool_requests(
+        "打开 TextEdit 写一份 Oha Yachiyo 发布检查清单",
+        [
+            "desktop.list_apps",
+            "app.open_and_safe_type_text",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    )
 
     assert focus == [
         {
@@ -7862,6 +7872,26 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.submit_foreground",
             "input": {"action": "send"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+    assert publish_note == [
+        _app_discovery_request("TextEdit"),
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_type_text",
+            "input": {
+                "app_name": "TextEdit",
+                "text": "一份 Oha Yachiyo 发布检查清单",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },

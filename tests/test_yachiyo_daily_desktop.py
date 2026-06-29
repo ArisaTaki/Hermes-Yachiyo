@@ -1948,6 +1948,22 @@ def test_daily_desktop_entrypoint_routes_browser_search_and_current_page_find() 
         "app.open_and_safe_type_text",
         "desktop.submit_foreground",
     ]
+    publish_note_requests = daily_desktop_entrypoint_requests(
+        "打开 TextEdit 写一份 Oha Yachiyo 发布检查清单"
+    )
+    assert publish_note_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_type_text",
+            "input": {
+                "app_name": "TextEdit",
+                "text": "一份 Oha Yachiyo 发布检查清单",
+            },
+        }
+    ]
+    assert daily_desktop_user_metadata(publish_note_requests)["daily_desktop_tools"] == [
+        "app.open_and_safe_type_text"
+    ]
     assert daily_desktop_entrypoint_requests("打开搜索框输入 yachiyo 回车") == [
         {
             "protocol": "json_fallback",
