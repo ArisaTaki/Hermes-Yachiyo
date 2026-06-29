@@ -240,6 +240,7 @@ function runtimeTimelineContentSnapshotDetail(event: RuntimeTimelineEventSnapsho
     runtimeTimelineRecordString(record, 'source_tool'),
     runtimeTimelineRecordString(record, 'app_name'),
     runtimeTimelineRecordString(record, 'title'),
+    runtimeTimelineRecordString(record, 'url'),
     textItemCount ? `${textItemCount} 条文本` : '',
     elementCount ? `${elementCount} 个元素` : '',
     runtimeTimelineRecordString(record, 'path'),

@@ -189,7 +189,7 @@ function RuntimeContentSnapshot({
   return (
     <section className="run-content-snapshot" data-testid={testId}>
       <div className="run-content-snapshot-head">
-        <strong>桌面内容快照</strong>
+        <strong>上下文快照</strong>
         {meta ? <span>{meta}</span> : null}
       </div>
       {text ? <pre>{text}</pre> : summary ? <p>{summary}</p> : null}
@@ -447,6 +447,7 @@ function runtimeContentSnapshotMeta(snapshot: RuntimeTimelineEventRecord): strin
     defaultString(snapshot.source_tool),
     defaultString(snapshot.app_name),
     defaultString(snapshot.title),
+    defaultString(snapshot.url),
     textItemCount ? `${textItemCount} 条文本` : '',
     elementCount ? `${elementCount} 个元素` : '',
     defaultString(snapshot.path),

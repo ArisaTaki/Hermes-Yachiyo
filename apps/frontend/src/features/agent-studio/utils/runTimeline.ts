@@ -459,6 +459,7 @@ function publicRunEventContentSnapshotSummary(payload: Record<string, unknown>):
     publicRunEventPayloadString(record, 'source_tool'),
     publicRunEventPayloadString(record, 'app_name'),
     publicRunEventPayloadString(record, 'title'),
+    publicRunEventPayloadString(record, 'url'),
     textItemCount ? `${textItemCount} 条文本` : '',
     elementCount ? `${elementCount} 个元素` : '',
     publicRunEventPayloadString(record, 'path'),

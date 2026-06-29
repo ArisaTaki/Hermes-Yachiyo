@@ -760,6 +760,34 @@ def test_custom_api_agent_loop_prefetches_runtime_planner_data_source_before_mod
     timeline: list[dict[str, Any]] = []
     messages = [{"role": "user", "content": "请分析 data/sales.csv 并输出报告"}]
 
+    def fake_run_tool_requests(tool_requests, allowed_tools, broker, messages_arg, timeline_arg, artifacts, **kwargs):
+        tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": messages_arg,
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        request = tool_requests[0]
+        input_preview = request.get("input") if isinstance(request.get("input"), dict) else {}
+        result = {
+            "ok": True,
+            "path": "data/sales.csv",
+            "content": "region,revenue\nEast,10\nWest,20",
+        }
+        timeline_arg.append(
+            _timeline(
+                "agent.tool.call",
+                str(request.get("tool") or ""),
+                input_preview=input_preview,
+                result=result,
+            )
+        )
+
     loop = RuntimeCustomApiAgentLoop(
         agent_model_config_private=lambda _agent: {"base_url": "https://model.local", "model": "m", "api_key": "k"},
         compile_agent_runtime=lambda _agent: {
@@ -785,17 +813,7 @@ def test_custom_api_agent_loop_prefetches_runtime_planner_data_source_before_mod
         limit_model_output=lambda value: (str(value), False),
         model_output_text_factory=agent_runtime._ModelOutputText,
         tool_loop_projection=FakeToolLoopProjection(),
-        run_tool_requests=lambda tool_requests, allowed_tools, broker, messages_arg, timeline_arg, artifacts, **kwargs: tool_runs.append(
-            {
-                "tool_requests": tool_requests,
-                "allowed_tools": allowed_tools,
-                "broker": broker,
-                "messages": messages_arg,
-                "timeline": timeline_arg,
-                "artifacts": artifacts,
-                "kwargs": kwargs,
-            }
-        ),
+        run_tool_requests=fake_run_tool_requests,
         error_type=agent_runtime.AgentRuntimeError,
     )
 
@@ -825,9 +843,25 @@ def test_custom_api_agent_loop_prefetches_runtime_planner_data_source_before_mod
     planned_event = next(
         event for event in timeline if event["event"] == "agent.desktop.intent_planned"
     )
+    followup_event = next(
+        event for event in timeline if event["event"] == "agent.model.followup_context"
+    )
     assert planned_event["source"] == "runtime_planner"
+    assert followup_event["planning_reason"] == "planner_prefetch_data_source"
+    assert followup_event["observation_tools"] == ["workspace.read"]
+    assert followup_event["content_snapshot"] == {
+        "source_tool": "workspace.read",
+        "ok": True,
+        "path": "data/sales.csv",
+        "text_length": 30,
+        "truncated": False,
+        "text": "region,revenue\nEast,10\nWest,20",
+    }
     assert model_calls[0][0]["role"] == "system"
     assert "selected intent=data_analysis" in model_calls[0][0]["content"]
+    assert model_calls[0][-1]["role"] == "user"
+    assert "Observed content snapshot:" in model_calls[0][-1]["content"]
+    assert "region,revenue\nEast,10\nWest,20" in model_calls[0][-1]["content"]
 
 
 def test_custom_api_agent_loop_routes_daily_desktop_intents_to_structured_tools() -> None:
@@ -13730,7 +13764,13 @@ def test_custom_api_agent_loop_preplans_runtime_browser_research_before_model(
 
     def call_model(_base_url, _model, _api_key, model_messages, **_kwargs):
         order.append("model")
-        assert "Tool result for browser.open_url_and_extract_text" in model_messages[-1]["content"]
+        assert any(
+            "Tool result for browser.open_url_and_extract_text" in str(message.get("content") or "")
+            for message in model_messages
+        )
+        assert model_messages[-1]["role"] == "user"
+        assert "Observed content snapshot:" in model_messages[-1]["content"]
+        assert "Example Domain" in model_messages[-1]["content"]
         return {"role": "assistant", "content": "总结完成。"}
 
     loop = RuntimeCustomApiAgentLoop(
@@ -13774,6 +13814,17 @@ def test_custom_api_agent_loop_preplans_runtime_browser_research_before_model(
 
     assert str(result) == "总结完成。"
     assert order == ["tool", "model"]
+    followup_event = next(
+        event for event in timeline if event["event"] == "agent.model.followup_context"
+    )
+    assert followup_event["content_snapshot"] == {
+        "source_tool": "browser.open_url_and_extract_text",
+        "ok": True,
+        "url": "https://example.com",
+        "text_length": 14,
+        "truncated": False,
+        "text": "Example Domain",
+    }
     assert tool_runs[0]["tool_requests"] == [
         {
             "protocol": "json_fallback",

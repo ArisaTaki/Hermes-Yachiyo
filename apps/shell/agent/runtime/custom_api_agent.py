@@ -19,7 +19,7 @@ from apps.shell.agent.runtime.desktop_intents import (
 from apps.shell.agent.runtime.desktop_tool_labels import (
     DAILY_DESKTOP_TOOL_LABELS as _DAILY_DESKTOP_TOOL_LABELS,
 )
-from apps.shell.agent.runtime.desktop_content_snapshot import latest_desktop_content_snapshot
+from apps.shell.agent.runtime.followup_content_snapshot import latest_followup_content_snapshot
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.tools.policy import (
     DAILY_BROWSER_TOOL_NAMES,
@@ -618,7 +618,7 @@ class RuntimeCustomApiAgentLoop:
         timeline: list[dict[str, Any]],
         run_id: str = "",
     ) -> None:
-        payload = _desktop_content_followup_payload(
+        payload = _model_followup_context_payload(
             planned_tool_requests,
             selection_payload,
             allowed_tools=allowed_tools,
@@ -629,7 +629,7 @@ class RuntimeCustomApiAgentLoop:
         messages.append(
             {
                 "role": "user",
-                "content": _desktop_content_followup_message(payload),
+                "content": _model_followup_context_message(payload),
             }
         )
         timeline.append(
@@ -3225,7 +3225,7 @@ def _combine_daily_desktop_summaries(summaries: list[str]) -> str:
     return " ".join(sentences)
 
 
-def _desktop_content_followup_payload(
+def _model_followup_context_payload(
     planned_tool_requests: list[dict[str, Any]],
     selection_payload: dict[str, Any],
     *,
@@ -3237,13 +3237,23 @@ def _desktop_content_followup_payload(
         for request in planned_tool_requests
         if isinstance(request, dict)
         and bool(request.get("continue_to_model"))
-        and str(request.get("planning_reason") or "").strip()
-        == "planner_prefetch_desktop_content"
     ]
     if not content_requests:
         return {}
     allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
     artifacts_expected = _string_list(selection_payload.get("artifacts_expected"))
+    planning_reasons = _ordered_text_list(
+        [
+            str(request.get("planning_reason") or "").strip()
+            for request in content_requests
+            if str(request.get("planning_reason") or "").strip()
+        ]
+    )
+    planning_reason = (
+        planning_reasons[0]
+        if len(planning_reasons) == 1
+        else "planner_model_followup_context"
+    )
     observation_tools = _ordered_text_list(
         [
             str(request.get("tool") or "").strip()
@@ -3254,13 +3264,13 @@ def _desktop_content_followup_payload(
     payload: dict[str, Any] = {
         "source": "runtime_planner",
         "status": "ready",
-        "planning_reason": "planner_prefetch_desktop_content",
+        "planning_reason": planning_reason,
         "observation_tools": observation_tools,
         "artifact_write_allowed": "artifact.write" in allowed,
     }
     if artifacts_expected:
         payload["artifacts_expected"] = artifacts_expected
-    content_snapshot = latest_desktop_content_snapshot(timeline, observation_tools)
+    content_snapshot = latest_followup_content_snapshot(timeline, observation_tools)
     if content_snapshot:
         payload["content_snapshot"] = content_snapshot
     for key in ("decision_id", "plan_id", "intent_kind"):
@@ -3270,29 +3280,29 @@ def _desktop_content_followup_payload(
     return payload
 
 
-def _desktop_content_followup_message(payload: dict[str, Any]) -> str:
+def _model_followup_context_message(payload: dict[str, Any]) -> str:
     artifacts = _string_list(payload.get("artifacts_expected"))
     artifact_write_allowed = bool(payload.get("artifact_write_allowed"))
     observation_tools = _string_list(payload.get("observation_tools"))
-    observation_text = ", ".join(observation_tools) or "desktop observation tools"
+    observation_text = ", ".join(observation_tools) or "runtime observation tools"
     if artifact_write_allowed and artifacts:
         artifact_instruction = (
             "The user requested a durable output. Call artifact.write next with "
-            f"path {artifacts[0]!r} and content derived from the desktop observation. "
+            f"path {artifacts[0]!r} and content derived from the observed context. "
             "Do not write an empty or placeholder artifact."
         )
     elif artifact_write_allowed:
         artifact_instruction = (
             "If the user requested a durable output, call artifact.write next with an appropriate "
-            "path and content derived from the desktop observation. Do not write an empty artifact."
+            "path and content derived from the observed context. Do not write an empty artifact."
         )
     else:
         artifact_instruction = (
             "artifact.write is not allowed, so provide the requested summary or report inline."
         )
-    snapshot_text = _desktop_content_snapshot_message(payload.get("content_snapshot"))
+    snapshot_text = _followup_content_snapshot_message(payload.get("content_snapshot"))
     return (
-        "Runtime follow-up context: desktop content has just been observed through "
+        "Runtime follow-up context: source material has just been observed through "
         f"{observation_text}. Use the latest Tool result messages above as source material. "
         f"{snapshot_text}"
         f"{artifact_instruction} If the observation failed or lacks readable content, explain the "
@@ -3301,16 +3311,21 @@ def _desktop_content_followup_message(payload: dict[str, Any]) -> str:
     )
 
 
-def _desktop_content_snapshot_message(value: Any) -> str:
+def _followup_content_snapshot_message(value: Any) -> str:
     if not isinstance(value, dict):
         return ""
     text = str(value.get("text") or "").strip()
     if text:
-        return f"\n\nDesktop content snapshot:\n{text}\n\n"
+        label = (
+            "Desktop content snapshot"
+            if str(value.get("source_tool") or "").startswith(("desktop.", "screen."))
+            else "Observed content snapshot"
+        )
+        return f"\n\n{label}:\n{text}\n\n"
     if value.get("ok") is False:
         summary = str(value.get("summary") or value.get("error") or "").strip()
         if summary:
-            return f"\n\nDesktop observation status: {summary}\n\n"
+            return f"\n\nObservation status: {summary}\n\n"
     return ""
 
 

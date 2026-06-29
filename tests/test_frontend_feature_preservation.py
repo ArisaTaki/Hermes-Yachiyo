@@ -2156,6 +2156,7 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "const payload = eventIsSecret ? '' : getEventPayload(event);",
             "const contentSnapshot = eventIsSecret ? null : runtimeEventContentSnapshot(payloadRecord);",
             "RuntimeContentSnapshot",
+            "上下文快照",
             "run-content-snapshot",
             "data-testid={testId}",
             "testId={`${eventTestId}-content-snapshot`}",
