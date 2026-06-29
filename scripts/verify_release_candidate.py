@@ -4440,8 +4440,6 @@ def verify_release_candidate(
             source_only_conflicts.append("--run-provider-smoke")
         if run_ui_smoke:
             source_only_conflicts.append("--run-ui-smoke")
-        if run_electron_native_bridge_smoke:
-            source_only_conflicts.append("--run-electron-native-bridge-smoke")
 
     if source_only_conflicts:
         conflict_message = f"--source-only cannot be combined with {', '.join(source_only_conflicts)}"
@@ -5363,7 +5361,11 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument(
         "--source-only",
         action="store_true",
-        help="Run source-level release guards only, rejecting built artifacts and UI smoke gates.",
+        help=(
+            "Run source-level release guards only, rejecting built artifacts "
+            "and UI smoke gates. May be combined with the source-level "
+            "Electron native bridge smoke."
+        ),
     )
     parser.add_argument(
         "--run-ui-smoke",

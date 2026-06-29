@@ -984,6 +984,50 @@ def test_release_candidate_verifier_reports_electron_native_bridge_smoke_when_re
     assert section["evidence"]["mode"] == "electron_native_bridge_smoke"
 
 
+def test_release_candidate_verifier_allows_source_only_electron_native_bridge_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    (tmp_path / "dist" / "electron").mkdir(parents=True)
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        rc,
+        "run_electron_native_bridge_smoke",
+        lambda: {
+            "ok": True,
+            "mode": "electron_native_bridge_smoke",
+            "native_runtime_url": "http://127.0.0.1:50123",
+            "checks": {
+                "native_bridge_started": True,
+                "unauthenticated_rejected": True,
+                "authenticated_status_ok": True,
+            },
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        run_electron_native_bridge_smoke=True,
+        report_json=Path("tmp/source-only-bridge-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "Electron native bridge smoke: passed" in output
+    assert "built artifact guards: skipped by --source-only" in output
+    assert "--source-only cannot be combined with --run-electron-native-bridge-smoke" not in output
+    report = json.loads(
+        (tmp_path / "tmp" / "source-only-bridge-rc.json").read_text(encoding="utf-8")
+    )
+    assert report["ok"] is True
+    assert report["electron_native_bridge_smoke"]["status"] == "passed"
+    assert report["electron_native_bridge_smoke"]["run_requested"] is True
+    assert report["built_artifact_guards"] == {
+        "status": "skipped",
+        "artifact_paths": [],
+        "findings": [],
+    }
+
+
 def test_release_candidate_verifier_fails_when_electron_native_bridge_smoke_fails(
     tmp_path, monkeypatch, capsys
 ):

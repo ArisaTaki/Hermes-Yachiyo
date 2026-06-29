@@ -308,17 +308,28 @@ python scripts/verify_release_candidate.py --source-only \
   --report-json tmp/source-only-rc.json
 ```
 
+The source-level Electron native bridge auth/status gate can be included
+without checking stale packaged artifacts:
+
+```bash
+python scripts/verify_release_candidate.py --source-only \
+  --run-electron-native-bridge-smoke \
+  --report-json tmp/source-only-electron-bridge-rc.json
+```
+
 This passed the current source release guards, data-analysis artifact smoke,
 browser planner artifact smoke, desktop planner discovery smoke, real desktop
-discovery smoke, planner/runtime tool parity smoke, approval policy gate smoke,
-approval resume timeline smoke, runtime approval resume smoke, Yachiyo route
-approval smoke, and GroupRun timeline smoke. It intentionally skipped opt-in or
-artifact-dependent gates: real app open/UI inspection/interaction, Electron
-native bridge, built artifacts, DMG launch/screen/UI/native-file checks, real
-provider smoke, UI smokes, and manual release-candidate checks. Passing this
-baseline proves the source-level planner/runtime contracts are currently
-coherent; it is not release parity until the skipped packaged, provider, and
-manual evidence is supplied.
+discovery smoke, Electron native bridge auth/status smoke when requested,
+planner/runtime tool parity smoke, approval policy gate smoke, approval resume
+timeline smoke, runtime approval resume smoke, Yachiyo route approval smoke,
+and GroupRun timeline smoke. It intentionally skipped opt-in or
+artifact-dependent gates: real app open/UI inspection/interaction, real
+Electron focus-app bridge attempts, built artifacts, DMG
+launch/screen/UI/native-file checks, real provider smoke, UI smokes, and manual
+release-candidate checks. Passing this baseline proves the source-level
+planner/runtime contracts are currently coherent; it is not release parity
+until the skipped packaged, provider, real desktop, and manual evidence is
+supplied.
 
 Current opt-in OpenAI-compatible provider stream evidence is reproducible, when
 `OHA_YACHIYO_SMOKE_*` credentials are configured, with:
