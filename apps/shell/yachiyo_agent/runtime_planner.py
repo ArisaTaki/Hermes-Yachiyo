@@ -11908,10 +11908,13 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
         rf"(?P<app>[\w .·-]{{1,40}}?)(?:里|中|上|内)?\s*"
         rf"(?:给|发给|发送给)\s*(?P<recipient>[^：:，,。]+?)\s*"
         rf"(?:发送|发|发消息)\s*{source_pattern}$",
-        rf"^(?:把|将)?\s*{source_pattern}.{{0,50}}?"
+        rf"^(?:把|将)?\s*(?:(?:读取|阅读|读一下|读下|查看|看看|read|inspect)\s*)?"
+        rf"{source_pattern}.{{0,50}}?"
         rf"(?:发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+)$",
-        rf"^(?:把|将)?\s*{source_pattern}\s*(?:通过|用|在)\s*(?P<app>[\w .·-]{{1,40}}?)\s*(?:发给|发送给|发到|发送到)\s*(?P<recipient>[^：:，,。]+)$",
-        rf"^(?:把|将)?\s*{source_pattern}\s*(?:发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+)$",
+        rf"^(?:把|将)?\s*(?:(?:读取|阅读|读一下|读下|查看|看看|read|inspect)\s*)?"
+        rf"{source_pattern}\s*(?:通过|用|在)\s*(?P<app>[\w .·-]{{1,40}}?)\s*(?:发给|发送给|发到|发送到)\s*(?P<recipient>[^：:，,。]+)$",
+        rf"^(?:把|将)?\s*(?:(?:读取|阅读|读一下|读下|查看|看看|read|inspect)\s*)?"
+        rf"{source_pattern}\s*(?:发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+)$",
         rf"^(?:给|发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+?)\s*(?:发送|发|发消息)\s*{source_pattern}$",
         rf"^(?:send|message)\s+{source_pattern}\s+(?:in|with|using|through)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{{1,40}}?)\s+(?:to|for)\s+(?P<recipient>[^.!?,]+)$",
         rf"^(?:in|with|using|through)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{{1,40}}?)\s+(?:send|message)\s+{source_pattern}\s+(?:to|for)\s+(?P<recipient>[^.!?,]+)$",

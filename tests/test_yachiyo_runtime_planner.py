@@ -9794,6 +9794,51 @@ def test_runtime_planner_routes_direct_context_communication_send_sequence() -> 
         "text": "Alice"
     }
 
+    clipboard_surface = RuntimePlanner().decision(
+        "读取剪贴板内容并发给 Slack 的 yachiyo",
+        allowed_tools=[
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+
+    assert clipboard_surface.selected_intent.kind == "communication"
+    assert clipboard_surface.selected_intent.inputs == {
+        "context_source": "clipboard",
+        "direct_message_hint": {
+            "app_name": "Slack",
+            "recipient": "yachiyo",
+            "body_source": "clipboard",
+            "mode": "focus",
+            "send_action": "send",
+        },
+    }
+    assert [step.step_id for step in clipboard_surface.plan.tool_plan.steps] == [
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "paste-communication-message",
+        "send-communication-message",
+    ]
+    assert _step_by_id(
+        clipboard_surface,
+        "focus-communication-recipient-search",
+    ).input_preview == {
+        "app_name": "Slack",
+        "action": "find",
+    }
+    assert _step_by_id(
+        clipboard_surface,
+        "type-communication-recipient",
+    ).input_preview == {"text": "yachiyo"}
+    assert _step_by_id(
+        clipboard_surface,
+        "paste-communication-message",
+    ).input_preview == {"action": "paste"}
+
 
 def test_runtime_planner_routes_file_context_communication_without_app_alias() -> None:
     decision = RuntimePlanner().decision(
