@@ -118,7 +118,8 @@ localized blocker and recovery hint, and keep executable recovery actions
 available without claiming that the user must grant another macOS permission.
 
 Current planner/runtime tool parity evidence is reproducible with
-`python scripts/smoke_planner_runtime_tool_parity.py`; this proves representative
+`python scripts/smoke_planner_runtime_tool_parity.py --report-json tmp/planner-runtime-tool-parity.json`;
+this proves representative
 planner-selected desktop, data-analysis, browser, media, terminal, and reminder
 tools are present in the runtime tool registry, dispatch table, main Chat
 policy, model descriptors, and approval map. It does not replace packaged-app

@@ -70,3 +70,18 @@ def test_planner_runtime_tool_parity_cli_outputs_json(capsys):
     assert output["mode"] == "planner_runtime_tool_parity_smoke"
     assert all(case["checks"]["request_tools_dispatched"] for case in output["cases"])
     assert all(case["checks"]["tools_have_model_descriptors"] for case in output["cases"])
+
+
+def test_planner_runtime_tool_parity_cli_writes_report_json(tmp_path, capsys):
+    report_path = tmp_path / "planner-runtime-tool-parity.json"
+
+    assert smoke.main(["--report-json", str(report_path)]) == 0
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert output == report
+    assert report["ok"] is True
+    assert report["mode"] == "planner_runtime_tool_parity_smoke"
+    assert "planner runtime tool parity smoke report:" in captured.err
+    assert str(report_path) in captured.err
