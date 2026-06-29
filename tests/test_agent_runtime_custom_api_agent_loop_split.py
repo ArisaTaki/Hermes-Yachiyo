@@ -1672,6 +1672,150 @@ def test_custom_api_agent_loop_sends_captured_data_analysis_to_communication_tar
     )
 
 
+def test_custom_api_agent_loop_sends_visible_text_summary_to_communication_target() -> None:
+    budget = FakeBudget()
+    tool_runs: list[dict[str, Any]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    messages = [
+        {
+            "role": "user",
+            "content": "把当前窗口内容总结一下发给微信文件传输助手",
+        }
+    ]
+    visible_text = "Q2 sales increased 12%. Renewal risk is concentrated in East accounts."
+    generated = "当前窗口摘要：Q2 销售增长 12%，续约风险集中在 East 客户。"
+
+    def fake_run_tool_requests(
+        tool_requests,
+        allowed_tools,
+        broker,
+        messages_arg,
+        timeline_arg,
+        artifacts,
+        **kwargs,
+    ):
+        tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": messages_arg,
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        for request in tool_requests:
+            tool_name = str(request.get("tool") or "")
+            input_preview = request.get("input") if isinstance(request.get("input"), dict) else {}
+            result = (
+                {
+                    "ok": True,
+                    "elements": [
+                        {
+                            "role": "text",
+                            "value": visible_text,
+                        }
+                    ],
+                }
+                if tool_name == "desktop.ui_elements"
+                else {"ok": True, **input_preview}
+            )
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool_name,
+                    input_preview=input_preview,
+                    result=result,
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "desktop.ui_elements",
+                    "app.focus_and_safe_shortcut",
+                    "desktop.safe_type_text",
+                    "desktop.search_submit",
+                    "desktop.submit_foreground",
+                ]
+            }
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner follow-up context.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": generated},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=fake_run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-visible-text-communication",
+    )
+
+    assert "WeChat" in str(result)
+    assert "输入文字" in str(result)
+    assert [run["tool_requests"][0]["tool"] for run in tool_runs] == [
+        "desktop.ui_elements",
+        "app.focus_and_safe_shortcut",
+    ]
+    assert [request["tool"] for request in tool_runs[1]["tool_requests"]] == [
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    assert tool_runs[1]["tool_requests"][0]["input"] == {
+        "app_name": "WeChat",
+        "action": "find",
+    }
+    assert tool_runs[1]["tool_requests"][1]["input"] == {"text": "文件传输助手"}
+    assert tool_runs[1]["tool_requests"][3]["input"] == {"text": generated}
+    assert tool_runs[1]["tool_requests"][4]["input"] == {"action": "send"}
+    followup = next(
+        event for event in timeline if event["event"] == "agent.model.followup_context"
+    )
+    assert followup["observation_tools"] == ["desktop.ui_elements"]
+    assert followup["followup_target"]["kind"] == "communication_message"
+    assert followup["followup_target"]["app_name"] == "WeChat"
+    assert followup["followup_target"]["recipient"] == "文件传输助手"
+    assert followup["followup_target"]["transform"] == "summary"
+    assert followup["content_snapshot"]["source_tool"] == "desktop.ui_elements"
+    assert visible_text in model_calls[0][-1]["content"]
+    assert "message to 文件传输助手 in WeChat" in model_calls[0][-1]["content"]
+
+
 def test_model_followup_context_payload_preserves_multiple_content_snapshots() -> None:
     timeline = [
         _timeline(
