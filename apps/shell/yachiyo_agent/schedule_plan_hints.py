@@ -156,6 +156,8 @@ def _reminder_body(text: str) -> str:
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?P<body_time_first>[^。！？!?]+?)\s*提醒我\s*(?P<body_time_after>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?P<body_time_first_plain>[^。！？!?]+?)\s*提醒(?!事项)\s*(?P<body_time_after_plain>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?提醒我\s*(?P<body>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:创建|新建|添加|新增)?\s*(?:一个|一条|一项)?\s*(?:提醒事项|提醒)\s*[:：]?\s*(?P<title>.+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
@@ -174,6 +176,10 @@ def _reminder_body(text: str) -> str:
         groups = match.groupdict()
         if groups.get("body_time_first") and groups.get("body_time_after"):
             return _strip_schedule_prefix(f"{groups['body_time_first']} {groups['body_time_after']}")
+        if groups.get("body_time_first_plain") and groups.get("body_time_after_plain"):
+            return _strip_schedule_prefix(
+                f"{groups['body_time_first_plain']} {groups['body_time_after_plain']}"
+            )
         body = _strip_schedule_prefix(
             groups.get("body")
             or groups.get("title")

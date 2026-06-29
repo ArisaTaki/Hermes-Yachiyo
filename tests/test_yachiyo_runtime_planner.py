@@ -10452,6 +10452,8 @@ def test_runtime_planner_routes_iso_calendar_event_to_schedule_capability() -> N
 def test_runtime_planner_routes_relative_reminder_to_schedule_capability() -> None:
     tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
     tomorrow_1000 = f"{(date.today() + timedelta(days=1)).isoformat()}T10:00"
+    next_monday = date.today() + timedelta(days=7 - date.today().weekday())
+    next_monday_1000 = f"{next_monday.isoformat()}T10:00"
     decision = RuntimePlanner().decision(
         "提醒我明天买牛奶",
         allowed_tools=["reminders.create"],
@@ -10459,6 +10461,10 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability() -> No
     create_first = RuntimePlanner().decision(
         "创建明天上午10点开会的提醒",
         allowed_tools=["reminders.create"],
+    )
+    time_first_plain = RuntimePlanner().decision(
+        "帮我下周一上午十点提醒团队复盘",
+        allowed_tools=["reminders.create", "group.run"],
     )
 
     assert decision.selected_intent.kind == "schedule"
@@ -10471,6 +10477,13 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability() -> No
     assert create_first_step.input_preview == {
         "title": "开会",
         "due_at": tomorrow_1000,
+    }
+    assert time_first_plain.selected_intent.kind == "schedule"
+    time_first_plain_step = _step_by_id(time_first_plain, "create-schedule-item")
+    assert time_first_plain_step.tool_name == "reminders.create"
+    assert time_first_plain_step.input_preview == {
+        "title": "团队复盘",
+        "due_at": next_monday_1000,
     }
 
 
@@ -14901,6 +14914,18 @@ def test_planner_tool_requests_maps_relative_schedule_plans() -> None:
             "protocol": "json_fallback",
             "tool": "reminders.create",
             "input": {"title": "开会", "due_at": tomorrow_1000},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
+        "帮我下周一上午十点提醒团队复盘",
+        allowed_tools=["reminders.create", "group.run"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {"title": "团队复盘", "due_at": next_monday_1000},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_schedule",
         }
