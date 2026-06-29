@@ -1717,6 +1717,43 @@ def test_runtime_planner_routes_web_research_report_to_communication_target() ->
         "transform": "report",
     }
 
+    app_scoped_allowed_tools = [
+        "browser.open_url_and_extract_text",
+        "artifact.write",
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+    app_scoped_decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=app_scoped_allowed_tools,
+    )
+
+    assert app_scoped_decision.plan.tool_plan.missing_capabilities == []
+    assert planner_tool_requests(prompt, app_scoped_allowed_tools) == requests
+    assert _step_by_id(
+        app_scoped_decision,
+        "type-research-communication-recipient",
+    ).tool_name == "app.focus_and_safe_type_text"
+    assert _step_by_id(
+        app_scoped_decision,
+        "type-research-communication-recipient",
+    ).input_preview == {"app_name": "Slack", "text": "yachiyo"}
+    assert _step_by_id(
+        app_scoped_decision,
+        "draft-research-communication-message",
+    ).tool_name == "app.focus_and_safe_type_text"
+    assert _step_by_id(
+        app_scoped_decision,
+        "draft-research-communication-message",
+    ).input_preview == {
+        "app_name": "Slack",
+        "body_source": "research_artifact",
+        "artifact_path": "research-summary.md",
+        "transform": "report",
+    }
+
 
 def test_runtime_planner_marks_unavailable_steps_when_tools_are_disallowed() -> None:
     decision = RuntimePlanner().decision(
