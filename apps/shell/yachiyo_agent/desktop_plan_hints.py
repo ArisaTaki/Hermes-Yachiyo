@@ -2129,6 +2129,12 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "新建一个文档": "new_document",
         "新建一份文档": "new_document",
         "新文档": "new_document",
+        "新建页面": "new_document",
+        "新建一个页面": "new_document",
+        "创建页面": "new_document",
+        "创建一个页面": "new_document",
+        "新增页面": "new_document",
+        "新页面": "new_document",
         "新建文件": "new_document",
         "新建一个文件": "new_document",
         "新建一份文件": "new_document",
@@ -2523,6 +2529,11 @@ def _safe_shortcut_action_from_trailing_phrase(value: str) -> str:
         "新建文档",
         "新建一个文档",
         "新建一份文档",
+        "新建页面",
+        "新建一个页面",
+        "创建页面",
+        "创建一个页面",
+        "新增页面",
         "新建文件",
         "新建一个文件",
         "新建一份文件",
@@ -2630,7 +2641,7 @@ def _safe_shortcut_action_from_embedded_create_phrase(value: str) -> str:
         return ""
     if re.search(
         r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份)?\s*"
-        r"(?:今天的|今日的|新的|新)?\s*(?:笔记|备忘录|日志|日记)",
+        r"(?:今天的|今日的|新的|新|关于.+?的)?\s*(?:笔记|备忘录|日志|日记)",
         text,
         flags=re.IGNORECASE,
     ) or re.search(
@@ -2642,7 +2653,7 @@ def _safe_shortcut_action_from_embedded_create_phrase(value: str) -> str:
         return "new_note"
     if re.search(
         r"(?:新建|创建|新增)\s*(?:一个|一份|一篇|一条)?\s*"
-        r"(?:文档|文件(?!夹)|表格|工作簿|演示|演示文稿|幻灯片|项目|工单|任务|卡片)",
+        r"(?:页面|文档|文件(?!夹)|表格|工作簿|演示|演示文稿|幻灯片|项目|工单|任务|卡片)",
         text,
         flags=re.IGNORECASE,
     ) or re.search(

@@ -338,6 +338,7 @@ def test_planner_first_direct_selection_owns_current_page_web_actions_without_le
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "presentation": "summary",
+            "continue_to_model": True,
         }
     ]
     assert screenshot_selection.selected_source == "runtime_planner"
@@ -638,8 +639,7 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
             "在 VS Code 里执行命令 Format Document",
             [
                 "desktop.list_apps",
-                "app.focus",
-                "desktop.safe_shortcut",
+                "app.focus_and_safe_shortcut",
                 "desktop.safe_type_text",
                 "desktop.submit_foreground",
                 "desktop.ui_elements",
@@ -658,7 +658,7 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
         ),
         (
             "微信打开搜索",
-            ["desktop.list_apps", "app.focus", "desktop.safe_shortcut", "desktop.ui_elements"],
+            ["desktop.list_apps", "app.focus_and_safe_shortcut", "desktop.ui_elements"],
         ),
         (
             "Chrome 点登录",
@@ -1543,15 +1543,8 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
         },
         {
             "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "WeChat"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.safe_shortcut",
-            "input": {"action": "select_all"},
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "WeChat", "action": "select_all"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },

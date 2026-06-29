@@ -1066,7 +1066,7 @@ class TaskIntentRouter:
                 _looks_like_file_organization_request(text)
                 and not _looks_like_context_artifact_request(text)
             )
-            or shortcut_action == "new_document"
+            or shortcut_action in {"new_document", "new_note"}
             or _looks_like_schedule_request(text)
         ):
             return _empty_intent("report_generation", text)
@@ -9707,6 +9707,9 @@ def _foreground_compose_text_hint(text: str) -> str:
         return ""
     if _looks_like_recipient_message_request(value):
         return ""
+    create_text = _app_scoped_create_text_hint(value)
+    if create_text:
+        return create_text
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|切到|聚焦)?\s*"
         r"(?P<app>[\w .·-]{1,40}?)\s*(?:输入|键入|填写|写入|写下|记录下|记下|写)\s*(?P<text>[^。！？!?，,]+?)"
@@ -9740,6 +9743,53 @@ def _foreground_compose_text_hint(text: str) -> str:
         if typed_text:
             return typed_text
     return ""
+
+
+def _app_scoped_create_text_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    parsed = _app_scoped_followup_hint(value)
+    followup = str(parsed.get("followup") or "").strip()
+    if not followup:
+        return ""
+    if not _looks_like_app_scoped_create_followup(followup):
+        return ""
+    patterns = (
+        r"(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*(?P<text>[^。！？!?，,]+)",
+        r"(?:名为|叫做|叫)\s*(?P<text>[^。！？!?，,]+)",
+        r"(?:关于|有关)\s*(?P<text>.+?)\s*的\s*"
+        r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件|项目|任务|卡片)",
+        r"\b(?:titled|called|named)\s+(?P<text_en>[^.!?,]+)",
+        r"\babout\s+(?P<text_en>[^.!?,]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, followup, flags=re.IGNORECASE)
+        if not match:
+            continue
+        text_value = _clean_foreground_compose_text(
+            match.groupdict().get("text") or match.groupdict().get("text_en") or ""
+        )
+        if text_value:
+            return text_value
+    return ""
+
+
+def _looks_like_app_scoped_create_followup(text: str) -> bool:
+    value = _clean_prompt(text)
+    return bool(
+        re.search(
+            r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份)?\s*"
+            r"(?:今天的|今日的|新的|新|关于.+?的)?\s*"
+            r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件(?!夹)|项目|任务|卡片)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:new|create|make)\b.{0,40}\b"
+            r"(?:page|note|document|file|project|task|card)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _foreground_paste_hint(text: str) -> bool:

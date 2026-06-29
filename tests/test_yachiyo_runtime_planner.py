@@ -6663,6 +6663,7 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
     cases = (
         ("在 Keynote 新建一个演示文稿", "Keynote", "new_document", "app.focus_and_safe_shortcut"),
         ("用 Pages 新建一份文档", "Pages", "new_document", "app.focus_and_safe_shortcut"),
+        ("在 Notion 新建一个页面", "Notion", "new_document", "app.focus_and_safe_shortcut"),
         ("在 Numbers 新建一个表格", "Numbers", "new_document", "app.focus_and_safe_shortcut"),
         ("打开 Keynote 新建演示", "Keynote", "new_document", "app.open_and_safe_shortcut"),
         ("在 PixelForge 新建项目", "PixelForge", "new_document", "app.focus_and_safe_shortcut"),
@@ -6743,6 +6744,93 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
     }
     assert _step_by_id(foreground, "operate-foreground-ui").input_preview == {
         "action": "new_document"
+    }
+
+    titled_page = RuntimePlanner().decision(
+        "在 Notion 新建一个页面，标题是本周业绩总结",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    assert titled_page.selected_intent.kind == "desktop_operation"
+    assert titled_page.selected_intent.inputs == {
+        "app_name_hint": "Notion",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "new_document"},
+        "foreground_compose_text_hint": "本周业绩总结",
+    }
+    assert [step.step_id for step in titled_page.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(titled_page, "operate-foreground-ui").input_preview == {
+        "app_name": "Notion",
+        "action": "new_document",
+    }
+    assert _step_by_id(titled_page, "operate-foreground-ui-followup-type").input_preview == {
+        "text": "本周业绩总结"
+    }
+    assert planner_direct_tool_requests(
+        "在 Notion 新建一个页面，标题是本周业绩总结",
+        [
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        _app_discovery_request("Notion"),
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Notion", "action": "new_document"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "本周业绩总结"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        },
+    ]
+
+    topic_note = RuntimePlanner().decision(
+        "打开 Obsidian，创建一篇关于本周业绩的笔记",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    assert topic_note.selected_intent.kind == "desktop_operation"
+    assert topic_note.selected_intent.inputs == {
+        "app_name_hint": "Obsidian",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "new_note"},
+        "foreground_compose_text_hint": "本周业绩",
+    }
+    assert _step_by_id(topic_note, "operate-foreground-ui").input_preview == {
+        "app_name": "Obsidian",
+        "action": "new_note",
+    }
+    assert _step_by_id(topic_note, "operate-foreground-ui-followup-type").input_preview == {
+        "text": "本周业绩"
     }
 
 
@@ -15115,6 +15203,46 @@ def test_planner_first_owns_app_scoped_ui_operations_over_legacy() -> None:
         assert selection.event_payload["legacy_request_count"] == 0
         assert [request["tool"] for request in selection.requests] == expected_tools
         assert legacy_calls == []
+
+
+def test_planner_first_owns_app_scoped_creation_with_verification_over_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    def legacy_requests(prompt: str, allowed_tools: list[str]) -> list[dict[str, Any]]:
+        legacy_calls.append({"prompt": prompt, "allowed_tools": list(allowed_tools)})
+        return [
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.extract_text",
+                "input": {},
+                "presentation": "summary",
+            }
+        ]
+
+    selection = planner_first_direct_tool_selection(
+        "在 Notion 新建一个页面，标题是本周业绩总结",
+        [
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+            "browser.extract_text",
+        ],
+        legacy_tool_requests=legacy_requests,
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert [request["tool"] for request in selection.requests] == [
+        "desktop.list_apps",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert selection.requests[1]["input"] == {"app_name": "Notion", "action": "new_document"}
+    assert selection.requests[2]["input"] == {"text": "本周业绩总结"}
+    assert selection.requests[3]["continue_to_model"] is True
+    assert legacy_calls == []
 
 
 def test_runtime_planner_preserves_app_scope_for_browser_safe_shortcuts() -> None:

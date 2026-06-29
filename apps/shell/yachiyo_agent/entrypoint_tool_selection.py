@@ -499,13 +499,25 @@ _RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS = frozenset(
     }
 )
 
+_RUNTIME_PLANNER_DESKTOP_VERIFICATION_TOOLS = frozenset(
+    {
+        "desktop.active_window",
+        "desktop.running_apps",
+        "desktop.ui_elements",
+        "desktop.windows",
+        "screen.capture",
+    }
+)
+
 
 def _runtime_planner_desktop_operation_owns_selection(
     requests: list[dict[str, Any]],
 ) -> bool:
     if not requests:
         return False
-    if any(bool(request.get("continue_to_model")) for request in requests):
+    if any(bool(request.get("continue_to_model")) for request in requests) and not (
+        _runtime_planner_desktop_followup_is_verification_only(requests)
+    ):
         return False
     reasons = _request_planning_reasons(requests)
     if reasons not in _RUNTIME_PLANNER_DESKTOP_DIRECT_REASON_SETS:
@@ -514,6 +526,17 @@ def _runtime_planner_desktop_operation_owns_selection(
     if not tools or not tools <= _RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS:
         return False
     return all(_runtime_planner_desktop_request_is_complete(request) for request in requests)
+
+
+def _runtime_planner_desktop_followup_is_verification_only(
+    requests: list[dict[str, Any]],
+) -> bool:
+    followup_tools = {
+        str(request.get("tool") or "").strip()
+        for request in requests
+        if isinstance(request, dict) and bool(request.get("continue_to_model"))
+    }
+    return bool(followup_tools) and followup_tools <= _RUNTIME_PLANNER_DESKTOP_VERIFICATION_TOOLS
 
 
 def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> bool:
