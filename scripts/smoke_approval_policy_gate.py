@@ -242,13 +242,30 @@ def run_smoke() -> dict[str, Any]:
     }
 
 
+def _write_report(path: Path, payload: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
 def _parser() -> argparse.ArgumentParser:
-    return argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--report-json",
+        type=Path,
+        help="Optional JSON evidence report path.",
+    )
+    return parser
 
 
 def main(argv: Sequence[str] | None = None) -> int:
-    _parser().parse_args(argv)
+    args = _parser().parse_args(argv)
     evidence = run_smoke()
+    if args.report_json is not None:
+        _write_report(args.report_json, evidence)
+        print(f"approval policy gate smoke report: {args.report_json}", file=sys.stderr)
     print(json.dumps(evidence, ensure_ascii=False, indent=2))
     return 0 if evidence.get("ok") is True else 1
 

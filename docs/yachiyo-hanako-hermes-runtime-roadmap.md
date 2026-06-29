@@ -141,19 +141,31 @@ media, terminal, and reminder tools are present in the runtime tool registry,
 dispatch table, main Chat policy, model descriptors, and approval map. It does
 not replace packaged-app or OS-permission execution smoke evidence.
 
-Current approval/policy source evidence is reproducible with
-`python scripts/smoke_approval_policy_gate.py`; this proves planner-facing
-low-risk app/browser reads stay unblocked while medium-risk desktop/browser
-interaction and high-risk runtime tools remain marked for approval by the
-planner, group policy, and legacy runtime policy compiler. Real approve/resume
-replay remains a later Run Timeline and UI smoke requirement.
+Current approval/policy source evidence is reproducible with:
 
-Current source-level approval resume replay evidence is reproducible with
-`python scripts/smoke_approval_resume_timeline.py`; this proves Chat and Agent
-Studio public services can project the same fake-port lifecycle from pending
-approval to approved tool completion, including event-page replay, approval
-resolution, completed tool call, and artifact metadata. Packaged-app and real
-NativeRunEngine approval resume remain later smoke requirements.
+```bash
+python scripts/smoke_approval_policy_gate.py \
+  --report-json tmp/approval-policy-gate.json
+```
+
+This proves planner-facing low-risk app/browser reads stay unblocked while
+medium-risk desktop/browser interaction and high-risk runtime tools remain
+marked for approval by the planner, group policy, and legacy runtime policy
+compiler. Real approve/resume replay remains a later Run Timeline and UI smoke
+requirement.
+
+Current source-level approval resume replay evidence is reproducible with:
+
+```bash
+python scripts/smoke_approval_resume_timeline.py \
+  --report-json tmp/approval-resume-timeline.json
+```
+
+This proves Chat and Agent Studio public services can project the same fake-port
+lifecycle from pending approval to approved tool completion, including
+event-page replay, approval resolution, completed tool call, and artifact
+metadata. Packaged-app and real NativeRunEngine approval resume remain later
+smoke requirements.
 
 Current runtime-level approval resume evidence is reproducible with
 `python scripts/smoke_runtime_approval_resume.py`; this drives the real

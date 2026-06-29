@@ -57,3 +57,18 @@ def test_approval_policy_gate_smoke_cli_outputs_json(capsys):
     assert output["ok"] is True
     assert output["mode"] == "approval_policy_gate_smoke"
     assert output["planner_case_count"] == len(smoke.PLANNER_APPROVAL_CASES)
+
+
+def test_approval_policy_gate_smoke_cli_writes_report_json(tmp_path, capsys):
+    report_path = tmp_path / "approval-policy-gate.json"
+
+    assert smoke.main(["--report-json", str(report_path)]) == 0
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert output == report
+    assert report["ok"] is True
+    assert report["mode"] == "approval_policy_gate_smoke"
+    assert "approval policy gate smoke report:" in captured.err
+    assert str(report_path) in captured.err

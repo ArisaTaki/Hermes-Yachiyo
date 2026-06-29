@@ -53,3 +53,18 @@ def test_approval_resume_timeline_smoke_cli_outputs_json(capsys):
     assert output["mode"] == "approval_resume_timeline_smoke"
     assert output["chat"]["checks"]["approval_payload_preserved"] is True
     assert output["studio"]["checks"]["approval_payload_preserved"] is True
+
+
+def test_approval_resume_timeline_smoke_cli_writes_report_json(tmp_path, capsys):
+    report_path = tmp_path / "approval-resume-timeline.json"
+
+    assert smoke.main(["--report-json", str(report_path)]) == 0
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert output == report
+    assert report["ok"] is True
+    assert report["mode"] == "approval_resume_timeline_smoke"
+    assert "approval resume timeline smoke report:" in captured.err
+    assert str(report_path) in captured.err
