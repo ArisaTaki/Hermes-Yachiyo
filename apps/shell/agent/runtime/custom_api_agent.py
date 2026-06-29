@@ -381,24 +381,36 @@ class RuntimeCustomApiAgentLoop:
                             run_id=run_id,
                             budget=budget,
                         )
-                        direct_result = self._direct_daily_desktop_result(
-                            agent,
-                            "data.analyze",
-                            (
-                                auto_followup_request.get("input")
-                                if isinstance(auto_followup_request.get("input"), dict)
-                                else {}
-                            ),
-                            timeline,
-                            run_id=run_id,
-                            source=str(auto_followup_request.get("source") or "runtime_planner"),
-                            planning_reason=str(
-                                auto_followup_request.get("planning_reason")
-                                or "planner_builtin_data_analysis"
-                            ),
-                        )
-                        if direct_result:
-                            return direct_result
+                        if _selection_payload_has_app_write_followup(
+                            direct_tool_selection_payload
+                        ):
+                            auto_followup_request = {
+                                **auto_followup_request,
+                                "continue_to_model": True,
+                            }
+                            planned_tool_requests = [
+                                *planned_tool_requests,
+                                auto_followup_request,
+                            ]
+                        else:
+                            direct_result = self._direct_daily_desktop_result(
+                                agent,
+                                "data.analyze",
+                                (
+                                    auto_followup_request.get("input")
+                                    if isinstance(auto_followup_request.get("input"), dict)
+                                    else {}
+                                ),
+                                timeline,
+                                run_id=run_id,
+                                source=str(auto_followup_request.get("source") or "runtime_planner"),
+                                planning_reason=str(
+                                    auto_followup_request.get("planning_reason")
+                                    or "planner_builtin_data_analysis"
+                                ),
+                            )
+                            if direct_result:
+                                return direct_result
                     self._append_model_followup_context(
                         planned_tool_requests,
                         direct_tool_selection_payload,
@@ -3478,6 +3490,20 @@ def _model_followup_target_payload(
     if context_source:
         payload["context_source"] = context_source
     return payload
+
+
+def _selection_payload_has_app_write_followup(
+    selection_payload: Mapping[str, Any],
+) -> bool:
+    target = (
+        selection_payload.get("followup_target")
+        if isinstance(selection_payload.get("followup_target"), Mapping)
+        else {}
+    )
+    return (
+        str(target.get("kind") or "").strip() == "app_write"
+        and bool(str(target.get("app_name") or "").strip())
+    )
 
 
 def _model_followup_app_write_tool_names(
