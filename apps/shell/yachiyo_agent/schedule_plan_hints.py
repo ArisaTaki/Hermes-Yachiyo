@@ -216,7 +216,7 @@ def _calendar_body(text: str) -> str:
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:加|新建|创建|添加|新增|安排)\s*(?:一个|一条|一项|新的?)?\s*"
         r"(?P<body_target_after>[^。！？!?]+?)\s*"
-        r"(?:日历事件|日历日程|日程|事件|会议)$",
+        r"(?:的)?(?:日历事件|日历日程|日程|事件|会议)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:新建|创建|添加|新增)\s*(?:一个|一条|一项|新的?)?\s*"
         r"(?:日历事件|日程|日历日程|calendar event)\s*[:：]?\s*(?P<body>[^。！？!?]+)$",
@@ -284,7 +284,7 @@ def _strip_schedule_prefix(value: str) -> str:
 
 def _strip_calendar_target_suffix(value: str) -> str:
     return re.sub(
-        r"\s*(?:日历事件|日历日程|日程|事件)$",
+        r"\s*(?:的)?(?:日历事件|日历日程|日程|事件)$",
         "",
         _clean(value),
         flags=re.IGNORECASE,

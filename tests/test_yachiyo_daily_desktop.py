@@ -4503,6 +4503,17 @@ def test_daily_desktop_entrypoint_routes_notes_and_time_first_reminders() -> Non
             },
         }
     ]
+    assert daily_desktop_entrypoint_requests("创建明天下午三点和 Alice 的日程") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "和 Alice",
+                "start_at": tomorrow_1500,
+                "end_at": tomorrow_1600,
+            },
+        }
+    ]
     assert daily_desktop_entrypoint_requests("创建日历 家庭") == []
     for prompt in (
         "schedule meeting tomorrow at 3pm",
