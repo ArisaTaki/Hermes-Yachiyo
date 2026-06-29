@@ -1450,6 +1450,8 @@ class TaskIntentRouter:
         ).strip()
         if scoped_action == "new_note":
             return _empty_intent("information_capture", text)
+        if _dynamic_context_source_hint(text) and _non_notes_dynamic_context_target_app(text):
+            return _empty_intent("information_capture", text)
         hint = capture_note_hint(text)
         if not hint:
             return _empty_intent("information_capture", text)
@@ -10124,7 +10126,9 @@ def _looks_like_dynamic_context_transfer(text: str) -> bool:
     value = _clean_prompt(text)
     return bool(
         re.search(
-            r"(?:粘贴|贴到|输入到|输入进|输入|键入|填到|填入|填写到|填写|paste|type|enter|insert|put)",
+            r"(?:粘贴|贴到|输入到|输入进|输入|键入|填到|填入|填写到|填写|"
+            r"写进|写入|写到|保存到|记录到|记到|放到|"
+            r"paste|type|enter|insert|put|write|save|record)",
             value,
             flags=re.IGNORECASE,
         )
@@ -10136,25 +10140,28 @@ def _dynamic_context_transfer_app_name_hint(text: str) -> str:
     patterns = (
         r"(?:粘贴到|粘贴在|贴到|输入到|输入进|填到|填入|填写到|放到)\s*"
         r"(?P<app>[\w .·-]{1,40}?)(?:$|[。！？!?，,])",
+        r"(?:写进|写入|写到|保存到|记录到|记到|放到)\s*"
+        r"(?P<app>[\w .·-]{1,40}?)(?:\s*(?:新笔记|笔记|便签|页面|文档|"
+        r"note|page|document))?(?:$|[。！？!?，,])",
         r"(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内)?\s*"
-        r"(?:粘贴|贴|输入|填入|填写)",
+        r"(?:粘贴|贴|输入|填入|填写|写进|写入|写到|保存|记录|记下)",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|开启|切到|聚焦)?\s*"
         r"(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内)?\s*"
-        r"(?:粘贴|贴|输入|填入|填写)\s*"
+        r"(?:粘贴|贴|输入|填入|填写|写进|写入|写到|保存|记录|记下)\s*"
         r"(?:当前|选中|剪贴板|粘贴板|网页|页面|窗口|链接|内容|文本|文字|clipboard|current|selected)",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|开启|切到|聚焦)?\s*"
         r"(?P<app>[\w .·-]{1,40}?)(?:的)?\s*"
         r"(?:搜索框|搜索栏|查找框|检索框|地址栏|输入框|文本框)\s*"
         r"(?:粘贴|贴|输入|填入|填写)",
-        r"(?:paste|type|enter|insert|put)\b.+?\b(?:in|into|to)\s+"
+        r"(?:paste|type|enter|insert|put|write|save|record)\b.+?\b(?:in|into|to)\s+"
         r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)(?:$|[.!?,])",
         r"\b(?:in|inside|within|using|with)\s+"
         r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
-        r"(?:paste|type|enter|insert|put)\b",
+        r"(?:paste|type|enter|insert|put|write|save|record)\b",
         r"^(?:open|launch|focus|switch\s+to)?\s*"
         r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
         r"(?:(?:search|input|text)\s+(?:box|field)|address\s+bar)?\s*"
-        r"(?:paste|type|enter|insert|put)\b",
+        r"(?:paste|type|enter|insert|put|write|save|record)\b",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
@@ -10164,6 +10171,16 @@ def _dynamic_context_transfer_app_name_hint(text: str) -> str:
         if app:
             return app
     return ""
+
+
+def _non_notes_dynamic_context_target_app(text: str) -> str:
+    app = _dynamic_context_transfer_app_name_hint(text)
+    return app if app and not _is_structured_notes_app_target(app) else ""
+
+
+def _is_structured_notes_app_target(app_name: str) -> bool:
+    normalized = re.sub(r"[\s._·-]+", "", str(app_name or "").strip().lower())
+    return normalized in {"notes", "applenotes", "备忘录", "笔记"}
 
 
 def _clean_dynamic_context_target_app(value: str) -> str:

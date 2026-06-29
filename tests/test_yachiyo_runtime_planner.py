@@ -15475,6 +15475,13 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
         "source": "runtime_planner",
         "planning_reason": "planner_desktop_operation",
     }
+    obsidian_focus = {
+        "protocol": "json_fallback",
+        "tool": "app.focus",
+        "input": {"app_name": "Obsidian"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_desktop_operation",
+    }
     verify_ui = {
         "protocol": "json_fallback",
         "tool": "desktop.ui_elements",
@@ -15501,6 +15508,24 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
         ("打开 Slack 粘贴当前页面内容", [
             *current_content_copy,
             slack_open,
+            paste,
+            verify_ui,
+        ]),
+        ("把当前网页内容写进 Obsidian", [
+            *current_content_copy,
+            obsidian_focus,
+            paste,
+            verify_ui,
+        ]),
+        ("把当前网页内容保存到 Obsidian 新笔记", [
+            *current_content_copy,
+            obsidian_focus,
+            paste,
+            verify_ui,
+        ]),
+        ("把当前网页链接写进 Obsidian", [
+            current_page_link_copy,
+            obsidian_focus,
             paste,
             verify_ui,
         ]),
