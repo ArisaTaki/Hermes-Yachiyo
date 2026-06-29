@@ -5866,14 +5866,20 @@ def _direct_communication_steps(
             source_step_id = context_steps[-1].step_id
     elif body_source == "selection":
         source_step_id = "copy-communication-body-source"
+        copy_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+        copy_input = {"action": "copy"}
+        if not copy_tool and app_name:
+            copy_tool = app_shortcut_tool
+            if str(copy_tool or "").startswith("app."):
+                copy_input = {"app_name": app_name, "action": "copy"}
         steps.append(
             _step(
                 intent,
                 source_step_id,
                 "Copy communication body source",
                 "communication.compose",
-                _first_allowed(("desktop.safe_shortcut",), allowed),
-                input_preview={"action": "copy"},
+                copy_tool,
+                input_preview=copy_input,
                 action="copy_selection",
                 reason="Copy the explicit selection before using it as the message body.",
             )
