@@ -210,8 +210,8 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
             payload["context_source"] = context_source
         return payload
 
-    communication_target = inputs.get("communication_target_hint")
-    if not isinstance(communication_target, Mapping):
+    communication_target = _communication_followup_hint(inputs)
+    if not communication_target:
         return {}
     recipient = str(communication_target.get("recipient") or "").strip()
     if not recipient:
@@ -232,6 +232,14 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
         if value:
             payload[target_key] = value
     return payload
+
+
+def _communication_followup_hint(inputs: Mapping[str, Any]) -> Mapping[str, Any]:
+    for key in ("communication_target_hint", "direct_message_hint"):
+        target = inputs.get(key)
+        if isinstance(target, Mapping):
+            return target
+    return {}
 
 
 def _selection_entrypoint_payload(metadata: Mapping[str, Any] | None) -> dict[str, Any]:

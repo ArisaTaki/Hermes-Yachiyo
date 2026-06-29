@@ -954,7 +954,8 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         if _spotlight_open_hint(text) or _foreground_search_submit_hint(text):
             return _empty_intent("web_research", text)
-        if _direct_communication_hint(text):
+        communication_target = _web_research_communication_target_hint(text)
+        if _direct_communication_hint(text) and not communication_target:
             return _empty_intent("web_research", text)
         dynamic_source = source if source in {"clipboard", "selection"} else ""
         web_search = _web_search_hint(text, dynamic_source)
@@ -1029,9 +1030,11 @@ class TaskIntentRouter:
         output_target = _task_output_target_hint(text)
         if output_target:
             inputs["output_target_hint"] = output_target
-        communication_target = _web_research_communication_target_hint(text)
         if communication_target:
             inputs["communication_target_hint"] = communication_target
+        app_write_target = {} if communication_target else _app_write_followup_target_hint(text)
+        if app_write_target:
+            inputs.update(app_write_target)
         inputs.update(browser_action)
         existing_browser_app_name = str(inputs.get("app_name") or "").strip()
         browser_app_name = existing_browser_app_name or _browser_action_app_name_hint(
@@ -1077,7 +1080,12 @@ class TaskIntentRouter:
                     else []
                 ),
                 "clipboard.read_write" if output_target == "clipboard" else "artifact.write",
-                *(["desktop.app_control"] if communication_target.get("app_name") else []),
+                *(
+                    ["desktop.app_control"]
+                    if communication_target.get("app_name")
+                    or str(app_write_target.get("target_app_hint") or "").strip()
+                    else []
+                ),
                 *(["communication.compose"] if communication_target else []),
             ],
             risk_level=risk_level,
@@ -3733,6 +3741,7 @@ class RuntimePlanner:
         allowed: set[str] | None,
     ) -> list[ToolPlanStepSnapshot]:
         browser_action = str(intent.inputs.get("browser_action") or "").strip()
+        target_app = str(intent.inputs.get("target_app_hint") or "").strip()
         if browser_action == "find_current_page":
             return _current_page_find_steps(intent, allowed)
         context_source = str(intent.inputs.get("context_source") or "").strip()
@@ -3891,8 +3900,10 @@ class RuntimePlanner:
                     )
                     steps.append(post_step)
                     artifact_depends_on = post_step.step_id
-                if _web_research_artifact_requested(intent) and (
-                    allowed is None or "artifact.write" in allowed
+                if (
+                    not target_app
+                    and _web_research_artifact_requested(intent)
+                    and (allowed is None or "artifact.write" in allowed)
                 ):
                     artifact_path = _artifact_output_path(
                         intent.user_goal,
@@ -3910,6 +3921,13 @@ class RuntimePlanner:
                             reason="Persist the requested browser-derived report as a replayable artifact.",
                         )
                     )
+                if target_app:
+                    return _append_web_research_app_write_target_steps(
+                        intent,
+                        allowed,
+                        steps,
+                        depends_on=artifact_depends_on,
+                    )
                 return steps
             steps = [
                 *([discover_step] if discover_step is not None else []),
@@ -3918,8 +3936,11 @@ class RuntimePlanner:
             ]
             artifact_path = ""
             if (
-                _web_research_artifact_requested(intent)
-                or isinstance(intent.inputs.get("communication_target_hint"), Mapping)
+                not target_app
+                and (
+                    _web_research_artifact_requested(intent)
+                    or isinstance(intent.inputs.get("communication_target_hint"), Mapping)
+                )
             ) and (
                 allowed is None or "artifact.write" in allowed
             ):
@@ -3940,6 +3961,13 @@ class RuntimePlanner:
                         depends_on=[main_step.step_id],
                         reason="Persist the requested browser-derived report as a replayable artifact.",
                     )
+                )
+            if target_app:
+                return _append_web_research_app_write_target_steps(
+                    intent,
+                    allowed,
+                    steps,
+                    depends_on=main_step.step_id,
                 )
             if _task_output_target_hint(intent.user_goal) == "clipboard":
                 steps.append(
@@ -4020,6 +4048,13 @@ class RuntimePlanner:
                 reason="Use browser tools for web content instead of desktop clicking when possible.",
             ),
         ]
+        if target_app:
+            return _append_web_research_app_write_target_steps(
+                intent,
+                allowed,
+                steps,
+                depends_on="open-or-read-web",
+            )
         if _task_output_target_hint(intent.user_goal) == "clipboard":
             steps.append(
                 _clipboard_output_step(
@@ -4050,6 +4085,13 @@ class RuntimePlanner:
                 allowed,
                 steps,
                 artifact_paths=[artifact_path],
+                depends_on="write-research-artifact",
+            )
+            steps = _append_web_research_communication_steps(
+                intent,
+                allowed,
+                steps,
+                artifact_path=artifact_path,
                 depends_on="write-research-artifact",
             )
         return steps
@@ -6875,6 +6917,55 @@ def _append_analysis_communication_steps(
     return [*steps, *communication_steps]
 
 
+def _append_web_research_app_write_target_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    depends_on: str,
+) -> list[ToolPlanStepSnapshot]:
+    target_app = str(intent.inputs.get("target_app_hint") or "").strip()
+    target_action = str(intent.inputs.get("target_action_hint") or "").strip()
+    if not target_app or target_action != "app_paste":
+        return steps
+    container_action = str(
+        intent.inputs.get("target_container_action_hint") or ""
+    ).strip()
+    return [
+        *steps,
+        _step(
+            intent,
+            "prepare-research-target-app",
+            "Prepare target app",
+            "desktop.app_control",
+            _first_allowed(
+                (
+                    "app.focus",
+                    "app.open",
+                    "app.focus_and_safe_shortcut",
+                    "app.open_and_safe_shortcut",
+                ),
+                allowed,
+            ),
+            input_preview={
+                "app_name": target_app,
+                "target_action": target_action,
+                **(
+                    {"container_action": container_action}
+                    if container_action
+                    else {}
+                ),
+                "body_source": "model_generated_content",
+            },
+            depends_on=[depends_on],
+            reason=(
+                "After the browser content is inspected, focus the requested app "
+                "before inserting the model-generated research output."
+            ),
+        ),
+    ]
+
+
 def _append_web_research_communication_steps(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
@@ -7595,6 +7686,20 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.18
     if intent.kind == "communication" and _looks_like_data_analysis_delivery_request(text):
         score -= 0.32
+    if (
+        intent.kind == "communication"
+        and (
+            external_info_lookup
+            or bool(_url_hint(text))
+            or _contains_any(
+                text,
+                ["research", "search", "调研", "研究", "搜索", "查询", "检索"],
+            )
+        )
+        and not isinstance(intent.inputs.get("direct_message_hint"), Mapping)
+        and not str(intent.inputs.get("context_source") or "").strip()
+    ):
+        score -= 0.42
     if intent.kind == "schedule" and _looks_like_communication_task_request(text):
         score -= 0.18
     if intent.kind == "schedule" and _looks_like_schedule_request(text):
@@ -7735,6 +7840,16 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score -= 0.24
     if intent.kind == "web_research" and _contains_any(text, _COMMUNICATION_ACTION_TERMS):
         score -= 0.18
+    if (
+        intent.kind == "web_research"
+        and isinstance(intent.inputs.get("communication_target_hint"), Mapping)
+    ):
+        score += 0.42
+    if (
+        intent.kind == "web_research"
+        and str(intent.inputs.get("target_app_hint") or "").strip()
+    ):
+        score += 0.28
     if (
         intent.kind == "web_research"
         and _report_file_context_hint(text)
@@ -10222,7 +10337,11 @@ def _app_write_followup_target_hint(text: str) -> dict[str, str]:
     app_name = _non_notes_dynamic_context_target_app(value)
     if not app_name:
         return {}
-    if _normalize_artifact_output_location(app_name) or _looks_like_file_output_target(app_name):
+    if (
+        _normalize_artifact_output_location(app_name)
+        or _looks_like_file_output_target(app_name)
+        or _looks_like_non_app_dynamic_context_target(app_name)
+    ):
         return {}
     container_action = _dynamic_context_target_container_action_hint(value)
     return {
@@ -10243,6 +10362,32 @@ def _looks_like_file_output_target(value: str) -> bool:
     if target.startswith(("~", ".", "/")) or "/" in target or "\\" in target:
         return True
     return bool(re.search(r"\.[A-Za-z0-9]{1,8}$", target))
+
+
+def _looks_like_non_app_dynamic_context_target(app_name: str) -> bool:
+    normalized = re.sub(r"[\s._·-]+", " ", str(app_name or "").strip().lower())
+    if not normalized:
+        return True
+    if normalized in {
+        "current page",
+        "current webpage",
+        "current web page",
+        "current window",
+        "current app",
+        "selected text",
+        "clipboard",
+        "research current page",
+        "research current webpage",
+        "research current web page",
+    }:
+        return True
+    return bool(
+        re.search(
+            r"\b(?:current\s+(?:web\s+)?page|current\s+window|selected\s+text|clipboard)\b",
+            normalized,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _dynamic_context_target_container_action_hint(text: str) -> str:

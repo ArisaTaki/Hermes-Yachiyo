@@ -1432,6 +1432,39 @@ def test_planner_selection_payload_surfaces_followup_communication_target() -> N
     }
 
 
+def test_planner_selection_payload_surfaces_direct_message_followup_target() -> None:
+    prompt = "把当前网页总结成报告并发给微信文件传输助手"
+    allowed_tools = [
+        "browser.extract_text",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_full_plan_execution",
+    )
+
+    assert payload["intent_kind"] == "communication"
+    assert payload["followup_target"] == {
+        "kind": "communication_message",
+        "recipient": "文件传输助手",
+        "body_source": "model_generated_content",
+        "send_action": "send",
+        "mode": "focus",
+        "app_name": "WeChat",
+        "transform": "report",
+    }
+
+
 def test_runtime_planner_routes_data_analysis_report_to_app_write_target() -> None:
     prompt = "请分析 sales.csv 并把报告写进 Obsidian 新笔记"
     allowed_tools = [
@@ -1508,6 +1541,135 @@ def test_runtime_planner_routes_data_analysis_report_to_app_write_target() -> No
         "target_app_hint": "Notion",
         "target_action_hint": "app_paste",
         "target_container_action_hint": "new_document",
+    }
+
+
+def test_runtime_planner_routes_web_research_report_to_app_write_target() -> None:
+    prompt = "调研 https://example.com 的信息并把报告写进 Notion 新页面"
+    allowed_tools = [
+        "browser.open_url_and_extract_text",
+        "app.focus",
+        "app.focus_and_safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "web_research"
+    assert decision.selected_intent.inputs == {
+        "url_hint": "https://example.com",
+        "target_app_hint": "Notion",
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "open-or-read-web",
+        "prepare-research-target-app",
+    ]
+    assert _step_by_id(decision, "prepare-research-target-app").input_preview == {
+        "app_name": "Notion",
+        "target_action": "app_paste",
+        "container_action": "new_document",
+        "body_source": "model_generated_content",
+    }
+    assert decision.plan.tool_plan.artifacts_expected == []
+
+    requests = planner_tool_requests(prompt, allowed_tools)
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_full_plan_execution",
+    )
+    assert payload["intent_kind"] == "web_research"
+    assert payload["followup_target"] == {
+        "kind": "app_write",
+        "app_name": "Notion",
+        "target_action": "app_paste",
+        "body_source": "model_generated_content",
+        "container_action": "new_document",
+    }
+
+
+def test_runtime_planner_routes_web_research_report_to_communication_target() -> None:
+    prompt = "调研 https://example.com 的信息并把报告发给 Slack 的 yachiyo"
+    allowed_tools = [
+        "browser.open_url_and_extract_text",
+        "artifact.write",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "web_research"
+    assert decision.selected_intent.inputs == {
+        "url_hint": "https://example.com",
+        "communication_target_hint": {
+            "recipient": "yachiyo",
+            "body_source": "research_artifact",
+            "mode": "focus",
+            "send_action": "send",
+            "app_name": "Slack",
+            "content_transform_hint": "report",
+        },
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "open-or-read-web",
+        "write-research-artifact",
+        "focus-research-communication-recipient-search",
+        "type-research-communication-recipient",
+        "submit-research-communication-recipient-search",
+        "draft-research-communication-message",
+        "send-research-communication-message",
+    ]
+    assert _step_by_id(
+        decision,
+        "send-research-communication-message",
+    ).approval_required is True
+
+    requests = planner_tool_requests(prompt, allowed_tools)
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_full_plan_execution",
+    )
+    assert payload["intent_kind"] == "web_research"
+    assert payload["followup_target"] == {
+        "kind": "communication_message",
+        "recipient": "yachiyo",
+        "body_source": "model_generated_content",
+        "send_action": "send",
+        "mode": "focus",
+        "app_name": "Slack",
+        "transform": "report",
     }
 
 

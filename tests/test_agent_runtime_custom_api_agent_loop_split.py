@@ -15118,6 +15118,158 @@ def test_custom_api_agent_loop_preplans_runtime_browser_research_before_model(
     }
 
 
+def test_custom_api_agent_loop_writes_web_research_report_to_target_app(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_tool_requests",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_candidates",
+        lambda *_args, **_kwargs: [],
+    )
+    budget = FakeBudget()
+    tool_runs: list[dict[str, Any]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    generated = "Example Domain 调研报告\n- 这是一个示例域名。"
+
+    def run_tool_requests(
+        tool_requests,
+        allowed_tools,
+        broker,
+        messages_arg,
+        timeline_arg,
+        artifacts,
+        **kwargs,
+    ):
+        tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": list(messages_arg),
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        for request in tool_requests:
+            tool_name = str(request.get("tool") or "")
+            input_preview = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if tool_name == "browser.open_url_and_extract_text":
+                result = {
+                    "ok": True,
+                    "action": "browser.open_url_and_extract_text",
+                    "data": {
+                        "url": input_preview.get("url"),
+                        "text": "Example Domain\nThis domain is for use in examples.",
+                    },
+                }
+            else:
+                result = {"ok": True, **input_preview}
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool_name,
+                    input_preview=input_preview,
+                    result=result,
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "browser.open_url_and_extract_text",
+                    "app.focus_and_safe_shortcut",
+                    "app.focus_and_safe_type_text",
+                    "desktop.ui_elements",
+                ]
+            }
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner follow-up context.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": generated},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "调研 https://example.com 的信息并把报告写进 Notion 新页面",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-web-research-app-write",
+    )
+
+    assert "Notion" in str(result)
+    assert "输入文字" in str(result)
+    assert [run["tool_requests"][0]["tool"] for run in tool_runs] == [
+        "browser.open_url_and_extract_text",
+        "app.focus_and_safe_shortcut",
+    ]
+    assert tool_runs[0]["tool_requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+    assert [request["tool"] for request in tool_runs[1]["tool_requests"]] == [
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert tool_runs[1]["tool_requests"][0]["input"] == {
+        "app_name": "Notion",
+        "action": "new_document",
+    }
+    assert tool_runs[1]["tool_requests"][1]["input"] == {
+        "app_name": "Notion",
+        "text": generated,
+    }
+    followup = next(
+        event for event in timeline if event["event"] == "agent.model.followup_context"
+    )
+    assert followup["followup_target"]["kind"] == "app_write"
+    assert followup["followup_target"]["app_name"] == "Notion"
+    assert followup["followup_target"]["container_action"] == "new_document"
+    assert followup["content_snapshot"]["source_tool"] == "browser.open_url_and_extract_text"
+    assert len(model_calls) == 1
+    assert "Example Domain" in model_calls[0][-1]["content"]
+    assert "written into Notion" in model_calls[0][-1]["content"]
+
+
 def test_custom_api_agent_loop_preserves_runtime_planner_source_on_direct_completion(
     monkeypatch,
 ) -> None:
