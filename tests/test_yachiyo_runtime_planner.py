@@ -10172,9 +10172,11 @@ def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None
         ("play Some Nights", "Some Nights"),
         ("put some jazz on Apple Music", "jazz"),
         ("search Apple Music for Taylor Swift and play it", "Taylor Swift"),
+        ("搜索 Apple Music for Taylor Swift and play first result", "Taylor Swift"),
         ("search Space Oddity in Apple Music and play it", "Space Oddity"),
         ("Apple Music search Space Oddity and play it", "Space Oddity"),
         ("帮我在 Apple Music 搜一下超时空辉夜姬并播放", "超时空辉夜姬"),
+        ("打开 Apple Music，搜索 超时空要塞夜姬 并播放第一首", "超时空要塞夜姬"),
         ("打开 Apple Music 搜索超时空辉夜姬并播放", "超时空辉夜姬"),
         ("播放 Apple Music 里的 超时空辉夜姬", "超时空辉夜姬"),
         ("Apple Music 里的超时空辉夜姬播放", "超时空辉夜姬"),
@@ -10245,6 +10247,46 @@ def test_runtime_planner_prefers_discovered_media_app_operation_for_apple_music_
     assert "media.apple_music_play" not in [
         step.tool_name for step in decision.plan.tool_plan.steps
     ]
+
+
+def test_runtime_planner_routes_generic_music_app_query_to_search_play_plan() -> None:
+    for prompt in (
+        "打开任意音乐 app，搜索 lo-fi beats，然后播放第一个结果",
+        "找一个音乐 app 搜索 lo-fi beats 并播放第一个结果",
+    ):
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.open_and_safe_shortcut",
+                "desktop.safe_type_text",
+                "desktop.search_submit",
+                "media.music_app_open_and_play",
+                "desktop.ui_elements",
+            ],
+        )
+
+        assert decision.selected_intent.kind == "media_playback"
+        assert decision.selected_intent.inputs == {
+            "action": "play",
+            "app_name": "Music",
+            "query": "lo-fi beats",
+            "control_only": "",
+        }
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover-media-app",
+            "focus-media-app-search",
+            "type-media-search-query",
+            "submit-media-search",
+            "play-media-search-result",
+            "verify-media-search",
+        ]
+        assert _step_by_id(decision, "type-media-search-query").input_preview == {
+            "text": "lo-fi beats",
+        }
+        assert _step_by_id(decision, "play-media-search-result").input_preview == {
+            "app_name": "Music",
+        }
 
 
 def test_runtime_planner_falls_back_to_app_search_for_apple_music_query() -> None:
@@ -15970,7 +16012,60 @@ def test_planner_desktop_tool_requests_verifies_media_app_search_when_available(
         "input": {"role_filter": "", "limit": 80},
         "source": "runtime_planner",
         "planning_reason": "planner_fallback_media_playback",
+        "continue_to_model": True,
     }
+
+
+def test_planner_desktop_tool_requests_searches_generic_music_app_then_continues() -> None:
+    requests = planner_desktop_tool_requests(
+        "打开任意音乐 app，搜索 lo-fi beats，然后播放第一个结果",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Music", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Music", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "lo-fi beats"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+            "continue_to_model": True,
+        },
+    ]
 
 
 def test_planner_desktop_tool_requests_normalizes_named_music_app_control() -> None:
