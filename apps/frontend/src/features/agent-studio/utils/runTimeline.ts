@@ -284,6 +284,10 @@ export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
     const contentSnapshotSummary = publicRunEventContentSnapshotSummary(payload);
     if (contentSnapshotSummary) return contentSnapshotSummary;
   }
+  if (event.event_type === 'agent.desktop.intent_completed') {
+    const toolChainSummary = publicRunEventDesktopToolChainSummary(payload);
+    if (toolChainSummary) return toolChainSummary;
+  }
   return (
     event.detail
     || event.title
@@ -452,6 +456,46 @@ function publicRunEventArtifactSummary(payload: Record<string, unknown>): string
     || publicRunEventPayloadString(artifactPayload, 'path')
     || publicRunEventPayloadString(artifactPayload, 'artifact_path')
   );
+}
+
+function publicRunEventDesktopToolChainSummary(payload: Record<string, unknown>): string {
+  const tools = publicRunEventDesktopToolChain(payload);
+  if (tools.length < 2) return '';
+  return `工具链 · ${tools.map(runtimeToolDisplayLabelOrName).join(' -> ')}`;
+}
+
+function publicRunEventDesktopToolChain(payload: Record<string, unknown>): string[] {
+  const directTools = [
+    publicRunEventPayloadStringList(payload, 'tools'),
+    publicRunEventPayloadStringList(payload, 'tool_chain'),
+  ].find((items) => items.length > 0) || [];
+  if (directTools.length) return publicRunEventUniqueStrings(directTools);
+  const steps = Array.isArray(payload.steps) ? payload.steps : [];
+  return publicRunEventUniqueStrings(
+    steps
+      .filter((step): step is Record<string, unknown> => (
+        Boolean(step && typeof step === 'object' && !Array.isArray(step))
+      ))
+      .map((step) => publicRunEventPayloadString(step, 'tool') || publicRunEventPayloadString(step, 'tool_name')),
+  );
+}
+
+function publicRunEventPayloadStringList(payload: Record<string, unknown>, key: string): string[] {
+  const value = payload[key];
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean);
+}
+
+function publicRunEventUniqueStrings(values: string[]): string[] {
+  const seen = new Set<string>();
+  const next: string[] = [];
+  for (const value of values) {
+    const item = String(value || '').trim();
+    if (!item || seen.has(item)) continue;
+    seen.add(item);
+    next.push(item);
+  }
+  return next;
 }
 
 function publicRunEventContentSnapshotSummary(payload: Record<string, unknown>): string {

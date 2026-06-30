@@ -99,6 +99,10 @@ function runtimeTimelineEventDetail(event: RuntimeTimelineEventSnapshot): string
     const contentSnapshotDetail = runtimeTimelineContentSnapshotDetail(event);
     if (contentSnapshotDetail) return contentSnapshotDetail;
   }
+  if (type === 'agent.desktop.intent_completed') {
+    const toolChainDetail = runtimeTimelineDesktopToolChainDetail(event);
+    if (toolChainDetail) return toolChainDetail;
+  }
   const detail = String(event.detail || '').trim();
   if (!detail) return '';
   if (detail === String(event.title || '').trim()) return '';
@@ -229,6 +233,55 @@ function runtimeTimelinePlannedDesktopToolLabel(event: RuntimeTimelineEventSnaps
   ).trim();
   if (!tool || runtimeTimelineLooksRuntimeId(tool)) return '';
   return runtimeToolDisplayLabelOrName(tool);
+}
+
+function runtimeTimelineDesktopToolChainDetail(event: RuntimeTimelineEventSnapshot): string {
+  const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+  const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
+    ? record.payload as Record<string, unknown>
+    : {};
+  const tools = runtimeTimelineDesktopToolChain(record, payload);
+  if (tools.length < 2) return '';
+  return `工具链 · ${tools.map(runtimeToolDisplayLabelOrName).join(' -> ')}`;
+}
+
+function runtimeTimelineDesktopToolChain(
+  record: Record<string, unknown>,
+  payload: Record<string, unknown>,
+): string[] {
+  const directTools = [
+    runtimeTimelineRecordStringList(record, 'tools'),
+    runtimeTimelineRecordStringList(payload, 'tools'),
+    runtimeTimelineRecordStringList(record, 'tool_chain'),
+    runtimeTimelineRecordStringList(payload, 'tool_chain'),
+  ].find((items) => items.length > 0) || [];
+  if (directTools.length) return runtimeTimelineUniqueToolNames(directTools);
+  const steps = Array.isArray(payload.steps) ? payload.steps : Array.isArray(record.steps) ? record.steps : [];
+  return runtimeTimelineUniqueToolNames(
+    steps
+      .filter((step): step is Record<string, unknown> => (
+        Boolean(step && typeof step === 'object' && !Array.isArray(step))
+      ))
+      .map((step) => runtimeTimelineRecordString(step, 'tool') || runtimeTimelineRecordString(step, 'tool_name')),
+  );
+}
+
+function runtimeTimelineRecordStringList(record: Record<string, unknown>, key: string): string[] {
+  const value = record[key];
+  if (!Array.isArray(value)) return [];
+  return value.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean);
+}
+
+function runtimeTimelineUniqueToolNames(values: string[]): string[] {
+  const seen = new Set<string>();
+  const tools: string[] = [];
+  for (const value of values) {
+    const tool = String(value || '').trim();
+    if (!tool || seen.has(tool)) continue;
+    seen.add(tool);
+    tools.push(tool);
+  }
+  return tools;
 }
 
 function runtimeTimelineContentSnapshotDetail(event: RuntimeTimelineEventSnapshot): string {
