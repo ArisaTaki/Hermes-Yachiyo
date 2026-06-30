@@ -51,6 +51,9 @@ from apps.shell.yachiyo_agent.daily_desktop import (
     main_chat_entrypoint_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
 )
+from apps.shell.yachiyo_agent.discovered_app_followups import (
+    planner_discovered_app_followup_can_direct_execute,
+)
 from apps.shell.yachiyo_agent.desktop_plan_hints import hotkey_hint
 from apps.shell.yachiyo_agent.desktop_permissions import desktop_permission_missing_by_capability
 from apps.shell.yachiyo_agent.planner_execution import planner_orchestration_requests
@@ -349,39 +352,6 @@ def _can_direct_execute_data_analysis_discovery(
         pattern=str(payload.get("pattern") or ""),
         file_type=str(payload.get("file_type") or ""),
     )
-
-
-def _discovered_app_followup_target_can_direct_execute(
-    target: dict[str, Any],
-    allowed_tools: list[str],
-) -> bool:
-    if isinstance(target.get("creative_canvas"), dict):
-        return False
-    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
-    target_action = str(target.get("target_action") or "").strip()
-    if target_action == "safe_shortcut":
-        if not str(target.get("safe_shortcut_action") or "").strip():
-            return False
-        can_prepare = (
-            "app.open_and_safe_shortcut" in allowed
-            or "app.focus_and_safe_shortcut" in allowed
-            or (
-                ("app.open" in allowed or "app.focus" in allowed)
-                and "desktop.safe_shortcut" in allowed
-            )
-        )
-    elif target_action in {"open_app", "open", "focus_app", "focus"}:
-        can_prepare = "app.open" in allowed or "app.focus" in allowed
-    else:
-        return False
-    if not can_prepare:
-        return False
-    if str(target.get("compose_text") or "").strip() and not (
-        "desktop.safe_type_text" in allowed
-        or "app.focus_and_safe_type_text" in allowed
-    ):
-        return False
-    return True
 
 
 def _has_single_data_analysis_file(
@@ -4339,11 +4309,9 @@ class ChatAPI:
         except Exception:
             logger.debug("Discovered app follow-up direct check failed", exc_info=True)
             return False
-        target = payload.get("followup_target") if isinstance(payload.get("followup_target"), dict) else {}
-        if str(target.get("kind") or "").strip() != "desktop_discovered_app_action":
-            return False
-        return _discovered_app_followup_target_can_direct_execute(
-            target,
+        return planner_discovered_app_followup_can_direct_execute(
+            payload,
+            requests,
             allowed_tools,
         )
 
