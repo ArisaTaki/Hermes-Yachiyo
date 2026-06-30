@@ -13116,9 +13116,16 @@ def _looks_like_too_short_cjk_app_label(value: str) -> bool:
 
 def _looks_like_recipient_message_request(value: str) -> bool:
     return bool(
-        re.search(r"(?:发消息|发送|发)\s*(?:给|到)", value, flags=re.IGNORECASE)
+        re.search(
+            r"(?:发消息|发送|发)\s*(?:一条|条|一则|则)?\s*"
+            r"(?:消息|短信|微信)?\s*(?:给|到)",
+            value,
+            flags=re.IGNORECASE,
+        )
         or re.search(
-            r"(?:给|向|对)\s*[^：:，,。]+?\s*(?:发送|发消息|发)\s*(?:说|[:：]|内容是|内容为)",
+            r"(?:给|向|对)\s*[^：:，,。]+?\s*(?:发送|发消息|发)\s*"
+            r"(?:一条|条|一则|则)?\s*(?:消息|短信|微信)?\s*"
+            r"(?:说|[:：]|内容是|内容为)",
             value,
             flags=re.IGNORECASE,
         )
@@ -14338,7 +14345,10 @@ def _direct_paste_communication_hint(text: str) -> dict[str, str]:
         if not match:
             continue
         groups = match.groupdict()
-        app_name = _canonical_app_name_hint(groups.get("app") or "")
+        raw_app = groups.get("app") or ""
+        if _looks_like_recipient_scoped_communication_app_capture(raw_app):
+            continue
+        app_name = _canonical_app_name_hint(raw_app)
         recipient = _clean_communication_recipient_text(groups.get("recipient") or "")
         if (not app_name or not recipient) and groups.get("target"):
             app_name, recipient = _split_communication_surface_and_recipient(
@@ -14434,7 +14444,10 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
         if not match:
             continue
         groups = match.groupdict()
-        app_name = _canonical_app_name_hint(groups.get("app") or "")
+        raw_app = groups.get("app") or ""
+        if _looks_like_recipient_scoped_communication_app_capture(raw_app):
+            continue
+        app_name = _canonical_app_name_hint(raw_app)
         recipient_tail = str(groups.get("recipient_message_tail") or "").strip()
         if recipient_tail:
             split_tail = _split_communication_implicit_recipient_message(recipient_tail)
@@ -14451,7 +14464,7 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
         else:
             recipient = _clean_communication_recipient_text(groups.get("recipient") or "")
             body = _clean_communication_body_text(groups.get("body") or "")
-        if _is_generic_communication_app_label(groups.get("app") or ""):
+        if _is_generic_communication_app_label(raw_app):
             continue
         if not app_name or not recipient or not body:
             continue
@@ -14478,7 +14491,8 @@ def _generic_direct_communication_hint(text: str) -> dict[str, str]:
         (
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:给|向|对|发给|发送给)\s*(?P<recipient>[^：:，,。]+?)\s*"
-            r"(?:发送|发出|发消息|发)\s*(?:消息|短信|微信|message)?\s*"
+            r"(?:发送|发出|发消息|发)\s*(?:一条|条|一则|则)?\s*"
+            r"(?:消息|短信|微信|message)?\s*"
             r"(?:说|内容是|内容为|[:：])\s*(?P<body>.+)$",
             "message",
         ),
@@ -14486,14 +14500,14 @@ def _generic_direct_communication_hint(text: str) -> dict[str, str]:
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:给|向|对)\s*(?P<recipient>[^：:，,。]+?)\s*"
             r"(?:[，,。；;]\s*)?"
-            r"(?:写|撰写|起草|草拟|发|发送)\s*(?:一封|封|条)?\s*"
+            r"(?:写|撰写|起草|草拟|发|发送)\s*(?:一封|封|一条|条|一则|则)?\s*"
             r"(?P<channel>邮件|电子邮件|短信|消息|email|e-mail|mail|message)\s*"
             r"(?P<body>(?:说|说明|关于|内容是|内容为|[:：]).+)$",
             "",
         ),
         (
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:写|撰写|起草|草拟|发|发送)\s*(?:一封|封|条)?\s*"
+            r"(?:写|撰写|起草|草拟|发|发送)\s*(?:一封|封|一条|条|一则|则)?\s*"
             r"(?P<channel>邮件|电子邮件|短信|消息|email|e-mail|mail|message)\s*"
             r"(?:给|发给|发送给|向|对)\s*(?P<recipient>[^：:，,。]+?)\s*"
             r"(?:[，,。；;]\s*)?"
@@ -14774,6 +14788,14 @@ def _clean_communication_body_text(value: str) -> str:
         flags=re.IGNORECASE,
     ).strip()
     text = _clean_foreground_compose_text(raw_text)
+    text = re.sub(
+        r"^(?:一条|条|一则|则|一封|封)?\s*"
+        r"(?:消息|短信|微信|邮件|电子邮件|message|email|e-mail|mail)\s*"
+        r"(?:说|说明|内容是|内容为|[:：]|saying|that)\s*",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
     text = re.sub(r"^(?:说(?!明)|内容是|内容为)\s*", "", text, flags=re.IGNORECASE).strip()
     text = re.sub(
         r"\s*[，,。；;！!？?]?\s*"
@@ -14821,6 +14843,16 @@ def _looks_like_communication_draft_request(value: str) -> bool:
     )
 
 
+def _looks_like_recipient_scoped_communication_app_capture(value: str) -> bool:
+    return bool(
+        re.match(
+            r"^\s*(?:给|向|对|发给|发送给)\s*.+",
+            str(value or ""),
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _is_generic_communication_app_label(value: str) -> bool:
     normalized = re.sub(r"[\s._·-]+", "", str(value or "").strip().lower())
     return normalized in {
@@ -14837,14 +14869,26 @@ def _is_generic_communication_app_label(value: str) -> bool:
         "通信app",
         "通信软件",
         "消息",
+        "一条消息",
+        "条消息",
+        "一则消息",
+        "则消息",
         "消息应用",
         "消息app",
         "消息软件",
         "送消息",
         "信息",
+        "一条短信",
+        "条短信",
+        "一则短信",
+        "则短信",
         "私信",
         "邮件",
+        "一封邮件",
+        "封邮件",
         "电子邮件",
+        "一封电子邮件",
+        "封电子邮件",
         "邮箱",
         "邮件客户端",
         "mail",

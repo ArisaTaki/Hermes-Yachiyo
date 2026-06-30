@@ -13383,6 +13383,16 @@ def test_runtime_planner_routes_flexible_communication_surface_phrasing() -> Non
             },
         ),
         (
+            "在 Slack 给 Alice 发一条消息说会议改到三点",
+            {
+                "app_name": "Slack",
+                "recipient": "Alice",
+                "body": "会议改到三点",
+                "mode": "focus",
+                "send_action": "send",
+            },
+        ),
+        (
             "给 Slack 的 yachiyo 发 hello",
             {
                 "app_name": "Slack",
@@ -13464,6 +13474,31 @@ def test_runtime_planner_preserves_generic_direct_communication_payload_for_disc
         "desktop.running_apps"
     )
     assert _step_by_id(decision, "draft-communication").input_preview == {
+        "recipient": "Alice",
+        "body": "会议改到三点",
+        "channel": "message",
+    }
+
+    quantified_message = RuntimePlanner().decision(
+        "给 Alice 发一条消息说会议改到三点",
+        allowed_tools=allowed_tools,
+    )
+
+    assert quantified_message.selected_intent.kind == "communication"
+    assert quantified_message.selected_intent.inputs == {
+        "direct_message_hint": {
+            "recipient": "Alice",
+            "body": "会议改到三点",
+            "mode": "focus",
+            "send_action": "send",
+            "channel": "message",
+        }
+    }
+    assert [step.step_id for step in quantified_message.plan.tool_plan.steps] == [
+        "discover-communication-surface",
+        "draft-communication",
+    ]
+    assert _step_by_id(quantified_message, "draft-communication").input_preview == {
         "recipient": "Alice",
         "body": "会议改到三点",
         "channel": "message",
