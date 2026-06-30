@@ -4808,6 +4808,57 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         app_task_create,
         "operate-foreground-ui-followup-type",
     ).input_preview == {"text": "修复登录错误"}
+
+    app_task_create_submit = RuntimePlanner().decision(
+        "在 Linear 里创建一个任务：修复登录错误，并按回车确认",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    )
+    assert [step.step_id for step in app_task_create_submit.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "operate-foreground-ui",
+        "operate-foreground-ui-followup-type",
+        "submit-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert [
+        step.input_preview
+        for step in app_task_create_submit.plan.tool_plan.steps
+        if step.tool_name == "desktop.safe_type_text"
+    ] == [{"text": "修复登录错误"}]
+    assert _step_by_id(
+        app_task_create_submit,
+        "submit-foreground-ui",
+    ).input_preview == {"action": "confirm"}
+    assert _step_by_id(app_task_create_submit, "submit-foreground-ui").approval_required is True
+    assert [
+        request["tool"]
+        for request in planner_tool_requests(
+            "在 Linear 里创建一个任务：修复登录错误，并按回车确认",
+            [
+                "desktop.list_apps",
+                "app.focus",
+                "desktop.safe_shortcut",
+                "desktop.safe_type_text",
+                "desktop.submit_foreground",
+                "desktop.ui_elements",
+            ],
+        )
+    ] == [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
     assert planner_tool_requests(
         "帮我打开 Linear 并创建一个任务：修复登录错误",
         [

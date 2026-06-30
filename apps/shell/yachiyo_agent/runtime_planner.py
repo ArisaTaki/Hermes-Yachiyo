@@ -4223,7 +4223,12 @@ class RuntimePlanner:
                     )
                 )
                 previous_step_id = followup_step_id
-        if click_target and safe_type_text and any(step.step_id == "operate-foreground-ui" for step in steps):
+        if (
+            click_target
+            and not create_first_safe_shortcut
+            and safe_type_text
+            and any(step.step_id == "operate-foreground-ui" for step in steps)
+        ):
             steps.append(
                 _step(
                     intent,
@@ -4282,6 +4287,7 @@ class RuntimePlanner:
             )
         if (
             hotkey
+            and not create_first_safe_shortcut
             and not click_target
             and safe_type_text
             and any(step.step_id == "operate-foreground-ui" for step in steps)
