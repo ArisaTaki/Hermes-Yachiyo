@@ -199,6 +199,7 @@ export type PlannerTraceSummarySnapshot = {
   launcher_mode?: string | null;
   launcher_surface?: string | null;
   runnable_kind?: string | null;
+  followup_target?: Record<string, unknown>;
   plan_tools?: string[];
   selected_tools?: string[];
   plan_capabilities?: string[];

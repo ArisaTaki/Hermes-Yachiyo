@@ -1405,6 +1405,7 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "planner_entrypoint: str | None = None",
             "entrypoint_source: str | None = None",
             "launcher_surface: str | None = None",
+            "followup_target: dict[str, Any] = Field(default_factory=dict)",
             "tool_calls: list[ToolCallSnapshot]",
             "memory_traces: list[MemoryTraceSnapshot]",
             "skill_traces: list[SkillTraceSnapshot]",

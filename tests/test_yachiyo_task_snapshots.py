@@ -143,6 +143,17 @@ def test_agent_task_snapshot_projects_planner_summary_from_visible_events() -> N
                         ],
                         "required_capabilities": ["data.analysis"],
                         "artifacts_expected": ["markdown_report", "chart"],
+                        "followup_target": {
+                            "kind": "desktop_discovered_app_action",
+                            "app_query": "messaging",
+                            "target_action": "safe_shortcut",
+                            "safe_shortcut_action": "new_message",
+                            "communication_compose": {
+                                "channel": "message",
+                                "recipient": "Alice",
+                                "send_action": "send",
+                            },
+                        },
                         "selected_tools": ["workspace.read", "python.pandas"],
                         "plan_step_count": 2,
                     },
@@ -167,9 +178,21 @@ def test_agent_task_snapshot_projects_planner_summary_from_visible_events() -> N
         plan_capabilities=["file.read", "artifact.output", "data.analysis"],
         required_capabilities=["data.analysis"],
         artifacts_expected=["markdown_report", "chart"],
+        followup_target={
+            "kind": "desktop_discovered_app_action",
+            "app_query": "messaging",
+            "target_action": "safe_shortcut",
+            "safe_shortcut_action": "new_message",
+            "communication_compose": {
+                "channel": "message",
+                "recipient": "Alice",
+                "send_action": "send",
+            },
+        },
         step_count=2,
         event_count=2,
     )
+    assert task.planner_summary.followup_target["communication_compose"]["recipient"] == "Alice"
 
 
 def test_agent_task_snapshot_derives_progress_from_planned_desktop_intent() -> None:

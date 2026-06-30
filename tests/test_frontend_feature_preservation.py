@@ -1691,6 +1691,10 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "desktopToolsFromEvent",
             "desktopToolsFromToolCall",
             "String(event.event_type || '').includes('tool')",
+            "data-plan-followup-targets={summary.followupTargets.join(',')}",
+            "plannerFollowupTargetSummary(trace.followup_target)",
+            "plannerFollowupTargetSummary(metadata.yachiyo_followup_target)",
+            "compose.${key}",
         ],
     )
     _assert_not_contains(
@@ -2538,6 +2542,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "launcher_mode?: string | null;",
             "launcher_surface?: string | null;",
             "runnable_kind?: string | null;",
+            "followup_target?: Record<string, unknown>;",
             "export type DesktopExecutionCapabilitySnapshot",
             "export type ToolCatalogItemSnapshot",
             "export type RestrictedPluginToolSnapshot",

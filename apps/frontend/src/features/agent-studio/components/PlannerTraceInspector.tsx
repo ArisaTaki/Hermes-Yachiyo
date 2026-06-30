@@ -803,6 +803,7 @@ function plannerSelectionFromSummary(
   const launcherMode = stringValue(summary.launcher_mode);
   const launcherSurface = stringValue(summary.launcher_surface);
   const runnableKind = stringValue(summary.runnable_kind);
+  const followupTarget = plannerFollowupTargetFromPayload(summary.followup_target);
   if (
     !selectedSource
     && !selectedRole
@@ -819,13 +820,14 @@ function plannerSelectionFromSummary(
     && !launcherMode
     && !launcherSurface
     && !runnableKind
+    && !followupTarget
   ) return null;
   return {
     approvalsRequired,
     artifactsExpected,
     dailyDesktopIntent: false,
     entrypointSource,
-    followupTarget: null,
+    followupTarget,
     launcherMode,
     launcherSurface,
     legacyFallback: false,

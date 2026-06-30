@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import Any
 
-from apps.shell.agent.runtime.events import redact_secrets
+from apps.shell.agent.runtime.events import redact_run_event_payload, redact_secrets
 
 from .contracts import PlannerTraceSummarySnapshot, PublicRunEvent, RunTimelineChildSnapshot
 
@@ -127,6 +127,7 @@ def planner_trace_summary_from_payload(
     launcher_mode = None
     launcher_surface = None
     runnable_kind = None
+    followup_target: dict[str, Any] = {}
     plan_tools: list[str] = []
     selected_tools: list[str] = []
     plan_capabilities: list[str] = []
@@ -220,6 +221,7 @@ def planner_trace_summary_from_payload(
             launcher_mode = launcher_mode or _optional_text(payload_record.get("launcher_mode"))
             launcher_surface = launcher_surface or _optional_text(payload_record.get("launcher_surface"))
             runnable_kind = runnable_kind or _optional_text(payload_record.get("runnable_kind"))
+            followup_target = followup_target or _public_mapping(payload_record.get("followup_target"))
             _add_strings(plan_tools, payload_record.get("plan_tools"))
             _add_strings(selected_tools, payload_record.get("selected_tools"))
             _add_strings(plan_capabilities, payload_record.get("plan_capabilities"))
@@ -259,6 +261,7 @@ def planner_trace_summary_from_payload(
         launcher_mode=launcher_mode,
         launcher_surface=launcher_surface,
         runnable_kind=runnable_kind,
+        followup_target=followup_target,
         plan_tools=plan_tools,
         selected_tools=selected_tools,
         plan_capabilities=plan_capabilities,
@@ -320,6 +323,13 @@ def _runtime_planner_desktop_event(payload: Mapping[str, Any]) -> bool:
 
 def _mapping(value: Any) -> Mapping[str, Any]:
     return value if isinstance(value, Mapping) else {}
+
+
+def _public_mapping(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    redacted = redact_run_event_payload(dict(value))
+    return dict(redacted) if isinstance(redacted, Mapping) else {}
 
 
 def _mapping_list(value: Any) -> list[Mapping[str, Any]]:

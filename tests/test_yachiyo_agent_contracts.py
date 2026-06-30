@@ -333,6 +333,12 @@ def test_run_timeline_child_snapshot_projects_planner_summary_from_child_events(
                                 "launcher_mode": "chat",
                                 "launcher_surface": "main_window",
                                 "runnable_kind": "agent",
+                                "followup_target": {
+                                    "kind": "app_write",
+                                    "app_name": "Numbers",
+                                    "target_action": "app_paste",
+                                    "body_source": "model_generated_content",
+                                },
                                 "selected_tools": ["data.analyze"],
                                 "plan_step_count": 2,
                             },
@@ -359,6 +365,12 @@ def test_run_timeline_child_snapshot_projects_planner_summary_from_child_events(
         launcher_mode="chat",
         launcher_surface="main_window",
         runnable_kind="agent",
+        followup_target={
+            "kind": "app_write",
+            "app_name": "Numbers",
+            "target_action": "app_paste",
+            "body_source": "model_generated_content",
+        },
         plan_tools=["workspace.read", "data.analyze"],
         selected_tools=["data.analyze"],
         plan_capabilities=["workspace.file_read", "data.analysis"],
@@ -375,6 +387,12 @@ def test_run_timeline_child_snapshot_projects_planner_summary_from_child_events(
         "workspace.read",
         "data.analyze",
     ]
+    assert payload["children"][0]["planner_summary"]["followup_target"] == {
+        "kind": "app_write",
+        "app_name": "Numbers",
+        "target_action": "app_paste",
+        "body_source": "model_generated_content",
+    }
 
 
 def test_run_timeline_snapshot_projects_planner_summary_from_events() -> None:
@@ -444,6 +462,44 @@ def test_run_timeline_snapshot_projects_planner_summary_from_events() -> None:
         event_count=2,
     )
     assert _json(snapshot)["planner_summary"]["artifacts_expected"] == ["markdown_report"]
+
+
+def test_planner_summary_redacts_followup_target_secret_fields() -> None:
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-secret",
+            "status": "running",
+            "events": [
+                {
+                    "event_type": "agent.plan.selection",
+                    "payload": {
+                        "source": "runtime_planner",
+                        "selection_source": "runtime_planner",
+                        "followup_target": {
+                            "kind": "app_write",
+                            "app_name": "Notes",
+                            "api_key": "abc123",
+                            "communication_compose": {
+                                "recipient": "Alice",
+                                "password": "pw",
+                            },
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert snapshot.planner_summary is not None
+    assert snapshot.planner_summary.followup_target == {
+        "kind": "app_write",
+        "app_name": "Notes",
+        "api_key": "[redacted]",
+        "communication_compose": {
+            "recipient": "Alice",
+            "password": "[redacted]",
+        },
+    }
 
 
 def test_agent_task_snapshot_json_shape_is_stable() -> None:

@@ -265,6 +265,7 @@ class PlannerTraceSummarySnapshot(_PublicSnapshot):
     launcher_mode: str | None = None
     launcher_surface: str | None = None
     runnable_kind: str | None = None
+    followup_target: dict[str, Any] = Field(default_factory=dict)
     plan_tools: list[str] = Field(default_factory=list)
     selected_tools: list[str] = Field(default_factory=list)
     plan_capabilities: list[str] = Field(default_factory=list)
