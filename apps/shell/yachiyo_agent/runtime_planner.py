@@ -9394,7 +9394,7 @@ def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
         for item in intent.expected_outputs
         if str(item or "").strip()
     }
-    if outputs.intersection({"report", "table"}):
+    if outputs.intersection({"report", "table", "links"}):
         return True
     return _contains_any(
         intent.user_goal,
@@ -9411,6 +9411,14 @@ def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
             "文档",
             "文件",
             "产物",
+            "链接清单",
+            "链接列表",
+            "列出链接",
+            "link list",
+            "list links",
+            "links list",
+            "source list",
+            "sources",
             "生成报告",
             "输出报告",
             "整理成表格",
@@ -12839,6 +12847,14 @@ def _desktop_content_artifact_requested(text: str) -> bool:
             "summarize",
             "write up",
             "document",
+            "link list",
+            "list links",
+            "links list",
+            "source list",
+            "sources",
+            "链接清单",
+            "链接列表",
+            "列出链接",
         ),
     )
 
@@ -16780,7 +16796,8 @@ def _clean_web_search_query(query: str) -> str:
         flags=re.IGNORECASE,
     ).strip()
     value = re.sub(
-        r"\s+(?:and|then)\s+(?:write|create|generate|produce|make|format|organize|summari[sz]e).*$",
+        r"\s+(?:and|then)\s+"
+        r"(?:write|create|generate|produce|make|format|organize|summari[sz]e|output|list)\b.*$",
         "",
         value,
         flags=re.IGNORECASE,
@@ -16834,8 +16851,8 @@ def _clean_web_search_query(query: str) -> str:
         flags=re.IGNORECASE,
     ).strip()
     value = re.sub(
-        r"(?:[，,]\s*|并|然后|并且|再)(?:输出|生成|写|写出|整理|总结|做总结|汇总)(?:一份|一下|成)?"
-        r"[^。；;！!？?]{0,40}(?:报告|总结|文档|结果|表格|清单|markdown|artifact|md|table)$",
+        r"(?:[，,]\s*|并|然后|并且|再)(?:输出|生成|写|写出|整理|总结|做总结|汇总|列出)(?:一份|一下|成)?"
+        r"[^。；;！!？?]{0,40}(?:报告|总结|文档|结果|表格|清单|列表|链接|markdown|artifact|md|table|links?)$",
         "",
         value,
         flags=re.IGNORECASE,
@@ -16850,15 +16867,15 @@ def _clean_web_search_query(query: str) -> str:
     ).strip()
     value = re.sub(r"[。.,，；;！!？?]+$", "", value).strip()
     value = re.sub(
-        r"(?:[，,]\s*|并|然后|并且|再)(?:输出|生成|写|写出|整理|总结|汇总)(?:一份|一下|成)?"
-        r"[^。；;！!？?]{0,40}(?:报告|总结|文档|结果|表格|清单|markdown|artifact|md|table)$",
+        r"(?:[，,]\s*|并|然后|并且|再)(?:输出|生成|写|写出|整理|总结|汇总|列出)(?:一份|一下|成)?"
+        r"[^。；;！!？?]{0,40}(?:报告|总结|文档|结果|表格|清单|列表|链接|markdown|artifact|md|table|links?)$",
         "",
         value,
         flags=re.IGNORECASE,
     ).strip()
     value = re.sub(
-        r"(?:并|然后|并且|再)?(?:输出|生成|写|写出|整理|总结|汇总)(?:一份|一下|成)?"
-        r"(?:报告|总结|文档|结果|表格|清单|table)?$",
+        r"(?:并|然后|并且|再)?(?:输出|生成|写|写出|整理|总结|汇总|列出)(?:一份|一下|成)?"
+        r"(?:报告|总结|文档|结果|表格|清单|列表|链接|table|links?)?$",
         "",
         value,
         flags=re.IGNORECASE,
@@ -18249,6 +18266,24 @@ def _expected_outputs(text: str, *, default: list[str]) -> list[str]:
         outputs.append("chart")
     if _contains_any(text, ["report", "报告"]):
         outputs.append("report")
+    if _contains_any(
+        text,
+        [
+            "link list",
+            "links list",
+            "list links",
+            "source list",
+            "sources",
+            "url list",
+            "链接清单",
+            "链接列表",
+            "列出链接",
+            "输出链接",
+            "来源清单",
+            "来源列表",
+        ],
+    ):
+        outputs.append("links")
     if _contains_any(
         text,
         [

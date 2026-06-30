@@ -3059,6 +3059,35 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
         "browser.open_url_and_extract_text"
     )
 
+    link_list = RuntimePlanner().decision(
+        "调研 OpenAI 最新 Agents SDK 并输出链接清单",
+        allowed_tools=["browser.open_url", "browser.open_url_and_extract_text", "artifact.write"],
+    )
+    assert link_list.selected_intent.kind == "web_research"
+    assert link_list.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0+Agents+SDK",
+        "browser_action": "open_url_extract",
+        "query": "OpenAI 最新 Agents SDK",
+    }
+    assert link_list.selected_intent.expected_outputs == ["links"]
+    assert [step.step_id for step in link_list.plan.tool_plan.steps] == [
+        "extract-web-url-text",
+        "write-research-artifact",
+    ]
+    assert link_list.plan.tool_plan.artifacts_expected == ["research-summary.md"]
+
+    english_link_list = RuntimePlanner().decision(
+        "research OpenAI latest Agents SDK and output a link list",
+        allowed_tools=["browser.open_url", "browser.open_url_and_extract_text", "artifact.write"],
+    )
+    assert english_link_list.selected_intent.kind == "web_research"
+    assert english_link_list.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=openai+latest+agents+sdk",
+        "browser_action": "open_url_extract",
+        "query": "openai latest agents sdk",
+    }
+    assert english_link_list.selected_intent.expected_outputs == ["links"]
+
     browser_surface_decision = RuntimePlanner().decision(
         "帮我在任意浏览器搜索 OpenAI 最新新闻并总结",
         allowed_tools=["browser.open_url", "artifact.write", "app.open"],
@@ -19289,6 +19318,32 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "input": {
                 "url": "https://www.google.com/search?q=OpenAI+%E6%9C%80%E6%96%B0%E4%BB%B7%E6%A0%BC"
             },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+    assert planner_tool_requests(
+        "搜索 OpenAI Agents SDK 并列出链接",
+        allowed_tools=[*allowed, "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://www.google.com/search?q=OpenAI+Agents+SDK"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+    assert planner_tool_requests(
+        "research OpenAI latest Agents SDK and output a link list",
+        allowed_tools=[*allowed, "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://www.google.com/search?q=openai+latest+agents+sdk"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "continue_to_model": True,
