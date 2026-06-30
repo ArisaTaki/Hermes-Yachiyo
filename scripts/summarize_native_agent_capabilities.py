@@ -802,6 +802,35 @@ def summarize_capabilities(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _evidence_value_score(capability: dict[str, Any]) -> int:
+    evidence = capability.get("evidence_summary")
+    if not isinstance(evidence, dict) or not evidence:
+        return 0
+    score = 0
+    status = str(evidence.get("status") or "").strip()
+    if status and status != "skipped":
+        score += 2
+    diagnostic_keys = {
+        "stage",
+        "error",
+        "blocking_condition",
+        "blocking_conditions",
+        "missing_permissions",
+        "permission_targets",
+        "recovery_hints",
+        "recovery_actions",
+        "recommended_tools",
+        "checks",
+        "tool_chain",
+        "case_ids",
+    }
+    for key, value in evidence.items():
+        if value in (None, "", [], {}):
+            continue
+        score += 3 if key in diagnostic_keys else 1
+    return score
+
+
 def merge_capability_matrices(
     matrices: Sequence[dict[str, Any]],
     *,
@@ -828,6 +857,13 @@ def merge_capability_matrices(
                 capability_by_id[capability_id] = capability
                 continue
             if existing.get("status") != "passed" and capability.get("status") == "passed":
+                capability_by_id[capability_id] = capability
+                continue
+            if (
+                existing.get("status") != "passed"
+                and capability.get("status") != "passed"
+                and _evidence_value_score(capability) > _evidence_value_score(existing)
+            ):
                 capability_by_id[capability_id] = capability
 
     capabilities = [capability_by_id[capability_id] for capability_id in capability_order]

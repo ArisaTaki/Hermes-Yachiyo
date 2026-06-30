@@ -520,6 +520,53 @@ def test_capability_summary_cli_merges_multiple_reports(tmp_path):
     assert by_id["packaged_app_bridge_isolation"]["status"] == "passed"
 
 
+def test_capability_summary_merge_preserves_missing_diagnostic_evidence():
+    skipped = summary.summarize_capabilities(
+        {
+            "real_desktop_ui_inspection_smoke": {
+                "status": "skipped",
+                "evidence": {},
+            }
+        }
+    )
+    failed = summary.summarize_capabilities(
+        {
+            "real_desktop_ui_inspection_smoke": {
+                "status": "failed",
+                "evidence": {
+                    "ok": False,
+                    "mode": "real_desktop_ui_inspection_smoke",
+                    "stage": "session_preflight",
+                    "error": "desktop_session_locked",
+                    "blocking_conditions": ["desktop_session_locked"],
+                    "recovery_hints": [
+                        "Unlock the active macOS user session, then retry."
+                    ],
+                    "recovery_actions": [
+                        {
+                            "label": "Retry foreground check",
+                            "tool": "desktop.active_window",
+                            "permission_target": "desktop_session_unlocked",
+                            "risk_level": "low",
+                        }
+                    ],
+                },
+            }
+        }
+    )
+
+    for matrices in ((skipped, failed), (failed, skipped)):
+        merged = summary.merge_capability_matrices(matrices)
+        by_id = {item["id"]: item for item in merged["capabilities"]}
+        evidence = by_id["source_real_desktop_ui_inspection"]["evidence_summary"]
+        assert by_id["source_real_desktop_ui_inspection"]["status"] == "missing"
+        assert evidence["status"] == "failed"
+        assert evidence["stage"] == "session_preflight"
+        assert evidence["error"] == "desktop_session_locked"
+        assert evidence["blocking_conditions"] == ["desktop_session_locked"]
+        assert evidence["recovery_actions"][0]["tool"] == "desktop.active_window"
+
+
 def test_capability_summary_script_entrypoint_runs_from_shell(tmp_path):
     source_path = tmp_path / "source-rc.json"
     output_path = tmp_path / "matrix.json"
