@@ -1924,6 +1924,39 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         "body_source": "explicit_user_text",
     }
 
+    diagram_prompt = "打开一个能画流程图的应用，创建新图，然后输入登录流程"
+    diagram_decision = RuntimePlanner().decision(diagram_prompt, allowed_tools=allowed_tools)
+    diagram_requests = planner_tool_requests(diagram_prompt, allowed_tools)
+    diagram_payload = planner_selection_payload(
+        decision=diagram_decision,
+        planner_requests=diagram_requests,
+        legacy_requests=[],
+        selected_requests=diagram_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert diagram_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "diagram", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+    assert diagram_payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "diagram",
+        "app_name_source": "desktop.list_apps",
+        "capability_description": "画流程图",
+        "target_action": "safe_shortcut",
+        "safe_shortcut_action": "new_document",
+        "compose_text": "登录流程",
+        "body_source": "explicit_user_text",
+    }
+
     message_prompt = "打开一个聊天软件，给 Alice 发送 hello"
     message_decision = RuntimePlanner().decision(
         message_prompt,
@@ -6472,6 +6505,10 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "打开一个适合写代码的应用并新建 Python 文件",
         allowed_tools=allowed_tools,
     )
+    diagram = RuntimePlanner().decision(
+        "打开一个能画流程图的应用，创建新图，然后输入登录流程",
+        allowed_tools=allowed_tools,
+    )
     image = RuntimePlanner().decision(
         "打开一个能编辑图片的应用，新建一张 1024x1024 图片",
         allowed_tools=allowed_tools,
@@ -6494,6 +6531,21 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "app_name": "<selected app from desktop.list_apps>",
         "selection_source": "desktop.list_apps",
         "query": "code",
+        "action": "new_document",
+    }
+    assert diagram.selected_intent.inputs["app_capability_hint"] == {
+        "query": "diagram",
+        "description": "画流程图",
+    }
+    assert diagram.selected_intent.inputs["foreground_compose_text_hint"] == "登录流程"
+    assert _step_by_id(diagram, "discover_apps-desktop-state").input_preview == {
+        "query": "diagram",
+        "limit": 20,
+    }
+    assert _step_by_id(diagram, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "diagram",
         "action": "new_document",
     }
     assert image.selected_intent.inputs["app_name_hint"] == ""

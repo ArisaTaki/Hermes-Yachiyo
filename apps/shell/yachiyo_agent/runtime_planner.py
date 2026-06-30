@@ -423,6 +423,7 @@ class TaskIntentRouter:
             and _looks_like_app_scoped_create_followup(text)
             and not _app_scoped_create_text_hint(text)
             and not _generic_create_title_text_hint(text)
+            and not _generic_followup_compose_text_hint(text)
         ):
             foreground_compose_text = ""
         if control_presence_inspection:
@@ -469,6 +470,7 @@ class TaskIntentRouter:
                 and _looks_like_app_scoped_create_followup(text)
                 and not _app_scoped_create_text_hint(text)
                 and not _generic_create_title_text_hint(text)
+                and not _generic_followup_compose_text_hint(text)
             ):
                 foreground_compose_text = ""
         if control_presence_inspection:
@@ -12672,6 +12674,9 @@ def _foreground_compose_text_hint(text: str) -> str:
     create_title_text = _generic_create_title_text_hint(value)
     if create_title_text:
         return create_title_text
+    followup_text = _generic_followup_compose_text_hint(value)
+    if followup_text:
+        return followup_text
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|切到|聚焦)?\s*"
         r"(?P<app>[\w .·-]{1,40}?)\s*(?:输入|键入|填写|写入|写下|记录下|记下|写)\s*(?P<text>[^。！？!?，,]+?)"
@@ -12704,6 +12709,29 @@ def _foreground_compose_text_hint(text: str) -> str:
             continue
         if typed_text:
             return typed_text
+    return ""
+
+
+def _generic_followup_compose_text_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if not value:
+        return ""
+    patterns = (
+        r"(?:并且|并|然后|再|接着|之后|随后|后)\s*"
+        r"(?:输入(?!框|栏)|键入|填写|填入|写入|写下|记录下|记下|写)\s*"
+        r"(?P<text>[^。！？!?]+)$",
+        r"\b(?:and\s+then|then|and)\s*"
+        r"(?:type|enter|fill|write)\s+(?P<text_en>[^.!?]+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        text_value = _clean_foreground_compose_text(
+            match.groupdict().get("text") or match.groupdict().get("text_en") or ""
+        )
+        if text_value:
+            return text_value
     return ""
 
 
@@ -12762,13 +12790,16 @@ def _generic_create_container_action_hint(text: str) -> str:
     if re.search(
         r"(?:新建|创建|新增)\s*(?:一个|一份|一篇|一条|一张|一幅)?\s*"
         r"(?:\d{2,5}\s*(?:x|×|X|\*)\s*\d{2,5}\s*)?"
+        r"(?:新的|新)?\s*"
         r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
-        r"(?:页面|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|图片|图像|画布|表格|工作簿|演示|演示文稿|幻灯片|项目|任务|卡片)",
+        r"(?:页面|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|图片|图像|图(?!标)|"
+        r"流程图|思维导图|脑图|图表|画布|表格|工作簿|演示|演示文稿|幻灯片|项目|任务|卡片)",
         value,
         flags=re.IGNORECASE,
     ) or re.search(
         r"\b(?:new|create|make)\b.{0,60}\b"
-        r"(?:page|document|file|image|picture|canvas|spreadsheet|workbook|presentation|slide|project|task|card)\b",
+        r"(?:page|document|file|image|picture|diagram|flowchart|mind\s*map|canvas|"
+        r"spreadsheet|workbook|presentation|slide|project|task|card)\b",
         value,
         flags=re.IGNORECASE,
     ):
@@ -12817,14 +12848,17 @@ def _looks_like_app_scoped_create_followup(text: str) -> bool:
         re.search(
             r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份|一则)?\s*"
             r"(?:今天的|今日的|新的|新|关于.+?的)?\s*"
+            r"(?:新的|新)?\s*"
             r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
-            r"(?:页面|页|笔记|备忘录|日志|日记|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|演示|演示文稿|幻灯片|项目|任务|卡片)",
+            r"(?:页面|页|笔记|备忘录|日志|日记|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|"
+            r"图片|图像|图(?!标)|流程图|思维导图|脑图|图表|画布|演示|演示文稿|幻灯片|项目|任务|卡片)",
             value,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"\b(?:new|create|make)\b.{0,40}\b"
-            r"(?:page|note|document|file|presentation|slide|project|task|card)\b",
+            r"(?:page|note|document|file|image|picture|diagram|flowchart|mind\s*map|"
+            r"canvas|presentation|slide|project|task|card)\b",
             value,
             flags=re.IGNORECASE,
         )
@@ -18469,6 +18503,8 @@ def _app_capability_discovery_query(value: str) -> str:
         return "code"
     if _contains_any(description, ("图片", "图像", "照片", "绘图", "画图", "设计", "image", "photo", "picture", "design")):
         return "image"
+    if _contains_any(description, ("流程图", "思维导图", "脑图", "diagram", "flowchart", "mind map", "mindmap")):
+        return "diagram"
     if _contains_any(description, ("表格", "数据表", "spreadsheet", "sheet", "csv")):
         return "spreadsheet"
     if _contains_any(description, ("演示", "幻灯片", "presentation", "slide")):
