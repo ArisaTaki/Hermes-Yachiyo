@@ -560,9 +560,11 @@ Current Workflow Run Detail evidence exposes planner summaries on public child
 runs, not only the parent workflow timeline. Each child run row carries stable
 `data-planner-*` attributes for intent kind, plan id, plan tools, selected
 tools, capabilities, approvals, artifacts, open questions, entrypoint, and
-selection role, and the visible summary includes the tool choice. This gives
-Agent Studio a stable Workflow debugging surface parallel to GroupRun planner
-replay while preserving the existing public timeline contract.
+selection role, and the visible summary includes the tool choice. The Workflow
+save-and-run UI smoke now mocks a child `planner_summary` and verifies those
+DOM attributes, giving Agent Studio a stable Workflow debugging surface
+parallel to GroupRun planner replay while preserving the existing public
+timeline contract.
 
 ## Phase 10 - 删除旧硬编码与收敛代码
 

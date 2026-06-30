@@ -13,6 +13,7 @@ const VITE = path.join(FRONTEND, 'node_modules', '.bin', process.platform === 'w
 const AGENT_ID = 'workflow-save-run-agent';
 const WORKFLOW_ID = 'workflow_save_run_ui_smoke_persisted';
 const RUN_ID = 'workflow_save_run_ui_smoke_run';
+const CHILD_RUN_ID = 'workflow_save_run_ui_smoke_child_agent_run';
 const RUN_GROUP_ID = 'workflow_save_run_ui_smoke_group';
 const WORKFLOW_TASK_ID = 'task-workflow-save-run-ui-smoke';
 const WORKFLOW_SESSION_ID = 'session-workflow-save-run-ui-smoke';
@@ -46,6 +47,31 @@ const agent = {
   enabled: true,
   editable: true,
   deletable: true,
+};
+
+const childPlannerSummary = {
+  source: 'runtime_planner',
+  decision_id: 'decision-workflow-save-run-child',
+  plan_id: 'runtime-plan-workflow-save-run-child',
+  intent_kind: 'data_analysis',
+  intent_title: 'Data Analysis',
+  route_to_studio: true,
+  selection_source: 'runtime_planner',
+  selection_role: 'runtime_planner_primary',
+  selection_reason: 'runtime_planner_full_plan_execution',
+  planner_entrypoint: 'workflow_agent_node',
+  entrypoint_source: 'workflow',
+  runnable_kind: 'agent',
+  plan_tools: ['data.analyze'],
+  selected_tools: ['data.analyze'],
+  plan_capabilities: ['data.analysis'],
+  required_capabilities: ['data.analysis'],
+  missing_capabilities: [],
+  approvals_required: [],
+  artifacts_expected: ['analysis-report.md'],
+  open_questions: [],
+  step_count: 1,
+  event_count: 4,
 };
 
 function savedWorkflowSpec(request = {}, workflowId = WORKFLOW_ID) {
@@ -85,6 +111,19 @@ const workflowRun = {
     { event: 'workflow.node.artifact', status: 'completed', artifact: { path: WORKFLOW_ARTIFACT_PATH } },
     { event: 'workflow.run.completed', status: 'completed' },
   ],
+  children: [{
+    run_id: CHILD_RUN_ID,
+    parent_run_id: RUN_ID,
+    workflow_run_id: RUN_ID,
+    workflow_id: WORKFLOW_ID,
+    workflow_node_id: 'agent-1',
+    workflow_node_label: 'Workflow Save Run Agent',
+    agent_id: AGENT_ID,
+    kind: 'agent_run',
+    title: 'Workflow Save Run Agent',
+    status: 'completed',
+    planner_summary: childPlannerSummary,
+  }],
   artifacts: [{
     path: WORKFLOW_ARTIFACT_PATH,
     kind: 'markdown',
@@ -840,6 +879,25 @@ async function main() {
       && artifactEvent?.textContent.includes(${JSON.stringify(WORKFLOW_ARTIFACT_PATH)})
       && completedEvent?.textContent.includes('Workflow save-and-run UI smoke completed');
   }, 'workflow run replay events');
+  await waitFor(win, () => {
+    const child = document.querySelector(
+      '[data-testid="agent-run-detail-public-child-run"][data-run-id=${JSON.stringify(CHILD_RUN_ID)}]',
+    );
+    return child
+      && child.getAttribute('data-workflow-node-id') === 'agent-1'
+      && child.getAttribute('data-planner-intent-kind') === 'data_analysis'
+      && child.getAttribute('data-planner-plan-id') === 'runtime-plan-workflow-save-run-child'
+      && child.getAttribute('data-planner-tools') === 'data.analyze'
+      && child.getAttribute('data-selected-tools') === 'data.analyze'
+      && child.getAttribute('data-planner-capabilities') === 'data.analysis'
+      && child.getAttribute('data-planner-artifacts-expected') === 'analysis-report.md'
+      && child.getAttribute('data-planner-entrypoint') === 'workflow_agent_node'
+      && child.getAttribute('data-planner-entrypoint-source') === 'workflow'
+      && child.getAttribute('data-planner-selection-role') === 'runtime_planner_primary'
+      && child.textContent.includes('Planner trace')
+      && child.textContent.includes('data_analysis')
+      && child.textContent.includes('selected data.analyze');
+  }, 'workflow child planner summary attributes');
   await waitFor(win, () => {
     const artifact = document.querySelector('[data-testid="agent-run-detail-artifact"]');
     return artifact

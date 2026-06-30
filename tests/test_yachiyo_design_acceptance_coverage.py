@@ -218,7 +218,12 @@ ACCEPTANCE_10_3_MATRIX: tuple[AcceptanceScenario, ...] = (
             (
                 "smoke",
                 "scripts/smoke_workflow_save_run_ui.mjs",
-                ('data-testid="workflow-save-and-run"', "/yachiyo/studio/runs/${RUN_ID}/timeline", "workflow.run.completed"),
+                (
+                    'data-testid="workflow-save-and-run"',
+                    "/yachiyo/studio/runs/${RUN_ID}/timeline",
+                    "workflow.run.completed",
+                    "workflow child planner summary attributes",
+                ),
             ),
         ),
     ),
@@ -1527,6 +1532,9 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "/yachiyo/studio/runs/${RUN_ID}/timeline",
             "workflow.run.completed",
             "workflow.node.approval_required",
+            "workflow child planner summary attributes",
+            "data-planner-intent-kind",
+            "data-planner-tools",
         ],
     )
     _assert_smoke_script(
