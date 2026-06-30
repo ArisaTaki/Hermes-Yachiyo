@@ -27,6 +27,7 @@ type PlannerTrace = {
 type PlannerSelection = {
   approvalsRequired: string[];
   artifactsExpected: string[];
+  followupTarget: PlannerFollowupTarget | null;
   legacyTools: string[];
   legacyRequestCount: number;
   missingCapabilities: string[];
@@ -51,6 +52,14 @@ type PlannerSelection = {
   selectedSource: string;
   selectedTools: string[];
   selectedRequestCount: number;
+};
+
+type PlannerFollowupTarget = {
+  kind: string;
+  entries: Array<{ key: string; value: string }>;
+  communicationCompose: Array<{ key: string; value: string }>;
+  recommendedTools: string[];
+  verifyTools: string[];
 };
 
 type PlannerTraceInspectorProps = {
@@ -302,6 +311,52 @@ export function PlannerTraceInspector({
               {trace.selection.legacyTools.map((tool) => (
                 <span className="studio-tool-permission" data-legacy-tool={tool} key={`legacy:${tool}`}>
                   legacy · {tool}
+                </span>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {trace.selection?.followupTarget ? (
+          <section
+            data-followup-kind={trace.selection.followupTarget.kind}
+            data-testid="agent-run-detail-planner-followup-target"
+          >
+            <div className="studio-tool-inspector-heading">
+              <h3>Follow-up Target</h3>
+              <span>{trace.selection.followupTarget.kind || 'target'}</span>
+            </div>
+            <div className="studio-tool-pill-row">
+              {trace.selection.followupTarget.entries.map((entry) => (
+                <span
+                  className="studio-tool-permission"
+                  data-followup-key={entry.key}
+                  data-followup-value={entry.value}
+                  key={`followup:${entry.key}`}
+                  title={entry.value}
+                >
+                  target · {entry.key}: {entry.value}
+                </span>
+              ))}
+              {trace.selection.followupTarget.communicationCompose.map((entry) => (
+                <span
+                  className="studio-tool-permission"
+                  data-followup-compose-key={entry.key}
+                  data-followup-compose-value={entry.value}
+                  key={`followup-compose:${entry.key}`}
+                  title={entry.value}
+                >
+                  compose · {entry.key}: {entry.value}
+                </span>
+              ))}
+              {trace.selection.followupTarget.recommendedTools.map((tool) => (
+                <span className="studio-tool-permission" data-followup-recommended-tool={tool} key={`followup-tool:${tool}`}>
+                  recommended · {tool}
+                </span>
+              ))}
+              {trace.selection.followupTarget.verifyTools.map((tool) => (
+                <span className="studio-tool-permission" data-followup-verify-tool={tool} key={`followup-verify:${tool}`}>
+                  verify · {tool}
                 </span>
               ))}
             </div>
@@ -770,6 +825,7 @@ function plannerSelectionFromSummary(
     artifactsExpected,
     dailyDesktopIntent: false,
     entrypointSource,
+    followupTarget: null,
     launcherMode,
     launcherSurface,
     legacyFallback: false,
@@ -960,6 +1016,7 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
   const missingCapabilityCount = integerValue(payload.missing_capability_count, missingCapabilities.length);
   const plannerRequestCount = integerValue(payload.planner_request_count, plannerTools.length);
   const legacyRequestCount = integerValue(payload.legacy_request_count, legacyTools.length);
+  const followupTarget = plannerFollowupTargetFromPayload(payload.followup_target);
   if (
     !selectedSource
     && !selectedRole
@@ -978,12 +1035,14 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
     && !launcherMode
     && !launcherSurface
     && !runnableKind
+    && !followupTarget
   ) return null;
   return {
     approvalsRequired,
     artifactsExpected,
     dailyDesktopIntent: booleanValue(payload.entrypoint_daily_desktop_intent, false) || false,
     entrypointSource,
+    followupTarget,
     launcherMode,
     launcherSurface,
     legacyTools,
@@ -1010,6 +1069,43 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
     selectedTools,
     selectedRequestCount,
   };
+}
+
+function plannerFollowupTargetFromPayload(value: unknown): PlannerFollowupTarget | null {
+  const record = objectRecord(value);
+  const entries = plannerRecordEntries(record, [
+    'communication_compose',
+    'recommended_tools',
+    'verify_tools',
+  ]);
+  const communicationCompose = plannerRecordEntries(objectRecord(record.communication_compose));
+  const recommendedTools = uniqueStrings(Array.isArray(record.recommended_tools) ? record.recommended_tools : []);
+  const verifyTools = uniqueStrings(Array.isArray(record.verify_tools) ? record.verify_tools : []);
+  const kind = stringValue(record.kind);
+  if (!kind && !entries.length && !communicationCompose.length && !recommendedTools.length && !verifyTools.length) {
+    return null;
+  }
+  return {
+    kind,
+    entries,
+    communicationCompose,
+    recommendedTools,
+    verifyTools,
+  };
+}
+
+function plannerRecordEntries(
+  record: Record<string, unknown>,
+  skipKeys: string[] = [],
+): Array<{ key: string; value: string }> {
+  const skip = new Set(skipKeys);
+  return Object.entries(record)
+    .filter(([key]) => key && !skip.has(key))
+    .map(([key, entryValue]) => ({
+      key,
+      value: plannerValuePreview(entryValue),
+    }))
+    .filter((entry) => entry.value);
 }
 
 function objectRecord(value: unknown): Record<string, unknown> {
