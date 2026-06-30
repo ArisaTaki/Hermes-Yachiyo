@@ -1158,6 +1158,8 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         if _foreground_app_search_hint(text):
             return _empty_intent("web_research", text)
+        if _workflow_action_hint(text) in {"create", "debug"}:
+            return _empty_intent("web_research", text)
         if _foreground_find_query_hint(text) and not _looks_like_external_info_lookup(text):
             return _empty_intent("web_research", text)
         if type_into_ui_hint(text) and not _has_browser_page_context(text):
@@ -1663,6 +1665,7 @@ class TaskIntentRouter:
 
     def _workflow_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         score = _score_terms(text, ["workflow", "flow", "工作流", "流程"])
+        action_hint = _workflow_action_hint(text)
         known_target_hint = _known_orchestration_target_hint(
             text,
             metadata,
@@ -1670,9 +1673,16 @@ class TaskIntentRouter:
         )
         if score <= 0 and known_target_hint:
             score = 0.24
+        if score <= 0 and action_hint:
+            score = 0.24
         if score <= 0 and metadata.get("runnable_kind") != "workflow":
             return _empty_intent("workflow_orchestration", text)
         target_hint = _workflow_target_hint(text) or known_target_hint
+        inputs = {}
+        if target_hint:
+            inputs["target_name_hint"] = target_hint
+        if action_hint:
+            inputs["workflow_action_hint"] = action_hint
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "workflow_orchestration", text),
             kind="workflow_orchestration",
@@ -1680,7 +1690,7 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.92, 0.5 + score),
             description="Run or debug an Agent Studio workflow.",
-            inputs={"target_name_hint": target_hint} if target_hint else {},
+            inputs=inputs,
             required_capabilities=["workflow.orchestration"],
             preferred_capabilities=["artifact.write"],
             risk_level="medium",
@@ -5759,12 +5769,12 @@ def _service_step(
     allowed: set[str] | None = None,
 ) -> ToolPlanStepSnapshot:
     target_name = str(intent.inputs.get("target_name_hint") or "").strip()
-    tool_name = _first_allowed(_service_tool_candidates(capability_id), allowed)
+    tool_name = _first_allowed(_service_tool_candidates(capability_id, intent), allowed)
     return ToolPlanStepSnapshot(
         step_id=capability_id.replace(".", "-"),
         title=title,
         capability_id=capability_id,
-        action=_service_action(capability_id),
+        action=_service_action(capability_id, intent),
         tool_name=tool_name,
         input_preview={"target_name": target_name} if target_name else {},
         reason=(
@@ -7861,16 +7871,35 @@ def _media_playback_verify_input_preview(tool_name: str | None) -> dict[str, Any
     return {}
 
 
-def _service_action(capability_id: str) -> str:
+def _service_action(capability_id: str, intent: TaskIntentSnapshot | None = None) -> str:
     if capability_id == "workflow.orchestration":
+        action_hint = str(
+            ((intent.inputs if intent is not None else {}) or {}).get("workflow_action_hint")
+            or ""
+        ).strip()
+        if action_hint == "create":
+            return "create_workflow"
+        if action_hint == "debug":
+            return "debug_workflow"
         return "start_workflow"
     if capability_id == "group.multi_agent":
         return "start_group_run"
     return ""
 
 
-def _service_tool_candidates(capability_id: str) -> tuple[str, ...]:
+def _service_tool_candidates(
+    capability_id: str,
+    intent: TaskIntentSnapshot | None = None,
+) -> tuple[str, ...]:
     if capability_id == "workflow.orchestration":
+        action_hint = str(
+            ((intent.inputs if intent is not None else {}) or {}).get("workflow_action_hint")
+            or ""
+        ).strip()
+        if action_hint == "create":
+            return ("workflow.create", "workflow.start", "workflow.run", "workflow.list")
+        if action_hint == "debug":
+            return ("workflow.debug", "workflow.start", "workflow.run", "workflow.list")
         return ("workflow.start", "workflow.run", "workflow.list")
     if capability_id == "group.multi_agent":
         return ("group.start", "group.run", "group.list")
@@ -11441,6 +11470,30 @@ def _workflow_target_hint(text: str) -> str:
             "run ",
         ),
     )
+
+
+def _workflow_action_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if not value:
+        return ""
+    if not _contains_any(value, ("workflow", "flow", "工作流", "流程")):
+        return ""
+    if re.search(
+        r"(?:创建|新建|建立|搭建|设计|生成|做一个|创建一个|新建一个|"
+        r"\bcreate\b|\bnew\b|\bbuild\b|\bdesign\b)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "create"
+    if re.search(r"(?:调试|debug|排查)", value, flags=re.IGNORECASE):
+        return "debug"
+    if re.search(
+        r"(?:运行|启动|执行|跑|run|start|execute)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "run"
+    return ""
 
 
 def _known_orchestration_target_hint(

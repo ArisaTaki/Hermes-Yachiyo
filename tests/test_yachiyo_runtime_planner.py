@@ -2884,19 +2884,36 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     )
 
     assert workflow.selected_intent.kind == "workflow_orchestration"
+    assert workflow.selected_intent.inputs == {"workflow_action_hint": "create"}
     assert workflow.plan.route_to_studio is True
     workflow_step = _step_by_id(workflow, "workflow-orchestration")
     assert workflow_step.capability_id == "workflow.orchestration"
-    assert workflow_step.action == "start_workflow"
+    assert workflow_step.action == "create_workflow"
     assert workflow_step.tool_name == "workflow.run"
     assert workflow_step.status == "planned"
+
+    create_workflow = RuntimePlanner().decision(
+        "创建一个工作流：每天上午搜索 AI 新闻并生成摘要",
+        allowed_tools=["workflow.create", "workflow.run", "browser.open_url", "artifact.write"],
+    )
+    assert create_workflow.selected_intent.kind == "workflow_orchestration"
+    assert create_workflow.selected_intent.inputs == {"workflow_action_hint": "create"}
+    assert create_workflow.plan.route_to_studio is True
+    create_workflow_step = _step_by_id(create_workflow, "workflow-orchestration")
+    assert create_workflow_step.action == "create_workflow"
+    assert create_workflow_step.tool_name == "workflow.create"
+    assert not any(
+        step.tool_name in {"browser.open_url", "browser.open_url_and_extract_text"}
+        for step in create_workflow.plan.tool_plan.steps
+    )
 
     named_workflow = RuntimePlanner().decision(
         "运行 Daily Summary workflow",
         allowed_tools=["workflow.start", "artifact.write"],
     )
     assert named_workflow.selected_intent.inputs == {
-        "target_name_hint": "Daily Summary"
+        "target_name_hint": "Daily Summary",
+        "workflow_action_hint": "run",
     }
     named_workflow_step = _step_by_id(named_workflow, "workflow-orchestration")
     assert named_workflow_step.tool_name == "workflow.start"
@@ -2907,7 +2924,9 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
         allowed_tools=["workflow.run", "data.analyze", "workspace.read"],
     )
     assert workflow_with_data_words.selected_intent.kind == "workflow_orchestration"
-    assert workflow_with_data_words.selected_intent.inputs == {}
+    assert workflow_with_data_words.selected_intent.inputs == {
+        "workflow_action_hint": "run"
+    }
 
     group = RuntimePlanner().decision(
         "让两个 agent 分别调研 Hanako 和 Hermes 然后汇总",
@@ -2985,6 +3004,13 @@ def test_planner_orchestration_requests_project_workflow_and_group_handoffs() ->
             },
         }
     ]
+    workflow_create_request = planner_orchestration_requests(
+        "创建一个工作流：每天上午搜索 AI 新闻并生成摘要"
+    )
+    assert len(workflow_create_request) == 1
+    assert workflow_create_request[0]["orchestration_kind"] == "workflow"
+    assert workflow_create_request[0]["intent_kind"] == "workflow_orchestration"
+    assert workflow_create_request[0]["input"]["target_name"] == ""
 
     group_request = planner_orchestration_requests(
         "让两个 agent 分别调研 Hanako 和 Hermes 然后汇总"
