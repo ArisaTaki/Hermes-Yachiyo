@@ -40,17 +40,18 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
     assert summary["ok"] is True
     assert summary["complete"] is False
     assert summary["status"] == "partial"
-    assert summary["selected_count"] == 5
-    assert summary["passed_count"] == 5
+    assert summary["selected_count"] == 6
+    assert summary["passed_count"] == 6
     assert summary["skipped_count"] == 6
     assert [flow["id"] for flow in summary["flows"] if flow["selected"]] == [
         "data_analysis_artifact",
         "browser_research_artifact",
+        "desktop_planner_discovery",
         "approval_resume",
         "group_run",
         "workflow_run",
     ]
-    assert len(commands) == 5
+    assert len(commands) == 6
     assert any(action["id"] == "real_desktop_app_open" for action in summary["next_actions"])
 
 
@@ -104,9 +105,9 @@ def test_public_demo_smokes_opt_in_selects_all_flows(tmp_path, monkeypatch):
     assert summary["ok"] is True
     assert summary["complete"] is True
     assert summary["status"] == "passed"
-    assert summary["selected_count"] == summary["flow_count"] == 11
+    assert summary["selected_count"] == summary["flow_count"] == 12
     assert summary["skipped_count"] == 0
-    assert len(commands) == 11
+    assert len(commands) == 12
     assert ["node", "scripts/smoke_agent_run_detail_ui.mjs"] in commands
 
 

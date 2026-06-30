@@ -59,6 +59,18 @@ def demo_flows(tmp_dir: Path) -> list[DemoFlow]:
             report_json=tmp_dir / "browser-research-artifact.json",
         ),
         DemoFlow(
+            id="desktop_planner_discovery",
+            label="Desktop planner discovery and operate tool plan",
+            category="source",
+            command=(
+                sys.executable,
+                "scripts/smoke_desktop_planner_discovery.py",
+                "--report-json",
+                str(tmp_dir / "desktop-planner-discovery.json"),
+            ),
+            report_json=tmp_dir / "desktop-planner-discovery.json",
+        ),
+        DemoFlow(
             id="approval_resume",
             label="Approval card and replayable resume",
             category="source",

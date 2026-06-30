@@ -49,7 +49,7 @@ evidence for these flows:
 
 | Flow | Evidence |
 | --- | --- |
-| Arbitrary app operation | `real_desktop_*` smokes or RC capability matrix entries for app open, UI inspection, and interaction. |
+| Arbitrary app operation | `desktop_planner_discovery_smoke` for source-level discover/operate/verify planning, plus `real_desktop_*` smokes or RC capability matrix entries for app open, UI inspection, and interaction. |
 | Data analysis artifact | `data_analysis_artifact_smoke` and artifact readback evidence. |
 | Browser research | `browser_planner_artifact_smoke` evidence. |
 | Approval resume | `approval_resume_timeline_smoke`, `runtime_approval_resume_smoke`, and route approval evidence. |
@@ -67,9 +67,9 @@ python scripts/run_public_demo_smokes.py \
 ```
 
 By default it runs only safe source-level demos: data analysis artifact,
-browser research artifact planning, approval resume, GroupRun replay, and
-WorkflowRun replay. Full Hanako/Hermes-level demo evidence requires explicit
-opt-in:
+browser research artifact planning, desktop planner discovery, approval
+resume, GroupRun replay, and WorkflowRun replay. Full Hanako/Hermes-level demo
+evidence requires explicit opt-in:
 
 ```bash
 python scripts/run_public_demo_smokes.py \

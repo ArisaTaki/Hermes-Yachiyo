@@ -176,6 +176,11 @@ USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
     ),
     (
         Path("docs/public-release-readiness.md"),
+        "desktop_planner_discovery_smoke",
+        "public release readiness guide must document desktop planner public demo evidence",
+    ),
+    (
+        Path("docs/public-release-readiness.md"),
         "WorkflowRun replay",
         "public release readiness guide must document WorkflowRun public demo evidence",
     ),
