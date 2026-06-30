@@ -49,12 +49,12 @@ evidence for these flows:
 
 | Flow | Evidence |
 | --- | --- |
-| Arbitrary app operation | `desktop_planner_discovery_smoke` for source-level discover/operate/verify planning, plus `real_desktop_*` smokes or RC capability matrix entries for app open, UI inspection, and interaction. |
+| Arbitrary app operation | `desktop_planner_discovery_smoke` for source-level discover/operate/verify planning, `real_desktop_discovery_smoke` for non-mutating installed-app discovery, plus `real_desktop_*` smokes or RC capability matrix entries for app open, UI inspection, and interaction. |
 | Data analysis artifact | `data_analysis_artifact_smoke` and artifact readback evidence. |
 | Browser research | `browser_planner_artifact_smoke` evidence. |
 | Approval resume | `approval_resume_timeline_smoke`, `runtime_approval_resume_smoke`, and route approval evidence. |
 | GroupRun | `group_run_timeline_smoke` and Agent Studio GroupRun replay evidence. |
-| Workflow | `workflow_run_timeline_smoke`, native Workflow full-chain provider smoke, and Workflow UI smoke evidence. |
+| Workflow | `workflow_run_timeline_smoke` WorkflowRun replay evidence, native Workflow full-chain provider smoke, and Workflow UI smoke evidence. |
 | Studio replay | Run Detail / Agent Studio UI smoke plus RunEvent replay evidence. |
 | Diagnostics export | `collect_release_diagnostics.py` bundle manifest and `release-smoke` diagnostics item. |
 
@@ -66,10 +66,10 @@ python scripts/run_public_demo_smokes.py \
   --output-markdown tmp/public-demo-smokes.md
 ```
 
-By default it runs only safe source-level demos: data analysis artifact,
-browser research artifact planning, desktop planner discovery, approval
-resume, GroupRun replay, and WorkflowRun replay. Full Hanako/Hermes-level demo
-evidence requires explicit opt-in:
+By default it runs only safe demos: data analysis artifact, browser research
+artifact planning, desktop planner discovery, non-mutating real desktop app
+discovery, approval resume, GroupRun replay, and WorkflowRun replay. Full
+Hanako/Hermes-level demo evidence requires explicit opt-in:
 
 ```bash
 python scripts/run_public_demo_smokes.py \

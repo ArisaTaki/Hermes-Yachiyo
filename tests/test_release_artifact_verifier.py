@@ -1005,6 +1005,7 @@ def test_verifier_requires_user_facing_release_docs_for_first_launch(tmp_path):
     assert "public release readiness guide must state packaged runtime expectations" in messages
     assert "public release readiness guide must document the public demo smoke runner" in messages
     assert "public release readiness guide must document desktop planner public demo evidence" in messages
+    assert "public release readiness guide must document real desktop discovery public demo evidence" in messages
     assert "public release readiness guide must document WorkflowRun public demo evidence" in messages
     assert "contribution guide must document non-negotiable product boundaries" in messages
     assert "contribution guide must document public demo smoke evidence" in messages

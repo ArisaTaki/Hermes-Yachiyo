@@ -71,6 +71,18 @@ def demo_flows(tmp_dir: Path) -> list[DemoFlow]:
             report_json=tmp_dir / "desktop-planner-discovery.json",
         ),
         DemoFlow(
+            id="real_desktop_discovery",
+            label="Real desktop app discovery without opening apps",
+            category="real_desktop",
+            command=(
+                sys.executable,
+                "scripts/smoke_real_desktop_discovery.py",
+                "--report-json",
+                str(tmp_dir / "real-desktop-discovery.json"),
+            ),
+            report_json=tmp_dir / "real-desktop-discovery.json",
+        ),
+        DemoFlow(
             id="approval_resume",
             label="Approval card and replayable resume",
             category="source",
@@ -207,7 +219,7 @@ def run_public_demo_smokes(
         for flow in flows
     ]
     selected = [flow for flow in flow_results if flow.get("selected") is True]
-    skipped = [flow for flow in flow_results if flow.get("selected") is not True]
+    skipped = [flow for flow in flow_results if flow.get("status") == "skipped"]
     failed = [flow for flow in selected if flow.get("status") == "failed"]
     passed = [flow for flow in selected if flow.get("status") == "passed"]
     planned = [flow for flow in selected if flow.get("status") == "planned"]
@@ -264,13 +276,22 @@ def _flow_result(
     result = _run_command(command)
     evidence = _load_evidence(flow.report_json) if flow.report_json else {}
     evidence_ok = evidence.get("ok") is True if evidence else result.returncode == 0
-    status = "passed" if result.returncode == 0 and evidence_ok else "failed"
+    evidence_skipped = evidence.get("skipped") is True if evidence else False
+    status = (
+        "skipped"
+        if result.returncode == 0 and evidence_skipped
+        else "passed"
+        if result.returncode == 0 and evidence_ok
+        else "failed"
+    )
     return {
         **base,
         "status": status,
         "returncode": result.returncode,
         "evidence_ok": evidence_ok,
+        "evidence_skipped": evidence_skipped,
         "evidence_mode": str(evidence.get("mode") or ""),
+        "evidence_reason": str(evidence.get("reason") or ""),
         "stdout_tail": _tail(result.stdout),
         "stderr_tail": _tail(result.stderr),
     }
@@ -325,7 +346,7 @@ def _next_actions(flows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
                 "status": status,
                 "command": " ".join(str(part) for part in command),
                 "opt_in_flag": str(flow.get("opt_in_flag") or ""),
-                "reason": str(flow.get("opt_in_reason") or ""),
+                "reason": str(flow.get("opt_in_reason") or flow.get("evidence_reason") or ""),
             }
         )
     return actions
@@ -357,6 +378,8 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
             reason = str(action.get("reason") or "")
             if opt_in:
                 lines.append(f"  Requires `{opt_in}`: {reason}")
+            elif reason:
+                lines.append(f"  Reason: {reason}")
             lines.extend(["", "```bash", str(action.get("command") or ""), "```", ""])
     return "\n".join(lines).rstrip() + "\n"
 
