@@ -40,9 +40,11 @@ def test_runnable_run_coordinator_passes_agent_override_to_async_agent_run() -> 
         runnable_id="agent-desktop",
         user_goal="Inspect the desktop",
         agent_override=override,
+        runtime_planner_entrypoint=True,
     )
 
     assert captured["payload"]["agent_override"] is override
+    assert captured["payload"]["runtime_planner_entrypoint"] is True
     assert run["runnable"] == {"kind": "agent", "id": "agent-desktop"}
 
 

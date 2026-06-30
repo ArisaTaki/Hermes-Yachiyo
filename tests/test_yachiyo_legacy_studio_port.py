@@ -111,6 +111,10 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
 
     assert group_run["group_run_id"] == "group-run-1"
     assert group_run["child_run_ids"] == ["run-1", "run-2"]
+    assert [
+        payload["runtime_planner_entrypoint"]
+        for payload in runtime.runnable_run_payloads
+    ] == [True, True]
     assert [event["event_type"] for event in group_run["events"]] == [
         "group.run.started",
         "group.run.plan",
@@ -323,6 +327,7 @@ class _FakeGroupRuntime:
         self.last_event_page_request: dict[str, Any] | None = None
         self.last_reject_request: dict[str, Any] | None = None
         self.runs: dict[str, dict[str, Any]] = {}
+        self.runnable_run_payloads: list[dict[str, Any]] = []
         self.statuses = statuses or {}
         self.group = {
             "group_id": "group-1",
@@ -347,8 +352,19 @@ class _FakeGroupRuntime:
         user_goal: str,
         run_group_id: str = "",
         on_complete: Any | None = None,
+        runtime_planner_entrypoint: bool = False,
+        agent_override: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         del on_complete
+        self.runnable_run_payloads.append(
+            {
+                "runnable_id": runnable_id,
+                "user_goal": user_goal,
+                "run_group_id": run_group_id,
+                "runtime_planner_entrypoint": runtime_planner_entrypoint,
+                "agent_override": agent_override,
+            }
+        )
         clean_run_group_id = run_group_id or "group-run-1"
         run_id = f"run-{len(self.runs) + 1}"
         status = self.statuses.get(runnable_id, "processing")
