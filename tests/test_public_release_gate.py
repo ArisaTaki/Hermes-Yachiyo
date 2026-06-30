@@ -116,6 +116,77 @@ def _write_diagnostics_bundle(command: list[str]) -> None:
         archive.writestr("diagnostics/manifest.json", json.dumps(manifest))
 
 
+def _write_public_demo_batch_report(
+    path: Path,
+    *,
+    passed_flow_ids: set[str],
+    failed_flow_ids: set[str] | None = None,
+) -> None:
+    failed_flow_ids = failed_flow_ids or set()
+    required_flow_ids = gate._public_demo_required_flow_ids([])
+    missing_flow_ids = [
+        flow_id for flow_id in required_flow_ids if flow_id not in passed_flow_ids
+    ]
+    blockers = []
+    for flow_id in missing_flow_ids:
+        status = "failed" if flow_id in failed_flow_ids else "skipped"
+        blockers.append(
+            {
+                "id": flow_id,
+                "status": status,
+                "category": "real_desktop" if flow_id.startswith("real_desktop_") else "",
+                "opt_in_flag": {
+                    "real_desktop_app_open": "--include-real-desktop-open",
+                    "real_desktop_ui_inspection": "--include-real-desktop-ui-inspection",
+                    "real_desktop_interaction": "--include-real-desktop-interaction",
+                }.get(flow_id, ""),
+                "reason": "screen_capture_blank" if status == "failed" else "not collected",
+                "evidence_summary": {
+                    "blocking_condition": "screen_capture_blank",
+                }
+                if status == "failed"
+                else {},
+            }
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(
+            {
+                "ok": not failed_flow_ids,
+                "status": "failed" if failed_flow_ids else "partial",
+                "release_level": "blocked" if failed_flow_ids else "partial_demo_ready",
+                "complete": False,
+                "selected_count": len(passed_flow_ids),
+                "passed_count": len(passed_flow_ids),
+                "required_flow_count": len(required_flow_ids),
+                "passed_required_flow_count": len(passed_flow_ids),
+                "missing_required_flow_ids": missing_flow_ids,
+                "release_blockers": blockers,
+                "flows": [
+                    {
+                        "id": flow_id,
+                        "status": "passed"
+                        if flow_id in passed_flow_ids
+                        else "failed"
+                        if flow_id in failed_flow_ids
+                        else "skipped",
+                        "category": "real_desktop"
+                        if flow_id.startswith("real_desktop_")
+                        else "source",
+                        "opt_in_flag": {
+                            "real_desktop_app_open": "--include-real-desktop-open",
+                            "real_desktop_ui_inspection": "--include-real-desktop-ui-inspection",
+                            "real_desktop_interaction": "--include-real-desktop-interaction",
+                        }.get(flow_id, ""),
+                    }
+                    for flow_id in required_flow_ids
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+
 def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     tmp_path,
     monkeypatch,
@@ -326,6 +397,53 @@ def test_public_release_gate_accepts_existing_release_smoke_sources(
     assert "--diagnostics-zip" in release_smoke_command
     assert str(tmp_path / "tmp" / "diagnostics.zip") in release_smoke_command
     assert summary["release_smoke"]["status"] == "incomplete"
+
+
+def test_public_release_gate_accepts_existing_public_demo_reports(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    report_path = tmp_path / "tmp" / "public-demo-real-desktop.json"
+    passed_flow_ids = set(gate._public_demo_required_flow_ids([]))
+    passed_flow_ids.remove("real_desktop_ui_inspection")
+    passed_flow_ids.remove("real_desktop_interaction")
+    _write_public_demo_batch_report(
+        report_path,
+        passed_flow_ids=passed_flow_ids,
+        failed_flow_ids={"real_desktop_ui_inspection", "real_desktop_interaction"},
+    )
+    commands: list[list[str]] = []
+
+    def fake_run(command):
+        command = list(command)
+        commands.append(command)
+        return _completed(command)
+
+    monkeypatch.setattr(gate, "_run_command", fake_run)
+
+    summary = gate.run_public_release_gate(
+        tmp_dir="tmp/gate",
+        include_public_demo=False,
+        include_release_smoke=False,
+        include_diagnostics_bundle=False,
+        public_demo_reports=["tmp/public-demo-real-desktop.json"],
+    )
+
+    assert not any("scripts/run_public_demo_smokes.py" in command for command in commands)
+    public_demo = next(item for item in summary["checks"] if item["id"] == "public_demo")
+    assert public_demo["release_level"] == "blocked"
+    assert "real_desktop_app_open" not in public_demo["missing_required_flow_ids"]
+    assert public_demo["missing_required_flow_ids"] == [
+        "real_desktop_ui_inspection",
+        "real_desktop_interaction",
+    ]
+    desktop_action = next(
+        item for item in summary["next_actions"] if item["id"] == "public_demo_real_desktop"
+    )
+    assert "--include-real-desktop-open" not in desktop_action["command"]
+    assert "--include-real-desktop-ui-inspection" in desktop_action["command"]
+    assert "--include-real-desktop-interaction" in desktop_action["command"]
 
 
 def test_public_release_gate_passes_granular_real_desktop_demo_flags(

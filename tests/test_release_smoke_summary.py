@@ -48,6 +48,41 @@ def _diagnostics_zip(path):
         )
 
 
+def _public_demo_report_with_passed_flows(passed_flow_ids: set[str]) -> dict[str, object]:
+    required_flow_ids = release_smoke._canonical_public_demo_flow_ids()
+    missing_flow_ids = [
+        flow_id for flow_id in required_flow_ids if flow_id not in passed_flow_ids
+    ]
+    return {
+        "ok": True,
+        "status": "partial" if missing_flow_ids else "passed",
+        "release_level": "partial_demo_ready"
+        if missing_flow_ids
+        else "full_public_demo_ready",
+        "complete": not missing_flow_ids,
+        "selected_count": len(passed_flow_ids),
+        "passed_count": len(passed_flow_ids),
+        "required_flow_count": len(required_flow_ids),
+        "passed_required_flow_count": len(passed_flow_ids),
+        "missing_required_flow_ids": missing_flow_ids,
+        "release_blockers": [
+            {
+                "id": flow_id,
+                "status": "skipped",
+                "reason": "not collected in this batch",
+            }
+            for flow_id in missing_flow_ids
+        ],
+        "flows": [
+            {
+                "id": flow_id,
+                "status": "passed" if flow_id in passed_flow_ids else "skipped",
+            }
+            for flow_id in required_flow_ids
+        ],
+    }
+
+
 def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
     report_path = tmp_path / "tmp" / "rc.json"
@@ -292,6 +327,38 @@ def test_release_smoke_summary_collects_passed_public_demo_flow_reports(
     assert group_run["status"] == "passed"
     assert group_run["evidence"]["source_group_run_timeline"][0]["source"] == "tmp/group-run.json"
     assert artifact["status"] == "missing"
+
+
+def test_release_smoke_summary_aggregates_partial_public_demo_reports(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    required_flow_ids = release_smoke._canonical_public_demo_flow_ids()
+    first_batch = set(required_flow_ids[::2])
+    second_batch = set(required_flow_ids[1::2])
+    first_path = tmp_path / "tmp" / "public-demo-first.json"
+    second_path = tmp_path / "tmp" / "public-demo-second.json"
+    first_path.parent.mkdir(parents=True, exist_ok=True)
+    first_path.write_text(
+        json.dumps(_public_demo_report_with_passed_flows(first_batch)),
+        encoding="utf-8",
+    )
+    second_path.write_text(
+        json.dumps(_public_demo_report_with_passed_flows(second_batch)),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke([first_path, second_path])
+
+    public_demo = next(item for item in summary["items"] if item["id"] == "public_demo")
+    assert public_demo["status"] == "passed"
+    aggregate = public_demo["evidence"]["public_demo_complete"][0]
+    assert aggregate["kind"] == "public_demo_aggregate"
+    assert aggregate["release_level"] == "full_public_demo_ready"
+    assert aggregate["missing_required_flow_ids"] == []
+    details = public_demo["related_evidence"]["public_demo_assessment"][-1]
+    assert details["kind"] == "public_demo_aggregate"
 
 
 def test_release_smoke_cli_writes_json_and_markdown(tmp_path, monkeypatch, capsys):

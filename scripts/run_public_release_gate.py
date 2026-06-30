@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from packages.security import redact_log_text  # noqa: E402
+from scripts.run_public_demo_smokes import demo_flows  # noqa: E402
 
 
 @dataclass(frozen=True)
@@ -109,6 +110,7 @@ def run_public_release_gate(
     include_public_demo: bool = True,
     include_release_smoke: bool = True,
     release_smoke_reports: Sequence[Path | str] = (),
+    public_demo_reports: Sequence[Path | str] = (),
     diagnostics_zips: Sequence[Path | str] = (),
     include_diagnostics_bundle: bool = True,
     include_real_desktop: bool = False,
@@ -136,6 +138,20 @@ def run_public_release_gate(
         _check_result(check, plan_only=plan_only)
         for check in checks
     ]
+    public_demo_report_paths = [
+        _resolve_path(Path(path))
+        for path in public_demo_reports
+    ]
+    extra_public_demo_report_count = len(public_demo_report_paths)
+    for check in checks:
+        if check.id == "public_demo" and check.report_json is not None:
+            public_demo_report_paths.append(check.report_json)
+    _merge_public_demo_check_result(
+        check_results,
+        public_demo_report_paths,
+        has_external_reports=extra_public_demo_report_count > 0,
+        plan_only=plan_only,
+    )
     generated_diagnostics_zips: list[Path] = []
     if include_diagnostics_bundle and include_public_demo:
         diagnostics_result = _diagnostics_bundle_check(
@@ -157,6 +173,7 @@ def run_public_release_gate(
             tmp_dir=resolved_tmp_dir,
             checks=checks,
             extra_reports=release_smoke_reports,
+            public_demo_reports=public_demo_report_paths,
             diagnostics_zips=[*generated_diagnostics_zips, *diagnostics_zips],
             plan_only=plan_only,
         )
@@ -213,9 +230,145 @@ def _check_result(check: GateCheck, *, plan_only: bool) -> dict[str, Any]:
     }
     if check.id == "public_demo":
         payload.update(_public_demo_gate_fields(check.report_json, command=check.command))
+        if payload.get("report_loaded") is True:
+            payload["status"] = "passed"
         if payload.get("release_level") != "full_public_demo_ready":
             payload["release_blockers"] = _public_demo_release_blockers(payload)
     return payload
+
+
+def _merge_public_demo_check_result(
+    check_results: list[dict[str, Any]],
+    report_paths: Sequence[Path],
+    *,
+    has_external_reports: bool,
+    plan_only: bool,
+) -> None:
+    if plan_only or not report_paths:
+        return
+    existing = next((item for item in check_results if item.get("id") == "public_demo"), None)
+    if existing is not None and not has_external_reports:
+        return
+    aggregate = _aggregate_public_demo_reports(report_paths)
+    if not aggregate:
+        return
+    if existing is None:
+        existing = {
+            "id": "public_demo",
+            "label": "Public demo smoke evidence",
+            "command": [],
+            "report_json": "",
+            "status": "passed",
+            "returncode": 0,
+        }
+        check_results.append(existing)
+    existing.update(aggregate)
+    existing["status"] = "passed"
+    if existing.get("release_level") != "full_public_demo_ready":
+        existing["release_blockers"] = _public_demo_release_blockers(existing)
+
+
+def _aggregate_public_demo_reports(report_paths: Sequence[Path]) -> dict[str, Any]:
+    reports = [_load_json(path) for path in report_paths]
+    reports = [report for report in reports if _dict_list(report.get("flows"))]
+    if not reports:
+        return {}
+    required_flow_ids = _public_demo_required_flow_ids(reports)
+    passed_flow_ids: list[str] = []
+    blocker_by_id: dict[str, dict[str, Any]] = {}
+    sources: list[str] = []
+    for path, report in zip(report_paths, [_load_json(path) for path in report_paths]):
+        if not _dict_list(report.get("flows")):
+            continue
+        source = _display_path(path)
+        if source not in sources:
+            sources.append(source)
+        for flow in _dict_list(report.get("flows")):
+            flow_id = str(flow.get("id") or "").strip()
+            if not flow_id:
+                continue
+            if flow.get("status") == "passed":
+                if flow_id not in passed_flow_ids:
+                    passed_flow_ids.append(flow_id)
+            elif flow_id not in blocker_by_id:
+                blocker_by_id[flow_id] = _public_demo_blocker_from_flow(flow)
+        for blocker in _dict_list(report.get("release_blockers")):
+            blocker_id = str(blocker.get("id") or "").strip()
+            if blocker_id and blocker_id not in blocker_by_id:
+                blocker_by_id[blocker_id] = blocker
+    missing_flow_ids = [flow_id for flow_id in required_flow_ids if flow_id not in passed_flow_ids]
+    release_blockers = [
+        blocker_by_id.get(flow_id)
+        or {
+            "id": flow_id,
+            "status": "missing",
+            "reason": "required public demo flow has not passed",
+        }
+        for flow_id in missing_flow_ids
+    ]
+    blocked = any(str(blocker.get("status") or "") == "failed" for blocker in release_blockers)
+    complete = bool(required_flow_ids) and not missing_flow_ids
+    release_level = (
+        "full_public_demo_ready"
+        if complete
+        else "blocked"
+        if blocked
+        else "partial_demo_ready"
+    )
+    return {
+        "release_level": release_level,
+        "complete": complete,
+        "selected_count": len(passed_flow_ids),
+        "passed_count": len(passed_flow_ids),
+        "required_flow_count": len(required_flow_ids),
+        "passed_required_flow_count": len(passed_flow_ids),
+        "missing_required_flow_ids": missing_flow_ids,
+        "release_blockers": release_blockers,
+        "full_demo_command": _full_demo_command(),
+        "public_demo_report_sources": sources,
+        "report_loaded": True,
+    }
+
+
+def _public_demo_required_flow_ids(reports: Sequence[Mapping[str, Any]]) -> list[str]:
+    canonical = [flow.id for flow in demo_flows(Path("tmp/public-demo-flow-catalog"))]
+    if canonical:
+        return canonical
+    required: list[str] = []
+    for report in reports:
+        for flow in _dict_list(report.get("flows")):
+            flow_id = str(flow.get("id") or "").strip()
+            if flow_id and flow_id not in required:
+                required.append(flow_id)
+    return required
+
+
+def _public_demo_blocker_from_flow(flow: Mapping[str, Any]) -> dict[str, Any]:
+    evidence_summary = _dict(flow.get("evidence_summary"))
+    blocking_conditions = _string_list(evidence_summary.get("blocking_conditions"))
+    reason = (
+        ", ".join(blocking_conditions)
+        if len(blocking_conditions) > 1
+        else str(
+            evidence_summary.get("blocking_condition")
+            or evidence_summary.get("error")
+            or evidence_summary.get("reason")
+            or flow.get("evidence_reason")
+            or flow.get("opt_in_reason")
+            or "required public demo flow has not passed"
+        ).strip()
+    )
+    return {
+        "id": str(flow.get("id") or ""),
+        "label": str(flow.get("label") or ""),
+        "category": str(flow.get("category") or ""),
+        "status": str(flow.get("status") or "missing"),
+        "opt_in_flag": str(flow.get("opt_in_flag") or ""),
+        "opt_in_reason": str(flow.get("opt_in_reason") or ""),
+        "reason": reason,
+        "evidence_summary": evidence_summary,
+        "command": " ".join(str(part) for part in flow.get("command") or []),
+    }
 
 
 def _diagnostics_bundle_check(
@@ -299,15 +452,19 @@ def _release_smoke_assessment(
     tmp_dir: Path,
     checks: Sequence[GateCheck],
     extra_reports: Sequence[Path | str],
+    public_demo_reports: Sequence[Path | str],
     diagnostics_zips: Sequence[Path | str],
     plan_only: bool,
 ) -> dict[str, Any]:
     output_json = tmp_dir / "release-smoke.json"
     output_markdown = tmp_dir / "release-smoke.md"
     report_paths = [_resolve_path(Path(path)) for path in extra_reports]
+    report_paths.extend(_resolve_path(Path(path)) for path in public_demo_reports)
     for check in checks:
         if check.id == "public_demo" and check.report_json is not None:
-            report_paths.append(check.report_json)
+            resolved = check.report_json.resolve(strict=False)
+            if all(path.resolve(strict=False) != resolved for path in report_paths):
+                report_paths.append(check.report_json)
     command: list[str] = [
         sys.executable,
         "scripts/summarize_release_smoke.py",
@@ -681,6 +838,10 @@ def _dict_list(value: Any) -> list[dict[str, Any]]:
     return [dict(item) for item in value if isinstance(item, dict)]
 
 
+def _dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
+
+
 def _full_demo_command() -> str:
     return (
         "python scripts/run_public_demo_smokes.py "
@@ -722,6 +883,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--skip-public-demo", action="store_true")
     parser.add_argument("--skip-release-smoke-assessment", action="store_true")
     parser.add_argument("--release-smoke-report", action="append", default=[], type=Path)
+    parser.add_argument("--public-demo-report", action="append", default=[], type=Path)
     parser.add_argument("--diagnostics-zip", action="append", default=[], type=Path)
     parser.add_argument("--skip-diagnostics-bundle", action="store_true")
     parser.add_argument("--include-real-desktop", action="store_true")
@@ -741,6 +903,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         include_public_demo=not args.skip_public_demo,
         include_release_smoke=not args.skip_release_smoke_assessment,
         release_smoke_reports=args.release_smoke_report,
+        public_demo_reports=args.public_demo_report,
         diagnostics_zips=args.diagnostics_zip,
         include_diagnostics_bundle=not args.skip_diagnostics_bundle,
         include_real_desktop=bool(args.include_real_desktop),

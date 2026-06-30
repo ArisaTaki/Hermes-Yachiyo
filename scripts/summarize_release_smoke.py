@@ -19,6 +19,7 @@ from scripts.summarize_native_agent_capabilities import (  # noqa: E402
     capability_matrix_from_report,
     summarize_capabilities,
 )
+from scripts.run_public_demo_smokes import demo_flows  # noqa: E402
 
 
 SECTION_TO_CAPABILITY = {
@@ -154,6 +155,7 @@ def summarize_release_smoke(
         path = _resolve_path(Path(archive_path))
         diagnostics_sources.append(_display_path(path))
         _collect_diagnostics_evidence(path, evidence=evidence)
+    _collect_aggregate_public_demo_evidence(evidence)
 
     items = [_item_status(item, evidence) for item in SMOKE_ITEMS]
     passed_count = sum(1 for item in items if item["status"] == "passed")
@@ -467,6 +469,13 @@ def _public_demo_is_complete(report: Mapping[str, Any]) -> bool:
 
 
 def _public_demo_assessment(report: Mapping[str, Any]) -> dict[str, Any]:
+    flows = _dict_list(report.get("flows"))
+    required_flow_ids = [str(flow.get("id") or "") for flow in flows if flow.get("id")]
+    passed_flow_ids = [
+        str(flow.get("id") or "")
+        for flow in flows
+        if flow.get("id") and flow.get("status") == "passed"
+    ]
     return {
         "status": str(report.get("status") or ""),
         "release_level": str(report.get("release_level") or ""),
@@ -475,6 +484,8 @@ def _public_demo_assessment(report: Mapping[str, Any]) -> dict[str, Any]:
         "passed_count": int(report.get("passed_count") or 0),
         "required_flow_count": int(report.get("required_flow_count") or 0),
         "passed_required_flow_count": int(report.get("passed_required_flow_count") or 0),
+        "required_flow_ids": required_flow_ids,
+        "passed_required_flow_ids": passed_flow_ids,
         "missing_required_flow_ids": _string_list(report.get("missing_required_flow_ids")),
         "release_blockers": _dict_list(report.get("release_blockers")),
         "full_demo_command": FULL_PUBLIC_DEMO_COMMAND,
@@ -488,8 +499,97 @@ def _public_demo_item_details(item: Mapping[str, Any]) -> dict[str, Any]:
     for evidence_id in ("public_demo_assessment", "public_demo_selected"):
         entries = related.get(evidence_id)
         if isinstance(entries, list) and entries and isinstance(entries[0], dict):
+            aggregate = next(
+                (
+                    dict(entry)
+                    for entry in entries
+                    if isinstance(entry, dict)
+                    and entry.get("kind") == "public_demo_aggregate"
+                ),
+                None,
+            )
+            if aggregate is not None:
+                return aggregate
             return dict(entries[0])
     return {}
+
+
+def _collect_aggregate_public_demo_evidence(
+    evidence: dict[str, list[dict[str, Any]]],
+) -> None:
+    assessments = [
+        entry
+        for entry in evidence.get("public_demo_assessment", [])
+        if isinstance(entry, dict)
+    ]
+    if len(assessments) < 2:
+        return
+    required_flow_ids = _canonical_public_demo_flow_ids()
+    passed_flow_ids: list[str] = []
+    blocker_by_id: dict[str, dict[str, Any]] = {}
+    sources: list[str] = []
+    for assessment in assessments:
+        source = str(assessment.get("source") or "").strip()
+        if source and source not in sources:
+            sources.append(source)
+        for flow_id in _string_list(assessment.get("required_flow_ids")):
+            if flow_id not in required_flow_ids:
+                required_flow_ids.append(flow_id)
+        for flow_id in _string_list(assessment.get("passed_required_flow_ids")):
+            if flow_id not in passed_flow_ids:
+                passed_flow_ids.append(flow_id)
+        for blocker in _dict_list(assessment.get("release_blockers")):
+            blocker_id = str(blocker.get("id") or "").strip()
+            if blocker_id and blocker_id not in blocker_by_id:
+                blocker_by_id[blocker_id] = blocker
+    if not required_flow_ids:
+        return
+    missing_flow_ids = [
+        flow_id for flow_id in required_flow_ids if flow_id not in passed_flow_ids
+    ]
+    release_blockers = [
+        blocker_by_id.get(flow_id)
+        or {
+            "id": flow_id,
+            "status": "missing",
+            "reason": "required public demo flow has not passed",
+        }
+        for flow_id in missing_flow_ids
+    ]
+    blocked = any(str(blocker.get("status") or "") == "failed" for blocker in release_blockers)
+    complete = not missing_flow_ids
+    release_level = (
+        "full_public_demo_ready"
+        if complete
+        else "blocked"
+        if blocked
+        else "partial_demo_ready"
+    )
+    aggregate = {
+        "source": ", ".join(sources),
+        "kind": "public_demo_aggregate",
+        "status": "passed" if complete else "partial",
+        "release_level": release_level,
+        "complete": complete,
+        "selected_count": len(passed_flow_ids),
+        "passed_count": len(passed_flow_ids),
+        "required_flow_count": len(required_flow_ids),
+        "passed_required_flow_count": len(passed_flow_ids),
+        "required_flow_ids": required_flow_ids,
+        "passed_required_flow_ids": passed_flow_ids,
+        "missing_required_flow_ids": missing_flow_ids,
+        "release_blockers": release_blockers,
+        "full_demo_command": FULL_PUBLIC_DEMO_COMMAND,
+    }
+    evidence.setdefault("public_demo_assessment", []).append(aggregate)
+    if passed_flow_ids:
+        evidence.setdefault("public_demo_selected", []).append(aggregate)
+    if complete:
+        evidence.setdefault("public_demo_complete", []).append(aggregate)
+
+
+def _canonical_public_demo_flow_ids() -> list[str]:
+    return [flow.id for flow in demo_flows(Path("tmp/public-demo-flow-catalog"))]
 
 
 def _add_evidence(
