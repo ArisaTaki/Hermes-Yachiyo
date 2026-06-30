@@ -4818,7 +4818,8 @@ def test_main_chat_model_loop_executes_daily_desktop_intent_without_chat_model_p
         tool_event = next(
             event
             for event in events
-            if event["event_type"] == "agent.tool.call" and event["payload"]["tool"] == "app.open"
+            if event["event_type"] == "agent.tool.call"
+            and event["payload"]["tool"] == "desktop.open_app"
         )
 
         assert open_calls == ["Music"]
@@ -4827,12 +4828,11 @@ def test_main_chat_model_loop_executes_daily_desktop_intent_without_chat_model_p
         assert "model.requested" not in event_types
         assert [event["payload"]["tool"] for event in planned_events] == [
             "desktop.list_apps",
-            "app.open",
-            "desktop.active_window",
+            "desktop.open_app",
         ]
         assert planned_events[1]["payload"]["source"] == "runtime_planner"
         assert planned_events[1]["payload"]["input_preview"] == {"app_name": "Music"}
-        assert tool_event["payload"]["tool"] == "app.open"
+        assert tool_event["payload"]["tool"] == "desktop.open_app"
         assert tool_event["payload"]["input_preview"] == {"app_name": "Music"}
     finally:
         service.close()
@@ -5055,7 +5055,7 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
                 "Yachiyo runtime supports discover, act, verify, artifact."
             ) == 1
             assert any(
-                "Tool result for desktop.ui_elements" in str(message.get("content") or "")
+                "Tool result for desktop.read_ui" in str(message.get("content") or "")
                 and "Yachiyo runtime supports discover" in str(message.get("content") or "")
                 for message in messages
             )
@@ -5113,6 +5113,7 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
                     "desktop.safe_shortcut",
                     "desktop.safe_type_text",
                     "desktop.search_submit",
+                    "desktop.read_ui",
                     "desktop.ui_elements",
                     "artifact.write",
                 ]
@@ -5123,7 +5124,7 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
             event
             for event in events
             if event["event_type"] == "agent.desktop.intent_planned"
-            and event["payload"]["tool"] == "desktop.ui_elements"
+            and event["payload"]["tool"] == "desktop.read_ui"
         )
         followup = next(
             event
@@ -5136,7 +5137,6 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
         assert [name for name, _payload in desktop_calls] == [
             "desktop.list_apps",
             "app.open",
-            "app.focus",
             "desktop.safe_shortcut",
             "desktop.safe_type_text",
             "desktop.search_submit",
@@ -5148,7 +5148,7 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
         assert followup["payload"]["artifacts_expected"] == ["desktop-content-report.md"]
         assert followup["payload"]["artifact_write_allowed"] is True
         assert followup["payload"]["content_snapshot"] == {
-            "source_tool": "desktop.ui_elements",
+            "source_tool": "desktop.read_ui",
             "ok": True,
             "app_name": "Obsidian",
             "title": "Search: yachiyo runtime",

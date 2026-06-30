@@ -1571,13 +1571,13 @@ class RuntimeCustomApiAgentLoop:
     ) -> str:
         result_summary = str(result.get("summary") or "").strip()
         if result.get("ok"):
-            if tool_name == "app.open":
+            if tool_name in {"app.open", "desktop.open_app"}:
                 app_name = _payload_text(result, planned_input, "app_name")
                 data = result.get("data") if isinstance(result.get("data"), dict) else {}
                 if data.get("launch_verified") is False and app_name:
                     return f"已向 macOS 发送打开{_display_target_name(app_name, '的请求')}，但未能确认它已启动。"
                 return f"已打开{_display_target_name(app_name)}。" if app_name else (result_summary or "已打开应用。")
-            if tool_name == "app.focus":
+            if tool_name in {"app.focus", "desktop.focus_app"}:
                 app_name = _payload_text(result, planned_input, "app_name")
                 return f"已切换到{_display_target_name(app_name)}。" if app_name else (result_summary or "已切换到应用。")
             if tool_name == "app.focus_window":

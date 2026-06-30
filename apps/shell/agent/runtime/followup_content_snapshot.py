@@ -12,6 +12,7 @@ FOLLOWUP_CONTENT_SNAPSHOT_TOOLS: frozenset[str] = frozenset(
         "browser.open_url_and_extract_text",
         "clipboard.read",
         "data.analyze",
+        "desktop.read_ui",
         "desktop.ui_elements",
         "file.read",
         "screen.capture",
@@ -65,8 +66,12 @@ def followup_content_snapshot_for_tool_call(
     result: dict[str, Any],
     input_preview: dict[str, Any],
 ) -> dict[str, Any]:
-    if tool_name == "desktop.ui_elements":
-        return desktop_ui_elements_content_snapshot(result, input_preview)
+    if tool_name in {"desktop.ui_elements", "desktop.read_ui"}:
+        return desktop_ui_elements_content_snapshot(
+            result,
+            input_preview,
+            source_tool=tool_name,
+        )
     if tool_name == "screen.capture":
         return screen_capture_content_snapshot(result, input_preview)
     if tool_name in {"browser.extract_text", "browser.open_url_and_extract_text"}:
@@ -83,6 +88,8 @@ def followup_content_snapshot_for_tool_call(
 def desktop_ui_elements_content_snapshot(
     result: dict[str, Any],
     input_preview: dict[str, Any],
+    *,
+    source_tool: str = "desktop.ui_elements",
 ) -> dict[str, Any]:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
     elements = data.get("elements")
@@ -97,7 +104,7 @@ def desktop_ui_elements_content_snapshot(
     ).strip()
     title = str(data.get("title") or result.get("title") or "").strip()
     snapshot: dict[str, Any] = {
-        "source_tool": "desktop.ui_elements",
+        "source_tool": source_tool,
         "ok": bool(result.get("ok")),
         "app_name": app_name,
         "title": title,
