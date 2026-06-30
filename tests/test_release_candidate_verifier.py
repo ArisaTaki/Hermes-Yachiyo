@@ -106,6 +106,7 @@ def _source_desktop_capability_report() -> dict[str, object]:
         "agent_entrypoint_desktop_execution_smoke": _passed_source_smoke_section(
             "agent_entrypoint_desktop_execution_smoke",
             "main_chat_generic_app_open_before_model",
+            "main_chat_capability_discovered_app_open_before_model",
         ),
         "agent_entrypoint_data_analysis_smoke": _passed_source_smoke_section(
             "agent_entrypoint_data_analysis_smoke",

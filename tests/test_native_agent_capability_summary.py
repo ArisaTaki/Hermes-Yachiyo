@@ -134,7 +134,10 @@ def test_capability_summary_reports_full_native_agent_matrix():
         ),
         "agent_entrypoint_desktop_execution_smoke": _passed_section(
             "agent_entrypoint_desktop_execution_smoke",
-            cases=["main_chat_generic_app_open_before_model"],
+            cases=[
+                "main_chat_generic_app_open_before_model",
+                "main_chat_capability_discovered_app_open_before_model",
+            ],
         ),
         "agent_entrypoint_data_analysis_smoke": _passed_section(
             "agent_entrypoint_data_analysis_smoke",
@@ -219,7 +222,8 @@ def test_capability_summary_reports_full_native_agent_matrix():
     assert source_desktop["status"] == "passed"
     assert source_desktop["category"] == "source"
     assert source_desktop["evidence_summary"]["case_ids"] == [
-        "main_chat_generic_app_open_before_model"
+        "main_chat_generic_app_open_before_model",
+        "main_chat_capability_discovered_app_open_before_model",
     ]
     multi_tool = by_id["agent_multi_tool_pipeline"]
     assert multi_tool["status"] == "passed"
@@ -264,7 +268,10 @@ def test_capability_summary_reports_source_only_partial_matrix():
         ),
         "agent_entrypoint_desktop_execution_smoke": _passed_section(
             "agent_entrypoint_desktop_execution_smoke",
-            cases=["main_chat_generic_app_open_before_model"],
+            cases=[
+                "main_chat_generic_app_open_before_model",
+                "main_chat_capability_discovered_app_open_before_model",
+            ],
         ),
     }
 

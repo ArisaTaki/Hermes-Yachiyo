@@ -4912,6 +4912,7 @@ def test_main_chat_model_loop_auto_opens_path_with_discovered_app_without_model(
             [{"role": "user", "content": "找一个代码编辑器打开 README.md"}],
         )
         events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
         planned_events = [
             event for event in events if event["event_type"] == "agent.desktop.intent_planned"
         ]
@@ -4937,6 +4938,8 @@ def test_main_chat_model_loop_auto_opens_path_with_discovered_app_without_model(
         ]
         assert updated["result"] == "已用 Visual Studio Code 打开文件：README.md。"
         assert model_calls == []
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
         assert [event["payload"]["tool"] for event in planned_events] == [
             "desktop.list_apps",
             "desktop.open_path_with_app",

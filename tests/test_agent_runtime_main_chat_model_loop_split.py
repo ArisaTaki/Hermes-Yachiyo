@@ -280,6 +280,51 @@ def test_main_chat_model_loop_runner_keeps_profile_required_for_planner_model_fo
         runner.execute("run-1", [{"role": "user", "content": "写一份项目总结报告"}])
 
 
+def test_main_chat_model_loop_runner_treats_discovered_app_followup_as_direct() -> None:
+    continue_calls: list[dict[str, Any]] = []
+    runner, state = _runner()
+    runner._default_profile_id = lambda: ""
+    runner._compile_agent_runtime = lambda _agent: {
+        "tool_policy": {
+            "allowed_tools": ["desktop.list_apps", "app.open", "desktop.active_window"],
+        },
+        "workspace_policy": {"default_workdir": "/tmp/project"},
+    }
+
+    def continue_custom_api_agent(
+        agent: dict[str, Any],
+        _context: str,
+        broker: dict[str, Any],
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        **kwargs: Any,
+    ) -> str:
+        continue_calls.append(
+            {
+                "agent": agent,
+                "broker": broker,
+                "timeline": timeline,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        return "opened"
+
+    runner._continue_custom_api_agent = continue_custom_api_agent
+
+    result = runner.execute(
+        "run-1",
+        [{"role": "user", "content": "找一个能编辑 PDF 的本机应用并打开它"}],
+    )
+
+    assert result["status"] == "running"
+    assert result["result"] == "opened"
+    assert continue_calls[0]["agent"]["model_profile_id"] == ""
+    assert [event_type for event_type, _payload in state["events"]] == [
+        "model.output.completed"
+    ]
+
+
 def test_main_chat_model_loop_runner_projects_approval_required_without_bypassing_gate() -> None:
     def raise_approval(*_args: Any, **_kwargs: Any) -> str:
         raise AgentApprovalRequired({"tool": "terminal.run", "approval_id": "approval-1"})
