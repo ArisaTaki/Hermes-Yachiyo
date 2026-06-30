@@ -27,6 +27,7 @@ _RELATIVE_DELAY_TEXT_RE = (
     rf"\b(?:in|after)\s+(?:{_ENGLISH_RELATIVE_NUMBER_RE})\s*"
     r"(?:minutes?|mins?|hours?|hrs?|days?)\b"
 )
+_DEFAULT_REMINDER_TITLE = "提醒"
 
 
 def schedule_tool_preview(
@@ -59,19 +60,37 @@ def reminder_payload(text: str) -> dict[str, Any]:
     iso_due_at = _local_iso_hint(text)
     if iso_due_at:
         title = _strip_schedule_prefix(re.sub(rf"\b{_LOCAL_ISO_RE}\b", "", body).strip())
-        return {"title": title, "due_at": iso_due_at} if title else {}
+        return {"title": title or _DEFAULT_REMINDER_TITLE, "due_at": iso_due_at}
     scheduled = _extract_schedule_datetime_and_title(body)
     if scheduled:
         due_at, title = scheduled
         return {"title": title, "due_at": _local_datetime_text(due_at)} if title else {}
+    scheduled_without_title = _extract_schedule_datetime(body)
+    if scheduled_without_title:
+        return {
+            "title": _DEFAULT_REMINDER_TITLE,
+            "due_at": _local_datetime_text(scheduled_without_title),
+        }
     relative = _extract_relative_delay_datetime_and_title(body)
     if relative:
         due_at, title = relative
         return {"title": title, "due_at": _local_datetime_text(due_at)} if title else {}
+    relative_without_title = _extract_relative_delay_datetime(body)
+    if relative_without_title:
+        return {
+            "title": _DEFAULT_REMINDER_TITLE,
+            "due_at": _local_datetime_text(relative_without_title),
+        }
     date_only = _extract_reminder_date_only_datetime_and_title(body)
     if date_only:
         due_at, title = date_only
         return {"title": title, "due_at": _local_datetime_text(due_at)} if title else {}
+    date_only_without_title = _extract_reminder_date_only_datetime(body)
+    if date_only_without_title:
+        return {
+            "title": _DEFAULT_REMINDER_TITLE,
+            "due_at": _local_datetime_text(date_only_without_title),
+        }
     title = _strip_schedule_prefix(body)
     if not title:
         return {}
@@ -172,18 +191,20 @@ def _reminder_body(text: str) -> str:
     value = _clean(text)
     value = re.sub(rf"\b{_LOCAL_ISO_RE}\b", "", value).strip()
     patterns = (
-        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"^(?:帮我|给我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?P<body_time_first>[^。！？!?]+?)\s*提醒我\s*(?P<body_time_after>[^。！？!?]+)$",
-        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"^(?:帮我|给我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?P<body_time_first_plain>[^。！？!?]+?)\s*提醒(?!事项)\s*(?P<body_time_after_plain>[^。！？!?]+)$",
-        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?提醒我\s*(?P<body>[^。！？!?]+)$",
-        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:创建|新建|添加|新增)?\s*(?:一个|一条|一项)?\s*(?:提醒事项|提醒)\s*[:：]?\s*(?P<title>.+)$",
-        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"^(?:帮我|给我|请|麻烦|能否|能不能|可以)?(?:直接)?提醒我\s*(?P<body>[^。！？!?]+)$",
+        r"^(?:帮我|给我|请|麻烦|能否|能不能|可以)?(?:创建|新建|添加|新增)?\s*(?:一个|一条|一项)?\s*(?:提醒事项|提醒)\s*[:：]?\s*(?P<title>.+)$",
+        r"^(?:帮我|给我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:创建|新建|添加|新增)\s*(?:个|一个|一条|一项|新的?)?\s*"
         r"(?P<body_create>[^。！？!?]+?)\s*(?:的)?(?:提醒事项|提醒)$",
-        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-        r"(?:设|设置|定|订)\s*(?:个|一个|一条|一项|新的?)?\s*"
+        r"^(?:帮我|给我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:设置|设|定|订)\s*(?:个|一个|一条|一项|新的?)?\s*"
         r"(?P<body_set>[^。！？!?]+?)\s*(?:的)?(?:提醒事项|提醒)$",
+        r"^(?:帮我|给我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?P<body_time_only>[^。！？!?]+?)\s*提醒(?!事项)\s*$",
         r"^(?:please\s+)?(?:create|add|make)?\s*(?:a\s+)?(?:new\s+)?reminder\s*(?:called|named|for|to)?\s*(?P<title_en>.+)$",
         r"^(?:please\s+)?(?:set)\s+(?:a\s+)?(?:new\s+)?reminder\s*(?:called|named|for|to)?\s*(?P<body_set_en>[^.!?]+)$",
         r"^(?:please\s+)?(?P<body_time_first_en>(?:in|after)\s+"
@@ -208,6 +229,8 @@ def _reminder_body(text: str) -> str:
             return _strip_schedule_prefix(
                 f"{groups['body_time_first_plain']} {groups['body_time_after_plain']}"
             )
+        if groups.get("body_time_only"):
+            return _strip_schedule_prefix(groups["body_time_only"])
         if groups.get("body_time_first_en") and groups.get("body_time_after_en"):
             return _strip_schedule_prefix(
                 f"{groups['body_time_first_en']} {groups['body_time_after_en']}"
@@ -356,7 +379,7 @@ def _strip_schedule_prefix(value: str) -> str:
     title = re.sub(r"^(?:to|for|about|that|please)\s+", "", title, flags=re.IGNORECASE)
     title = re.sub(r"\s*(?:的时候|时|在|于)$", "", title).strip()
     title = title.strip(" .，,。")
-    if title in {"个", "一个", "一条", "一项", "新的", "提醒", "提醒事项", "日程", "事件", "会议"}:
+    if title in {"个", "一个", "一条", "一项", "新的", "我", "提醒", "提醒事项", "日程", "事件", "会议"}:
         return ""
     if title.lower() in {"a", "an", "new", "reminder", "event", "meeting"}:
         return ""
@@ -420,6 +443,20 @@ def _extract_schedule_datetime_and_title(value: str) -> tuple[datetime, str] | N
     return None
 
 
+def _extract_schedule_datetime(value: str) -> datetime | None:
+    text = _clean(value)
+    if not text:
+        return None
+    for pattern in _SCHEDULE_TIME_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        scheduled = _datetime_from_schedule_match(match)
+        if scheduled is not None:
+            return scheduled
+    return None
+
+
 _RELATIVE_DELAY_PATTERNS = (
     re.compile(
         r"(?P<full>"
@@ -451,6 +488,20 @@ def _extract_relative_delay_datetime_and_title(value: str) -> tuple[datetime, st
         title = _strip_schedule_prefix(f"{text[: match.start()]} {text[match.end() :]}")
         if title:
             return datetime.now() + delay, title
+    return None
+
+
+def _extract_relative_delay_datetime(value: str) -> datetime | None:
+    text = _clean(value)
+    if not text:
+        return None
+    for pattern in _RELATIVE_DELAY_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        delay = _relative_delay_from_match(match)
+        if delay is not None:
+            return datetime.now() + delay
     return None
 
 
@@ -535,6 +586,17 @@ def _extract_reminder_date_only_datetime_and_title(value: str) -> tuple[datetime
         day = str(groups.get("day") or "").lower()
         hour = 20 if day == "tonight" else 9
         return _datetime_for_english_day_marker(day, hour, 0), title
+    return None
+
+
+def _extract_reminder_date_only_datetime(value: str) -> datetime | None:
+    text = _clean(value)
+    if re.fullmatch(r"(?:今天|今日|今晚|明天|明日|明晚|后天)", text):
+        return _datetime_for_chinese_day_marker(text)
+    day = text.lower()
+    if day in {"today", "tomorrow", "tonight"}:
+        hour = 20 if day == "tonight" else 9
+        return _datetime_for_english_day_marker(day, hour, 0)
     return None
 
 

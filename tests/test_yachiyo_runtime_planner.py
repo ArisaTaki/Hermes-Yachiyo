@@ -16253,12 +16253,24 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
         "创建明天上午10点开会的提醒",
         allowed_tools=["reminders.create"],
     )
+    default_title_create = RuntimePlanner().decision(
+        "给我创建一个明天上午十点的提醒",
+        allowed_tools=["reminders.create"],
+    )
+    default_title_time_only = RuntimePlanner().decision(
+        "明天上午十点提醒",
+        allowed_tools=["reminders.create"],
+    )
     time_first_plain = RuntimePlanner().decision(
         "帮我下周一上午十点提醒团队复盘",
         allowed_tools=["reminders.create", "group.run"],
     )
     duration_cn = RuntimePlanner().decision(
         "30分钟后提醒我喝水",
+        allowed_tools=["reminders.create"],
+    )
+    duration_default_title = RuntimePlanner().decision(
+        "30分钟后提醒",
         allowed_tools=["reminders.create"],
     )
     half_hour_cn = RuntimePlanner().decision(
@@ -16285,6 +16297,16 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
         "title": "开会",
         "due_at": tomorrow_1000,
     }
+    assert default_title_create.selected_intent.kind == "schedule"
+    assert _step_by_id(default_title_create, "create-schedule-item").input_preview == {
+        "title": "提醒",
+        "due_at": tomorrow_1000,
+    }
+    assert default_title_time_only.selected_intent.kind == "schedule"
+    assert _step_by_id(default_title_time_only, "create-schedule-item").input_preview == {
+        "title": "提醒",
+        "due_at": tomorrow_1000,
+    }
     assert time_first_plain.selected_intent.kind == "schedule"
     time_first_plain_step = _step_by_id(time_first_plain, "create-schedule-item")
     assert time_first_plain_step.tool_name == "reminders.create"
@@ -16295,6 +16317,10 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
     assert duration_cn.selected_intent.kind == "schedule"
     assert _step_by_id(duration_cn, "create-schedule-item").input_preview == {
         "title": "喝水",
+        "due_at": today_1030,
+    }
+    assert _step_by_id(duration_default_title, "create-schedule-item").input_preview == {
+        "title": "提醒",
         "due_at": today_1030,
     }
     assert _step_by_id(half_hour_cn, "create-schedule-item").input_preview == {
@@ -21454,6 +21480,18 @@ def test_planner_tool_requests_maps_relative_schedule_plans(monkeypatch: Any) ->
             "protocol": "json_fallback",
             "tool": "reminders.create",
             "input": {"title": "买牛奶", "due_at": tomorrow_0900},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
+        "给我创建一个明天上午十点的提醒",
+        allowed_tools=["reminders.create"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {"title": "提醒", "due_at": tomorrow_1000},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_schedule",
         }
