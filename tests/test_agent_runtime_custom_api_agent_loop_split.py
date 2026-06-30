@@ -13133,6 +13133,69 @@ def test_custom_api_agent_loop_preserves_discovered_app_compose_remaining_reques
     assert appended_events[-1]["payload"]["planning_reason"] == "planner_discovered_app_followup"
 
 
+def test_auto_discovered_app_open_followup_verifies_active_window() -> None:
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.list_apps",
+            input_preview={"query": "browser", "limit": 20},
+            result={
+                "ok": True,
+                "action": "desktop.list_apps",
+                "summary": "Found Safari",
+                "data": {
+                    "query": "browser",
+                    "apps": [
+                        {
+                            "name": "Safari",
+                            "path": "/Applications/Safari.app",
+                            "match_score": 93,
+                        }
+                    ],
+                },
+            },
+        )
+    ]
+
+    requests = custom_api_agent_module._auto_discovered_app_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "browser",
+                "target_action": "open_app",
+            }
+        },
+        ["app.open", "desktop.active_window"],
+        timeline,
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Safari"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+            "input_resolution": {
+                "tool": "app.open",
+                "field": "app_name",
+                "requested_app_name": "browser",
+                "resolved_app_name": "Safari",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/Safari.app",
+                "app_resolution_score": "93",
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+        },
+    ]
+
+
 def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> None:
     budget = FakeBudget()
     tool_runs: list[list[dict[str, Any]]] = []

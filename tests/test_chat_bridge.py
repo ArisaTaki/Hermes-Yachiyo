@@ -2145,10 +2145,117 @@ def test_chat_bridge_quick_message_executes_discovered_app_followup_without_mode
                 "app_resolution_source": "desktop.list_apps",
                 "requested_app_name": "markdown",
                 "resolved_app_name": "Typora",
+                "resolved_app_path": "/Applications/Typora.app",
+                "app_resolution_score": "97",
             },
         ),
         ("desktop.safe_type_text", {"text": "周报"}),
         ("desktop.ui_elements", {}),
+    ]
+
+
+def test_chat_bridge_quick_message_opens_generic_browser_followup_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    calls: list[tuple[str, object, object]] = []
+
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict:
+        calls.append(("list_apps", query, limit))
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": f"Found Safari for {query}",
+            "data": {
+                "query": query,
+                "apps": [
+                    {
+                        "name": "Safari",
+                        "bundle_id": "com.apple.Safari",
+                        "path": "/Applications/Safari.app",
+                        "match_score": 93,
+                    }
+                ],
+            },
+        }
+
+    def fake_app_open(app_name: str) -> dict:
+        calls.append(("open", app_name, None))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_active_window() -> dict:
+        calls.append(("active", "Safari", None))
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Active Safari",
+            "data": {"app_name": "Safari", "title": "Start Page"},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
+
+    result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
+        tmp_path,
+        monkeypatch,
+        "打开一个浏览器",
+    )
+
+    assert result["ok"] is True
+    assert calls == [
+        ("list_apps", "browser", 20),
+        ("open", "Safari", None),
+        ("active", "Safari", None),
+    ]
+    assert agent_task["status"] == "completed"
+    assert agent_task["needs_user_action"] is False
+    assert agent_task["pending_approvals"] == []
+    assert run["status"] == "completed"
+    assert run["pending_approval"] == {}
+    assert "agent.plan.selection" in event_types
+    assert "agent.tool.input_resolved" in event_types
+    assert "agent.desktop.intent_completed" in event_types
+    assert "model.request.started" not in event_types
+    assert "model.requested" not in event_types
+
+    plan_events = [
+        event["payload"]
+        for event in result["_events"]
+        if event["event_type"] == "agent.plan.selection"
+    ]
+    assert plan_events
+    assert plan_events[-1]["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "browser",
+        "app_name_source": "desktop.list_apps",
+        "capability_description": "browser",
+        "target_action": "open_app",
+    }
+    tool_calls = [
+        (event["payload"]["tool"], event["payload"]["input_preview"])
+        for event in result["_events"]
+        if event["event_type"] == "agent.tool.call"
+    ]
+    assert tool_calls == [
+        ("desktop.list_apps", {"query": "browser", "limit": 20}),
+        (
+            "app.open",
+            {
+                "app_name": "Safari",
+                "app_resolution_source": "desktop.list_apps",
+                "requested_app_name": "browser",
+                "resolved_app_name": "Safari",
+                "resolved_app_path": "/Applications/Safari.app",
+                "app_resolution_score": "93",
+            },
+        ),
+        ("desktop.active_window", {}),
     ]
 
 

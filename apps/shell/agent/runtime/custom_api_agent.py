@@ -4293,6 +4293,18 @@ def _discovered_app_observation_request(
         and not post_action_observation
     ):
         return {}
+    target_action = str(target.get("target_action") or "").strip()
+    if (
+        not post_action_observation
+        and target_action in {"open_app", "open", "focus_app", "focus"}
+        and "desktop.active_window" in allowed
+    ):
+        return _request_like(
+            "desktop.active_window",
+            {},
+            source=source,
+            planning_reason=planning_reason,
+        )
     tool_name = str(post_action_observation.get("tool") or "desktop.ui_elements").strip()
     raw_input = (
         post_action_observation.get("input")
