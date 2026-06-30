@@ -224,7 +224,7 @@ def test_send_message_executes_direct_daily_desktop_music_task(tmp_path, monkeyp
         "apps.shell.agent.tools.desktop.music_app_open_and_play",
         fake_music_app_open_and_play,
     )
-    expected_summary = "已打开 Music，并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+    expected_summary = "已打开 Apple Music，并开始播放。当前：超时空辉夜姬 - Yachiyo。"
     expected_tool = "media.music_app_open_and_play"
     try:
         result = api.send_message("能不能直接播个 Apple Music")
@@ -846,7 +846,7 @@ def test_send_message_executes_main_chat_runnable_daily_desktop_intent_without_m
         "apps.shell.agent.tools.desktop.music_app_open_and_play",
         fake_music_app_open_and_play,
     )
-    expected_summary = "已打开 Music，并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+    expected_summary = "已打开 Apple Music，并开始播放。当前：超时空辉夜姬 - Yachiyo。"
     expected_tool = "media.music_app_open_and_play"
     try:
         result = api.send_message(
@@ -12360,13 +12360,13 @@ def test_selected_runnable_executes_daily_desktop_intent_before_model(tmp_path, 
         planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
         tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
         user_message = runtime.chat_session.get_messages()[0]
-        assistant = _wait_for_assistant_content_contains(api, "已打开 Music，并开始播放")
+        assistant = _wait_for_assistant_content_contains(api, "已打开 Apple Music，并开始播放")
 
         assert result["ok"] is True
         assert result["runnable_command"] is True
         assert open_and_play_calls == 1
         assert run["status"] == "completed"
-        assert "已打开 Music，并开始播放" in run["result"]
+        assert "已打开 Apple Music，并开始播放" in run["result"]
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
         assert planned_event["payload"]["tool"] == "media.music_app_open_and_play"
@@ -12665,7 +12665,7 @@ def test_manual_group_agent_mention_executes_daily_desktop_intent_before_model(
         tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
         messages = api.get_messages()["messages"]
         user_message = [message for message in messages if message["role"] == "user"][-1]
-        assistant = _wait_for_assistant_content_contains(api, "已打开 Music，并开始播放")
+        assistant = _wait_for_assistant_content_contains(api, "已打开 Apple Music，并开始播放")
         current = next(
             item
             for item in api.list_sessions()["sessions"]
@@ -12677,7 +12677,7 @@ def test_manual_group_agent_mention_executes_daily_desktop_intent_before_model(
         assert result["runnable_command"] is True
         assert open_and_play_calls == 1
         assert run["status"] == "completed"
-        assert "已打开 Music，并开始播放" in run["result"]
+        assert "已打开 Apple Music，并开始播放" in run["result"]
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
         assert planned_event["payload"]["tool"] == "media.music_app_open_and_play"

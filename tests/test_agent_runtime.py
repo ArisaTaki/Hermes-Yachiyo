@@ -4334,13 +4334,14 @@ def test_main_chat_model_loop_executes_generic_apple_music_intent_before_model(t
         completed_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_completed")
 
         assert open_and_play_calls == 1
-        assert "已打开 Apple Music 并开始播放" in updated["result"]
+        assert "已打开 Apple Music，并开始播放" in updated["result"]
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
-        assert planned_event["payload"]["tool"] == "media.apple_music_open_and_play"
-        assert planned_event["payload"]["input_preview"] == {}
-        assert tool_event["payload"]["tool"] == "media.apple_music_open_and_play"
+        assert planned_event["payload"]["tool"] == "media.music_app_open_and_play"
+        assert planned_event["payload"]["input_preview"] == {"app_name": "Music"}
+        assert tool_event["payload"]["tool"] == "media.music_app_open_and_play"
         assert tool_event["payload"]["result"]["ok"] is True
+        assert tool_event["payload"]["result"]["action"] == "media.apple_music_open_and_play"
         assert completed_event["payload"]["source"] == "runtime_planner"
     finally:
         service.close()
@@ -4404,11 +4405,12 @@ def test_agent_run_daily_desktop_overlay_plans_from_user_goal_before_context(tmp
 
         assert open_and_play_calls == 1
         assert run["status"] == "completed"
-        assert "已打开 Apple Music 并开始播放" in run["result"]
+        assert "已打开 Apple Music，并开始播放" in run["result"]
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
-        assert planned_event["payload"]["tool"] == "media.apple_music_open_and_play"
-        assert tool_event["payload"]["tool"] == "media.apple_music_open_and_play"
+        assert planned_event["payload"]["tool"] == "media.music_app_open_and_play"
+        assert tool_event["payload"]["tool"] == "media.music_app_open_and_play"
+        assert tool_event["payload"]["result"]["action"] == "media.apple_music_open_and_play"
         assert all(
             event.get("payload", {}).get("tool") != "browser.open_url_and_extract_text"
             for event in events

@@ -2886,7 +2886,7 @@ def test_chat_bridge_quick_message_executes_natural_music_request_for_launcher_e
         "apps.shell.agent.tools.desktop.music_app_open_and_play",
         fake_music_app_open_and_play,
     )
-    expected_summary = "已打开 Music，并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+    expected_summary = "已打开 Apple Music，并开始播放。当前：超时空辉夜姬 - Yachiyo。"
     expected_tool = "media.music_app_open_and_play"
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
