@@ -343,6 +343,7 @@ def _flow_result(
         "evidence_skipped": evidence_skipped,
         "evidence_mode": str(evidence.get("mode") or ""),
         "evidence_reason": str(evidence.get("reason") or ""),
+        "evidence_summary": _evidence_summary(evidence),
         "stdout_tail": _tail(result.stdout),
         "stderr_tail": _tail(result.stderr),
     }
@@ -375,6 +376,38 @@ def _load_evidence(path: Path | None) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _evidence_summary(evidence: Mapping[str, Any]) -> dict[str, Any]:
+    if not evidence:
+        return {}
+    keys = (
+        "ok",
+        "mode",
+        "skipped",
+        "platform",
+        "stage",
+        "error",
+        "reason",
+        "blocking_condition",
+        "blocking_conditions",
+        "recovery_hints",
+        "recommended_tools",
+        "app_name",
+        "opened_app_name",
+        "release_level",
+    )
+    summary = {
+        key: evidence[key]
+        for key in keys
+        if key in evidence and evidence[key] not in ("", [], {}, None)
+    }
+    checks = evidence.get("checks")
+    if isinstance(checks, dict):
+        summary["checks"] = {
+            str(key): value for key, value in checks.items() if isinstance(value, bool)
+        }
+    return summary
+
+
 def _tail(value: str, *, limit: int = 1200) -> str:
     redacted = redact_log_text(value or "")
     if len(redacted) <= limit:
@@ -397,7 +430,9 @@ def _next_actions(flows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
                 "status": status,
                 "command": " ".join(str(part) for part in command),
                 "opt_in_flag": str(flow.get("opt_in_flag") or ""),
-                "reason": str(flow.get("opt_in_reason") or flow.get("evidence_reason") or ""),
+                "opt_in_reason": str(flow.get("opt_in_reason") or ""),
+                "reason": _flow_blocker_reason(flow),
+                "evidence_summary": _dict(flow.get("evidence_summary")),
             }
         )
     return actions
@@ -449,9 +484,20 @@ def _release_blocker(flow: Mapping[str, Any]) -> dict[str, Any]:
         "category": str(flow.get("category") or ""),
         "status": str(flow.get("status") or ""),
         "opt_in_flag": str(flow.get("opt_in_flag") or ""),
-        "reason": str(flow.get("opt_in_reason") or flow.get("evidence_reason") or ""),
+        "opt_in_reason": str(flow.get("opt_in_reason") or ""),
+        "reason": _flow_blocker_reason(flow),
+        "evidence_summary": _dict(flow.get("evidence_summary")),
         "command": " ".join(str(part) for part in flow.get("command") or []),
     }
+
+
+def _flow_blocker_reason(flow: Mapping[str, Any]) -> str:
+    evidence_summary = _dict(flow.get("evidence_summary"))
+    for key in ("blocking_condition", "error", "reason"):
+        value = str(evidence_summary.get(key) or "").strip()
+        if value:
+            return value
+    return str(flow.get("evidence_reason") or flow.get("opt_in_reason") or "").strip()
 
 
 def render_markdown(summary: Mapping[str, Any]) -> str:
@@ -476,6 +522,9 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         reason = str(flow.get("opt_in_reason") or "")
         if flow.get("status") == "skipped" and reason:
             lines.append(f"  Opt-in: `{flow.get('opt_in_flag')}` ({reason})")
+        blocker = _flow_blocker_reason(flow)
+        if flow.get("status") == "failed" and blocker:
+            lines.append(f"  Blocker: `{blocker}`")
     blockers = _dict_list(summary.get("release_blockers"))
     if blockers:
         lines.extend(["", "## Release Blockers", ""])
@@ -484,9 +533,13 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
                 f"- `{blocker.get('id')}` ({blocker.get('status')}) - {blocker.get('label')}"
             )
             opt_in = str(blocker.get("opt_in_flag") or "")
+            opt_in_reason = str(blocker.get("opt_in_reason") or "")
             reason = str(blocker.get("reason") or "")
             if opt_in:
-                lines.append(f"  Requires `{opt_in}`: {reason}")
+                if opt_in_reason:
+                    lines.append(f"  Requires `{opt_in}`: {opt_in_reason}")
+                if reason and reason != opt_in_reason:
+                    lines.append(f"  Blocker: `{reason}`")
             elif reason:
                 lines.append(f"  Reason: {reason}")
     actions = _dict_list(summary.get("next_actions"))
@@ -495,9 +548,13 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         for action in actions:
             lines.append(f"- `{action.get('id')}` ({action.get('status')})")
             opt_in = str(action.get("opt_in_flag") or "")
+            opt_in_reason = str(action.get("opt_in_reason") or "")
             reason = str(action.get("reason") or "")
             if opt_in:
-                lines.append(f"  Requires `{opt_in}`: {reason}")
+                if opt_in_reason:
+                    lines.append(f"  Requires `{opt_in}`: {opt_in_reason}")
+                if reason and reason != opt_in_reason:
+                    lines.append(f"  Blocker: `{reason}`")
             elif reason:
                 lines.append(f"  Reason: {reason}")
             lines.extend(["", "```bash", str(action.get("command") or ""), "```", ""])
@@ -518,6 +575,10 @@ def _dict_list(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [dict(item) for item in value if isinstance(item, dict)]
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _resolve_path(path: Path) -> Path:

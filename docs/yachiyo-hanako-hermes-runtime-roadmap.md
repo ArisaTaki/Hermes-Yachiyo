@@ -761,7 +761,11 @@ Full public demo evidence requires the explicit
 `--include-real-desktop`, `--include-provider-workflow`, and `--include-ui`
 flags because those flows open/operate apps, require live credentials, or start
 Vite/Electron UI smokes. The summary now reports `release_level`,
-`missing_required_flow_ids`, and `release_blockers`; only
+`missing_required_flow_ids`, and `release_blockers`; failed selected flows also
+project per-flow `evidence_summary` details such as `stage`,
+`blocking_condition`, and boolean checks into Release Blockers and Next
+Actions, so host blockers like `desktop_session_locked` are visible without
+opening the full flow report. Only
 `full_public_demo_ready` is enough for a Hanako/Hermes-level public demo. The
 current default evidence can pass with `complete=false` and
 `release_level=partial_demo_ready`; release parity still requires the opt-in

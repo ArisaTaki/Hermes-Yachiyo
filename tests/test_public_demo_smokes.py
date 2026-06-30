@@ -270,8 +270,19 @@ def test_public_demo_smokes_marks_selected_failure_as_release_blocker(
             if not report.is_absolute():
                 report = tmp_path / report
             report.parent.mkdir(parents=True, exist_ok=True)
+            payload = {"ok": report.name != "browser-research-artifact.json"}
+            if report.name == "browser-research-artifact.json":
+                payload.update(
+                    {
+                        "mode": "browser_research_artifact_smoke",
+                        "stage": "browser_planner",
+                        "error": "desktop_session_locked",
+                        "blocking_condition": "desktop_session_locked",
+                        "checks": {"desktop_session_ready": False},
+                    }
+                )
             report.write_text(
-                json.dumps({"ok": report.name != "browser-research-artifact.json"}),
+                json.dumps(payload),
                 encoding="utf-8",
             )
         return _fake_completed(command)
@@ -288,6 +299,15 @@ def test_public_demo_smokes_marks_selected_failure_as_release_blocker(
         item for item in summary["release_blockers"] if item["id"] == "browser_research_artifact"
     )
     assert blocker["status"] == "failed"
+    assert blocker["reason"] == "desktop_session_locked"
+    assert blocker["evidence_summary"]["blocking_condition"] == "desktop_session_locked"
+    assert blocker["evidence_summary"]["checks"] == {"desktop_session_ready": False}
+    action = next(
+        item for item in summary["next_actions"] if item["id"] == "browser_research_artifact"
+    )
+    assert action["reason"] == "desktop_session_locked"
+    markdown = demo.render_markdown(summary)
+    assert "Blocker: `desktop_session_locked`" in markdown
 
 
 def test_public_demo_smokes_cli_writes_reports(tmp_path, monkeypatch, capsys):
