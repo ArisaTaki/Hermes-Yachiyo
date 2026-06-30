@@ -16456,9 +16456,10 @@ def _browser_search_deliverable_extract_requested(text: str) -> bool:
         return False
     if not surface:
         return _plain_web_search_deliverable_extract_requested(text)
+    if _is_generic_browser_app_label(surface):
+        return _plain_web_search_deliverable_extract_requested(text)
     return bool(
         _is_browser_or_search_app_name(surface)
-        and not _is_generic_browser_app_label(surface)
     )
 
 
@@ -16473,7 +16474,8 @@ def _plain_web_search_deliverable_extract_requested(text: str) -> bool:
         )
         or re.search(
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
-            r"(?:打开|启动|开启|新建|开)?\s*(?:一个|个)?\s*"
+            r"(?:打开|启动|开启|新建|开|用|在|通过)?\s*"
+            r"(?:一个|个|任意|任何|默认|可用)?\s*"
             r"(?:Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave|浏览器)"
             r"(?:里|中|上|内)?\s*(?:搜索|查找|检索)\s*",
             value,

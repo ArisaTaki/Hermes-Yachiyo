@@ -3148,6 +3148,26 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
     }
     assert english_link_list.selected_intent.expected_outputs == ["links"]
 
+    generic_browser_link_list = RuntimePlanner().decision(
+        "用任意浏览器搜索 Hanako Hermes 并输出链接清单",
+        allowed_tools=[
+            "browser.open_url",
+            "browser.open_url_and_extract_text",
+            "artifact.write",
+            "app.open",
+        ],
+    )
+    assert generic_browser_link_list.selected_intent.kind == "web_research"
+    assert generic_browser_link_list.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=Hanako+Hermes",
+        "browser_action": "open_url_extract",
+        "query": "Hanako Hermes",
+    }
+    assert generic_browser_link_list.selected_intent.expected_outputs == ["links"]
+    assert _step_by_id(generic_browser_link_list, "extract-web-url-text").tool_name == (
+        "browser.open_url_and_extract_text"
+    )
+
     browser_surface_decision = RuntimePlanner().decision(
         "帮我在任意浏览器搜索 OpenAI 最新新闻并总结",
         allowed_tools=["browser.open_url", "artifact.write", "app.open"],
@@ -19404,6 +19424,19 @@ def test_planner_tool_requests_maps_static_web_search() -> None:
             "protocol": "json_fallback",
             "tool": "browser.open_url_and_extract_text",
             "input": {"url": "https://www.google.com/search?q=openai+latest+agents+sdk"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+    assert planner_tool_requests(
+        "用任意浏览器搜索 Hanako Hermes 并输出链接清单",
+        allowed_tools=[*allowed, "artifact.write", "app.open"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://www.google.com/search?q=Hanako+Hermes"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "continue_to_model": True,
