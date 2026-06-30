@@ -688,7 +688,10 @@ JSON files, and diagnostics bundle manifests into an 8-item release-smoke
 checklist: packaged launch, Chat desktop task, approval card, Agent Studio run
 timeline, GroupRun, Workflow, artifact readback, and diagnostics export. It
 does not run heavy native/provider/UI flows; it reports missing evidence and the
-next commands to run.
+next commands to run. `scripts/refresh_local_rc_signoff.py` now generates the
+redacted diagnostics bundle and release-smoke summary during each local RC
+refresh, and `--print-status` prints both capability readiness and user-path
+release smoke coverage when those reports exist.
 
 ## Phase 12 - Public Project Release
 

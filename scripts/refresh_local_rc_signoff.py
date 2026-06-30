@@ -365,6 +365,9 @@ def refresh_local_rc_signoff(
     native_capability_matrix_report = tmp_dir / f"rc-verification-{label}-native-capability-matrix.json"
     release_readiness_report = tmp_dir / f"rc-verification-{label}-release-readiness.json"
     release_readiness_markdown = tmp_dir / f"rc-verification-{label}-release-readiness.md"
+    diagnostics_bundle = tmp_dir / f"oha-yachiyo-diagnostics-{label}.zip"
+    release_smoke_report = tmp_dir / f"rc-verification-{label}-release-smoke.json"
+    release_smoke_markdown = tmp_dir / f"rc-verification-{label}-release-smoke.md"
     signoff_draft = tmp_dir / f"rc-signoff-{label}-current.json"
     signoff_markdown = tmp_dir / f"rc-signoff-{label}-current.md"
     signoff_preview = tmp_dir / f"rc-signoff-{label}-preview.json"
@@ -524,6 +527,45 @@ def refresh_local_rc_signoff(
     if preview_code and not _preview_failure_is_only_manual_incomplete(signoff_preview):
         raise subprocess.CalledProcessError(preview_code, preview_command)
 
+    for stale_release_smoke in (release_smoke_report, release_smoke_markdown):
+        stale_release_smoke.unlink(missing_ok=True)
+
+    diagnostics_command = [
+        sys.executable,
+        "scripts/collect_release_diagnostics.py",
+        "--label",
+        label,
+        "--include-app-logs",
+        "--output-zip",
+        str(diagnostics_bundle.relative_to(ROOT)),
+    ]
+    diagnostics_code = _run(diagnostics_command, allow_failure=True)
+    if diagnostics_code and not diagnostics_bundle.exists():
+        raise subprocess.CalledProcessError(diagnostics_code, diagnostics_command)
+
+    release_smoke_command = [
+        sys.executable,
+        "scripts/summarize_release_smoke.py",
+    ]
+    for source in manual_sources:
+        release_smoke_command.append(str(source.relative_to(ROOT)))
+    release_smoke_command.extend(
+        [
+            "--diagnostics-zip",
+            str(diagnostics_bundle.relative_to(ROOT)),
+            "--output-json",
+            str(release_smoke_report.relative_to(ROOT)),
+            "--output-markdown",
+            str(release_smoke_markdown.relative_to(ROOT)),
+        ]
+    )
+    release_smoke_code = _run(release_smoke_command, allow_failure=True)
+    if release_smoke_code and not release_smoke_report.exists():
+        raise subprocess.CalledProcessError(
+            release_smoke_code,
+            release_smoke_command,
+        )
+
     return {
         "source_capability_report": source_capability_report,
         "batch_report": batch_report,
@@ -531,6 +573,9 @@ def refresh_local_rc_signoff(
         "native_capability_matrix_report": native_capability_matrix_report,
         "release_readiness_report": release_readiness_report,
         "release_readiness_markdown": release_readiness_markdown,
+        "diagnostics_bundle": diagnostics_bundle,
+        "release_smoke_report": release_smoke_report,
+        "release_smoke_markdown": release_smoke_markdown,
         "signoff_draft": signoff_draft,
         "signoff_markdown": signoff_markdown,
         "signoff_preview": signoff_preview,
@@ -574,6 +619,7 @@ def print_local_rc_signoff_status(*, short_commit: str | None = None) -> bool:
             automation_commands["screen_recording_permission"] = previous_screen_command
     if ok:
         _print_release_readiness_status(label=label)
+        _print_release_smoke_status(label=label)
         _print_os_evidence_command(label=label, signoff_draft=signoff_draft)
     return ok
 
@@ -619,6 +665,32 @@ def _print_release_readiness_status(*, label: str) -> None:
                 ]
             target = ", ".join(capability_ids) if capability_ids else "unknown"
             print(f"- blocker {blocker_type}:{blocker_id}: {target}")
+
+
+def _print_release_smoke_status(*, label: str) -> None:
+    release_smoke_report = ROOT / "tmp" / f"rc-verification-{label}-release-smoke.json"
+    if not release_smoke_report.exists():
+        return
+    try:
+        report = _load_report(release_smoke_report)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(
+            f"local RC release smoke: could not read {release_smoke_report.relative_to(ROOT)}: {exc}",
+            file=sys.stderr,
+        )
+        return
+    print("local RC release smoke:")
+    status = str(report.get("status") or "unknown")
+    passed = report.get("passed_count")
+    total = report.get("item_count")
+    print(f"- status: {status}")
+    if isinstance(passed, int) and isinstance(total, int):
+        print(f"- user paths: {passed}/{total} passed")
+    missing_ids = report.get("missing_item_ids")
+    if isinstance(missing_ids, list) and missing_ids:
+        missing = ", ".join(str(item) for item in missing_ids if str(item))
+        if missing:
+            print(f"- missing user paths: {missing}")
 
 
 def write_local_os_manual_evidence(

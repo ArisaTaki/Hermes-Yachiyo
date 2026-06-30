@@ -92,6 +92,9 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
     assert reports["native_capability_matrix_report"] == tmp_path / "tmp" / "rc-verification-abc12345-native-capability-matrix.json"
     assert reports["release_readiness_report"] == tmp_path / "tmp" / "rc-verification-abc12345-release-readiness.json"
     assert reports["release_readiness_markdown"] == tmp_path / "tmp" / "rc-verification-abc12345-release-readiness.md"
+    assert reports["diagnostics_bundle"] == tmp_path / "tmp" / "oha-yachiyo-diagnostics-abc12345.zip"
+    assert reports["release_smoke_report"] == tmp_path / "tmp" / "rc-verification-abc12345-release-smoke.json"
+    assert reports["release_smoke_markdown"] == tmp_path / "tmp" / "rc-verification-abc12345-release-smoke.md"
     assert reports["signoff_draft"] == tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
     assert reports["signoff_markdown"] == tmp_path / "tmp" / "rc-signoff-abc12345-current.md"
     assert reports["signoff_preview"] == tmp_path / "tmp" / "rc-signoff-abc12345-preview.json"
@@ -174,6 +177,34 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
         False,
     )
     assert commands[7][1] is True
+    assert commands[8] == (
+        [
+            sys.executable,
+            "scripts/collect_release_diagnostics.py",
+            "--label",
+            "abc12345",
+            "--include-app-logs",
+            "--output-zip",
+            "tmp/oha-yachiyo-diagnostics-abc12345.zip",
+        ],
+        True,
+    )
+    assert commands[9] == (
+        [
+            sys.executable,
+            "scripts/summarize_release_smoke.py",
+            "tmp/rc-verification-abc12345-source-capabilities.json",
+            "tmp/rc-verification-abc12345-packaged-batch.json",
+            "tmp/rc-verification-abc12345-screen.json",
+            "--diagnostics-zip",
+            "tmp/oha-yachiyo-diagnostics-abc12345.zip",
+            "--output-json",
+            "tmp/rc-verification-abc12345-release-smoke.json",
+            "--output-markdown",
+            "tmp/rc-verification-abc12345-release-smoke.md",
+        ],
+        True,
+    )
 
 
 def test_refresh_local_rc_signoff_rejects_non_manual_preview_failure(
@@ -308,7 +339,7 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
     assert reports["batch_report"].exists()
     assert reports["screen_report"].exists()
     assert reports["native_capability_matrix_report"].exists()
-    assert len(commands) == 5
+    assert len(commands) == 7
     assert commands[0] == (
         [
             sys.executable,
@@ -352,6 +383,32 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
         "tmp/rc-signoff-abc12345-current.md",
     ]
     assert commands[4][1] is True
+    assert commands[5] == (
+        [
+            sys.executable,
+            "scripts/collect_release_diagnostics.py",
+            "--label",
+            "abc12345",
+            "--include-app-logs",
+            "--output-zip",
+            "tmp/oha-yachiyo-diagnostics-abc12345.zip",
+        ],
+        True,
+    )
+    assert commands[6][0] == [
+        sys.executable,
+        "scripts/summarize_release_smoke.py",
+        "tmp/rc-verification-abc12345-source-capabilities.json",
+        "tmp/rc-verification-abc12345-packaged-batch.json",
+        "tmp/rc-verification-abc12345-screen.json",
+        "--diagnostics-zip",
+        "tmp/oha-yachiyo-diagnostics-abc12345.zip",
+        "--output-json",
+        "tmp/rc-verification-abc12345-release-smoke.json",
+        "--output-markdown",
+        "tmp/rc-verification-abc12345-release-smoke.md",
+    ]
+    assert commands[6][1] is True
 
 
 def test_refresh_local_rc_signoff_does_not_reuse_failed_batch_report(
@@ -668,6 +725,18 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
         ),
         encoding="utf-8",
     )
+    release_smoke = tmp_path / "tmp" / "rc-verification-abc12345-release-smoke.json"
+    release_smoke.write_text(
+        json.dumps(
+            {
+                "status": "incomplete",
+                "passed_count": 6,
+                "item_count": 8,
+                "missing_item_ids": ["chat_desktop_task", "workflow"],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     assert refresh.main(["--short-commit", "abc12345", "--print-status"]) == 0
     output = capsys.readouterr().out
@@ -678,6 +747,10 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
     assert "provider_text_stream" in output
     assert "blocker runtime_blocking_condition:desktop_session_locked" in output
     assert "blocker provider_credentials_missing:oha_yachiyo_smoke_credentials" in output
+    assert "local RC release smoke:" in output
+    assert "- user paths: 6/8 passed" in output
+    assert "chat_desktop_task" in output
+    assert "workflow" in output
     assert (
         f"{sys.executable} scripts/verify_release_candidate.py --require-artifacts "
         "--run-dmg-screen-smoke --report-json "
