@@ -913,6 +913,8 @@ def _desktop_discovery_step_needs_model_followup(
         return True
     if isinstance(inputs.get("generic_browser_discovery_hint"), Mapping):
         return True
+    if isinstance(inputs.get("generic_music_app_discovery_hint"), Mapping):
+        return True
     return any(
         str(getattr(step, "step_id", "") or "").strip() == "open-selected-discovered-app"
         for step in getattr(getattr(getattr(decision, "plan", None), "tool_plan", None), "steps", [])

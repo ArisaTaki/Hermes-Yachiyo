@@ -597,6 +597,14 @@ Chrome app alias. This keeps default/any-browser behavior aligned with the
 Hanako/Hermes-style "discover first, then select" chain without deleting the
 legacy Chrome compatibility alias yet.
 
+Generic music-app open requests now use the same discovery-first boundary.
+Prompts such as "打开音乐播放器", "打开任意音乐 app", and "open a music player"
+produce `desktop.list_apps` with `query=music` and `continue_to_model=true`
+instead of being misrouted to media playback or silently canonicalized to
+Music. Explicit playback requests such as "播放音乐" still use the media
+playback capability, and explicit app names such as Apple Music keep their
+legacy compatibility mapping.
+
 ## Phase 11 - Release Productization
 
 Turn the runtime migration into a product that can be installed and diagnosed

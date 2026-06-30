@@ -6162,6 +6162,65 @@ def test_runtime_planner_treats_music_app_open_as_desktop_open() -> None:
     assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.open"
 
 
+def test_runtime_planner_discovers_generic_music_app_before_acting() -> None:
+    allowed_tools = ["desktop.list_apps", "app.open", "desktop.active_window"]
+
+    for prompt in ("打开音乐播放器", "打开任意音乐 app", "open a music player"):
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == ""
+        assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+            "action": "discover_apps",
+            "query": "music",
+        }
+        assert decision.selected_intent.inputs["generic_music_app_discovery_hint"] == {
+            "query": "music",
+        }
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover_apps-desktop-state",
+            "open-selected-discovered-app",
+        ]
+        assert planner_tool_requests(prompt, allowed_tools) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": "music", "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
+            }
+        ]
+
+    capability_decision = RuntimePlanner().decision(
+        "打开一个能播放音乐的应用",
+        allowed_tools=allowed_tools,
+    )
+    assert capability_decision.selected_intent.inputs["app_capability_hint"] == {
+        "query": "music",
+        "description": "播放音乐",
+    }
+    assert planner_tool_requests("打开一个能播放音乐的应用", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "music", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+    playback = RuntimePlanner().decision(
+        "播放音乐",
+        allowed_tools=["media.music_app_open_and_play", "desktop.ui_elements"],
+    )
+    assert playback.selected_intent.kind == "media_playback"
+    assert _step_by_id(playback, "control-media-playback").tool_name == (
+        "media.music_app_open_and_play"
+    )
+
+
 def test_runtime_planner_keeps_app_name_before_chinese_followup_capture() -> None:
     decision = RuntimePlanner().decision(
         "打开 Apple Music，然后看看界面",

@@ -669,6 +669,15 @@ class TaskIntentRouter:
             app_name_hint = ""
             app_management = None
             generic_browser_discovery = True
+        generic_music_app_discovery = False
+        if desktop_discovery is None and _generic_music_app_target_requested(text):
+            desktop_discovery = {
+                "action": "discover_apps",
+                "query": "music",
+            }
+            app_name_hint = ""
+            app_management = None
+            generic_music_app_discovery = True
         if not app_type_scope and _target_first_foreground_type_hint(text):
             app_name_hint = ""
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
@@ -872,6 +881,8 @@ class TaskIntentRouter:
             inputs["desktop_discovery_hint"] = desktop_discovery
         if generic_browser_discovery:
             inputs["generic_browser_discovery_hint"] = {"query": "browser"}
+        if generic_music_app_discovery:
+            inputs["generic_music_app_discovery_hint"] = {"query": "music"}
         if app_capability:
             inputs["app_capability_hint"] = app_capability
         finder_operation_mode = str(finder_special_location.get("mode") or "").strip()
@@ -941,6 +952,8 @@ class TaskIntentRouter:
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
         if _looks_like_desktop_permissions_request(text, text.lower()):
+            return _empty_intent("media_playback", text)
+        if _generic_music_app_target_requested(text):
             return _empty_intent("media_playback", text)
         score = _score_terms(
             text,
@@ -12625,6 +12638,31 @@ def _generic_browser_app_target_requested(text: str) -> bool:
     return any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in patterns)
 
 
+def _generic_music_app_target_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    open_only_pattern = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|开启|切到|聚焦|查看|看看|检查)\s*"
+        r"(?:一个|一款|任意|任何|默认|可用)?\s*"
+        r"(?:音乐\s*(?:应用|app|软件|播放器)|播放器|music\s+(?:app|player))"
+        r"(?:\s*(?:一下|下|起来|开了吗|打开了吗))?\s*[?？。！!]*$"
+    )
+    if re.search(
+        r"(?:搜索|搜一下|搜|查找|找|检索|播放|播|放|\bplay\b|\bsearch\b|\bfind\b)",
+        value,
+        flags=re.IGNORECASE,
+    ) and not re.search(open_only_pattern, value, flags=re.IGNORECASE):
+        return False
+    patterns = (
+        open_only_pattern,
+        r"\b(?:open|launch|start|focus|inspect|check)\s+"
+        r"(?:an?\s+|the\s+|any\s+|default\s+)?music\s+(?:app|player)\b\s*[.!?]*$",
+    )
+    return any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in patterns)
+
+
 def _browser_internal_shortcut_action(surface: str) -> str:
     if surface == "history":
         return "show_history"
@@ -16999,6 +17037,8 @@ def _app_capability_discovery_query(value: str) -> str:
         return "mail"
     if _contains_any(description, ("日历", "calendar")):
         return "calendar"
+    if _contains_any(description, ("播放音乐", "听音乐", "music playback", "play music")):
+        return "music"
     if _contains_any(description, ("文档", "文本", "文章", "document", "text", "writing", "write")):
         return "document"
     return description[:40].strip()
