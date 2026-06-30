@@ -171,6 +171,8 @@ def planner_selection_payload(
         "legacy_request_count": len(legacy_request_list),
         "selected_request_count": len(selected_request_list),
     }
+    if decision is not None:
+        payload.update(_decision_trace_payload(decision))
     decision_id = str(getattr(decision, "decision_id", "") or "").strip()
     if decision_id:
         payload["decision_id"] = decision_id
@@ -190,6 +192,27 @@ def planner_selection_payload(
         payload["route_to_studio"] = route_to_studio
     payload.update(_selection_entrypoint_payload(metadata))
     return payload
+
+
+def _decision_trace_payload(decision: Any) -> dict[str, Any]:
+    trace: dict[str, Any] = {}
+    selected_intent = getattr(decision, "selected_intent", None)
+    if selected_intent is not None and hasattr(selected_intent, "model_dump"):
+        trace["selected_intent"] = selected_intent.model_dump(mode="json")
+    candidate_intents = getattr(decision, "candidate_intents", None)
+    if isinstance(candidate_intents, Iterable) and not isinstance(candidate_intents, (str, bytes)):
+        trace["candidate_intents"] = [
+            intent.model_dump(mode="json")
+            for intent in candidate_intents
+            if hasattr(intent, "model_dump")
+        ]
+    plan = getattr(decision, "plan", None)
+    if plan is not None and hasattr(plan, "model_dump"):
+        trace["runtime_plan"] = plan.model_dump(mode="json")
+    tool_plan = getattr(plan, "tool_plan", None)
+    if tool_plan is not None and hasattr(tool_plan, "model_dump"):
+        trace["tool_plan"] = tool_plan.model_dump(mode="json")
+    return trace
 
 
 def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:

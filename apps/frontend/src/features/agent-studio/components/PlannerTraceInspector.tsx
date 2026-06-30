@@ -550,6 +550,31 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
 
     if (plannerEventType === 'agent.plan.selection') {
       selection = plannerSelectionFromPayload(payload) || selection;
+      intent = intent || taskIntentSnapshot(payload.selected_intent) || taskIntentSnapshot(payload.intent);
+      const selectionCandidates = arrayRecords(payload.candidate_intents)
+        .map(taskIntentSnapshot)
+        .filter((candidate): candidate is TaskIntentSnapshot => Boolean(candidate));
+      if (!candidateIntents.length && selectionCandidates.length) {
+        candidateIntents = selectionCandidates;
+      }
+      const selectionPlan = runtimePlanSnapshot(payload.runtime_plan) || runtimePlanSnapshot(payload.plan);
+      if (!plan && selectionPlan) {
+        plan = selectionPlan;
+        intent = intent || selectionPlan.intent;
+        toolPlan = selectionPlan.tool_plan || toolPlan;
+        planId = selectionPlan.plan_id || planId;
+        for (const step of selectionPlan.tool_plan?.steps || []) {
+          addPlannerStep(stepById, step);
+        }
+      }
+      const selectionToolPlan = toolPlanSnapshot(payload.tool_plan);
+      if (!toolPlan && selectionToolPlan) {
+        toolPlan = selectionToolPlan;
+        planId = selectionToolPlan.plan_id || planId;
+        for (const step of selectionToolPlan.steps || []) {
+          addPlannerStep(stepById, step);
+        }
+      }
       routeToStudio = booleanValue(payload.route_to_studio, routeToStudio);
       continue;
     }
@@ -884,6 +909,12 @@ function runtimePlanSnapshot(value: unknown): RuntimePlanSnapshot | null {
   const record = objectRecord(value);
   if (!stringValue(record.plan_id) && !record.intent && !record.tool_plan) return null;
   return record as RuntimePlanSnapshot;
+}
+
+function toolPlanSnapshot(value: unknown): ToolPlanSnapshot | null {
+  const record = objectRecord(value);
+  if (!stringValue(record.plan_id) && !stringValue(record.title) && !Array.isArray(record.steps)) return null;
+  return record as ToolPlanSnapshot;
 }
 
 function toolPlanStepSnapshot(value: unknown): ToolPlanStepSnapshot | null {

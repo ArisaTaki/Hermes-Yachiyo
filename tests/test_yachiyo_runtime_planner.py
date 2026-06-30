@@ -1417,6 +1417,10 @@ def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None
     assert payload["decision_id"] == decision.decision_id
     assert payload["plan_id"] == decision.plan.plan_id
     assert payload["intent_kind"] == "desktop_operation"
+    assert payload["selected_intent"]["kind"] == "desktop_operation"
+    assert payload["runtime_plan"]["plan_id"] == decision.plan.plan_id
+    assert payload["runtime_plan"]["tool_plan"]["steps"][0]["tool_name"] == "desktop.list_apps"
+    assert payload["tool_plan"]["plan_id"] == decision.plan.tool_plan.plan_id
     assert event["event"] == "agent.plan.selection"
     assert event["detail"] == "runtime_planner"
     assert event["payload"] == payload
@@ -1501,6 +1505,9 @@ def test_planner_selection_payload_surfaces_outputs_for_studio_replay() -> None:
     assert payload["approval_count"] == 1
     assert payload["artifact_count"] == 1
     assert payload["open_question_count"] == 0
+    assert payload["selected_intent"]["kind"] == "data_analysis"
+    assert payload["runtime_plan"]["tool_plan"]["artifacts_expected"] == ["analysis-report.md"]
+    assert payload["tool_plan"]["approvals_required"] == ["run-analysis"]
 
 
 def test_planner_selection_payload_surfaces_followup_app_write_target() -> None:
