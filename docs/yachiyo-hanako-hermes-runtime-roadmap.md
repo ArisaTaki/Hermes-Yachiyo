@@ -149,7 +149,9 @@ named-app `desktop.read_ui(app_name=...)`, and `desktop.verify` path through
 the runtime dispatch registry. The evidence records whether focus was actually
 verified and how many menu-level or control-like UI roles were observed, so
 current environment limits remain visible instead of being hidden behind a
-passing smoke.
+passing smoke. With `--report-json`, stdout is a compact UI-readiness summary;
+the full preflight, window, UI tree, verify, and cleanup evidence stays in the
+JSON report.
 
 Current foreground focus diagnostics also record each low-risk activation
 strategy attempted by `app.focus`: AppleScript/System Events, AppKit,
