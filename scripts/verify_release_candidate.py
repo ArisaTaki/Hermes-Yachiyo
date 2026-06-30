@@ -3096,17 +3096,6 @@ def _native_agent_capability_matrix_section(
     *,
     run_requested: bool,
 ) -> dict[str, Any]:
-    provider_smoke = report.get("provider_smoke")
-    if not isinstance(provider_smoke, dict) or not provider_smoke.get("checks"):
-        return {
-            "status": "skipped",
-            "ok": False,
-            "capability_count": 0,
-            "status_counts": {"passed": 0, "missing": 0},
-            "missing_capability_ids": [],
-            "capabilities": [],
-            "run_requested": run_requested,
-        }
     matrix = summarize_capabilities(report)
     return {
         "status": "passed" if matrix.get("ok") is True else "incomplete",

@@ -16,8 +16,69 @@ def _provider_check(label: str, checks: list[dict[str, object]]) -> dict[str, ob
     }
 
 
+def _passed_section(mode: str, *, cases: list[str] | None = None) -> dict[str, object]:
+    return {
+        "status": "passed",
+        "evidence": {
+            "ok": True,
+            "mode": mode,
+            "case_count": len(cases or []),
+            "cases": [{"id": case_id} for case_id in cases or []],
+        },
+    }
+
+
 def test_capability_summary_reports_full_native_agent_matrix():
     report = {
+        "data_analysis_artifact_smoke": _passed_section(
+            "data_analysis_artifact_smoke",
+            cases=["csv", "json", "text_table", "xlsx"],
+        ),
+        "browser_planner_artifact_smoke": _passed_section(
+            "browser_planner_artifact_smoke",
+            cases=["current_page_report"],
+        ),
+        "desktop_planner_discovery_smoke": _passed_section(
+            "desktop_planner_discovery_smoke",
+            cases=["generic_app_open"],
+        ),
+        "real_desktop_discovery_smoke": _passed_section(
+            "real_desktop_discovery_smoke",
+            cases=["safari"],
+        ),
+        "real_desktop_app_open_smoke": _passed_section(
+            "real_desktop_app_open_smoke",
+            cases=["calculator"],
+        ),
+        "real_desktop_ui_inspection_smoke": _passed_section(
+            "real_desktop_ui_inspection_smoke",
+            cases=["calculator"],
+        ),
+        "real_desktop_interaction_smoke": _passed_section(
+            "real_desktop_interaction_smoke",
+            cases=["calculator"],
+        ),
+        "planner_runtime_tool_parity_smoke": _passed_section(
+            "planner_runtime_tool_parity_smoke",
+            cases=["app_scoped_ui_click"],
+        ),
+        "media_playback_chain_smoke": _passed_section(
+            "media_playback_chain_smoke",
+            cases=["apple_music_open_and_play"],
+        ),
+        "agent_entrypoint_desktop_execution_smoke": _passed_section(
+            "agent_entrypoint_desktop_execution_smoke",
+            cases=["main_chat_generic_app_open_before_model"],
+        ),
+        "agent_entrypoint_data_analysis_smoke": _passed_section(
+            "agent_entrypoint_data_analysis_smoke",
+            cases=["studio_agent_run_data_analysis_before_model"],
+        ),
+        "approval_policy_gate_smoke": _passed_section("approval_policy_gate_smoke"),
+        "approval_resume_timeline_smoke": _passed_section("approval_resume_timeline_smoke"),
+        "runtime_approval_resume_smoke": _passed_section("runtime_approval_resume_smoke"),
+        "yachiyo_route_approval_smoke": _passed_section("yachiyo_route_approval_smoke"),
+        "group_run_timeline_smoke": _passed_section("group_run_timeline_smoke"),
         "provider_smoke": {
             "checks": [
                 {
@@ -77,9 +138,15 @@ def test_capability_summary_reports_full_native_agent_matrix():
     result = summary.summarize_capabilities(report)
 
     assert result["ok"] is True
-    assert result["status_counts"] == {"passed": 13, "missing": 0}
+    assert result["status_counts"] == {"passed": 29, "missing": 0}
     assert result["missing_capability_ids"] == []
+    assert result["capability_count"] == 29
     by_id = {item["id"]: item for item in result["capabilities"]}
+    source_desktop = by_id["source_agent_entrypoint_desktop_execution"]
+    assert source_desktop["status"] == "passed"
+    assert source_desktop["evidence_summary"]["case_ids"] == [
+        "main_chat_generic_app_open_before_model"
+    ]
     multi_tool = by_id["agent_multi_tool_pipeline"]
     assert multi_tool["status"] == "passed"
     assert multi_tool["evidence_summary"]["tool_call_count"] == 2
@@ -109,6 +176,34 @@ def test_capability_summary_marks_missing_multi_tool_pipeline():
 
     assert result["ok"] is False
     assert "agent_multi_tool_pipeline" in result["missing_capability_ids"]
+
+
+def test_capability_summary_reports_source_only_partial_matrix():
+    report = {
+        "data_analysis_artifact_smoke": _passed_section(
+            "data_analysis_artifact_smoke",
+            cases=["csv", "json", "xlsx"],
+        ),
+        "desktop_planner_discovery_smoke": _passed_section(
+            "desktop_planner_discovery_smoke",
+            cases=["generic_app_open"],
+        ),
+        "agent_entrypoint_desktop_execution_smoke": _passed_section(
+            "agent_entrypoint_desktop_execution_smoke",
+            cases=["main_chat_generic_app_open_before_model"],
+        ),
+    }
+
+    result = summary.summarize_capabilities(report)
+
+    by_id = {item["id"]: item for item in result["capabilities"]}
+    assert result["ok"] is False
+    assert by_id["source_data_analysis_artifact"]["status"] == "passed"
+    assert by_id["source_desktop_planner_discovery"]["status"] == "passed"
+    assert by_id["source_agent_entrypoint_desktop_execution"]["status"] == "passed"
+    assert by_id["provider_text_stream"]["status"] == "missing"
+    assert "provider_text_stream" in result["missing_capability_ids"]
+    assert result["status_counts"] == {"passed": 3, "missing": 26}
 
 
 def test_capability_summary_cli_writes_json(tmp_path):

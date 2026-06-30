@@ -41,6 +41,13 @@ def _external_integrations_passed_check() -> dict[str, str]:
     }
 
 
+def _command_index(commands: list[object], predicate) -> int:
+    for index, command in enumerate(commands):
+        if predicate(command):
+            return index
+    raise AssertionError("expected command was not recorded")
+
+
 def test_release_candidate_verifier_runs_source_and_artifact_guards(tmp_path, monkeypatch, capsys):
     (tmp_path / "release").mkdir()
     calls: list[dict[str, object]] = []
@@ -1215,6 +1222,7 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
 
     output = capsys.readouterr().out
     assert "planner runtime tool parity smoke: passed" in output
+    assert "Native Agent capability matrix: incomplete" in output
     report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
     section = report["planner_runtime_tool_parity_smoke"]
     assert section["status"] == "passed"
@@ -1231,6 +1239,13 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
     assert case_by_id["explicit_terminal_command"]["approval_required_tools"] == [
         "terminal.run"
     ]
+    matrix = report["native_agent_capability_matrix"]
+    assert matrix["status"] == "incomplete"
+    assert matrix["capability_count"] >= 29
+    capability_by_id = {item["id"]: item for item in matrix["capabilities"]}
+    assert capability_by_id["source_planner_runtime_tool_parity"]["status"] == "passed"
+    assert capability_by_id["source_agent_entrypoint_desktop_execution"]["status"] == "passed"
+    assert capability_by_id["provider_text_stream"]["status"] == "missing"
     assert all(
         case["checks"]["request_tools_dispatched"]
         for case in section["evidence"]["cases"]
@@ -3954,8 +3969,13 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
         report_json=Path("tmp/rc.json"),
     ) == 0
 
-    assert commands[0][:2] == ["hdiutil", "attach"]
-    assert commands[1][:2] == ["hdiutil", "detach"]
+    attach_index = _command_index(
+        commands, lambda command: command[:2] == ["hdiutil", "attach"]
+    )
+    detach_index = _command_index(
+        commands, lambda command: command[:2] == ["hdiutil", "detach"]
+    )
+    assert attach_index < detach_index
     assert len(popen_calls) == 1
     assert popen_calls[0]["command"][0].endswith("/Oha-Yachiyo.app/Contents/MacOS/Oha-Yachiyo")
     assert popen_calls[0]["cwd"].endswith("/Oha-Yachiyo.app")
@@ -4159,8 +4179,13 @@ def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
         report_json=Path("tmp/rc.json"),
     ) == 0
 
-    assert commands[0][:2] == ["hdiutil", "attach"]
-    assert commands[1][:2] == ["hdiutil", "detach"]
+    attach_index = _command_index(
+        commands, lambda command: command[:2] == ["hdiutil", "attach"]
+    )
+    detach_index = _command_index(
+        commands, lambda command: command[:2] == ["hdiutil", "detach"]
+    )
+    assert attach_index < detach_index
     assert len(popen_calls) == 1
     assert popen_calls[0]["start_new_session"] is True
     assert popen_calls[0]["command"] == [
@@ -4484,12 +4509,21 @@ def test_release_candidate_verifier_runs_dmg_ui_sampling_smoke(
         report_json=Path("tmp/rc.json"),
     ) == 0
 
-    assert commands[0]["command"][:2] == ["hdiutil", "attach"]
-    node_command = commands[1]["command"]
+    attach_index = _command_index(
+        commands, lambda item: item["command"][:2] == ["hdiutil", "attach"]
+    )
+    node_index = _command_index(
+        commands,
+        lambda item: item["command"][:2] == ["node", str(rc.DMG_UI_SAMPLING_SMOKE_SCRIPT)],
+    )
+    detach_index = _command_index(
+        commands, lambda item: item["command"][:2] == ["hdiutil", "detach"]
+    )
+    assert attach_index < node_index < detach_index
+    node_command = commands[node_index]["command"]
     assert node_command[:2] == ["node", str(rc.DMG_UI_SAMPLING_SMOKE_SCRIPT)]
     assert node_command[node_command.index("--debug-port") + 1] == "49225"
-    assert commands[1]["kwargs"]["timeout"] == 190.0
-    assert commands[2]["command"][:2] == ["hdiutil", "detach"]
+    assert commands[node_index]["kwargs"]["timeout"] == 190.0
     assert len(popen_calls) == 1
     assert popen_calls[0]["command"][0].endswith("/Oha-Yachiyo.app/Contents/MacOS/Oha-Yachiyo")
     assert "--remote-debugging-port=49225" in popen_calls[0]["command"]
@@ -4616,13 +4650,22 @@ def test_release_candidate_verifier_runs_dmg_chat_native_file_smoke(
         report_json=Path("tmp/rc.json"),
     ) == 0
 
-    assert commands[0][:2] == ["hdiutil", "attach"]
-    assert commands[1][:2] == ["node", str(rc.DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT)]
-    assert commands[1][commands[1].index("--app-executable") + 1].endswith(
+    attach_index = _command_index(
+        commands, lambda command: command[:2] == ["hdiutil", "attach"]
+    )
+    node_index = _command_index(
+        commands,
+        lambda command: command[:2] == ["node", str(rc.DMG_CHAT_NATIVE_FILE_SMOKE_SCRIPT)],
+    )
+    detach_index = _command_index(
+        commands, lambda command: command[:2] == ["hdiutil", "detach"]
+    )
+    assert attach_index < node_index < detach_index
+    node_command = commands[node_index]
+    assert node_command[node_command.index("--app-executable") + 1].endswith(
         "/Oha-Yachiyo.app/Contents/MacOS/Oha-Yachiyo"
     )
-    assert commands[1][commands[1].index("--app-cwd") + 1].endswith("/Oha-Yachiyo.app")
-    assert commands[2][:2] == ["hdiutil", "detach"]
+    assert node_command[node_command.index("--app-cwd") + 1].endswith("/Oha-Yachiyo.app")
     output = capsys.readouterr().out
     assert "DMG Chat native file smoke: passed" in output
     assert "DMG packaged build metadata revision guards: passed" in output
