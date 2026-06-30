@@ -98,6 +98,14 @@ match score/confidence/reason, resolved bundle path, and
 keeps arbitrary app handling explainable in Chat and Agent Studio without
 adding app-specific branches.
 
+Current selected-app file continuation is also automatic for safe local paths:
+when the planner asks `desktop.list_apps` for a generic capability such as
+`code`, `document`, `spreadsheet`, or `pdf` and the user supplied a target
+path, the Chat runtime can continue from the discovery result into
+`desktop.open_path_with_app` without asking the model to restate manual steps.
+The follow-up request keeps the discovery resolution evidence in
+`agent.tool.input_resolved`, so Studio can replay why that app was selected.
+
 Current real desktop discovery evidence is reproducible with:
 
 ```bash

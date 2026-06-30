@@ -4838,6 +4838,132 @@ def test_main_chat_model_loop_executes_daily_desktop_intent_without_chat_model_p
         service.close()
 
 
+def test_main_chat_model_loop_auto_opens_path_with_discovered_app_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    service = make_service(tmp_path)
+    desktop_calls: list[tuple[str, dict[str, Any]]] = []
+    model_calls: list[object] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_chat(*_args, **_kwargs):
+        model_calls.append((_args, _kwargs))
+        raise AssertionError("model should not be called after app discovery")
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict[str, Any]:
+        desktop_calls.append(("desktop.list_apps", {"query": query, "limit": limit}))
+        best_match = {
+            "name": "Visual Studio Code",
+            "path": "/Applications/Visual Studio Code.app",
+            "match_score": 96,
+            "match_confidence": "high",
+            "match_reason": "capability query",
+        }
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": "Installed apps matching code: Visual Studio Code",
+            "data": {
+                "query": query,
+                "apps": [best_match],
+                "best_match": best_match,
+                "count": 1,
+                "total_count": 1,
+                "truncated": False,
+            },
+        }
+
+    def fake_open_path_with_app(path: str, app_name: str) -> dict[str, Any]:
+        desktop_calls.append(
+            ("desktop.open_path_with_app", {"path": path, "app_name": app_name})
+        )
+        return {
+            "ok": True,
+            "action": "desktop.open_path_with_app",
+            "summary": f"Opened {path} with {app_name}",
+            "data": {
+                "path": path,
+                "app_name": app_name,
+                "exists": True,
+                "is_dir": False,
+                "suffix": ".md",
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.open_path_with_app",
+        fake_open_path_with_app,
+    )
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-open-readme-with-discovered-editor",
+            session_id="session-main-open-readme-with-discovered-editor",
+            user_goal="找一个代码编辑器打开 README.md",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "找一个代码编辑器打开 README.md"}],
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        planned_events = [
+            event for event in events if event["event_type"] == "agent.desktop.intent_planned"
+        ]
+        resolved_event = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.tool.input_resolved"
+            and event["payload"]["tool"] == "desktop.open_path_with_app"
+        )
+        open_event = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.tool.call"
+            and event["payload"]["tool"] == "desktop.open_path_with_app"
+        )
+
+        assert desktop_calls == [
+            ("desktop.list_apps", {"query": "code", "limit": 20}),
+            (
+                "desktop.open_path_with_app",
+                {"path": "README.md", "app_name": "Visual Studio Code"},
+            ),
+        ]
+        assert updated["result"] == "已用 Visual Studio Code 打开文件：README.md。"
+        assert model_calls == []
+        assert [event["payload"]["tool"] for event in planned_events] == [
+            "desktop.list_apps",
+            "desktop.open_path_with_app",
+        ]
+        assert planned_events[1]["payload"]["planning_reason"] == (
+            "planner_discovered_app_followup"
+        )
+        assert resolved_event["payload"]["requested_app_name"] == "code"
+        assert resolved_event["payload"]["resolved_app_name"] == "Visual Studio Code"
+        assert resolved_event["payload"]["resolved_app_path"] == (
+            "/Applications/Visual Studio Code.app"
+        )
+        assert open_event["payload"]["input_preview"] == {
+            "app_name": "Visual Studio Code",
+            "path": "README.md",
+            "resolved_app_name": "Visual Studio Code",
+            "requested_app_name": "code",
+            "app_resolution_source": "desktop.list_apps",
+            "app_resolution_score": "96",
+            "app_resolution_confidence": "high",
+            "app_resolution_reason": "capability query",
+            "resolved_app_path": "/Applications/Visual Studio Code.app",
+        }
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
     tmp_path,
     monkeypatch,

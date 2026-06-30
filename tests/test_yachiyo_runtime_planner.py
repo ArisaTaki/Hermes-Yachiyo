@@ -1833,6 +1833,40 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
     }
 
 
+def test_planner_selection_payload_surfaces_discovered_app_open_path_target() -> None:
+    prompt = "找一个代码编辑器打开 README.md"
+    allowed_tools = [
+        "desktop.list_apps",
+        "desktop.open_path_with_app",
+        "app.open",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert payload["intent_kind"] == "desktop_operation"
+    assert payload["selected_tools"] == ["desktop.list_apps"]
+    assert payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "code",
+        "app_name_source": "desktop.list_apps",
+        "capability_description": "代码",
+        "target_action": "open_path_with_selected_app",
+        "target_path": "README.md",
+    }
+    assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == payload[
+        "followup_target"
+    ]
+
+
 def test_planner_selection_payload_surfaces_direct_message_followup_target() -> None:
     prompt = "把当前网页总结成报告并发给微信文件传输助手"
     allowed_tools = [

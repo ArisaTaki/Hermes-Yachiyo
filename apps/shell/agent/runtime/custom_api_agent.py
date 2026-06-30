@@ -25,7 +25,10 @@ from apps.shell.agent.runtime.followup_content_snapshot import (
     followup_content_snapshots,
     latest_followup_content_snapshot,
 )
-from apps.shell.agent.runtime.tool_execution import _discovered_app_name_for_query
+from apps.shell.agent.runtime.tool_execution import (
+    _discovered_app_name_for_query,
+    _discovered_app_resolution_evidence,
+)
 from apps.shell.agent.tools.policy import (
     DAILY_BROWSER_TOOL_NAMES,
     DAILY_DESKTOP_TOOL_NAMES,
@@ -1754,6 +1757,12 @@ class RuntimeCustomApiAgentLoop:
                 return f"已在 Finder 中显示：{path}。" if path else (result_summary or "已在 Finder 中显示。")
             if tool_name == "desktop.open_path":
                 return _desktop_open_path_summary(result, planned_input) or result_summary or "已打开本地路径。"
+            if tool_name == "desktop.open_path_with_app":
+                return (
+                    _desktop_open_path_with_app_summary(result, planned_input)
+                    or result_summary
+                    or "已用应用打开本地路径。"
+                )
             if tool_name == "desktop.hide_app":
                 return "已隐藏当前应用。"
             if tool_name == "desktop.show_all_apps":
@@ -3439,6 +3448,18 @@ def _desktop_open_path_summary(result: dict[str, Any], planned_input: dict[str, 
     return f"已打开文件：{path}。"
 
 
+def _desktop_open_path_with_app_summary(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    path = _desktop_path_summary_path(result, planned_input)
+    app_name = str(data.get("app_name") or planned_input.get("app_name") or "").strip()
+    if not path:
+        return ""
+    app_text = f"用 {app_name} " if app_name else "用应用"
+    if data.get("is_dir") is True:
+        return f"已{app_text}打开文件夹：{path}。"
+    return f"已{app_text}打开文件：{path}。"
+
+
 def _desktop_path_summary_path(result: dict[str, Any], planned_input: dict[str, Any]) -> str:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
     if data.get("desktop_object"):
@@ -3692,6 +3713,7 @@ def _model_followup_desktop_discovered_app_target_payload(
             "app.focus_and_safe_shortcut",
             "app.open",
             "app.focus",
+            "desktop.open_path_with_app",
             "desktop.safe_shortcut",
             "desktop.safe_type_text",
             "desktop.click_ui_element",
@@ -3715,6 +3737,9 @@ def _model_followup_desktop_discovered_app_target_payload(
     safe_shortcut_action = str(target.get("safe_shortcut_action") or "").strip()
     if safe_shortcut_action:
         payload["safe_shortcut_action"] = safe_shortcut_action
+    target_path = str(target.get("target_path") or "").strip()
+    if target_path:
+        payload["target_path"] = target_path
     compose_text = str(target.get("compose_text") or "").strip()
     if compose_text:
         payload["compose_text"] = compose_text
@@ -3821,6 +3846,7 @@ def _auto_discovered_app_followup_requests(
     app_name = _discovered_app_name_for_query(timeline, app_query)
     if not app_name:
         return []
+    resolution_evidence = _discovered_app_resolution_evidence(timeline, app_query, app_name)
     allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
     source = "runtime_planner"
     planning_reason = "planner_discovered_app_followup"
@@ -3838,6 +3864,19 @@ def _auto_discovered_app_followup_requests(
                 planning_reason=planning_reason,
             )
         )
+    elif target_action == "open_path_with_selected_app":
+        target_path = str(target.get("target_path") or "").strip()
+        if target_path:
+            open_path_request = _discovered_app_open_path_request(
+                app_query,
+                app_name,
+                target_path,
+                allowed,
+                source=source,
+                planning_reason=planning_reason,
+            )
+            if open_path_request:
+                requests.append(open_path_request)
     elif target_action in {"open_app", "open", "focus_app", "focus"}:
         open_request = _discovered_app_open_request(
             app_query,
@@ -3862,6 +3901,11 @@ def _auto_discovered_app_followup_requests(
             requests.append(type_request)
     if not requests:
         return []
+    if resolution_evidence:
+        requests = [
+            _with_discovered_app_resolution_evidence(request, resolution_evidence)
+            for request in requests
+        ]
     observation_request = _discovered_app_observation_request(
         target,
         allowed,
@@ -3931,6 +3975,29 @@ def _discovered_app_safe_shortcut_requests(
     return []
 
 
+def _discovered_app_open_path_request(
+    app_query: str,
+    app_name: str,
+    path: str,
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> dict[str, Any]:
+    if "desktop.open_path_with_app" not in allowed:
+        return {}
+    return _with_discovered_app_resolution(
+        _request_like(
+            "desktop.open_path_with_app",
+            {"app_name": app_name, "path": path},
+            source=source,
+            planning_reason=planning_reason,
+        ),
+        app_query,
+        app_name,
+    )
+
+
 def _discovered_app_open_request(
     app_query: str,
     app_name: str,
@@ -3996,6 +4063,11 @@ def _discovered_app_observation_request(
         if isinstance(target.get("post_action_observation"), Mapping)
         else {}
     )
+    if (
+        str(target.get("target_action") or "").strip() == "open_path_with_selected_app"
+        and not post_action_observation
+    ):
+        return {}
     tool_name = str(post_action_observation.get("tool") or "desktop.ui_elements").strip()
     raw_input = (
         post_action_observation.get("input")
@@ -4034,6 +4106,22 @@ def _with_discovered_app_resolution(
             "source_tool": "desktop.list_apps",
         },
     }
+
+
+def _with_discovered_app_resolution_evidence(
+    request: dict[str, Any],
+    evidence: Mapping[str, str],
+) -> dict[str, Any]:
+    if not evidence:
+        return request
+    resolution = (
+        request.get("input_resolution")
+        if isinstance(request.get("input_resolution"), dict)
+        else {}
+    )
+    if not resolution:
+        return request
+    return {**request, "input_resolution": {**resolution, **dict(evidence)}}
 
 
 def _model_followup_communication_prepare_tool_names(
@@ -4150,12 +4238,20 @@ def _model_followup_desktop_discovered_app_instruction(target: Mapping[str, Any]
     )
     tools = _string_list(target.get("recommended_tools"))
     verify_tools = _string_list(target.get("verify_tools"))
+    target_path = str(target.get("target_path") or "").strip()
     tool_text = ", ".join(tools) or "the allowed desktop operation tools"
     verify_text = (
         f" Verify with {', '.join(verify_tools)} after the operation."
         if verify_tools
         else ""
     )
+    if target_path:
+        return (
+            f"The runtime discovered an app for {app_query!r}. Continue by opening "
+            f"{target_path!r} with the discovered app using the allowed desktop tools. "
+            f"Prefer {tool_text}.{verify_text} If direct open-with-app tooling is unavailable, "
+            "explain the missing capability and do not claim the file was opened. "
+        )
     if creative_canvas:
         width = str(creative_canvas.get("width") or "").strip()
         height = str(creative_canvas.get("height") or "").strip()

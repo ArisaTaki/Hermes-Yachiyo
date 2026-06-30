@@ -345,6 +345,10 @@ def _desktop_discovered_app_followup_target(inputs: Mapping[str, Any]) -> dict[s
         if action:
             payload["target_action"] = "safe_shortcut"
             payload["safe_shortcut_action"] = action
+    target_path = str(inputs.get("selected_app_target_path_hint") or "").strip()
+    if target_path:
+        payload["target_action"] = "open_path_with_selected_app"
+        payload["target_path"] = target_path
     if "target_action" not in payload:
         payload["target_action"] = "open_app"
     compose_text = str(inputs.get("foreground_compose_text_hint") or "").strip()
