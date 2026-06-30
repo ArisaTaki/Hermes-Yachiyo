@@ -83,6 +83,9 @@ class _RuntimeDesktopBroker:
     def app_focus(self, app_name: str) -> dict[str, Any]:
         return desktop_tools.app_focus(app_name)
 
+    def app_show(self, app_name: str) -> dict[str, Any]:
+        return desktop_tools.app_show(app_name)
+
 
 def _runtime_tool_call(
     broker: _RuntimeDesktopBroker,
@@ -100,6 +103,74 @@ def _app_names(result: dict[str, Any]) -> list[str]:
         for app in apps
         if isinstance(app, dict) and str(app.get("name") or "").strip()
     ]
+
+
+def _app_candidates(result: dict[str, Any]) -> list[dict[str, Any]]:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    apps = data.get("apps") if isinstance(data.get("apps"), list) else []
+    return [dict(app) for app in apps if isinstance(app, dict)]
+
+
+def _tool_data(result: dict[str, Any] | None) -> dict[str, Any]:
+    if not isinstance(result, dict):
+        return {}
+    data = result.get("data")
+    return data if isinstance(data, dict) else {}
+
+
+def _tool_checks(result: dict[str, Any] | None) -> dict[str, Any]:
+    data = _tool_data(result)
+    checks = data.get("checks")
+    return checks if isinstance(checks, dict) else {}
+
+
+def _foreground_ready(result: dict[str, Any] | None) -> bool:
+    data = _tool_data(result)
+    checks = _tool_checks(result)
+    return (
+        data.get("ready_for_foreground_action") is True
+        or checks.get("ready_for_foreground_action") is True
+    )
+
+
+def _foreground_readiness_result(result: dict[str, Any] | None) -> dict[str, Any]:
+    data = _tool_data(result)
+    checks = _tool_checks(result)
+    readiness = {
+        "ok": bool(isinstance(result, dict) and result.get("ok") is True),
+        "ready": _foreground_ready(result),
+        "summary": str((result or {}).get("summary") or "").strip()
+        if isinstance(result, dict)
+        else "",
+        "focus_verified": data.get("focus_verified") is True
+        or checks.get("focus_verified") is True,
+        "visibility_limited": data.get("visibility_limited") is True,
+        "visibility_status": str(data.get("visibility_status") or "").strip(),
+        "window_count": int(data.get("window_count") or 0),
+        "ui_element_count": int(data.get("ui_element_count") or 0),
+        "control_like_count": int(data.get("control_like_count") or 0),
+        "inspection_level": str(data.get("inspection_level") or "").strip(),
+        "recommended_tools": _string_list(
+            (result or {}).get("recommended_tools") if isinstance(result, dict) else None
+        )
+        or _string_list(data.get("recommended_tools")),
+        "recovery_actions": _dict_list(
+            (result or {}).get("recovery_actions") if isinstance(result, dict) else None
+        )
+        or _dict_list(data.get("recovery_actions")),
+    }
+    blocking_evidence = _merge_blocking_evidence(result or {})
+    for key in (
+        "error",
+        "blocking_condition",
+        "blocking_conditions",
+        "permission_targets",
+        "missing_permissions",
+        "recovery_hints",
+    ):
+        if key in blocking_evidence:
+            readiness[key] = blocking_evidence[key]
+    return readiness
 
 
 def _status_running(result: dict[str, Any]) -> bool | None:
@@ -187,6 +258,50 @@ def _merge_blocking_evidence(*results: dict[str, Any]) -> dict[str, Any]:
     for result in results:
         if not isinstance(result, dict):
             continue
+        nested_results = [result]
+        data = _tool_data(result)
+        for key in ("focus_result", "open_result", "windows", "ui_elements"):
+            nested = data.get(key)
+            if isinstance(nested, dict):
+                nested_results.append(nested)
+        evidence = _merge_blocking_evidence_from_flat_results(nested_results)
+        if evidence.get("error") and not merged.get("error"):
+            merged["error"] = evidence["error"]
+        if evidence.get("blocking_condition") and not merged.get("blocking_condition"):
+            merged["blocking_condition"] = evidence["blocking_condition"]
+        for key in list_keys:
+            values = _string_list(merged.get(key))
+            _append_unique(values, _string_list(evidence.get(key)))
+            if values:
+                merged[key] = values
+        actions = _dict_list(merged.get("recovery_actions"))
+        seen_actions = {
+            json.dumps(action, sort_keys=True, ensure_ascii=False)
+            for action in actions
+        }
+        for action in _dict_list(evidence.get("recovery_actions")):
+            action_key = json.dumps(action, sort_keys=True, ensure_ascii=False)
+            if action_key in seen_actions:
+                continue
+            seen_actions.add(action_key)
+            actions.append(action)
+        if actions:
+            merged["recovery_actions"] = actions
+    return merged
+
+
+def _merge_blocking_evidence_from_flat_results(
+    results: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    merged: dict[str, Any] = {}
+    list_keys = (
+        "blocking_conditions",
+        "permission_targets",
+        "missing_permissions",
+        "recovery_hints",
+        "recommended_tools",
+    )
+    for result in results:
         evidence = _blocking_evidence_from_result(result)
         if evidence.get("error") and not merged.get("error"):
             merged["error"] = evidence["error"]
@@ -326,10 +441,16 @@ def _cleanup_evidence(
 def run_smoke(
     *,
     app_name: str = DEFAULT_APP_NAME,
+    capability_query: str = "",
+    require_foreground_ready: bool = False,
+    recover_foreground: bool = True,
     cleanup: bool = True,
 ) -> dict[str, Any]:
     current_platform = platform.system()
     clean_app_name = str(app_name or "").strip() or DEFAULT_APP_NAME
+    clean_capability_query = str(capability_query or "").strip()
+    discovery_query = clean_capability_query or clean_app_name
+    selection_source = "capability_query" if clean_capability_query else "app_name_query"
     if current_platform != "Darwin":
         return {
             "ok": True,
@@ -337,6 +458,7 @@ def run_smoke(
             "skipped": True,
             "platform": current_platform,
             "app_name": clean_app_name,
+            **({"capability_query": clean_capability_query} if clean_capability_query else {}),
             "reason": "real desktop app open smoke only runs on macOS",
         }
 
@@ -344,13 +466,72 @@ def run_smoke(
     discovery = _runtime_tool_call(
         broker,
         "desktop.list_apps",
-        {"query": clean_app_name, "limit": 10},
+        {"query": discovery_query, "limit": 10},
     )
+    discovered_candidates = _app_candidates(discovery)
     discovered_names = _app_names(discovery)
-    discovered_app_name = next(
-        (name for name in discovered_names if name.casefold() == clean_app_name.casefold()),
-        discovered_names[0] if discovered_names else clean_app_name,
-    )
+    if clean_capability_query:
+        selected_candidate = discovered_candidates[0] if discovered_candidates else {}
+        discovered_app_name = str(selected_candidate.get("name") or clean_app_name).strip()
+        if not discovered_candidates:
+            checks = {
+                "discovered_app": discovery.get("ok") is True and bool(discovered_names),
+                "selected_discovered_app": False,
+                "capability_match_recorded": False,
+            }
+            return {
+                "ok": False,
+                "mode": "real_desktop_app_open_smoke",
+                "skipped": False,
+                "platform": current_platform,
+                "tool_chain": ["desktop.list_apps"],
+                "case_count": 1,
+                "cases": [
+                    _desktop_execution_case(
+                        "open_discovered_app",
+                        app_name=clean_app_name,
+                        tool_chain=["desktop.list_apps"],
+                        checks=checks,
+                        stage="app_discovery",
+                    )
+                ],
+                "planner_alignment": _planner_alignment(
+                    intent_category="desktop_app_open",
+                    app_name=clean_app_name,
+                    capabilities=["desktop.app_discovery"],
+                    tool_chain=["desktop.list_apps"],
+                    mutates_desktop=False,
+                ),
+                "app_name": clean_app_name,
+                "discovery_query": discovery_query,
+                "selection_source": selection_source,
+                "capability_query": clean_capability_query,
+                "selected_candidate": selected_candidate,
+                "matched_capability": "",
+                "discovered_app_name": "",
+                "opened_app_name": "",
+                "error": str(discovery.get("error") or "capability_app_not_found"),
+                "discovery": {
+                    "result": discovery,
+                    "names": discovered_names,
+                },
+                "checks": checks,
+            }
+    else:
+        selected_name = next(
+            (name for name in discovered_names if name.casefold() == clean_app_name.casefold()),
+            discovered_names[0] if discovered_names else clean_app_name,
+        )
+        selected_candidate = next(
+            (
+                candidate
+                for candidate in discovered_candidates
+                if str(candidate.get("name") or "").strip() == selected_name
+            ),
+            discovered_candidates[0] if discovered_candidates else {},
+        )
+        discovered_app_name = selected_name
+    matched_capability = str(selected_candidate.get("matched_capability") or "").strip()
     before_status = _runtime_tool_call(
         broker,
         "app.status",
@@ -377,6 +558,38 @@ def run_smoke(
             "reason": "desktop.open_app failed",
             "data": {"app_name": opened_app_name},
         }
+
+    foreground_inspect_result: dict[str, Any] | None = None
+    foreground_recovery_result: dict[str, Any] | None = None
+    foreground_reinspect_result: dict[str, Any] | None = None
+    if require_foreground_ready and open_result.get("ok") is True:
+        foreground_inspect_result = _runtime_tool_call(
+            broker,
+            "desktop.inspect_app",
+            {
+                "app_name": opened_app_name,
+                "open_if_needed": False,
+                "focus": True,
+                "limit": 80,
+            },
+        )
+        if recover_foreground and not _foreground_ready(foreground_inspect_result):
+            foreground_recovery_result = _runtime_tool_call(
+                broker,
+                "app.show",
+                {"app_name": opened_app_name},
+            )
+            if foreground_recovery_result.get("ok") is True:
+                foreground_reinspect_result = _runtime_tool_call(
+                    broker,
+                    "desktop.inspect_app",
+                    {
+                        "app_name": opened_app_name,
+                        "open_if_needed": False,
+                        "focus": True,
+                        "limit": 80,
+                    },
+                )
     after_status = _runtime_tool_call(
         broker,
         "app.status",
@@ -389,6 +602,39 @@ def run_smoke(
     verify_checks = (
         verify_data.get("checks") if isinstance(verify_data.get("checks"), dict) else {}
     )
+    foreground_final_result = (
+        foreground_reinspect_result
+        or foreground_inspect_result
+        or verify_result
+    )
+    foreground_readiness = {
+        "required": require_foreground_ready,
+        "recover_foreground": recover_foreground,
+        "verify": _foreground_readiness_result(verify_result),
+        "final": _foreground_readiness_result(foreground_final_result),
+    }
+    if foreground_inspect_result is not None:
+        foreground_readiness["inspect"] = _foreground_readiness_result(
+            foreground_inspect_result
+        )
+    if foreground_recovery_result is not None:
+        foreground_readiness["recovery"] = {
+            "tool": "app.show",
+            "ok": foreground_recovery_result.get("ok") is True,
+            "summary": str(foreground_recovery_result.get("summary") or "").strip(),
+        }
+    if foreground_reinspect_result is not None:
+        foreground_readiness["reinspect"] = _foreground_readiness_result(
+            foreground_reinspect_result
+        )
+    tool_chain = ["desktop.list_apps", "desktop.open_app", "desktop.verify"]
+    if foreground_inspect_result is not None:
+        tool_chain.append("desktop.inspect_app")
+    if foreground_recovery_result is not None:
+        tool_chain.append("app.show")
+    if foreground_reinspect_result is not None:
+        tool_chain.append("desktop.inspect_app")
+    tool_chain.append("app.status")
     cleanup_result = _cleanup_evidence(
         app_name=opened_app_name,
         cleanup=cleanup,
@@ -397,6 +643,8 @@ def run_smoke(
     )
     checks = {
         "discovered_app": discovery.get("ok") is True and bool(discovered_names),
+        "selected_discovered_app": bool(discovered_app_name and discovered_app_name in discovered_names),
+        "capability_match_recorded": bool(matched_capability) if clean_capability_query else True,
         "before_status_ok": before_status.get("ok") is True,
         "open_ok": open_result.get("ok") is True,
         "open_alias_used": open_result.get("action") == "desktop.open_app",
@@ -408,6 +656,10 @@ def run_smoke(
             or verify_data.get("running") is True
             or after_running is True
         ),
+        "foreground_ready_when_required": (
+            not require_foreground_ready
+            or foreground_readiness["final"].get("ready") is True
+        ),
         "after_status_ok": after_status.get("ok") is True,
         "after_status_running": after_running is True,
         "cleanup_ok": cleanup_result.get("ok") is True,
@@ -417,11 +669,16 @@ def run_smoke(
             and cleanup_result.get("attempted") is True
         ),
     }
-    blocking_evidence = _merge_blocking_evidence(open_result, verify_result, after_status)
+    blocking_evidence = _merge_blocking_evidence(
+        open_result,
+        verify_result,
+        foreground_final_result,
+        after_status,
+    )
     case = _desktop_execution_case(
         "open_discovered_app",
         app_name=opened_app_name,
-        tool_chain=DESKTOP_APP_OPEN_TOOL_CHAIN,
+        tool_chain=tool_chain,
         checks=checks,
     )
     return {
@@ -429,7 +686,7 @@ def run_smoke(
         "mode": "real_desktop_app_open_smoke",
         "skipped": False,
         "platform": current_platform,
-        "tool_chain": DESKTOP_APP_OPEN_TOOL_CHAIN,
+        "tool_chain": tool_chain,
         "case_count": 1,
         "cases": [case],
         "planner_alignment": _planner_alignment(
@@ -440,10 +697,15 @@ def run_smoke(
                 "desktop.app_launch",
                 "desktop.app_verification",
             ],
-            tool_chain=DESKTOP_APP_OPEN_TOOL_CHAIN,
+            tool_chain=tool_chain,
             mutates_desktop=True,
         ),
         "app_name": clean_app_name,
+        "discovery_query": discovery_query,
+        "selection_source": selection_source,
+        **({"capability_query": clean_capability_query} if clean_capability_query else {}),
+        "selected_candidate": selected_candidate,
+        "matched_capability": matched_capability,
         "discovered_app_name": discovered_app_name,
         "opened_app_name": opened_app_name,
         **blocking_evidence,
@@ -454,6 +716,10 @@ def run_smoke(
         "before_status": before_status,
         "open_result": open_result,
         "verify_result": verify_result,
+        "foreground_inspect_result": foreground_inspect_result,
+        "foreground_recovery_result": foreground_recovery_result,
+        "foreground_reinspect_result": foreground_reinspect_result,
+        "foreground_readiness": foreground_readiness,
         "after_status": after_status,
         "cleanup": cleanup_result,
         "checks": checks,
@@ -466,6 +732,22 @@ def _parser() -> argparse.ArgumentParser:
         "--app-name",
         default=DEFAULT_APP_NAME,
         help=f"Installed app name or query to open. Defaults to {DEFAULT_APP_NAME}.",
+    )
+    parser.add_argument(
+        "--capability-query",
+        default="",
+        help=(
+            "Optional capability query, such as browser or file manager. "
+            "When set, the smoke opens the best desktop.list_apps candidate."
+        ),
+    )
+    parser.add_argument(
+        "--require-foreground-ready",
+        action="store_true",
+        help=(
+            "Fail unless desktop.inspect_app proves the opened app is ready for "
+            "foreground actions. Attempts app.show recovery once when needed."
+        ),
     )
     parser.add_argument(
         "--no-cleanup",
@@ -492,6 +774,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     evidence = run_smoke(
         app_name=args.app_name,
+        capability_query=args.capability_query,
+        require_foreground_ready=args.require_foreground_ready,
         cleanup=not args.no_cleanup,
     )
     if args.report_json is not None:

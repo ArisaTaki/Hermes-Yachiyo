@@ -25,8 +25,16 @@ def _patch_verify(monkeypatch, calls: list[tuple[str, str]] | None = None) -> No
                 "open_if_needed": open_if_needed,
                 "focus_requested": focus,
                 "running": True,
-                "checks": {"status_running": True},
+                "focus_verified": bool(focus),
+                "window_count": 1 if focus else 0,
                 "ui_element_count": 1,
+                "control_like_count": 1 if focus else 0,
+                "ready_for_foreground_action": bool(focus),
+                "checks": {
+                    "status_running": True,
+                    "focus_verified": bool(focus),
+                    "ready_for_foreground_action": bool(focus),
+                },
             },
             "permission_error": False,
         }
@@ -150,6 +158,482 @@ def test_real_desktop_app_open_smoke_discovers_opens_and_verifies_app(monkeypatc
         ("verify", "Calculator"),
         ("status", "Calculator"),
     ]
+
+
+def test_real_desktop_app_open_smoke_uses_capability_query_candidate(monkeypatch):
+    calls: list[tuple[str, str]] = []
+    list_queries: list[tuple[str, int]] = []
+
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
+
+    def fake_list_apps(*, query="", limit=200):
+        list_queries.append((query, limit))
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": "Installed apps matching browser: Safari",
+            "data": {
+                "query": query,
+                "apps": [
+                    {
+                        "name": "Safari",
+                        "path": "/Applications/Safari.app",
+                        "matched_capability": "web_browser",
+                    }
+                ],
+            },
+            "permission_error": False,
+        }
+
+    def fake_status(app_name):
+        calls.append(("status", app_name))
+        return {
+            "ok": True,
+            "action": "app.status",
+            "data": {
+                "app_name": app_name,
+                "running": len(calls) > 1,
+                "status": "running" if len(calls) > 1 else "not_running",
+            },
+            "permission_error": False,
+        }
+
+    def fake_open(app_name):
+        calls.append(("open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {
+                "app_name": app_name,
+                "launch_verified": True,
+                "launch_status": "running",
+            },
+            "permission_error": False,
+        }
+
+    monkeypatch.setattr(smoke.desktop_tools, "list_apps", fake_list_apps)
+    monkeypatch.setattr(smoke.desktop_tools, "app_status", fake_status)
+    monkeypatch.setattr(smoke.desktop_tools, "app_open", fake_open)
+    _patch_verify(monkeypatch, calls)
+
+    evidence = smoke.run_smoke(
+        app_name="Calculator",
+        capability_query="browser",
+        cleanup=False,
+    )
+
+    assert evidence["ok"] is True
+    assert evidence["discovery_query"] == "browser"
+    assert evidence["selection_source"] == "capability_query"
+    assert evidence["capability_query"] == "browser"
+    assert evidence["discovered_app_name"] == "Safari"
+    assert evidence["opened_app_name"] == "Safari"
+    assert evidence["matched_capability"] == "web_browser"
+    assert evidence["selected_candidate"]["name"] == "Safari"
+    assert evidence["selected_candidate"]["matched_capability"] == "web_browser"
+    assert evidence["checks"]["selected_discovered_app"] is True
+    assert evidence["checks"]["capability_match_recorded"] is True
+    assert list_queries == [("browser", 10)]
+    assert calls == [
+        ("status", "Safari"),
+        ("open", "Safari"),
+        ("verify", "Safari"),
+        ("status", "Safari"),
+    ]
+
+
+def test_real_desktop_app_open_smoke_capability_query_without_candidate_does_not_open(
+    monkeypatch,
+):
+    opened: list[str] = []
+
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "list_apps",
+        lambda *, query="", limit=200: {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "data": {"query": query, "apps": []},
+            "permission_error": False,
+        },
+    )
+
+    def fake_open(app_name):
+        opened.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "data": {"app_name": app_name},
+        }
+
+    monkeypatch.setattr(smoke.desktop_tools, "app_open", fake_open)
+
+    evidence = smoke.run_smoke(
+        app_name="Calculator",
+        capability_query="browser",
+        cleanup=False,
+    )
+
+    assert evidence["ok"] is False
+    assert evidence["tool_chain"] == ["desktop.list_apps"]
+    assert evidence["selection_source"] == "capability_query"
+    assert evidence["capability_query"] == "browser"
+    assert evidence["opened_app_name"] == ""
+    assert evidence["error"] == "capability_app_not_found"
+    assert evidence["checks"] == {
+        "discovered_app": False,
+        "selected_discovered_app": False,
+        "capability_match_recorded": False,
+    }
+    assert opened == []
+
+
+def test_real_desktop_app_open_smoke_can_require_foreground_readiness(
+    monkeypatch,
+):
+    calls: list[tuple[str, str, bool]] = []
+
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "list_apps",
+        lambda *, query="", limit=200: {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "data": {"query": query, "apps": [{"name": "Calculator"}]},
+            "permission_error": False,
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_status",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.status",
+            "data": {"app_name": app_name, "running": True, "status": "running"},
+            "permission_error": False,
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_open",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.open",
+            "data": {
+                "app_name": app_name,
+                "launch_verified": True,
+                "launch_status": "running",
+            },
+        },
+    )
+
+    def fake_inspect_app(
+        app_name,
+        *,
+        open_if_needed=True,
+        focus=True,
+        role_filter="",
+        limit=80,
+    ):
+        calls.append(("inspect", app_name, bool(focus)))
+        ready = bool(focus)
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": (
+                f"{app_name} is ready"
+                if ready
+                else f"{app_name} is only running"
+            ),
+            "data": {
+                "app_name": app_name,
+                "open_if_needed": open_if_needed,
+                "focus_requested": focus,
+                "running": True,
+                "focus_verified": ready,
+                "visibility_limited": not ready,
+                "window_count": 1 if ready else 0,
+                "ui_element_count": 1,
+                "control_like_count": 1 if ready else 0,
+                "ready_for_foreground_action": ready,
+                "checks": {
+                    "status_running": True,
+                    "focus_verified": ready,
+                    "ready_for_foreground_action": ready,
+                },
+            },
+        }
+
+    monkeypatch.setattr(smoke.desktop_tools, "inspect_app", fake_inspect_app)
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_show",
+        lambda app_name: (_ for _ in ()).throw(
+            AssertionError("foreground recovery should not run")
+        ),
+    )
+
+    evidence = smoke.run_smoke(
+        app_name="Calculator",
+        require_foreground_ready=True,
+        cleanup=False,
+    )
+
+    assert evidence["ok"] is True
+    assert evidence["tool_chain"] == [
+        "desktop.list_apps",
+        "desktop.open_app",
+        "desktop.verify",
+        "desktop.inspect_app",
+        "app.status",
+    ]
+    assert evidence["checks"]["foreground_ready_when_required"] is True
+    assert evidence["foreground_readiness"]["required"] is True
+    assert evidence["foreground_readiness"]["verify"]["ready"] is False
+    assert evidence["foreground_readiness"]["inspect"]["ready"] is True
+    assert evidence["foreground_readiness"]["final"]["ready"] is True
+    assert "recovery" not in evidence["foreground_readiness"]
+    assert calls == [
+        ("inspect", "Calculator", False),
+        ("inspect", "Calculator", True),
+    ]
+
+
+def test_real_desktop_app_open_smoke_recovers_foreground_readiness(monkeypatch):
+    calls: list[tuple[str, str]] = []
+    shown = False
+
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "list_apps",
+        lambda *, query="", limit=200: {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "data": {"query": query, "apps": [{"name": "Calculator"}]},
+            "permission_error": False,
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_status",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.status",
+            "data": {"app_name": app_name, "running": True, "status": "running"},
+            "permission_error": False,
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_open",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.open",
+            "data": {
+                "app_name": app_name,
+                "launch_verified": True,
+                "launch_status": "running",
+            },
+        },
+    )
+
+    def fake_inspect_app(
+        app_name,
+        *,
+        open_if_needed=True,
+        focus=True,
+        role_filter="",
+        limit=80,
+    ):
+        ready = bool(focus and shown)
+        calls.append(("inspect_ready" if ready else "inspect_limited", app_name))
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": (
+                f"{app_name} is ready"
+                if ready
+                else f"{app_name} has limited visibility"
+            ),
+            "data": {
+                "app_name": app_name,
+                "open_if_needed": open_if_needed,
+                "focus_requested": focus,
+                "running": True,
+                "focus_verified": ready,
+                "visibility_limited": not ready,
+                "window_count": 1 if ready else 0,
+                "ui_element_count": 1,
+                "control_like_count": 1 if ready else 0,
+                "ready_for_foreground_action": ready,
+                "checks": {
+                    "status_running": True,
+                    "focus_verified": ready,
+                    "ready_for_foreground_action": ready,
+                },
+            },
+            "recommended_tools": ["app.show"],
+            "recovery_actions": [
+                {
+                    "label": "Show Calculator",
+                    "tool": "app.show",
+                    "input": {"app_name": app_name},
+                    "risk_level": "low",
+                }
+            ],
+        }
+
+    def fake_app_show(app_name):
+        nonlocal shown
+        shown = True
+        calls.append(("show", app_name))
+        return {
+            "ok": True,
+            "action": "app.show",
+            "summary": f"Showed {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    monkeypatch.setattr(smoke.desktop_tools, "inspect_app", fake_inspect_app)
+    monkeypatch.setattr(smoke.desktop_tools, "app_show", fake_app_show)
+
+    evidence = smoke.run_smoke(
+        app_name="Calculator",
+        require_foreground_ready=True,
+        cleanup=False,
+    )
+
+    assert evidence["ok"] is True
+    assert evidence["tool_chain"] == [
+        "desktop.list_apps",
+        "desktop.open_app",
+        "desktop.verify",
+        "desktop.inspect_app",
+        "app.show",
+        "desktop.inspect_app",
+        "app.status",
+    ]
+    assert evidence["checks"]["foreground_ready_when_required"] is True
+    assert evidence["foreground_readiness"]["inspect"]["ready"] is False
+    assert evidence["foreground_readiness"]["recovery"] == {
+        "tool": "app.show",
+        "ok": True,
+        "summary": "Showed Calculator",
+    }
+    assert evidence["foreground_readiness"]["reinspect"]["ready"] is True
+    assert evidence["foreground_readiness"]["final"]["ready"] is True
+    assert calls == [
+        ("inspect_limited", "Calculator"),
+        ("inspect_limited", "Calculator"),
+        ("show", "Calculator"),
+        ("inspect_ready", "Calculator"),
+    ]
+
+
+def test_real_desktop_app_open_smoke_surfaces_nested_focus_blocker(monkeypatch):
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "list_apps",
+        lambda *, query="", limit=200: {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "data": {"query": query, "apps": [{"name": "Calculator"}]},
+            "permission_error": False,
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_status",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.status",
+            "data": {"app_name": app_name, "running": True, "status": "running"},
+            "permission_error": False,
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_open",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.open",
+            "data": {
+                "app_name": app_name,
+                "launch_verified": True,
+                "launch_status": "running",
+            },
+        },
+    )
+
+    def fake_inspect_app(
+        app_name,
+        *,
+        open_if_needed=True,
+        focus=True,
+        role_filter="",
+        limit=80,
+    ):
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"{app_name} is not foreground-ready",
+            "data": {
+                "app_name": app_name,
+                "open_if_needed": open_if_needed,
+                "focus_requested": focus,
+                "running": True,
+                "focus_verified": False,
+                "visibility_limited": True,
+                "window_count": 0,
+                "ui_element_count": 1,
+                "control_like_count": 0,
+                "ready_for_foreground_action": False,
+                "checks": {
+                    "status_running": True,
+                    "focus_verified": False,
+                    "ready_for_foreground_action": False,
+                },
+                "focus_result": {
+                    "ok": False,
+                    "action": "app.focus",
+                    "error": "desktop_session_locked",
+                    "blocking_condition": "desktop_session_locked",
+                    "recovery_hints": ["Unlock the active macOS user session."],
+                    "recovery_actions": [
+                        {
+                            "label": "Retry focus",
+                            "tool": "app.focus",
+                            "input": {"app_name": app_name},
+                            "risk_level": "low",
+                        }
+                    ],
+                    "data": {"app_name": app_name},
+                },
+            },
+        }
+
+    monkeypatch.setattr(smoke.desktop_tools, "inspect_app", fake_inspect_app)
+
+    evidence = smoke.run_smoke(
+        app_name="Calculator",
+        require_foreground_ready=True,
+        recover_foreground=False,
+        cleanup=False,
+    )
+
+    assert evidence["ok"] is False
+    assert evidence["blocking_condition"] == "desktop_session_locked"
+    assert evidence["blocking_conditions"] == ["desktop_session_locked"]
+    assert evidence["recovery_hints"] == ["Unlock the active macOS user session."]
+    assert evidence["foreground_readiness"]["final"]["blocking_condition"] == (
+        "desktop_session_locked"
+    )
+    assert evidence["checks"]["foreground_ready_when_required"] is False
 
 
 def test_real_desktop_app_open_smoke_cleans_up_app_started_by_smoke(monkeypatch):
@@ -410,6 +894,31 @@ def test_real_desktop_app_open_smoke_cli_outputs_json(monkeypatch, capsys):
     assert output["mode"] == "real_desktop_app_open_smoke"
     assert output["skipped"] is True
     assert output["app_name"] == "Calculator"
+
+
+def test_real_desktop_app_open_smoke_cli_outputs_capability_query(
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Linux")
+
+    assert (
+        smoke.main(
+            [
+                "--app-name",
+                "Calculator",
+                "--capability-query",
+                "browser",
+            ]
+        )
+        == 0
+    )
+
+    output = json.loads(capsys.readouterr().out)
+    assert output["ok"] is True
+    assert output["skipped"] is True
+    assert output["app_name"] == "Calculator"
+    assert output["capability_query"] == "browser"
 
 
 def test_real_desktop_app_open_smoke_cli_writes_report_json(
