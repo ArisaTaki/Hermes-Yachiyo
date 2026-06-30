@@ -6328,16 +6328,100 @@ def test_runtime_planner_discovers_generic_communication_app_before_composing() 
         "desktop.list_apps",
         "app.open",
         "app.open_and_safe_shortcut",
-        "desktop.safe_type_text",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
         "desktop.ui_elements",
     ]
     cases = (
-        ("打开一个邮件客户端，写一封给 Alice 的邮件", "mail", "邮件"),
-        ("open an email client and compose a message to Alice", "mail", "email"),
-        ("打开一个聊天软件，给 Alice 输入 hello", "messaging", "聊天"),
+        (
+            "打开一个邮件客户端，写一封给 Alice 的邮件",
+            "mail",
+            "邮件",
+            {"send_action": "draft", "channel": "email", "recipient": "Alice"},
+            [
+                "discover_apps-desktop-state",
+                "open-selected-discovered-app",
+                "inspect-selected-communication-compose-ui",
+                "fill-selected-communication-recipient",
+                "submit-selected-communication-recipient",
+            ],
+        ),
+        (
+            "open an email client and compose a message to Alice",
+            "mail",
+            "email",
+            {"send_action": "draft", "channel": "email", "recipient": "Alice"},
+            [
+                "discover_apps-desktop-state",
+                "open-selected-discovered-app",
+                "inspect-selected-communication-compose-ui",
+                "fill-selected-communication-recipient",
+                "submit-selected-communication-recipient",
+            ],
+        ),
+        (
+            "打开一个邮件客户端，给 Alice 写邮件说明会议改期",
+            "mail",
+            "邮件",
+            {
+                "send_action": "draft",
+                "channel": "email",
+                "recipient": "Alice",
+                "body": "会议改期",
+            },
+            [
+                "discover_apps-desktop-state",
+                "open-selected-discovered-app",
+                "inspect-selected-communication-compose-ui",
+                "fill-selected-communication-recipient",
+                "submit-selected-communication-recipient",
+                "draft-selected-communication-message",
+            ],
+        ),
+        (
+            "打开一个聊天软件，给 Alice 输入 hello",
+            "messaging",
+            "聊天",
+            {
+                "send_action": "draft",
+                "channel": "message",
+                "recipient": "Alice",
+                "body": "hello",
+            },
+            [
+                "discover_apps-desktop-state",
+                "open-selected-discovered-app",
+                "inspect-selected-communication-compose-ui",
+                "fill-selected-communication-recipient",
+                "submit-selected-communication-recipient",
+                "draft-selected-communication-message",
+            ],
+        ),
+        (
+            "打开一个聊天软件，给 Alice 发送 hello",
+            "messaging",
+            "聊天",
+            {
+                "send_action": "send",
+                "channel": "message",
+                "recipient": "Alice",
+                "body": "hello",
+            },
+            [
+                "discover_apps-desktop-state",
+                "open-selected-discovered-app",
+                "inspect-selected-communication-compose-ui",
+                "fill-selected-communication-recipient",
+                "submit-selected-communication-recipient",
+                "draft-selected-communication-message",
+                "send-selected-communication-message",
+            ],
+        ),
     )
 
-    for prompt, query, description in cases:
+    for prompt, query, description, compose_hint, step_ids in cases:
         decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
 
         assert decision.selected_intent.kind == "desktop_operation"
@@ -6354,10 +6438,8 @@ def test_runtime_planner_discovers_generic_communication_app_before_composing() 
             "query": query,
             "description": description,
         }
-        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
-            "discover_apps-desktop-state",
-            "open-selected-discovered-app",
-        ]
+        assert decision.selected_intent.inputs["communication_compose_hint"] == compose_hint
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == step_ids
         selected = _step_by_id(decision, "open-selected-discovered-app")
         assert selected.tool_name == "app.open_and_safe_shortcut"
         assert selected.action == "safe_shortcut"
@@ -6367,6 +6449,39 @@ def test_runtime_planner_discovers_generic_communication_app_before_composing() 
             "query": query,
             "action": "new_message",
         }
+        assert _step_by_id(decision, "inspect-selected-communication-compose-ui").input_preview == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "open_if_needed": False,
+            "focus": True,
+            "role_filter": "text",
+            "limit": 80,
+        }
+        recipient = _step_by_id(decision, "fill-selected-communication-recipient")
+        assert recipient.tool_name == "app.focus_and_type_into_ui_element"
+        assert recipient.approval_required is True
+        assert recipient.input_preview == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "target": "To" if query == "mail" else "recipient",
+            "text": "Alice",
+            "role_filter": "text",
+            "limit": 80,
+        }
+        if "body" in compose_hint:
+            body = _step_by_id(decision, "draft-selected-communication-message")
+            assert body.tool_name == "app.focus_and_type_into_ui_element"
+            assert body.approval_required is True
+            assert body.input_preview == {
+                "app_name": "<selected app from desktop.list_apps>",
+                "target": "message body" if query == "mail" else "message",
+                "text": compose_hint["body"],
+                "role_filter": "text",
+                "limit": 80,
+            }
+        if compose_hint["send_action"] == "send":
+            send = _step_by_id(decision, "send-selected-communication-message")
+            assert send.tool_name == "desktop.submit_foreground"
+            assert send.approval_required is True
+            assert send.input_preview == {"action": "send"}
         assert planner_tool_requests(prompt, allowed_tools) == [
             {
                 "protocol": "json_fallback",

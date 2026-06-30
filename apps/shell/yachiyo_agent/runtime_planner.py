@@ -977,6 +977,16 @@ class TaskIntentRouter:
             inputs["foreground_paste_hint"] = {"action": "paste"}
         if foreground_submit_action:
             inputs["foreground_submit_action_hint"] = foreground_submit_action
+        if (
+            str((safe_shortcut or {}).get("action") or "").strip() == "new_message"
+            and desktop_discovery is not None
+        ):
+            communication_compose = _generic_communication_compose_detail_hint(
+                text,
+                channel_hint=str((desktop_discovery or {}).get("query") or ""),
+            )
+            if communication_compose:
+                inputs["communication_compose_hint"] = communication_compose
         desktop_content_artifact = _desktop_content_artifact_hint(text)
         if desktop_content_artifact and app_search:
             inputs["desktop_content_artifact_hint"] = desktop_content_artifact
@@ -2858,6 +2868,14 @@ class RuntimePlanner:
                             "best matching app before opening it or continuing with the target file."
                         ),
                     )
+                )
+                _append_selected_discovered_communication_compose_steps(
+                    steps,
+                    intent,
+                    allowed,
+                    query=str(input_preview.get("query") or "").strip(),
+                    selected_app_tool=selected_app_tool,
+                    depends_on="open-selected-discovered-app",
                 )
             return steps
         if (
@@ -7082,6 +7100,173 @@ def _selected_discovered_app_operation_preview(
         return {}
     action = str((safe_shortcut or {}).get("action") or "").strip()
     return {"action": action} if action else {}
+
+
+def _append_selected_discovered_communication_compose_steps(
+    steps: list[ToolPlanStepSnapshot],
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    *,
+    query: str,
+    selected_app_tool: str,
+    depends_on: str,
+) -> None:
+    if selected_app_tool != "app.open_and_safe_shortcut":
+        return
+    if str(query or "").strip().lower() not in {"mail", "messaging"}:
+        return
+    safe_shortcut = intent.inputs.get("safe_shortcut_hint")
+    if str((safe_shortcut or {}).get("action") or "").strip() != "new_message":
+        return
+    compose_hint = intent.inputs.get("communication_compose_hint")
+    if not isinstance(compose_hint, Mapping):
+        compose_hint = {}
+    selected_app = "<selected app from desktop.list_apps>"
+    channel = str(compose_hint.get("channel") or "").strip()
+    recipient = str(compose_hint.get("recipient") or "").strip()
+    body = str(compose_hint.get("body") or "").strip()
+    send_action = str(compose_hint.get("send_action") or "").strip()
+    previous_step = depends_on
+
+    inspect_tool = _first_allowed(("desktop.inspect_app", "desktop.ui_elements"), allowed)
+    inspect_input = (
+        {
+            "app_name": selected_app,
+            "open_if_needed": False,
+            "focus": True,
+            "role_filter": "text",
+            "limit": 80,
+        }
+        if inspect_tool == "desktop.inspect_app"
+        else {"role_filter": "text", "limit": 80}
+    )
+    steps.append(
+        _step(
+            intent,
+            "inspect-selected-communication-compose-ui",
+            "Inspect selected communication compose UI",
+            "desktop.app_discovery",
+            inspect_tool,
+            input_preview=inspect_input,
+            depends_on=[depends_on],
+            action="read_ui",
+            reason=(
+                "After the model selects and opens a capable communication app, inspect "
+                "the compose UI before filling recipient or message fields."
+            ),
+        )
+    )
+    if inspect_tool:
+        previous_step = "inspect-selected-communication-compose-ui"
+
+    if recipient:
+        recipient_tool = _first_allowed(
+            ("app.focus_and_type_into_ui_element", "desktop.type_into_ui_element"),
+            allowed,
+        )
+        recipient_input = {
+            "target": _communication_compose_recipient_target(channel),
+            "text": recipient,
+            "role_filter": "text",
+            "limit": 80,
+        }
+        if str(recipient_tool or "").startswith("app."):
+            recipient_input = {"app_name": selected_app, **recipient_input}
+        steps.append(
+            _step(
+                intent,
+                "fill-selected-communication-recipient",
+                "Fill selected communication recipient",
+                "communication.compose",
+                recipient_tool,
+                input_preview=recipient_input,
+                risk_level=_desktop_operation_risk_level(recipient_tool),
+                approval_required=_desktop_operation_approval_required(recipient_tool),
+                depends_on=[previous_step],
+                action="type",
+                reason=(
+                    "Type only the explicit recipient after the compose UI has been observed."
+                ),
+            )
+        )
+        if recipient_tool:
+            previous_step = "fill-selected-communication-recipient"
+        search_submit_tool = _first_allowed(("desktop.search_submit",), allowed)
+        if search_submit_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "submit-selected-communication-recipient",
+                    "Submit selected communication recipient",
+                    "communication.compose",
+                    search_submit_tool,
+                    input_preview={},
+                    depends_on=[previous_step],
+                    action="submit_search",
+                    reason=(
+                        "Confirm the selected recipient with the safe search-submit tool before drafting."
+                    ),
+                )
+            )
+            previous_step = "submit-selected-communication-recipient"
+
+    if body:
+        body_tool = _first_allowed(
+            ("app.focus_and_type_into_ui_element", "desktop.type_into_ui_element"),
+            allowed,
+        )
+        body_input = {
+            "target": _communication_compose_body_target(channel),
+            "text": body,
+            "role_filter": "text",
+            "limit": 80,
+        }
+        if str(body_tool or "").startswith("app."):
+            body_input = {"app_name": selected_app, **body_input}
+        steps.append(
+            _step(
+                intent,
+                "draft-selected-communication-message",
+                "Draft selected communication message",
+                "communication.compose",
+                body_tool,
+                input_preview=body_input,
+                risk_level=_desktop_operation_risk_level(body_tool),
+                approval_required=_desktop_operation_approval_required(body_tool),
+                depends_on=[previous_step],
+                action="draft_message",
+                reason=(
+                    "Type only the explicit message body into the observed compose UI."
+                ),
+            )
+        )
+        if body_tool:
+            previous_step = "draft-selected-communication-message"
+
+    if send_action == "send" and body:
+        steps.append(
+            _step(
+                intent,
+                "send-selected-communication-message",
+                "Send selected communication message",
+                "communication.compose",
+                _first_allowed(("desktop.submit_foreground",), allowed),
+                input_preview={"action": "send"},
+                risk_level="high",
+                approval_required=True,
+                depends_on=[previous_step],
+                action="send_message",
+                reason="Final message sending remains approval-gated after discovery and drafting.",
+            )
+        )
+
+
+def _communication_compose_recipient_target(channel: str) -> str:
+    return "To" if str(channel or "").strip() == "email" else "recipient"
+
+
+def _communication_compose_body_target(channel: str) -> str:
+    return "message body" if str(channel or "").strip() == "email" else "message"
 
 
 def _information_capture_context_payload(tool_name: str | None) -> dict[str, Any]:
@@ -12878,6 +13063,118 @@ def _generic_communication_app_discovery_query(text: str, app_name_hint: str = "
 
 def _communication_capability_query(value: str) -> bool:
     return str(value or "").strip().lower() in {"mail", "messaging"}
+
+
+def _generic_communication_compose_detail_hint(
+    text: str,
+    *,
+    channel_hint: str = "",
+) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value or not _generic_communication_compose_requested(value):
+        return {}
+    channel = _canonical_communication_channel(
+        "email" if str(channel_hint or "").strip().lower() == "mail" else channel_hint
+    )
+    if not channel and str(channel_hint or "").strip().lower() == "messaging":
+        channel = "message"
+    recipient = _generic_communication_compose_recipient_hint(value)
+    body = _generic_communication_compose_body_hint(value)
+    send_action = "send" if _generic_communication_compose_send_requested(value) else "draft"
+    hint: dict[str, str] = {"send_action": send_action}
+    if channel:
+        hint["channel"] = channel
+    if recipient:
+        hint["recipient"] = recipient
+    if body:
+        hint["body"] = body
+    return hint
+
+
+def _generic_communication_compose_recipient_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"(?:给|向|对|发给|发送给)\s*(?P<recipient_action>[^：:，,。；;！!？?]+?)\s*"
+        r"(?:输入|键入|发送|发|写|撰写|起草|草拟)",
+        r"(?:给|向|对|发给|发送给)\s*(?P<recipient>[^：:，,。；;！!？?]+?)\s*"
+        r"(?:写|撰写|起草|草拟|发|发送|输入|键入)?\s*"
+        r"(?:一封|封|一条|条)?\s*(?:邮件|电子邮件|消息|短信|微信|mail|email|message)?"
+        r"(?=\s*(?:说|说明|内容是|内容为|[:：]|$|[，,。；;！!？?]))",
+        r"(?:写|撰写|起草|草拟|发|发送)\s*(?:一封|封|一条|条)?\s*"
+        r"(?:邮件|电子邮件|消息|短信|微信|mail|email|message)\s*"
+        r"(?:给|发给|发送给|向|对)\s*(?P<recipient>[^：:，,。；;！!？?]+)",
+        r"\b(?:compose|draft|write|create|new|send|type)\b.{0,48}?"
+        r"\b(?:email|mail|message|chat)\b.{0,24}?\b(?:to|for)\s+"
+        r"(?P<recipient_en>[^.!?,]+?)(?:\s+(?:saying|about|that|with)\b|$)",
+        r"\b(?:email|mail|message)\s+(?:to|for)\s+"
+        r"(?P<recipient_to_en>[^.!?,]+?)(?:\s+(?:saying|about|that|with)\b|$)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        recipient = _clean_communication_recipient_text(
+            groups.get("recipient_action")
+            or groups.get("recipient")
+            or groups.get("recipient_en")
+            or groups.get("recipient_to_en")
+            or ""
+        )
+        recipient = re.sub(
+            r"\s*(?:的)?(?:邮件|电子邮件|消息|短信|微信|mail|email|message)\s*$",
+            "",
+            recipient,
+            flags=re.IGNORECASE,
+        ).strip()
+        recipient = re.sub(r"\s*的$", "", recipient).strip()
+        if recipient and not _is_generic_communication_app_label(recipient):
+            return recipient
+    return ""
+
+
+def _generic_communication_compose_body_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"(?:说明|说|内容是|内容为|[:：])\s*(?P<body>[^。！？!?]+)",
+        r"(?:输入|键入)\s*(?P<input_body>[^。！？!?，,]+)",
+        r"(?:给|向|对|发给|发送给)\s*[^：:，,。；;！!？?]+?\s*"
+        r"(?:发送|发)\s*(?P<send_body>[^。！？!?，,]+)",
+        r"\b(?:saying|that|about|with(?:\s+(?:body|text|message))?)\s+"
+        r"(?P<body_en>[^.!?]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        body = _clean_communication_body_text(
+            match.groupdict().get("body")
+            or match.groupdict().get("input_body")
+            or match.groupdict().get("send_body")
+            or match.groupdict().get("body_en")
+            or ""
+        )
+        if body and not re.fullmatch(
+            r"(?:邮件|电子邮件|消息|短信|微信|mail|email|message)",
+            body,
+            flags=re.IGNORECASE,
+        ):
+            return body
+    return ""
+
+
+def _generic_communication_compose_send_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if _looks_like_communication_draft_request(value):
+        return False
+    return bool(
+        re.search(
+            r"(?:发送|发出|发给|发送给|发消息|\bsend\b|\bmessage\b)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        and not re.search(r"(?:写|撰写|起草|草拟|草稿|compose|draft|write)", value, flags=re.IGNORECASE)
+    )
 
 
 def _generic_communication_compose_requested(text: str) -> bool:

@@ -300,14 +300,16 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
     if _has_unavailable_required_desktop_step(decision):
         return []
     requests: list[dict[str, Any]] = []
-    for step in decision.plan.tool_plan.steps:
+    steps = list(decision.plan.tool_plan.steps)
+    model_selected_step_ids = _model_selected_desktop_step_ids(steps)
+    for step in steps:
         if not _step_available(step):
             continue
         step_id = str(getattr(step, "step_id", "") or "").strip()
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if not tool_name or tool_name not in allowed:
             continue
-        if step_id in {"write-desktop-content-artifact", "open-selected-discovered-app"}:
+        if step_id == "write-desktop-content-artifact" or step_id in model_selected_step_ids:
             continue
         input_preview = getattr(step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
@@ -330,6 +332,33 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
     if _weak_desktop_discovery_plan(decision, requests):
         return []
     return requests
+
+
+def _model_selected_desktop_step_ids(steps: list[Any]) -> set[str]:
+    selected_step_ids: set[str] = set()
+    changed = True
+    while changed:
+        changed = False
+        for step in steps:
+            step_id = str(getattr(step, "step_id", "") or "").strip()
+            if not step_id or step_id in selected_step_ids:
+                continue
+            input_preview = getattr(step, "input_preview", None)
+            payload = input_preview if isinstance(input_preview, Mapping) else {}
+            depends_on = [
+                str(item or "").strip()
+                for item in (getattr(step, "depends_on", None) or [])
+                if str(item or "").strip()
+            ]
+            if (
+                step_id == "open-selected-discovered-app"
+                or str(payload.get("app_name") or "").strip()
+                == "<selected app from desktop.list_apps>"
+                or any(item in selected_step_ids for item in depends_on)
+            ):
+                selected_step_ids.add(step_id)
+                changed = True
+    return selected_step_ids
 
 
 def _has_unavailable_required_desktop_step(decision: Any) -> bool:
