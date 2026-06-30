@@ -194,6 +194,14 @@ def test_capability_summary_reports_full_native_agent_matrix():
             "agent_entrypoint_data_analysis_smoke",
             cases=["studio_agent_run_data_analysis_before_model"],
         ),
+        "agent_studio_planner_orchestration_smoke": _passed_section(
+            "agent_studio_planner_orchestration_smoke",
+            cases=[
+                "workflow_orchestration_start",
+                "group_run_orchestration_start",
+                "missing_target_handoff",
+            ],
+        ),
         "approval_policy_gate_smoke": _passed_section("approval_policy_gate_smoke"),
         "approval_resume_timeline_smoke": _passed_section("approval_resume_timeline_smoke"),
         "runtime_approval_resume_smoke": _passed_section("runtime_approval_resume_smoke"),
@@ -258,16 +266,16 @@ def test_capability_summary_reports_full_native_agent_matrix():
     result = summary.summarize_capabilities(report)
 
     assert result["ok"] is True
-    assert result["status_counts"] == {"passed": 29, "missing": 0}
+    assert result["status_counts"] == {"passed": 30, "missing": 0}
     assert result["category_status_counts"] == {
-        "source": {"passed": 16, "missing": 0},
+        "source": {"passed": 17, "missing": 0},
         "provider": {"passed": 11, "missing": 0},
         "packaged": {"passed": 2, "missing": 0},
     }
     assert result["missing_capability_ids"] == []
     assert result["missing_by_category"] == {}
     assert result["next_actions"] == []
-    assert result["capability_count"] == 29
+    assert result["capability_count"] == 30
     by_id = {item["id"]: item for item in result["capabilities"]}
     source_desktop = by_id["source_agent_entrypoint_desktop_execution"]
     assert source_desktop["status"] == "passed"
@@ -275,6 +283,13 @@ def test_capability_summary_reports_full_native_agent_matrix():
     assert source_desktop["evidence_summary"]["case_ids"] == [
         "main_chat_generic_app_open_before_model",
         "main_chat_capability_discovered_app_open_before_model",
+    ]
+    studio_orchestration = by_id["source_agent_studio_planner_orchestration"]
+    assert studio_orchestration["status"] == "passed"
+    assert studio_orchestration["evidence_summary"]["case_ids"] == [
+        "workflow_orchestration_start",
+        "group_run_orchestration_start",
+        "missing_target_handoff",
     ]
     multi_tool = by_id["agent_multi_tool_pipeline"]
     assert multi_tool["status"] == "passed"
@@ -379,7 +394,7 @@ def test_capability_summary_reports_source_only_partial_matrix():
     assert by_id["source_agent_entrypoint_desktop_execution"]["status"] == "passed"
     assert by_id["provider_text_stream"]["status"] == "missing"
     assert "provider_text_stream" in result["missing_capability_ids"]
-    assert result["status_counts"] == {"passed": 3, "missing": 26}
+    assert result["status_counts"] == {"passed": 3, "missing": 27}
     assert result["missing_by_category"]["source"]
     assert result["missing_by_category"]["provider"]
     assert result["missing_by_category"]["packaged"] == [
@@ -470,7 +485,7 @@ def test_capability_summary_cli_merges_multiple_reports(tmp_path):
 
     payload = json.loads(output_path.read_text(encoding="utf-8"))
     assert payload["ok"] is True
-    assert payload["status_counts"] == {"passed": 29, "missing": 0}
+    assert payload["status_counts"] == {"passed": 30, "missing": 0}
     assert payload["source_reports"] == [str(source_path), str(provider_path)]
     assert payload["next_actions"] == []
     by_id = {item["id"]: item for item in payload["capabilities"]}

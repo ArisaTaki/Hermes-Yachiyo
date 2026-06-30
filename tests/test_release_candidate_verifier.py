@@ -159,6 +159,12 @@ def _source_desktop_capability_report() -> dict[str, object]:
             "agent_entrypoint_data_analysis_smoke",
             "studio_agent_run_data_analysis_before_model",
         ),
+        "agent_studio_planner_orchestration_smoke": _passed_source_smoke_section(
+            "agent_studio_planner_orchestration_smoke",
+            "workflow_orchestration_start",
+            "group_run_orchestration_start",
+            "missing_target_handoff",
+        ),
         "approval_policy_gate_smoke": _passed_source_smoke_section(
             "approval_policy_gate_smoke"
         ),
@@ -1511,6 +1517,7 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
     capability_by_id = {item["id"]: item for item in matrix["capabilities"]}
     assert capability_by_id["source_planner_runtime_tool_parity"]["status"] == "passed"
     assert capability_by_id["source_agent_entrypoint_desktop_execution"]["status"] == "passed"
+    assert capability_by_id["source_agent_studio_planner_orchestration"]["status"] == "passed"
     assert capability_by_id["provider_text_stream"]["status"] == "missing"
     assert matrix["missing_by_category"]["provider"]
     assert matrix["next_actions"]
@@ -1553,6 +1560,72 @@ def test_release_candidate_verifier_fails_when_planner_runtime_tool_parity_smoke
         {
             "path": str(tmp_path / "scripts/smoke_planner_runtime_tool_parity.py"),
             "message": "planner selected an unregistered tool",
+        }
+    ]
+
+
+def test_release_candidate_verifier_reports_agent_studio_planner_orchestration_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "Agent Studio planner orchestration smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["agent_studio_planner_orchestration_smoke"]
+    assert section["status"] == "passed"
+    assert section["run_requested"] is True
+    assert section["findings"] == []
+    assert section["evidence"]["mode"] == "agent_studio_planner_orchestration_smoke"
+    case_by_id = {case["id"]: case for case in section["evidence"]["cases"]}
+    assert case_by_id["workflow_orchestration_start"]["workflow_run_id"] == (
+        "workflow-run-studio-planner"
+    )
+    assert case_by_id["group_run_orchestration_start"]["group_run_id"] == (
+        "group-run-studio-planner"
+    )
+    assert case_by_id["missing_target_handoff"]["status"] == "target_not_found"
+
+
+def test_release_candidate_verifier_fails_when_agent_studio_planner_orchestration_smoke_fails(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    monkeypatch.setattr(
+        rc,
+        "run_agent_studio_planner_orchestration_smoke",
+        lambda: {
+            "ok": False,
+            "mode": "agent_studio_planner_orchestration_smoke",
+            "error": "workflow target was not started",
+            "cases": [],
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "Agent Studio planner orchestration smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["agent_studio_planner_orchestration_smoke"]
+    assert report["ok"] is False
+    assert section["status"] == "failed"
+    assert section["evidence"]["error"] == "workflow target was not started"
+    assert section["findings"] == [
+        {
+            "path": str(tmp_path / "scripts/smoke_agent_studio_planner_orchestration.py"),
+            "message": "workflow target was not started",
         }
     ]
 
@@ -2419,7 +2492,7 @@ def test_release_candidate_verifier_merges_manual_source_capability_matrices(
     ) == 0
 
     output = capsys.readouterr().out
-    assert "Native Agent capability matrix: passed (29 capabilities)" in output
+    assert "Native Agent capability matrix: passed (30 capabilities)" in output
     assert (
         "Native Agent capability matrix sources: tmp/source-rc.json, tmp/provider-rc.json"
         in output
@@ -2428,12 +2501,13 @@ def test_release_candidate_verifier_merges_manual_source_capability_matrices(
     matrix = report["native_agent_capability_matrix"]
     assert matrix["status"] == "passed"
     assert matrix["ok"] is True
-    assert matrix["capability_count"] == 29
-    assert matrix["status_counts"] == {"passed": 29, "missing": 0}
+    assert matrix["capability_count"] == 30
+    assert matrix["status_counts"] == {"passed": 30, "missing": 0}
     assert matrix["missing_capability_ids"] == []
     assert matrix["source_reports"] == ["tmp/source-rc.json", "tmp/provider-rc.json"]
     capability_by_id = {item["id"]: item for item in matrix["capabilities"]}
     assert capability_by_id["source_real_desktop_interaction"]["status"] == "passed"
+    assert capability_by_id["source_agent_studio_planner_orchestration"]["status"] == "passed"
     assert capability_by_id["provider_text_stream"]["status"] == "passed"
     assert capability_by_id["agent_multi_tool_pipeline"]["status"] == "passed"
     assert capability_by_id["packaged_app_bridge_isolation"]["status"] == "passed"
@@ -2445,7 +2519,7 @@ def test_release_candidate_verifier_merges_manual_source_capability_matrices(
     )
     assert matrix_from_merged_report is not None
     assert matrix_from_merged_report["status"] == "passed"
-    assert matrix_from_merged_report["capability_count"] == 29
+    assert matrix_from_merged_report["capability_count"] == 30
 
 
 def test_release_candidate_verifier_merges_multiple_manual_check_json_sources(

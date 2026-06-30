@@ -737,8 +737,8 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
         json.dumps(
             {
                 "status": "incomplete",
-                "passed_count": 25,
-                "capability_count": 29,
+                "passed_count": 26,
+                "capability_count": 30,
                 "missing_capability_ids": [
                     "source_real_desktop_interaction",
                     "provider_text_stream",
@@ -807,10 +807,10 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
                 "status": "partial",
                 "release_level": "partial_demo_ready",
                 "complete": False,
-                "passed_count": 10,
-                "selected_count": 10,
-                "passed_required_flow_count": 10,
-                "required_flow_count": 16,
+                "passed_count": 11,
+                "selected_count": 11,
+                "passed_required_flow_count": 11,
+                "required_flow_count": 17,
                 "missing_required_flow_ids": [
                     "real_desktop_interaction",
                     "workflow_provider",
@@ -836,7 +836,7 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
     output = capsys.readouterr().out
     assert "manual release-candidate check progress: 4/7 complete, 3 remaining" in output
     assert "local RC release readiness:" in output
-    assert "- capabilities: 25/29 passed" in output
+    assert "- capabilities: 26/30 passed" in output
     assert "source_real_desktop_interaction" in output
     assert "provider_text_stream" in output
     assert "blocker runtime_blocking_condition:desktop_session_locked" in output
@@ -852,10 +852,10 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
     assert "--include-provider-workflow" in output
     assert "local RC public demo:" in output
     assert "- status: partial" in output
-    assert "- selected demos: 10/10 passed" in output
+    assert "- selected demos: 11/11 passed" in output
     assert "- complete evidence: false" in output
     assert "- release level: partial_demo_ready" in output
-    assert "- required demos: 10/16 passed" in output
+    assert "- required demos: 11/17 passed" in output
     assert "- missing required demos: real_desktop_interaction, workflow_provider" in output
     assert "demo blocker real_desktop_interaction: skipped" in output
     assert "--include-real-desktop-interaction" in output

@@ -71,6 +71,11 @@ CAPABILITY_DEFINITIONS: tuple[dict[str, str], ...] = (
         "evidence": "agent_entrypoint_data_analysis_smoke",
     },
     {
+        "id": "source_agent_studio_planner_orchestration",
+        "label": "Agent Studio planner orchestration start boundary",
+        "evidence": "agent_studio_planner_orchestration_smoke",
+    },
+    {
         "id": "source_approval_policy_gate",
         "label": "Approval and policy gate coverage",
         "evidence": "approval_policy_gate_smoke",
@@ -174,6 +179,9 @@ SOURCE_SECTION_CAPABILITIES: dict[str, str] = {
     "source_media_playback_chain": "media_playback_chain_smoke",
     "source_agent_entrypoint_desktop_execution": "agent_entrypoint_desktop_execution_smoke",
     "source_agent_entrypoint_data_analysis": "agent_entrypoint_data_analysis_smoke",
+    "source_agent_studio_planner_orchestration": (
+        "agent_studio_planner_orchestration_smoke"
+    ),
     "source_approval_policy_gate": "approval_policy_gate_smoke",
     "source_approval_resume_timeline": "approval_resume_timeline_smoke",
     "source_runtime_approval_resume": "runtime_approval_resume_smoke",

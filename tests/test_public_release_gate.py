@@ -27,10 +27,10 @@ def _write_public_demo_report(command: list[str], *, release_level: str) -> None
         "status": "passed" if release_level == "full_public_demo_ready" else "partial",
         "release_level": release_level,
         "complete": release_level == "full_public_demo_ready",
-        "selected_count": 16 if release_level == "full_public_demo_ready" else 10,
-        "passed_count": 16 if release_level == "full_public_demo_ready" else 10,
-        "required_flow_count": 16,
-        "passed_required_flow_count": 16 if release_level == "full_public_demo_ready" else 10,
+        "selected_count": 17 if release_level == "full_public_demo_ready" else 11,
+        "passed_count": 17 if release_level == "full_public_demo_ready" else 11,
+        "required_flow_count": 17,
+        "passed_required_flow_count": 17 if release_level == "full_public_demo_ready" else 11,
         "missing_required_flow_ids": []
         if release_level == "full_public_demo_ready"
         else ["real_desktop_interaction", "workflow_provider"],

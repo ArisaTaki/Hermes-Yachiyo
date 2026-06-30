@@ -95,6 +95,18 @@ def demo_flows(tmp_dir: Path) -> list[DemoFlow]:
             report_json=tmp_dir / "agent-entrypoint-data-analysis.json",
         ),
         DemoFlow(
+            id="agent_studio_planner_orchestration",
+            label="Agent Studio planner orchestration start",
+            category="source",
+            command=(
+                sys.executable,
+                "scripts/smoke_agent_studio_planner_orchestration.py",
+                "--report-json",
+                str(tmp_dir / "agent-studio-planner-orchestration.json"),
+            ),
+            report_json=tmp_dir / "agent-studio-planner-orchestration.json",
+        ),
+        DemoFlow(
             id="real_desktop_discovery",
             label="Real desktop app discovery without opening apps",
             category="real_desktop",

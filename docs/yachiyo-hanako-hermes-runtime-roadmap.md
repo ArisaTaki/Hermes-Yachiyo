@@ -618,6 +618,18 @@ timeline when a run is returned. This makes the Studio planner path executable
 instead of only explanatory while still preserving structured handoff for
 missing targets.
 
+Current source-level release evidence for that boundary is reproducible with:
+
+```bash
+python scripts/smoke_agent_studio_planner_orchestration.py \
+  --report-json tmp/agent-studio-planner-orchestration.json
+```
+
+This fake-port smoke verifies planner-selected Workflow start, planner-selected
+GroupRun start, and missing-target handoff without invoking the full
+NativeRunEngine. The release verifier now runs the same evidence in
+`--source-only` mode and includes it in the Native Agent capability matrix.
+
 ## Phase 10 - 删除旧硬编码与收敛代码
 
 After coverage proves the new chain works, delete no-longer-needed app aliases,

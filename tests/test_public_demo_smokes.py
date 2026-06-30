@@ -41,8 +41,8 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
     assert summary["complete"] is False
     assert summary["status"] == "partial"
     assert summary["release_level"] == "partial_demo_ready"
-    assert summary["required_flow_count"] == 16
-    assert summary["passed_required_flow_count"] == 10
+    assert summary["required_flow_count"] == 17
+    assert summary["passed_required_flow_count"] == 11
     assert summary["missing_required_flow_ids"] == [
         "real_desktop_app_open",
         "real_desktop_ui_inspection",
@@ -51,8 +51,8 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
         "studio_replay_ui",
         "workflow_ui",
     ]
-    assert summary["selected_count"] == 10
-    assert summary["passed_count"] == 10
+    assert summary["selected_count"] == 11
+    assert summary["passed_count"] == 11
     assert summary["skipped_count"] == 6
     assert [flow["id"] for flow in summary["flows"] if flow["selected"]] == [
         "data_analysis_artifact",
@@ -60,13 +60,14 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
         "desktop_planner_discovery",
         "agent_entrypoint_desktop_execution",
         "agent_entrypoint_data_analysis",
+        "agent_studio_planner_orchestration",
         "real_desktop_discovery",
         "approval_resume",
         "yachiyo_route_approval",
         "group_run",
         "workflow_run",
     ]
-    assert len(commands) == 10
+    assert len(commands) == 11
     entrypoint_commands = [
         command
         for command in commands
@@ -137,12 +138,12 @@ def test_public_demo_smokes_opt_in_selects_all_flows(tmp_path, monkeypatch):
     assert summary["complete"] is True
     assert summary["status"] == "passed"
     assert summary["release_level"] == "full_public_demo_ready"
-    assert summary["passed_required_flow_count"] == summary["required_flow_count"] == 16
+    assert summary["passed_required_flow_count"] == summary["required_flow_count"] == 17
     assert summary["missing_required_flow_ids"] == []
     assert summary["release_blockers"] == []
-    assert summary["selected_count"] == summary["flow_count"] == 16
+    assert summary["selected_count"] == summary["flow_count"] == 17
     assert summary["skipped_count"] == 0
-    assert len(commands) == 16
+    assert len(commands) == 17
     assert any(
         command[:2] == ["node", "scripts/smoke_agent_run_detail_ui.mjs"]
         and "--report-json" in command
@@ -184,8 +185,8 @@ def test_public_demo_smokes_real_desktop_open_can_be_opted_in_separately(
     assert "real_desktop_app_open" in selected_ids
     assert "real_desktop_ui_inspection" not in selected_ids
     assert "real_desktop_interaction" not in selected_ids
-    assert summary["selected_count"] == 11
-    assert summary["passed_count"] == 11
+    assert summary["selected_count"] == 12
+    assert summary["passed_count"] == 12
     assert any("smoke_real_desktop_app_open.py" in part for command in commands for part in command)
     assert not any(
         "smoke_real_desktop_interaction.py" in part
@@ -266,7 +267,7 @@ def test_public_demo_smokes_records_selected_skipped_evidence(tmp_path, monkeypa
     assert real_desktop["evidence_skipped"] is True
     assert summary["ok"] is True
     assert summary["complete"] is False
-    assert summary["passed_count"] == 9
+    assert summary["passed_count"] == 10
     assert summary["skipped_count"] == 7
     assert summary["release_level"] == "partial_demo_ready"
     assert "real_desktop_discovery" in summary["missing_required_flow_ids"]
