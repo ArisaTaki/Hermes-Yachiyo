@@ -172,14 +172,24 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
         "workflow_provider",
     ]
     assert public_demo["release_blockers"][0]["reason"] == "desktop_session_locked"
-    action = next(item for item in summary["next_actions"] if item["id"] == "public_demo")
-    assert "--include-real-desktop-interaction" in action["command"]
-    assert "--include-provider-workflow" in action["command"]
-    assert "--include-real-desktop " not in action["command"]
-    assert "--include-real-desktop-open" not in action["command"]
-    assert "--include-ui" not in action["command"]
-    assert "tmp/public-demo-smokes-missing.json" in action["command"]
-    assert action["release_blockers"][0]["reason"] == "desktop_session_locked"
+    desktop_action = next(
+        item for item in summary["next_actions"] if item["id"] == "public_demo_real_desktop"
+    )
+    provider_action = next(
+        item for item in summary["next_actions"] if item["id"] == "public_demo_provider"
+    )
+    assert "--include-real-desktop-interaction" in desktop_action["command"]
+    assert "--include-provider-workflow" not in desktop_action["command"]
+    assert "--include-real-desktop " not in desktop_action["command"]
+    assert "--include-real-desktop-open" not in desktop_action["command"]
+    assert "--include-ui" not in desktop_action["command"]
+    assert "tmp/public-demo-smokes-real-desktop-missing.json" in desktop_action["command"]
+    assert desktop_action["release_blockers"][0]["reason"] == "desktop_session_locked"
+    assert provider_action["command"] == (
+        "python scripts/run_public_demo_smokes.py --include-provider-workflow "
+        "--output-json tmp/public-demo-smokes-provider-missing.json "
+        "--output-markdown tmp/public-demo-smokes-provider-missing.md"
+    )
     assert summary["release_smoke"]["status"] == "incomplete"
     assert "packaged_launch" in summary["release_smoke"]["missing_item_ids"]
     assert "diagnostics_export" not in summary["release_smoke"]["missing_item_ids"]
@@ -228,6 +238,8 @@ def test_public_release_gate_strict_mode_fails_until_release_ready(
     assert "Demo blocker `real_desktop_interaction`: `desktop_session_locked`" in markdown
     assert "--include-real-desktop-interaction" in markdown
     assert "--include-provider-workflow" in markdown
+    assert "tmp/public-demo-smokes-real-desktop-missing.json" in markdown
+    assert "tmp/public-demo-smokes-provider-missing.json" in markdown
     assert "--include-real-desktop --include-provider-workflow --include-ui" not in markdown
 
 
@@ -347,11 +359,17 @@ def test_public_release_gate_passes_granular_real_desktop_demo_flags(
     assert "--include-real-desktop" not in public_demo_command
     assert "--include-real-desktop-ui-inspection" not in public_demo_command
     assert "--include-real-desktop-interaction" not in public_demo_command
-    action = next(item for item in summary["next_actions"] if item["id"] == "public_demo")
-    assert "--include-real-desktop-open" not in action["command"]
-    assert "--include-ui" not in action["command"]
-    assert "--include-real-desktop-interaction" in action["command"]
-    assert "--include-provider-workflow" in action["command"]
+    desktop_action = next(
+        item for item in summary["next_actions"] if item["id"] == "public_demo_real_desktop"
+    )
+    provider_action = next(
+        item for item in summary["next_actions"] if item["id"] == "public_demo_provider"
+    )
+    assert "--include-real-desktop-open" not in desktop_action["command"]
+    assert "--include-ui" not in desktop_action["command"]
+    assert "--include-real-desktop-interaction" in desktop_action["command"]
+    assert "--include-provider-workflow" not in desktop_action["command"]
+    assert "--include-provider-workflow" in provider_action["command"]
     assert summary["status"] == "needs_release_evidence"
 
 

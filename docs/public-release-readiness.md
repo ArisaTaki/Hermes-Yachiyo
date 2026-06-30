@@ -152,8 +152,9 @@ granular public-demo flags such as `--include-real-desktop-open`,
 and `--include-ui`. This lets maintainers archive a passing real app-open or
 Studio UI replay result without forcing every foreground interaction smoke to
 run in the same session. When the public demo remains partial, the gate's Next
-Actions use only the missing flow flags when they are known, and fall back to the
-full-demo command only for unknown future flows.
+Actions are grouped by dependency class such as real desktop, provider, and UI;
+each command uses only the missing flow flags when they are known, and falls
+back to the full-demo command only for unknown future flows.
 
 The macOS release workflow keeps the default preflight safe on push builds. For
 manual release-candidate runs, set the `public_demo` workflow input to `full` to
