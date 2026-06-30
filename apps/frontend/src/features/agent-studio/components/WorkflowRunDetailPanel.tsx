@@ -1,4 +1,8 @@
-import type { RunTimelineChildSnapshot, YachiyoRunTimelineSnapshot } from '../../yachiyo-studio/types';
+import type {
+  PlannerTraceSummarySnapshot,
+  RunTimelineChildSnapshot,
+  YachiyoRunTimelineSnapshot,
+} from '../../yachiyo-studio/types';
 import type { RunSpec } from '../types';
 
 type WorkflowRunDetailPanelProps = {
@@ -72,13 +76,25 @@ export function WorkflowRunDetailPanel({
         <div className="run-group-overview-children run-public-child-list" data-testid="agent-run-detail-public-children">
           {childSnapshots.map((child) => {
             const plannerSummary = publicChildPlannerSummary(child);
+            const rawPlannerSummary = child.planner_summary;
             return (
               <button
                 type="button"
                 data-group-run-id={child.group_run_id || child.run_group_id || ''}
                 data-has-planner-summary={String(Boolean(plannerSummary))}
+                data-planner-approvals-required={plannerSummaryValues(rawPlannerSummary?.approvals_required)}
+                data-planner-artifacts-expected={plannerSummaryValues(rawPlannerSummary?.artifacts_expected)}
+                data-planner-capabilities={plannerSummaryValues(rawPlannerSummary?.plan_capabilities)}
+                data-planner-entrypoint={rawPlannerSummary?.planner_entrypoint || ''}
+                data-planner-entrypoint-source={rawPlannerSummary?.entrypoint_source || ''}
+                data-planner-intent-kind={rawPlannerSummary?.intent_kind || ''}
+                data-planner-open-questions={plannerSummaryValues(rawPlannerSummary?.open_questions)}
+                data-planner-plan-id={rawPlannerSummary?.plan_id || ''}
+                data-planner-selection-role={rawPlannerSummary?.selection_role || rawPlannerSummary?.selection_source || ''}
                 data-planner-summary={plannerSummary}
+                data-planner-tools={plannerSummaryValues(rawPlannerSummary?.plan_tools)}
                 data-run-id={child.run_id}
+                data-selected-tools={plannerSummaryValues(rawPlannerSummary?.selected_tools)}
                 data-testid="agent-run-detail-public-child-run"
                 data-workflow-node-id={child.workflow_node_id || ''}
                 key={child.run_id}
@@ -128,6 +144,7 @@ function publicChildPlannerSummary(child: RunTimelineChildSnapshot): string {
     summary.intent_kind,
     summary.plan_capabilities?.length ? `${summary.plan_capabilities.length} capabilities` : '',
     summary.step_count ? `${summary.step_count} steps` : '',
+    publicChildPlannerToolSummary(summary),
     summary.approvals_required?.length ? `${summary.approvals_required.length} approvals` : '',
     summary.artifacts_expected?.length ? `${summary.artifacts_expected.length} artifacts` : '',
     summary.open_questions?.length ? `${summary.open_questions.length} questions` : '',
@@ -136,4 +153,15 @@ function publicChildPlannerSummary(child: RunTimelineChildSnapshot): string {
     summary.launcher_surface ? `surface ${summary.launcher_surface}` : '',
   ].filter(Boolean);
   return parts.join(' · ');
+}
+
+function publicChildPlannerToolSummary(summary: PlannerTraceSummarySnapshot | null | undefined): string {
+  const selectedTools = plannerSummaryValues(summary?.selected_tools, ', ');
+  if (selectedTools) return `selected ${selectedTools}`;
+  const planTools = plannerSummaryValues(summary?.plan_tools, ', ');
+  return planTools ? `tools ${planTools}` : '';
+}
+
+function plannerSummaryValues(values: string[] | null | undefined, separator = ','): string {
+  return Array.isArray(values) ? values.filter(Boolean).join(separator) : '';
 }

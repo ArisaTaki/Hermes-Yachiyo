@@ -1477,6 +1477,27 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "summary.launcher_surface ? `surface ${summary.launcher_surface}` : '',",
         ],
     )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/WorkflowRunDetailPanel.tsx",
+        [
+            "export function WorkflowRunDetailPanel",
+            'data-testid="agent-run-detail-public-child-run"',
+            "const rawPlannerSummary = child.planner_summary;",
+            "data-planner-intent-kind={rawPlannerSummary?.intent_kind || ''}",
+            "data-planner-plan-id={rawPlannerSummary?.plan_id || ''}",
+            "data-planner-tools={plannerSummaryValues(rawPlannerSummary?.plan_tools)}",
+            "data-selected-tools={plannerSummaryValues(rawPlannerSummary?.selected_tools)}",
+            "data-planner-capabilities={plannerSummaryValues(rawPlannerSummary?.plan_capabilities)}",
+            "data-planner-approvals-required={plannerSummaryValues(rawPlannerSummary?.approvals_required)}",
+            "data-planner-artifacts-expected={plannerSummaryValues(rawPlannerSummary?.artifacts_expected)}",
+            "data-planner-open-questions={plannerSummaryValues(rawPlannerSummary?.open_questions)}",
+            "data-planner-entrypoint={rawPlannerSummary?.planner_entrypoint || ''}",
+            "data-planner-entrypoint-source={rawPlannerSummary?.entrypoint_source || ''}",
+            "data-planner-selection-role={rawPlannerSummary?.selection_role || rawPlannerSummary?.selection_source || ''}",
+            "publicChildPlannerToolSummary(summary)",
+            "return planTools ? `tools ${planTools}` : '';",
+        ],
+    )
     _assert_smoke_script(
         "scripts/smoke_agent_studio_groups_ui.mjs",
         [
