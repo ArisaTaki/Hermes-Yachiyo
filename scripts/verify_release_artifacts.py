@@ -1200,6 +1200,34 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must run the local RC verification gate",
     ),
     (
+        "Run public release preflight gate",
+        "macOS release workflow must run the public release preflight gate",
+    ),
+    (
+        "python scripts/run_public_release_gate.py",
+        "macOS release workflow must invoke the public release preflight runner",
+    ),
+    (
+        "--tmp-dir release/public-release-gate",
+        "macOS release workflow must keep public release gate nested evidence",
+    ),
+    (
+        "--output-json release/public-release-gate.json",
+        "macOS release workflow must archive a public release gate JSON report",
+    ),
+    (
+        "--output-markdown release/public-release-gate.md",
+        "macOS release workflow must archive a public release gate Markdown report",
+    ),
+    (
+        "release/public-release-gate/*.json",
+        "macOS release workflow must upload public release gate nested JSON evidence",
+    ),
+    (
+        "release/public-release-gate/*.md",
+        "macOS release workflow must upload public release gate nested Markdown evidence",
+    ),
+    (
         "python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount",
         "macOS release workflow must mount-check DMG contents during local RC verification",
     ),
@@ -4396,8 +4424,22 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
                 "macOS release workflow must verify release guards before installing dependencies",
             )
         )
-    signing_import = workflow.find("Import macOS self-signing certificate")
+    public_release_gate = workflow.find("Run public release preflight gate")
     smoke_tests = workflow.find("Run smoke tests")
+    if (
+        install_deps < 0
+        or public_release_gate < 0
+        or smoke_tests < 0
+        or public_release_gate < install_deps
+        or public_release_gate > smoke_tests
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must run public release preflight after Python dependencies before smoke tests",
+            )
+        )
+    signing_import = workflow.find("Import macOS self-signing certificate")
     provider_smoke = workflow.find("provider_smoke_args+=(--run-provider-smoke)")
     write_metadata = workflow.find("Write app build metadata")
     write_metadata_script = workflow.find("python scripts/prepare_app_build_metadata.py")

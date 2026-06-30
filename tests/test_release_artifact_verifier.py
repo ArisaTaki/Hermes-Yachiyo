@@ -1902,6 +1902,17 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     assert "macOS release workflow must verify the final packaged app code signature when signing is enabled" in messages
     assert "macOS release workflow must binary-scan final release artifacts" in messages
     assert "macOS release workflow must run the local RC verification gate" in messages
+    assert "macOS release workflow must run the public release preflight gate" in messages
+    assert "macOS release workflow must invoke the public release preflight runner" in messages
+    assert "macOS release workflow must keep public release gate nested evidence" in messages
+    assert "macOS release workflow must archive a public release gate JSON report" in messages
+    assert "macOS release workflow must archive a public release gate Markdown report" in messages
+    assert "macOS release workflow must upload public release gate nested JSON evidence" in messages
+    assert "macOS release workflow must upload public release gate nested Markdown evidence" in messages
+    assert (
+        "macOS release workflow must run public release preflight after Python dependencies before smoke tests"
+        in messages
+    )
     assert "macOS release workflow must upload a release-candidate verification report" in messages
     assert "macOS release workflow must archive a manual RC check evidence template" in messages
     assert (

@@ -115,7 +115,7 @@ python scripts/app_version.py check
 python scripts/build_release_candidate_artifacts.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
 ```
 
-CI 仍直接运行 `python scripts/prepare_app_build_metadata.py`、`python scripts/build_backend.py --clean` 和 `npm --prefix apps/frontend run dist:mac`，因为 workflow 工作区不会把临时 metadata 改动提交回仓库。
+CI 仍直接运行 `python scripts/prepare_app_build_metadata.py`、`python scripts/build_backend.py --clean` 和 `npm --prefix apps/frontend run dist:mac`，因为 workflow 工作区不会把临时 metadata 改动提交回仓库。macOS release workflow 会在 smoke tests 前运行 `python scripts/run_public_release_gate.py`，并上传 `release/public-release-gate.json`、`release/public-release-gate.md` 与 `release/public-release-gate/*.json` / `.md` nested evidence。
 
 在真正刷新本地 RC evidence 前，可以先跑低成本 public-release preflight：
 

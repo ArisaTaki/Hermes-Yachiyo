@@ -55,6 +55,13 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,packaging]"
 
+      - name: Run public release preflight gate
+        run: |
+          python scripts/run_public_release_gate.py \
+            --tmp-dir release/public-release-gate \
+            --output-json release/public-release-gate.json \
+            --output-markdown release/public-release-gate.md
+
       - name: Install frontend dependencies
         run: npm ci --prefix apps/frontend
 
@@ -666,6 +673,8 @@ jobs:
             release/*.sha256
             release/*.json
             release/*.md
+            release/public-release-gate/*.json
+            release/public-release-gate/*.md
 
       - name: Create or update versioned GitHub release
         env:
