@@ -11808,6 +11808,87 @@ def test_runtime_planner_defaults_email_send_channel_to_mail_sequence() -> None:
     ]
 
 
+def test_runtime_planner_defaults_email_draft_channel_to_mail_without_send() -> None:
+    allowed_tools = [
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+        "artifact.write",
+    ]
+    prompt = "帮我起草一封邮件给张三，内容是会议改到明天上午十点，不要发送"
+
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {
+        "direct_message_hint": {
+            "recipient": "张三",
+            "body": "会议改到明天上午十点",
+            "mode": "focus",
+            "send_action": "draft",
+            "channel": "email",
+        }
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+    ]
+    assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+        "app_name": "Mail"
+    }
+    assert _step_by_id(decision, "focus-communication-recipient-search").input_preview == {
+        "action": "new_message"
+    }
+    assert _step_by_id(decision, "draft-communication-message").input_preview == {
+        "text": "会议改到明天上午十点"
+    }
+    assert "send-communication-message" not in {
+        step.step_id for step in decision.plan.tool_plan.steps
+    }
+    assert planner_tool_requests(prompt, allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Mail"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "new_message"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "张三"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "会议改到明天上午十点"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+    ]
+
+
 def test_runtime_planner_routes_flexible_communication_surface_phrasing() -> None:
     allowed_tools = [
         "app.focus_and_safe_shortcut",
@@ -12626,7 +12707,19 @@ def test_runtime_planner_can_fall_back_to_artifact_for_communication_draft() -> 
             "artifact.write",
         ],
     )
-    assert _step_by_id(desktop_tools_draft, "draft-communication").tool_name == "artifact.write"
+    assert [step.step_id for step in desktop_tools_draft.plan.tool_plan.steps] == [
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+    ]
+    assert _step_by_id(desktop_tools_draft, "open-or-focus-app").input_preview == {
+        "app_name": "Mail"
+    }
+    assert _step_by_id(desktop_tools_draft, "draft-communication-message").input_preview == {
+        "text": "说明会议延期"
+    }
     assert planner_tool_requests(
         "给 Alice 写一封邮件说明会议延期",
         [
@@ -12637,7 +12730,43 @@ def test_runtime_planner_can_fall_back_to_artifact_for_communication_draft() -> 
             "desktop.submit_foreground",
             "artifact.write",
         ],
-    ) == []
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Mail"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "new_message"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Alice"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "说明会议延期"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+    ]
 
 
 def test_runtime_planner_tracks_context_communication_source_without_body() -> None:

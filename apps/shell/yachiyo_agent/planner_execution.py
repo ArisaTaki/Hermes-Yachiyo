@@ -1338,6 +1338,7 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
     if not isinstance(direct_hint, Mapping):
         return []
     body_source = str(direct_hint.get("body_source") or "").strip()
+    send_action = str(direct_hint.get("send_action") or "send").strip() or "send"
     if _direct_communication_requires_model_body(direct_hint):
         return []
     steps_by_id = {
@@ -1359,9 +1360,10 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
         required_step_ids += ("paste-communication-message",)
     else:
         required_step_ids += ("draft-communication-message",)
-    required_step_ids += (
-        "send-communication-message",
-    )
+    if send_action != "draft":
+        required_step_ids += (
+            "send-communication-message",
+        )
     requests: list[dict[str, Any]] = []
     for step_id in required_step_ids:
         step = steps_by_id.get(step_id)

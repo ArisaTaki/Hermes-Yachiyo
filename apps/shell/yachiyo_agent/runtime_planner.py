@@ -6304,8 +6304,13 @@ def _direct_communication_steps(
     channel = str(direct_message.get("channel") or "").strip()
     send_action = str(direct_message.get("send_action") or "send").strip() or "send"
     mode = str(direct_message.get("mode") or "focus").strip() or "focus"
-    if not app_name and send_action == "send":
-        app_name = _default_communication_app_for_channel(channel, mode, allowed)
+    if not app_name and channel == "email" and send_action in {"send", "draft"}:
+        app_name = _default_communication_app_for_channel(
+            channel,
+            mode,
+            allowed,
+            require_send=send_action != "draft",
+        )
     if (
         not app_name
         or not recipient
@@ -6516,11 +6521,18 @@ def _direct_communication_steps(
                 reason=(
                     "Draft the generated message body from inspected context before the approval-gated send step."
                     if generated_body
-                    else "Type only the explicit message body before the approval-gated send step."
+                    else (
+                        "Type only the explicit message body and stop before sending."
+                        if send_action == "draft"
+                        else "Type only the explicit message body before the approval-gated send step."
+                    )
                 ),
             )
         )
         send_depends_on = ["draft-communication-message"]
+
+    if send_action == "draft":
+        return steps
 
     steps.append(
         _step(
@@ -6566,17 +6578,25 @@ def _default_communication_app_for_channel(
     channel: str,
     mode: str,
     allowed: set[str] | None,
+    *,
+    require_send: bool = True,
 ) -> str:
     if channel != "email":
         return ""
-    if not _communication_desktop_send_tools_available(mode, allowed):
+    if not _communication_desktop_compose_tools_available(
+        mode,
+        allowed,
+        require_send=require_send,
+    ):
         return ""
     return "Mail"
 
 
-def _communication_desktop_send_tools_available(
+def _communication_desktop_compose_tools_available(
     mode: str,
     allowed: set[str] | None,
+    *,
+    require_send: bool,
 ) -> bool:
     if allowed is None:
         return True
@@ -6593,7 +6613,10 @@ def _communication_desktop_send_tools_available(
             allowed,
         )
         and _first_allowed(("desktop.search_submit",), allowed)
-        and _first_allowed(("desktop.submit_foreground",), allowed)
+        and (
+            not require_send
+            or _first_allowed(("desktop.submit_foreground",), allowed)
+        )
     )
 
 
@@ -13207,6 +13230,7 @@ def _generic_direct_communication_hint(text: str) -> dict[str, str]:
         (
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:给|向|对)\s*(?P<recipient>[^：:，,。]+?)\s*"
+            r"(?:[，,。；;]\s*)?"
             r"(?:写|撰写|起草|草拟|发|发送)\s*(?:一封|封|条)?\s*"
             r"(?P<channel>邮件|电子邮件|短信|消息|email|e-mail|mail|message)\s*"
             r"(?P<body>(?:说|说明|关于|内容是|内容为|[:：]).+)$",
@@ -13217,6 +13241,7 @@ def _generic_direct_communication_hint(text: str) -> dict[str, str]:
             r"(?:写|撰写|起草|草拟|发|发送)\s*(?:一封|封|条)?\s*"
             r"(?P<channel>邮件|电子邮件|短信|消息|email|e-mail|mail|message)\s*"
             r"(?:给|发给|发送给|向|对)\s*(?P<recipient>[^：:，,。]+?)\s*"
+            r"(?:[，,。；;]\s*)?"
             r"(?P<body>(?:说|说明|关于|内容是|内容为|[:：]).+)$",
             "",
         ),
@@ -13465,8 +13490,26 @@ def _clean_communication_recipient_text(value: str) -> str:
 
 
 def _clean_communication_body_text(value: str) -> str:
-    text = _clean_foreground_compose_text(_clean_communication_hint_text(value))
-    return re.sub(r"^(?:说(?!明)|内容是|内容为)\s*", "", text, flags=re.IGNORECASE).strip()
+    raw_text = _clean_communication_hint_text(value)
+    raw_text = re.sub(
+        r"\s*[，,。；;！!？?]?\s*"
+        r"(?:不要发送|别发送|先别发送|不用发送|无需发送|不要发出|"
+        r"do\s+not\s+send|don't\s+send|without\s+sending)\s*$",
+        "",
+        raw_text,
+        flags=re.IGNORECASE,
+    ).strip()
+    text = _clean_foreground_compose_text(raw_text)
+    text = re.sub(r"^(?:说(?!明)|内容是|内容为)\s*", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(
+        r"\s*[，,。；;！!？?]?\s*"
+        r"(?:不要发送|别发送|先别发送|不用发送|无需发送|不要发出|"
+        r"do\s+not\s+send|don't\s+send|without\s+sending)\s*$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    )
+    return text.strip()
 
 
 def _canonical_communication_channel(value: str) -> str:
@@ -13481,7 +13524,9 @@ def _canonical_communication_channel(value: str) -> str:
 def _looks_like_communication_draft_request(value: str) -> bool:
     return bool(
         re.search(
-            r"(?:写|撰写|起草|草拟|draft|compose|write)",
+            r"(?:写|撰写|起草|草拟|草稿|draft|compose|write|"
+            r"不要发送|别发送|先别发送|不用发送|无需发送|不要发出|"
+            r"do\s+not\s+send|don't\s+send|without\s+sending)",
             _clean_prompt(value),
             flags=re.IGNORECASE,
         )
