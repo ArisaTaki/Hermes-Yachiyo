@@ -362,6 +362,7 @@ def refresh_local_rc_signoff(
     source_capability_report = tmp_dir / f"rc-verification-{label}-source-capabilities.json"
     batch_report = tmp_dir / f"rc-verification-{label}-packaged-batch.json"
     screen_report = tmp_dir / f"rc-verification-{label}-screen.json"
+    native_capability_matrix_report = tmp_dir / f"rc-verification-{label}-native-capability-matrix.json"
     signoff_draft = tmp_dir / f"rc-signoff-{label}-current.json"
     signoff_markdown = tmp_dir / f"rc-signoff-{label}-current.md"
     signoff_preview = tmp_dir / f"rc-signoff-{label}-preview.json"
@@ -445,6 +446,25 @@ def refresh_local_rc_signoff(
         if screen_report.exists():
             manual_sources.append(screen_report)
 
+    capability_matrix_command = [
+        sys.executable,
+        "scripts/summarize_native_agent_capabilities.py",
+    ]
+    for source in manual_sources:
+        capability_matrix_command.append(str(source.relative_to(ROOT)))
+    capability_matrix_command.extend(
+        [
+            "--output-json",
+            str(native_capability_matrix_report.relative_to(ROOT)),
+        ]
+    )
+    capability_matrix_code = _run(capability_matrix_command, allow_failure=True)
+    if capability_matrix_code and not native_capability_matrix_report.exists():
+        raise subprocess.CalledProcessError(
+            capability_matrix_code,
+            capability_matrix_command,
+        )
+
     draft_command = [sys.executable, "scripts/verify_release_candidate.py"]
     for source in manual_sources:
         draft_command.extend(["--manual-checks-json", str(source.relative_to(ROOT))])
@@ -485,6 +505,7 @@ def refresh_local_rc_signoff(
         "source_capability_report": source_capability_report,
         "batch_report": batch_report,
         "screen_report": screen_report,
+        "native_capability_matrix_report": native_capability_matrix_report,
         "signoff_draft": signoff_draft,
         "signoff_markdown": signoff_markdown,
         "signoff_preview": signoff_preview,

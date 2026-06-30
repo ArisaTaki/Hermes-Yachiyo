@@ -123,7 +123,7 @@ CI 仍直接运行 `python scripts/prepare_app_build_metadata.py`、`python scri
 python scripts/refresh_local_rc_signoff.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
 ```
 
-该命令会生成 `tmp/rc-verification-<short-commit>-packaged-batch.json`、`tmp/rc-verification-<short-commit>-screen.json`、`tmp/rc-signoff-<short-commit>-current.json`、`tmp/rc-signoff-<short-commit>-current.md` 和 `tmp/rc-signoff-<short-commit>-preview.json`；其中 packaged batch report 会同时归档 DMG mount、Gatekeeper readiness、packaged backend bridge identity、packaged app startup、packaged UI sampling 和 packaged Chat native file smoke evidence。如果 final signoff 只因为 Gatekeeper / Screen Recording 仍为 `manual_required` 而失败，命令仍返回成功，方便把“还差多少”作为状态刷新而不是构建失败处理。签核人可以直接填写 Markdown checklist，再用 `--manual-checks-markdown` 进入最终 gate。
+该命令会生成 `tmp/rc-verification-<short-commit>-source-capabilities.json`、`tmp/rc-verification-<short-commit>-packaged-batch.json`、`tmp/rc-verification-<short-commit>-screen.json`、`tmp/rc-verification-<short-commit>-native-capability-matrix.json`、`tmp/rc-signoff-<short-commit>-current.json`、`tmp/rc-signoff-<short-commit>-current.md` 和 `tmp/rc-signoff-<short-commit>-preview.json`；其中 source capabilities report 归档 source-level planner/artifact/approval/entrypoint/desktop discovery evidence，packaged batch report 会同时归档 DMG mount、Gatekeeper readiness、packaged backend bridge identity、packaged app startup、packaged UI sampling 和 packaged Chat native file smoke evidence，native capability matrix report 会按 capability id 合并多份 RC report 并标出 source/provider/packaged 缺口。如果 final signoff 只因为 Gatekeeper / Screen Recording 仍为 `manual_required` 而失败，命令仍返回成功，方便把“还差多少”作为状态刷新而不是构建失败处理。签核人可以直接填写 Markdown checklist，再用 `--manual-checks-markdown` 进入最终 gate。
 
 只查看当前 HEAD 还剩哪些签核项时，运行：
 
