@@ -2258,10 +2258,24 @@ class RuntimeCustomApiAgentLoop:
         ]
         if not tool_path:
             return ""
+        intent_kind = str(decision.selected_intent.kind or "").strip()
         missing = ", ".join(decision.plan.tool_plan.missing_capabilities) or "none"
         outputs = ", ".join(decision.selected_intent.expected_outputs) or "unspecified"
         artifacts = ", ".join(decision.plan.tool_plan.artifacts_expected) or "none"
         route_to_studio = "yes" if decision.plan.route_to_studio else "no"
+        studio_handoff_guidance = ""
+        if intent_kind in {"workflow_orchestration", "multi_agent"}:
+            studio_surface = (
+                "Workflow"
+                if intent_kind == "workflow_orchestration"
+                else "GroupRun"
+            )
+            studio_handoff_guidance = (
+                f"Studio orchestration handoff: this is an Agent Studio {studio_surface} plan, "
+                "not a normal model-only recipe. Preserve the planner intent, target, approvals, "
+                "artifacts, and timeline context; do not claim the workflow or group run completed "
+                "unless Runtime or Agent Studio returns a concrete run snapshot/run id. "
+            )
         step_guidance = []
         for index, step in enumerate(steps, start=1):
             tool_or_capability = str(step.tool_name or step.capability_id or "").strip()
@@ -2287,6 +2301,7 @@ class RuntimeCustomApiAgentLoop:
             f"artifact expected={artifacts}; "
             f"route to Studio={route_to_studio}. "
             f"Plan steps: {steps_text}. "
+            f"{studio_handoff_guidance}"
             "Follow the planned tool path in order when the named tools are allowed; do not replace app-scoped "
             "app.*_and_* foreground tools with a looser app.open/app.focus plus desktop.* sequence unless the "
             "app-scoped tool is unavailable. "

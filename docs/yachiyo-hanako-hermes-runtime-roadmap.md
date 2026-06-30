@@ -538,6 +538,16 @@ Exit evidence:
 - Main chat runtime guidance emphasizes available tools over text-only advice.
 - The doctrine is shared by Chat, Bubble, Live2D, Studio, Workflow, and Groups.
 
+Current runtime guidance evidence now distinguishes ordinary tool execution
+from Studio-managed orchestration. When the planner selects
+`workflow_orchestration` or `multi_agent`, the Custom API Agent prompt labels
+the plan as an Agent Studio Workflow/GroupRun handoff, preserves planner
+intent/target/approval/artifact/timeline context, and explicitly prevents the
+model from claiming the workflow or group run completed unless Runtime or
+Agent Studio returns a concrete run snapshot or run id. This keeps Workflow and
+GroupRun plans observable without pretending they are regular model-only tool
+loops.
+
 ## Phase 8 - Chat/Bubble/Live2D Planner Integration
 
 Daily entrypoints default to the new planner. Old `desktop_intents.py` remains

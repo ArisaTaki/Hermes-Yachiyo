@@ -723,14 +723,39 @@ def test_custom_api_agent_loop_guides_code_tasks_without_bypassing_approval() ->
     )
 
     assert "selected intent=code_task" in system_prompt
-    assert "workspace.list -> artifact.write" in system_prompt
+    assert "workspace.list -> terminal.run -> artifact.write" in system_prompt
     assert "route to Studio=yes" in system_prompt
     assert "inspect the workspace before shell execution" in system_prompt
     assert "only when the plan contains a concrete command" in system_prompt
     assert "1. Inspect workspace: workspace.list" in system_prompt
-    assert "2. Write result artifact: artifact.write" in system_prompt
-    assert "Run code command: terminal.run" not in system_prompt
+    assert "2. Run code diagnostic: terminal.run" in system_prompt
+    assert "terminal execution remains approval-gated" in system_prompt
+    assert "3. Write result artifact: artifact.write" in system_prompt
     assert "approval gates still apply" in system_prompt
+
+
+def test_custom_api_agent_loop_guides_workflow_and_group_runs_as_studio_handoffs() -> None:
+    workflow_prompt = RuntimeCustomApiAgentLoop._runtime_planner_guidance(
+        "运行 Daily Summary workflow",
+        ["workflow.run", "group.run", "artifact.write"],
+    )
+    group_prompt = RuntimeCustomApiAgentLoop._runtime_planner_guidance(
+        "让研究员和写作者两个 Agent 协作，研究 Hermes 和 Hanako 的差异并产出报告",
+        ["agent.group_run", "artifact.write"],
+    )
+
+    assert "selected intent=workflow_orchestration" in workflow_prompt
+    assert "planned tool path=workflow.run" in workflow_prompt
+    assert "route to Studio=yes" in workflow_prompt
+    assert "Studio orchestration handoff: this is an Agent Studio Workflow plan" in workflow_prompt
+    assert "not a normal model-only recipe" in workflow_prompt
+    assert "do not claim the workflow or group run completed" in workflow_prompt
+    assert "concrete run snapshot/run id" in workflow_prompt
+
+    assert "selected intent=multi_agent" in group_prompt
+    assert "planned tool path=agent.group_run" in group_prompt
+    assert "Studio orchestration handoff: this is an Agent Studio GroupRun plan" in group_prompt
+    assert "Preserve the planner intent, target, approvals, artifacts, and timeline context" in group_prompt
 
 
 def test_custom_api_agent_loop_injects_runtime_prompt_for_existing_messages() -> None:
