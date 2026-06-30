@@ -125,7 +125,7 @@ python scripts/run_public_release_gate.py \
   --output-markdown tmp/public-release-gate.md
 ```
 
-该入口会运行 release artifact guard、secret redaction、focused release pytest 和安全 public-demo smoke。默认模式用于快速发现文档、secret、release-smoke/public-demo 回归；当 public demo 仍是 `partial_demo_ready` 时报告会显示 `status=needs_release_evidence`、缺失 demo flow 和下一步命令但不会因为缺少 opt-in 证据返回失败。最终发布前加 `--require-release-ready`，让缺少完整 public-demo release evidence 的候选版本直接失败。
+该入口会运行 release artifact guard、secret redaction、focused release pytest 和安全 public-demo smoke，并把 public-demo JSON 投影成非阻断的 `tmp/public-release-gate/release-smoke.json` / `.md` 评估。默认模式用于快速发现文档、secret、release-smoke/public-demo 回归；当 public demo 仍是 `partial_demo_ready` 或 9 项 release-smoke 用户路径证据不完整时，报告会显示 `status=needs_release_evidence`、缺失 demo flow、缺失 user path 和下一步命令，但不会因为缺少 opt-in/RC 证据返回失败。已有 RC report 和 diagnostics bundle 可通过重复 `--release-smoke-report` 与 `--diagnostics-zip` 合入同一份 assessment。最终发布前加 `--require-release-ready`，让缺少完整 public-demo release evidence 或完整 9 项 release-smoke evidence 的候选版本直接失败。
 
 如果要一次刷新当前 HEAD 的本地 RC evidence、Gatekeeper readiness diagnostics、Screen Recording attempt、provider-not-applicable 草稿和 final signoff preview，运行：
 

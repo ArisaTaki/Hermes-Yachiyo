@@ -93,6 +93,9 @@ def run_public_release_gate(
     *,
     tmp_dir: Path | str = Path("tmp/public-release-gate"),
     include_public_demo: bool = True,
+    include_release_smoke: bool = True,
+    release_smoke_reports: Sequence[Path | str] = (),
+    diagnostics_zips: Sequence[Path | str] = (),
     include_real_desktop: bool = False,
     include_provider_workflow: bool = False,
     include_ui: bool = False,
@@ -113,12 +116,25 @@ def run_public_release_gate(
         for check in checks
     ]
     failed = [item for item in check_results if item["status"] == "failed"]
-    release_blockers = [
+    demo_release_blockers = [
         blocker
         for item in check_results
         for blocker in _dict_list(item.get("release_blockers"))
     ]
-    release_ready = not failed and not release_blockers and not plan_only
+    release_smoke = (
+        _release_smoke_assessment(
+            tmp_dir=resolved_tmp_dir,
+            checks=checks,
+            extra_reports=release_smoke_reports,
+            diagnostics_zips=diagnostics_zips,
+            plan_only=plan_only,
+        )
+        if include_release_smoke
+        else {}
+    )
+    release_smoke_blockers = _release_smoke_blockers(release_smoke)
+    release_blocker_count = len(demo_release_blockers) + len(release_smoke_blockers)
+    release_ready = not failed and release_blocker_count == 0 and not plan_only
     status = (
         "planned"
         if plan_only
@@ -139,9 +155,10 @@ def run_public_release_gate(
         "check_count": len(check_results),
         "passed_count": sum(1 for item in check_results if item["status"] == "passed"),
         "failed_count": len(failed),
-        "release_blocker_count": len(release_blockers),
+        "release_blocker_count": release_blocker_count,
         "checks": check_results,
-        "next_actions": _next_actions(check_results),
+        "release_smoke": release_smoke,
+        "next_actions": _next_actions(check_results, release_smoke=release_smoke),
     }
 
 
@@ -208,7 +225,99 @@ def _public_demo_release_blockers(check: Mapping[str, Any]) -> list[dict[str, An
     ]
 
 
-def _next_actions(checks: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+def _release_smoke_assessment(
+    *,
+    tmp_dir: Path,
+    checks: Sequence[GateCheck],
+    extra_reports: Sequence[Path | str],
+    diagnostics_zips: Sequence[Path | str],
+    plan_only: bool,
+) -> dict[str, Any]:
+    output_json = tmp_dir / "release-smoke.json"
+    output_markdown = tmp_dir / "release-smoke.md"
+    report_paths = [_resolve_path(Path(path)) for path in extra_reports]
+    for check in checks:
+        if check.id == "public_demo" and check.report_json is not None:
+            report_paths.append(check.report_json)
+    command: list[str] = [
+        sys.executable,
+        "scripts/summarize_release_smoke.py",
+        *[str(path) for path in report_paths],
+    ]
+    for archive_path in diagnostics_zips:
+        command.extend(["--diagnostics-zip", str(_resolve_path(Path(archive_path)))])
+    command.extend(
+        [
+            "--output-json",
+            str(output_json),
+            "--output-markdown",
+            str(output_markdown),
+        ]
+    )
+    base: dict[str, Any] = {
+        "command": command,
+        "report_json": _display_path(output_json),
+        "report_markdown": _display_path(output_markdown),
+    }
+    if plan_only:
+        return {**base, "status": "planned", "ok": False}
+    result = _run_command(command)
+    report = _load_json(output_json)
+    if not report:
+        return {
+            **base,
+            "ok": False,
+            "status": "failed",
+            "returncode": result.returncode,
+            "stdout_tail": _tail(result.stdout),
+            "stderr_tail": _tail(result.stderr),
+        }
+    return {
+        **base,
+        "ok": report.get("ok") is True,
+        "status": str(report.get("status") or "unknown"),
+        "returncode": result.returncode,
+        "item_count": int(report.get("item_count") or 0),
+        "passed_count": int(report.get("passed_count") or 0),
+        "missing_count": int(report.get("missing_count") or 0),
+        "missing_item_ids": _string_list(report.get("missing_item_ids")),
+        "next_actions": _dict_list(report.get("next_actions")),
+        "stdout_tail": _tail(result.stdout),
+        "stderr_tail": _tail(result.stderr),
+    }
+
+
+def _release_smoke_blockers(assessment: Mapping[str, Any]) -> list[dict[str, Any]]:
+    if not assessment:
+        return []
+    if assessment.get("ok") is True:
+        return []
+    if assessment.get("status") == "planned":
+        return []
+    missing = _string_list(assessment.get("missing_item_ids"))
+    if missing:
+        return [
+            {
+                "id": item_id,
+                "status": "missing",
+                "reason": "release-smoke evidence is missing",
+            }
+            for item_id in missing
+        ]
+    return [
+        {
+            "id": "release_smoke",
+            "status": str(assessment.get("status") or "failed"),
+            "reason": "release-smoke summary did not pass",
+        }
+    ]
+
+
+def _next_actions(
+    checks: Sequence[Mapping[str, Any]],
+    *,
+    release_smoke: Mapping[str, Any],
+) -> list[dict[str, Any]]:
     actions: list[dict[str, Any]] = []
     seen: set[str] = set()
     for check in checks:
@@ -227,6 +336,18 @@ def _next_actions(checks: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
                 "command": command,
                 "release_level": str(check.get("release_level") or ""),
                 "missing_required_flow_ids": _string_list(check.get("missing_required_flow_ids")),
+            }
+        )
+    for action in _dict_list(release_smoke.get("next_actions")):
+        command = str(action.get("command") or "").strip()
+        if not command or command in seen:
+            continue
+        seen.add(command)
+        actions.append(
+            {
+                "id": str(action.get("id") or "release_smoke"),
+                "status": "missing",
+                "command": command,
             }
         )
     return actions
@@ -252,6 +373,17 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         missing = _string_list(check.get("missing_required_flow_ids"))
         if missing:
             lines.append(f"  Missing demo flows: {', '.join(f'`{item}`' for item in missing)}")
+    release_smoke = summary.get("release_smoke")
+    if isinstance(release_smoke, Mapping) and release_smoke:
+        lines.extend(["", "## Release Smoke", ""])
+        lines.append(f"Status: {release_smoke.get('status')}")
+        item_count = release_smoke.get("item_count")
+        passed_count = release_smoke.get("passed_count")
+        if isinstance(item_count, int) and isinstance(passed_count, int):
+            lines.append(f"Coverage: {passed_count}/{item_count} passed")
+        missing_items = _string_list(release_smoke.get("missing_item_ids"))
+        if missing_items:
+            lines.append(f"Missing user paths: {', '.join(f'`{item}`' for item in missing_items)}")
     actions = _dict_list(summary.get("next_actions"))
     if actions:
         lines.extend(["", "## Next Actions", ""])
@@ -346,6 +478,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tmp-dir", type=Path, default=Path("tmp/public-release-gate"))
     parser.add_argument("--skip-public-demo", action="store_true")
+    parser.add_argument("--skip-release-smoke-assessment", action="store_true")
+    parser.add_argument("--release-smoke-report", action="append", default=[], type=Path)
+    parser.add_argument("--diagnostics-zip", action="append", default=[], type=Path)
     parser.add_argument("--include-real-desktop", action="store_true")
     parser.add_argument("--include-provider-workflow", action="store_true")
     parser.add_argument("--include-ui", action="store_true")
@@ -358,6 +493,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     summary = run_public_release_gate(
         tmp_dir=args.tmp_dir,
         include_public_demo=not args.skip_public_demo,
+        include_release_smoke=not args.skip_release_smoke_assessment,
+        release_smoke_reports=args.release_smoke_report,
+        diagnostics_zips=args.diagnostics_zip,
         include_real_desktop=bool(args.include_real_desktop),
         include_provider_workflow=bool(args.include_provider_workflow),
         include_ui=bool(args.include_ui),

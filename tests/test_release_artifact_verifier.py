@@ -908,6 +908,9 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document local RC signoff refresh helper" in messages
     assert "release packaging docs must document public release preflight gate" in messages
     assert "release packaging docs must document public release gate coverage" in messages
+    assert "release packaging docs must document public release gate release-smoke output" in messages
+    assert "release packaging docs must document public release gate missing user path output" in messages
+    assert "release packaging docs must document public release gate existing report inputs" in messages
     assert "release packaging docs must document strict public release gate mode" in messages
     assert "release packaging docs must document local RC public demo evidence output" in messages
     assert "release packaging docs must document public demo release assessment fields" in messages
@@ -1020,6 +1023,9 @@ def test_verifier_requires_user_facing_release_docs_for_first_launch(tmp_path):
     assert "public release readiness guide must document the public demo smoke runner" in messages
     assert "public release readiness guide must document the public release gate runner" in messages
     assert "public release readiness guide must document strict public release gate mode" in messages
+    assert "public release readiness guide must document public release gate release-smoke output" in messages
+    assert "public release readiness guide must document strict release-smoke evidence enforcement" in messages
+    assert "public release readiness guide must document public release gate existing report inputs" in messages
     assert "public release readiness guide must document RC public demo evidence output" in messages
     assert "public release readiness guide must document desktop planner public demo evidence" in messages
     assert "public release readiness guide must document real desktop discovery public demo evidence" in messages

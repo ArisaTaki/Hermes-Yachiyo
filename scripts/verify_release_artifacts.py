@@ -186,6 +186,21 @@ USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
     ),
     (
         Path("docs/public-release-readiness.md"),
+        "tmp/public-release-gate/release-smoke.json",
+        "public release readiness guide must document public release gate release-smoke output",
+    ),
+    (
+        Path("docs/public-release-readiness.md"),
+        "missing 9-item release-smoke evidence",
+        "public release readiness guide must document strict release-smoke evidence enforcement",
+    ),
+    (
+        Path("docs/public-release-readiness.md"),
+        "--release-smoke-report",
+        "public release readiness guide must document public release gate existing report inputs",
+    ),
+    (
+        Path("docs/public-release-readiness.md"),
         "rc-verification-${SHORT_COMMIT}-public-demo.json",
         "public release readiness guide must document RC public demo evidence output",
     ),
@@ -769,6 +784,18 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "release artifact guard、secret redaction、focused release pytest 和安全 public-demo smoke",
         "release packaging docs must document public release gate coverage",
+    ),
+    (
+        "tmp/public-release-gate/release-smoke.json",
+        "release packaging docs must document public release gate release-smoke output",
+    ),
+    (
+        "缺失 user path",
+        "release packaging docs must document public release gate missing user path output",
+    ),
+    (
+        "--release-smoke-report",
+        "release packaging docs must document public release gate existing report inputs",
     ),
     (
         "--require-release-ready",
