@@ -573,8 +573,52 @@ def print_local_rc_signoff_status(*, short_commit: str | None = None) -> bool:
         else:
             automation_commands["screen_recording_permission"] = previous_screen_command
     if ok:
+        _print_release_readiness_status(label=label)
         _print_os_evidence_command(label=label, signoff_draft=signoff_draft)
     return ok
+
+
+def _print_release_readiness_status(*, label: str) -> None:
+    readiness_report = ROOT / "tmp" / f"rc-verification-{label}-release-readiness.json"
+    if not readiness_report.exists():
+        return
+    try:
+        report = _load_report(readiness_report)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(
+            f"local RC release readiness: could not read {readiness_report.relative_to(ROOT)}: {exc}",
+            file=sys.stderr,
+        )
+        return
+    print("local RC release readiness:")
+    status = str(report.get("status") or "unknown")
+    passed = report.get("passed_count")
+    total = report.get("capability_count")
+    print(f"- status: {status}")
+    if isinstance(passed, int) and isinstance(total, int):
+        print(f"- capabilities: {passed}/{total} passed")
+    missing_ids = report.get("missing_capability_ids")
+    if isinstance(missing_ids, list) and missing_ids:
+        missing = ", ".join(str(item) for item in missing_ids if str(item))
+        if missing:
+            print(f"- missing capabilities: {missing}")
+    blockers = report.get("blockers")
+    if isinstance(blockers, list):
+        for blocker in blockers:
+            if not isinstance(blocker, dict):
+                continue
+            blocker_type = str(blocker.get("type") or "blocker")
+            blocker_id = str(blocker.get("id") or "")
+            capabilities = blocker.get("capabilities")
+            capability_ids = []
+            if isinstance(capabilities, list):
+                capability_ids = [
+                    str(item.get("id") or "")
+                    for item in capabilities
+                    if isinstance(item, dict) and str(item.get("id") or "")
+                ]
+            target = ", ".join(capability_ids) if capability_ids else "unknown"
+            print(f"- blocker {blocker_type}:{blocker_id}: {target}")
 
 
 def write_local_os_manual_evidence(

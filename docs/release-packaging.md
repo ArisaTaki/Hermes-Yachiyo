@@ -131,7 +131,7 @@ python scripts/refresh_local_rc_signoff.py --channel experimental --repository k
 python scripts/refresh_local_rc_signoff.py --print-status
 ```
 
-该命令只读取 `tmp/rc-signoff-<short-commit>-current.json` 并打印剩余项，不运行 build、DMG 或 UI gate。
+该命令只读取 `tmp/rc-signoff-<short-commit>-current.json` 并打印剩余项，不运行 build、DMG 或 UI gate；如果同一 commit 的 `tmp/rc-verification-<short-commit>-release-readiness.json` 存在，也会同步打印 29 项能力矩阵通过数、缺失 capability 和 blocker 摘要。
 
 需要按当前 draft 完成最后的 Gatekeeper / Screen Recording 收证时，可以先打印聚合操作指南；该命令只读已有 draft / screen report，不会写入 evidence，也不会把人工项标为通过：
 

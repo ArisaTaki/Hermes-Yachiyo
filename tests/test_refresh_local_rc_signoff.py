@@ -637,10 +637,47 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
         ),
         encoding="utf-8",
     )
+    readiness = tmp_path / "tmp" / "rc-verification-abc12345-release-readiness.json"
+    readiness.write_text(
+        json.dumps(
+            {
+                "status": "incomplete",
+                "passed_count": 25,
+                "capability_count": 29,
+                "missing_capability_ids": [
+                    "source_real_desktop_interaction",
+                    "provider_text_stream",
+                ],
+                "blockers": [
+                    {
+                        "type": "runtime_blocking_condition",
+                        "id": "desktop_session_locked",
+                        "capabilities": [
+                            {"id": "source_real_desktop_interaction"},
+                        ],
+                    },
+                    {
+                        "type": "provider_credentials_missing",
+                        "id": "oha_yachiyo_smoke_credentials",
+                        "capabilities": [
+                            {"id": "provider_text_stream"},
+                        ],
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     assert refresh.main(["--short-commit", "abc12345", "--print-status"]) == 0
     output = capsys.readouterr().out
     assert "manual release-candidate check progress: 4/7 complete, 3 remaining" in output
+    assert "local RC release readiness:" in output
+    assert "- capabilities: 25/29 passed" in output
+    assert "source_real_desktop_interaction" in output
+    assert "provider_text_stream" in output
+    assert "blocker runtime_blocking_condition:desktop_session_locked" in output
+    assert "blocker provider_credentials_missing:oha_yachiyo_smoke_credentials" in output
     assert (
         f"{sys.executable} scripts/verify_release_candidate.py --require-artifacts "
         "--run-dmg-screen-smoke --report-json "
