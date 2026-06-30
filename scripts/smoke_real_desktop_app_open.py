@@ -49,11 +49,33 @@ class _RuntimeDesktopBroker:
     def desktop_active_window(self) -> dict[str, Any]:
         return desktop_tools.active_window()
 
+    def desktop_running_apps(self) -> dict[str, Any]:
+        return desktop_tools.running_apps()
+
+    def desktop_windows(self, app_name: str = "") -> dict[str, Any]:
+        return desktop_tools.windows(app_name)
+
+    def desktop_ui_elements(
+        self,
+        *,
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        return desktop_tools.ui_elements(
+            role_filter=role_filter,
+            limit=limit,
+            app_name=app_name,
+        )
+
     def app_status(self, app_name: str) -> dict[str, Any]:
         return desktop_tools.app_status(app_name)
 
     def app_open(self, app_name: str) -> dict[str, Any]:
         return desktop_tools.app_open(app_name)
+
+    def app_focus(self, app_name: str) -> dict[str, Any]:
+        return desktop_tools.app_focus(app_name)
 
 
 def _runtime_tool_call(

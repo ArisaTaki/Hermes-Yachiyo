@@ -132,12 +132,13 @@ python scripts/smoke_real_desktop_ui_inspection.py \
   --report-json tmp/real-desktop-ui-inspection.json
 ```
 
-On macOS this runs the real `desktop.running_apps`, `desktop.windows`,
-`app.focus`, `desktop.active_window`, and named-app
-`desktop.ui_elements(app_name=...)` path. The evidence records whether focus
-was actually verified and how many menu-level or control-like UI roles were
-observed, so current environment limits remain visible instead of being hidden
-behind a passing smoke.
+On macOS this runs the real `desktop.open_app`, `desktop.running_apps`,
+`desktop.list_windows`, `desktop.focus_app`, `desktop.active_window`,
+named-app `desktop.read_ui(app_name=...)`, and `desktop.verify` path through
+the runtime dispatch registry. The evidence records whether focus was actually
+verified and how many menu-level or control-like UI roles were observed, so
+current environment limits remain visible instead of being hidden behind a
+passing smoke.
 
 Current foreground focus diagnostics also record each low-risk activation
 strategy attempted by `app.focus`: AppleScript/System Events, AppKit,

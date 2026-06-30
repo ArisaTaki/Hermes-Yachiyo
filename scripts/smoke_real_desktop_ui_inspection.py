@@ -17,10 +17,12 @@ if str(PROJECT_ROOT) not in sys.path:
 from apps.shell.agent.tools import desktop as desktop_tools
 from scripts.smoke_real_desktop_app_open import (
     DEFAULT_APP_NAME,
+    _RuntimeDesktopBroker,
     _app_names,
     _merge_blocking_evidence,
     _cleanup_evidence,
     _resolved_open_app_name,
+    _runtime_tool_call,
     _status_running,
 )
 
@@ -103,27 +105,61 @@ def run_smoke(
             "reason": "real desktop UI inspection smoke only runs on macOS",
         }
 
-    discovery = desktop_tools.list_apps(query=clean_app_name, limit=10)
+    broker = _RuntimeDesktopBroker()
+    discovery = _runtime_tool_call(
+        broker,
+        "desktop.list_apps",
+        {"query": clean_app_name, "limit": 10},
+    )
     discovered_names = _app_names(discovery)
     discovered_app_name = next(
         (name for name in discovered_names if name.casefold() == clean_app_name.casefold()),
         discovered_names[0] if discovered_names else clean_app_name,
     )
-    before_status = desktop_tools.app_status(discovered_app_name)
-    before_running = _status_running(before_status)
-    open_result = desktop_tools.app_open(discovered_app_name)
-    opened_app_name = _resolved_open_app_name(discovered_app_name, open_result)
-    running_result = desktop_tools.running_apps()
-    windows_result = desktop_tools.windows(opened_app_name)
-    focus_result = desktop_tools.app_focus(opened_app_name)
-    active_window = desktop_tools.active_window()
-    ui_result = desktop_tools.ui_elements(app_name=opened_app_name, limit=40)
-    menu_result = desktop_tools.ui_elements(
-        app_name=opened_app_name,
-        role_filter="menu",
-        limit=40,
+    before_status = _runtime_tool_call(
+        broker,
+        "app.status",
+        {"app_name": discovered_app_name},
     )
-    after_status = desktop_tools.app_status(opened_app_name)
+    before_running = _status_running(before_status)
+    open_result = _runtime_tool_call(
+        broker,
+        "desktop.open_app",
+        {"app_name": discovered_app_name},
+    )
+    opened_app_name = _resolved_open_app_name(discovered_app_name, open_result)
+    running_result = _runtime_tool_call(broker, "desktop.running_apps", {})
+    windows_result = _runtime_tool_call(
+        broker,
+        "desktop.list_windows",
+        {"app_name": opened_app_name},
+    )
+    focus_result = _runtime_tool_call(
+        broker,
+        "desktop.focus_app",
+        {"app_name": opened_app_name},
+    )
+    active_window = _runtime_tool_call(broker, "desktop.active_window", {})
+    ui_result = _runtime_tool_call(
+        broker,
+        "desktop.read_ui",
+        {"app_name": opened_app_name, "limit": 40},
+    )
+    menu_result = _runtime_tool_call(
+        broker,
+        "desktop.read_ui",
+        {"app_name": opened_app_name, "role_filter": "menu", "limit": 40},
+    )
+    verify_result = _runtime_tool_call(
+        broker,
+        "desktop.verify",
+        {"app_name": opened_app_name, "limit": 40},
+    )
+    after_status = _runtime_tool_call(
+        broker,
+        "app.status",
+        {"app_name": opened_app_name},
+    )
     after_running = _status_running(after_status)
     cleanup_result = _cleanup_evidence(
         app_name=opened_app_name,
@@ -171,16 +207,22 @@ def run_smoke(
     ui_app_name = str(_data(ui_result).get("app_name") or "")
     checks = {
         "discovered_app": discovery.get("ok") is True and bool(discovered_names),
+        "open_alias_used": open_result.get("action") == "desktop.open_app",
         "open_ok": open_result.get("ok") is True,
         "running_apps_ok": running_result.get("ok") is True,
         "running_apps_contains_app": opened_app_name in running_names,
+        "windows_alias_used": windows_result.get("action") == "desktop.list_windows",
         "windows_query_ok": windows_result.get("ok") is True,
+        "focus_alias_used": focus_result.get("action") == "desktop.focus_app",
         "focus_tool_returned": focus_result.get("ok") is True,
         "active_window_query_ok": active_window.get("ok") is True,
+        "read_ui_alias_used": ui_result.get("action") == "desktop.read_ui",
         "named_ui_elements_ok": ui_result.get("ok") is True,
         "named_ui_elements_match_app": ui_app_name == opened_app_name,
         "named_ui_elements_nonempty": bool(elements),
         "named_ui_roles_nonempty": bool(role_counts),
+        "verify_alias_used": verify_result.get("action") == "desktop.verify",
+        "verify_returned": verify_result.get("ok") is True,
         "menu_level_ui_visible": (
             bool(menu_elements) or menu_role_count > 0 or control_like_count > 0
         ),
@@ -192,12 +234,30 @@ def run_smoke(
             and cleanup_result.get("attempted") is True
         ),
     }
-    blocker_evidence = _merge_blocking_evidence(focus_result, windows_result, ui_result)
+    blocker_evidence = _merge_blocking_evidence(
+        focus_result,
+        windows_result,
+        ui_result,
+        menu_result,
+        verify_result,
+    )
     return {
         "ok": all(checks.values()),
         "mode": "real_desktop_ui_inspection_smoke",
         "skipped": False,
         "platform": current_platform,
+        "tool_chain": [
+            "desktop.list_apps",
+            "desktop.open_app",
+            "desktop.running_apps",
+            "desktop.list_windows",
+            "desktop.focus_app",
+            "desktop.active_window",
+            "desktop.read_ui",
+            "desktop.read_ui",
+            "desktop.verify",
+            "app.status",
+        ],
         "app_name": clean_app_name,
         "discovered_app_name": discovered_app_name,
         "opened_app_name": opened_app_name,
@@ -224,6 +284,7 @@ def run_smoke(
         "active_window": active_window,
         "ui_elements": ui_result,
         "menu_ui_elements": menu_result,
+        "verify_result": verify_result,
         "after_status": after_status,
         "cleanup": cleanup_result,
         "checks": checks,

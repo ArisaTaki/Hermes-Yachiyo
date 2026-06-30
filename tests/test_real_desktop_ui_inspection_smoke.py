@@ -5,6 +5,33 @@ import json
 from scripts import smoke_real_desktop_ui_inspection as smoke
 
 
+def _patch_verify(monkeypatch, *, ok: bool = True) -> None:
+    def fake_inspect_app(
+        app_name,
+        *,
+        open_if_needed=True,
+        focus=True,
+        role_filter="",
+        limit=80,
+    ):
+        return {
+            "ok": ok,
+            "action": "desktop.inspect_app",
+            "summary": f"Verified {app_name}",
+            "data": {
+                "app_name": app_name,
+                "open_if_needed": open_if_needed,
+                "focus_requested": focus,
+                "running": ok,
+                "checks": {"status_running": ok},
+                "ui_element_count": 2 if ok else 0,
+            },
+            "permission_error": False,
+        }
+
+    monkeypatch.setattr(smoke.desktop_tools, "inspect_app", fake_inspect_app)
+
+
 def test_real_desktop_ui_inspection_smoke_skips_non_macos(monkeypatch):
     monkeypatch.setattr(smoke.platform, "system", lambda: "Linux")
 
@@ -130,6 +157,7 @@ def test_real_desktop_ui_inspection_smoke_accepts_menu_level_ui_for_named_app(mo
         }
 
     monkeypatch.setattr(smoke.desktop_tools, "ui_elements", fake_ui_elements)
+    _patch_verify(monkeypatch)
     monkeypatch.setattr(
         smoke.desktop_tools,
         "app_quit",
@@ -143,6 +171,23 @@ def test_real_desktop_ui_inspection_smoke_accepts_menu_level_ui_for_named_app(mo
     evidence = smoke.run_smoke(app_name="Oha-Yachiyo", cleanup=True)
 
     assert evidence["ok"] is True
+    assert evidence["tool_chain"] == [
+        "desktop.list_apps",
+        "desktop.open_app",
+        "desktop.running_apps",
+        "desktop.list_windows",
+        "desktop.focus_app",
+        "desktop.active_window",
+        "desktop.read_ui",
+        "desktop.read_ui",
+        "desktop.verify",
+        "app.status",
+    ]
+    assert evidence["open_result"]["action"] == "desktop.open_app"
+    assert evidence["windows"]["action"] == "desktop.list_windows"
+    assert evidence["focus_result"]["action"] == "desktop.focus_app"
+    assert evidence["ui_elements"]["action"] == "desktop.read_ui"
+    assert evidence["verify_result"]["action"] == "desktop.verify"
     assert evidence["focus_verified"] is False
     assert evidence["window_count"] == 0
     assert evidence["window_visibility_status"] == "running_without_visible_windows"
@@ -156,6 +201,12 @@ def test_real_desktop_ui_inspection_smoke_accepts_menu_level_ui_for_named_app(mo
     assert evidence["control_like_count"] == 0
     assert evidence["deepest_ui_depth"] == 1
     assert evidence["checks"]["default_app_control_surface_visible"] is True
+    assert evidence["checks"]["open_alias_used"] is True
+    assert evidence["checks"]["windows_alias_used"] is True
+    assert evidence["checks"]["focus_alias_used"] is True
+    assert evidence["checks"]["read_ui_alias_used"] is True
+    assert evidence["checks"]["verify_alias_used"] is True
+    assert evidence["checks"]["verify_returned"] is True
     assert evidence["checks"]["named_ui_elements_match_app"] is True
     assert evidence["checks"]["menu_level_ui_visible"] is True
     assert evidence["cleanup"]["attempted"] is True
@@ -239,6 +290,7 @@ def test_real_desktop_ui_inspection_smoke_fails_when_named_ui_is_not_read(monkey
             "error": "accessibility denied",
         },
     )
+    _patch_verify(monkeypatch)
 
     evidence = smoke.run_smoke(app_name="Calculator", cleanup=False)
 
@@ -333,6 +385,7 @@ def test_real_desktop_ui_inspection_smoke_surfaces_focus_blocker(monkeypatch):
             },
         },
     )
+    _patch_verify(monkeypatch)
 
     evidence = smoke.run_smoke(app_name="Calculator", cleanup=False)
 
