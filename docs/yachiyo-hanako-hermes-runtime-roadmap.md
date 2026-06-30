@@ -496,7 +496,8 @@ Exit evidence:
 
 - Data-source hints produce `workspace.read`/analysis/artifact plans.
 - Artifacts are observable and readable through existing task/run surfaces.
-- Sample dataset artifact readback is reproducible with:
+- CSV, JSON, text-table, and XLSX sample dataset artifact readback is
+  reproducible with:
 
   ```bash
   python scripts/smoke_data_analysis_artifacts.py \
@@ -504,9 +505,10 @@ Exit evidence:
     --report-json tmp/data-analysis-artifacts.json
   ```
 
-  The smoke also archives the `data.analyze` follow-up context snapshot so
-  Agent Studio/Run Timeline can replay rows, columns, and generated artifact
-  paths without relying on private tool output.
+  The smoke also archives the `data.analyze` follow-up context snapshot for
+  every source kind, so Agent Studio/Run Timeline can replay rows, columns,
+  source kind, and generated artifact paths without relying on private tool
+  output.
 
 ## Phase 7 - Prompt/Skill Runtime Doctrine
 
