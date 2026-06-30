@@ -49,6 +49,9 @@ from scripts.smoke_electron_native_bridge import (
 from scripts.smoke_group_run_timeline import (
     run_smoke as run_group_run_timeline_smoke,
 )
+from scripts.smoke_agent_entrypoint_desktop_execution import (
+    run_smoke as run_agent_entrypoint_desktop_execution_smoke,
+)
 from scripts.smoke_media_playback_chain import (
     run_smoke as run_media_playback_chain_smoke,
 )
@@ -1930,6 +1933,45 @@ def verify_media_playback_chain_smoke(root: Path) -> tuple[list[Finding], dict[s
     return [
         Finding(
             root / "scripts/smoke_media_playback_chain.py",
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
+def verify_agent_entrypoint_desktop_execution_smoke(
+    root: Path,
+) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = run_agent_entrypoint_desktop_execution_smoke()
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/smoke_agent_entrypoint_desktop_execution.py",
+                f"agent entrypoint desktop execution smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "agent_entrypoint_desktop_execution_smoke",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/smoke_agent_entrypoint_desktop_execution.py",
+                "agent entrypoint desktop execution smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "agent_entrypoint_desktop_execution_smoke",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "agent entrypoint desktop execution smoke did not pass")
+    return [
+        Finding(
+            root / "scripts/smoke_agent_entrypoint_desktop_execution.py",
             redact_api_error_text(message),
         )
     ], evidence
@@ -4337,6 +4379,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         },
+        "agent_entrypoint_desktop_execution_smoke": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        },
         "approval_policy_gate_smoke": {
             "status": "pending",
             "evidence": {},
@@ -4550,6 +4598,12 @@ def verify_release_candidate(
             "run_requested": True,
         }
         report["media_playback_chain_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        }
+        report["agent_entrypoint_desktop_execution_smoke"] = {
             "status": "skipped",
             "evidence": {},
             "findings": [],
@@ -4818,6 +4872,18 @@ def verify_release_candidate(
         "status": "failed" if media_playback_smoke_findings else "passed",
         "evidence": media_playback_smoke_evidence,
         "findings": _finding_report(media_playback_smoke_findings),
+        "run_requested": True,
+    }
+
+    agent_entrypoint_smoke_findings, agent_entrypoint_smoke_evidence = (
+        verify_agent_entrypoint_desktop_execution_smoke(root)
+    )
+    _print_findings("agent entrypoint desktop execution smoke", agent_entrypoint_smoke_findings)
+    failed = failed or bool(agent_entrypoint_smoke_findings)
+    report["agent_entrypoint_desktop_execution_smoke"] = {
+        "status": "failed" if agent_entrypoint_smoke_findings else "passed",
+        "evidence": agent_entrypoint_smoke_evidence,
+        "findings": _finding_report(agent_entrypoint_smoke_findings),
         "run_requested": True,
     }
 
