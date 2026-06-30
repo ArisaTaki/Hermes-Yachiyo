@@ -27,6 +27,21 @@ from scripts.smoke_real_desktop_app_open import (
 )
 
 DEFAULT_INPUT_TEXT = "42"
+TOOL_CHAIN = [
+    "desktop.active_window",
+    "desktop.list_apps",
+    "app.status",
+    "app.open",
+    "app.focus",
+    "desktop.safe_key",
+    "desktop.safe_type_text",
+    "desktop.ui_elements",
+    "app.focus",
+    "desktop.active_window",
+    "desktop.click_ui_element",
+    "desktop.ui_elements",
+    "app.status",
+]
 _SIGN_TARGET_HINTS = ("更改数值符号", "change sign", "toggle sign", "plus/minus")
 _BIDI_MARKS = re.compile(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 
@@ -109,6 +124,7 @@ def _locked_session_evidence(app_name: str, preflight: dict[str, Any]) -> dict[s
         "skipped": False,
         "platform": "Darwin",
         "app_name": app_name,
+        "tool_chain": TOOL_CHAIN,
         "stage": "session_preflight",
         "error": "desktop_session_locked",
         "blocking_condition": "desktop_session_locked",
@@ -135,6 +151,7 @@ def run_smoke(
             "skipped": True,
             "platform": current_platform,
             "app_name": clean_app_name,
+            "tool_chain": TOOL_CHAIN,
             "reason": "real desktop interaction smoke only runs on macOS",
         }
 
@@ -148,6 +165,7 @@ def run_smoke(
             "skipped": False,
             "platform": current_platform,
             "app_name": clean_app_name,
+            "tool_chain": TOOL_CHAIN,
             "stage": "session_preflight",
             "error": str(preflight.get("error") or "desktop_session_preflight_failed"),
             "preflight": preflight,
@@ -163,6 +181,7 @@ def run_smoke(
             "skipped": False,
             "platform": current_platform,
             "app_name": clean_app_name,
+            "tool_chain": TOOL_CHAIN,
             "stage": "app_discovery",
             "error": str(discovery.get("error") or "app_not_found"),
             "preflight": preflight,
@@ -186,6 +205,7 @@ def run_smoke(
             "skipped": False,
             "platform": current_platform,
             "app_name": clean_app_name,
+            "tool_chain": TOOL_CHAIN,
             "stage": "app_preflight",
             "error": status_error,
             "reason": (
@@ -230,6 +250,7 @@ def run_smoke(
             "platform": current_platform,
             "app_name": clean_app_name,
             "opened_app_name": opened_app_name,
+            "tool_chain": TOOL_CHAIN,
             "stage": stage,
             "error": error,
             **{key: value for key, value in blocker_evidence.items() if key != "error"},
@@ -449,6 +470,7 @@ def run_smoke(
         "platform": current_platform,
         "app_name": clean_app_name,
         "opened_app_name": opened_app_name,
+        "tool_chain": TOOL_CHAIN,
         "input_text": clean_input,
         "expected_signed_value": expected_signed_value,
         "sign_target": sign_target,

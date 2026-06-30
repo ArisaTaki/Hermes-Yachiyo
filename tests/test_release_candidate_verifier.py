@@ -1136,6 +1136,7 @@ def test_release_candidate_verifier_reports_real_desktop_interaction_smoke_when_
             "skipped": False,
             "platform": "Darwin",
             "app_name": "Calculator",
+            "tool_chain": ["desktop.active_window", "desktop.safe_type_text"],
             "before_values": ["42"],
             "after_values": ["-42"],
             "checks": {
@@ -1159,6 +1160,7 @@ def test_release_candidate_verifier_reports_real_desktop_interaction_smoke_when_
     section = report["real_desktop_interaction_smoke"]
     assert section["status"] == "passed"
     assert section["run_requested"] is True
+    assert section["evidence"]["tool_chain"] == ["desktop.active_window", "desktop.safe_type_text"]
     assert section["evidence"]["after_values"] == ["-42"]
     assert section["findings"] == []
 

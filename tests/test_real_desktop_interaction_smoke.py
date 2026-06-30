@@ -150,6 +150,7 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
     assert evidence["ok"] is True
     assert evidence["before_values"] == ["42"]
     assert evidence["after_values"] == ["(-42)"]
+    assert evidence["tool_chain"] == smoke.TOOL_CHAIN
     assert evidence["checks"]["signed_value_visible"] is True
     assert evidence["sign_target"] == "更改数值符号"
     assert all(evidence["checks"].values())
@@ -251,6 +252,7 @@ def test_real_desktop_interaction_smoke_stops_if_active_app_changes_before_click
     assert evidence["ok"] is False
     assert evidence["stage"] == "pre_click_active_window"
     assert evidence["error"] == "foreground_app_mismatch_before_click"
+    assert evidence["tool_chain"] == smoke.TOOL_CHAIN
     assert evidence["pre_click_active_app"] == "QQ"
     assert evidence["checks"]["pre_click_focus_verified"] is True
     assert evidence["checks"]["pre_click_active_app_matches"] is False
