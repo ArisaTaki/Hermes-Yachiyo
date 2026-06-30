@@ -628,6 +628,12 @@ PDF capabilities with `continue_to_model=true`. Explicit data-analysis requests
 such as "用 Excel 分析 data/sales.csv 并输出报告" keep the data-analysis path and
 only open the named spreadsheet app because the user asked for it.
 
+The Yachiyo planner compatibility boundary now excludes generic app category
+labels from `legacy_app_name_hint`. Browser, default-browser, file-manager,
+terminal, and music-player labels are no longer canonicalized to Chrome,
+Finder, Terminal, or Music at that boundary; explicit app aliases such as
+Chrome, Finder, Apple Music, iTerm, and Warp remain available for compatibility.
+
 ## Phase 11 - Release Productization
 
 Turn the runtime migration into a product that can be installed and diagnosed

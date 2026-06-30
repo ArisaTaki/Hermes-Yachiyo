@@ -14,6 +14,7 @@ from apps.shell.yachiyo_agent import (
 )
 from apps.shell.yachiyo_agent.app_name_hints import (
     compact_app_name_hint,
+    is_legacy_app_name_hint,
     legacy_app_name_hint,
     legacy_music_app_name_hint,
     supports_new_message_app_hint,
@@ -115,6 +116,7 @@ def _data_analysis_artifact_kind(path: str) -> str:
 
 def test_runtime_planner_app_name_aliases_are_behind_compatibility_boundary() -> None:
     assert legacy_app_name_hint("Chrome") == "Google Chrome"
+    assert is_legacy_app_name_hint("Chrome") is True
     assert legacy_app_name_hint("一个我没提过的新应用") == "一个我没提过的新应用"
     assert compact_app_name_hint("Google Chrome") == "googlechrome"
     assert supports_new_message_app_hint("Messages") is True
@@ -122,6 +124,25 @@ def test_runtime_planner_app_name_aliases_are_behind_compatibility_boundary() ->
     assert legacy_music_app_name_hint("网易云音乐") == "网易云音乐"
     assert legacy_music_app_name_hint("Apple Music") == "Music"
     assert legacy_music_app_name_hint("YouTube Music") == "YouTube Music"
+
+
+def test_runtime_planner_generic_app_aliases_are_not_legacy_app_names() -> None:
+    for generic_name in (
+        "浏览器",
+        "默认浏览器",
+        "browser",
+        "default browser",
+        "文件管理器",
+        "文件浏览器",
+        "终端",
+        "命令行",
+        "terminal",
+        "音乐播放器",
+        "播放器",
+        "music player",
+    ):
+        assert legacy_app_name_hint(generic_name) == generic_name
+        assert is_legacy_app_name_hint(generic_name) is False
 
 
 def test_runtime_planner_web_destinations_are_behind_compatibility_boundary() -> None:

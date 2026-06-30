@@ -18,6 +18,29 @@ from apps.shell.agent.runtime.app_aliases import (
 from apps.shell.agent.runtime.media_apps import music_app_name_from_text
 
 
+GENERIC_APP_ALIAS_COMPACTS = frozenset(
+    {
+        "browser",
+        "defaultbrowser",
+        "systemdefaultbrowser",
+        "defaultwebbrowser",
+        "webbrowser",
+        "浏览器",
+        "默认浏览器",
+        "系统默认浏览器",
+        "默认网页浏览器",
+        "文件管理器",
+        "文件浏览器",
+        "terminal",
+        "终端",
+        "命令行",
+        "musicplayer",
+        "音乐播放器",
+        "播放器",
+    }
+)
+
+
 def _legacy_app_name_compact(value: str) -> str:
     app_name = str(value or "").strip()
     if not app_name:
@@ -43,19 +66,28 @@ def _legacy_app_name_compact(value: str) -> str:
     return compact
 
 
+def _legacy_alias_lookup(compact: str, app_name: str) -> str:
+    return APP_ALIASES.get(compact, app_name)
+
+
 def legacy_app_name_hint(value: str) -> str:
     app_name = str(value or "").strip()
     if not app_name:
         return ""
     compact = _legacy_app_name_compact(app_name)
-    return APP_ALIASES.get(compact, app_name)
+    if compact in GENERIC_APP_ALIAS_COMPACTS:
+        return app_name
+    return _legacy_alias_lookup(compact, app_name)
 
 
 def is_legacy_app_name_hint(value: str) -> bool:
     app_name = str(value or "").strip()
     if not app_name:
         return False
-    return _legacy_app_name_compact(app_name) in APP_ALIASES
+    compact = _legacy_app_name_compact(app_name)
+    if compact in GENERIC_APP_ALIAS_COMPACTS:
+        return False
+    return compact in APP_ALIASES
 
 
 def compact_app_name_hint(value: str) -> str:
