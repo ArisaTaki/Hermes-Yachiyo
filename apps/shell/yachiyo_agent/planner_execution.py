@@ -297,6 +297,12 @@ def _first_allowed(candidates: Iterable[str], allowed: set[str]) -> str:
 
 
 def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    coordinate_resolution_requests = _coordinate_click_resolution_requests(
+        decision,
+        allowed,
+    )
+    if coordinate_resolution_requests:
+        return coordinate_resolution_requests
     if _has_unavailable_required_desktop_step(decision):
         return []
     requests: list[dict[str, Any]] = []
@@ -704,6 +710,12 @@ def _same_app_control_request(request: dict[str, Any], tool_name: str, app_name:
 
 
 def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    coordinate_resolution_requests = _coordinate_click_resolution_requests(
+        decision,
+        allowed,
+    )
+    if coordinate_resolution_requests:
+        return coordinate_resolution_requests
     if _has_unavailable_required_desktop_step(decision):
         return []
     requests: list[dict[str, Any]] = []
@@ -835,6 +847,97 @@ def _desktop_observation_step_needs_model_followup(
     if _desktop_verify_step_is_direct_control(step_id, tool_name, inputs):
         return False
     return False
+
+
+def _coordinate_click_resolution_requests(
+    decision: Any,
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    if "desktop.click" not in allowed:
+        return []
+    tool_plan = getattr(getattr(decision, "plan", None), "tool_plan", None)
+    steps = list(getattr(tool_plan, "steps", None) or [])
+    click_step = next(
+        (
+            item
+            for item in steps
+            if str(getattr(item, "step_id", "") or "").strip() == "operate-foreground-ui"
+            and str(getattr(item, "status", "") or "").strip() == "unavailable"
+            and str(getattr(item, "capability_id", "") or "").strip() == "desktop.ui_operation"
+        ),
+        None,
+    )
+    if click_step is None:
+        return []
+    click_payload = getattr(click_step, "input_preview", None)
+    if not isinstance(click_payload, Mapping):
+        return []
+    if not str(click_payload.get("target") or "").strip():
+        return []
+    if click_payload.get("x") is not None or click_payload.get("y") is not None:
+        return []
+
+    observation_step = _coordinate_click_resolution_observation_step(steps, allowed)
+    if observation_step is None:
+        return []
+
+    requests: list[dict[str, Any]] = []
+    discover_step = next(
+        (
+            item
+            for item in steps
+            if str(getattr(item, "step_id", "") or "").strip() == "discover-desktop-state"
+            and item is not observation_step
+            and _step_available(item)
+        ),
+        None,
+    )
+    discover_tool = str(getattr(discover_step, "tool_name", "") or "").strip()
+    if discover_step is not None and discover_tool in allowed:
+        discover_payload = getattr(discover_step, "input_preview", None)
+        requests.append(
+            _request(
+                discover_tool,
+                _desktop_request_payload(
+                    discover_tool,
+                    dict(discover_payload) if isinstance(discover_payload, Mapping) else {},
+                ),
+                planning_reason=_desktop_step_planning_reason(discover_step, discover_tool),
+            )
+        )
+
+    observation_tool = str(getattr(observation_step, "tool_name", "") or "").strip()
+    observation_payload = getattr(observation_step, "input_preview", None)
+    request = _request(
+        observation_tool,
+        _desktop_request_payload(
+            observation_tool,
+            dict(observation_payload) if isinstance(observation_payload, Mapping) else {},
+        ),
+        planning_reason=_desktop_step_planning_reason(observation_step, observation_tool),
+    )
+    request["continue_to_model"] = True
+    requests.append(request)
+    return requests
+
+
+def _coordinate_click_resolution_observation_step(
+    steps: list[Any],
+    allowed: set[str],
+) -> Any | None:
+    preferred_tools = {
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.inspect_app",
+        "screen.capture",
+    }
+    for step in steps:
+        if not _step_available(step):
+            continue
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if tool_name in preferred_tools and tool_name in allowed:
+            return step
+    return None
 
 
 def _desktop_observation_prompt_needs_model_followup(prompt: str, inputs: Any) -> bool:

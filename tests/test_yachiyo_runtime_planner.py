@@ -11298,6 +11298,10 @@ def test_runtime_planner_uses_approved_low_level_foreground_click_and_type_when_
         "输入 hello",
         allowed_tools=["desktop.active_window", "desktop.type_text"],
     )
+    target_click_decision = RuntimePlanner().decision(
+        "在当前应用里点击保存按钮",
+        allowed_tools=["desktop.active_window", "desktop.ui_elements", "desktop.click"],
+    )
 
     click_step = _step_by_id(click_decision, "operate-foreground-ui")
     assert click_step.tool_name == "desktop.click"
@@ -11310,6 +11314,16 @@ def test_runtime_planner_uses_approved_low_level_foreground_click_and_type_when_
     assert type_step.input_preview == {"text": "hello"}
     assert type_step.risk_level == "medium"
     assert type_step.approval_required is True
+
+    target_click_step = _step_by_id(target_click_decision, "operate-foreground-ui")
+    assert target_click_step.status == "unavailable"
+    assert target_click_step.tool_name is None
+    assert target_click_step.input_preview == {
+        "target": "保存",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }
 
 
 def test_planner_tool_requests_maps_approved_low_level_foreground_click_and_type() -> None:
@@ -11363,6 +11377,26 @@ def test_planner_tool_requests_maps_approved_low_level_foreground_click_and_type
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
+        },
+    ]
+    assert planner_tool_requests(
+        "在当前应用里点击保存按钮",
+        allowed_tools=["desktop.active_window", "desktop.ui_elements", "desktop.click"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
         },
     ]
 
