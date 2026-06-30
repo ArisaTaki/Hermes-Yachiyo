@@ -605,6 +605,13 @@ Music. Explicit playback requests such as "播放音乐" still use the media
 playback capability, and explicit app names such as Apple Music keep their
 legacy compatibility mapping.
 
+Generic file-manager requests now follow the discovery-first boundary too.
+Prompts such as "打开文件管理器", "打开文件浏览器", and "open a file manager"
+produce `desktop.list_apps` with `query=file manager` and
+`continue_to_model=true` instead of silently canonicalizing to Finder. Explicit
+Finder prompts and safe local path/folder requests still preserve the existing
+Finder/file-access compatibility behavior.
+
 ## Phase 11 - Release Productization
 
 Turn the runtime migration into a product that can be installed and diagnosed
