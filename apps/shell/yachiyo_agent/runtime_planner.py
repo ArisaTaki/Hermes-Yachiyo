@@ -1404,6 +1404,8 @@ class TaskIntentRouter:
             return _empty_intent("report_generation", text)
         shortcut = safe_shortcut_hint(text)
         shortcut_action = str((shortcut or {}).get("action") or "").strip()
+        clipboard_hint = clipboard_operation_hint(text)
+        transform_target = _dynamic_context_transform_target_hint(text)
         if (
             (
                 _looks_like_file_organization_request(text)
@@ -1411,6 +1413,18 @@ class TaskIntentRouter:
             )
             or shortcut_action in {"new_document", "new_note"}
             or _looks_like_schedule_request(text)
+            or (
+                clipboard_hint
+                and str(clipboard_hint.get("action") or "").strip()
+                not in {"read", "copy_selection_read"}
+            )
+            or (capture_note_hint(text) and not transform_target)
+            or _direct_communication_hint(text)
+            or (
+                _looks_like_ui_operation(text)
+                and not _looks_like_context_artifact_request(text)
+                and not transform_target
+            )
         ):
             return _empty_intent("report_generation", text)
         score = _score_terms(
@@ -1435,7 +1449,11 @@ class TaskIntentRouter:
                 "复盘",
             ],
         )
-        transform_target = _dynamic_context_transform_target_hint(text)
+        app_write_target = (
+            {}
+            if transform_target
+            else _app_write_followup_target_hint(text)
+        )
         artifact_context_source = _context_artifact_source_hint(text)
         context_source = (
             str(transform_target.get("context_source") or "").strip()
@@ -1448,6 +1466,32 @@ class TaskIntentRouter:
         file_context = {} if artifact_context_source else _report_file_context_hint(text)
         if score <= 0 and transform_target:
             score = 0.24
+        if score <= 0 and context_source == "visible_text" and _contains_any(
+            text,
+            [
+                "整理",
+                "写",
+                "写进",
+                "写入",
+                "记录",
+                "保存",
+                "保存成",
+                "输出",
+                "导出",
+                "生成",
+                "markdown",
+                "Markdown",
+                "文件",
+                "文档",
+                "save",
+                "export",
+                "output",
+                "format",
+                "write",
+                "markdown file",
+            ],
+        ):
+            score = 0.18
         if score <= 0 and file_context and _contains_any(
             text,
             ["生成", "输出", "写", "总结", "摘要", "summarize", "write", "report"],
@@ -1458,12 +1502,13 @@ class TaskIntentRouter:
         inputs: dict[str, Any] = {}
         if context_source:
             inputs["context_source"] = context_source
-        target_app = str(transform_target.get("target_app_hint") or "").strip()
+        target_payload = transform_target or app_write_target
+        target_app = str(target_payload.get("target_app_hint") or "").strip()
         if target_app:
             inputs["target_app_hint"] = target_app
             inputs["target_action_hint"] = "app_paste"
             container_action = str(
-                transform_target.get("target_container_action_hint") or ""
+                target_payload.get("target_container_action_hint") or ""
             ).strip()
             if container_action:
                 inputs["target_container_action_hint"] = container_action
@@ -13190,7 +13235,15 @@ def _dynamic_context_transform_target_hint(text: str) -> dict[str, str]:
         source = "current_page_content"
     if not source and re.search(r"\bcurrent\s+page\b|当前网页|当前页面", value, flags=re.IGNORECASE):
         source = "current_page_content"
-    if source not in {"selection", "clipboard", "current_page_link", "current_page_content"}:
+    if not source and _looks_like_visible_text_artifact_source(value):
+        source = "visible_text"
+    if source not in {
+        "selection",
+        "clipboard",
+        "current_page_link",
+        "current_page_content",
+        "visible_text",
+    }:
         return {}
     app_name = _non_notes_dynamic_context_target_app(value)
     if not app_name:

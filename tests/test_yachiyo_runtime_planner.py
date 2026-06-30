@@ -6116,8 +6116,16 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
         "把当前窗口内容总结成 markdown 文件",
         allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
     )
+    current_window_markdown_export = RuntimePlanner().decision(
+        "把当前窗口里的内容复制并保存成 markdown",
+        allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
+    )
     current_app_report = RuntimePlanner().decision(
         "把当前应用内容整理成一份报告",
+        allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
+    )
+    current_app_markdown = RuntimePlanner().decision(
+        "把当前应用里的文字整理成 markdown 文件",
         allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
     )
     assert clipboard.selected_intent.kind == "report_generation"
@@ -6182,6 +6190,21 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
         "path": "report.md",
         "body_source": "visible_text",
     }
+    assert current_window_markdown_export.selected_intent.kind == "report_generation"
+    assert current_window_markdown_export.selected_intent.inputs == {
+        "context_source": "visible_text"
+    }
+    assert [step.step_id for step in current_window_markdown_export.plan.tool_plan.steps] == [
+        "read-report-context",
+        "write-report-artifact",
+    ]
+    assert _step_by_id(
+        current_window_markdown_export,
+        "write-report-artifact",
+    ).input_preview == {
+        "path": "report.md",
+        "body_source": "visible_text",
+    }
     assert current_app_report.selected_intent.kind == "report_generation"
     assert current_app_report.selected_intent.inputs == {
         "context_source": "visible_text"
@@ -6190,6 +6213,14 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
         step.tool_name == "workspace.list"
         for step in current_app_report.plan.tool_plan.steps
     )
+    assert current_app_markdown.selected_intent.kind == "report_generation"
+    assert current_app_markdown.selected_intent.inputs == {
+        "context_source": "visible_text"
+    }
+    assert [step.step_id for step in current_app_markdown.plan.tool_plan.steps] == [
+        "read-report-context",
+        "write-report-artifact",
+    ]
 
     read_only = RuntimePlanner().decision(
         "读取剪贴板",
@@ -6206,6 +6237,7 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "app.focus",
         "app.open",
         "desktop.safe_shortcut",
+        "desktop.ui_elements",
     ]
     page_prefetch = {
         "protocol": "json_fallback",
@@ -6287,6 +6319,10 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "把当前网页摘要写进 Notion 新页面",
         allowed_tools=allowed,
     )
+    current_app_new_page = RuntimePlanner().decision(
+        "把当前应用里的文字总结到 Notion 新页面",
+        allowed_tools=allowed,
+    )
     natural_new_page = RuntimePlanner().decision(
         "把当前网页总结到 Notion 新页面",
         allowed_tools=allowed,
@@ -6309,6 +6345,20 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "把当前网页总结到 Notion 新页面",
         allowed,
     ) == [page_prefetch]
+    assert current_app_new_page.selected_intent.kind == "report_generation"
+    assert current_app_new_page.selected_intent.inputs == {
+        "context_source": "visible_text",
+        "target_app_hint": "Notion",
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert [step.step_id for step in current_app_new_page.plan.tool_plan.steps] == [
+        "read-report-context",
+        "prepare-report-target-app",
+    ]
+    assert _step_by_id(current_app_new_page, "read-report-context").tool_name == (
+        "desktop.ui_elements"
+    )
     english_new_page = RuntimePlanner().decision(
         "write current page summary into Notion new page",
         allowed_tools=allowed,
@@ -21623,9 +21673,21 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
         "读取当前窗口内容，然后把摘要保存成 markdown 文件",
         allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
     )
+    current_window_markdown_export_requests = planner_tool_requests(
+        "把当前窗口里的内容复制并保存成 markdown",
+        allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
+    )
+    current_app_markdown_requests = planner_tool_requests(
+        "把当前应用里的文字整理成 markdown 文件",
+        allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
+    )
     current_app_report_requests = planner_tool_requests(
         "把当前应用内容整理成一份报告",
         allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
+    )
+    current_app_to_notion_requests = planner_tool_requests(
+        "把当前应用里的文字总结到 Notion 新页面",
+        allowed_tools=["desktop.ui_elements", "app.focus", "artifact.write"],
     )
     current_window_clipboard_requests = planner_tool_requests(
         "把当前窗口内容总结后复制到剪贴板",
@@ -21693,6 +21755,8 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
             "continue_to_model": True,
         }
     ]
+    assert current_window_markdown_export_requests == current_window_markdown_requests
+    assert current_app_markdown_requests == current_window_markdown_requests
     assert current_app_report_requests == [
         {
             "protocol": "json_fallback",
@@ -21703,6 +21767,7 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
             "continue_to_model": True,
         }
     ]
+    assert current_app_to_notion_requests == current_app_report_requests
     assert current_window_clipboard_requests == [
         {
             "protocol": "json_fallback",
