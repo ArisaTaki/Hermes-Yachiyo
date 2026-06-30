@@ -9826,6 +9826,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         or bool(intent.inputs.get("target_name_hint"))
     ):
         score += 0.28
+        if intent.inputs.get("target_name_hint"):
+            score += 0.42
         if _looks_like_multi_agent_request(text):
             score += 0.3
         if _contains_any(text, ["分工", "分别", "各自", "并行", "delegate", "assign"]):
@@ -10829,7 +10831,10 @@ def _looks_like_visible_data_context_source(text: str) -> bool:
         ],
     ):
         return False
-    return _visible_context_marker_matches(value) and _visible_data_marker_matches(value)
+    return (
+        _visible_context_marker_matches(value)
+        and _visible_data_marker_matches(value)
+    ) or _deictic_visible_data_marker_matches(value)
 
 
 def _looks_like_desktop_visible_data_context_source(text: str) -> bool:
@@ -10946,6 +10951,22 @@ def _visible_data_marker_matches(value: str) -> bool:
             "当前表",
             "前台表",
         ],
+    )
+
+
+def _deictic_visible_data_marker_matches(value: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:"
+            r"(?:当前)?这\s*(?:份|张|个|组|条|套)?"
+            r"|this|these"
+            r")\s*(?:"
+            r"数据集|数据|电子表格|表格|报表|明细表|台账|清单|表"
+            r"|dataset|data|table|spreadsheet|worksheet|sheet|csv|tsv|json"
+            r")",
+            value,
+            flags=re.IGNORECASE,
+        )
     )
 
 

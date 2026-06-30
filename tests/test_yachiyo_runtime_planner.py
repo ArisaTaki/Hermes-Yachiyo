@@ -1159,7 +1159,12 @@ def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
 def test_runtime_planner_handles_natural_data_analysis_contexts() -> None:
     generic_data = RuntimePlanner().decision(
         "分析这份数据并输出报告",
-        allowed_tools=["workspace.list", "terminal.run", "artifact.write"],
+        allowed_tools=[
+            "desktop.ui_elements",
+            "workspace.list",
+            "terminal.run",
+            "artifact.write",
+        ],
     )
     latest_local_data = RuntimePlanner().decision(
         "读取 data 目录里最新的销售表，分析并输出报告",
@@ -1181,13 +1186,14 @@ def test_runtime_planner_handles_natural_data_analysis_contexts() -> None:
     )
 
     assert generic_data.selected_intent.kind == "data_analysis"
-    assert generic_data.selected_intent.missing_inputs == ["data_source"]
+    assert generic_data.selected_intent.missing_inputs == []
+    assert generic_data.selected_intent.inputs["context_source"] == "visible_text"
     assert [step.step_id for step in generic_data.plan.tool_plan.steps] == [
-        "inspect-data-source",
+        "read-data-context",
         "run-analysis",
         "write-analysis-artifact",
     ]
-    assert _step_by_id(generic_data, "inspect-data-source").tool_name == "workspace.list"
+    assert _step_by_id(generic_data, "read-data-context").tool_name == "desktop.ui_elements"
 
     assert latest_local_data.selected_intent.kind == "data_analysis"
     assert latest_local_data.selected_intent.inputs["data_source_scope_hint"] == "data"
@@ -19729,6 +19735,34 @@ def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> 
         "根据屏幕上这张表做数据分析",
         allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
     )
+    this_data_requests = planner_tool_requests(
+        "帮我分析这份数据，输出一份报告",
+        allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
+    )
+    this_table_requests = planner_tool_requests(
+        "分析这张表并输出 markdown 报告",
+        allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
+    )
+    this_data_to_notion_requests = planner_tool_requests(
+        "帮我分析这份数据，输出一份报告并写进 Notion 新页面",
+        allowed_tools=[
+            "desktop.ui_elements",
+            "terminal.run",
+            "artifact.write",
+            "app.focus",
+            "desktop.type_text",
+        ],
+    )
+    this_data_to_notion_decision = RuntimePlanner().decision(
+        "帮我分析这份数据，输出一份报告并写进 Notion 新页面",
+        allowed_tools=[
+            "desktop.ui_elements",
+            "terminal.run",
+            "artifact.write",
+            "app.focus",
+            "desktop.type_text",
+        ],
+    )
     foreground_excel_table_requests = planner_tool_requests(
         "分析前台 Excel 表格并输出报告",
         allowed_tools=["desktop.ui_elements", "terminal.run", "artifact.write"],
@@ -19835,6 +19869,21 @@ def test_planner_tool_requests_prefetches_context_data_source_for_analysis() -> 
         }
     ]
     assert current_screen_this_table_requests == current_window_ui_requests
+    assert this_data_requests == current_window_ui_requests
+    assert this_table_requests == current_window_ui_requests
+    assert this_data_to_notion_requests == current_window_ui_requests
+    assert this_data_to_notion_decision.selected_intent.missing_inputs == []
+    assert this_data_to_notion_decision.selected_intent.inputs["context_source"] == "visible_text"
+    assert this_data_to_notion_decision.selected_intent.inputs["target_app_hint"] == "Notion"
+    assert [
+        step.step_id
+        for step in this_data_to_notion_decision.plan.tool_plan.steps
+    ] == [
+        "read-data-context",
+        "run-analysis",
+        "write-analysis-artifact",
+        "prepare-analysis-target-app",
+    ]
     assert foreground_excel_table_requests == current_window_ui_requests
     assert current_page_table_requests == [
         {
