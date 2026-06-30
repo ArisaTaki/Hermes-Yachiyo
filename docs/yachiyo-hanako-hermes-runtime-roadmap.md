@@ -709,8 +709,8 @@ Exit evidence:
 - README, user manual, architecture notes, release notes, and contribution
   guide describe the supported product shape and non-goals.
 - Demo scripts show Hanako/Hermes-level flows: arbitrary app operation, data
-  analysis artifact, browser research, approval resume, GroupRun, Workflow,
-  and Studio replay.
+  analysis artifact, browser research, approval resume, Yachiyo route approval,
+  GroupRun, Workflow, and Studio replay.
 - CI or documented local release gates run the core Python tests, route/API
   tests, UI smokes, packaging smoke, and security/secret checks.
 - Legacy route compatibility and DB schema invariants are explicitly verified

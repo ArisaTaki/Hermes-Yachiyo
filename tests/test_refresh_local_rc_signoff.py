@@ -807,10 +807,10 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
                 "status": "partial",
                 "release_level": "partial_demo_ready",
                 "complete": False,
-                "passed_count": 7,
+                "passed_count": 8,
                 "selected_count": 8,
-                "passed_required_flow_count": 7,
-                "required_flow_count": 13,
+                "passed_required_flow_count": 8,
+                "required_flow_count": 14,
                 "missing_required_flow_ids": [
                     "real_desktop_interaction",
                     "workflow_provider",
@@ -852,10 +852,10 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
     assert "--include-provider-workflow" in output
     assert "local RC public demo:" in output
     assert "- status: partial" in output
-    assert "- selected demos: 7/8 passed" in output
+    assert "- selected demos: 8/8 passed" in output
     assert "- complete evidence: false" in output
     assert "- release level: partial_demo_ready" in output
-    assert "- required demos: 7/13 passed" in output
+    assert "- required demos: 8/14 passed" in output
     assert "- missing required demos: real_desktop_interaction, workflow_provider" in output
     assert "demo blocker real_desktop_interaction: skipped" in output
     assert "--include-real-desktop-interaction" in output

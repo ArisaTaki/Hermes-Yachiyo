@@ -68,8 +68,9 @@ python scripts/run_public_demo_smokes.py \
 
 By default it runs only safe demos: data analysis artifact, browser research
 artifact planning, desktop planner discovery, non-mutating real desktop app
-discovery, approval resume, GroupRun replay, and WorkflowRun replay. Full
-Hanako/Hermes-level demo evidence requires explicit opt-in:
+discovery, approval resume, Yachiyo approval route evidence, GroupRun replay,
+and WorkflowRun replay. Full Hanako/Hermes-level demo evidence requires
+explicit opt-in:
 
 ```bash
 python scripts/run_public_demo_smokes.py \

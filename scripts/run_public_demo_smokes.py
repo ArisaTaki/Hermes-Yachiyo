@@ -95,6 +95,18 @@ def demo_flows(tmp_dir: Path) -> list[DemoFlow]:
             report_json=tmp_dir / "approval-resume.json",
         ),
         DemoFlow(
+            id="yachiyo_route_approval",
+            label="Yachiyo approval route boundary",
+            category="source",
+            command=(
+                sys.executable,
+                "scripts/smoke_yachiyo_route_approval.py",
+                "--report-json",
+                str(tmp_dir / "yachiyo-route-approval.json"),
+            ),
+            report_json=tmp_dir / "yachiyo-route-approval.json",
+        ),
+        DemoFlow(
             id="group_run",
             label="GroupRun public snapshot and replay",
             category="source",

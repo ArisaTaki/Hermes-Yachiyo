@@ -136,11 +136,18 @@ def summarize_release_smoke(
 ) -> dict[str, Any]:
     evidence: dict[str, list[dict[str, Any]]] = {}
     source_reports: list[str] = []
+    visited_reports: set[Path] = set()
     for report_path in reports:
         path = _resolve_path(Path(report_path))
         source_reports.append(_display_path(path))
         report = _load_report(path)
-        _collect_report_evidence(report, source=_display_path(path), evidence=evidence)
+        visited_reports.add(path.resolve())
+        _collect_report_evidence(
+            report,
+            source=_display_path(path),
+            evidence=evidence,
+            visited_reports=visited_reports,
+        )
     diagnostics_sources: list[str] = []
     for archive_path in diagnostics_zips:
         path = _resolve_path(Path(archive_path))
@@ -216,6 +223,7 @@ def _collect_report_evidence(
     *,
     source: str,
     evidence: dict[str, list[dict[str, Any]]],
+    visited_reports: set[Path],
 ) -> None:
     mode = str(report.get("mode") or "").strip()
     if mode and report.get("ok") is True:
@@ -228,7 +236,12 @@ def _collect_report_evidence(
                 source=source,
                 kind="smoke_mode_capability",
             )
-    _collect_public_demo_evidence(report, source=source, evidence=evidence)
+    _collect_public_demo_evidence(
+        report,
+        source=source,
+        evidence=evidence,
+        visited_reports=visited_reports,
+    )
     for section_id in sorted(SECTION_IDS):
         section = report.get(section_id)
         if isinstance(section, dict) and _section_passed(section):
@@ -370,6 +383,7 @@ def _collect_public_demo_evidence(
     *,
     source: str,
     evidence: dict[str, list[dict[str, Any]]],
+    visited_reports: set[Path],
 ) -> None:
     if not isinstance(report.get("flows"), list):
         return
@@ -398,6 +412,39 @@ def _collect_public_demo_evidence(
             source=source,
             kind="public_demo",
             **assessment,
+        )
+    _collect_public_demo_flow_reports(
+        report,
+        evidence=evidence,
+        visited_reports=visited_reports,
+    )
+
+
+def _collect_public_demo_flow_reports(
+    report: Mapping[str, Any],
+    *,
+    evidence: dict[str, list[dict[str, Any]]],
+    visited_reports: set[Path],
+) -> None:
+    for flow in _dict_list(report.get("flows")):
+        if flow.get("status") != "passed":
+            continue
+        report_json = str(flow.get("report_json") or "").strip()
+        if not report_json:
+            continue
+        path = _resolve_path(Path(report_json))
+        resolved = path.resolve()
+        if resolved in visited_reports:
+            continue
+        visited_reports.add(resolved)
+        flow_report = _load_report(path)
+        if not flow_report:
+            continue
+        _collect_report_evidence(
+            flow_report,
+            source=_display_path(path),
+            evidence=evidence,
+            visited_reports=visited_reports,
         )
 
 

@@ -68,6 +68,8 @@ def public_release_gate_checks(
         command = [
             sys.executable,
             "scripts/run_public_demo_smokes.py",
+            "--tmp-dir",
+            str(tmp_dir),
             "--output-json",
             str(public_demo_json),
             "--output-markdown",

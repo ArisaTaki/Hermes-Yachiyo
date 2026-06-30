@@ -26,10 +26,10 @@ def _write_public_demo_report(command: list[str], *, release_level: str) -> None
         "status": "passed" if release_level == "full_public_demo_ready" else "partial",
         "release_level": release_level,
         "complete": release_level == "full_public_demo_ready",
-        "selected_count": 13 if release_level == "full_public_demo_ready" else 7,
-        "passed_count": 13 if release_level == "full_public_demo_ready" else 7,
-        "required_flow_count": 13,
-        "passed_required_flow_count": 13 if release_level == "full_public_demo_ready" else 7,
+        "selected_count": 14 if release_level == "full_public_demo_ready" else 8,
+        "passed_count": 14 if release_level == "full_public_demo_ready" else 8,
+        "required_flow_count": 14,
+        "passed_required_flow_count": 14 if release_level == "full_public_demo_ready" else 8,
         "missing_required_flow_ids": []
         if release_level == "full_public_demo_ready"
         else ["real_desktop_interaction", "workflow_provider"],
@@ -120,6 +120,12 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     ]
     release_pytest_command = next(command for command in commands if "pytest" in command)
     assert "tests/test_public_release_gate.py" in release_pytest_command
+    public_demo_command = next(
+        command for command in commands if "scripts/run_public_demo_smokes.py" in command
+    )
+    assert public_demo_command[public_demo_command.index("--tmp-dir") + 1] == str(
+        tmp_path / "tmp" / "gate"
+    )
     public_demo = next(item for item in summary["checks"] if item["id"] == "public_demo")
     assert public_demo["release_level"] == "partial_demo_ready"
     assert public_demo["missing_required_flow_ids"] == [

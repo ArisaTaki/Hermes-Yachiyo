@@ -75,10 +75,10 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
                 "status": "passed",
                 "release_level": "full_public_demo_ready",
                 "complete": True,
-                "selected_count": 13,
-                "passed_count": 13,
-                "required_flow_count": 13,
-                "passed_required_flow_count": 13,
+                "selected_count": 14,
+                "passed_count": 14,
+                "required_flow_count": 14,
+                "passed_required_flow_count": 14,
                 "missing_required_flow_ids": [],
                 "release_blockers": [],
                 "flows": [{"id": "real_desktop_app_open", "status": "passed"}],
@@ -137,10 +137,10 @@ def test_release_smoke_summary_requires_complete_public_demo(tmp_path, monkeypat
                 "status": "partial",
                 "release_level": "partial_demo_ready",
                 "complete": False,
-                "selected_count": 7,
-                "passed_count": 7,
-                "required_flow_count": 13,
-                "passed_required_flow_count": 7,
+                "selected_count": 8,
+                "passed_count": 8,
+                "required_flow_count": 14,
+                "passed_required_flow_count": 8,
                 "missing_required_flow_ids": ["real_desktop_app_open"],
                 "release_blockers": [
                     {
@@ -191,10 +191,10 @@ def test_release_smoke_summary_rejects_inconsistent_public_demo_level(
                 "status": "passed",
                 "release_level": "partial_demo_ready",
                 "complete": True,
-                "selected_count": 13,
-                "passed_count": 13,
-                "required_flow_count": 13,
-                "passed_required_flow_count": 13,
+                "selected_count": 14,
+                "passed_count": 14,
+                "required_flow_count": 14,
+                "passed_required_flow_count": 14,
                 "missing_required_flow_ids": [],
                 "release_blockers": [],
                 "flows": [{"id": "workflow_ui", "status": "passed"}],
@@ -226,6 +226,61 @@ def test_release_smoke_summary_accepts_raw_smoke_mode_reports(tmp_path, monkeypa
     group_run = next(item for item in summary["items"] if item["id"] == "group_run")
     assert group_run["status"] == "passed"
     assert group_run["present_evidence_ids"] == ["source_group_run_timeline"]
+
+
+def test_release_smoke_summary_collects_passed_public_demo_flow_reports(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    public_demo_path = tmp_path / "tmp" / "public-demo.json"
+    group_report_path = tmp_path / "tmp" / "group-run.json"
+    skipped_report_path = tmp_path / "tmp" / "skipped-artifact.json"
+    public_demo_path.parent.mkdir(parents=True, exist_ok=True)
+    group_report_path.write_text(
+        json.dumps({"ok": True, "mode": "group_run_timeline_smoke"}),
+        encoding="utf-8",
+    )
+    skipped_report_path.write_text(
+        json.dumps({"ok": True, "mode": "data_analysis_artifact_smoke"}),
+        encoding="utf-8",
+    )
+    public_demo_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "status": "partial",
+                "release_level": "partial_demo_ready",
+                "complete": False,
+                "selected_count": 1,
+                "passed_count": 1,
+                "required_flow_count": 14,
+                "passed_required_flow_count": 1,
+                "missing_required_flow_ids": ["workflow_provider"],
+                "flows": [
+                    {
+                        "id": "group_run",
+                        "status": "passed",
+                        "report_json": "tmp/group-run.json",
+                    },
+                    {
+                        "id": "data_analysis_artifact",
+                        "status": "skipped",
+                        "report_json": "tmp/skipped-artifact.json",
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke([public_demo_path])
+
+    group_run = next(item for item in summary["items"] if item["id"] == "group_run")
+    artifact = next(item for item in summary["items"] if item["id"] == "artifact_readback")
+    assert group_run["status"] == "passed"
+    assert group_run["evidence"]["source_group_run_timeline"][0]["source"] == "tmp/group-run.json"
+    assert artifact["status"] == "missing"
 
 
 def test_release_smoke_cli_writes_json_and_markdown(tmp_path, monkeypatch, capsys):
@@ -269,10 +324,10 @@ def test_release_smoke_markdown_shows_public_demo_blockers(tmp_path, monkeypatch
                 "status": "partial",
                 "release_level": "partial_demo_ready",
                 "complete": False,
-                "selected_count": 7,
-                "passed_count": 7,
-                "required_flow_count": 13,
-                "passed_required_flow_count": 7,
+                "selected_count": 8,
+                "passed_count": 8,
+                "required_flow_count": 14,
+                "passed_required_flow_count": 8,
                 "missing_required_flow_ids": ["workflow_provider"],
                 "release_blockers": [
                     {"id": "workflow_provider", "status": "skipped"}
