@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
 import apps.shell.model_profiles as model_profiles
 from packages.security import contains_sensitive_text, sanitize_sensitive_value
 from scripts.smoke_native_agent_full_chain import run_full_chain_smoke
+from scripts.smoke_openai_compatible_stream import run_stream_smoke
 from scripts.smoke_native_workflow_full_chain import run_workflow_full_chain_smoke
 
 _FAKE_BASE_URL = "https://oha-yachiyo-provider-contract.local/v1"
@@ -217,6 +218,16 @@ def _stream_response(payload: dict[str, Any]) -> _FakeProviderResponse:
                 )
             ]
         )
+    if "workspace_read" in names and "README.md" in prompt_text:
+        return _FakeProviderResponse(
+            chunks=[
+                _tool_call_chunk(
+                    call_id="call_provider_contract_stream",
+                    name="workspace_read",
+                    arguments={"path": "README.md"},
+                )
+            ]
+        )
     if "workspace_read" in names:
         return _FakeProviderResponse(
             chunks=[
@@ -277,6 +288,26 @@ def _patched_provider_transport() -> Iterator[None]:
 
 def run_contract_smoke() -> dict[str, Any]:
     with _patched_provider_transport():
+        text_stream = run_stream_smoke(
+            base_url=_FAKE_BASE_URL,
+            model=_FAKE_MODEL,
+            api_key=_FAKE_API_KEY,
+            require_content=True,
+            expect_finish_reasons=["stop"],
+        )
+        tool_call_stream = run_stream_smoke(
+            base_url=_FAKE_BASE_URL,
+            model=_FAKE_MODEL,
+            api_key=_FAKE_API_KEY,
+            tool_call=True,
+            require_tool_call=True,
+            require_tool_result_content=True,
+            expect_tool_name="workspace_read",
+            expect_tool_argument_substrings=["README.md"],
+            expect_tool_argument_json_fields=["path=README.md"],
+            expect_finish_reasons=["tool_calls"],
+            expect_tool_result_finish_reasons=["stop"],
+        )
         native_agent = run_full_chain_smoke(
             base_url=_FAKE_BASE_URL,
             model=_FAKE_MODEL,
@@ -288,6 +319,16 @@ def run_contract_smoke() -> dict[str, Any]:
             api_key=_FAKE_API_KEY,
         )
     checks = [
+        {
+            "label": "text_stream_contract",
+            "summary": text_stream,
+            "ok": bool(text_stream.get("ok")),
+        },
+        {
+            "label": "tool_call_stream_contract",
+            "summary": tool_call_stream,
+            "ok": bool(tool_call_stream.get("ok")),
+        },
         {
             "label": "native_agent_full_chain_contract",
             "summary": native_agent,

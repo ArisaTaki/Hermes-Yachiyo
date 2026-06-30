@@ -110,6 +110,24 @@ def _native_provider_contract_report() -> dict[str, object]:
                 "provider": "local_fake_openai_compatible_sse",
                 "checks": [
                     {
+                        "label": "text_stream_contract",
+                        "ok": True,
+                        "summary": {
+                            "ok": True,
+                            "finish_reasons": ["stop"],
+                            "content_chars": 42,
+                        },
+                    },
+                    {
+                        "label": "tool_call_stream_contract",
+                        "ok": True,
+                        "summary": {
+                            "ok": True,
+                            "tool_call_count": 1,
+                            "tool_result_followup_finish_reasons": ["stop"],
+                        },
+                    },
+                    {
                         "label": "native_agent_full_chain_contract",
                         "ok": True,
                         "summary": {
@@ -299,12 +317,18 @@ def test_capability_summary_reports_full_native_agent_matrix():
     assert "pipeline-report.md" in multi_tool["evidence_summary"]["artifact_paths"]
 
 
-def test_capability_summary_uses_native_provider_contract_for_runtime_full_chain_only():
+def test_capability_summary_uses_native_provider_contract_for_streams_and_runtime_full_chain():
     result = summary.summarize_capabilities(_native_provider_contract_report())
 
     by_id = {item["id"]: item for item in result["capabilities"]}
-    assert by_id["provider_text_stream"]["status"] == "missing"
-    assert by_id["provider_tool_call_stream"]["status"] == "missing"
+    assert by_id["provider_text_stream"]["status"] == "passed"
+    assert by_id["provider_text_stream"]["evidence_summary"]["evidence_source"] == (
+        "native_provider_contract_smoke"
+    )
+    assert by_id["provider_tool_call_stream"]["status"] == "passed"
+    assert by_id["provider_tool_call_stream"]["evidence_summary"]["evidence_source"] == (
+        "native_provider_contract_smoke"
+    )
     assert by_id["model_profile_readiness"]["status"] == "passed"
     assert by_id["agent_workspace_read"]["status"] == "passed"
     assert by_id["agent_artifact_write"]["status"] == "passed"
@@ -317,14 +341,12 @@ def test_capability_summary_uses_native_provider_contract_for_runtime_full_chain
     assert by_id["agent_multi_tool_pipeline"]["evidence_summary"]["evidence_source"] == (
         "native_provider_contract_smoke"
     )
-    provider_action = {
-        item["id"]: item
-        for item in result["next_actions"]
-    }["provider_smoke"]
-    assert provider_action["capability_ids"] == [
-        "provider_text_stream",
-        "provider_tool_call_stream",
-    ]
+    assert {item["id"] for item in result["next_actions"]} == {
+        "source_capability_smoke",
+        "real_desktop_smokes",
+        "packaged_backend_bridge_smoke",
+        "packaged_app_smoke",
+    }
 
 
 def test_capability_summary_does_not_hide_failed_real_provider_with_contract():
@@ -338,6 +360,8 @@ def test_capability_summary_does_not_hide_failed_real_provider_with_contract():
     result = summary.summarize_capabilities(report)
 
     by_id = {item["id"]: item for item in result["capabilities"]}
+    assert by_id["provider_text_stream"]["status"] == "missing"
+    assert by_id["provider_tool_call_stream"]["status"] == "missing"
     assert by_id["agent_workspace_read"]["status"] == "missing"
     assert by_id["agent_multi_tool_pipeline"]["status"] == "missing"
     assert by_id["advanced_workflow_orchestration"]["status"] == "missing"

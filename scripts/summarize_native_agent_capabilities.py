@@ -385,6 +385,13 @@ def _summary_ok(provider_check: dict[str, Any] | None) -> bool:
     return isinstance(summary, dict) and summary.get("ok") is True
 
 
+def _contract_summary_ok(contract_check: dict[str, Any] | None) -> bool:
+    if not isinstance(contract_check, dict) or contract_check.get("ok") is not True:
+        return False
+    summary = contract_check.get("summary")
+    return isinstance(summary, dict) and summary.get("ok") is True
+
+
 def _check_ok(checks: dict[str, dict[str, Any]], name: str) -> bool:
     item = checks.get(name)
     return isinstance(item, dict) and item.get("ok") is True
@@ -639,6 +646,7 @@ def _capability_status(
     *,
     report: dict[str, Any],
     provider_checks: dict[str, dict[str, Any]],
+    contract_checks: dict[str, dict[str, Any]],
     native_agent_checks: dict[str, dict[str, Any]],
     native_workflow_checks: dict[str, dict[str, Any]],
     native_agent_source: str,
@@ -653,10 +661,18 @@ def _capability_status(
     if capability_id == "provider_text_stream":
         summary = _first_summary_check(provider_checks, "text_stream")
         ok = _summary_ok(provider_checks.get("text_stream"))
-        return ("passed" if ok else "missing", {
+        evidence_source = ""
+        if not ok and not _provider_smoke_failed_or_requested(report):
+            contract_summary = _first_summary_check(contract_checks, "text_stream_contract")
+            contract_ok = _contract_summary_ok(contract_checks.get("text_stream_contract"))
+            if contract_ok:
+                summary = contract_summary
+                ok = True
+                evidence_source = "native_provider_contract_smoke"
+        return ("passed" if ok else "missing", _with_evidence_source({
             "finish_reasons": summary.get("finish_reasons", []),
             "content_chars": summary.get("content_chars"),
-        })
+        }, evidence_source))
     if capability_id == "provider_tool_call_stream":
         summary = _first_summary_check(provider_checks, "tool_call_stream")
         ok = (
@@ -664,10 +680,25 @@ def _capability_status(
             and int(summary.get("tool_call_count") or 0) >= 1
             and summary.get("tool_result_followup_finish_reasons") == ["stop"]
         )
-        return ("passed" if ok else "missing", {
+        evidence_source = ""
+        if not ok and not _provider_smoke_failed_or_requested(report):
+            contract_summary = _first_summary_check(
+                contract_checks,
+                "tool_call_stream_contract",
+            )
+            contract_ok = (
+                _contract_summary_ok(contract_checks.get("tool_call_stream_contract"))
+                and int(contract_summary.get("tool_call_count") or 0) >= 1
+                and contract_summary.get("tool_result_followup_finish_reasons") == ["stop"]
+            )
+            if contract_ok:
+                summary = contract_summary
+                ok = True
+                evidence_source = "native_provider_contract_smoke"
+        return ("passed" if ok else "missing", _with_evidence_source({
             "tool_call_count": summary.get("tool_call_count"),
             "tool_result_followup_finish_reasons": summary.get("tool_result_followup_finish_reasons", []),
-        })
+        }, evidence_source))
     if capability_id == "agent_multi_tool_pipeline":
         item = native_agent_checks.get("agent_multi_tool_pipeline", {})
         ok = (
@@ -751,6 +782,7 @@ def summarize_capabilities(report: dict[str, Any]) -> dict[str, Any]:
             definition["id"],
             report=report,
             provider_checks=provider_checks,
+            contract_checks=contract_checks,
             native_agent_checks=native_agent_checks,
             native_workflow_checks=native_workflow_checks,
             native_agent_source=native_agent_source,

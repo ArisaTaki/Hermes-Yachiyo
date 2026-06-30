@@ -36,6 +36,24 @@ def _stub_native_provider_contract_source_smoke(monkeypatch):
             "provider": "local_fake_openai_compatible_sse",
             "checks": [
                 {
+                    "label": "text_stream_contract",
+                    "ok": True,
+                    "summary": {
+                        "ok": True,
+                        "finish_reasons": ["stop"],
+                        "content_chars": 42,
+                    },
+                },
+                {
+                    "label": "tool_call_stream_contract",
+                    "ok": True,
+                    "summary": {
+                        "ok": True,
+                        "tool_call_count": 1,
+                        "tool_result_followup_finish_reasons": ["stop"],
+                    },
+                },
+                {
                     "label": "native_agent_full_chain_contract",
                     "ok": True,
                     "summary": {
@@ -1491,10 +1509,12 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
 
     output = capsys.readouterr().out
     assert "planner runtime tool parity smoke: passed" in output
-    assert "Native Agent capability matrix: incomplete" in output
-    assert "- missing[provider]: provider_text_stream" in output
+    assert "Native Agent capability matrix: incomplete (25/30 passed)" in output
+    assert "- missing[provider]:" not in output
+    assert "- missing[packaged]: packaged_backend_bridge_identity, packaged_app_bridge_isolation" in output
     assert "Native Agent capability matrix next actions:" in output
-    assert "--run-provider-smoke" in output
+    assert "real_desktop_smokes" in output
+    assert "packaged_backend_bridge_smoke" in output
     report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
     section = report["planner_runtime_tool_parity_smoke"]
     assert section["status"] == "passed"
@@ -1518,8 +1538,11 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
     assert capability_by_id["source_planner_runtime_tool_parity"]["status"] == "passed"
     assert capability_by_id["source_agent_entrypoint_desktop_execution"]["status"] == "passed"
     assert capability_by_id["source_agent_studio_planner_orchestration"]["status"] == "passed"
-    assert capability_by_id["provider_text_stream"]["status"] == "missing"
-    assert matrix["missing_by_category"]["provider"]
+    assert capability_by_id["provider_text_stream"]["status"] == "passed"
+    assert capability_by_id["provider_text_stream"]["evidence_summary"][
+        "evidence_source"
+    ] == "native_provider_contract_smoke"
+    assert "provider" not in matrix["missing_by_category"]
     assert matrix["next_actions"]
     assert all(
         case["checks"]["request_tools_dispatched"]
@@ -1942,12 +1965,19 @@ def test_release_candidate_verifier_reports_native_provider_contract_smoke(
     assert section["evidence"]["mode"] == "native_provider_contract_smoke"
     assert section["evidence"]["provider"] == "local_fake_openai_compatible_sse"
     matrix = report["native_agent_capability_matrix"]
-    provider_capability = {
-        item["id"]: item["status"]
+    provider_capabilities = {
+        item["id"]: item
         for item in matrix["capabilities"]
-        if item["id"] == "provider_text_stream"
+        if item["id"] in {"provider_text_stream", "provider_tool_call_stream"}
     }
-    assert provider_capability == {"provider_text_stream": "missing"}
+    assert provider_capabilities["provider_text_stream"]["status"] == "passed"
+    assert provider_capabilities["provider_text_stream"]["evidence_summary"][
+        "evidence_source"
+    ] == "native_provider_contract_smoke"
+    assert provider_capabilities["provider_tool_call_stream"]["status"] == "passed"
+    assert provider_capabilities["provider_tool_call_stream"]["evidence_summary"][
+        "evidence_source"
+    ] == "native_provider_contract_smoke"
 
 
 def test_release_candidate_verifier_fails_when_native_provider_contract_smoke_fails(
@@ -4164,11 +4194,10 @@ def test_release_candidate_verifier_records_gatekeeper_readiness(
 
     output = capsys.readouterr().out
     assert "Gatekeeper readiness: passed" in output
-    assert [command[:2] for command in commands[:2]] == [
-        ["hdiutil", "attach"],
-        ["xattr", "-p"],
-    ]
-    assert commands[-1][:2] == ["hdiutil", "detach"]
+    command_prefixes = [command[:2] for command in commands]
+    attach_index = command_prefixes.index(["hdiutil", "attach"])
+    assert command_prefixes[attach_index + 1] == ["xattr", "-p"]
+    assert ["hdiutil", "detach"] in command_prefixes[attach_index + 1 :]
     report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
     assert report["ok"] is True
     assert report["gatekeeper_readiness"]["status"] == "passed"

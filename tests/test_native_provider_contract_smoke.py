@@ -11,6 +11,14 @@ def test_native_provider_contract_smoke_exercises_full_chain_without_secret_leak
     assert report["ok"] is True
     assert report["mode"] == "native_provider_contract_smoke"
     by_label = {check["label"]: check for check in report["checks"]}
+    assert by_label["text_stream_contract"]["ok"] is True
+    assert by_label["text_stream_contract"]["summary"]["content_chars"] > 0
+    assert by_label["text_stream_contract"]["summary"]["finish_reasons"] == ["stop"]
+    assert by_label["tool_call_stream_contract"]["ok"] is True
+    assert by_label["tool_call_stream_contract"]["summary"]["tool_call_count"] == 1
+    assert by_label["tool_call_stream_contract"]["summary"][
+        "tool_result_followup_finish_reasons"
+    ] == ["stop"]
     assert by_label["native_agent_full_chain_contract"]["ok"] is True
     assert by_label["native_workflow_full_chain_contract"]["ok"] is True
 

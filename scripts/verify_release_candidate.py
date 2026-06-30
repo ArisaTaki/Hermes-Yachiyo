@@ -5753,6 +5753,10 @@ def verify_release_candidate(
         and existing_capability_matrix.get("status") in {"passed", "incomplete"}
         and isinstance(existing_capability_matrix.get("capabilities"), list)
         and existing_capability_matrix.get("capabilities")
+        and (
+            existing_capability_matrix.get("source_report")
+            or existing_capability_matrix.get("source_reports")
+        )
     ):
         capability_matrix = existing_capability_matrix
         capability_matrix["run_requested"] = run_provider_smoke

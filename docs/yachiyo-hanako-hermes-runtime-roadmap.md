@@ -753,6 +753,13 @@ redacted diagnostics bundle, release-smoke summary, and public-demo smoke
 summary during each local RC refresh, and `--print-status` prints capability
 readiness, user-path release smoke coverage, public-demo release level, missing
 demo flows, and demo blockers when those reports exist.
+`scripts/smoke_native_provider_contract.py` now also exercises text streaming
+and forced `workspace_read` tool-call streaming through the same local fake
+OpenAI-compatible SSE provider used by the Native Agent and Workflow contract
+smokes. Source-level RC reports can therefore mark `provider_text_stream` and
+`provider_tool_call_stream` as passed with
+`evidence_source=native_provider_contract_smoke`; real credentialed
+`--run-provider-smoke` remains the final provider signoff evidence.
 
 ## Phase 12 - Public Project Release
 
