@@ -145,9 +145,15 @@ def test_release_smoke_summary_requires_complete_public_demo(tmp_path, monkeypat
                 "release_blockers": [
                     {
                         "id": "real_desktop_app_open",
-                        "status": "skipped",
+                        "status": "failed",
                         "opt_in_flag": "--include-real-desktop-open",
-                        "reason": "opens a real macOS application",
+                        "opt_in_reason": "opens a real macOS application",
+                        "reason": "desktop_session_locked",
+                        "evidence_summary": {
+                            "stage": "session_preflight",
+                            "blocking_condition": "desktop_session_locked",
+                            "checks": {"desktop_session_ready": False},
+                        },
                     }
                 ],
                 "full_demo_command": "python scripts/run_public_demo_smokes.py --full-test-command",
@@ -171,11 +177,15 @@ def test_release_smoke_summary_requires_complete_public_demo(tmp_path, monkeypat
     assert assessment["release_level"] == "partial_demo_ready"
     assert assessment["missing_required_flow_ids"] == ["real_desktop_app_open"]
     assert assessment["release_blockers"][0]["opt_in_flag"] == "--include-real-desktop-open"
+    assert assessment["release_blockers"][0]["reason"] == "desktop_session_locked"
     action = next(item for item in summary["next_actions"] if item["id"] == "public_demo")
     assert action["command"] == release_smoke.FULL_PUBLIC_DEMO_COMMAND
     assert "--full-test-command" not in action["command"]
     assert action["release_level"] == "partial_demo_ready"
     assert action["missing_required_flow_ids"] == ["real_desktop_app_open"]
+    assert action["release_blockers"][0]["reason"] == "desktop_session_locked"
+    markdown = release_smoke.render_markdown(summary)
+    assert "Demo blocker `real_desktop_app_open`: `desktop_session_locked`" in markdown
 
 
 def test_release_smoke_summary_rejects_inconsistent_public_demo_level(

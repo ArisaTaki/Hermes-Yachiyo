@@ -390,6 +390,7 @@ def _next_actions(
                 "command": command,
                 "release_level": str(check.get("release_level") or ""),
                 "missing_required_flow_ids": _string_list(check.get("missing_required_flow_ids")),
+                "release_blockers": _dict_list(check.get("release_blockers")),
             }
         )
     for action in _dict_list(release_smoke.get("next_actions")):
@@ -402,6 +403,9 @@ def _next_actions(
                 "id": str(action.get("id") or "release_smoke"),
                 "status": "missing",
                 "command": command,
+                "release_level": str(action.get("release_level") or ""),
+                "missing_required_flow_ids": _string_list(action.get("missing_required_flow_ids")),
+                "release_blockers": _dict_list(action.get("release_blockers")),
             }
         )
     return actions
@@ -427,6 +431,11 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         missing = _string_list(check.get("missing_required_flow_ids"))
         if missing:
             lines.append(f"  Missing demo flows: {', '.join(f'`{item}`' for item in missing)}")
+        for blocker in _dict_list(check.get("release_blockers")):
+            blocker_id = str(blocker.get("id") or "").strip()
+            reason = str(blocker.get("reason") or "").strip()
+            if blocker_id and reason:
+                lines.append(f"  Demo blocker `{blocker_id}`: `{reason}`")
     release_smoke = summary.get("release_smoke")
     if isinstance(release_smoke, Mapping) and release_smoke:
         lines.extend(["", "## Release Smoke", ""])
@@ -443,6 +452,20 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         lines.extend(["", "## Next Actions", ""])
         for action in actions:
             lines.append(f"- `{action.get('id')}`")
+            release_level = str(action.get("release_level") or "")
+            if release_level:
+                lines.append(f"  Release level: `{release_level}`")
+            missing_flows = _string_list(action.get("missing_required_flow_ids"))
+            if missing_flows:
+                lines.append(
+                    "  Missing demo flows: "
+                    + ", ".join(f"`{item}`" for item in missing_flows)
+                )
+            for blocker in _dict_list(action.get("release_blockers")):
+                blocker_id = str(blocker.get("id") or "").strip()
+                reason = str(blocker.get("reason") or "").strip()
+                if blocker_id and reason:
+                    lines.append(f"  Demo blocker `{blocker_id}`: `{reason}`")
             command = str(action.get("command") or "").strip()
             if command:
                 lines.extend(["", "```bash", command, "```", ""])

@@ -199,6 +199,11 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
                     "  Missing demo flows: "
                     + ", ".join(f"`{value}`" for value in missing_flows)
                 )
+            for blocker in _dict_list(demo_details.get("release_blockers")):
+                blocker_id = str(blocker.get("id") or "").strip()
+                reason = str(blocker.get("reason") or "").strip()
+                if blocker_id and reason:
+                    lines.append(f"  Demo blocker `{blocker_id}`: `{reason}`")
     actions = _dict_list(summary.get("next_actions"))
     if actions:
         lines.extend(["", "## Next Actions", ""])
@@ -213,6 +218,11 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
                     "  Missing demo flows: "
                     + ", ".join(f"`{value}`" for value in missing_flows)
                 )
+            for blocker in _dict_list(action.get("release_blockers")):
+                blocker_id = str(blocker.get("id") or "").strip()
+                reason = str(blocker.get("reason") or "").strip()
+                if blocker_id and reason:
+                    lines.append(f"  Demo blocker `{blocker_id}`: `{reason}`")
             command = str(action.get("command") or "").strip()
             if command:
                 lines.extend(["", "```bash", command, "```", ""])

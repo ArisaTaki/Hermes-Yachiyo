@@ -765,7 +765,10 @@ Vite/Electron UI smokes. The summary now reports `release_level`,
 project per-flow `evidence_summary` details such as `stage`,
 `blocking_condition`, and boolean checks into Release Blockers and Next
 Actions, so host blockers like `desktop_session_locked` are visible without
-opening the full flow report. Only
+opening the full flow report. Release-smoke and public-release gate summaries
+preserve those demo blockers in their Markdown and JSON next actions, so final
+release evidence points to the real host or credential blocker instead of only
+reporting missing public-demo evidence. Only
 `full_public_demo_ready` is enough for a Hanako/Hermes-level public demo. The
 current default evidence can pass with `complete=false` and
 `release_level=partial_demo_ready`; release parity still requires the opt-in
