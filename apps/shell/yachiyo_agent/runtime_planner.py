@@ -4405,6 +4405,48 @@ class RuntimePlanner:
                     )
                 )
             return steps
+        if str(intent.inputs.get("kind") or "").strip() == "settings_open":
+            fallback_tool = _first_allowed(("app.open", "desktop.open_app", "app.show"), allowed)
+            target = str(input_preview.get("target") or "").strip()
+            steps = [
+                _step(
+                    intent,
+                    "open-system-settings-fallback",
+                    "Open system settings app",
+                    "desktop.app_control",
+                    fallback_tool,
+                    input_preview={
+                        key: value
+                        for key, value in {
+                            "app_name": "System Settings",
+                            "target": target,
+                        }.items()
+                        if value
+                    },
+                    reason=(
+                        "Open System Settings through the general desktop app tool when "
+                        "the dedicated settings pane tool is unavailable."
+                    ),
+                )
+            ]
+            read_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed)
+            if read_tool and (bool(intent.inputs.get("inspect_ui")) or target):
+                steps.append(
+                    _step(
+                        intent,
+                        "read-system-settings-ui",
+                        "Read system settings UI",
+                        "desktop.app_discovery",
+                        read_tool,
+                        input_preview={"role_filter": "", "limit": 80},
+                        depends_on=["open-system-settings-fallback"],
+                        reason=(
+                            "Read the opened System Settings UI so the model can continue "
+                            "toward the requested settings target."
+                        ),
+                    )
+                )
+            return steps
         return [
             _step(
                 intent,
@@ -7519,7 +7561,7 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
         return "type"
     if step_key == "submit-browser-context":
         return "submit"
-    if step_key == "open-system-settings":
+    if step_key in {"open-system-settings", "open-system-settings-fallback"}:
         return "open_settings"
     if step_key == "read-system-settings-ui":
         return "read_ui"

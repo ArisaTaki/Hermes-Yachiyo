@@ -12655,6 +12655,31 @@ def test_runtime_planner_routes_system_settings_open_to_system_control() -> None
         "open-system-settings"
     ]
 
+    fallback = RuntimePlanner().decision(
+        "在系统设置里打开蓝牙",
+        allowed_tools=["app.open", "desktop.ui_elements"],
+    )
+    assert fallback.selected_intent.kind == "system_control"
+    assert fallback.selected_intent.inputs == {
+        "kind": "settings_open",
+        "payload": {"target": "蓝牙"},
+        "inspect_ui": False,
+    }
+    assert [step.step_id for step in fallback.plan.tool_plan.steps] == [
+        "open-system-settings-fallback",
+        "read-system-settings-ui",
+    ]
+    fallback_open = _step_by_id(fallback, "open-system-settings-fallback")
+    assert fallback_open.capability_id == "desktop.app_control"
+    assert fallback_open.tool_name == "app.open"
+    assert fallback_open.input_preview == {
+        "app_name": "System Settings",
+        "target": "蓝牙",
+    }
+    assert _step_by_id(fallback, "read-system-settings-ui").depends_on == [
+        "open-system-settings-fallback"
+    ]
+
 
 def test_runtime_planner_routes_communication_to_compose_capability() -> None:
     decision = RuntimePlanner().decision(
@@ -18311,6 +18336,39 @@ def test_planner_tool_requests_maps_system_control_plan() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_system_control",
         },
+    ]
+    assert planner_tool_requests(
+        "在系统设置里打开蓝牙",
+        allowed_tools=["app.open", "desktop.ui_elements"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "System Settings"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
+            "continue_to_model": True,
+        },
+    ]
+    assert planner_tool_requests(
+        "open sound settings",
+        allowed_tools=["app.open"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "System Settings"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
+            "continue_to_model": True,
+        }
     ]
 
 

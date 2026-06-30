@@ -1384,6 +1384,9 @@ def _media_playback_verify_request(inputs: Mapping[str, Any], allowed: set[str])
 def _system_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
     tool_name, payload = system_tool_preview(inputs, allowed)
     if not tool_name:
+        fallback_requests = _system_settings_open_fallback_requests(inputs, allowed)
+        if fallback_requests:
+            return fallback_requests
         return []
     requests = [
         _request(
@@ -1404,6 +1407,40 @@ def _system_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dic
                 planning_reason="planner_fallback_system_control",
             )
         )
+    return requests
+
+
+def _system_settings_open_fallback_requests(
+    inputs: Mapping[str, Any],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    if str(inputs.get("kind") or "").strip() != "settings_open":
+        return []
+    payload = inputs.get("payload") if isinstance(inputs.get("payload"), Mapping) else {}
+    target = str(payload.get("target") or "").strip()
+    tool_name = _first_allowed(("app.open", "desktop.open_app", "app.show"), allowed)
+    if not tool_name:
+        return []
+    requests = [
+        _request(
+            tool_name,
+            _desktop_request_payload(tool_name, {"app_name": "System Settings"}),
+            planning_reason="planner_fallback_system_control",
+        )
+    ]
+    read_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed)
+    if read_tool and (bool(inputs.get("inspect_ui")) or target):
+        read_payload = {"role_filter": "", "limit": 80}
+        requests.append(
+            _request(
+                read_tool,
+                _desktop_request_payload(read_tool, read_payload),
+                planning_reason="planner_fallback_system_control",
+            )
+        )
+        requests[-1]["continue_to_model"] = True
+    elif target:
+        requests[-1]["continue_to_model"] = True
     return requests
 
 
