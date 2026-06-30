@@ -6323,6 +6323,73 @@ def test_runtime_planner_discovers_generic_communication_app_before_acting() -> 
     ]
 
 
+def test_runtime_planner_discovers_generic_communication_app_before_composing() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    cases = (
+        ("打开一个邮件客户端，写一封给 Alice 的邮件", "mail", "邮件"),
+        ("open an email client and compose a message to Alice", "mail", "email"),
+        ("打开一个聊天软件，给 Alice 输入 hello", "messaging", "聊天"),
+    )
+
+    for prompt, query, description in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == ""
+        assert decision.selected_intent.inputs["operation_hint"] == "discover_apps"
+        assert decision.selected_intent.inputs["safe_shortcut_hint"] == {
+            "action": "new_message"
+        }
+        assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+            "action": "discover_apps",
+            "query": query,
+        }
+        assert decision.selected_intent.inputs["app_capability_hint"] == {
+            "query": query,
+            "description": description,
+        }
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover_apps-desktop-state",
+            "open-selected-discovered-app",
+        ]
+        selected = _step_by_id(decision, "open-selected-discovered-app")
+        assert selected.tool_name == "app.open_and_safe_shortcut"
+        assert selected.action == "safe_shortcut"
+        assert selected.input_preview == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": query,
+            "action": "new_message",
+        }
+        assert planner_tool_requests(prompt, allowed_tools) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": query, "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
+            }
+        ]
+
+    assert RuntimePlanner().decision(
+        "给张三发邮件说明会议改期",
+        allowed_tools=[
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    ).selected_intent.kind == "communication"
+
+
 def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation() -> None:
     allowed_tools = [
         "desktop.list_apps",

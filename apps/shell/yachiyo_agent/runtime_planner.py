@@ -417,6 +417,12 @@ class TaskIntentRouter:
                 "action": "discover_apps",
                 "query": str(app_capability.get("query") or "").strip(),
             }
+            if (
+                safe_shortcut is None
+                and _communication_capability_query(str(app_capability.get("query") or ""))
+                and _generic_communication_compose_requested(text)
+            ):
+                safe_shortcut = {"action": "new_message"}
             if safe_shortcut is None and _looks_like_app_scoped_create_followup(text):
                 create_container_action = _generic_create_container_action_hint(text)
                 if create_container_action:
@@ -719,6 +725,8 @@ class TaskIntentRouter:
                 text,
                 app_name_hint,
             )
+            if _generic_communication_compose_requested(text):
+                safe_shortcut = {"action": "new_message"}
             desktop_discovery = {
                 "action": "discover_apps",
                 "query": generic_communication_query,
@@ -1667,6 +1675,8 @@ class TaskIntentRouter:
 
     def _communication_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         if ui_control_presence_hint(text):
+            return _empty_intent("communication", text)
+        if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
             return _empty_intent("communication", text)
         scoped_new_item = _app_scoped_safe_operation_hint(text)
         scoped_action = str(
@@ -2820,7 +2830,11 @@ class RuntimePlanner:
                         safe_shortcut=safe_shortcut,
                     ),
                 }
-                selected_app_action = "open_app"
+                selected_app_action = (
+                    "safe_shortcut"
+                    if selected_app_tool == "app.open_and_safe_shortcut"
+                    else "open_app"
+                )
                 if selected_app_target_path:
                     selected_app_input_preview["target_path"] = selected_app_target_path
                     selected_app_input_preview["action"] = "open_path_with_selected_app"
@@ -7049,11 +7063,13 @@ def _selected_discovered_app_tool(
         tool_name = _first_allowed(("desktop.open_path_with_app",), allowed)
         if tool_name:
             return tool_name
+    if isinstance(safe_shortcut, Mapping) and str(safe_shortcut.get("action") or "").strip():
+        tool_name = _first_allowed(("app.open_and_safe_shortcut",), allowed)
+        if tool_name:
+            return tool_name
     tool_name = _first_allowed(("app.open",), allowed)
     if tool_name:
         return tool_name
-    if isinstance(safe_shortcut, Mapping) and str(safe_shortcut.get("action") or "").strip():
-        return _first_allowed(("app.open_and_safe_shortcut",), allowed) or ""
     return ""
 
 
@@ -12860,6 +12876,42 @@ def _generic_communication_app_discovery_query(text: str, app_name_hint: str = "
     return "messaging"
 
 
+def _communication_capability_query(value: str) -> bool:
+    return str(value or "").strip().lower() in {"mail", "messaging"}
+
+
+def _generic_communication_compose_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"(?:新建|创建|写|撰写|起草|草拟|草稿|发|发送|输入|键入).{0,24}"
+            r"(?:邮件|电子邮件|邮箱|消息|短信|聊天|会话|mail|email|message|chat)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:给|向|发给|发送给)\s*[^。！？!?，,]{1,40}?"
+            r"(?:写|发|发送|输入|键入)?\s*"
+            r"(?:邮件|电子邮件|消息|短信|微信|hello|你好|您好|hi|在吗)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:compose|draft|write|create|new|send|type)\b.{0,40}"
+            r"\b(?:email|mail|message|chat)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:email|mail|message)\s+(?:to|for)\s+[^.!?,]{1,60}",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _browser_internal_shortcut_action(surface: str) -> str:
     if surface == "history":
         return "show_history"
@@ -17217,12 +17269,12 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
         r"图片|图像|照片|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
         r"聊天|通讯|通信|消息|即时通讯|日历)"
-        r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|工具|程序)",
+        r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
         r"\b(?:open|launch|start|find|use)\s+"
         r"(?:(?:an?|any|some|available)\s+)?"
         r"(?P<direct_capability_en>markdown|code|image|photo|document|text|spreadsheet|"
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar)[\w\s-]{0,30}?"
-        r"(?:app|application|tool|program|editor)\b",
+        r"(?:app|application|client|tool|program|editor)\b",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
