@@ -687,6 +687,15 @@ class TaskIntentRouter:
             app_name_hint = ""
             app_management = None
             generic_file_manager_discovery = True
+        generic_terminal_app_discovery = False
+        if desktop_discovery is None and _generic_terminal_app_target_requested(text):
+            desktop_discovery = {
+                "action": "discover_apps",
+                "query": "terminal",
+            }
+            app_name_hint = ""
+            app_management = None
+            generic_terminal_app_discovery = True
         if not app_type_scope and _target_first_foreground_type_hint(text):
             app_name_hint = ""
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
@@ -894,6 +903,8 @@ class TaskIntentRouter:
             inputs["generic_music_app_discovery_hint"] = {"query": "music"}
         if generic_file_manager_discovery:
             inputs["generic_file_manager_discovery_hint"] = {"query": "file manager"}
+        if generic_terminal_app_discovery:
+            inputs["generic_terminal_app_discovery_hint"] = {"query": "terminal"}
         if app_capability:
             inputs["app_capability_hint"] = app_capability
         finder_operation_mode = str(finder_special_location.get("mode") or "").strip()
@@ -12686,6 +12697,25 @@ def _generic_file_manager_app_target_requested(text: str) -> bool:
         r"(?:\s*(?:一下|下|起来|开了吗|打开了吗))?\s*[?？。！!]*$",
         r"\b(?:open|launch|start|focus|inspect|check)\s+"
         r"(?:an?\s+|the\s+|any\s+|default\s+)?file\s+(?:manager|browser)\b\s*[.!?]*$",
+    )
+    return any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def _generic_terminal_app_target_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|开启|切到|聚焦|查看|看看|检查)\s*"
+        r"(?:一个|一款|任意|任何|默认|可用)?\s*"
+        r"(?:终端(?:应用|app|软件)?|命令行(?:应用|app|软件)?)"
+        r"(?:\s*(?:一下|下|起来|开了吗|打开了吗))?\s*[?？。！!]*$",
+        r"\b(?:open|launch|start|focus|inspect|check)\s+"
+        r"(?:an?\s+|the\s+|any\s+|default\s+)?(?:terminal|shell)\s+"
+        r"(?:app|application|program)\b\s*[.!?]*$",
+        r"\b(?:open|launch|start|focus|inspect|check)\s+"
+        r"(?:an?\s+|the\s+|any\s+|default\s+)?terminal\b\s*[.!?]*$",
     )
     return any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in patterns)
 

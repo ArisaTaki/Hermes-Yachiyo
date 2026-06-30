@@ -612,6 +612,14 @@ produce `desktop.list_apps` with `query=file manager` and
 Finder prompts and safe local path/folder requests still preserve the existing
 Finder/file-access compatibility behavior.
 
+Generic terminal-app requests now use the same boundary. Pure app requests such
+as "打开终端", "打开命令行", and "open a terminal" produce
+`desktop.list_apps` with `query=terminal` and `continue_to_model=true`, allowing
+the model to choose Terminal, iTerm, Warp, Ghostty, or another discovered
+terminal app from local evidence. Explicit command execution requests such as
+"打开终端运行 ls" and "run npm test in terminal" still use `terminal.run` with
+the existing approval path.
+
 ## Phase 11 - Release Productization
 
 Turn the runtime migration into a product that can be installed and diagnosed
