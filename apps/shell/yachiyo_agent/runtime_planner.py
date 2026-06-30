@@ -1162,6 +1162,17 @@ class TaskIntentRouter:
             return _empty_intent("media_playback", text)
         if score <= 0 and not hint.get("action"):
             return _empty_intent("media_playback", text)
+        target_app_capability = _media_playback_target_app_capability_hint(text)
+        if target_app_capability and hint.get("action") == "play" and hint.get("query"):
+            capability_query = _media_playback_capability_query_hint(text)
+            if not capability_query:
+                return _empty_intent("media_playback", text)
+            hint = {
+                **hint,
+                "app_name": "",
+                "query": capability_query,
+                "target_app_capability_hint": target_app_capability,
+            }
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "media_playback", text),
             kind="media_playback",
@@ -9774,6 +9785,14 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score -= 0.2
     if (
         intent.kind == "desktop_operation"
+        and isinstance(intent.inputs.get("app_capability_hint"), Mapping)
+        and str(intent.inputs["app_capability_hint"].get("query") or "").strip() == "music"
+        and str(media_playback_hint(text).get("action") or "").strip() == "play"
+        and str(media_playback_hint(text).get("query") or "").strip()
+    ):
+        score -= 0.18
+    if (
+        intent.kind == "desktop_operation"
         and _foreground_safe_shortcut_hint(intent.inputs.get("safe_shortcut_hint"))
     ):
         score += 0.24
@@ -9827,6 +9846,11 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.12
     if intent.kind == "media_playback" and _looks_like_generic_media_playback_request(text):
         score += 0.18
+    if (
+        intent.kind == "media_playback"
+        and isinstance(intent.inputs.get("target_app_capability_hint"), Mapping)
+    ):
+        score += 0.24
     if intent.kind == "information_capture" and _contains_any(
         text,
         ["note", "notes", "备忘录", "笔记", "记一下", "记录一下", "记下"],
@@ -18889,6 +18913,20 @@ def _app_capability_discovery_query(value: str) -> str:
     lowered = description.lower()
     if not description:
         return ""
+    if _contains_any(
+        description,
+        (
+            "播放音乐",
+            "听音乐",
+            "音乐",
+            "歌曲",
+            "播放器",
+            "music playback",
+            "play music",
+            "music player",
+        ),
+    ):
+        return "music"
     if "markdown" in lowered:
         return "markdown"
     if "pdf" in lowered:
@@ -18911,11 +18949,65 @@ def _app_capability_discovery_query(value: str) -> str:
         return "mail"
     if _contains_any(description, ("日历", "calendar")):
         return "calendar"
-    if _contains_any(description, ("播放音乐", "听音乐", "music playback", "play music")):
-        return "music"
     if _contains_any(description, ("文档", "文本", "文章", "document", "text", "writing", "write")):
         return "document"
     return description[:40].strip()
+
+
+def _media_playback_target_app_capability_hint(text: str) -> dict[str, str]:
+    hint = _app_capability_discovery_hint(text)
+    if str(hint.get("query") or "").strip() == "music":
+        return hint
+    value = _clean_prompt(text)
+    if not value:
+        return {}
+    if not re.search(
+        r"(?:任意|任何|一个|一款|可用|默认|any|some|available).{0,12}"
+        r"(?:音乐\s*(?:应用|app|软件|播放器)?|播放器|music\s+(?:app|player))",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return {}
+    return {"query": "music", "description": "音乐"}
+
+
+def _media_playback_capability_query_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if not value:
+        return ""
+    patterns = (
+        r"(?:应用(?:程序)?|app|软件|工具|程序|播放器)"
+        r"(?:里|中|上|内|里面)?\s*(?:，|,|然后|并|再|接着|之后|\s)*"
+        r"(?:搜索|搜一下|搜|查找|找|检索|播放|播|放)\s*"
+        r"(?P<query>[^。！？!?，,]{1,80})",
+        r"\b(?:app|application|tool|program|music\s+player).{0,80}"
+        r"\b(?:search|find|play)\s+(?P<query_en>[^.!?,]{1,80})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = (
+            match.groupdict().get("query")
+            or match.groupdict().get("query_en")
+            or ""
+        )
+        query = re.sub(
+            r"\s*(?:然后|并|再|接着|之后)?\s*(?:播放|播|放)?\s*"
+            r"(?:第一个结果|第一首|首个结果)\s*$",
+            "",
+            query.strip(),
+            flags=re.IGNORECASE,
+        )
+        query = re.sub(
+            r"\s+(?:and\s+)?(?:play|start\s+playing)(?:\s+it)?\s*$",
+            "",
+            query,
+            flags=re.IGNORECASE,
+        ).strip()
+        if query:
+            return query
+    return ""
 
 
 def _app_file_open_discovery_hint(

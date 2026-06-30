@@ -138,6 +138,24 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "approval_required": [],
     },
     {
+        "id": "capability_media_app_playback",
+        "category": "orchestrator",
+        "prompt": "打开任意能播放音乐的应用播放 lo-fi",
+        "expected_intent": "media_playback",
+        "expected_plan_tools": [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ],
+        "expected_request_tools": [
+            "desktop.list_apps",
+        ],
+        "approval_required": [],
+    },
+    {
         "id": "clipboard_send_to_slack",
         "category": "orchestrator",
         "prompt": "读取剪贴板内容并发给 Slack 的 yachiyo",

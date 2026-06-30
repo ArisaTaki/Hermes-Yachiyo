@@ -1568,7 +1568,7 @@ def _code_task_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str,
 def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
     app_query_plan = media_app_query_search_plan(inputs, allowed)
     if app_query_plan:
-        return [
+        requests = [
             _request(
                 tool_name,
                 payload,
@@ -1576,6 +1576,11 @@ def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict
             )
             for tool_name, payload in app_query_plan
         ]
+        if _media_query_plan_needs_selected_app_followup(app_query_plan):
+            if requests:
+                requests[0]["continue_to_model"] = True
+            return requests[:1]
+        return requests
     tool_name, payload = media_tool_preview(inputs, allowed)
     if not tool_name:
         prepare_plan = media_app_prepare_plan(inputs, allowed)
@@ -1600,6 +1605,17 @@ def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict
     if verify_request:
         requests.append(verify_request)
     return requests
+
+
+def _media_query_plan_needs_selected_app_followup(
+    app_query_plan: list[tuple[str, dict[str, Any]]],
+) -> bool:
+    return any(
+        str(payload.get("app_name") or "").strip()
+        == "<selected app from desktop.list_apps>"
+        for _tool_name, payload in app_query_plan
+        if isinstance(payload, Mapping)
+    )
 
 
 def _media_playback_verify_request(inputs: Mapping[str, Any], allowed: set[str]) -> dict[str, Any]:

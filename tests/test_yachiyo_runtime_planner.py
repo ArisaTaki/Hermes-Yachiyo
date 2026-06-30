@@ -13295,10 +13295,11 @@ def test_runtime_planner_prefers_discovered_media_app_operation_for_apple_music_
 
 
 def test_runtime_planner_routes_generic_music_app_query_to_search_play_plan() -> None:
-    for prompt in (
-        "打开任意音乐 app，搜索 lo-fi beats，然后播放第一个结果",
-        "找一个音乐 app 搜索 lo-fi beats 并播放第一个结果",
-        "帮我在任意可用播放器里播放 city pop",
+    for prompt, query, description in (
+        ("打开任意音乐 app，搜索 lo-fi beats，然后播放第一个结果", "lo-fi beats", "音乐"),
+        ("找一个音乐 app 搜索 lo-fi beats 并播放第一个结果", "lo-fi beats", "音乐"),
+        ("帮我在任意可用播放器里播放 city pop", "city pop", "音乐"),
+        ("打开任意能播放音乐的应用播放 lo-fi", "lo-fi", "播放音乐"),
     ):
         decision = RuntimePlanner().decision(
             prompt,
@@ -13315,9 +13316,13 @@ def test_runtime_planner_routes_generic_music_app_query_to_search_play_plan() ->
         assert decision.selected_intent.kind == "media_playback"
         assert decision.selected_intent.inputs == {
             "action": "play",
-            "app_name": "Music",
-            "query": "city pop" if "city pop" in prompt else "lo-fi beats",
+            "app_name": "",
+            "query": query,
             "control_only": "",
+            "target_app_capability_hint": {
+                "query": "music",
+                "description": description,
+            },
         }
         assert [step.step_id for step in decision.plan.tool_plan.steps] == [
             "discover-media-app",
@@ -13327,12 +13332,56 @@ def test_runtime_planner_routes_generic_music_app_query_to_search_play_plan() ->
             "play-media-search-result",
             "verify-media-search",
         ]
+        assert _step_by_id(decision, "discover-media-app").input_preview == {
+            "query": "music",
+            "limit": 20,
+        }
+        assert _step_by_id(decision, "focus-media-app-search").input_preview == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": "music",
+            "action": "find",
+        }
         assert _step_by_id(decision, "type-media-search-query").input_preview == {
-            "text": "city pop" if "city pop" in prompt else "lo-fi beats",
+            "text": query,
         }
         assert _step_by_id(decision, "play-media-search-result").input_preview == {
-            "app_name": "Music",
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": "music",
         }
+        assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == {
+            "kind": "desktop_discovered_media_playback",
+            "app_query": "music",
+            "app_name_source": "desktop.list_apps",
+            "target_action": "safe_shortcut",
+            "safe_shortcut_action": "find",
+            "media_playback_query": query,
+            "post_action_observation": {
+                "tool": "desktop.ui_elements",
+                "input": {},
+            },
+        }
+        assert planner_tool_requests(
+            prompt,
+            [
+                "desktop.list_apps",
+                "app.open_and_safe_shortcut",
+                "desktop.safe_type_text",
+                "desktop.search_submit",
+                "media.music_app_open_and_play",
+                "desktop.ui_elements",
+            ],
+        ) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": "music", "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_media_playback",
+                "continue_to_model": True,
+            }
+        ]
 
 
 def test_runtime_planner_falls_back_to_app_search_for_apple_music_query() -> None:
@@ -19656,7 +19705,7 @@ def test_planner_desktop_tool_requests_verifies_media_app_search_when_available(
     }
 
 
-def test_planner_desktop_tool_requests_searches_generic_music_app_then_verifies() -> None:
+def test_planner_desktop_tool_requests_discovers_generic_music_app_before_playback() -> None:
     requests = planner_desktop_tool_requests(
         "打开任意音乐 app，搜索 lo-fi beats，然后播放第一个结果",
         allowed_tools=[
@@ -19672,37 +19721,10 @@ def test_planner_desktop_tool_requests_searches_generic_music_app_then_verifies(
         {
             "protocol": "json_fallback",
             "tool": "desktop.list_apps",
-            "input": {"query": "Music", "limit": 20},
+            "input": {"query": "music", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Music", "action": "find"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_media_playback",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.safe_type_text",
-            "input": {"text": "lo-fi beats"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_media_playback",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.search_submit",
-            "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_media_playback",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.ui_elements",
-            "input": {"role_filter": "", "limit": 80},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_media_playback",
+            "continue_to_model": True,
         },
     ]
 

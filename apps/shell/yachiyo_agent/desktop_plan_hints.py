@@ -51,6 +51,8 @@ _MEDIA_APP_NAME_PATTERN = (
     r"apple\s*music|苹果音乐|youtube\s*music|spotify|网易云|qq\s*音乐|qq music"
 )
 
+_SELECTED_DESKTOP_APP_NAME = "<selected app from desktop.list_apps>"
+
 _FINDER_SAFE_SHORTCUT_PHRASES: tuple[tuple[str, str], ...] = (
     ("finder_quick_look", "快速查看"),
     ("finder_quick_look", "快速查看选中项"),
@@ -869,6 +871,17 @@ def media_app_query_search_plan(
     action = str(inputs.get("action") or "").strip() or "play"
     app_name = str(inputs.get("app_name") or "").strip()
     query = str(inputs.get("query") or "").strip()
+    app_capability = inputs.get("target_app_capability_hint")
+    capability_query = ""
+    selected_app_payload: dict[str, Any] = {}
+    if isinstance(app_capability, Mapping):
+        capability_query = str(app_capability.get("query") or "").strip()
+        if capability_query and not app_name:
+            app_name = _SELECTED_DESKTOP_APP_NAME
+            selected_app_payload = {
+                "selection_source": "desktop.list_apps",
+                "query": capability_query,
+            }
     if action != "play" or not app_name or not query:
         return []
 
@@ -881,22 +894,37 @@ def media_app_query_search_plan(
     discovery_step = []
     discover_tool = _first_allowed(("desktop.list_apps",), allowed)
     if discover_tool:
-        discovery_step = [(discover_tool, {"query": app_name, "limit": 20})]
+        discovery_step = [
+            (discover_tool, {"query": capability_query or app_name, "limit": 20})
+        ]
 
     app_search_tool = _first_allowed(
         ("app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"),
         allowed,
     )
     if app_search_tool:
+        app_search_payload = {
+            "app_name": app_name,
+            **selected_app_payload,
+            "action": "find",
+        }
         plan = [
             *discovery_step,
-            (app_search_tool, {"app_name": app_name, "action": "find"}),
+            (app_search_tool, app_search_payload),
             (type_tool, {"text": query}),
             (submit_tool, submit_payload),
         ]
         play_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
         if play_tool:
-            plan.append((play_tool, {"app_name": app_name}))
+            plan.append(
+                (
+                    play_tool,
+                    {
+                        "app_name": app_name,
+                        **selected_app_payload,
+                    },
+                )
+            )
         _append_media_app_verify_step(plan, allowed)
         return plan
 
@@ -906,14 +934,14 @@ def media_app_query_search_plan(
         return []
     plan = [
         *discovery_step,
-        (app_tool, {"app_name": app_name}),
+        (app_tool, {"app_name": app_name, **selected_app_payload}),
         (shortcut_tool, {"action": "find"}),
         (type_tool, {"text": query}),
         (submit_tool, submit_payload),
     ]
     play_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
     if play_tool:
-        plan.append((play_tool, {"app_name": app_name}))
+        plan.append((play_tool, {"app_name": app_name, **selected_app_payload}))
     _append_media_app_verify_step(plan, allowed)
     return plan
 

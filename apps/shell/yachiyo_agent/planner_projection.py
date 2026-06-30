@@ -286,6 +286,9 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
     discovered_app_write_target = _discovered_app_write_followup_target(inputs)
     if discovered_app_write_target:
         return discovered_app_write_target
+    media_app_target = _media_app_playback_followup_target(inputs)
+    if media_app_target:
+        return media_app_target
     desktop_discovered_app_target = _desktop_discovered_app_followup_target(inputs)
     if desktop_discovered_app_target:
         return desktop_discovered_app_target
@@ -438,6 +441,31 @@ def _desktop_file_open_followup_target(inputs: Mapping[str, Any]) -> dict[str, A
         "target_action": "open_path_with_app",
         "target_path_source": "workspace.list",
         "file_query": file_query,
+    }
+
+
+def _media_app_playback_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:
+    app_capability = inputs.get("target_app_capability_hint")
+    if not isinstance(app_capability, Mapping):
+        return {}
+    if str(app_capability.get("query") or "").strip() != "music":
+        return {}
+    if str(inputs.get("action") or "").strip() != "play":
+        return {}
+    media_query = str(inputs.get("query") or "").strip()
+    if not media_query:
+        return {}
+    return {
+        "kind": "desktop_discovered_media_playback",
+        "app_query": "music",
+        "app_name_source": "desktop.list_apps",
+        "target_action": "safe_shortcut",
+        "safe_shortcut_action": "find",
+        "media_playback_query": media_query,
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
     }
 
 
