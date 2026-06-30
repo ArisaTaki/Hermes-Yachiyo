@@ -2632,7 +2632,7 @@ class RuntimePlanner:
         ):
             action = str(desktop_discovery.get("action") or "").strip()
             tool_name, input_preview = _desktop_discovery_tool_preview(action, desktop_discovery)
-            return [
+            steps = [
                 _step(
                     intent,
                     f"{action}-desktop-state" if action else "discover-desktop-state",
@@ -2643,6 +2643,45 @@ class RuntimePlanner:
                     reason="Run the explicit desktop discovery or permission diagnostic request.",
                 )
             ]
+            selected_app_tool = _selected_discovered_app_tool(
+                allowed,
+                safe_shortcut=safe_shortcut,
+            )
+            if action == "discover_apps" and _discovered_app_open_requested(intent) and selected_app_tool:
+                selected_app_capability = (
+                    "desktop.app_control"
+                    if selected_app_tool == "app.open"
+                    else "desktop.ui_operation"
+                )
+                steps.append(
+                    _step(
+                        intent,
+                        "open-selected-discovered-app",
+                        "Open selected discovered app",
+                        selected_app_capability,
+                        selected_app_tool,
+                        input_preview={
+                            "app_name": "<selected app from desktop.list_apps>",
+                            "selection_source": "desktop.list_apps",
+                            "query": str(input_preview.get("query") or "").strip(),
+                            **_selected_discovered_app_operation_preview(
+                                selected_app_tool,
+                                safe_shortcut=safe_shortcut,
+                            ),
+                        },
+                        depends_on=[
+                            f"{action}-desktop-state"
+                            if action
+                            else "discover-desktop-state"
+                        ],
+                        action="open_app",
+                        reason=(
+                            "After desktop.list_apps returns candidates, the model selects the "
+                            "best matching app before opening it."
+                        ),
+                    )
+                )
+            return steps
         if (
             not app_name
             and screen_capture is not None
@@ -6738,6 +6777,30 @@ def _dynamic_context_browser_steps(
     return steps
 
 
+def _selected_discovered_app_tool(
+    allowed: set[str] | None,
+    *,
+    safe_shortcut: Mapping[str, Any] | None,
+) -> str:
+    tool_name = _first_allowed(("app.open",), allowed)
+    if tool_name:
+        return tool_name
+    if isinstance(safe_shortcut, Mapping) and str(safe_shortcut.get("action") or "").strip():
+        return _first_allowed(("app.open_and_safe_shortcut",), allowed) or ""
+    return ""
+
+
+def _selected_discovered_app_operation_preview(
+    tool_name: str,
+    *,
+    safe_shortcut: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if tool_name != "app.open_and_safe_shortcut":
+        return {}
+    action = str((safe_shortcut or {}).get("action") or "").strip()
+    return {"action": action} if action else {}
+
+
 def _information_capture_context_payload(tool_name: str | None) -> dict[str, Any]:
     if tool_name == "desktop.ui_elements":
         return {"role_filter": "text", "limit": 80}
@@ -8146,6 +8209,11 @@ def _first_path_with_suffix(paths: Iterable[str], suffixes: tuple[str, ...]) -> 
 def _route_to_studio(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapshot]) -> bool:
     return (
         intent.kind in {"workflow_orchestration", "multi_agent", "data_analysis", "code_task"}
+        or (
+            intent.kind == "desktop_operation"
+            and isinstance(intent.inputs.get("app_capability_hint"), Mapping)
+        )
+        or any(step.step_id == "open-selected-discovered-app" for step in steps)
         or any(step.approval_required for step in steps)
         or any(step.tool_name == "desktop.inspect_app" for step in steps)
         or len(steps) >= 3
@@ -16717,9 +16785,11 @@ def _app_capability_discovery_query(value: str) -> str:
         return ""
     if "markdown" in lowered:
         return "markdown"
+    if "pdf" in lowered:
+        return "pdf"
     if _contains_any(description, ("代码", "编程", "开发", "code", "coding", "programming")):
         return "code"
-    if _contains_any(description, ("图片", "图像", "照片", "绘图", "设计", "image", "photo", "picture", "design")):
+    if _contains_any(description, ("图片", "图像", "照片", "绘图", "画图", "设计", "image", "photo", "picture", "design")):
         return "image"
     if _contains_any(description, ("表格", "数据表", "spreadsheet", "sheet", "csv")):
         return "spreadsheet"
@@ -16751,7 +16821,36 @@ def _clean_app_capability_description(value: str) -> str:
         maxsplit=1,
         flags=re.IGNORECASE,
     )[0].strip(" .，,。")
+    description = re.sub(
+        r"\s*(?:的)?(?:本机|本地|桌面|电脑|mac|系统|"
+        r"local|desktop|mac|machine|system)\s*$",
+        "",
+        description,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
     return description
+
+
+def _discovered_app_open_requested(intent: TaskIntentSnapshot) -> bool:
+    text = _clean_prompt(intent.user_goal)
+    if not text:
+        return False
+    if isinstance(intent.inputs.get("app_capability_hint"), Mapping) and _explicit_app_open_request(text):
+        return True
+    return bool(
+        re.search(
+            r"(?:并|然后|再|接着|之后|后|可以的话|如果可以|如果有|找到后).{0,12}"
+            r"(?:打开|启动|开启|运行|拉起|开一个|打开一个)",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:and|then|after(?:wards)?|if\s+(?:available|possible|found))\b"
+            r".{0,24}\b(?:open|launch|start|run|use)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _desktop_discovery_tool_preview(

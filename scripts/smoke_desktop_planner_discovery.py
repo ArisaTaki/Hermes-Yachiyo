@@ -71,6 +71,23 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
         ],
     },
     {
+        "id": "capability_app_discovery_open",
+        "prompt": "找一个能编辑 PDF 的本机应用并打开它",
+        "allowed_tools": [
+            "desktop.list_apps",
+            "app.open",
+        ],
+        "expected_app": "pdf",
+        "expected_steps": [
+            "discover_apps-desktop-state",
+            "open-selected-discovered-app",
+        ],
+        "expected_request_tools": [
+            "desktop.list_apps",
+        ],
+        "expected_model_followup": True,
+    },
+    {
         "id": "app_scoped_click",
         "prompt": "在 Notion 点击 New Page",
         "allowed_tools": [
@@ -211,6 +228,7 @@ def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
     expected_app = str(case["expected_app"])
     expected_steps = [str(step_id) for step_id in case["expected_steps"]]
     expected_request_tools = [str(tool) for tool in case["expected_request_tools"]]
+    expected_model_followup = bool(case.get("expected_model_followup", False))
     discovery_request = requests[0] if requests else {}
     operation_request = requests[1] if len(requests) > 1 else {}
     discovery_input = discovery_request.get("input") if isinstance(discovery_request, dict) else {}
@@ -231,7 +249,12 @@ def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
         ),
         "operation_app_matches": (
             expected_discovery_tool == "desktop.inspect_app"
+            or expected_model_followup
             or (isinstance(operation_input, dict) and operation_input.get("app_name") == expected_app)
+        ),
+        "model_followup_matches": (
+            bool(requests and requests[-1].get("continue_to_model"))
+            == expected_model_followup
         ),
         "uses_no_browser_tool": not any(tool.startswith("browser.") for tool in request_tools),
         "missing_capabilities_empty": decision.plan.tool_plan.missing_capabilities == [],

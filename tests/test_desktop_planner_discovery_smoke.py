@@ -14,6 +14,7 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
         "generic_app_open",
         "generic_app_read_buttons",
         "generic_unknown_app_sequenced_read_buttons",
+        "capability_app_discovery_open",
         "app_scoped_click",
         "app_scoped_type",
         "app_scoped_hotkey",
@@ -39,6 +40,19 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
     assert cases["generic_unknown_app_sequenced_read_buttons"]["intent_inputs"][
         "app_name_hint"
     ] == "PixelForge"
+    assert [request["tool"] for request in cases["capability_app_discovery_open"]["requests"]] == [
+        "desktop.list_apps",
+    ]
+    assert cases["capability_app_discovery_open"]["requests"][0]["continue_to_model"] is True
+    assert [step["id"] for step in cases["capability_app_discovery_open"]["steps"]] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+    ]
+    assert cases["capability_app_discovery_open"]["steps"][1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "pdf",
+    }
     assert cases["app_scoped_click"]["requests"][0]["tool"] == "desktop.inspect_app"
     assert cases["app_scoped_click"]["requests"][1]["tool"] == (
         "app.focus_and_click_ui_element"

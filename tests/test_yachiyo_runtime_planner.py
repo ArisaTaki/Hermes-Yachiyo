@@ -5611,12 +5611,28 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "description": "markdown",
     }
     assert [step.step_id for step in markdown.plan.tool_plan.steps] == [
-        "discover_apps-desktop-state"
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
     ]
+    assert markdown.plan.route_to_studio is True
+    assert markdown.plan.tool_plan.required_capabilities == [
+        "desktop.app_discovery",
+        "desktop.ui_operation",
+    ]
+    assert markdown.plan.tool_plan.missing_capabilities == []
     assert _step_by_id(markdown, "discover_apps-desktop-state").input_preview == {
         "query": "markdown",
         "limit": 20,
     }
+    assert _step_by_id(markdown, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "markdown",
+        "action": "new_document",
+    }
+    assert _step_by_id(markdown, "open-selected-discovered-app").depends_on == [
+        "discover_apps-desktop-state"
+    ]
     assert planner_tool_requests("打开一个能写 markdown 的应用，新建文档标题为周报", allowed_tools) == [
         {
             "protocol": "json_fallback",
@@ -5640,9 +5656,47 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     assert code.selected_intent.inputs["app_name_hint"] == ""
     assert code.selected_intent.inputs["app_capability_hint"]["query"] == "code"
     assert _step_by_id(code, "discover_apps-desktop-state").input_preview["query"] == "code"
+    assert _step_by_id(code, "open-selected-discovered-app").input_preview["query"] == "code"
     assert image.selected_intent.inputs["app_name_hint"] == ""
     assert image.selected_intent.inputs["app_capability_hint"]["query"] == "image"
     assert _step_by_id(image, "discover_apps-desktop-state").input_preview["query"] == "image"
+    assert _step_by_id(image, "open-selected-discovered-app").input_preview["query"] == "image"
+
+    pdf = RuntimePlanner().decision(
+        "找一个能编辑 PDF 的本机应用并打开它",
+        allowed_tools=["desktop.list_apps", "app.open"],
+    )
+    assert pdf.selected_intent.inputs["app_capability_hint"] == {
+        "query": "pdf",
+        "description": "PDF",
+    }
+    assert [step.step_id for step in pdf.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+    ]
+    assert planner_tool_requests("找一个能编辑 PDF 的本机应用并打开它", ["desktop.list_apps", "app.open"]) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "pdf", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+    mindmap = RuntimePlanner().decision(
+        "看看我电脑里有没有思维导图软件，可以的话打开一个",
+        allowed_tools=["desktop.list_apps", "app.open"],
+    )
+    assert mindmap.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "思维导图",
+    }
+    assert [step.step_id for step in mindmap.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+    ]
 
 
 def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation() -> None:

@@ -307,7 +307,7 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if not tool_name or tool_name not in allowed:
             continue
-        if step_id == "write-desktop-content-artifact":
+        if step_id in {"write-desktop-content-artifact", "open-selected-discovered-app"}:
             continue
         input_preview = getattr(step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
@@ -663,9 +663,9 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if not tool_name or tool_name not in allowed:
             continue
-        if step_id == "discover-desktop-state" and not _keep_direct_discovery_step(step, tool_name):
+        if step_id in {"write-desktop-content-artifact", "open-selected-discovered-app"}:
             continue
-        if step_id == "write-desktop-content-artifact":
+        if step_id == "discover-desktop-state" and not _keep_direct_discovery_step(step, tool_name):
             continue
         input_preview = getattr(step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
@@ -882,7 +882,12 @@ def _desktop_discovery_step_needs_model_followup(
     inputs = getattr(getattr(decision, "selected_intent", None), "inputs", None)
     if not isinstance(inputs, Mapping):
         return False
-    return isinstance(inputs.get("app_capability_hint"), Mapping)
+    if isinstance(inputs.get("app_capability_hint"), Mapping):
+        return True
+    return any(
+        str(getattr(step, "step_id", "") or "").strip() == "open-selected-discovered-app"
+        for step in getattr(getattr(getattr(decision, "plan", None), "tool_plan", None), "steps", [])
+    )
 
 
 def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
