@@ -117,11 +117,13 @@ python scripts/smoke_real_desktop_app_open.py \
   --report-json tmp/real-desktop-app-open.json
 ```
 
-On macOS this runs the real `desktop.list_apps -> app.open -> app.status` chain
-against Calculator by default, then attempts cleanup only if the app was not
-already running before the smoke. The RC verifier keeps this evidence skipped
-by default and only runs it with `--run-real-desktop-app-open-smoke`, so source
-gates do not open user apps unless explicitly requested.
+On macOS this runs the real
+`desktop.list_apps -> desktop.open_app -> desktop.verify -> app.status` chain
+through the runtime dispatch registry against Calculator by default, then
+attempts cleanup only if the app was not already running before the smoke. The
+RC verifier keeps this evidence skipped by default and only runs it with
+`--run-real-desktop-app-open-smoke`, so source gates do not open user apps
+unless explicitly requested.
 
 Current opt-in real desktop UI inspection evidence is reproducible with:
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Opt-in smoke-test for real macOS desktop app discovery and app.open."""
+"""Opt-in smoke-test for real macOS desktop app discovery and desktop.open_app."""
 
 from __future__ import annotations
 
@@ -16,10 +16,52 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from apps.shell.agent.tools import desktop as desktop_tools
+from apps.shell.agent.tools.registry import dispatch_tool_call
 
 DEFAULT_APP_NAME = "Calculator"
 _CLEANUP_STATUS_MAX_POLLS = 12
 _CLEANUP_STATUS_POLL_INTERVAL_SECONDS = 0.25
+
+
+class _RuntimeDesktopBroker:
+    """Small broker surface for exercising the production tool dispatch registry."""
+
+    def desktop_list_apps(self, query: str = "", limit: Any = 200) -> dict[str, Any]:
+        return desktop_tools.list_apps(query=query, limit=limit)
+
+    def desktop_inspect_app(
+        self,
+        app_name: str,
+        *,
+        open_if_needed: Any = True,
+        focus: Any = True,
+        role_filter: str = "",
+        limit: Any = 80,
+    ) -> dict[str, Any]:
+        return desktop_tools.inspect_app(
+            app_name,
+            open_if_needed=open_if_needed,
+            focus=focus,
+            role_filter=role_filter,
+            limit=limit,
+        )
+
+    def desktop_active_window(self) -> dict[str, Any]:
+        return desktop_tools.active_window()
+
+    def app_status(self, app_name: str) -> dict[str, Any]:
+        return desktop_tools.app_status(app_name)
+
+    def app_open(self, app_name: str) -> dict[str, Any]:
+        return desktop_tools.app_open(app_name)
+
+
+def _runtime_tool_call(
+    broker: _RuntimeDesktopBroker,
+    tool_name: str,
+    payload: dict[str, Any],
+) -> dict[str, Any]:
+    return dispatch_tool_call(broker, tool_name, payload)
 
 
 def _app_names(result: dict[str, Any]) -> list[str]:
@@ -223,20 +265,55 @@ def run_smoke(
             "reason": "real desktop app open smoke only runs on macOS",
         }
 
-    discovery = desktop_tools.list_apps(query=clean_app_name, limit=10)
+    broker = _RuntimeDesktopBroker()
+    discovery = _runtime_tool_call(
+        broker,
+        "desktop.list_apps",
+        {"query": clean_app_name, "limit": 10},
+    )
     discovered_names = _app_names(discovery)
     discovered_app_name = next(
         (name for name in discovered_names if name.casefold() == clean_app_name.casefold()),
         discovered_names[0] if discovered_names else clean_app_name,
     )
-    before_status = desktop_tools.app_status(discovered_app_name)
+    before_status = _runtime_tool_call(
+        broker,
+        "app.status",
+        {"app_name": discovered_app_name},
+    )
     before_running = _status_running(before_status)
-    open_result = desktop_tools.app_open(discovered_app_name)
+    open_result = _runtime_tool_call(
+        broker,
+        "desktop.open_app",
+        {"app_name": discovered_app_name},
+    )
     opened_app_name = _resolved_open_app_name(discovered_app_name, open_result)
-    after_status = desktop_tools.app_status(opened_app_name)
+    if open_result.get("ok") is True:
+        verify_result = _runtime_tool_call(
+            broker,
+            "desktop.verify",
+            {"app_name": opened_app_name, "limit": 40},
+        )
+    else:
+        verify_result = {
+            "ok": False,
+            "action": "desktop.verify",
+            "skipped": True,
+            "reason": "desktop.open_app failed",
+            "data": {"app_name": opened_app_name},
+        }
+    after_status = _runtime_tool_call(
+        broker,
+        "app.status",
+        {"app_name": opened_app_name},
+    )
     after_running = _status_running(after_status)
     open_data = open_result.get("data") if isinstance(open_result.get("data"), dict) else {}
     open_verified = open_data.get("launch_verified")
+    verify_data = verify_result.get("data") if isinstance(verify_result.get("data"), dict) else {}
+    verify_checks = (
+        verify_data.get("checks") if isinstance(verify_data.get("checks"), dict) else {}
+    )
     cleanup_result = _cleanup_evidence(
         app_name=opened_app_name,
         cleanup=cleanup,
@@ -247,7 +324,15 @@ def run_smoke(
         "discovered_app": discovery.get("ok") is True and bool(discovered_names),
         "before_status_ok": before_status.get("ok") is True,
         "open_ok": open_result.get("ok") is True,
+        "open_alias_used": open_result.get("action") == "desktop.open_app",
         "open_verified_running": open_verified is True or after_running is True,
+        "verify_ok": verify_result.get("ok") is True,
+        "verify_alias_used": verify_result.get("action") == "desktop.verify",
+        "verify_status_running": (
+            verify_checks.get("status_running") is True
+            or verify_data.get("running") is True
+            or after_running is True
+        ),
         "after_status_ok": after_status.get("ok") is True,
         "after_status_running": after_running is True,
         "cleanup_ok": cleanup_result.get("ok") is True,
@@ -257,20 +342,24 @@ def run_smoke(
             and cleanup_result.get("attempted") is True
         ),
     }
+    blocking_evidence = _merge_blocking_evidence(open_result, verify_result, after_status)
     return {
         "ok": all(checks.values()),
         "mode": "real_desktop_app_open_smoke",
         "skipped": False,
         "platform": current_platform,
+        "tool_chain": ["desktop.list_apps", "desktop.open_app", "desktop.verify", "app.status"],
         "app_name": clean_app_name,
         "discovered_app_name": discovered_app_name,
         "opened_app_name": opened_app_name,
+        **blocking_evidence,
         "discovery": {
             "result": discovery,
             "names": discovered_names,
         },
         "before_status": before_status,
         "open_result": open_result,
+        "verify_result": verify_result,
         "after_status": after_status,
         "cleanup": cleanup_result,
         "checks": checks,

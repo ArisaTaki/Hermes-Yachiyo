@@ -5,6 +5,35 @@ import json
 from scripts import smoke_real_desktop_app_open as smoke
 
 
+def _patch_verify(monkeypatch, calls: list[tuple[str, str]] | None = None) -> None:
+    def fake_inspect_app(
+        app_name,
+        *,
+        open_if_needed=True,
+        focus=True,
+        role_filter="",
+        limit=80,
+    ):
+        if calls is not None:
+            calls.append(("verify", app_name))
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"Verified {app_name}",
+            "data": {
+                "app_name": app_name,
+                "open_if_needed": open_if_needed,
+                "focus_requested": focus,
+                "running": True,
+                "checks": {"status_running": True},
+                "ui_element_count": 1,
+            },
+            "permission_error": False,
+        }
+
+    monkeypatch.setattr(smoke.desktop_tools, "inspect_app", fake_inspect_app)
+
+
 def test_real_desktop_app_open_smoke_skips_non_macos(monkeypatch):
     monkeypatch.setattr(smoke.platform, "system", lambda: "Linux")
 
@@ -66,20 +95,33 @@ def test_real_desktop_app_open_smoke_discovers_opens_and_verifies_app(monkeypatc
 
     monkeypatch.setattr(smoke.desktop_tools, "app_status", fake_status)
     monkeypatch.setattr(smoke.desktop_tools, "app_open", fake_open)
+    _patch_verify(monkeypatch, calls)
 
     evidence = smoke.run_smoke(app_name="Calculator", cleanup=False)
 
     assert evidence["ok"] is True
     assert evidence["skipped"] is False
+    assert evidence["tool_chain"] == [
+        "desktop.list_apps",
+        "desktop.open_app",
+        "desktop.verify",
+        "app.status",
+    ]
     assert evidence["discovered_app_name"] == "Calculator"
     assert evidence["opened_app_name"] == "Calculator"
     assert evidence["checks"]["discovered_app"] is True
     assert evidence["checks"]["open_ok"] is True
+    assert evidence["checks"]["open_alias_used"] is True
+    assert evidence["checks"]["verify_ok"] is True
+    assert evidence["checks"]["verify_alias_used"] is True
+    assert evidence["verify_result"]["action"] == "desktop.verify"
+    assert evidence["open_result"]["action"] == "desktop.open_app"
     assert evidence["checks"]["after_status_running"] is True
     assert evidence["cleanup"]["attempted"] is False
     assert calls == [
         ("status", "Calculator"),
         ("open", "Calculator"),
+        ("verify", "Calculator"),
         ("status", "Calculator"),
     ]
 
@@ -128,6 +170,7 @@ def test_real_desktop_app_open_smoke_cleans_up_app_started_by_smoke(monkeypatch)
             },
         },
     )
+    _patch_verify(monkeypatch)
 
     def fake_quit(app_name):
         calls.append(("quit", app_name))
@@ -197,6 +240,7 @@ def test_real_desktop_app_open_smoke_waits_for_async_quit(monkeypatch):
             },
         },
     )
+    _patch_verify(monkeypatch)
     monkeypatch.setattr(
         smoke.desktop_tools,
         "app_quit",
@@ -269,6 +313,7 @@ def test_real_desktop_app_open_smoke_does_not_quit_existing_app(monkeypatch):
             },
         },
     )
+    _patch_verify(monkeypatch)
     monkeypatch.setattr(
         smoke.desktop_tools,
         "app_quit",

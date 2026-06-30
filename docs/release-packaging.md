@@ -215,7 +215,7 @@ python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount
 python scripts/verify_release_candidate.py --source-only --run-real-desktop-app-open-smoke --report-json tmp/source-only-real-desktop-app-open.json
 ```
 
-`--run-real-desktop-app-open-smoke` 会在 macOS 上执行真实 `desktop.list_apps -> app.open -> app.status` 链路，默认目标是 Calculator；如果 Calculator 在 smoke 前未运行，脚本会在验证后尝试清理退出，如果它原本已经运行则不会退出用户的 app。该 gate 默认不运行，避免普通 source-only 或完整 RC gate 自动打开本机应用；它证明的是系统 app open 能力，不替代 `--run-dmg-app-smoke` 的发布包自身启动证据。
+`--run-real-desktop-app-open-smoke` 会在 macOS 上通过 runtime dispatch 执行真实 `desktop.list_apps -> desktop.open_app -> desktop.verify -> app.status` 链路，默认目标是 Calculator；如果 Calculator 在 smoke 前未运行，脚本会在验证后尝试清理退出，如果它原本已经运行则不会退出用户的 app。该 gate 默认不运行，避免普通 source-only 或完整 RC gate 自动打开本机应用；它证明的是通用桌面 app 发现、打开和验证能力，不替代 `--run-dmg-app-smoke` 的发布包自身启动证据。
 
 需要继续证明源码侧真实桌面 UI 读取链路时，显式运行 opt-in UI inspection smoke：
 
