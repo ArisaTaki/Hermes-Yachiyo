@@ -117,6 +117,16 @@ python scripts/build_release_candidate_artifacts.py --channel experimental --rep
 
 CI 仍直接运行 `python scripts/prepare_app_build_metadata.py`、`python scripts/build_backend.py --clean` 和 `npm --prefix apps/frontend run dist:mac`，因为 workflow 工作区不会把临时 metadata 改动提交回仓库。
 
+在真正刷新本地 RC evidence 前，可以先跑低成本 public-release preflight：
+
+```bash
+python scripts/run_public_release_gate.py \
+  --output-json tmp/public-release-gate.json \
+  --output-markdown tmp/public-release-gate.md
+```
+
+该入口会运行 release artifact guard、secret redaction、focused release pytest 和安全 public-demo smoke。默认模式用于快速发现文档、secret、release-smoke/public-demo 回归；当 public demo 仍是 `partial_demo_ready` 时报告会显示 `status=needs_release_evidence`、缺失 demo flow 和下一步命令但不会因为缺少 opt-in 证据返回失败。最终发布前加 `--require-release-ready`，让缺少完整 public-demo release evidence 的候选版本直接失败。
+
 如果要一次刷新当前 HEAD 的本地 RC evidence、Gatekeeper readiness diagnostics、Screen Recording attempt、provider-not-applicable 草稿和 final signoff preview，运行：
 
 ```bash

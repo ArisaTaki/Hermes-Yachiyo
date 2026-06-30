@@ -728,6 +728,14 @@ guide so public release docs cannot silently drop Gatekeeper, Screen Recording,
 diagnostics bundle, known limitation, packaged runtime, or product-boundary
 language.
 
+`scripts/run_public_release_gate.py` now provides a cheap public-release
+preflight before the heavier local RC refresh. It runs release artifact guards,
+secret redaction, focused release pytest, and the safe public-demo smoke, then
+writes JSON/Markdown status with `needs_release_evidence` when the safe demo
+passes but full opt-in public-demo evidence is still missing. Final release
+signoff can add `--require-release-ready` so partial public-demo evidence fails
+the gate instead of only reporting next actions.
+
 `scripts/run_public_demo_smokes.py` now provides the maintained public-demo
 evidence entry point. The default run executes safe default demonstrations for
 data-analysis artifacts, browser-research planner artifacts, desktop planner

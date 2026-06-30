@@ -117,11 +117,21 @@ what evidence is still absent.
 Run these before calling a local build release-ready:
 
 ```bash
+python scripts/run_public_release_gate.py \
+  --output-json tmp/public-release-gate.json \
+  --output-markdown tmp/public-release-gate.md
 python scripts/verify_release_artifacts.py
 python scripts/verify_secret_redaction.py
 python scripts/refresh_local_rc_signoff.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
 python scripts/refresh_local_rc_signoff.py --print-status
 ```
+
+`run_public_release_gate.py` is the cheap public-release preflight. By default
+it runs release artifact guards, secret redaction, focused release pytest, and
+the safe public demo smoke. A partial public demo keeps the report at
+`status=needs_release_evidence` while still returning success if no command
+failed; add `--require-release-ready` for final release signoff so missing
+public-demo flows make the command fail.
 
 `refresh_local_rc_signoff.py` builds/refreshes the current local RC evidence,
 generates the Native Agent capability matrix, writes release readiness
