@@ -16,6 +16,11 @@ from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_decision_and_tool_requests,
 )
 
+_RUNTIME_PLANNER_ENTRYPOINT_EXECUTION_REASONS = {
+    "planner_builtin_data_analysis",
+    "planner_prefetch_data_source",
+}
+
 
 @dataclass(frozen=True)
 class AgentRunStart:
@@ -347,11 +352,37 @@ class RuntimeAgentRunAsyncCoordinator:
 
 
 def _runtime_planner_entrypoint_context(agent: dict[str, Any], user_goal: str) -> str:
+    clean_goal = str(user_goal or "").strip()
+    if (
+        agent.get("_daily_desktop_policy_overlay") is True
+        and agent.get("_runtime_planner_entrypoint") is not True
+    ):
+        return clean_goal
     if agent.get("_runtime_planner_entrypoint") is True:
         context = str(agent.get("_runtime_planner_entrypoint_context") or "").strip()
-        if context:
-            return context
-    return user_goal
+        candidate = context or clean_goal
+        policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
+        allowed = _string_list(policy.get("allowed_tools"))
+        return candidate if _runtime_planner_entrypoint_should_execute(candidate, allowed) else ""
+    return clean_goal
+
+
+def _runtime_planner_entrypoint_should_execute(context: str, allowed_tools: list[str]) -> bool:
+    clean_context = str(context or "").strip()
+    if not clean_context:
+        return False
+    _decision, direct_requests = planner_first_direct_decision_and_tool_requests(
+        clean_context,
+        allowed_tools,
+    )
+    if not direct_requests:
+        return False
+    reasons = {
+        str(request.get("planning_reason") or "").strip()
+        for request in direct_requests
+        if isinstance(request, dict)
+    }
+    return bool(reasons) and reasons <= _RUNTIME_PLANNER_ENTRYPOINT_EXECUTION_REASONS
 
 
 def _with_entrypoint_runtime_planner(agent: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:

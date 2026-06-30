@@ -2189,18 +2189,32 @@ class RuntimeCustomApiAgentLoop:
             or any(tool in allowed_tools for tool in DAILY_BROWSER_TOOL_NAMES)
             else ""
         )
+        has_tools = bool(allowed_tools)
+        runtime_manual = f"{YACHIYO_RUNTIME_OPERATING_MANUAL} " if has_tools else ""
+        tool_call_guidance = (
+            "Prefer native tool_calls when available. "
+            "If the model endpoint does not support tool_calls and a controlled tool is needed, respond as JSON "
+            "{\"action\":\"tool\",\"tool\":\"workspace.list\",\"input\":{}}. "
+            "Do not request tools that are not listed as allowed. "
+            if has_tools
+            else "No tools are allowed for this run; answer directly without requesting tools. "
+        )
+        workspace_guidance = (
+            "Workspace tools only accept paths relative to the configured Default Workdir. Never pass absolute "
+            "paths to workspace tools. If a required target is outside that workspace and terminal.run is "
+            "allowed, use terminal.run instead. A failed workspace tool call is recoverable: follow its hint "
+            "or switch tools instead of stopping or retrying the same invalid path. "
+            if has_tools
+            else ""
+        )
         system_prompt = (
             "You are running inside Oha-Yachiyo Agent Runtime. "
             "Follow the Agent functional instructions, persona prompt, user goal, and exact output requests. "
             "If those instructions require an exact phrase or format, return exactly that final output. "
             "Return concise final output unless the Agent instructions require otherwise. "
-            f"{YACHIYO_RUNTIME_OPERATING_MANUAL} "
+            f"{runtime_manual}"
             f"{self._operating_doctrine}\n"
-            "Prefer native tool_calls when available. "
-            "If the model endpoint does not support tool_calls and a controlled tool is needed, respond as JSON "
-            "{\"action\":\"tool\",\"tool\":\"workspace.list\",\"input\":{}}. "
-            "Do not request tools that are not listed as allowed. "
-            "If no tools are allowed, do not request tools. "
+            f"{tool_call_guidance}"
             "Do not request a tool solely because of the output contract; use tools only when the user goal "
             "or an explicit deliverable requires them. "
             f"{memory_tool_guidance}"
@@ -2209,10 +2223,7 @@ class RuntimeCustomApiAgentLoop:
             "If the user asks not to create, save, write, or modify files, provide the content inline and do "
             "not request file-writing tools. If the user asks not to run or execute commands, do not request "
             "command-execution tools. "
-            "Workspace tools only accept paths relative to the configured Default Workdir. Never pass absolute "
-            "paths to workspace tools. If a required target is outside that workspace and terminal.run is "
-            "allowed, use terminal.run instead. A failed workspace tool call is recoverable: follow its hint "
-            "or switch tools instead of stopping or retrying the same invalid path. "
+            f"{workspace_guidance}"
             f"{self._runtime_planner_guidance(planner_context, allowed_tools)}"
             f"Request at most one high-risk tool per turn.\n\nAllowed tools: {allowed_tool_text}"
         )

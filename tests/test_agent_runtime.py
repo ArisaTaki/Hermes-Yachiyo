@@ -5137,6 +5137,7 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
         assert [name for name, _payload in desktop_calls] == [
             "desktop.list_apps",
             "app.open",
+            "app.focus",
             "desktop.safe_shortcut",
             "desktop.safe_type_text",
             "desktop.search_submit",
