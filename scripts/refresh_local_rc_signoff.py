@@ -804,11 +804,18 @@ def _public_demo_details_from_release_smoke(report: dict[str, object]) -> dict[s
         for evidence_id in ("public_demo_assessment", "public_demo_selected"):
             entries = _dict_items(related.get(evidence_id))
             if entries:
-                return entries[0]
+                return _preferred_public_demo_entry(entries)
     for action in _dict_items(report.get("next_actions")):
         if action.get("id") == "public_demo":
             return action
     return {}
+
+
+def _preferred_public_demo_entry(entries: list[dict[str, object]]) -> dict[str, object]:
+    for entry in entries:
+        if entry.get("kind") == "public_demo_aggregate":
+            return entry
+    return entries[0] if entries else {}
 
 
 def _print_public_demo_detail_lines(details: dict[str, object], *, prefix: str) -> None:

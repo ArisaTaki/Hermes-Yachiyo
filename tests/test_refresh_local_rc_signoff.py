@@ -1004,6 +1004,45 @@ def test_refresh_local_rc_signoff_cli_passes_public_demo_reports(
     assert "release_smoke_report: tmp/rc-verification-abc12345-release-smoke.json" in output
 
 
+def test_refresh_local_rc_signoff_prefers_aggregate_public_demo_status():
+    details = refresh._public_demo_details_from_release_smoke(
+        {
+            "items": [
+                {
+                    "id": "public_demo",
+                    "related_evidence": {
+                        "public_demo_assessment": [
+                            {
+                                "kind": "public_demo_assessment",
+                                "release_level": "partial_demo_ready",
+                                "missing_required_flow_ids": [
+                                    "real_desktop_app_open",
+                                    "studio_replay_ui",
+                                ],
+                            },
+                            {
+                                "kind": "public_demo_aggregate",
+                                "release_level": "blocked",
+                                "missing_required_flow_ids": [
+                                    "real_desktop_ui_inspection",
+                                    "workflow_provider",
+                                ],
+                            },
+                        ]
+                    },
+                }
+            ]
+        }
+    )
+
+    assert details["kind"] == "public_demo_aggregate"
+    assert details["release_level"] == "blocked"
+    assert details["missing_required_flow_ids"] == [
+        "real_desktop_ui_inspection",
+        "workflow_provider",
+    ]
+
+
 def test_refresh_local_rc_signoff_prints_os_signoff_guide(
     monkeypatch,
     tmp_path,
