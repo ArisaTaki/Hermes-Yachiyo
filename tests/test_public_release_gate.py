@@ -118,6 +118,8 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
         [sys.executable, "scripts/verify_release_artifacts.py"],
         [sys.executable, "scripts/verify_secret_redaction.py"],
     ]
+    release_pytest_command = next(command for command in commands if "pytest" in command)
+    assert "tests/test_public_release_gate.py" in release_pytest_command
     public_demo = next(item for item in summary["checks"] if item["id"] == "public_demo")
     assert public_demo["release_level"] == "partial_demo_ready"
     assert public_demo["missing_required_flow_ids"] == [
