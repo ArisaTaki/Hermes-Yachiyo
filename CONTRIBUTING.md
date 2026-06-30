@@ -79,6 +79,16 @@ python scripts/refresh_local_rc_signoff.py --channel experimental --repository k
 python scripts/refresh_local_rc_signoff.py --print-status
 ```
 
+For public demo evidence, start with the safe source-level demo runner:
+
+```bash
+python scripts/run_public_demo_smokes.py --output-json tmp/public-demo-smokes.json --output-markdown tmp/public-demo-smokes.md
+```
+
+Use `--include-real-desktop`, `--include-provider-workflow`, and `--include-ui`
+only when the environment is ready for real app operation, live provider calls,
+and Electron UI smokes.
+
 If a capability lacks current source, provider, packaged, UI, or manual
 evidence, document it as a limitation or roadmap item instead of presenting it
 as shipped.

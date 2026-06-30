@@ -58,6 +58,32 @@ evidence for these flows:
 | Studio replay | Run Detail / Agent Studio UI smoke plus RunEvent replay evidence. |
 | Diagnostics export | `collect_release_diagnostics.py` bundle manifest and `release-smoke` diagnostics item. |
 
+The public demo smoke runner is the maintained entry point for this checklist:
+
+```bash
+python scripts/run_public_demo_smokes.py \
+  --output-json tmp/public-demo-smokes.json \
+  --output-markdown tmp/public-demo-smokes.md
+```
+
+By default it runs only safe source-level demos: data analysis artifact,
+browser research artifact planning, approval resume, and GroupRun replay.
+Full Hanako/Hermes-level demo evidence requires explicit opt-in:
+
+```bash
+python scripts/run_public_demo_smokes.py \
+  --include-real-desktop \
+  --include-provider-workflow \
+  --include-ui \
+  --output-json tmp/public-demo-smokes-full.json \
+  --output-markdown tmp/public-demo-smokes-full.md
+```
+
+`--include-real-desktop` opens and operates real macOS apps,
+`--include-provider-workflow` requires live provider smoke credentials, and
+`--include-ui` starts Vite/Electron UI smokes. A default run can pass selected
+source demos while still reporting `complete=false` until opt-in flows pass.
+
 The release-smoke summary is the quickest user-path view:
 
 ```bash

@@ -170,9 +170,19 @@ USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
         "public release readiness guide must state packaged runtime expectations",
     ),
     (
+        Path("docs/public-release-readiness.md"),
+        "scripts/run_public_demo_smokes.py",
+        "public release readiness guide must document the public demo smoke runner",
+    ),
+    (
         Path("CONTRIBUTING.md"),
         "Non-Negotiable Product Boundaries",
         "contribution guide must document non-negotiable product boundaries",
+    ),
+    (
+        Path("CONTRIBUTING.md"),
+        "run_public_demo_smokes.py",
+        "contribution guide must document public demo smoke evidence",
     ),
 )
 PACKAGING_CONFIG_FILE = Path("apps/frontend/electron-builder.yml")

@@ -722,6 +722,17 @@ guide so public release docs cannot silently drop Gatekeeper, Screen Recording,
 diagnostics bundle, known limitation, packaged runtime, or product-boundary
 language.
 
+`scripts/run_public_demo_smokes.py` now provides the maintained public-demo
+evidence entry point. The default run executes safe source-level demonstrations
+for data-analysis artifacts, browser-research planner artifacts, approval
+resume replay, and GroupRun replay, then reports skipped real desktop,
+provider Workflow, and UI demo flows as next actions. Full public demo evidence
+requires the explicit `--include-real-desktop`, `--include-provider-workflow`,
+and `--include-ui` flags because those flows open/operate apps, require live
+credentials, or start Vite/Electron UI smokes. The current default evidence can
+pass with `complete=false`; release parity still requires the opt-in flows to
+pass for the current candidate.
+
 ## Non-Negotiable Guards
 
 - 禁止删除 Agent Studio。
