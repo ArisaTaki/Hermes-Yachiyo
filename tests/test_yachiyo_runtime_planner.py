@@ -6554,6 +6554,85 @@ def test_runtime_planner_discovers_generic_communication_app_before_composing() 
     ).selected_intent.kind == "communication"
 
 
+def test_runtime_planner_discovers_unscoped_communication_app_before_direct_send() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+
+    cases = (
+        (
+            "给 Alice 发邮件说明会议改到三点",
+            "mail",
+            "To",
+            "message body",
+            "说明会议改到三点",
+        ),
+        (
+            "给 Alice 发消息说会议改到三点",
+            "messaging",
+            "recipient",
+            "message",
+            "会议改到三点",
+        ),
+    )
+
+    for prompt, query, recipient_target, body_target, body in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "communication"
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover_apps-desktop-state",
+            "open-selected-discovered-app",
+            "inspect-selected-communication-compose-ui",
+            "fill-selected-communication-recipient",
+            "submit-selected-communication-recipient",
+            "draft-selected-communication-message",
+            "send-selected-communication-message",
+        ]
+        assert _step_by_id(decision, "discover_apps-desktop-state").input_preview == {
+            "query": query,
+            "limit": 20,
+        }
+        assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": query,
+            "action": "new_message",
+        }
+        assert _step_by_id(decision, "fill-selected-communication-recipient").input_preview == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "target": recipient_target,
+            "text": "Alice",
+            "role_filter": "text",
+            "limit": 80,
+        }
+        assert _step_by_id(decision, "draft-selected-communication-message").input_preview == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "target": body_target,
+            "text": body,
+            "role_filter": "text",
+            "limit": 80,
+        }
+        send_step = _step_by_id(decision, "send-selected-communication-message")
+        assert send_step.input_preview == {"action": "send"}
+        assert send_step.approval_required is True
+        assert planner_tool_requests(prompt, allowed_tools) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": query, "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_prefetch_communication_surface",
+                "continue_to_model": True,
+            }
+        ]
+
+
 def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation() -> None:
     allowed_tools = [
         "desktop.list_apps",

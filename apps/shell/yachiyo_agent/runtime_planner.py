@@ -6564,6 +6564,18 @@ def _direct_communication_steps(
     channel = str(direct_message.get("channel") or "").strip()
     send_action = str(direct_message.get("send_action") or "send").strip() or "send"
     mode = str(direct_message.get("mode") or "focus").strip() or "focus"
+    if not app_name:
+        selected_app_steps = _direct_communication_discovered_app_steps(
+            intent,
+            allowed,
+            recipient=recipient,
+            body=body,
+            body_source=body_source,
+            channel=channel,
+            send_action=send_action,
+        )
+        if selected_app_steps:
+            return selected_app_steps
     if not app_name and channel == "email" and send_action in {"send", "draft"}:
         app_name = _default_communication_app_for_channel(
             channel,
@@ -6808,6 +6820,87 @@ def _direct_communication_steps(
             action="send_message",
             reason="Final message sending remains approval-gated.",
         )
+    )
+    return steps
+
+
+def _direct_communication_discovered_app_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    *,
+    recipient: str,
+    body: str,
+    body_source: str,
+    channel: str,
+    send_action: str,
+) -> list[ToolPlanStepSnapshot]:
+    if channel not in {"email", "message"} or not recipient or body_source:
+        return []
+    query = "mail" if channel == "email" else "messaging"
+    discovery_tool = _first_allowed(("desktop.list_apps",), allowed)
+    selected_app_tool = _selected_discovered_app_tool(
+        allowed,
+        safe_shortcut={"action": "new_message"},
+    )
+    if not discovery_tool or selected_app_tool != "app.open_and_safe_shortcut":
+        return []
+    selected_app = "<selected app from desktop.list_apps>"
+    steps = [
+        _step(
+            intent,
+            "discover_apps-desktop-state",
+            "Discover desktop state",
+            "desktop.app_discovery",
+            discovery_tool,
+            input_preview={"query": query, "limit": 20},
+            reason=(
+                "Discover an installed communication app by capability before drafting "
+                "the user-requested message."
+            ),
+        ),
+        _step(
+            intent,
+            "open-selected-discovered-app",
+            "Open selected discovered app",
+            "desktop.ui_operation",
+            selected_app_tool,
+            input_preview={
+                "app_name": selected_app,
+                "selection_source": "desktop.list_apps",
+                "query": query,
+                "action": "new_message",
+            },
+            depends_on=["discover_apps-desktop-state"],
+            action="safe_shortcut",
+            reason=(
+                "After desktop.list_apps returns candidates, the model selects the best "
+                "matching communication app before opening compose."
+            ),
+        ),
+    ]
+    compose_hint = {
+        "send_action": send_action,
+        "channel": channel,
+        "recipient": recipient,
+    }
+    if body:
+        compose_hint["body"] = body
+    selected_intent = intent.model_copy(
+        update={
+            "inputs": {
+                **intent.inputs,
+                "safe_shortcut_hint": {"action": "new_message"},
+                "communication_compose_hint": compose_hint,
+            }
+        }
+    )
+    _append_selected_discovered_communication_compose_steps(
+        steps,
+        selected_intent,
+        allowed,
+        query=query,
+        selected_app_tool=selected_app_tool,
+        depends_on="open-selected-discovered-app",
     )
     return steps
 

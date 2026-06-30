@@ -174,7 +174,7 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
         return _context_prefetch_tool_requests(
             decision,
             allowed,
-            step_ids=("discover-communication-surface",),
+            step_ids=("discover_apps-desktop-state", "discover-communication-surface"),
             planning_reason="planner_prefetch_communication_surface",
         )
     if decision.selected_intent.kind == "information_capture":
@@ -2173,6 +2173,13 @@ def _context_prefetch_payload(
         return request_payload
     if tool_name in {"desktop.active_window", "desktop.running_apps"}:
         return {}
+    if tool_name == "desktop.list_apps":
+        query = str(payload.get("query") or "").strip()
+        request_payload: dict[str, Any] = {"query": query, "limit": 20} if query else {}
+        limit = payload.get("limit")
+        if isinstance(limit, int) and limit > 0:
+            request_payload["limit"] = limit
+        return request_payload
     if tool_name == "screen.capture":
         reason = str(payload.get("reason") or "").strip()
         return {"reason": reason} if reason else {}
