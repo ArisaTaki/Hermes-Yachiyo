@@ -335,6 +335,56 @@ def test_capability_summary_cli_merges_multiple_reports(tmp_path):
     assert by_id["packaged_app_bridge_isolation"]["status"] == "passed"
 
 
+def test_capability_summary_cli_preserves_existing_report_matrix(tmp_path):
+    report_path = tmp_path / "combined-rc.json"
+    output_path = tmp_path / "matrix.json"
+    capabilities = []
+    for definition in summary.CAPABILITY_DEFINITIONS:
+        capability_id = definition["id"]
+        capabilities.append(
+            {
+                **definition,
+                "category": summary.capability_category(capability_id),
+                "status": (
+                    "passed"
+                    if capability_id
+                    in {
+                        "source_real_desktop_app_open",
+                        "packaged_backend_bridge_identity",
+                        "packaged_app_bridge_isolation",
+                    }
+                    else "missing"
+                ),
+                "evidence_summary": {},
+            }
+        )
+    existing_matrix = {
+        **summary.capability_matrix_status_summary(capabilities),
+        "status": "incomplete",
+        "capabilities": capabilities,
+        "source_reports": [
+            "tmp/rc-real-desktop-app-open-current.json",
+            "tmp/rc-packaged-backend-current.json",
+            "tmp/rc-dmg-app-current.json",
+        ],
+    }
+    report_path.write_text(
+        json.dumps({"native_agent_capability_matrix": existing_matrix}),
+        encoding="utf-8",
+    )
+
+    assert summary.main([str(report_path), "--output-json", str(output_path)]) == 1
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    by_id = {item["id"]: item for item in payload["capabilities"]}
+    assert by_id["source_real_desktop_app_open"]["status"] == "passed"
+    assert by_id["packaged_backend_bridge_identity"]["status"] == "passed"
+    assert by_id["packaged_app_bridge_isolation"]["status"] == "passed"
+    assert "packaged" not in payload["missing_by_category"]
+    assert payload["source_reports"] == existing_matrix["source_reports"]
+    assert payload["source_report"] == str(report_path)
+
+
 def test_capability_summary_cli_writes_json(tmp_path):
     report_path = tmp_path / "rc.json"
     output_path = tmp_path / "matrix.json"

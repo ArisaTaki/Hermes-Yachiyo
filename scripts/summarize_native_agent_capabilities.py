@@ -647,6 +647,73 @@ def merge_capability_matrices(
     return merged
 
 
+def _normalize_capability_matrix(matrix: dict[str, Any]) -> dict[str, Any]:
+    result = dict(matrix)
+    raw_capabilities = result.get("capabilities")
+    if not isinstance(raw_capabilities, list):
+        return result
+
+    capabilities: list[dict[str, Any]] = []
+    for raw_capability in raw_capabilities:
+        if not isinstance(raw_capability, dict):
+            continue
+        capability = dict(raw_capability)
+        capability_id = str(capability.get("id") or "").strip()
+        if capability_id and not str(capability.get("category") or "").strip():
+            capability["category"] = capability_category(capability_id)
+        capabilities.append(capability)
+    if not capabilities:
+        return result
+
+    status_summary = capability_matrix_status_summary(capabilities)
+    for key in (
+        "ok",
+        "capability_count",
+        "status_counts",
+        "missing_capability_ids",
+        "category_status_counts",
+        "missing_by_category",
+        "next_actions",
+    ):
+        result.setdefault(key, status_summary[key])
+    result["capabilities"] = capabilities
+    if str(result.get("status") or "").strip() not in {"passed", "incomplete"}:
+        result["status"] = "passed" if result.get("ok") is True else "incomplete"
+    return result
+
+
+def _should_preserve_report_matrix(raw_matrix: Any) -> bool:
+    if not isinstance(raw_matrix, dict) or not isinstance(raw_matrix.get("capabilities"), list):
+        return False
+    if isinstance(raw_matrix.get("source_reports"), list) and raw_matrix.get("source_reports"):
+        return True
+    raw_count = raw_matrix.get("capability_count")
+    return isinstance(raw_count, int) and raw_count >= len(CAPABILITY_DEFINITIONS)
+
+
+def _report_can_rebuild_matrix(report: dict[str, Any]) -> bool:
+    if isinstance(report.get("provider_smoke"), dict):
+        return True
+    rebuild_sections = tuple(SOURCE_SECTION_CAPABILITIES.values()) + (
+        "packaged_backend_bridge_smoke",
+        "dmg_app_smoke",
+    )
+    return any(isinstance(report.get(section), dict) for section in rebuild_sections)
+
+
+def capability_matrix_from_report(report: dict[str, Any]) -> dict[str, Any]:
+    raw_matrix = report.get("native_agent_capability_matrix")
+    if _should_preserve_report_matrix(raw_matrix):
+        return _normalize_capability_matrix(dict(raw_matrix))
+    if _report_can_rebuild_matrix(report):
+        matrix = summarize_capabilities(report)
+        matrix["status"] = "passed" if matrix.get("ok") is True else "incomplete"
+        return matrix
+    if isinstance(raw_matrix, dict) and isinstance(raw_matrix.get("capabilities"), list):
+        return _normalize_capability_matrix(dict(raw_matrix))
+    return summarize_capabilities(report)
+
+
 def _write_report(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -667,7 +734,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         source_reports: list[str] = []
         for report_path in args.reports:
             source = _load_report(ROOT, report_path)
-            matrix = summarize_capabilities(source)
+            matrix = capability_matrix_from_report(source)
             matrix["source_report"] = str(report_path)
             matrices.append(matrix)
             source_reports.append(str(report_path))
