@@ -609,6 +609,44 @@ def summarize_capabilities(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def merge_capability_matrices(
+    matrices: Sequence[dict[str, Any]],
+    *,
+    source_reports: Sequence[str] | None = None,
+) -> dict[str, Any]:
+    capability_order: list[str] = []
+    capability_by_id: dict[str, dict[str, Any]] = {}
+    for matrix in matrices:
+        raw_capabilities = matrix.get("capabilities")
+        if not isinstance(raw_capabilities, list):
+            continue
+        for raw_capability in raw_capabilities:
+            if not isinstance(raw_capability, dict):
+                continue
+            capability_id = str(raw_capability.get("id") or "").strip()
+            if not capability_id:
+                continue
+            if capability_id not in capability_order:
+                capability_order.append(capability_id)
+            capability = dict(raw_capability)
+            capability.setdefault("category", capability_category(capability_id))
+            existing = capability_by_id.get(capability_id)
+            if existing is None:
+                capability_by_id[capability_id] = capability
+                continue
+            if existing.get("status") != "passed" and capability.get("status") == "passed":
+                capability_by_id[capability_id] = capability
+
+    capabilities = [capability_by_id[capability_id] for capability_id in capability_order]
+    merged = {
+        **capability_matrix_status_summary(capabilities),
+        "capabilities": capabilities,
+    }
+    if source_reports:
+        merged["source_reports"] = list(source_reports)
+    return merged
+
+
 def _write_report(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -616,13 +654,30 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("report", type=Path, help="Release-candidate report JSON.")
+    parser.add_argument(
+        "reports",
+        nargs="+",
+        type=Path,
+        help="One or more release-candidate report JSON files.",
+    )
     parser.add_argument("--output-json", type=Path, help="Write the capability matrix JSON.")
     args = parser.parse_args(argv)
     try:
-        source = _load_report(ROOT, args.report)
-        summary = summarize_capabilities(source)
-        summary["source_report"] = str(args.report)
+        matrices: list[dict[str, Any]] = []
+        source_reports: list[str] = []
+        for report_path in args.reports:
+            source = _load_report(ROOT, report_path)
+            matrix = summarize_capabilities(source)
+            matrix["source_report"] = str(report_path)
+            matrices.append(matrix)
+            source_reports.append(str(report_path))
+        summary = (
+            matrices[0]
+            if len(matrices) == 1
+            else merge_capability_matrices(matrices, source_reports=source_reports)
+        )
+        if len(matrices) == 1:
+            summary["source_report"] = source_reports[0]
         if args.output_json is not None:
             output_path = args.output_json if args.output_json.is_absolute() else ROOT / args.output_json
             _write_report(output_path, summary)

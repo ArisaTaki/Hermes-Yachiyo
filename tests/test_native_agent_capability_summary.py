@@ -28,6 +28,72 @@ def _passed_section(mode: str, *, cases: list[str] | None = None) -> dict[str, o
     }
 
 
+def _source_sections_report() -> dict[str, object]:
+    return {
+        section_name: _passed_section(section_name, cases=[section_name])
+        for section_name in summary.SOURCE_SECTION_CAPABILITIES.values()
+    }
+
+
+def _provider_and_packaged_report() -> dict[str, object]:
+    return {
+        "provider_smoke": {
+            "checks": [
+                {
+                    "label": "text_stream",
+                    "exit_code": 0,
+                    "summary": {
+                        "ok": True,
+                        "finish_reasons": ["stop"],
+                        "content_chars": 42,
+                    },
+                },
+                {
+                    "label": "tool_call_stream",
+                    "exit_code": 0,
+                    "summary": {
+                        "ok": True,
+                        "tool_call_count": 1,
+                        "tool_result_followup_finish_reasons": ["stop"],
+                    },
+                },
+                _provider_check(
+                    "native_agent_full_chain",
+                    [
+                        {"name": "model_profile_readiness", "ok": True},
+                        {"name": "agent_workspace_read", "ok": True},
+                        {"name": "agent_artifact_write", "ok": True},
+                        {
+                            "name": "agent_multi_tool_pipeline",
+                            "ok": True,
+                            "tool_call_count": 2,
+                            "artifact_paths": ["agent-context.md", "pipeline-report.md"],
+                        },
+                        {"name": "workflow_child_agent_artifact", "ok": True},
+                        {"name": "terminal_approval_resume", "ok": True},
+                        {"name": "main_chat_model_loop", "ok": True},
+                    ],
+                ),
+                _provider_check(
+                    "native_workflow_full_chain",
+                    [
+                        {"name": "advanced_workflow_orchestration", "ok": True},
+                        {"name": "workflow_budget_boundary", "ok": True},
+                    ],
+                ),
+            ]
+        },
+        "packaged_backend_bridge_smoke": {
+            "status": "passed",
+            "bridge_statuses": [{"service": "oha-yachiyo"}],
+        },
+        "dmg_app_smoke": {
+            "status": "passed",
+            "bridge_statuses": [{"service": "oha-yachiyo"}],
+        },
+    }
+
+
 def test_capability_summary_reports_full_native_agent_matrix():
     report = {
         "data_analysis_artifact_smoke": _passed_section(
@@ -230,6 +296,36 @@ def test_capability_summary_reports_source_only_partial_matrix():
     assert "source_real_desktop_interaction" in action_by_id["real_desktop_smokes"]["capability_ids"]
     assert "provider_text_stream" in action_by_id["provider_smoke"]["capability_ids"]
     assert "--run-provider-smoke" in action_by_id["provider_smoke"]["command"]
+
+
+def test_capability_summary_cli_merges_multiple_reports(tmp_path):
+    source_path = tmp_path / "source-rc.json"
+    provider_path = tmp_path / "provider-rc.json"
+    output_path = tmp_path / "matrix.json"
+    source_path.write_text(json.dumps(_source_sections_report()), encoding="utf-8")
+    provider_path.write_text(
+        json.dumps(_provider_and_packaged_report()),
+        encoding="utf-8",
+    )
+
+    assert summary.main(
+        [
+            str(source_path),
+            str(provider_path),
+            "--output-json",
+            str(output_path),
+        ]
+    ) == 0
+
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["ok"] is True
+    assert payload["status_counts"] == {"passed": 29, "missing": 0}
+    assert payload["source_reports"] == [str(source_path), str(provider_path)]
+    assert payload["next_actions"] == []
+    by_id = {item["id"]: item for item in payload["capabilities"]}
+    assert by_id["source_real_desktop_interaction"]["status"] == "passed"
+    assert by_id["provider_text_stream"]["status"] == "passed"
+    assert by_id["packaged_app_bridge_isolation"]["status"] == "passed"
 
 
 def test_capability_summary_cli_writes_json(tmp_path):
