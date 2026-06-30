@@ -14259,15 +14259,27 @@ def _direct_file_context_communication_hint(
                 app_name = ""
             target = _clean_communication_hint_text(groups.get("target") or "")
             recipient = _clean_communication_recipient_text(groups.get("recipient") or "")
+            channel = _communication_delivery_channel_hint(
+                value,
+                groups.get("channel") or "",
+            )
             if target and (not app_name or not recipient):
                 split_app, split_recipient = _split_communication_surface_and_recipient(target)
-                app_name = app_name or split_app
-                recipient = recipient or split_recipient or _clean_communication_recipient_text(target)
+                if channel == "email" and (
+                    not split_app or not is_legacy_app_name_hint(split_app)
+                ):
+                    recipient = recipient or _clean_communication_recipient_text(target)
+                else:
+                    app_name = app_name or split_app
+                    recipient = (
+                        recipient
+                        or split_recipient
+                        or _clean_communication_recipient_text(target)
+                    )
             if not app_name and recipient:
                 app_name = _communication_surface_for_recipient_hint(recipient)
             if not recipient:
                 continue
-            channel = _canonical_communication_channel(groups.get("channel") or "")
             hint = {
                 "recipient": recipient,
                 "body_source": "file",
@@ -14571,6 +14583,11 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
         rf"(?:发送|发|发消息)\s*{source_pattern}$",
         rf"^(?:把|将)?\s*(?:(?:读取|阅读|读一下|读下|查看|看看|read|inspect)\s*)?"
         rf"{source_pattern}.{{0,50}}?"
+        rf"(?:发|发送|写|撰写|起草|草拟)\s*"
+        rf"(?P<channel>邮件|电子邮件|消息|短信|微信|email|e-mail|mail|message)\s*"
+        rf"(?:草稿|draft)?\s*(?:给|到|向|对)\s*(?P<target>[^：:，,。]+)$",
+        rf"^(?:把|将)?\s*(?:(?:读取|阅读|读一下|读下|查看|看看|read|inspect)\s*)?"
+        rf"{source_pattern}.{{0,50}}?"
         rf"(?:发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+)$",
         rf"^(?:把|将)?\s*(?:(?:读取|阅读|读一下|读下|查看|看看|read|inspect)\s*)?"
         rf"{source_pattern}\s*(?:通过|用|在)\s*(?P<app>[\w .·-]{{1,40}}?)\s*(?:发给|发送给|发到|发送到)\s*(?P<recipient>[^：:，,。]+)$",
@@ -14588,21 +14605,35 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
         groups = match.groupdict()
         app_name = _canonical_app_name_hint(groups.get("app") or "")
         recipient = _clean_communication_hint_text(groups.get("recipient") or "")
+        channel = _communication_delivery_channel_hint(value, groups.get("channel") or "")
         if (not app_name or not recipient) and groups.get("target"):
-            app_name, recipient = _split_communication_surface_and_recipient(
-                str(groups.get("target") or "")
-            )
+            target = str(groups.get("target") or "")
+            split_app, split_recipient = _split_communication_surface_and_recipient(target)
+            if channel == "email" and (
+                not split_app or not is_legacy_app_name_hint(split_app)
+            ):
+                recipient = _clean_communication_recipient_text(target)
+            else:
+                app_name = app_name or split_app
+                recipient = recipient or split_recipient
         if not app_name and recipient:
             app_name = _communication_surface_for_recipient_hint(recipient)
-        if not app_name or not recipient:
+        if not recipient or (not app_name and channel != "email"):
             continue
-        return {
+        hint = {
             "app_name": app_name,
             "recipient": recipient,
             "body_source": source,
             "mode": _communication_app_mode(value),
-            "send_action": "send",
+            "send_action": (
+                "draft" if _looks_like_communication_draft_request(value) else "send"
+            ),
         }
+        if not app_name:
+            hint.pop("app_name")
+        if channel:
+            hint["channel"] = channel
+        return hint
     return {}
 
 
@@ -14753,6 +14784,20 @@ def _clean_communication_body_text(value: str) -> str:
         flags=re.IGNORECASE,
     )
     return text.strip()
+
+
+def _communication_delivery_channel_hint(text: str, explicit: str = "") -> str:
+    channel = _canonical_communication_channel(explicit)
+    if channel:
+        return channel
+    value = _clean_prompt(text)
+    if re.search(
+        r"(?:邮件|电子邮件|邮箱|email|e-mail|\bmail\b)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "email"
+    return ""
 
 
 def _canonical_communication_channel(value: str) -> str:

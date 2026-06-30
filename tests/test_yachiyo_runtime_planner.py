@@ -14462,6 +14462,10 @@ def test_runtime_planner_routes_generated_context_to_direct_communication() -> N
         "把当前网页摘要发给微信文件传输助手",
         allowed_tools=allowed_tools,
     )
+    email_draft = RuntimePlanner().decision(
+        "把当前网页总结成邮件草稿发给 Alex",
+        allowed_tools=allowed_tools,
+    )
     current_window = RuntimePlanner().decision(
         "把当前窗口内容整理成报告，然后发给微信文件传输助手",
         allowed_tools=allowed_tools,
@@ -14502,6 +14506,42 @@ def test_runtime_planner_routes_generated_context_to_direct_communication() -> N
     }
     assert _step_by_id(current_page, "send-communication-message").risk_level == "high"
     assert _step_by_id(current_page, "send-communication-message").approval_required is True
+
+    assert email_draft.selected_intent.kind == "communication"
+    assert email_draft.selected_intent.inputs == {
+        "context_source": "current_page_content",
+        "content_transform_hint": "summary",
+        "direct_message_hint": {
+            "recipient": "Alex",
+            "body_source": "current_page_content",
+            "mode": "focus",
+            "send_action": "draft",
+            "channel": "email",
+            "content_transform_hint": "summary",
+        },
+    }
+    assert [step.step_id for step in email_draft.plan.tool_plan.steps] == [
+        "read-communication-context",
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+    ]
+    assert _step_by_id(email_draft, "open-or-focus-app").input_preview == {
+        "app_name": "Mail"
+    }
+    assert _step_by_id(email_draft, "focus-communication-recipient-search").input_preview == {
+        "action": "new_message"
+    }
+    assert _step_by_id(email_draft, "type-communication-recipient").input_preview == {
+        "text": "Alex"
+    }
+    assert _step_by_id(email_draft, "draft-communication-message").input_preview == {
+        "body_source": "current_page_content",
+        "transform": "summary",
+    }
+    assert _step_by_id(email_draft, "draft-communication-message").approval_required is False
 
     assert current_window.selected_intent.kind == "communication"
     assert current_window.selected_intent.inputs["context_source"] == "visible_text"
@@ -20681,6 +20721,26 @@ def test_planner_tool_requests_prefetches_dynamic_communication_context() -> Non
     ]
     assert planner_tool_requests(
         "把当前网页摘要发给微信文件传输助手",
+        allowed_tools=[
+            "browser.extract_text",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
+    assert planner_tool_requests(
+        "把当前网页总结成邮件草稿发给 Alex",
         allowed_tools=[
             "browser.extract_text",
             "app.focus",
