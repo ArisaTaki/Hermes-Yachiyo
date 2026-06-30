@@ -19,12 +19,27 @@ from scripts.smoke_real_desktop_app_open import (
     DEFAULT_APP_NAME,
     _RuntimeDesktopBroker,
     _app_names,
+    _desktop_execution_case,
     _merge_blocking_evidence,
     _cleanup_evidence,
+    _planner_alignment,
     _resolved_open_app_name,
     _runtime_tool_call,
     _status_running,
 )
+
+UI_INSPECTION_TOOL_CHAIN = [
+    "desktop.list_apps",
+    "desktop.open_app",
+    "desktop.running_apps",
+    "desktop.list_windows",
+    "desktop.focus_app",
+    "desktop.active_window",
+    "desktop.read_ui",
+    "desktop.read_ui",
+    "desktop.verify",
+    "app.status",
+]
 
 
 def _data(result: dict[str, Any]) -> dict[str, Any]:
@@ -241,23 +256,33 @@ def run_smoke(
         menu_result,
         verify_result,
     )
+    case = _desktop_execution_case(
+        "inspect_named_app_ui",
+        app_name=opened_app_name,
+        tool_chain=UI_INSPECTION_TOOL_CHAIN,
+        checks=checks,
+    )
     return {
         "ok": all(checks.values()),
         "mode": "real_desktop_ui_inspection_smoke",
         "skipped": False,
         "platform": current_platform,
-        "tool_chain": [
-            "desktop.list_apps",
-            "desktop.open_app",
-            "desktop.running_apps",
-            "desktop.list_windows",
-            "desktop.focus_app",
-            "desktop.active_window",
-            "desktop.read_ui",
-            "desktop.read_ui",
-            "desktop.verify",
-            "app.status",
-        ],
+        "tool_chain": UI_INSPECTION_TOOL_CHAIN,
+        "case_count": 1,
+        "cases": [case],
+        "planner_alignment": _planner_alignment(
+            intent_category="desktop_ui_inspection",
+            app_name=opened_app_name,
+            capabilities=[
+                "desktop.app_discovery",
+                "desktop.app_launch",
+                "desktop.window_focus",
+                "desktop.ui_inspection",
+                "desktop.app_verification",
+            ],
+            tool_chain=UI_INSPECTION_TOOL_CHAIN,
+            mutates_desktop=True,
+        ),
         "app_name": clean_app_name,
         "discovered_app_name": discovered_app_name,
         "opened_app_name": opened_app_name,

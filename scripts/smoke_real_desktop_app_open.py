@@ -19,6 +19,12 @@ from apps.shell.agent.tools import desktop as desktop_tools
 from apps.shell.agent.tools.registry import dispatch_tool_call
 
 DEFAULT_APP_NAME = "Calculator"
+DESKTOP_APP_OPEN_TOOL_CHAIN = [
+    "desktop.list_apps",
+    "desktop.open_app",
+    "desktop.verify",
+    "app.status",
+]
 _CLEANUP_STATUS_MAX_POLLS = 12
 _CLEANUP_STATUS_POLL_INTERVAL_SECONDS = 0.25
 
@@ -207,6 +213,53 @@ def _merge_blocking_evidence(*results: dict[str, Any]) -> dict[str, Any]:
     return merged
 
 
+def _bool_checks(checks: dict[str, Any]) -> dict[str, bool]:
+    return {str(key): value for key, value in checks.items() if isinstance(value, bool)}
+
+
+def _desktop_execution_case(
+    case_id: str,
+    *,
+    app_name: str,
+    tool_chain: Sequence[str],
+    checks: dict[str, Any],
+    stage: str | None = None,
+) -> dict[str, Any]:
+    bool_checks = _bool_checks(checks)
+    case: dict[str, Any] = {
+        "id": case_id,
+        "app_name": app_name,
+        "tool_chain": list(tool_chain),
+        "passed": bool(bool_checks) and all(bool_checks.values()),
+        "checks": bool_checks,
+    }
+    if stage:
+        case["stage"] = stage
+    return case
+
+
+def _planner_alignment(
+    *,
+    intent_category: str,
+    app_name: str,
+    capabilities: Sequence[str],
+    tool_chain: Sequence[str],
+    mutates_desktop: bool,
+    approval_required: bool = False,
+) -> dict[str, Any]:
+    return {
+        "intent_category": intent_category,
+        "target_app": app_name,
+        "execution_pattern": ["discover", "execute", "verify"],
+        "capabilities": list(capabilities),
+        "tool_plan": [{"tool": tool_name} for tool_name in tool_chain],
+        "approval_policy": {
+            "mutates_desktop": mutates_desktop,
+            "approval_required": approval_required,
+        },
+    }
+
+
 def _resolved_open_app_name(requested_app_name: str, result: dict[str, Any]) -> str:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
     return str(data.get("app_name") or data.get("resolved_app_name") or requested_app_name).strip()
@@ -365,12 +418,31 @@ def run_smoke(
         ),
     }
     blocking_evidence = _merge_blocking_evidence(open_result, verify_result, after_status)
+    case = _desktop_execution_case(
+        "open_discovered_app",
+        app_name=opened_app_name,
+        tool_chain=DESKTOP_APP_OPEN_TOOL_CHAIN,
+        checks=checks,
+    )
     return {
         "ok": all(checks.values()),
         "mode": "real_desktop_app_open_smoke",
         "skipped": False,
         "platform": current_platform,
-        "tool_chain": ["desktop.list_apps", "desktop.open_app", "desktop.verify", "app.status"],
+        "tool_chain": DESKTOP_APP_OPEN_TOOL_CHAIN,
+        "case_count": 1,
+        "cases": [case],
+        "planner_alignment": _planner_alignment(
+            intent_category="desktop_app_open",
+            app_name=opened_app_name,
+            capabilities=[
+                "desktop.app_discovery",
+                "desktop.app_launch",
+                "desktop.app_verification",
+            ],
+            tool_chain=DESKTOP_APP_OPEN_TOOL_CHAIN,
+            mutates_desktop=True,
+        ),
         "app_name": clean_app_name,
         "discovered_app_name": discovered_app_name,
         "opened_app_name": opened_app_name,

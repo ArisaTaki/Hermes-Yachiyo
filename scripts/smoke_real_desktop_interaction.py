@@ -21,12 +21,16 @@ from scripts.smoke_real_desktop_app_open import (
     DEFAULT_APP_NAME,
     _app_names,
     _cleanup_evidence,
+    _desktop_execution_case,
     _merge_blocking_evidence,
+    _planner_alignment,
     _resolved_open_app_name,
     _status_running,
 )
 
 DEFAULT_INPUT_TEXT = "42"
+_AFTER_CLICK_VERIFY_MAX_POLLS = 5
+_AFTER_CLICK_VERIFY_POLL_INTERVAL_SECONDS = 0.2
 TOOL_CHAIN = [
     "desktop.active_window",
     "desktop.list_apps",
@@ -44,6 +48,16 @@ TOOL_CHAIN = [
 ]
 _SIGN_TARGET_HINTS = ("更改数值符号", "change sign", "toggle sign", "plus/minus")
 _BIDI_MARKS = re.compile(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
+INTERACTION_CAPABILITIES = [
+    "desktop.app_discovery",
+    "desktop.app_launch",
+    "desktop.window_focus",
+    "desktop.safe_keyboard",
+    "desktop.safe_text",
+    "desktop.ui_inspection",
+    "desktop.ui_click",
+    "desktop.app_verification",
+]
 
 
 def _data(result: dict[str, Any]) -> dict[str, Any]:
@@ -101,6 +115,41 @@ def _visible_values(result: dict[str, Any]) -> list[str]:
     return values
 
 
+def _poll_after_click_values(
+    *,
+    app_name: str,
+    before_values: Sequence[str],
+    expected_signed_value: str,
+) -> tuple[dict[str, Any], list[str], bool, list[dict[str, Any]]]:
+    after_ui: dict[str, Any] = {}
+    after_values: list[str] = []
+    after_ui_matches_app = False
+    polls: list[dict[str, Any]] = []
+    for attempt in range(1, _AFTER_CLICK_VERIFY_MAX_POLLS + 1):
+        after_ui = desktop_tools.ui_elements(app_name=app_name, limit=80)
+        after_values = _visible_values(after_ui)
+        after_ui_matches_app = (
+            after_ui.get("ok") is True
+            and str(_data(after_ui).get("app_name") or "") == app_name
+        )
+        signed_value_visible = _signed_value_visible(after_values, expected_signed_value)
+        visible_value_changed = list(before_values) != after_values
+        polls.append(
+            {
+                "attempt": attempt,
+                "after_ui_matches_app": after_ui_matches_app,
+                "signed_value_visible": signed_value_visible,
+                "visible_value_changed": visible_value_changed,
+                "values": after_values,
+            }
+        )
+        if after_ui_matches_app and signed_value_visible and visible_value_changed:
+            break
+        if attempt < _AFTER_CLICK_VERIFY_MAX_POLLS:
+            time.sleep(_AFTER_CLICK_VERIFY_POLL_INTERVAL_SECONDS)
+    return after_ui, after_values, after_ui_matches_app, polls
+
+
 def _sign_target(elements: list[dict[str, Any]]) -> str:
     for element in elements:
         if str(element.get("role") or "") != "AXButton":
@@ -116,8 +165,34 @@ def _sign_target(elements: list[dict[str, Any]]) -> str:
     return ""
 
 
+def _interaction_case(
+    *,
+    app_name: str,
+    checks: dict[str, Any],
+    stage: str | None = None,
+) -> dict[str, Any]:
+    return _desktop_execution_case(
+        "type_click_verify_control",
+        app_name=app_name,
+        tool_chain=TOOL_CHAIN,
+        checks=checks,
+        stage=stage,
+    )
+
+
+def _interaction_planner_alignment(app_name: str) -> dict[str, Any]:
+    return _planner_alignment(
+        intent_category="desktop_type_click_verify",
+        app_name=app_name,
+        capabilities=INTERACTION_CAPABILITIES,
+        tool_chain=TOOL_CHAIN,
+        mutates_desktop=True,
+    )
+
+
 def _locked_session_evidence(app_name: str, preflight: dict[str, Any]) -> dict[str, Any]:
     blocker_evidence = _merge_blocking_evidence(preflight)
+    checks = {"desktop_session_ready": False}
     return {
         "ok": False,
         "mode": "real_desktop_interaction_smoke",
@@ -125,13 +200,16 @@ def _locked_session_evidence(app_name: str, preflight: dict[str, Any]) -> dict[s
         "platform": "Darwin",
         "app_name": app_name,
         "tool_chain": TOOL_CHAIN,
+        "case_count": 1,
+        "cases": [_interaction_case(app_name=app_name, checks=checks, stage="session_preflight")],
+        "planner_alignment": _interaction_planner_alignment(app_name),
         "stage": "session_preflight",
         "error": "desktop_session_locked",
         "blocking_condition": "desktop_session_locked",
         "blocking_conditions": ["desktop_session_locked"],
         **{key: value for key, value in blocker_evidence.items() if key != "error"},
         "preflight": preflight,
-        "checks": {"desktop_session_ready": False},
+        "checks": checks,
     }
 
 
@@ -159,6 +237,7 @@ def run_smoke(
     if preflight.get("error") == "desktop_session_locked":
         return _locked_session_evidence(clean_app_name, preflight)
     if preflight.get("ok") is not True:
+        checks = {"desktop_session_ready": False}
         return {
             "ok": False,
             "mode": "real_desktop_interaction_smoke",
@@ -166,15 +245,28 @@ def run_smoke(
             "platform": current_platform,
             "app_name": clean_app_name,
             "tool_chain": TOOL_CHAIN,
+            "case_count": 1,
+            "cases": [
+                _interaction_case(
+                    app_name=clean_app_name,
+                    checks=checks,
+                    stage="session_preflight",
+                )
+            ],
+            "planner_alignment": _interaction_planner_alignment(clean_app_name),
             "stage": "session_preflight",
             "error": str(preflight.get("error") or "desktop_session_preflight_failed"),
             "preflight": preflight,
-            "checks": {"desktop_session_ready": False},
+            "checks": checks,
         }
 
     discovery = desktop_tools.list_apps(query=clean_app_name, limit=10)
     discovered_names = _app_names(discovery)
     if discovery.get("ok") is not True or not discovered_names:
+        checks = {
+            "desktop_session_ready": True,
+            "discovered_app": False,
+        }
         return {
             "ok": False,
             "mode": "real_desktop_interaction_smoke",
@@ -182,14 +274,20 @@ def run_smoke(
             "platform": current_platform,
             "app_name": clean_app_name,
             "tool_chain": TOOL_CHAIN,
+            "case_count": 1,
+            "cases": [
+                _interaction_case(
+                    app_name=clean_app_name,
+                    checks=checks,
+                    stage="app_discovery",
+                )
+            ],
+            "planner_alignment": _interaction_planner_alignment(clean_app_name),
             "stage": "app_discovery",
             "error": str(discovery.get("error") or "app_not_found"),
             "preflight": preflight,
             "discovery": {"result": discovery, "names": discovered_names},
-            "checks": {
-                "desktop_session_ready": True,
-                "discovered_app": False,
-            },
+            "checks": checks,
         }
     discovered_app_name = next(
         (name for name in discovered_names if name.casefold() == clean_app_name.casefold()),
@@ -199,6 +297,10 @@ def run_smoke(
     before_running = _status_running(before_status)
     if before_running is not False:
         status_error = "app_already_running" if before_running is True else "app_status_unknown"
+        checks = {
+            "desktop_session_ready": preflight.get("ok") is True,
+            "app_not_already_running": False,
+        }
         return {
             "ok": False,
             "mode": "real_desktop_interaction_smoke",
@@ -206,6 +308,15 @@ def run_smoke(
             "platform": current_platform,
             "app_name": clean_app_name,
             "tool_chain": TOOL_CHAIN,
+            "case_count": 1,
+            "cases": [
+                _interaction_case(
+                    app_name=discovered_app_name,
+                    checks=checks,
+                    stage="app_preflight",
+                )
+            ],
+            "planner_alignment": _interaction_planner_alignment(discovered_app_name),
             "stage": "app_preflight",
             "error": status_error,
             "reason": (
@@ -216,10 +327,7 @@ def run_smoke(
             "preflight": preflight,
             "discovery": {"result": discovery, "names": discovered_names},
             "before_status": before_status,
-            "checks": {
-                "desktop_session_ready": preflight.get("ok") is True,
-                "app_not_already_running": False,
-            },
+            "checks": checks,
         }
 
     open_result = desktop_tools.app_open(discovered_app_name)
@@ -251,6 +359,15 @@ def run_smoke(
             "app_name": clean_app_name,
             "opened_app_name": opened_app_name,
             "tool_chain": TOOL_CHAIN,
+            "case_count": 1,
+            "cases": [
+                _interaction_case(
+                    app_name=opened_app_name,
+                    checks=checks,
+                    stage=stage,
+                )
+            ],
+            "planner_alignment": _interaction_planner_alignment(opened_app_name),
             "stage": stage,
             "error": error,
             **{key: value for key, value in blocker_evidence.items() if key != "error"},
@@ -427,15 +544,74 @@ def run_smoke(
         sign_target,
         role_filter="button",
         limit=80,
+        expected_app_name=opened_app_name,
     )
-    time.sleep(0.2)
-    after_ui = desktop_tools.ui_elements(app_name=opened_app_name, limit=80)
-    after_values = _visible_values(after_ui)
-    after_ui_matches_app = (
-        after_ui.get("ok") is True
-        and str(_data(after_ui).get("app_name") or "") == opened_app_name
-    )
+    click_attempts: list[dict[str, Any]] = [{"attempt": 1, "result": click_result}]
+    retry_focus_result: dict[str, Any] | None = None
+    retry_active_window: dict[str, Any] | None = None
+    retry_active_app = ""
+    retry_active_app_matches = False
+    if click_result.get("ok") is not True and click_result.get("error") == "foreground_app_mismatch":
+        retry_focus_result = desktop_tools.app_focus(opened_app_name)
+        retry_focus_verified = retry_focus_result.get("ok") is True and _data(
+            retry_focus_result
+        ).get("focus_verified") is True
+        retry_active_window = desktop_tools.active_window()
+        retry_active_app = str(_data(retry_active_window).get("app_name") or "")
+        retry_active_app_matches = (
+            retry_active_window.get("ok") is True
+            and _app_names_match(opened_app_name, retry_active_app)
+        )
+        if retry_focus_verified and retry_active_app_matches:
+            click_result = desktop_tools.click_ui_element(
+                sign_target,
+                role_filter="button",
+                limit=80,
+                expected_app_name=opened_app_name,
+            )
+            click_attempts.append({"attempt": 2, "result": click_result})
+    if click_result.get("ok") is not True:
+        return fail_stage(
+            "click_ui_element",
+            str(click_result.get("error") or "click_ui_element_failed"),
+            {
+                "open_ok": True,
+                "focus_verified": focus_verified,
+                "clear_ok": True,
+                "type_ok": True,
+                "before_ui_matches_app": before_ui_matches_app,
+                "typed_value_visible": clean_input in before_values,
+                "sign_control_found": bool(sign_target),
+                "pre_click_focus_verified": pre_click_focus_verified,
+                "pre_click_active_app_matches": pre_click_active_app_matches,
+                "click_ok": False,
+            },
+            {
+                "focus_result": focus_result,
+                "clear_result": clear_result,
+                "type_result": type_result,
+                "before_ui": before_ui,
+                "before_values": before_values,
+                "sign_target": sign_target,
+                "pre_click_focus_result": pre_click_focus_result,
+                "pre_click_window": pre_click_window,
+                "pre_click_active_app": pre_click_active_app,
+                "click_result": click_result,
+                "click_attempts": click_attempts,
+                "retry_focus_result": retry_focus_result,
+                "retry_active_window": retry_active_window,
+                "retry_active_app": retry_active_app,
+                "retry_active_app_matches": retry_active_app_matches,
+            },
+        )
     expected_signed_value = f"-{clean_input.lstrip('+')}"
+    after_ui, after_values, after_ui_matches_app, after_value_polls = (
+        _poll_after_click_values(
+            app_name=opened_app_name,
+            before_values=before_values,
+            expected_signed_value=expected_signed_value,
+        )
+    )
     after_status = desktop_tools.app_status(opened_app_name)
     after_running = _status_running(after_status)
     cleanup_result = _cleanup_evidence(
@@ -471,11 +647,21 @@ def run_smoke(
         "app_name": clean_app_name,
         "opened_app_name": opened_app_name,
         "tool_chain": TOOL_CHAIN,
+        "case_count": 1,
+        "cases": [
+            _interaction_case(
+                app_name=opened_app_name,
+                checks=checks,
+                stage="type_click_verify",
+            )
+        ],
+        "planner_alignment": _interaction_planner_alignment(opened_app_name),
         "input_text": clean_input,
         "expected_signed_value": expected_signed_value,
         "sign_target": sign_target,
         "before_values": before_values,
         "after_values": after_values,
+        "after_value_polls": after_value_polls,
         "preflight": preflight,
         "discovery": {"result": discovery, "names": discovered_names},
         "before_status": before_status,
@@ -487,6 +673,11 @@ def run_smoke(
         "pre_click_focus_result": pre_click_focus_result,
         "pre_click_window": pre_click_window,
         "click_result": click_result,
+        "click_attempts": click_attempts,
+        "retry_focus_result": retry_focus_result,
+        "retry_active_window": retry_active_window,
+        "retry_active_app": retry_active_app,
+        "retry_active_app_matches": retry_active_app_matches,
         "after_ui": after_ui,
         "after_status": after_status,
         "cleanup": cleanup_result,

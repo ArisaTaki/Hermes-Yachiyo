@@ -188,6 +188,22 @@ def test_real_desktop_ui_inspection_smoke_accepts_menu_level_ui_for_named_app(mo
     assert evidence["focus_result"]["action"] == "desktop.focus_app"
     assert evidence["ui_elements"]["action"] == "desktop.read_ui"
     assert evidence["verify_result"]["action"] == "desktop.verify"
+    assert evidence["case_count"] == 1
+    assert evidence["cases"][0]["id"] == "inspect_named_app_ui"
+    assert evidence["cases"][0]["tool_chain"] == evidence["tool_chain"]
+    assert evidence["cases"][0]["passed"] is True
+    assert evidence["planner_alignment"]["intent_category"] == "desktop_ui_inspection"
+    assert evidence["planner_alignment"]["capabilities"] == [
+        "desktop.app_discovery",
+        "desktop.app_launch",
+        "desktop.window_focus",
+        "desktop.ui_inspection",
+        "desktop.app_verification",
+    ]
+    assert evidence["planner_alignment"]["approval_policy"] == {
+        "mutates_desktop": True,
+        "approval_required": False,
+    }
     assert evidence["focus_verified"] is False
     assert evidence["window_count"] == 0
     assert evidence["window_visibility_status"] == "running_without_visible_windows"

@@ -40,6 +40,15 @@ def test_real_desktop_interaction_smoke_stops_before_app_mutation_when_locked(mo
     assert evidence["error"] == "desktop_session_locked"
     assert evidence["blocking_condition"] == "desktop_session_locked"
     assert evidence["blocking_conditions"] == ["desktop_session_locked"]
+    assert evidence["case_count"] == 1
+    assert evidence["cases"][0]["id"] == "type_click_verify_control"
+    assert evidence["cases"][0]["stage"] == "session_preflight"
+    assert evidence["cases"][0]["passed"] is False
+    assert evidence["planner_alignment"]["intent_category"] == "desktop_type_click_verify"
+    assert evidence["planner_alignment"]["approval_policy"] == {
+        "mutates_desktop": True,
+        "approval_required": False,
+    }
     assert evidence["checks"] == {"desktop_session_ready": False}
 
 
@@ -49,6 +58,7 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
     active_windows = iter(
         [
             {"ok": True, "data": {"app_name": "Codex"}},
+            {"ok": True, "data": {"app_name": "Calculator"}},
             {"ok": True, "data": {"app_name": "Calculator"}},
         ]
     )
@@ -61,6 +71,15 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
                     "elements": [
                         {"role": "AXStaticText", "name": "\u200e42", "value": "\u200e42"},
                         {"role": "AXButton", "name": "更改数值符号", "description": "按钮"},
+                    ],
+                },
+            },
+            {
+                "ok": True,
+                "data": {
+                    "app_name": "Calculator",
+                    "elements": [
+                        {"role": "AXStaticText", "name": "\u200e42", "value": "\u200e42"},
                     ],
                 },
             },
@@ -134,11 +153,25 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
         "ui_elements",
         lambda **_kwargs: next(ui_results),
     )
-    monkeypatch.setattr(
-        smoke.desktop_tools,
-        "click_ui_element",
-        lambda target, **kwargs: calls.append(("click", target, kwargs)) or {"ok": True},
+    click_results = iter(
+        [
+            {
+                "ok": False,
+                "error": "foreground_app_mismatch",
+                "data": {
+                    "expected_app_name": "Calculator",
+                    "observed_app_name": "QQ",
+                },
+            },
+            {"ok": True},
+        ]
     )
+
+    def fake_click_ui_element(target, **kwargs):
+        calls.append(("click", target, kwargs))
+        return next(click_results)
+
+    monkeypatch.setattr(smoke.desktop_tools, "click_ui_element", fake_click_ui_element)
     monkeypatch.setattr(
         smoke.desktop_tools,
         "app_quit",
@@ -150,14 +183,61 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
     assert evidence["ok"] is True
     assert evidence["before_values"] == ["42"]
     assert evidence["after_values"] == ["(-42)"]
+    assert evidence["after_value_polls"] == [
+        {
+            "attempt": 1,
+            "after_ui_matches_app": True,
+            "signed_value_visible": False,
+            "visible_value_changed": False,
+            "values": ["42"],
+        },
+        {
+            "attempt": 2,
+            "after_ui_matches_app": True,
+            "signed_value_visible": True,
+            "visible_value_changed": True,
+            "values": ["(-42)"],
+        }
+    ]
     assert evidence["tool_chain"] == smoke.TOOL_CHAIN
+    assert evidence["case_count"] == 1
+    assert evidence["cases"][0]["id"] == "type_click_verify_control"
+    assert evidence["cases"][0]["stage"] == "type_click_verify"
+    assert evidence["cases"][0]["app_name"] == "Calculator"
+    assert evidence["cases"][0]["tool_chain"] == smoke.TOOL_CHAIN
+    assert evidence["cases"][0]["passed"] is True
+    assert evidence["planner_alignment"]["capabilities"] == smoke.INTERACTION_CAPABILITIES
+    assert evidence["planner_alignment"]["tool_plan"] == [
+        {"tool": tool_name} for tool_name in smoke.TOOL_CHAIN
+    ]
+    assert len(evidence["click_attempts"]) == 2
+    assert evidence["click_attempts"][0]["result"]["error"] == "foreground_app_mismatch"
+    assert evidence["click_attempts"][1]["result"]["ok"] is True
+    assert evidence["retry_active_app_matches"] is True
     assert evidence["checks"]["signed_value_visible"] is True
     assert evidence["sign_target"] == "更改数值符号"
     assert all(evidence["checks"].values())
     assert calls == [
         ("key", "escape", 2),
         ("type", "42"),
-        ("click", "更改数值符号", {"role_filter": "button", "limit": 80}),
+        (
+            "click",
+            "更改数值符号",
+            {
+                "role_filter": "button",
+                "limit": 80,
+                "expected_app_name": "Calculator",
+            },
+        ),
+        (
+            "click",
+            "更改数值符号",
+            {
+                "role_filter": "button",
+                "limit": 80,
+                "expected_app_name": "Calculator",
+            },
+        ),
     ]
 
 
@@ -374,6 +454,9 @@ def test_real_desktop_interaction_smoke_surfaces_focus_blocker(monkeypatch):
     assert evidence["blocking_conditions"] == ["desktop_session_locked"]
     assert evidence["recovery_hints"] == ["Unlock the active macOS user session, then retry."]
     assert evidence["recovery_actions"][0]["tool"] == "app.focus"
+    assert evidence["case_count"] == 1
+    assert evidence["cases"][0]["stage"] == "app_focus"
+    assert evidence["cases"][0]["passed"] is False
     assert evidence["checks"]["focus_verified"] is False
     assert evidence["cleanup"]["attempted"] is True
 

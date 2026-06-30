@@ -109,6 +109,32 @@ def test_real_desktop_app_open_smoke_discovers_opens_and_verifies_app(monkeypatc
     ]
     assert evidence["discovered_app_name"] == "Calculator"
     assert evidence["opened_app_name"] == "Calculator"
+    assert evidence["case_count"] == 1
+    assert evidence["cases"][0]["id"] == "open_discovered_app"
+    assert evidence["cases"][0]["app_name"] == "Calculator"
+    assert evidence["cases"][0]["tool_chain"] == evidence["tool_chain"]
+    assert evidence["cases"][0]["passed"] is True
+    assert evidence["planner_alignment"]["intent_category"] == "desktop_app_open"
+    assert evidence["planner_alignment"]["execution_pattern"] == [
+        "discover",
+        "execute",
+        "verify",
+    ]
+    assert evidence["planner_alignment"]["capabilities"] == [
+        "desktop.app_discovery",
+        "desktop.app_launch",
+        "desktop.app_verification",
+    ]
+    assert evidence["planner_alignment"]["tool_plan"] == [
+        {"tool": "desktop.list_apps"},
+        {"tool": "desktop.open_app"},
+        {"tool": "desktop.verify"},
+        {"tool": "app.status"},
+    ]
+    assert evidence["planner_alignment"]["approval_policy"] == {
+        "mutates_desktop": True,
+        "approval_required": False,
+    }
     assert evidence["checks"]["discovered_app"] is True
     assert evidence["checks"]["open_ok"] is True
     assert evidence["checks"]["open_alias_used"] is True
