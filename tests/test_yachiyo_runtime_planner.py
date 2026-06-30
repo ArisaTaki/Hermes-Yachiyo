@@ -44,6 +44,7 @@ from apps.shell.yachiyo_agent.planner_projection import (
     runtime_planner_metadata,
 )
 from apps.shell.yachiyo_agent.path_alias_hints import legacy_common_desktop_path_hint
+from apps.shell.yachiyo_agent.file_access_plan_hints import file_access_hint
 from apps.shell.yachiyo_agent.web_destination_hints import (
     legacy_known_web_destination_search_url,
     legacy_known_web_destination_url_hint,
@@ -156,6 +157,25 @@ def test_runtime_planner_web_destinations_are_behind_compatibility_boundary() ->
 def test_runtime_planner_path_aliases_are_behind_compatibility_boundary() -> None:
     assert legacy_common_desktop_path_hint("打开下载目录") == "~/Downloads"
     assert legacy_common_desktop_path_hint("打开桌面文件夹") == "~/Desktop"
+
+
+def test_runtime_planner_file_access_keeps_relative_path_prefixes() -> None:
+    assert file_access_hint("打开 Downloads/report.pdf") == {
+        "action": "open_path",
+        "path": "Downloads/report.pdf",
+    }
+    assert file_access_hint("open ./README.md") == {
+        "action": "open_path",
+        "path": "./README.md",
+    }
+    assert file_access_hint("open data/report.pdf") == {
+        "action": "open_path",
+        "path": "data/report.pdf",
+    }
+    assert file_access_hint("打开 /tmp/report.pdf") == {
+        "action": "open_path",
+        "path": "/tmp/report.pdf",
+    }
 
 
 def test_runtime_planner_hotkeys_are_behind_compatibility_boundary() -> None:
@@ -6711,8 +6731,11 @@ def test_runtime_planner_carries_target_file_when_discovering_app_capabilities()
 
     cases = (
         ("找一个代码编辑器打开 README.md", "code", "README.md"),
+        ("找一个代码编辑器打开 ./README.md", "code", "./README.md"),
         ("用一个文本编辑器打开 notes.txt", "document", "notes.txt"),
         ("找一个表格应用打开 data/sales.csv", "spreadsheet", "data/sales.csv"),
+        ("打开一个能编辑 PDF 的应用并打开 Downloads/report.pdf", "pdf", "Downloads/report.pdf"),
+        ("用能编辑 PDF 的应用打开 Downloads/report.pdf", "pdf", "Downloads/report.pdf"),
         ("找一个 PDF 编辑器打开 ~/Downloads/report.pdf", "pdf", "~/Downloads/report.pdf"),
     )
 

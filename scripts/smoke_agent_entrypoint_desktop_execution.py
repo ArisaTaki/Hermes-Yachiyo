@@ -116,6 +116,23 @@ def _fake_app_open(app_name: str) -> dict[str, Any]:
     }
 
 
+def _fake_open_path_with_app(path: str, app_name: str) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "action": "desktop.open_path_with_app",
+        "summary": f"Opened {path} with {app_name}",
+        "data": {
+            "path": str(path or "").strip(),
+            "app_name": str(app_name or "").strip(),
+            "exists": True,
+            "is_dir": False,
+            "suffix": ".pdf",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def _fake_active_window() -> dict[str, Any]:
     return {
         "ok": True,
@@ -393,6 +410,139 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
     }
 
 
+def _capability_discovered_app_open_path_case(service: AgentRuntimeService) -> dict[str, Any]:
+    prompt = "打开一个能编辑 PDF 的应用并打开 Downloads/report.pdf"
+    run = service.start_main_chat_run(
+        task_id="smoke-main-chat-capability-discovered-app-open-path",
+        session_id="smoke-main-chat-capability-discovered-app-open-path-session",
+        user_goal=prompt,
+    )
+    loop_result = service.execute_main_chat_model_loop(
+        str(run["run_id"]),
+        [{"role": "user", "content": prompt}],
+    )
+    updated = service.complete_main_chat_run(
+        str(run["run_id"]),
+        str(loop_result.get("result") or ""),
+    )
+    run_id = str(run.get("run_id") or "")
+    events = service.list_run_events(run_id)["events"]
+    planned_events = _events_of_type(events, "agent.desktop.intent_planned")
+    tool_events = _events_of_type(events, "agent.tool.call")
+    completed_event = _first_event(events, "agent.desktop.intent_completed")
+    selection_event = _first_event(events, "agent.plan.selection")
+    selected_intent_event = _first_event(events, "agent.intent.selected")
+    resolved_event = next(
+        (
+            event
+            for event in events
+            if event.get("event_type") == "agent.tool.input_resolved"
+            and _payload(event).get("tool") == "desktop.open_path_with_app"
+        ),
+        {},
+    )
+    planned_tools = [_payload(event).get("tool") for event in planned_events]
+    tool_call_tools = [_payload(event).get("tool") for event in tool_events]
+    tool_result_actions = [
+        (_payload(event).get("result") or {}).get("action")
+        for event in tool_events
+        if isinstance(_payload(event).get("result"), dict)
+    ]
+    selection_payload = _payload(selection_event)
+    followup_target = (
+        selection_payload.get("followup_target")
+        if isinstance(selection_payload.get("followup_target"), dict)
+        else {}
+    )
+    selected_intent_payload = _payload(selected_intent_event)
+    completed_payload = _payload(completed_event)
+    open_path_input = (
+        _payload(tool_events[1]).get("input_preview")
+        if len(tool_events) > 1 and isinstance(_payload(tool_events[1]), dict)
+        else {}
+    )
+    checks = {
+        "run_completed": updated.get("status") == "completed",
+        "summary_names_discovered_app_and_path": (
+            "已用 PixelForge 打开文件：Downloads/report.pdf。"
+            in str(updated.get("result") or "")
+        ),
+        "model_not_called": _model_event_free(events),
+        "intent_is_desktop_operation": (
+            (selected_intent_payload.get("intent") or {}).get("kind") == "desktop_operation"
+            if isinstance(selected_intent_payload.get("intent"), dict)
+            else False
+        ),
+        "selection_source_runtime_planner": selection_payload.get("selection_source") == "runtime_planner",
+        "selection_has_discovered_app_open_path_followup": followup_target == {
+            "kind": "desktop_discovered_app_action",
+            "app_query": "pdf",
+            "app_name_source": "desktop.list_apps",
+            "capability_description": "PDF",
+            "target_action": "open_path_with_selected_app",
+            "target_path": "Downloads/report.pdf",
+        },
+        "planned_tool_chain": planned_tools == [
+            "desktop.list_apps",
+            "desktop.open_path_with_app",
+        ],
+        "planned_discovery_is_model_continuation": (
+            bool(_payload(planned_events[0]).get("continue_to_model"))
+            if planned_events
+            else False
+        ),
+        "planned_discovery_query": _payload(planned_events[0]).get("input_preview")
+        == {"query": "pdf", "limit": 20}
+        if planned_events
+        else False,
+        "planned_followup_tool": (
+            _payload(planned_events[1]).get("planning_reason")
+            == "planner_discovered_app_followup"
+            if len(planned_events) > 1
+            else False
+        ),
+        "tool_call_chain": tool_call_tools == [
+            "desktop.list_apps",
+            "desktop.open_path_with_app",
+        ],
+        "tool_results_match_chain": tool_result_actions == [
+            "desktop.list_apps",
+            "desktop.open_path_with_app",
+        ],
+        "resolved_app_from_discovery": {
+            "app_name": "PixelForge",
+            "path": "Downloads/report.pdf",
+            "requested_app_name": "pdf",
+            "resolved_app_name": "PixelForge",
+            "resolved_app_path": "/Applications/PixelForge.app",
+            "app_resolution_source": "desktop.list_apps",
+            "app_resolution_score": "100",
+        }.items()
+        <= open_path_input.items()
+        if isinstance(open_path_input, dict)
+        else False,
+        "resolved_event_recorded": _payload(resolved_event).get("resolved_app_name") == "PixelForge",
+        "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
+        "completed_tools_match": completed_payload.get("tools") == ["desktop.open_path_with_app"],
+        "completed_after_open_path": completed_payload.get("tool") == "desktop.open_path_with_app",
+    }
+    return {
+        "id": "main_chat_capability_discovered_app_open_path_before_model",
+        "ok": all(checks.values()),
+        "run_id": run_id,
+        "status": updated.get("status"),
+        "loop_status": loop_result.get("status"),
+        "result": updated.get("result"),
+        "event_types": _event_types(events),
+        "selection_event": selection_event,
+        "planned_events": planned_events,
+        "tool_events": tool_events,
+        "resolved_event": resolved_event,
+        "completed_event": completed_event,
+        "checks": checks,
+    }
+
+
 def _main_chat_loop_case(service: AgentRuntimeService) -> dict[str, Any]:
     run = service.start_main_chat_run(
         task_id="smoke-main-chat-apple-music",
@@ -529,6 +679,10 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
                 _fake_app_open,
             ), _patched_attr(
                 desktop_tools,
+                "open_path_with_app",
+                _fake_open_path_with_app,
+            ), _patched_attr(
+                desktop_tools,
                 "active_window",
                 _fake_active_window,
             ):
@@ -536,6 +690,7 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
                     _generic_app_open_case(service, entrypoint="main_chat"),
                     _generic_app_open_case(service, entrypoint="agent_run"),
                     _capability_discovered_app_open_case(service),
+                    _capability_discovered_app_open_path_case(service),
                     _main_chat_loop_case(service),
                     _agent_run_overlay_case(service),
                 ]

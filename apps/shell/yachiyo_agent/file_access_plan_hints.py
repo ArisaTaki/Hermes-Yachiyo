@@ -144,7 +144,12 @@ def _generated_artifact_path(text: str) -> str:
 
 
 def _explicit_path(text: str) -> str:
-    match = re.search(r"(?P<path>(?:~|/|\./|\../)[^。！？!?，,]+)", text)
+    match = re.search(
+        r"(?P<path>(?:~(?:/|$)|/(?!/)|\.{1,2}/|[\w.-]+/)"
+        r"[^。！？!?，,；;\s\"'“”‘’]*)",
+        text,
+        flags=re.IGNORECASE,
+    )
     if not match:
         return ""
     return _normalize_path(match.group("path"))
@@ -172,7 +177,7 @@ def _normalize_path(value: str) -> str:
     path = _clean(value)
     path = re.sub(r"\s+in\s+(?:the\s+)?finder$", "", path, flags=re.IGNORECASE)
     path = re.sub(r"(?:文件夹|目录|路径|folder|directory|path)$", "", path, flags=re.IGNORECASE)
-    return path.strip(" .，,。")
+    return path.strip(" ，,。").rstrip(".")
 
 
 def _clean(value: str) -> str:
