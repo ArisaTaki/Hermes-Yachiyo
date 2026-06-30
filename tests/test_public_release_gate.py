@@ -173,8 +173,12 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     ]
     assert public_demo["release_blockers"][0]["reason"] == "desktop_session_locked"
     action = next(item for item in summary["next_actions"] if item["id"] == "public_demo")
-    assert action["command"] == gate._full_demo_command()
-    assert "--full-demo" not in action["command"]
+    assert "--include-real-desktop-interaction" in action["command"]
+    assert "--include-provider-workflow" in action["command"]
+    assert "--include-real-desktop " not in action["command"]
+    assert "--include-real-desktop-open" not in action["command"]
+    assert "--include-ui" not in action["command"]
+    assert "tmp/public-demo-smokes-missing.json" in action["command"]
     assert action["release_blockers"][0]["reason"] == "desktop_session_locked"
     assert summary["release_smoke"]["status"] == "incomplete"
     assert "packaged_launch" in summary["release_smoke"]["missing_item_ids"]
@@ -222,8 +226,9 @@ def test_public_release_gate_strict_mode_fails_until_release_ready(
     assert "Release level: `partial_demo_ready`" in markdown
     assert "## Release Smoke" in markdown
     assert "Demo blocker `real_desktop_interaction`: `desktop_session_locked`" in markdown
-    assert gate._full_demo_command() in markdown
-    assert "--full-demo" not in markdown
+    assert "--include-real-desktop-interaction" in markdown
+    assert "--include-provider-workflow" in markdown
+    assert "--include-real-desktop --include-provider-workflow --include-ui" not in markdown
 
 
 def test_public_release_gate_passes_when_full_release_smoke_is_present(
@@ -342,4 +347,21 @@ def test_public_release_gate_passes_granular_real_desktop_demo_flags(
     assert "--include-real-desktop" not in public_demo_command
     assert "--include-real-desktop-ui-inspection" not in public_demo_command
     assert "--include-real-desktop-interaction" not in public_demo_command
+    action = next(item for item in summary["next_actions"] if item["id"] == "public_demo")
+    assert "--include-real-desktop-open" not in action["command"]
+    assert "--include-ui" not in action["command"]
+    assert "--include-real-desktop-interaction" in action["command"]
+    assert "--include-provider-workflow" in action["command"]
     assert summary["status"] == "needs_release_evidence"
+
+
+def test_public_release_gate_public_demo_next_action_falls_back_for_unknown_flow():
+    command = gate._public_demo_next_command(
+        {
+            "release_level": "partial_demo_ready",
+            "missing_required_flow_ids": ["unknown_demo_flow"],
+            "release_blockers": [{"id": "unknown_demo_flow"}],
+        }
+    )
+
+    assert command == gate._full_demo_command()

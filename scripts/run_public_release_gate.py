@@ -389,18 +389,21 @@ def _next_actions(
 ) -> list[dict[str, Any]]:
     actions: list[dict[str, Any]] = []
     seen: set[str] = set()
+    seen_action_ids: set[str] = set()
     for check in checks:
         command = " ".join(str(part) for part in check.get("command") or [])
         if check.get("id") == "public_demo" and check.get("release_level") != "full_public_demo_ready":
-            command = str(check.get("full_demo_command") or "") or _full_demo_command()
+            command = _public_demo_next_command(check)
         if not command or command in seen:
             continue
         if check.get("status") == "passed" and not _dict_list(check.get("release_blockers")):
             continue
+        action_id = str(check.get("id") or "next_action")
         seen.add(command)
+        seen_action_ids.add(action_id)
         actions.append(
             {
-                "id": str(check.get("id") or "next_action"),
+                "id": action_id,
                 "status": str(check.get("status") or ""),
                 "command": command,
                 "release_level": str(check.get("release_level") or ""),
@@ -409,13 +412,17 @@ def _next_actions(
             }
         )
     for action in _dict_list(release_smoke.get("next_actions")):
+        action_id = str(action.get("id") or "release_smoke")
+        if action_id in seen_action_ids:
+            continue
         command = str(action.get("command") or "").strip()
         if not command or command in seen:
             continue
         seen.add(command)
+        seen_action_ids.add(action_id)
         actions.append(
             {
-                "id": str(action.get("id") or "release_smoke"),
+                "id": action_id,
                 "status": "missing",
                 "command": command,
                 "release_level": str(action.get("release_level") or ""),
@@ -424,6 +431,42 @@ def _next_actions(
             }
         )
     return actions
+
+
+PUBLIC_DEMO_FLOW_FLAGS: dict[str, str] = {
+    "real_desktop_app_open": "--include-real-desktop-open",
+    "real_desktop_ui_inspection": "--include-real-desktop-ui-inspection",
+    "real_desktop_interaction": "--include-real-desktop-interaction",
+    "workflow_provider": "--include-provider-workflow",
+    "studio_replay_ui": "--include-ui",
+    "workflow_ui": "--include-ui",
+}
+
+
+def _public_demo_next_command(check: Mapping[str, Any]) -> str:
+    flags: list[str] = []
+    missing_ids = _string_list(check.get("missing_required_flow_ids"))
+    blockers = _dict_list(check.get("release_blockers"))
+    for blocker in blockers:
+        flag = str(blocker.get("opt_in_flag") or "").strip()
+        if flag and flag not in flags:
+            flags.append(flag)
+    unknown_missing_ids: list[str] = []
+    for flow_id in missing_ids:
+        flag = PUBLIC_DEMO_FLOW_FLAGS.get(flow_id)
+        if flag:
+            if flag not in flags:
+                flags.append(flag)
+        else:
+            unknown_missing_ids.append(flow_id)
+    if not flags or unknown_missing_ids:
+        return str(check.get("full_demo_command") or "") or _full_demo_command()
+    return (
+        "python scripts/run_public_demo_smokes.py "
+        + " ".join(flags)
+        + " --output-json tmp/public-demo-smokes-missing.json "
+        + "--output-markdown tmp/public-demo-smokes-missing.md"
+    )
 
 
 def render_markdown(summary: Mapping[str, Any]) -> str:
