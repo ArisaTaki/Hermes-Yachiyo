@@ -1208,6 +1208,22 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must invoke the public release preflight runner",
     ),
     (
+        "public_demo:",
+        "macOS release workflow must expose an opt-in public demo evidence scope",
+    ),
+    (
+        "PUBLIC_DEMO_MODE",
+        "macOS release workflow must pass public demo mode into the preflight gate",
+    ),
+    (
+        "public_demo_args+=(--include-real-desktop --include-provider-workflow --include-ui)",
+        "macOS release workflow must support full public demo opt-in flags",
+    ),
+    (
+        '"${public_demo_args[@]}"',
+        "macOS release workflow must pass public demo opt-in args to the preflight gate",
+    ),
+    (
         "--tmp-dir release/public-release-gate",
         "macOS release workflow must keep public release gate nested evidence",
     ),
@@ -4462,6 +4478,7 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
         )
     public_release_gate = workflow.find("Run public release preflight gate")
     smoke_tests = workflow.find("Run smoke tests")
+    frontend_deps = workflow.find("Install frontend dependencies")
     if (
         install_deps < 0
         or public_release_gate < 0
@@ -4473,6 +4490,13 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             Finding(
                 workflow_path,
                 "macOS release workflow must run public release preflight after Python dependencies before smoke tests",
+            )
+        )
+    if frontend_deps < 0 or public_release_gate < 0 or public_release_gate < frontend_deps:
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must install frontend dependencies before public release preflight for full demo UI smokes",
             )
         )
     signing_import = workflow.find("Import macOS self-signing certificate")

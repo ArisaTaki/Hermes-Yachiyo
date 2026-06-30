@@ -140,6 +140,11 @@ fail. Existing RC reports and diagnostics bundles can be folded into the same
 assessment with repeated `--release-smoke-report` and `--diagnostics-zip`
 arguments.
 
+The macOS release workflow keeps the default preflight safe on push builds. For
+manual release-candidate runs, set the `public_demo` workflow input to `full` to
+pass `--include-real-desktop --include-provider-workflow --include-ui` into the
+preflight after frontend dependencies are installed.
+
 `refresh_local_rc_signoff.py` builds/refreshes the current local RC evidence,
 generates the Native Agent capability matrix, writes release readiness
 diagnostics, exports a redacted diagnostics bundle, summarizes release-smoke

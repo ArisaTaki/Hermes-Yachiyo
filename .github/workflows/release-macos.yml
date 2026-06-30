@@ -16,6 +16,14 @@ on:
           - stable
           - alpha
           - experimental
+      public_demo:
+        description: Public demo evidence scope
+        required: true
+        default: safe
+        type: choice
+        options:
+          - safe
+          - full
 
 permissions:
   contents: write
@@ -55,15 +63,26 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[dev,packaging]"
 
+      - name: Install frontend dependencies
+        run: npm ci --prefix apps/frontend
+
       - name: Run public release preflight gate
+        env:
+          PUBLIC_DEMO_MODE: ${{ inputs.public_demo || 'safe' }}
+          OHA_YACHIYO_SMOKE_BASE_URL: ${{ secrets.OHA_YACHIYO_SMOKE_BASE_URL }}
+          OHA_YACHIYO_SMOKE_MODEL: ${{ secrets.OHA_YACHIYO_SMOKE_MODEL }}
+          OHA_YACHIYO_SMOKE_API_KEY: ${{ secrets.OHA_YACHIYO_SMOKE_API_KEY }}
         run: |
+          set -euo pipefail
+          public_demo_args=()
+          if [[ "${PUBLIC_DEMO_MODE}" == "full" ]]; then
+            public_demo_args+=(--include-real-desktop --include-provider-workflow --include-ui)
+          fi
           python scripts/run_public_release_gate.py \
             --tmp-dir release/public-release-gate \
             --output-json release/public-release-gate.json \
-            --output-markdown release/public-release-gate.md
-
-      - name: Install frontend dependencies
-        run: npm ci --prefix apps/frontend
+            --output-markdown release/public-release-gate.md \
+            "${public_demo_args[@]}"
 
       - name: Run smoke tests
         run: |

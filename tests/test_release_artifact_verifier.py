@@ -1904,6 +1904,10 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     assert "macOS release workflow must run the local RC verification gate" in messages
     assert "macOS release workflow must run the public release preflight gate" in messages
     assert "macOS release workflow must invoke the public release preflight runner" in messages
+    assert "macOS release workflow must expose an opt-in public demo evidence scope" in messages
+    assert "macOS release workflow must pass public demo mode into the preflight gate" in messages
+    assert "macOS release workflow must support full public demo opt-in flags" in messages
+    assert "macOS release workflow must pass public demo opt-in args to the preflight gate" in messages
     assert "macOS release workflow must keep public release gate nested evidence" in messages
     assert "macOS release workflow must archive a public release gate JSON report" in messages
     assert "macOS release workflow must archive a public release gate Markdown report" in messages
@@ -1912,6 +1916,10 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     assert "macOS release workflow must upload public release gate diagnostics bundles" in messages
     assert (
         "macOS release workflow must run public release preflight after Python dependencies before smoke tests"
+        in messages
+    )
+    assert (
+        "macOS release workflow must install frontend dependencies before public release preflight for full demo UI smokes"
         in messages
     )
     assert "macOS release workflow must upload a release-candidate verification report" in messages
