@@ -4936,6 +4936,68 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "operate-foreground-ui-followup-type",
     ).input_preview == {"text": "修复登录错误"}
 
+    app_issue_record = RuntimePlanner().decision(
+        "打开 Linear，把这个 bug 记录成 issue",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    assert app_issue_record.selected_intent.kind == "desktop_operation"
+    assert app_issue_record.selected_intent.inputs == {
+        "app_name_hint": "Linear",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "new_document"},
+        "foreground_compose_text_hint": "这个 bug",
+    }
+    assert [step.step_id for step in app_issue_record.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(app_issue_record, "operate-foreground-ui").input_preview == {
+        "app_name": "Linear",
+        "action": "new_document",
+    }
+    assert _step_by_id(
+        app_issue_record,
+        "operate-foreground-ui-followup-type",
+    ).input_preview == {"text": "这个 bug"}
+
+    app_issue_with_content = RuntimePlanner().decision(
+        "在 Linear 新建一个 issue，内容是这个 bug",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    assert app_issue_with_content.selected_intent.kind == "desktop_operation"
+    assert app_issue_with_content.selected_intent.inputs == {
+        "app_name_hint": "Linear",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "new_document"},
+        "foreground_compose_text_hint": "这个 bug",
+    }
+    assert [step.step_id for step in app_issue_with_content.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(app_issue_with_content, "operate-foreground-ui").input_preview == {
+        "app_name": "Linear",
+        "action": "new_document",
+    }
+    assert _step_by_id(
+        app_issue_with_content,
+        "operate-foreground-ui-followup-type",
+    ).input_preview == {"text": "这个 bug"}
+
     app_task_create_submit = RuntimePlanner().decision(
         "在 Linear 里创建一个任务：修复登录错误，并按回车确认",
         allowed_tools=[

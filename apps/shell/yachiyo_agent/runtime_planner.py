@@ -12967,7 +12967,8 @@ def _generic_create_title_text_hint(text: str) -> str:
         return ""
     container = (
         r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件(?!夹)|演示|演示文稿|幻灯片|"
-        r"项目|任务|卡片|page|note|document|file|presentation|slide|project|task|card)"
+        r"项目|任务|卡片|工单|事项|page|note|document|file|presentation|slide|"
+        r"project|task|card|ticket|issue|bug)"
     )
     chinese_patterns = (
         rf"(?:新建|创建|新增).{{0,80}}?"
@@ -13019,13 +13020,25 @@ def _generic_create_container_action_hint(text: str) -> str:
         r"(?:新的|新)?\s*"
         r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
         r"(?:页面|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|图片|图像|图(?!标)|"
-        r"流程图|思维导图|脑图|图表|画布|表格|工作簿|演示|演示文稿|幻灯片|项目|任务|卡片)",
+        r"流程图|思维导图|脑图|图表|画布|表格|工作簿|演示|演示文稿|幻灯片|"
+        r"项目|任务|卡片|工单|事项)",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"(?:新建|创建|新增)\s*(?:一个|一条|一张)?\s*"
+        r"(?:ticket|issue|bug|bug\s*ticket)",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"(?:把|将)?\s*[^。！？!?，,]{1,80}?\s*"
+        r"(?:记录成|记成|登记为|转成|作为)\s*"
+        r"(?:ticket|issue|bug|工单|事项|任务|卡片)",
         value,
         flags=re.IGNORECASE,
     ) or re.search(
         r"\b(?:new|create|make)\b.{0,60}\b"
         r"(?:page|document|file|image|picture|diagram|flowchart|mind\s*map|canvas|"
-        r"spreadsheet|workbook|presentation|slide|project|task|card)\b",
+        r"spreadsheet|workbook|presentation|slide|project|task|card|ticket|issue|bug)\b",
         value,
         flags=re.IGNORECASE,
     ):
@@ -13043,21 +13056,27 @@ def _app_scoped_create_text_hint(text: str) -> str:
         return ""
     patterns = (
         r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份|一则|一张|一幅|新的|新)?\s*"
-        r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件|演示|演示文稿|幻灯片|项目|任务|卡片)"
+        r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件|演示|演示文稿|幻灯片|"
+        r"项目|任务|卡片|工单|事项|ticket|issue|bug)"
         r"\s*(?:(?:标题|名称|名字|题目)\s*)?(?:是|为|叫|:|：)\s*"
         r"(?P<text>[^。！？!?，,]+)",
         r"(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*"
         r"(?P<text>[^。！？!?，,]+?)"
-        r"(?:\s*的\s*(?:页面|页|笔记|备忘录|日志|日记|文档|文件|演示|演示文稿|幻灯片|项目|任务|卡片))?"
+        r"(?:\s*的\s*(?:页面|页|笔记|备忘录|日志|日记|文档|文件|演示|演示文稿|"
+        r"幻灯片|项目|任务|卡片|工单|事项|ticket|issue|bug))?"
         r"(?:$|[。！？!?，,])",
         r"(?:名为|叫做|叫)\s*(?P<text>[^。！？!?，,]+)",
         r"(?:关于|有关)\s*(?P<text>.+?)\s*的\s*"
-        r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件|演示|演示文稿|幻灯片|项目|任务|卡片)",
+        r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件|演示|演示文稿|幻灯片|"
+        r"项目|任务|卡片|工单|事项|ticket|issue|bug)",
         r"(?:内容|正文)\s*(?:是|为|写|写成|写下|:|：)\s*(?P<text>[^。！？!?，,]+)",
         r"(?:写下|写入|记录下|记下|写)\s*(?P<text>[^。！？!?，,]+)",
+        r"(?:把|将)?\s*(?P<text>[^。！？!?，,]+?)\s*"
+        r"(?:记录成|记成|登记为|转成|作为)\s*"
+        r"(?:ticket|issue|bug|工单|事项|任务|卡片)",
         r"\b(?:titled|called|named)\s+(?P<text_en>[^.!?,]+)",
         r"\b(?:new|create|make)\b.{0,40}\b"
-        r"(?:page|note|document|file|presentation|slide|project|task|card)\b"
+        r"(?:page|note|document|file|presentation|slide|project|task|card|ticket|issue|bug)\b"
         r"\s*(?::|-)\s*(?P<text_en>[^.!?,]+)",
         r"\babout\s+(?P<text_en>[^.!?,]+)",
         r"\b(?:saying|with(?:\s+(?:content|text|body))?|content|text|body)\s+"
@@ -13084,14 +13103,22 @@ def _looks_like_app_scoped_create_followup(text: str) -> bool:
             r"(?:新的|新)?\s*"
             r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
             r"(?:页面|页|笔记|备忘录|日志|日记|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|"
-            r"图片|图像|图(?!标)|流程图|思维导图|脑图|图表|画布|演示|演示文稿|幻灯片|项目|任务|卡片)",
+            r"图片|图像|图(?!标)|流程图|思维导图|脑图|图表|画布|演示|演示文稿|"
+            r"幻灯片|项目|任务|卡片|工单|事项|ticket|issue|bug)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:把|将)?\s*[^。！？!?，,]{1,80}?\s*"
+            r"(?:记录成|记成|登记为|转成|作为)\s*"
+            r"(?:ticket|issue|bug|工单|事项|任务|卡片)",
             value,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"\b(?:new|create|make)\b.{0,40}\b"
             r"(?:page|note|document|file|image|picture|diagram|flowchart|mind\s*map|"
-            r"canvas|presentation|slide|project|task|card)\b",
+            r"canvas|presentation|slide|project|task|card|ticket|issue|bug)\b",
             value,
             flags=re.IGNORECASE,
         )
@@ -15527,7 +15554,7 @@ def _looks_like_app_scoped_ticket_or_creation_request(text: str) -> bool:
     return bool(
         re.search(
             r"(?:打开|启动|开启|运行|拉起|在|用|通过|open|launch|start|in|inside|within|using|with)"
-            r".{0,80}(?:创建|新建|新增|添加|create|new|add)",
+            r".{0,80}(?:创建|新建|新增|添加|记录成|记成|登记为|转成|作为|create|new|add)",
             value,
             flags=re.IGNORECASE,
         )
@@ -15733,8 +15760,10 @@ def _app_scoped_followup_hint(text: str) -> dict[str, str]:
         r"新建备忘录|新建笔记|新笔记|新备忘录|创建备忘录|创建笔记|"
         r"新建项目|新建一个项目|创建项目|创建一个项目|新项目|"
         r"新建工单|创建工单|新建任务|创建任务|新建卡片|创建卡片|"
-        r"新建\s*(?:ticket|issue|bug|bug\s*ticket)|"
+        r"新建(?:一个|一条|一张)?\s*(?:ticket|issue|bug|bug\s*ticket)|"
         r"创建(?:一个|一条|一张)?\s*(?:ticket|issue|bug|bug\s*ticket)|"
+        r"(?:把|将)?\s*[^。！？!?，,]{1,80}?\s*(?:记录成|记成|登记为|转成|作为)\s*"
+        r"(?:ticket|issue|bug|工单|事项|任务|卡片)|"
         r"新建工作区|新建一个工作区|创建工作区|创建一个工作区|"
         r"新建\s*workspace|创建\s*workspace|创建新\s*workspace|新\s*workspace|"
         r"新建消息|新消息|创建消息|写消息|撰写消息|新建聊天|新聊天|创建聊天|新建会话|新会话|"

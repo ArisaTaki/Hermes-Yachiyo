@@ -51,6 +51,25 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "approval_required": ["app.focus_and_click_ui_element"],
     },
     {
+        "id": "app_issue_create",
+        "category": "orchestrator",
+        "prompt": "打开 Linear，把这个 bug 记录成 issue",
+        "expected_intent": "desktop_operation",
+        "expected_plan_tools": [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+        "expected_request_tools": [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+        "approval_required": [],
+    },
+    {
         "id": "builtin_data_analysis",
         "category": "orchestrator",
         "prompt": "请分析 data/sales.csv 并输出报告",
