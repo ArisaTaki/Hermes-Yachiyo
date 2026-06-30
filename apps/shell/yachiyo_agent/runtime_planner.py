@@ -15817,7 +15817,8 @@ def _foreground_app_search_hint(text: str) -> dict[str, str]:
         r"(?:在|用|通过)?\s*(?:(?:任意|任何)\s*)?(?:(?:当前|现在|前台|这个|该)\s*){1,2}"
         r"(?:应用|app|application|窗口|界面|ui)"
         r"(?:里|中|上|内)?\s*(?:找到|找|定位|聚焦|点击|点按|选择|选中)?(?:一下|下)?\s*"
-        r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏|search\s+field|search\s+box|search\s+input|search\s+bar)\s*"
+        r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏|"
+        r"search\s+field|search\s+box|search\s+input|search\s+bar)[\s，,：:]*"
         r"(?:输入|键入|填写|填入|写入|写|type|enter|fill)\s*"
         r"(?P<field_query>.+?)(?:\s*(?:并|然后|再|后|之后|and|then)?\s*"
         r"(?:搜索|查找|检索|提交|确认|回车|search|submit|confirm|press\s+enter|hit\s+enter))?$",
@@ -16090,7 +16091,7 @@ def _app_search_field_input_allows_safe_search(text: str) -> bool:
 def _app_search_field_input_submit_query(text: str) -> str:
     value = _clean_prompt(text)
     patterns = (
-        r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏)\s*"
+        r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏)[\s，,：:]*"
         r"(?:输入|键入|填写|填入|写入|写)\s*"
         r"(?P<query>[^。！？!?，,]+?)\s*"
         r"(?:并|然后|再|后|之后)?\s*(?:搜索|查找|检索|提交|确认|回车)$",
@@ -16115,7 +16116,7 @@ def _app_search_field_input_query(text: str) -> str:
     value = _clean_prompt(text)
     query = ""
     patterns = (
-        r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏)\s*"
+        r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏)[\s，,：:]*"
         r"(?:输入|键入|填写|填入|写入|写)\s*"
         r"(?P<query>[^。！？!?，,]+?)(?:\s*(?:并|然后|再|后|之后)?\s*(?:搜索|查找|检索|提交|确认|回车))?$",
         r"(?:type|enter|fill)\s+(?P<query_en>[^.!?,]+?)\s+"

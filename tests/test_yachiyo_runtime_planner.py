@@ -9828,6 +9828,27 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     assert _step_by_id(any_current_search, "type-app-search-query").input_preview == {
         "text": "OpenAI"
     }
+    punctuated_current_search = RuntimePlanner().decision(
+        "帮我在当前应用里找搜索框，输入 budget 并搜索",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+    )
+    assert punctuated_current_search.selected_intent.kind == "desktop_operation"
+    assert punctuated_current_search.selected_intent.inputs["app_name_hint"] == ""
+    assert punctuated_current_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "budget",
+        "target": "搜索",
+        "scope": "foreground",
+    }
+    assert _step_by_id(
+        punctuated_current_search,
+        "type-app-search-query",
+    ).input_preview == {"text": "budget"}
 
     english_current_search = RuntimePlanner().decision(
         "in current app search for OpenAI",
