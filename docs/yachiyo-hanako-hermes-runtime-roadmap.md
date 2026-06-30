@@ -696,8 +696,8 @@ can show exactly which Hanako/Hermes-level demo evidence is still missing.
 `scripts/refresh_local_rc_signoff.py` now generates the
 redacted diagnostics bundle, release-smoke summary, and public-demo smoke
 summary during each local RC refresh, and `--print-status` prints capability
-readiness, user-path release smoke coverage, and public-demo progress when
-those reports exist.
+readiness, user-path release smoke coverage, public-demo release level, missing
+demo flows, and demo blockers when those reports exist.
 
 ## Phase 12 - Public Project Release
 

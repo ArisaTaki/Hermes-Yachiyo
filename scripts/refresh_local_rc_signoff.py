@@ -70,6 +70,22 @@ def _non_manual_findings(report: dict[str, object]) -> list[tuple[str, object]]:
     return findings
 
 
+def _string_items(value: object) -> list[str]:
+    if isinstance(value, str):
+        values: list[object] = [value]
+    elif isinstance(value, (list, tuple, set)):
+        values = list(value)
+    else:
+        return []
+    return [str(item) for item in values if str(item)]
+
+
+def _dict_items(value: object) -> list[dict[str, object]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
+
+
 def _load_report(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -719,6 +735,9 @@ def _print_release_smoke_status(*, label: str) -> None:
         missing = ", ".join(str(item) for item in missing_ids if str(item))
         if missing:
             print(f"- missing user paths: {missing}")
+    public_demo_details = _public_demo_details_from_release_smoke(report)
+    if public_demo_details:
+        _print_public_demo_detail_lines(public_demo_details, prefix="public demo")
 
 
 def _print_public_demo_status(*, label: str) -> None:
@@ -743,6 +762,17 @@ def _print_public_demo_status(*, label: str) -> None:
     complete = report.get("complete")
     if isinstance(complete, bool):
         print(f"- complete evidence: {str(complete).lower()}")
+    release_level = str(report.get("release_level") or "")
+    if release_level:
+        print(f"- release level: {release_level}")
+    passed_required = report.get("passed_required_flow_count")
+    required = report.get("required_flow_count")
+    if isinstance(passed_required, int) and isinstance(required, int) and required:
+        print(f"- required demos: {passed_required}/{required} passed")
+    missing_required = _string_items(report.get("missing_required_flow_ids"))
+    if missing_required:
+        print(f"- missing required demos: {', '.join(missing_required)}")
+    _print_demo_blockers(_dict_items(report.get("release_blockers")))
     next_actions = report.get("next_actions")
     if isinstance(next_actions, list) and next_actions:
         action_ids = [
@@ -752,6 +782,54 @@ def _print_public_demo_status(*, label: str) -> None:
         ]
         if action_ids:
             print(f"- remaining demos: {', '.join(action_ids)}")
+
+
+def _public_demo_details_from_release_smoke(report: dict[str, object]) -> dict[str, object]:
+    for item in _dict_items(report.get("items")):
+        if item.get("id") != "public_demo":
+            continue
+        related = item.get("related_evidence")
+        if not isinstance(related, dict):
+            continue
+        for evidence_id in ("public_demo_assessment", "public_demo_selected"):
+            entries = _dict_items(related.get(evidence_id))
+            if entries:
+                return entries[0]
+    for action in _dict_items(report.get("next_actions")):
+        if action.get("id") == "public_demo":
+            return action
+    return {}
+
+
+def _print_public_demo_detail_lines(details: dict[str, object], *, prefix: str) -> None:
+    release_level = str(details.get("release_level") or "")
+    if release_level:
+        print(f"- {prefix} level: {release_level}")
+    missing_required = _string_items(details.get("missing_required_flow_ids"))
+    if missing_required:
+        print(f"- missing {prefix} flows: {', '.join(missing_required)}")
+    _print_demo_blockers(_dict_items(details.get("release_blockers")), prefix=prefix)
+
+
+def _print_demo_blockers(
+    blockers: list[dict[str, object]],
+    *,
+    prefix: str = "demo",
+) -> None:
+    for blocker in blockers:
+        blocker_id = str(blocker.get("id") or "")
+        if not blocker_id:
+            continue
+        status = str(blocker.get("status") or "unknown")
+        opt_in = str(blocker.get("opt_in_flag") or "")
+        reason = str(blocker.get("reason") or "")
+        suffix_parts = []
+        if opt_in:
+            suffix_parts.append(f"requires {opt_in}")
+        if reason:
+            suffix_parts.append(reason)
+        suffix = f" ({'; '.join(suffix_parts)})" if suffix_parts else ""
+        print(f"- {prefix} blocker {blocker_id}: {status}{suffix}")
 
 
 def write_local_os_manual_evidence(

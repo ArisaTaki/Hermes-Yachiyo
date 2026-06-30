@@ -769,8 +769,33 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
             {
                 "status": "incomplete",
                 "passed_count": 6,
-                "item_count": 8,
-                "missing_item_ids": ["chat_desktop_task", "workflow"],
+                "item_count": 9,
+                "missing_item_ids": ["chat_desktop_task", "workflow", "public_demo"],
+                "items": [
+                    {
+                        "id": "public_demo",
+                        "status": "missing",
+                        "related_evidence": {
+                            "public_demo_assessment": [
+                                {
+                                    "release_level": "partial_demo_ready",
+                                    "missing_required_flow_ids": [
+                                        "real_desktop_interaction",
+                                        "workflow_provider",
+                                    ],
+                                    "release_blockers": [
+                                        {
+                                            "id": "workflow_provider",
+                                            "status": "skipped",
+                                            "opt_in_flag": "--include-provider-workflow",
+                                            "reason": "requires live provider smoke credentials",
+                                        }
+                                    ],
+                                }
+                            ]
+                        },
+                    }
+                ],
             }
         ),
         encoding="utf-8",
@@ -780,9 +805,24 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
         json.dumps(
             {
                 "status": "partial",
+                "release_level": "partial_demo_ready",
                 "complete": False,
                 "passed_count": 7,
                 "selected_count": 8,
+                "passed_required_flow_count": 7,
+                "required_flow_count": 13,
+                "missing_required_flow_ids": [
+                    "real_desktop_interaction",
+                    "workflow_provider",
+                ],
+                "release_blockers": [
+                    {
+                        "id": "real_desktop_interaction",
+                        "status": "skipped",
+                        "opt_in_flag": "--include-real-desktop-interaction",
+                        "reason": "types and clicks in a real macOS application",
+                    }
+                ],
                 "next_actions": [
                     {"id": "real_desktop_interaction"},
                     {"id": "workflow_provider"},
@@ -802,13 +842,23 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
     assert "blocker runtime_blocking_condition:desktop_session_locked" in output
     assert "blocker provider_credentials_missing:oha_yachiyo_smoke_credentials" in output
     assert "local RC release smoke:" in output
-    assert "- user paths: 6/8 passed" in output
+    assert "- user paths: 6/9 passed" in output
     assert "chat_desktop_task" in output
     assert "workflow" in output
+    assert "public_demo" in output
+    assert "- public demo level: partial_demo_ready" in output
+    assert "- missing public demo flows: real_desktop_interaction, workflow_provider" in output
+    assert "public demo blocker workflow_provider: skipped" in output
+    assert "--include-provider-workflow" in output
     assert "local RC public demo:" in output
     assert "- status: partial" in output
     assert "- selected demos: 7/8 passed" in output
     assert "- complete evidence: false" in output
+    assert "- release level: partial_demo_ready" in output
+    assert "- required demos: 7/13 passed" in output
+    assert "- missing required demos: real_desktop_interaction, workflow_provider" in output
+    assert "demo blocker real_desktop_interaction: skipped" in output
+    assert "--include-real-desktop-interaction" in output
     assert "real_desktop_interaction" in output
     assert "workflow_provider" in output
     assert (
