@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import subprocess
+import sys
 
 from scripts import summarize_native_agent_capabilities as summary
 
@@ -492,6 +494,36 @@ def test_capability_summary_cli_merges_multiple_reports(tmp_path):
     assert by_id["source_real_desktop_interaction"]["status"] == "passed"
     assert by_id["provider_text_stream"]["status"] == "passed"
     assert by_id["packaged_app_bridge_isolation"]["status"] == "passed"
+
+
+def test_capability_summary_script_entrypoint_runs_from_shell(tmp_path):
+    source_path = tmp_path / "source-rc.json"
+    output_path = tmp_path / "matrix.json"
+    source_path.write_text(json.dumps(_source_sections_report()), encoding="utf-8")
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            "scripts/summarize_native_agent_capabilities.py",
+            str(source_path),
+            "--output-json",
+            str(output_path),
+        ],
+        check=False,
+        cwd=summary.ROOT,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+    )
+
+    assert result.returncode == 1
+    assert "ModuleNotFoundError" not in result.stderr
+    payload = json.loads(output_path.read_text(encoding="utf-8"))
+    assert payload["capability_count"] == 30
+    assert payload["status"] == "incomplete"
+    assert "source_agent_studio_planner_orchestration" in {
+        item["id"] for item in payload["capabilities"]
+    }
 
 
 def test_capability_summary_cli_preserves_existing_report_matrix(tmp_path):
