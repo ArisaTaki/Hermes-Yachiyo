@@ -1664,6 +1664,56 @@ def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None
     assert event["payload"] == payload
 
 
+def test_planner_selection_payload_surfaces_studio_orchestration_handoff() -> None:
+    workflow_decision = RuntimePlanner().decision(
+        "运行 Daily Summary workflow",
+        allowed_tools=["workflow.run", "group.run", "artifact.write"],
+    )
+    group_decision = RuntimePlanner().decision(
+        "让研究员和写作者两个 Agent 协作，研究 Hermes 和 Hanako 的差异并产出报告",
+        allowed_tools=["agent.group_run", "artifact.write"],
+    )
+
+    workflow_payload = planner_selection_payload(
+        decision=workflow_decision,
+        planner_requests=[],
+        legacy_requests=[],
+        selected_requests=[],
+        selected_source="none",
+        selected_reason="studio_orchestration_handoff",
+    )
+    group_payload = planner_selection_payload(
+        decision=group_decision,
+        planner_requests=[],
+        legacy_requests=[],
+        selected_requests=[],
+        selected_source="none",
+        selected_reason="studio_orchestration_handoff",
+    )
+
+    assert workflow_payload["orchestration"] == {
+        "kind": "workflow",
+        "surface": "Workflow",
+        "handoff": True,
+        "route_to_studio": True,
+        "target_name": "Daily Summary",
+        "action": "run",
+        "tool": "workflow.run",
+        "capability_id": "workflow.orchestration",
+        "step_action": "start_workflow",
+    }
+    assert group_payload["orchestration"] == {
+        "kind": "group_run",
+        "surface": "GroupRun",
+        "handoff": True,
+        "route_to_studio": True,
+        "target_name": "",
+        "tool": "agent.group_run",
+        "capability_id": "group.multi_agent",
+        "step_action": "start_group_run",
+    }
+
+
 def test_runtime_planner_selection_projection_marks_legacy_desktop_intent_as_fallback() -> None:
     decision = RuntimePlanner().decision(
         "Finder 新建文件夹",

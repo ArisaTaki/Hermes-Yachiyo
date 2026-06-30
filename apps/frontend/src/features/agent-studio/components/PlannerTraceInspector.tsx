@@ -33,6 +33,7 @@ type PlannerSelection = {
   missingCapabilities: string[];
   missingCapabilityCount: number;
   openQuestions: string[];
+  orchestration: PlannerOrchestration | null;
   planCapabilities: string[];
   planCapabilityCount: number;
   planTools: string[];
@@ -52,6 +53,14 @@ type PlannerSelection = {
   selectedSource: string;
   selectedTools: string[];
   selectedRequestCount: number;
+};
+
+type PlannerOrchestration = {
+  entries: Array<{ key: string; value: string }>;
+  handoff: boolean;
+  kind: string;
+  routeToStudio: boolean;
+  surface: string;
 };
 
 type PlannerFollowupTarget = {
@@ -311,6 +320,33 @@ export function PlannerTraceInspector({
               {trace.selection.legacyTools.map((tool) => (
                 <span className="studio-tool-permission" data-legacy-tool={tool} key={`legacy:${tool}`}>
                   legacy · {tool}
+                </span>
+              ))}
+            </div>
+          </section>
+        ) : null}
+
+        {trace.selection?.orchestration ? (
+          <section
+            data-orchestration-handoff={String(trace.selection.orchestration.handoff)}
+            data-orchestration-kind={trace.selection.orchestration.kind}
+            data-orchestration-route-to-studio={String(trace.selection.orchestration.routeToStudio)}
+            data-testid="agent-run-detail-planner-orchestration"
+          >
+            <div className="studio-tool-inspector-heading">
+              <h3>Studio Handoff</h3>
+              <span>{trace.selection.orchestration.surface || trace.selection.orchestration.kind || 'orchestration'}</span>
+            </div>
+            <div className="studio-tool-pill-row">
+              {trace.selection.orchestration.entries.map((entry) => (
+                <span
+                  className="studio-tool-permission"
+                  data-orchestration-key={entry.key}
+                  data-orchestration-value={entry.value}
+                  key={`orchestration:${entry.key}`}
+                  title={entry.value}
+                >
+                  handoff · {entry.key}: {entry.value}
                 </span>
               ))}
             </div>
@@ -804,6 +840,7 @@ function plannerSelectionFromSummary(
   const launcherSurface = stringValue(summary.launcher_surface);
   const runnableKind = stringValue(summary.runnable_kind);
   const followupTarget = plannerFollowupTargetFromPayload(summary.followup_target);
+  const orchestration = plannerOrchestrationFromPayload((summary as Record<string, unknown>).orchestration);
   if (
     !selectedSource
     && !selectedRole
@@ -821,6 +858,7 @@ function plannerSelectionFromSummary(
     && !launcherSurface
     && !runnableKind
     && !followupTarget
+    && !orchestration
   ) return null;
   return {
     approvalsRequired,
@@ -836,6 +874,7 @@ function plannerSelectionFromSummary(
     missingCapabilities,
     missingCapabilityCount: missingCapabilities.length,
     openQuestions,
+    orchestration,
     planCapabilities,
     planCapabilityCount: planCapabilities.length,
     planStepCount: stepCount || planTools.length,
@@ -1019,6 +1058,7 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
   const plannerRequestCount = integerValue(payload.planner_request_count, plannerTools.length);
   const legacyRequestCount = integerValue(payload.legacy_request_count, legacyTools.length);
   const followupTarget = plannerFollowupTargetFromPayload(payload.followup_target);
+  const orchestration = plannerOrchestrationFromPayload(payload.orchestration);
   if (
     !selectedSource
     && !selectedRole
@@ -1038,6 +1078,7 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
     && !launcherSurface
     && !runnableKind
     && !followupTarget
+    && !orchestration
   ) return null;
   return {
     approvalsRequired,
@@ -1052,6 +1093,7 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
     missingCapabilities,
     missingCapabilityCount,
     openQuestions,
+    orchestration,
     planCapabilities,
     planCapabilityCount,
     planTools,
@@ -1070,6 +1112,23 @@ function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerS
     selectedSource,
     selectedTools,
     selectedRequestCount,
+  };
+}
+
+function plannerOrchestrationFromPayload(value: unknown): PlannerOrchestration | null {
+  const record = objectRecord(value);
+  const entries = plannerRecordEntries(record, ['kind', 'surface', 'handoff', 'route_to_studio']);
+  const kind = stringValue(record.kind);
+  const surface = stringValue(record.surface);
+  const handoff = booleanValue(record.handoff, false) || false;
+  const routeToStudio = booleanValue(record.route_to_studio, false) || false;
+  if (!kind && !surface && !entries.length && !handoff && !routeToStudio) return null;
+  return {
+    entries,
+    handoff,
+    kind,
+    routeToStudio,
+    surface,
   };
 }
 

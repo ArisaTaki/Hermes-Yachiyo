@@ -244,6 +244,9 @@ def planner_selection_payload(
     followup_target = _selection_followup_target_payload(decision)
     if followup_target:
         payload["followup_target"] = followup_target
+    orchestration = _selection_orchestration_payload(decision)
+    if orchestration:
+        payload["orchestration"] = orchestration
     route_to_studio = getattr(plan, "route_to_studio", None)
     if isinstance(route_to_studio, bool):
         payload["route_to_studio"] = route_to_studio
@@ -321,6 +324,50 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
         value = str(communication_target.get(source_key) or "").strip()
         if value:
             payload[target_key] = value
+    return payload
+
+
+def _selection_orchestration_payload(decision: Any | None) -> dict[str, Any]:
+    intent = getattr(decision, "selected_intent", None)
+    intent_kind = str(getattr(intent, "kind", "") or "").strip()
+    if intent_kind == "workflow_orchestration":
+        orchestration_kind = "workflow"
+        surface = "Workflow"
+    elif intent_kind == "multi_agent":
+        orchestration_kind = "group_run"
+        surface = "GroupRun"
+    else:
+        return {}
+    inputs = getattr(intent, "inputs", None)
+    if not isinstance(inputs, Mapping):
+        inputs = {}
+    plan = getattr(decision, "plan", None)
+    tool_plan = getattr(plan, "tool_plan", None)
+    steps = getattr(tool_plan, "steps", []) if tool_plan is not None else []
+    first_step = next(
+        (step for step in steps if str(getattr(step, "capability_id", "") or "").strip()),
+        None,
+    )
+    payload: dict[str, Any] = {
+        "kind": orchestration_kind,
+        "surface": surface,
+        "handoff": True,
+        "route_to_studio": bool(getattr(plan, "route_to_studio", False)),
+        "target_name": str(inputs.get("target_name_hint") or "").strip(),
+    }
+    workflow_action = str(inputs.get("workflow_action_hint") or "").strip()
+    if workflow_action:
+        payload["action"] = workflow_action
+    if first_step is not None:
+        tool_name = str(getattr(first_step, "tool_name", "") or "").strip()
+        capability_id = str(getattr(first_step, "capability_id", "") or "").strip()
+        step_action = str(getattr(first_step, "action", "") or "").strip()
+        if tool_name:
+            payload["tool"] = tool_name
+        if capability_id:
+            payload["capability_id"] = capability_id
+        if step_action:
+            payload["step_action"] = step_action
     return payload
 
 

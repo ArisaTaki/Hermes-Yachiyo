@@ -593,6 +593,14 @@ DOM attributes, giving Agent Studio a stable Workflow debugging surface
 parallel to GroupRun planner replay while preserving the existing public
 timeline contract.
 
+Current planner selection replay also carries Studio orchestration handoff
+metadata for `workflow_orchestration` and `multi_agent` plans. The public
+`agent.plan.selection` payload includes an `orchestration` object with
+Workflow/GroupRun kind, target, selected service tool/capability, handoff flag,
+and `route_to_studio`; Agent Studio renders this in the Planner Trace
+Inspector as a `Studio Handoff` section so Workflow and GroupRun routing stays
+visible during replay.
+
 ## Phase 10 - 删除旧硬编码与收敛代码
 
 After coverage proves the new chain works, delete no-longer-needed app aliases,
