@@ -146,6 +146,13 @@ fail. Existing RC reports and diagnostics bundles can be folded into the same
 assessment with repeated `--release-smoke-report` and `--diagnostics-zip`
 arguments.
 
+When collecting opt-in evidence incrementally, the same gate can pass through
+granular public-demo flags such as `--include-real-desktop-open`,
+`--include-real-desktop-ui-inspection`, `--include-real-desktop-interaction`,
+and `--include-ui`. This lets maintainers archive a passing real app-open or
+Studio UI replay result without forcing every foreground interaction smoke to
+run in the same session.
+
 The macOS release workflow keeps the default preflight safe on push builds. For
 manual release-candidate runs, set the `public_demo` workflow input to `full` to
 pass `--include-real-desktop --include-provider-workflow --include-ui` into the

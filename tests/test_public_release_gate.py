@@ -309,3 +309,37 @@ def test_public_release_gate_accepts_existing_release_smoke_sources(
     assert "--diagnostics-zip" in release_smoke_command
     assert str(tmp_path / "tmp" / "diagnostics.zip") in release_smoke_command
     assert summary["release_smoke"]["status"] == "incomplete"
+
+
+def test_public_release_gate_passes_granular_real_desktop_demo_flags(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    commands: list[list[str]] = []
+
+    def fake_run(command):
+        command = list(command)
+        commands.append(command)
+        _write_public_demo_report(command, release_level="partial_demo_ready")
+        _write_diagnostics_bundle(command)
+        _write_release_smoke_report(command, ok=False)
+        return _completed(command)
+
+    monkeypatch.setattr(gate, "_run_command", fake_run)
+
+    summary = gate.run_public_release_gate(
+        tmp_dir="tmp/gate",
+        include_real_desktop_open=True,
+        include_ui=True,
+    )
+
+    public_demo_command = next(
+        command for command in commands if "scripts/run_public_demo_smokes.py" in command
+    )
+    assert "--include-real-desktop-open" in public_demo_command
+    assert "--include-ui" in public_demo_command
+    assert "--include-real-desktop" not in public_demo_command
+    assert "--include-real-desktop-ui-inspection" not in public_demo_command
+    assert "--include-real-desktop-interaction" not in public_demo_command
+    assert summary["status"] == "needs_release_evidence"

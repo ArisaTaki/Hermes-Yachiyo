@@ -33,6 +33,9 @@ def public_release_gate_checks(
     tmp_dir: Path,
     include_public_demo: bool = True,
     include_real_desktop: bool = False,
+    include_real_desktop_open: bool = False,
+    include_real_desktop_ui_inspection: bool = False,
+    include_real_desktop_interaction: bool = False,
     include_provider_workflow: bool = False,
     include_ui: bool = False,
 ) -> list[GateCheck]:
@@ -79,6 +82,12 @@ def public_release_gate_checks(
         ]
         if include_real_desktop:
             command.append("--include-real-desktop")
+        if include_real_desktop_open:
+            command.append("--include-real-desktop-open")
+        if include_real_desktop_ui_inspection:
+            command.append("--include-real-desktop-ui-inspection")
+        if include_real_desktop_interaction:
+            command.append("--include-real-desktop-interaction")
         if include_provider_workflow:
             command.append("--include-provider-workflow")
         if include_ui:
@@ -103,6 +112,9 @@ def run_public_release_gate(
     diagnostics_zips: Sequence[Path | str] = (),
     include_diagnostics_bundle: bool = True,
     include_real_desktop: bool = False,
+    include_real_desktop_open: bool = False,
+    include_real_desktop_ui_inspection: bool = False,
+    include_real_desktop_interaction: bool = False,
     include_provider_workflow: bool = False,
     include_ui: bool = False,
     require_release_ready: bool = False,
@@ -114,6 +126,9 @@ def run_public_release_gate(
         tmp_dir=resolved_tmp_dir,
         include_public_demo=include_public_demo,
         include_real_desktop=include_real_desktop,
+        include_real_desktop_open=include_real_desktop_open,
+        include_real_desktop_ui_inspection=include_real_desktop_ui_inspection,
+        include_real_desktop_interaction=include_real_desktop_interaction,
         include_provider_workflow=include_provider_workflow,
         include_ui=include_ui,
     )
@@ -569,6 +584,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--diagnostics-zip", action="append", default=[], type=Path)
     parser.add_argument("--skip-diagnostics-bundle", action="store_true")
     parser.add_argument("--include-real-desktop", action="store_true")
+    parser.add_argument("--include-real-desktop-open", action="store_true")
+    parser.add_argument("--include-real-desktop-ui-inspection", action="store_true")
+    parser.add_argument("--include-real-desktop-interaction", action="store_true")
     parser.add_argument("--include-provider-workflow", action="store_true")
     parser.add_argument("--include-ui", action="store_true")
     parser.add_argument("--require-release-ready", action="store_true")
@@ -585,6 +603,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         diagnostics_zips=args.diagnostics_zip,
         include_diagnostics_bundle=not args.skip_diagnostics_bundle,
         include_real_desktop=bool(args.include_real_desktop),
+        include_real_desktop_open=bool(args.include_real_desktop_open),
+        include_real_desktop_ui_inspection=bool(args.include_real_desktop_ui_inspection),
+        include_real_desktop_interaction=bool(args.include_real_desktop_interaction),
         include_provider_workflow=bool(args.include_provider_workflow),
         include_ui=bool(args.include_ui),
         require_release_ready=bool(args.require_release_ready),
