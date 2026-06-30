@@ -58,6 +58,9 @@ from scripts.smoke_agent_entrypoint_data_analysis import (
 from scripts.smoke_media_playback_chain import (
     run_smoke as run_media_playback_chain_smoke,
 )
+from scripts.smoke_native_provider_contract import (
+    run_contract_smoke as run_native_provider_contract_smoke,
+)
 from scripts.smoke_planner_runtime_tool_parity import (
     run_smoke as run_planner_runtime_tool_parity_smoke,
 )
@@ -2543,6 +2546,43 @@ def verify_group_run_timeline_smoke(root: Path) -> tuple[list[Finding], dict[str
     ], evidence
 
 
+def verify_native_provider_contract_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = run_native_provider_contract_smoke()
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/smoke_native_provider_contract.py",
+                f"Native provider contract smoke failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "mode": "native_provider_contract_smoke",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/smoke_native_provider_contract.py",
+                "Native provider contract smoke returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "mode": "native_provider_contract_smoke",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    message = str(evidence.get("error") or "Native provider contract smoke did not pass")
+    return [
+        Finding(
+            root / "scripts/smoke_native_provider_contract.py",
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
 def _print_findings(title: str, findings: Sequence[Finding]) -> None:
     if not findings:
         print(f"{title}: passed")
@@ -4647,6 +4687,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         },
+        "native_provider_contract_smoke": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        },
         "built_artifact_guards": {
             "status": "pending",
             "artifact_paths": [],
@@ -4854,6 +4900,12 @@ def verify_release_candidate(
             "run_requested": True,
         }
         report["yachiyo_route_approval_smoke"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        }
+        report["native_provider_contract_smoke"] = {
             "status": "skipped",
             "evidence": {},
             "findings": [],
@@ -5208,6 +5260,18 @@ def verify_release_candidate(
         "status": "failed" if group_run_timeline_findings else "passed",
         "evidence": group_run_timeline_evidence,
         "findings": _finding_report(group_run_timeline_findings),
+        "run_requested": True,
+    }
+
+    native_provider_contract_findings, native_provider_contract_evidence = (
+        verify_native_provider_contract_smoke(root)
+    )
+    _print_findings("native provider contract smoke", native_provider_contract_findings)
+    failed = failed or bool(native_provider_contract_findings)
+    report["native_provider_contract_smoke"] = {
+        "status": "failed" if native_provider_contract_findings else "passed",
+        "evidence": native_provider_contract_evidence,
+        "findings": _finding_report(native_provider_contract_findings),
         "run_requested": True,
     }
 

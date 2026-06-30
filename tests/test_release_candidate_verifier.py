@@ -25,6 +25,23 @@ def _stub_media_playback_chain_source_smoke(monkeypatch):
     )
 
 
+@pytest.fixture(autouse=True)
+def _stub_native_provider_contract_source_smoke(monkeypatch):
+    monkeypatch.setattr(
+        rc,
+        "run_native_provider_contract_smoke",
+        lambda: {
+            "ok": True,
+            "mode": "native_provider_contract_smoke",
+            "provider": "local_fake_openai_compatible_sse",
+            "checks": [
+                {"label": "native_agent_full_chain_contract", "ok": True},
+                {"label": "native_workflow_full_chain_contract", "ok": True},
+            ],
+        },
+    )
+
+
 def _manual_check_ids() -> list[str]:
     return [check["id"] for check in rc.MANUAL_RELEASE_CANDIDATE_CHECK_DETAILS]
 
@@ -539,12 +556,13 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     assert report["real_desktop_discovery_smoke"]["evidence"]["mode"] == (
         "real_desktop_discovery_smoke"
     )
-    assert report["real_desktop_app_open_smoke"] == {
-        "status": "skipped",
-        "evidence": {},
-        "findings": [],
-        "run_requested": False,
-    }
+    app_open_section = report["real_desktop_app_open_smoke"]
+    assert app_open_section["status"] == "skipped"
+    assert app_open_section["evidence"] == {}
+    assert app_open_section["findings"] == []
+    assert app_open_section["run_requested"] is False
+    assert app_open_section["capability_query"] == ""
+    assert app_open_section["require_foreground_ready"] is False
     assert report["real_desktop_interaction_smoke"] == {
         "status": "skipped",
         "evidence": {},
@@ -623,6 +641,11 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     assert report["yachiyo_route_approval_smoke"]["evidence"]["studio"]["artifact"][
         "content"
     ] == "# Route artifact"
+    assert report["native_provider_contract_smoke"]["status"] == "passed"
+    assert report["native_provider_contract_smoke"]["evidence"]["ok"] is True
+    assert report["native_provider_contract_smoke"]["evidence"]["provider"] == (
+        "local_fake_openai_compatible_sse"
+    )
     assert report["built_artifact_guards"]["status"] == "passed"
     assert report["built_artifact_guards"]["artifact_paths"] == ["release"]
     assert report["dmg_mount_guards"]["status"] == "skipped"
@@ -1793,6 +1816,70 @@ def test_release_candidate_verifier_reports_group_run_timeline_smoke(
         "approval_required"
     )
     assert section["evidence"]["event_page"]["has_more"] is True
+
+
+def test_release_candidate_verifier_reports_native_provider_contract_smoke(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "native provider contract smoke: passed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["native_provider_contract_smoke"]
+    assert section["status"] == "passed"
+    assert section["run_requested"] is True
+    assert section["findings"] == []
+    assert section["evidence"]["mode"] == "native_provider_contract_smoke"
+    assert section["evidence"]["provider"] == "local_fake_openai_compatible_sse"
+    matrix = report["native_agent_capability_matrix"]
+    provider_capability = {
+        item["id"]: item["status"]
+        for item in matrix["capabilities"]
+        if item["id"] == "provider_text_stream"
+    }
+    assert provider_capability == {"provider_text_stream": "missing"}
+
+
+def test_release_candidate_verifier_fails_when_native_provider_contract_smoke_fails(
+    tmp_path, monkeypatch, capsys
+):
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        rc,
+        "run_native_provider_contract_smoke",
+        lambda: {
+            "ok": False,
+            "mode": "native_provider_contract_smoke",
+            "error": "main chat contract did not complete",
+        },
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 1
+
+    output = capsys.readouterr().out
+    assert "native provider contract smoke: failed" in output
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["native_provider_contract_smoke"]
+    assert report["ok"] is False
+    assert section["status"] == "failed"
+    assert section["evidence"]["error"] == "main chat contract did not complete"
+    assert section["findings"] == [
+        {
+            "path": str(tmp_path / "scripts/smoke_native_provider_contract.py"),
+            "message": "main chat contract did not complete",
+        }
+    ]
 
 
 def test_release_candidate_verifier_fails_when_group_run_timeline_smoke_fails(
