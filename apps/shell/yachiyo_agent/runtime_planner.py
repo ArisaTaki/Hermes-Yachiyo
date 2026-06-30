@@ -1494,6 +1494,12 @@ class TaskIntentRouter:
         )
         if score <= 0:
             return _empty_intent("code_task", text)
+        diagnostic_command = _code_task_diagnostic_command_hint(text)
+        inputs = (
+            {"code_diagnostic_command_hint": diagnostic_command}
+            if diagnostic_command
+            else {}
+        )
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "code_task", text),
             kind="code_task",
@@ -1501,7 +1507,12 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=min(0.88, 0.4 + score),
             description="Read, modify, or test code in the configured workspace.",
-            required_capabilities=["file.workspace_read"],
+            inputs=inputs,
+            expected_outputs=["test_output"] if diagnostic_command else [],
+            required_capabilities=[
+                "file.workspace_read",
+                *(["terminal.execution"] if diagnostic_command else []),
+            ],
             preferred_capabilities=["terminal.execution", "artifact.write"],
             risk_level="high" if _contains_any(text, ["改", "写", "fix", "change", "modify"]) else "medium",
         )
@@ -5036,25 +5047,57 @@ class RuntimePlanner:
                     reason="Run exactly the terminal command explicitly requested by the user.",
                 )
             ]
-        return [
-            _step(
-                intent,
-                "inspect-workspace",
-                "Inspect workspace",
-                "file.workspace_read",
-                _first_allowed(
-                    (
-                        "workspace.list",
-                        "fs.find_files",
-                        "file.search",
-                        "workspace.read",
-                        "fs.read_file",
-                        "file.read",
-                    ),
-                    allowed,
+        inspect_step = _step(
+            intent,
+            "inspect-workspace",
+            "Inspect workspace",
+            "file.workspace_read",
+            _first_allowed(
+                (
+                    "workspace.list",
+                    "fs.find_files",
+                    "file.search",
+                    "workspace.read",
+                    "fs.read_file",
+                    "file.read",
                 ),
-                reason="Understand the repo before editing or testing.",
+                allowed,
             ),
+            reason="Understand the repo before editing or testing.",
+        )
+        diagnostic_hint = intent.inputs.get("code_diagnostic_command_hint")
+        if isinstance(diagnostic_hint, Mapping) and str(diagnostic_hint.get("command") or "").strip():
+            run_step = _step(
+                intent,
+                "run-code-diagnostic",
+                "Run code diagnostic",
+                "terminal.execution",
+                _first_allowed(("terminal.run",), allowed),
+                input_preview={"command": str(diagnostic_hint.get("command") or "").strip()},
+                risk_level="high",
+                approval_required=True,
+                depends_on=["inspect-workspace"],
+                reason=(
+                    "Run the inferred test or diagnostic command after inspecting the workspace; "
+                    "terminal execution remains approval-gated."
+                ),
+            )
+            return [
+                inspect_step,
+                run_step,
+                _step(
+                    intent,
+                    "write-code-report",
+                    "Write result artifact",
+                    "artifact.write",
+                    _first_allowed(("artifact.write",), allowed),
+                    input_preview={"path": "code-task-summary.md"},
+                    depends_on=["run-code-diagnostic"],
+                    reason="Summarize diagnostic output, fixes, or findings for replay.",
+                ),
+            ]
+        return [
+            inspect_step,
             _step(
                 intent,
                 "write-code-report",
@@ -9427,6 +9470,56 @@ def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
             "生成表格",
         ],
     )
+
+
+def _code_task_diagnostic_command_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value:
+        return {}
+    if re.search(r"\b(?:npm|pnpm|yarn)\s+test\b", value, flags=re.IGNORECASE):
+        package_runner = re.search(
+            r"\b(?P<command>(?:npm|pnpm|yarn)\s+test(?:\s+[^\n。！？!?]*)?)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        command = "npm test"
+        if package_runner:
+            command = str(package_runner.group("command") or "").strip() or command
+        return {"command": command}
+    if re.search(r"\bpytest\b|pytest\s*失败|pytest\s*报错", value, flags=re.IGNORECASE):
+        return {"command": "python -m pytest"}
+    if _contains_any(
+        value,
+        (
+            "jest",
+            "vitest",
+            "javascript tests",
+            "typescript tests",
+            "js tests",
+            "ts tests",
+            "node tests",
+        ),
+    ):
+        return {"command": "npm test"}
+    if re.search(
+        r"(?:run|check|diagnose|fix|repair).{0,40}(?:failing\s+tests?|test\s+failures?|tests?)",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"(?:运行|执行|跑|检查|诊断|修复).{0,40}(?:failing\s+tests?|test\s+failures?|tests?)",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"(?:运行|执行|跑|检查|诊断|修复).{0,24}(?:测试|单测|失败测试|测试失败)",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"(?:测试|单测).{0,16}(?:失败|报错|不过|不通过)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return {"command": "python -m pytest"}
+    return {}
 
 
 def _score_terms(text: str, terms: Iterable[str]) -> float:

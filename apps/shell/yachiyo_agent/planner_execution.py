@@ -1309,6 +1309,17 @@ def _code_task_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str,
                     planning_reason="planner_fallback_terminal_command",
                 )
             ]
+    diagnostic_hint = inputs.get("code_diagnostic_command_hint")
+    if isinstance(diagnostic_hint, Mapping):
+        command = str(diagnostic_hint.get("command") or "").strip()
+        if command and "terminal.run" in allowed:
+            request = _request(
+                "terminal.run",
+                {"command": command},
+                planning_reason="planner_fallback_code_diagnostic",
+            )
+            request["continue_to_model"] = True
+            return [request]
     return _context_prefetch_tool_requests(
         decision,
         allowed,
