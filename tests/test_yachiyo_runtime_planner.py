@@ -2399,6 +2399,18 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
         "分析刚刚下载的 sales.csv 并生成报告",
         allowed_tools=["data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"],
     )
+    named_xlsx_decision = RuntimePlanner().decision(
+        "查找电脑上叫 budget 的 xlsx 并分析成报告",
+        allowed_tools=["data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+    named_scoped_csv_decision = RuntimePlanner().decision(
+        "找 Downloads 里叫 sales 的 csv 并分析成报告",
+        allowed_tools=["data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+    english_named_xlsx_decision = RuntimePlanner().decision(
+        "find the xlsx named budget on my computer and analyze it into a report",
+        allowed_tools=["data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
     desktop_scoped_decision = RuntimePlanner().decision(
         "分析桌面上的销售数据并输出报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
@@ -2450,6 +2462,38 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
         "Downloads/sales.csv",
         "csv",
     )
+    assert named_xlsx_decision.selected_intent.kind == "data_analysis"
+    assert named_xlsx_decision.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "xlsx",
+        "data_source_name_hint": "budget",
+    }
+    assert _step_by_id(named_xlsx_decision, "inspect-data-source").input_preview == {
+        "pattern": "*budget*.xlsx",
+        "file_type": "xlsx",
+    }
+    assert named_scoped_csv_decision.selected_intent.kind == "data_analysis"
+    assert named_scoped_csv_decision.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "csv",
+        "data_source_name_hint": "sales",
+        "data_source_scope_hint": "Downloads",
+    }
+    assert _step_by_id(named_scoped_csv_decision, "inspect-data-source").input_preview == {
+        "path": "Downloads",
+        "pattern": "*sales*.csv",
+        "file_type": "csv",
+    }
+    assert english_named_xlsx_decision.selected_intent.kind == "data_analysis"
+    assert english_named_xlsx_decision.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "xlsx",
+        "data_source_name_hint": "budget",
+    }
+    assert _step_by_id(english_named_xlsx_decision, "inspect-data-source").input_preview == {
+        "pattern": "*budget*.xlsx",
+        "file_type": "xlsx",
+    }
     assert desktop_scoped_decision.selected_intent.kind == "data_analysis"
     assert desktop_scoped_decision.selected_intent.inputs["data_source_scope_hint"] == "Desktop"
     assert "context_source" not in desktop_scoped_decision.selected_intent.inputs
@@ -18672,6 +18716,18 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
         "分析刚刚下载的 sales.csv 并生成报告",
         allowed_tools=["data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"],
     )
+    named_xlsx_requests = planner_tool_requests(
+        "查找电脑上叫 budget 的 xlsx 并分析成报告",
+        allowed_tools=["data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+    named_scoped_csv_requests = planner_tool_requests(
+        "找 Downloads 里叫 sales 的 csv 并分析成报告",
+        allowed_tools=["data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+    english_named_xlsx_requests = planner_tool_requests(
+        "find the xlsx named budget on my computer and analyze it into a report",
+        allowed_tools=["data.analyze", "workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
     generic_requests = planner_tool_requests(
         "分析数据并输出报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
@@ -18724,6 +18780,27 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
             "planning_reason": "planner_builtin_data_analysis",
         }
     ]
+    assert named_xlsx_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"pattern": "*budget*.xlsx", "file_type": "xlsx"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+    assert named_scoped_csv_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads", "pattern": "*sales*.csv", "file_type": "csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+    assert english_named_xlsx_requests == named_xlsx_requests
     assert xlsx_requests == [
         {
             "protocol": "json_fallback",

@@ -21,6 +21,38 @@ def data_source_hint(text: str, metadata: Mapping[str, Any] | None = None) -> st
     return match.group(1) if match else ""
 
 
+def named_data_source_hint(text: str) -> dict[str, str]:
+    value = str(text or "").strip()
+    if not value:
+        return {}
+    kind_pattern = r"csv|tsv|xlsx|xls|excel|jsonl|json|parquet|txt|md|markdown"
+    quoted_name = r"[\"'“”‘’「」『』]?(?P<name>[\w\u4e00-\u9fff ._-]{1,80}?)[\"'“”‘’「」『』]?"
+    patterns = (
+        rf"(?:叫做|叫|名为|名字叫)\s*{quoted_name}\s*(?:的)?\s*(?P<kind>{kind_pattern})\b",
+        rf"(?P<kind>{kind_pattern})\s*(?:文件|表格|数据|数据集|电子表格)?\s*"
+        rf"(?:叫做|叫|名为|名字叫)\s*{quoted_name}",
+        rf"\b(?P<kind>{kind_pattern})\s+"
+        rf"(?:file\s+|spreadsheet\s+|dataset\s+|data\s+)?(?:named|called)\s+"
+        rf"[\"']?(?P<name_en>[A-Za-z0-9_.-]{{1,80}})[\"']?",
+        rf"\b(?:file|spreadsheet|dataset|data)?\s*(?:named|called)\s+"
+        rf"[\"']?(?P<name_en_first>[A-Za-z0-9_.-]{{1,80}})[\"']?\s+"
+        rf"(?:with\s+)?(?:the\s+)?(?:extension\s+)?(?P<kind_en_first>{kind_pattern})\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        groups = match.groupdict()
+        raw_name = groups.get("name") or groups.get("name_en") or groups.get("name_en_first") or ""
+        kind = _normalize_data_source_kind(
+            groups.get("kind") or groups.get("kind_en_first") or ""
+        )
+        name = _clean_named_data_source_name(raw_name, kind)
+        if name and kind:
+            return {"name": name, "kind": kind}
+    return {}
+
+
 def data_source_scope_hint(text: str, metadata: Mapping[str, Any] | None = None) -> str:
     metadata = metadata or {}
     for key in ("data_source_scope", "folder", "directory", "location"):
@@ -145,6 +177,9 @@ def data_source_kind_hint(source_hint: str, text: str = "") -> str:
     scoped_format_kind = _scoped_data_source_kind_hint(lowered_text)
     if scoped_format_kind:
         return scoped_format_kind
+    named_source = named_data_source_hint(text)
+    if named_source.get("kind"):
+        return str(named_source["kind"])
     if any(
         marker in lowered_text
         for marker in ("价格表", "销售表", "数据表", "明细表", "报表", "price table", "pricing table")
@@ -156,6 +191,25 @@ def data_source_kind_hint(source_hint: str, text: str = "") -> str:
     ):
         return "text_table"
     return "unknown"
+
+
+def _normalize_data_source_kind(kind: str) -> str:
+    value = str(kind or "").strip().lower()
+    return {
+        "excel": "xlsx",
+        "markdown": "md",
+    }.get(value, value)
+
+
+def _clean_named_data_source_name(name: str, kind: str) -> str:
+    value = str(name or "").strip().strip("\"'“”‘’「」『』")
+    value = re.sub(r"[，,。；;:：!?！？]+$", "", value).strip()
+    if not value:
+        return ""
+    extension = f".{kind.lower()}"
+    if value.lower().endswith(extension):
+        value = value[: -len(extension)].rstrip(". ")
+    return value
 
 
 def _context_data_source_kind_hint(lowered_text: str) -> str:

@@ -36,6 +36,7 @@ from .data_analysis_plan_hints import (
     data_source_hint,
     data_source_kind_hint,
     data_source_scope_hint,
+    named_data_source_hint,
 )
 from .desktop_plan_hints import (
     app_management_hint,
@@ -170,6 +171,8 @@ class TaskIntentRouter:
         )
         source_hint = data_source_hint(text, metadata)
         source_scope = data_source_scope_hint(text, metadata)
+        named_source = named_data_source_hint(text)
+        source_name = str(named_source.get("name") or "").strip()
         context_source = _task_context_source_hint(text)
         current_page_context = _looks_like_current_page_data_context_source(text)
         visible_context = _looks_like_visible_data_context_source(text)
@@ -193,7 +196,13 @@ class TaskIntentRouter:
             text,
             ["数据", "数据集", "表格", "data", "dataset", "table", "csv", "xlsx", "json"],
         )
-        has_source = bool(source_hint or source_scope or context_source or app_search_result_source)
+        has_source = bool(
+            source_hint
+            or source_scope
+            or source_name
+            or context_source
+            or app_search_result_source
+        )
         if score <= 0 and has_source and _contains_any(text, ["分析", "统计", "汇总", "可视化"]):
             score = 0.16
         if (
@@ -232,6 +241,8 @@ class TaskIntentRouter:
         }
         if spreadsheet_app_hint:
             inputs["spreadsheet_app_hint"] = spreadsheet_app_hint
+        if source_name and not source_hint:
+            inputs["data_source_name_hint"] = source_name
         if context_source:
             inputs["context_source"] = context_source
         if app_search_result_source:
@@ -318,6 +329,8 @@ class TaskIntentRouter:
         if _direct_communication_candidate_hint(text):
             return _empty_intent("desktop_operation", text)
         if _known_web_destination_search_hint(text):
+            return _empty_intent("desktop_operation", text)
+        if named_data_source_hint(text) and _data_analysis_action_requested(text):
             return _empty_intent("desktop_operation", text)
         app_capability = _app_capability_discovery_hint(text)
         file_open_discovery = _app_file_open_discovery_hint(text, metadata)
@@ -2248,6 +2261,7 @@ class RuntimePlanner:
                 input_preview=_data_source_inspect_input_preview(
                     source_hint or source_scope,
                     source_kind,
+                    str(intent.inputs.get("data_source_name_hint") or ""),
                 ),
                 reason="Find and inspect the dataset before analysis.",
                 fallback_tools=["desktop.open_path", "browser.current_page"],
@@ -6593,16 +6607,41 @@ def _file_scope_input_preview(
     return preview
 
 
-def _data_source_inspect_input_preview(path: str, source_kind: str) -> dict[str, str]:
+def _data_source_inspect_input_preview(
+    path: str,
+    source_kind: str,
+    source_name: str = "",
+) -> dict[str, str]:
     preview: dict[str, str] = {}
     clean_path = str(path or "").strip()
+    clean_name = _clean_data_source_name_pattern(source_name)
     if clean_path:
         preview["path"] = clean_path
     pattern = _data_source_pattern_hint(source_kind)
+    if clean_name and pattern:
+        pattern = _named_data_source_pattern(clean_name, pattern)
+    elif clean_name:
+        pattern = f"*{clean_name}*"
     if pattern and not _looks_like_specific_data_source_path(clean_path):
         preview["pattern"] = pattern
-        preview["file_type"] = str(source_kind or "").strip()
+        if str(source_kind or "").strip() != "unknown":
+            preview["file_type"] = str(source_kind or "").strip()
     return preview
+
+
+def _clean_data_source_name_pattern(source_name: str) -> str:
+    value = str(source_name or "").strip()
+    if not value:
+        return ""
+    return re.sub(r"[*?\\[\\]{}]", "", value).strip()
+
+
+def _named_data_source_pattern(source_name: str, base_pattern: str) -> str:
+    if base_pattern.startswith("*."):
+        return f"*{source_name}*{base_pattern[1:]}"
+    if base_pattern.startswith("*.{") and base_pattern.endswith("}"):
+        return f"*{source_name}*{base_pattern[1:]}"
+    return base_pattern
 
 
 def _scoped_data_source_path(source_hint: str, source_scope: str) -> str:
