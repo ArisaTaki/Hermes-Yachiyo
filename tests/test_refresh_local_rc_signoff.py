@@ -26,7 +26,9 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
         commands.append((command, allow_failure))
         if "--report-json" in command:
             report_path = command[command.index("--report-json") + 1]
-            if report_path.endswith("-packaged-batch.json"):
+            if report_path.endswith("-source-capabilities.json"):
+                write_report(report_path, {"ok": True})
+            elif report_path.endswith("-packaged-batch.json"):
                 write_report(report_path, {"ok": True})
             elif report_path.endswith("-screen.json"):
                 write_report(report_path, {"ok": False})
@@ -75,11 +77,19 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
     )
 
     assert reports["batch_report"] == tmp_path / "tmp" / "rc-verification-abc12345-packaged-batch.json"
+    assert reports["source_capability_report"] == tmp_path / "tmp" / "rc-verification-abc12345-source-capabilities.json"
     assert reports["screen_report"] == tmp_path / "tmp" / "rc-verification-abc12345-screen.json"
     assert reports["signoff_draft"] == tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
     assert reports["signoff_markdown"] == tmp_path / "tmp" / "rc-signoff-abc12345-current.md"
     assert reports["signoff_preview"] == tmp_path / "tmp" / "rc-signoff-abc12345-preview.json"
     assert commands[0][0] == [
+        sys.executable,
+        "scripts/verify_release_candidate.py",
+        "--source-only",
+        "--report-json",
+        "tmp/rc-verification-abc12345-source-capabilities.json",
+    ]
+    assert commands[1][0] == [
         sys.executable,
         "scripts/verify_release_candidate.py",
         "--require-artifacts",
@@ -92,7 +102,7 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
         "--report-json",
         "tmp/rc-verification-abc12345-packaged-batch.json",
     ]
-    assert commands[1] == (
+    assert commands[2] == (
         [
             sys.executable,
             "scripts/verify_release_candidate.py",
@@ -103,8 +113,17 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
         ],
         True,
     )
-    assert "--mark-provider-smoke-not-applicable-if-missing" in commands[2][0]
-    assert commands[3] == (
+    assert "--mark-provider-smoke-not-applicable-if-missing" in commands[3][0]
+    assert commands[3][0][:7] == [
+        sys.executable,
+        "scripts/verify_release_candidate.py",
+        "--manual-checks-json",
+        "tmp/rc-verification-abc12345-source-capabilities.json",
+        "--manual-checks-json",
+        "tmp/rc-verification-abc12345-packaged-batch.json",
+        "--manual-checks-json",
+    ]
+    assert commands[4] == (
         [
             sys.executable,
             "scripts/verify_release_candidate.py",
@@ -115,7 +134,7 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
         ],
         False,
     )
-    assert commands[4][1] is True
+    assert commands[5][1] is True
 
 
 def test_refresh_local_rc_signoff_rejects_non_manual_preview_failure(
@@ -197,6 +216,7 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
             "dirty": False,
         }
     }
+    write_report("tmp/rc-verification-abc12345-source-capabilities.json", current_source)
     write_report("tmp/rc-verification-abc12345-packaged-batch.json", current_source)
     write_report("tmp/rc-verification-abc12345-screen.json", current_source)
 
@@ -204,6 +224,7 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
         commands.append((command, allow_failure))
         if "--report-json" in command:
             report_path = command[command.index("--report-json") + 1]
+            assert not report_path.endswith("-source-capabilities.json")
             assert not report_path.endswith("-packaged-batch.json")
             assert not report_path.endswith("-screen.json")
         if "--write-manual-checks-draft" in command:
@@ -247,9 +268,10 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
         sys.executable,
         "scripts/verify_release_candidate.py",
         "--manual-checks-json",
-        "tmp/rc-verification-abc12345-packaged-batch.json",
+        "tmp/rc-verification-abc12345-source-capabilities.json",
         "--manual-checks-json",
     ]
+    assert "tmp/rc-verification-abc12345-packaged-batch.json" in commands[0][0]
     assert commands[1][0] == [
         sys.executable,
         "scripts/verify_release_candidate.py",
@@ -279,6 +301,18 @@ def test_refresh_local_rc_signoff_does_not_reuse_failed_batch_report(
         report_path.parent.mkdir(parents=True, exist_ok=True)
         report_path.write_text(json.dumps(payload), encoding="utf-8")
 
+    write_report(
+        "tmp/rc-verification-abc12345-source-capabilities.json",
+        {
+            "ok": True,
+            "source_revision": {
+                "available": True,
+                "commit": "abc12345deadbeef",
+                "short_commit": "abc1234",
+                "dirty": False,
+            },
+        },
+    )
     write_report(
         "tmp/rc-verification-abc12345-packaged-batch.json",
         {
@@ -371,6 +405,7 @@ def test_refresh_local_rc_signoff_reruns_batch_for_provider_smoke(
             "dirty": False,
         }
     }
+    write_report("tmp/rc-verification-abc12345-source-capabilities.json", current_source)
     write_report("tmp/rc-verification-abc12345-packaged-batch.json", current_source)
 
     def fake_run(command: list[str], *, allow_failure: bool = False) -> int:
@@ -415,6 +450,68 @@ def test_refresh_local_rc_signoff_reruns_batch_for_provider_smoke(
     batch_command = commands[0][0]
     assert "tmp/rc-verification-abc12345-packaged-batch.json" in batch_command
     assert "--run-provider-smoke" in batch_command
+
+
+def test_refresh_local_rc_signoff_can_run_real_desktop_source_capability_smokes(
+    monkeypatch,
+    tmp_path,
+):
+    commands: list[tuple[list[str], bool]] = []
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+    monkeypatch.setattr(refresh, "build_release_candidate_artifacts", lambda **_: None)
+
+    def write_report(path: str, payload: dict[str, object]) -> None:
+        report_path = tmp_path / path
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(payload), encoding="utf-8")
+
+    def fake_run(command: list[str], *, allow_failure: bool = False) -> int:
+        commands.append((command, allow_failure))
+        if "--report-json" in command:
+            report_path = command[command.index("--report-json") + 1]
+            write_report(
+                report_path,
+                {
+                    "ok": False,
+                    "manual_release_candidate_check_summary": {
+                        "remaining_count": 2,
+                    },
+                    "source_revision_final_signoff_findings": [],
+                    "manual_release_candidate_check_source_revision_findings": [],
+                },
+            )
+            return 1 if report_path.endswith("-preview.json") else 0
+        if "--write-manual-checks-draft" in command:
+            write_report(
+                command[command.index("--write-manual-checks-draft") + 1],
+                {"manual_release_candidate_check_summary": {"remaining_count": 2}},
+            )
+        if "--write-manual-checks-markdown" in command:
+            markdown_path = tmp_path / command[
+                command.index("--write-manual-checks-markdown") + 1
+            ]
+            markdown_path.parent.mkdir(parents=True, exist_ok=True)
+            markdown_path.write_text("# Manual Signoff\n", encoding="utf-8")
+        return 0
+
+    monkeypatch.setattr(refresh, "_run", fake_run)
+
+    refresh.refresh_local_rc_signoff(
+        short_commit="abc12345",
+        skip_screen_smoke=True,
+        run_real_desktop_smokes=True,
+    )
+
+    source_command = commands[0][0]
+    assert source_command[:3] == [
+        sys.executable,
+        "scripts/verify_release_candidate.py",
+        "--source-only",
+    ]
+    assert "--run-real-desktop-app-open-smoke" in source_command
+    assert "--run-real-desktop-ui-inspection-smoke" in source_command
+    assert "--run-real-desktop-interaction-smoke" in source_command
+    assert "tmp/rc-verification-abc12345-source-capabilities.json" in source_command
 
 
 def test_refresh_local_rc_signoff_print_status_uses_current_draft(

@@ -350,6 +350,8 @@ def refresh_local_rc_signoff(
     channel: str = "experimental",
     repository: str | None = None,
     skip_build: bool = False,
+    skip_source_capability_smoke: bool = False,
+    run_real_desktop_smokes: bool = False,
     run_provider_smoke: bool = False,
     skip_screen_smoke: bool = False,
     reuse_current_reports: bool = False,
@@ -357,11 +359,20 @@ def refresh_local_rc_signoff(
     label = short_commit or _git_short_commit()
     tmp_dir = ROOT / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
+    source_capability_report = tmp_dir / f"rc-verification-{label}-source-capabilities.json"
     batch_report = tmp_dir / f"rc-verification-{label}-packaged-batch.json"
     screen_report = tmp_dir / f"rc-verification-{label}-screen.json"
     signoff_draft = tmp_dir / f"rc-signoff-{label}-current.json"
     signoff_markdown = tmp_dir / f"rc-signoff-{label}-current.md"
     signoff_preview = tmp_dir / f"rc-signoff-{label}-preview.json"
+    source_capability_report_is_current = (
+        reuse_current_reports
+        and not run_real_desktop_smokes
+        and _report_matches_current_source(
+            source_capability_report,
+            short_commit=label,
+        )
+    )
     batch_report_is_current = (
         reuse_current_reports
         and not run_provider_smoke
@@ -379,6 +390,24 @@ def refresh_local_rc_signoff(
     if not skip_build and not batch_report_is_current:
         build_release_candidate_artifacts(channel=channel, repository=repository)
         screen_report_is_current = False
+
+    if not skip_source_capability_smoke and not source_capability_report_is_current:
+        source_capability_command = [
+            sys.executable,
+            "scripts/verify_release_candidate.py",
+            "--source-only",
+            "--report-json",
+            str(source_capability_report.relative_to(ROOT)),
+        ]
+        if run_real_desktop_smokes:
+            source_capability_command.extend(
+                [
+                    "--run-real-desktop-app-open-smoke",
+                    "--run-real-desktop-ui-inspection-smoke",
+                    "--run-real-desktop-interaction-smoke",
+                ]
+            )
+        _run(source_capability_command)
 
     if not batch_report_is_current:
         batch_command = [
@@ -398,7 +427,10 @@ def refresh_local_rc_signoff(
             batch_command.append("--run-provider-smoke")
         _run(batch_command)
 
-    manual_sources = [batch_report]
+    manual_sources = []
+    if not skip_source_capability_smoke and source_capability_report.exists():
+        manual_sources.append(source_capability_report)
+    manual_sources.append(batch_report)
     if not skip_screen_smoke:
         if not screen_report_is_current:
             screen_command = [
@@ -450,6 +482,7 @@ def refresh_local_rc_signoff(
         raise subprocess.CalledProcessError(preview_code, preview_command)
 
     return {
+        "source_capability_report": source_capability_report,
         "batch_report": batch_report,
         "screen_report": screen_report,
         "signoff_draft": signoff_draft,
@@ -580,6 +613,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument("--repository", help="GitHub owner/repo for build metadata.")
     parser.add_argument("--skip-build", action="store_true")
+    parser.add_argument("--skip-source-capability-smoke", action="store_true")
+    parser.add_argument(
+        "--run-real-desktop-smokes",
+        action="store_true",
+        help=(
+            "Include opt-in real desktop app open, UI inspection, and interaction "
+            "smokes in the source capability report."
+        ),
+    )
     parser.add_argument("--skip-screen-smoke", action="store_true")
     parser.add_argument(
         "--print-status",
@@ -684,6 +726,8 @@ def main(argv: list[str] | None = None) -> int:
             channel=args.channel,
             repository=args.repository,
             skip_build=args.skip_build,
+            skip_source_capability_smoke=args.skip_source_capability_smoke,
+            run_real_desktop_smokes=args.run_real_desktop_smokes,
             run_provider_smoke=args.run_provider_smoke,
             skip_screen_smoke=args.skip_screen_smoke,
             reuse_current_reports=args.reuse_current_reports,
