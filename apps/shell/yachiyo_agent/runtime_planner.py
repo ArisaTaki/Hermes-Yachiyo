@@ -138,6 +138,8 @@ class TaskIntentRouter:
     ) -> TaskIntentSnapshot:
         if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
             return _empty_intent("data_analysis", text)
+        if _app_file_open_discovery_hint(text, metadata) and not _data_analysis_action_requested(text):
+            return _empty_intent("data_analysis", text)
         score = _score_terms(
             text,
             [
@@ -312,6 +314,7 @@ class TaskIntentRouter:
         if _known_web_destination_search_hint(text):
             return _empty_intent("desktop_operation", text)
         app_capability = _app_capability_discovery_hint(text)
+        file_open_discovery = _app_file_open_discovery_hint(text, metadata)
         app_search_app_hint = "" if app_capability else _app_name_hint(text)
         if (
             _explicit_system_settings_request(text)
@@ -968,6 +971,8 @@ class TaskIntentRouter:
             inputs["app_capability_hint"] = app_capability
         if selected_app_target_path:
             inputs["selected_app_target_path_hint"] = selected_app_target_path
+        if file_open_discovery:
+            inputs["file_open_discovery_hint"] = file_open_discovery
         finder_operation_mode = str(finder_special_location.get("mode") or "").strip()
         if finder_operation_mode:
             inputs["operation_mode_hint"] = finder_operation_mode
@@ -1605,6 +1610,8 @@ class TaskIntentRouter:
 
     def _file_access_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
+            return _empty_intent("file_access", text)
+        if _app_file_open_discovery_hint(text, metadata):
             return _empty_intent("file_access", text)
         if _explicit_browser_url_hint(text) or _browser_internal_page_hint(text):
             return _empty_intent("file_access", text)
@@ -2450,6 +2457,11 @@ class RuntimePlanner:
             and _contains_any(app_name, ("搜索", "查找", "检索", "search", "find", "look up"))
         ):
             app_name = direct_app_name
+        file_open_discovery = intent.inputs.get("file_open_discovery_hint")
+        if not isinstance(file_open_discovery, Mapping):
+            file_open_discovery = _app_file_open_discovery_hint(intent.user_goal, {})
+        if file_open_discovery and not app_name:
+            app_name = str(file_open_discovery.get("app_name") or "").strip()
         if control_presence_current_scope:
             app_name = ""
             app_management = None
@@ -2753,6 +2765,13 @@ class RuntimePlanner:
             allow_app_tools=not bool(focus_window),
         )
         operation_uses_app_tool = bool(operation_tool and operation_tool.startswith("app."))
+        if file_open_discovery and app_name:
+            return _file_open_with_app_discovery_steps(
+                intent,
+                allowed,
+                app_name=app_name,
+                file_hint=file_open_discovery,
+            )
         if foreground_search_submit:
             return [
                 _step(
@@ -5544,6 +5563,54 @@ def _step(
         fallback_tools=fallback_tools or [],
         status="planned" if tool_name else "unavailable",
     )
+
+
+def _file_open_with_app_discovery_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    *,
+    app_name: str,
+    file_hint: Mapping[str, Any],
+) -> list[ToolPlanStepSnapshot]:
+    file_list_preview = {
+        key: str(file_hint.get(key) or "").strip()
+        for key in ("path", "pattern", "file_type")
+        if str(file_hint.get(key) or "").strip()
+    }
+    selection = str(file_hint.get("selection") or "").strip()
+    open_preview = {
+        "app_name": app_name,
+        "target_path": "<selected file from workspace.list>",
+        "selection_source": "workspace.list",
+        "action": "open_path_with_app",
+    }
+    if selection:
+        open_preview["selection"] = selection
+    return [
+        _step(
+            intent,
+            "discover-file-open-target",
+            "Discover file open target",
+            "file.workspace_read",
+            _first_allowed(("workspace.list",), allowed),
+            input_preview=file_list_preview,
+            reason="List candidate files before opening a dynamic file target with the requested app.",
+        ),
+        _step(
+            intent,
+            "open-discovered-file-with-app",
+            "Open discovered file with app",
+            "file.desktop_access",
+            _first_allowed(("desktop.open_path_with_app", "app.open_path_with_app"), allowed),
+            input_preview=open_preview,
+            depends_on=["discover-file-open-target"],
+            action="open_path_with_app",
+            reason=(
+                "After workspace.list returns candidates, the model selects the matching "
+                "file path and opens it with the requested app."
+            ),
+        ),
+    ]
 
 
 def _spreadsheet_app_open_step(
@@ -11428,6 +11495,8 @@ def _app_name_hint(text: str) -> str:
         r"^(?!(?:can|could|would|please|pls|search|find|press|hit|tap|type|enter|click|send|submit)\b)"
         r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
         r"(?:open|launch|start|focus|activate)(?:\s+(?:please|pls))?[.!?]*$",
+        r"(?:^|[\s，,。])(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)"
+        r"(?:里|中|上|内)?\s*(?:打开|启动|开启|运行|查看|编辑)(?:\s+|(?=[^。！？!?，,]))",
         r"(?:open|launch|focus|start)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40})",
         r"(?:打开|启动|切到|聚焦)\s*(?P<app>[\w .·-]{1,40})",
         r"^(?!(?:在|用|通过|点击|点按))(?P<app>[\w .·-]{2,40}?)\s*点\s*[^。！？!?，,]+",
@@ -15275,10 +15344,24 @@ def _app_search_hint(text: str, app_name: str) -> dict[str, str]:
             return parsed
     if not query:
         return {}
-    return {
+    result = {
         "query": query,
         "target": "搜索" if _contains_any(text, ("搜索", "查找", "检索", "找")) else "Search",
     }
+    if app and _app_search_query_needs_app_scope(query, text):
+        result["app_name"] = app
+    return result
+
+
+def _app_search_query_needs_app_scope(query: str, text: str) -> bool:
+    value = _clean_prompt(query)
+    return bool(
+        _app_search_followup_hint(text).get("action") and re.search(
+            r"(?:剪贴板|粘贴板|选中|当前|clipboard|selected|current)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _looks_like_find_visible_target_action(text: str) -> bool:
@@ -17838,6 +17921,126 @@ def _app_capability_discovery_query(value: str) -> str:
     if _contains_any(description, ("文档", "文本", "文章", "document", "text", "writing", "write")):
         return "document"
     return description[:40].strip()
+
+
+def _app_file_open_discovery_hint(
+    text: str,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value or not _explicit_app_open_request(value):
+        return {}
+    app_name = _app_name_hint(value)
+    if not app_name or _is_generic_foreground_app_label(app_name):
+        return {}
+    if data_source_hint(value, metadata):
+        return {}
+    scope = data_source_scope_hint(value, metadata) or _file_open_location_hint(value)
+    file_type = data_source_kind_hint("", value) or _file_open_type_hint(value)
+    if file_type == "unknown":
+        file_type = _file_open_type_hint(value)
+    if not scope or not file_type:
+        return {}
+    if not _looks_like_dynamic_file_open_target(value):
+        return {}
+    pattern = _file_open_pattern(file_type)
+    hint = {
+        "app_name": app_name,
+        "path": scope,
+        "file_type": file_type,
+        "selection": _file_open_selection_hint(value),
+    }
+    if pattern:
+        hint["pattern"] = pattern
+    return {key: item for key, item in hint.items() if item}
+
+
+def _file_open_location_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    if re.search(r"(?:桌面|desktop)", value, flags=re.IGNORECASE):
+        return "Desktop"
+    if re.search(r"(?:下载|downloads?)", value, flags=re.IGNORECASE):
+        return "Downloads"
+    if re.search(r"(?:文档|documents?)", value, flags=re.IGNORECASE):
+        return "Documents"
+    if re.search(r"\b(?:home|主目录)\b", lowered, flags=re.IGNORECASE):
+        return "~"
+    return ""
+
+
+def _file_open_type_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    type_markers = (
+        ("csv", "csv"),
+        ("tsv", "tsv"),
+        ("xlsx", "xlsx"),
+        ("xls", "xls"),
+        ("pdf", "pdf"),
+        ("markdown", "markdown"),
+        ("md", "markdown"),
+        ("txt", "text"),
+        ("文本", "text"),
+        ("文档", "document"),
+        ("图片", "image"),
+        ("图像", "image"),
+        ("照片", "image"),
+        ("image", "image"),
+        ("photo", "image"),
+        ("picture", "image"),
+    )
+    for marker, file_type in type_markers:
+        if marker in lowered or marker in value:
+            return file_type
+    return ""
+
+
+def _file_open_pattern(file_type: str) -> str:
+    return {
+        "csv": "*.csv",
+        "tsv": "*.tsv",
+        "xlsx": "*.xlsx",
+        "xls": "*.xls",
+        "pdf": "*.pdf",
+        "markdown": "*.md",
+        "text": "*.txt",
+        "image": "*.{png,jpg,jpeg,heic,gif,webp}",
+    }.get(str(file_type or "").strip().lower(), "")
+
+
+def _file_open_selection_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if re.search(r"(?:最大|最大的|largest|biggest)", value, flags=re.IGNORECASE):
+        return "largest"
+    if re.search(
+        r"(?:最新|最近|最后|上一个|recent|latest|newest|last|most\s+recent)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "latest"
+    return ""
+
+
+def _looks_like_dynamic_file_open_target(text: str) -> bool:
+    value = _clean_prompt(text)
+    if _file_open_selection_hint(value):
+        return True
+    return bool(
+        re.search(
+            r"(?:里|里的|中|中的|内|内的|下|下面).{0,24}"
+            r"(?:文件|表格|电子表格|图片|图像|照片|pdf|csv|tsv|xlsx|xls|txt|md|markdown)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:in|from|under|inside)\s+(?:the\s+)?"
+            r"(?:downloads?|desktop|documents?|folder|directory)\b.{0,60}"
+            r"(?:file|image|photo|picture|pdf|csv|tsv|xlsx|xls|txt|md|markdown)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _selected_discovered_app_target_path_hint(text: str) -> str:

@@ -277,6 +277,9 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
     inputs = getattr(intent, "inputs", None)
     if not isinstance(inputs, Mapping):
         return {}
+    desktop_file_open_target = _desktop_file_open_followup_target(inputs)
+    if desktop_file_open_target:
+        return desktop_file_open_target
     desktop_discovered_app_target = _desktop_discovered_app_followup_target(inputs)
     if desktop_discovered_app_target:
         return desktop_discovered_app_target
@@ -319,6 +322,29 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
         if value:
             payload[target_key] = value
     return payload
+
+
+def _desktop_file_open_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:
+    file_hint = inputs.get("file_open_discovery_hint")
+    if not isinstance(file_hint, Mapping):
+        return {}
+    app_name = str(inputs.get("app_name_hint") or file_hint.get("app_name") or "").strip()
+    if not app_name:
+        return {}
+    file_query = {
+        str(key): str(file_hint.get(key) or "").strip()
+        for key in ("path", "pattern", "file_type", "selection")
+        if str(file_hint.get(key) or "").strip()
+    }
+    if not file_query:
+        return {}
+    return {
+        "kind": "desktop_file_open_with_app",
+        "app_name": app_name,
+        "target_action": "open_path_with_app",
+        "target_path_source": "workspace.list",
+        "file_query": file_query,
+    }
 
 
 def _desktop_discovered_app_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:

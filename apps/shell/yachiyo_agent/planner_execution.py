@@ -352,8 +352,11 @@ def _model_selected_desktop_step_ids(steps: list[Any]) -> set[str]:
             ]
             if (
                 step_id == "open-selected-discovered-app"
+                or step_id == "open-discovered-file-with-app"
                 or str(payload.get("app_name") or "").strip()
                 == "<selected app from desktop.list_apps>"
+                or str(payload.get("target_path") or "").strip()
+                == "<selected file from workspace.list>"
                 or any(item in selected_step_ids for item in depends_on)
             ):
                 selected_step_ids.add(step_id)
@@ -780,6 +783,8 @@ def _weak_desktop_discovery_plan(decision: Any, requests: list[dict[str, Any]]) 
 def _desktop_step_planning_reason(step: Any, tool_name: str) -> str:
     if str(getattr(step, "step_id", "") or "").strip() == "read-desktop-content":
         return "planner_prefetch_desktop_content"
+    if str(getattr(step, "step_id", "") or "").strip() == "discover-file-open-target":
+        return "planner_prefetch_file_open_target"
     input_preview = getattr(step, "input_preview", None)
     if "hotkey" in tool_name or (
         isinstance(input_preview, Mapping)
@@ -936,6 +941,8 @@ def _desktop_discovery_step_needs_model_followup(
     step_id: str,
     tool_name: str,
 ) -> bool:
+    if tool_name == "workspace.list" and step_id == "discover-file-open-target":
+        return True
     if tool_name != "desktop.list_apps":
         return False
     if step_id not in {"discover-desktop-state", "discover_apps-desktop-state"}:
