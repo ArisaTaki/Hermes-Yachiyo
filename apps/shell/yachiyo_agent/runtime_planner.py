@@ -135,6 +135,8 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
+            return _empty_intent("data_analysis", text)
         score = _score_terms(
             text,
             [
@@ -1361,6 +1363,8 @@ class TaskIntentRouter:
         )
 
     def _code_task_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
+            return _empty_intent("code_task", text)
         if _app_command_palette_hint(text):
             return _empty_intent("code_task", text)
         media_hint = media_playback_hint(text)
@@ -17044,6 +17048,11 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?:(?:an?|any|some|available)\s+)?"
         r"(?:app|application|tool|program)\s+"
         r"(?:that\s+can|to|for)\s+(?P<capability_en>[^.!?,]{1,60})",
+        r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
+        r"(?:一个|一款|任意|任何|可用)?\s*"
+        r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
+        r"图片|图像|照片|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|日历)"
+        r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|工具|程序)",
         r"\b(?:open|launch|start|find|use)\s+"
         r"(?:(?:an?|any|some|available)\s+)?"
         r"(?P<direct_capability_en>markdown|code|image|photo|document|text|spreadsheet|"

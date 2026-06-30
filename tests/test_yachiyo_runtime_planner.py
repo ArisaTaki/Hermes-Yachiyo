@@ -5871,6 +5871,63 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     ]
 
 
+def test_runtime_planner_discovers_chinese_generic_editor_apps_before_acting() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+        "data.analyze",
+        "workspace.read",
+        "terminal.run",
+        "artifact.write",
+    ]
+
+    cases = (
+        ("打开文本编辑器", "document", "文本"),
+        ("打开一个文本编辑器", "document", "文本"),
+        ("打开代码编辑器", "code", "代码"),
+        ("打开一个代码编辑器", "code", "代码"),
+        ("打开表格应用", "spreadsheet", "表格"),
+        ("打开电子表格软件", "spreadsheet", "电子表格"),
+        ("打开图片编辑器", "image", "图片"),
+        ("打开 PDF 编辑器", "pdf", "PDF"),
+    )
+
+    for prompt, query, description in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == ""
+        assert decision.selected_intent.inputs["operation_hint"] == "discover_apps"
+        assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+            "action": "discover_apps",
+            "query": query,
+        }
+        assert decision.selected_intent.inputs["app_capability_hint"] == {
+            "query": query,
+            "description": description,
+        }
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover_apps-desktop-state",
+            "open-selected-discovered-app",
+        ]
+        assert planner_tool_requests(prompt, allowed_tools) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": query, "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
+            }
+        ]
+
+    assert RuntimePlanner().decision(
+        "用 Excel 分析 data/sales.csv 并输出报告",
+        allowed_tools=allowed_tools,
+    ).selected_intent.kind == "data_analysis"
+
+
 def test_runtime_planner_discovers_generic_browser_before_acting() -> None:
     open_allowed = ["desktop.list_apps", "app.open", "desktop.active_window"]
     open_decision = RuntimePlanner().decision("打开默认浏览器", allowed_tools=open_allowed)

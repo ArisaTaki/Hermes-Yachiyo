@@ -620,6 +620,14 @@ terminal app from local evidence. Explicit command execution requests such as
 "打开终端运行 ls" and "run npm test in terminal" still use `terminal.run` with
 the existing approval path.
 
+Chinese generic editor and office-app labels now route through capability
+discovery as well. Prompts such as "打开代码编辑器", "打开文本编辑器",
+"打开表格应用", "打开电子表格软件", "打开图片编辑器", and "打开 PDF 编辑器"
+produce `desktop.list_apps` queries for code, document, spreadsheet, image, or
+PDF capabilities with `continue_to_model=true`. Explicit data-analysis requests
+such as "用 Excel 分析 data/sales.csv 并输出报告" keep the data-analysis path and
+only open the named spreadsheet app because the user asked for it.
+
 ## Phase 11 - Release Productization
 
 Turn the runtime migration into a product that can be installed and diagnosed
