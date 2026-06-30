@@ -1409,6 +1409,14 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release candidate verifier CLI must expose opt-in real desktop app open smoke",
     ),
     (
+        "--real-desktop-app-open-capability-query",
+        "release candidate verifier CLI must expose capability-query app open smoke",
+    ),
+    (
+        "--require-real-desktop-app-foreground-ready",
+        "release candidate verifier CLI must expose strict foreground app open smoke",
+    ),
+    (
         '"real_desktop_ui_inspection_smoke"',
         "release candidate verifier must archive opt-in real desktop UI inspection smoke evidence",
     ),

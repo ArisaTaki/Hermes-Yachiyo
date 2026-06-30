@@ -977,7 +977,7 @@ def test_release_candidate_verifier_reports_real_desktop_app_open_smoke_when_req
     monkeypatch.setattr(
         rc,
         "run_real_desktop_app_open_smoke",
-        lambda: {
+        lambda **_kwargs: {
             "ok": True,
             "mode": "real_desktop_app_open_smoke",
             "skipped": False,
@@ -1009,6 +1009,66 @@ def test_release_candidate_verifier_reports_real_desktop_app_open_smoke_when_req
     assert section["evidence"]["app_name"] == "Calculator"
 
 
+def test_release_candidate_verifier_passes_real_desktop_app_open_options(
+    tmp_path, monkeypatch, capsys
+):
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    def fake_real_desktop_app_open_smoke(**kwargs):
+        captured.update(kwargs)
+        return {
+            "ok": True,
+            "mode": "real_desktop_app_open_smoke",
+            "skipped": False,
+            "platform": "Darwin",
+            "app_name": "Calculator",
+            "discovery_query": "browser",
+            "selection_source": "capability_query",
+            "capability_query": "browser",
+            "opened_app_name": "Safari",
+            "matched_capability": "web_browser",
+            "foreground_readiness": {
+                "required": True,
+                "final": {"ready": True},
+            },
+            "checks": {
+                "selected_discovered_app": True,
+                "capability_match_recorded": True,
+                "foreground_ready_when_required": True,
+            },
+        }
+
+    monkeypatch.setattr(
+        rc,
+        "run_real_desktop_app_open_smoke",
+        fake_real_desktop_app_open_smoke,
+    )
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        run_real_desktop_app_open_smoke=True,
+        real_desktop_app_open_capability_query="browser",
+        require_real_desktop_app_foreground_ready=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "real desktop app open smoke: passed" in output
+    assert captured == {
+        "capability_query": "browser",
+        "require_foreground_ready": True,
+    }
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["real_desktop_app_open_smoke"]
+    assert section["status"] == "passed"
+    assert section["capability_query"] == "browser"
+    assert section["require_foreground_ready"] is True
+    assert section["evidence"]["opened_app_name"] == "Safari"
+    assert section["evidence"]["foreground_readiness"]["required"] is True
+
+
 def test_release_candidate_verifier_fails_when_real_desktop_app_open_smoke_fails(
     tmp_path, monkeypatch, capsys
 ):
@@ -1016,7 +1076,7 @@ def test_release_candidate_verifier_fails_when_real_desktop_app_open_smoke_fails
     monkeypatch.setattr(
         rc,
         "run_real_desktop_app_open_smoke",
-        lambda: {
+        lambda **_kwargs: {
             "ok": False,
             "mode": "real_desktop_app_open_smoke",
             "app_name": "Calculator",

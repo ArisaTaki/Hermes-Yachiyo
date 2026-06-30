@@ -2202,9 +2202,17 @@ def verify_real_desktop_discovery_smoke(root: Path) -> tuple[list[Finding], dict
     ], evidence
 
 
-def verify_real_desktop_app_open_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+def verify_real_desktop_app_open_smoke(
+    root: Path,
+    *,
+    capability_query: str = "",
+    require_foreground_ready: bool = False,
+) -> tuple[list[Finding], dict[str, Any]]:
     try:
-        raw_evidence = run_real_desktop_app_open_smoke()
+        raw_evidence = run_real_desktop_app_open_smoke(
+            capability_query=capability_query,
+            require_foreground_ready=require_foreground_ready,
+        )
     except Exception as exc:
         return [
             Finding(
@@ -4504,6 +4512,8 @@ def verify_release_candidate(
     run_provider_smoke: bool = False,
     run_ui_smoke: bool = False,
     run_real_desktop_app_open_smoke: bool = False,
+    real_desktop_app_open_capability_query: str = "",
+    require_real_desktop_app_foreground_ready: bool = False,
     run_real_desktop_interaction_smoke: bool = False,
     run_real_desktop_ui_inspection_smoke: bool = False,
     run_electron_native_bridge_smoke: bool = False,
@@ -4568,6 +4578,8 @@ def verify_release_candidate(
             "evidence": {},
             "findings": [],
             "run_requested": run_real_desktop_app_open_smoke,
+            "capability_query": real_desktop_app_open_capability_query,
+            "require_foreground_ready": require_real_desktop_app_foreground_ready,
         },
         "real_desktop_interaction_smoke": {
             "status": "pending",
@@ -4989,7 +5001,11 @@ def verify_release_candidate(
 
     if run_real_desktop_app_open_smoke:
         real_app_open_findings, real_app_open_evidence = (
-            verify_real_desktop_app_open_smoke(root)
+            verify_real_desktop_app_open_smoke(
+                root,
+                capability_query=real_desktop_app_open_capability_query,
+                require_foreground_ready=require_real_desktop_app_foreground_ready,
+            )
         )
         _print_findings("real desktop app open smoke", real_app_open_findings)
         failed = failed or bool(real_app_open_findings)
@@ -4998,6 +5014,8 @@ def verify_release_candidate(
             "evidence": real_app_open_evidence,
             "findings": _finding_report(real_app_open_findings),
             "run_requested": run_real_desktop_app_open_smoke,
+            "capability_query": real_desktop_app_open_capability_query,
+            "require_foreground_ready": require_real_desktop_app_foreground_ready,
         }
     else:
         print(
@@ -5009,6 +5027,8 @@ def verify_release_candidate(
             "evidence": {},
             "findings": [],
             "run_requested": run_real_desktop_app_open_smoke,
+            "capability_query": real_desktop_app_open_capability_query,
+            "require_foreground_ready": require_real_desktop_app_foreground_ready,
         }
 
     if run_real_desktop_ui_inspection_smoke:
@@ -5784,6 +5804,22 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Run opt-in real macOS desktop app discovery -> app.open -> app.status smoke.",
     )
     parser.add_argument(
+        "--real-desktop-app-open-capability-query",
+        default="",
+        help=(
+            "Optional capability query for --run-real-desktop-app-open-smoke, "
+            "such as browser or file manager."
+        ),
+    )
+    parser.add_argument(
+        "--require-real-desktop-app-foreground-ready",
+        action="store_true",
+        help=(
+            "When running the real desktop app open smoke, fail unless the opened app "
+            "is verified ready for foreground actions."
+        ),
+    )
+    parser.add_argument(
         "--run-real-desktop-interaction-smoke",
         action="store_true",
         help="Run opt-in real macOS desktop type -> inspect -> click -> verify smoke.",
@@ -5958,6 +5994,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_provider_smoke=args.run_provider_smoke,
         run_ui_smoke=args.run_ui_smoke,
         run_real_desktop_app_open_smoke=args.run_real_desktop_app_open_smoke,
+        real_desktop_app_open_capability_query=(
+            args.real_desktop_app_open_capability_query
+        ),
+        require_real_desktop_app_foreground_ready=(
+            args.require_real_desktop_app_foreground_ready
+        ),
         run_real_desktop_interaction_smoke=(
             args.run_real_desktop_interaction_smoke
         ),

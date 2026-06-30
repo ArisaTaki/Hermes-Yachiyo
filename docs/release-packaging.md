@@ -217,6 +217,20 @@ python scripts/verify_release_candidate.py --source-only --run-real-desktop-app-
 
 `--run-real-desktop-app-open-smoke` 会在 macOS 上通过 runtime dispatch 执行真实 `desktop.list_apps -> desktop.open_app -> desktop.verify -> app.status` 链路，默认目标是 Calculator；如果 Calculator 在 smoke 前未运行，脚本会在验证后尝试清理退出，如果它原本已经运行则不会退出用户的 app。该 gate 默认不运行，避免普通 source-only 或完整 RC gate 自动打开本机应用；它证明的是通用桌面 app 发现、打开和验证能力，不替代 `--run-dmg-app-smoke` 的发布包自身启动证据。
 
+需要证明更接近 Hanako / Hermes 的“按能力找应用，而不是只打开写死 app”时，可以给同一个 gate 加能力查询：
+
+```bash
+python scripts/verify_release_candidate.py --source-only --run-real-desktop-app-open-smoke --real-desktop-app-open-capability-query browser --report-json tmp/source-only-real-desktop-browser-open.json
+```
+
+需要继续证明打开后的应用已经达到前台可操作状态时，再加严格前台 ready 检查：
+
+```bash
+python scripts/verify_release_candidate.py --source-only --run-real-desktop-app-open-smoke --real-desktop-app-open-capability-query browser --require-real-desktop-app-foreground-ready --report-json tmp/source-only-real-desktop-browser-foreground.json
+```
+
+严格模式会在 `desktop.verify` 后追加 `desktop.inspect_app(focus=true)`，必要时尝试一次 `app.show` recovery 并复检；如果当前 macOS 会话被锁定、前台焦点无法验证、只能读到菜单层 UI 或没有可操作控件，RC report 会在 `foreground_readiness`、`blocking_condition(s)`、`recovery_hints` 和 `recovery_actions` 中保留根因，而不会把“进程已启动”误报成“可前台操作”。
+
 需要继续证明源码侧真实桌面 UI 读取链路时，显式运行 opt-in UI inspection smoke：
 
 ```bash
