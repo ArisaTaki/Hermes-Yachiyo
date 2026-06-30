@@ -601,6 +601,15 @@ and `route_to_studio`; Agent Studio renders this in the Planner Trace
 Inspector as a `Studio Handoff` section so Workflow and GroupRun routing stays
 visible during replay.
 
+Current Agent Studio service evidence now adds a unified planner orchestration
+start boundary. `StartPlannerOrchestrationRequest` plans the prompt, resolves a
+Workflow or Agent Group target through the Studio port, starts the matching
+`workflow_run` or `group_run` when possible, and returns a
+`PlannerOrchestrationStartSnapshot` containing the planner decision plus the
+started public run snapshot. Missing targets return a structured handoff
+instead of pretending execution happened, keeping the Hermes/Hanako-style
+"plan -> execute -> observe/replay" chain honest.
+
 ## Phase 10 - 删除旧硬编码与收敛代码
 
 After coverage proves the new chain works, delete no-longer-needed app aliases,

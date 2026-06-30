@@ -43,6 +43,7 @@ from apps.shell.yachiyo_agent import (
     MemorySnapshot,
     MemoryTraceSnapshot,
     PlannerDecisionSnapshot,
+    PlannerOrchestrationStartSnapshot,
     PlannerTraceSummarySnapshot,
     PublicRunEvent,
     RunEventPageSnapshot,
@@ -62,6 +63,7 @@ from apps.shell.yachiyo_agent import (
     SkillSourceRootSnapshot,
     SkillTraceSnapshot,
     StartChatTaskRequest,
+    StartPlannerOrchestrationRequest,
     TaskIntentSnapshot,
     TaskIntentKind,
     ToolCatalogItemSnapshot,
@@ -243,6 +245,92 @@ def test_planner_public_snapshots_explain_intent_capabilities_and_tool_plan() ->
     )
     assert payload["plan"]["tool_plan"]["steps"][1]["fallback_tools"] == ["terminal.run"]
     assert payload["plan"]["timeline_preview"] == [{"event_type": "agent.plan.created"}]
+
+
+def test_planner_orchestration_start_contract_links_decision_and_started_run() -> None:
+    intent = TaskIntentSnapshot(
+        intent_id="intent-workflow-1",
+        kind="workflow_orchestration",
+        title="Run workflow",
+        user_goal="运行 Review workflow",
+        inputs={"target_name_hint": "Review workflow"},
+        required_capabilities=["workflow.orchestration"],
+    )
+    tool_plan = ToolPlanSnapshot(
+        plan_id="tool-plan-workflow-1",
+        title="Workflow orchestration",
+        steps=[
+            ToolPlanStepSnapshot(
+                step_id="workflow-orchestration",
+                title="Start workflow",
+                capability_id="workflow.orchestration",
+                action="start_workflow",
+                tool_name="workflow.run",
+            )
+        ],
+    )
+    decision = PlannerDecisionSnapshot(
+        decision_id="decision-workflow-1",
+        prompt="运行 Review workflow",
+        selected_intent=intent,
+        plan=RuntimePlanSnapshot(
+            plan_id="runtime-plan-workflow-1",
+            intent=intent,
+            tool_plan=tool_plan,
+            route_to_studio=True,
+        ),
+    )
+    workflow_run = WorkflowRunSnapshot(
+        run_id="workflow-run-1",
+        workflow_run_id="workflow-run-1",
+        workflow_id="workflow-1",
+        status="running",
+        title="Review workflow",
+        objective="Build report",
+    )
+    snapshot = PlannerOrchestrationStartSnapshot(
+        kind="workflow",
+        status="started",
+        decision=decision,
+        target_id="workflow-1",
+        target_name="Review workflow",
+        objective="Build report",
+        title="Review workflow",
+        workflow_run=workflow_run,
+    )
+    request = StartPlannerOrchestrationRequest(
+        prompt="运行 Review workflow",
+        target_name="Review workflow",
+        allowed_tools=["workflow.run"],
+        metadata={"surface": "agent_studio"},
+    )
+
+    payload = _json(snapshot)
+
+    assert list(payload) == [
+        "kind",
+        "status",
+        "decision",
+        "target_id",
+        "target_name",
+        "objective",
+        "title",
+        "route_to_studio",
+        "message",
+        "workflow_run",
+        "group_run",
+    ]
+    assert payload["decision"]["selected_intent"]["kind"] == "workflow_orchestration"
+    assert payload["target_id"] == "workflow-1"
+    assert payload["route_to_studio"] is True
+    assert payload["workflow_run"]["workflow_id"] == "workflow-1"
+    assert payload["group_run"] is None
+    assert request.model_dump(exclude_none=True) == {
+        "prompt": "运行 Review workflow",
+        "target_name": "Review workflow",
+        "allowed_tools": ["workflow.run"],
+        "metadata": {"surface": "agent_studio"},
+    }
 
 
 def test_run_timeline_child_snapshot_projects_planner_summary_from_child_events() -> None:

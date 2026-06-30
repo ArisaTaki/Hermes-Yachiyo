@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from typing import Any
 
 from .adapters import agent_definition_snapshot_from_payload
@@ -20,6 +21,7 @@ from .contracts import (
     InstallRestrictedToolPluginRequest,
     MemorySnapshot,
     PlannerDecisionSnapshot,
+    PlannerOrchestrationStartSnapshot,
     PublicRunEvent,
     RerunRunRequest,
     RunEventPageSnapshot,
@@ -35,6 +37,7 @@ from .contracts import (
     SkillSourceRootSnapshot,
     StartAgentRunRequest,
     StartGroupRunRequest,
+    StartPlannerOrchestrationRequest,
     StartWorkflowRunRequest,
     ToolCatalogSnapshot,
     UpdateRestrictedToolPluginRequest,
@@ -141,6 +144,217 @@ class AgentStudioService:
             allowed_tools=tools or None,
             metadata=_planner_metadata_with_catalog_readiness(metadata, catalog),
         )
+
+    def start_planner_orchestration(
+        self,
+        request: StartPlannerOrchestrationRequest | Mapping[str, Any],
+    ) -> PlannerOrchestrationStartSnapshot:
+        payload = _request_payload(request)
+        prompt = str(payload.get("prompt") or payload.get("objective") or "").strip()
+        if not prompt:
+            raise AgentRuntimeError("Planner orchestration prompt is required")
+
+        metadata = (
+            dict(payload.get("metadata"))
+            if isinstance(payload.get("metadata"), Mapping)
+            else {}
+        )
+        decision = self.plan_task(
+            prompt,
+            allowed_tools=_string_list(
+                payload.get("allowed_tools"),
+                fallback=["workflow.run", "group.run", "agent.group_run"],
+            ),
+            metadata=metadata,
+        )
+        kind = _planner_orchestration_kind(decision)
+        objective = (
+            str(payload.get("objective") or decision.selected_intent.user_goal or prompt)
+            .strip()
+        )
+        title = (
+            str(payload.get("title") or decision.selected_intent.title or objective)
+            .strip()
+        )
+        target_name = (
+            str(
+                payload.get("target_name")
+                or _planner_intent_input(decision, "target_name_hint")
+                or ""
+            )
+            .strip()
+        )
+        client_run_id = str(payload.get("client_run_id") or "").strip()
+        if kind == "workflow":
+            target = self._planner_workflow_target(
+                target_id=str(
+                    payload.get("workflow_id")
+                    or payload.get("target_id")
+                    or ""
+                ).strip(),
+                target_name=target_name,
+            )
+            if target.target_id:
+                workflow_run = self.start_workflow_run(
+                    {
+                        "workflow_id": target.target_id,
+                        "objective": objective,
+                        "title": title or target.target_name or "Workflow run",
+                        "client_run_id": client_run_id or None,
+                        "metadata": _planner_orchestration_run_metadata(
+                            metadata,
+                            decision,
+                            kind="workflow",
+                            target_id=target.target_id,
+                            target_name=target.target_name,
+                        ),
+                    }
+                )
+                return PlannerOrchestrationStartSnapshot(
+                    kind="workflow",
+                    status="started",
+                    decision=decision,
+                    target_id=target.target_id,
+                    target_name=target.target_name,
+                    objective=objective,
+                    title=title,
+                    route_to_studio=bool(decision.plan.route_to_studio),
+                    message="Workflow run started from planner orchestration.",
+                    workflow_run=workflow_run,
+                )
+            return _planner_orchestration_handoff_snapshot(
+                decision,
+                kind="workflow",
+                status="target_not_found" if target_name else "handoff",
+                target_name=target_name or None,
+                objective=objective,
+                title=title,
+            )
+
+        if kind == "group_run":
+            target = self._planner_group_target(
+                target_id=str(
+                    payload.get("group_id")
+                    or payload.get("target_id")
+                    or ""
+                ).strip(),
+                target_name=target_name,
+            )
+            if target.target_id:
+                group_run = self.start_group_run(
+                    {
+                        "group_id": target.target_id,
+                        "objective": objective,
+                        "title": title or target.target_name or "Group run",
+                        "client_run_id": client_run_id or None,
+                        "metadata": _planner_orchestration_run_metadata(
+                            metadata,
+                            decision,
+                            kind="group_run",
+                            target_id=target.target_id,
+                            target_name=target.target_name,
+                        ),
+                    }
+                )
+                return PlannerOrchestrationStartSnapshot(
+                    kind="group_run",
+                    status="started",
+                    decision=decision,
+                    target_id=target.target_id,
+                    target_name=target.target_name,
+                    objective=objective,
+                    title=title,
+                    route_to_studio=bool(decision.plan.route_to_studio),
+                    message="GroupRun started from planner orchestration.",
+                    group_run=group_run,
+                )
+            return _planner_orchestration_handoff_snapshot(
+                decision,
+                kind="group_run",
+                status="target_not_found" if target_name else "handoff",
+                target_name=target_name or None,
+                objective=objective,
+                title=title,
+            )
+
+        return PlannerOrchestrationStartSnapshot(
+            kind=kind or "",
+            status="unsupported",
+            decision=decision,
+            objective=objective,
+            title=title,
+            route_to_studio=bool(decision.plan.route_to_studio),
+            message="Planner did not select Workflow or GroupRun orchestration.",
+        )
+
+    def _planner_workflow_target(
+        self,
+        *,
+        target_id: str,
+        target_name: str,
+    ) -> "_PlannerOrchestrationTarget":
+        if target_id:
+            return _PlannerOrchestrationTarget(
+                target_id=target_id,
+                target_name=target_name or target_id,
+            )
+        target_key = _planner_lookup_key(target_name)
+        if not target_key:
+            return _PlannerOrchestrationTarget()
+        try:
+            workflows = self.list_workflows()
+        except Exception:
+            return _PlannerOrchestrationTarget(target_name=target_name)
+        for workflow in workflows:
+            payload = workflow.model_dump(mode="json")
+            if _planner_target_matches(
+                payload,
+                target_key,
+                id_keys=("workflow_id", "id"),
+                name_keys=("name", "title", "nickname"),
+            ):
+                return _PlannerOrchestrationTarget(
+                    target_id=str(payload.get("workflow_id") or payload.get("id") or "").strip(),
+                    target_name=str(payload.get("name") or target_name).strip(),
+                )
+        return _PlannerOrchestrationTarget(target_name=target_name)
+
+    def _planner_group_target(
+        self,
+        *,
+        target_id: str,
+        target_name: str,
+    ) -> "_PlannerOrchestrationTarget":
+        if target_id:
+            return _PlannerOrchestrationTarget(
+                target_id=target_id,
+                target_name=target_name or target_id,
+            )
+        target_key = _planner_lookup_key(target_name)
+        if not target_key:
+            return _PlannerOrchestrationTarget()
+        try:
+            groups = self.list_groups()
+        except Exception:
+            return _PlannerOrchestrationTarget(target_name=target_name)
+        for group in groups:
+            payload = group.model_dump(mode="json")
+            if _planner_target_matches(
+                payload,
+                target_key,
+                id_keys=("group_id", "agent_group_id", "id"),
+                name_keys=("name", "title", "nickname"),
+            ):
+                return _PlannerOrchestrationTarget(
+                    target_id=str(
+                        payload.get("group_id")
+                        or payload.get("agent_group_id")
+                        or payload.get("id")
+                        or ""
+                    ).strip(),
+                    target_name=str(payload.get("name") or target_name).strip(),
+                )
+        return _PlannerOrchestrationTarget(target_name=target_name)
 
     def list_restricted_tool_plugins(self) -> list[RestrictedToolPluginSnapshot]:
         list_plugins = getattr(self._studio_port, "list_restricted_tool_plugins", None)
@@ -593,6 +807,111 @@ class AgentStudioService:
             has_more=len(filtered_events) > clean_limit,
             events=page,
         )
+
+
+@dataclass(frozen=True)
+class _PlannerOrchestrationTarget:
+    target_id: str = ""
+    target_name: str = ""
+
+
+def _string_list(value: Any, *, fallback: list[str]) -> list[str]:
+    if isinstance(value, Iterable) and not isinstance(value, (str, bytes, Mapping)):
+        values = [str(item or "").strip() for item in value if str(item or "").strip()]
+        if values:
+            return values
+    return list(fallback)
+
+
+def _planner_orchestration_kind(decision: PlannerDecisionSnapshot) -> str:
+    intent_kind = str(decision.selected_intent.kind or "").strip()
+    if intent_kind == "workflow_orchestration":
+        return "workflow"
+    if intent_kind == "multi_agent":
+        return "group_run"
+    return ""
+
+
+def _planner_intent_input(decision: PlannerDecisionSnapshot, key: str) -> str:
+    inputs = decision.selected_intent.inputs
+    if not isinstance(inputs, Mapping):
+        return ""
+    return str(inputs.get(key) or "").strip()
+
+
+def _planner_orchestration_run_metadata(
+    metadata: Mapping[str, Any],
+    decision: PlannerDecisionSnapshot,
+    *,
+    kind: str,
+    target_id: str,
+    target_name: str,
+) -> dict[str, Any]:
+    payload = dict(metadata)
+    payload.setdefault("source", "agent_studio_planner_orchestration")
+    payload.update(
+        {
+            "planner_orchestration": True,
+            "planner_orchestration_kind": kind,
+            "planner_orchestration_target_id": target_id,
+            "planner_orchestration_target": target_name,
+            "decision_id": decision.decision_id,
+            "plan_id": decision.plan.plan_id,
+            "intent_kind": str(decision.selected_intent.kind or ""),
+            "route_to_studio": bool(decision.plan.route_to_studio),
+        }
+    )
+    return payload
+
+
+def _planner_orchestration_handoff_snapshot(
+    decision: PlannerDecisionSnapshot,
+    *,
+    kind: str,
+    status: str,
+    target_name: str | None,
+    objective: str,
+    title: str,
+) -> PlannerOrchestrationStartSnapshot:
+    if kind == "workflow":
+        message = (
+            f"Workflow target not found: {target_name}"
+            if target_name
+            else "Planner selected Workflow orchestration but no Workflow target was provided."
+        )
+    else:
+        message = (
+            f"Group target not found: {target_name}"
+            if target_name
+            else "Planner selected GroupRun orchestration but no Agent Group target was provided."
+        )
+    return PlannerOrchestrationStartSnapshot(
+        kind=kind,
+        status=status,
+        decision=decision,
+        target_name=target_name,
+        objective=objective,
+        title=title,
+        route_to_studio=bool(decision.plan.route_to_studio),
+        message=message,
+    )
+
+
+def _planner_lookup_key(value: Any) -> str:
+    return " ".join(str(value or "").strip().casefold().split())
+
+
+def _planner_target_matches(
+    payload: Mapping[str, Any],
+    target_key: str,
+    *,
+    id_keys: tuple[str, ...],
+    name_keys: tuple[str, ...],
+) -> bool:
+    return any(
+        _planner_lookup_key(payload.get(key)) == target_key
+        for key in (*id_keys, *name_keys)
+    )
 
 
 def _request_payload(request: Any) -> dict[str, Any]:

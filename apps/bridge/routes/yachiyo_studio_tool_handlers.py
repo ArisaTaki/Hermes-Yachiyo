@@ -11,6 +11,7 @@ from apps.bridge.routes.yachiyo_models import (
     PlanTaskBody,
     RestrictedToolPluginInstallBody,
     RestrictedToolPluginUpdateBody,
+    StartPlannerOrchestrationBody,
 )
 from apps.bridge.routes.yachiyo_services import snapshot, studio_service
 from apps.bridge.routes.yachiyo_services import bad_request
@@ -33,6 +34,17 @@ async def plan_task(
         metadata=request.metadata,
     )
     return snapshot(decision)
+
+
+async def start_planner_orchestration(
+    request: StartPlannerOrchestrationBody,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    result = await asyncio.to_thread(
+        studio_service(http_request).start_planner_orchestration,
+        request,
+    )
+    return snapshot(result)
 
 
 async def list_restricted_tool_plugins(http_request: Request | None = None) -> dict[str, Any]:

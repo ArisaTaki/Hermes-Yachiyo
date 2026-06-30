@@ -23,6 +23,7 @@ from apps.bridge.routes.yachiyo_models import (
     SkillUpdateBody,
     StartAgentRunBody,
     StartGroupRunBody,
+    StartPlannerOrchestrationBody,
     StartWorkflowRunBody,
     TaskApprovalRequest,
 )
@@ -200,6 +201,14 @@ async def plan_studio_task(
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     return await yachiyo_studio_handlers.plan_task(request, http_request)
+
+
+@router.post("/studio/planner/orchestration/start")
+async def start_studio_planner_orchestration(
+    request: StartPlannerOrchestrationBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.start_planner_orchestration(request, http_request)
 
 
 @router.get("/studio/tools/restricted-plugins")

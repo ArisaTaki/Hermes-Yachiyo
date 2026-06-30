@@ -21,7 +21,13 @@ from apps.core.state import AppState
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.chat_api import ChatAPI
 from apps.shell.credential_store import MemoryCredentialStore
-from apps.shell.yachiyo_agent import AgentTaskSnapshot, RunTimelineSnapshot, legacy_ports
+from apps.shell.yachiyo_agent import (
+    AgentTaskSnapshot,
+    PlannerOrchestrationStartSnapshot,
+    RunTimelineSnapshot,
+    WorkflowRunSnapshot,
+    legacy_ports,
+)
 from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 from packages.protocol.enums import TaskStatus
 
@@ -6926,6 +6932,76 @@ async def test_yachiyo_studio_planner_route_returns_public_decision(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_studio_planner_orchestration_route_starts_public_run(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PlannerOrchestrationService:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def start_planner_orchestration(self, request):
+            payload = request.model_dump(exclude_none=True)
+            self.calls.append(payload)
+            decision = RuntimePlanner().decision(
+                payload["prompt"],
+                allowed_tools=payload.get("allowed_tools") or ["workflow.run"],
+                metadata=payload.get("metadata"),
+            )
+            return PlannerOrchestrationStartSnapshot(
+                kind="workflow",
+                status="started",
+                decision=decision,
+                target_id="workflow-1",
+                target_name=payload.get("target_name"),
+                objective=payload.get("objective") or payload["prompt"],
+                title=payload.get("title") or "Workflow run",
+                workflow_run=WorkflowRunSnapshot(
+                    run_id="workflow-run-1",
+                    workflow_run_id="workflow-run-1",
+                    workflow_id="workflow-1",
+                    status="running",
+                    objective=payload.get("objective") or payload["prompt"],
+                ),
+            )
+
+    service = PlannerOrchestrationService()
+    monkeypatch.setattr(
+        yachiyo_studio_tool_handlers,
+        "studio_service",
+        lambda _request=None: service,
+    )
+
+    response = await yachiyo.start_studio_planner_orchestration(
+        yachiyo.StartPlannerOrchestrationBody(
+            prompt="运行 Review workflow",
+            target_name="Review workflow",
+            objective="Build report",
+            title="Run Review workflow",
+            allowed_tools=["workflow.run"],
+            client_run_id="studio-planner-1",
+            metadata={"surface": "studio"},
+        ),
+        None,
+    )
+
+    assert response["kind"] == "workflow"
+    assert response["status"] == "started"
+    assert response["decision"]["selected_intent"]["kind"] == "workflow_orchestration"
+    assert response["workflow_run"]["workflow_id"] == "workflow-1"
+    assert service.calls == [
+        {
+            "prompt": "运行 Review workflow",
+            "allowed_tools": ["workflow.run"],
+            "metadata": {"surface": "studio"},
+            "objective": "Build report",
+            "title": "Run Review workflow",
+            "target_name": "Review workflow",
+            "client_run_id": "studio-planner-1",
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes(tmp_path: Path) -> None:
     runtime = _FakeAgentRuntime()
     runtime.agent_workspaces_dir = tmp_path / "agent-workspaces"
@@ -7869,6 +7945,7 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     assert "trigger_agent_desk_file_event(" in source
     assert "return await yachiyo_studio_handlers.list_tool_catalog(http_request)" in source
     assert "return await yachiyo_studio_handlers.plan_task(request, http_request)" in source
+    assert "return await yachiyo_studio_handlers.start_planner_orchestration(request, http_request)" in source
     assert "return await yachiyo_studio_handlers.list_restricted_tool_plugins(http_request)" in source
     assert "install_restricted_tool_plugin(" in source
     assert "update_restricted_tool_plugin(" in source

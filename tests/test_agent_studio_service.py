@@ -17,6 +17,7 @@ from apps.shell.yachiyo_agent import (
     SaveWorkflowRequest,
     StartAgentRunRequest,
     StartGroupRunRequest,
+    StartPlannerOrchestrationRequest,
     StartWorkflowRunRequest,
 )
 from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
@@ -849,6 +850,119 @@ def test_agent_studio_service_prefers_port_planner_when_available() -> None:
             },
         )
     ]
+
+
+def test_agent_studio_service_starts_workflow_from_planner_orchestration() -> None:
+    port = _FakeStudioPort()
+    service = AgentStudioService(port)
+
+    started = service.start_planner_orchestration(
+        StartPlannerOrchestrationRequest(
+            prompt="运行 Review workflow",
+            target_name="Review workflow",
+            objective="Build report",
+            title="Run Review workflow",
+            client_run_id="studio-planner-workflow-1",
+            metadata={"surface": "agent_studio"},
+        )
+    )
+
+    assert started.kind == "workflow"
+    assert started.status == "started"
+    assert started.target_id == "workflow-1"
+    assert started.target_name == "Review workflow"
+    assert started.decision.selected_intent.kind == "workflow_orchestration"
+    assert started.workflow_run is not None
+    assert started.workflow_run.workflow_run_id == "workflow-run-1"
+    assert started.group_run is None
+    assert (
+        "start_workflow_run",
+        {
+            "workflow_id": "workflow-1",
+            "objective": "Build report",
+            "title": "Run Review workflow",
+            "client_run_id": "studio-planner-workflow-1",
+            "metadata": {
+                "surface": "agent_studio",
+                "source": "agent_studio_planner_orchestration",
+                "planner_orchestration": True,
+                "planner_orchestration_kind": "workflow",
+                "planner_orchestration_target_id": "workflow-1",
+                "planner_orchestration_target": "Review workflow",
+                "decision_id": started.decision.decision_id,
+                "plan_id": started.decision.plan.plan_id,
+                "intent_kind": "workflow_orchestration",
+                "route_to_studio": True,
+            },
+        },
+    ) in port.calls
+
+
+def test_agent_studio_service_starts_group_run_from_planner_orchestration() -> None:
+    port = _FakeStudioPort()
+    service = AgentStudioService(port)
+
+    started = service.start_planner_orchestration(
+        {
+            "prompt": "运行 Research Team group 调研 Hanako",
+            "target_name": "Research Team",
+            "objective": "调研 Hanako",
+            "title": "Research Team GroupRun",
+            "client_run_id": "studio-planner-group-1",
+            "metadata": {"surface": "agent_studio"},
+        }
+    )
+
+    assert started.kind == "group_run"
+    assert started.status == "started"
+    assert started.target_id == "group-1"
+    assert started.target_name == "Research Team"
+    assert started.decision.selected_intent.kind == "multi_agent"
+    assert started.group_run is not None
+    assert started.group_run.group_run_id == "group-run-1"
+    assert started.workflow_run is None
+    assert (
+        "start_group_run",
+        {
+            "group_id": "group-1",
+            "objective": "调研 Hanako",
+            "title": "Research Team GroupRun",
+            "client_run_id": "studio-planner-group-1",
+            "metadata": {
+                "surface": "agent_studio",
+                "source": "agent_studio_planner_orchestration",
+                "planner_orchestration": True,
+                "planner_orchestration_kind": "group_run",
+                "planner_orchestration_target_id": "group-1",
+                "planner_orchestration_target": "Research Team",
+                "decision_id": started.decision.decision_id,
+                "plan_id": started.decision.plan.plan_id,
+                "intent_kind": "multi_agent",
+                "route_to_studio": True,
+            },
+        },
+    ) in port.calls
+
+
+def test_agent_studio_service_returns_structured_handoff_when_planner_target_missing() -> None:
+    port = _FakeStudioPort()
+    service = AgentStudioService(port)
+
+    handoff = service.start_planner_orchestration(
+        {
+            "prompt": "运行 Missing workflow",
+            "target_name": "Missing workflow",
+        }
+    )
+
+    assert handoff.kind == "workflow"
+    assert handoff.status == "target_not_found"
+    assert handoff.target_name == "Missing workflow"
+    assert handoff.decision.selected_intent.kind == "workflow_orchestration"
+    assert handoff.workflow_run is None
+    assert handoff.group_run is None
+    assert "Workflow target not found" in handoff.message
+    assert not any(call[0] == "start_workflow_run" for call in port.calls)
 
 
 def test_agent_studio_service_redacts_sensitive_public_memory_and_future_task_text() -> None:

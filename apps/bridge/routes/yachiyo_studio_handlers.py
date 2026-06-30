@@ -65,6 +65,7 @@ from apps.bridge.routes.yachiyo_studio_tool_handlers import (
     list_restricted_tool_plugins,
     list_tool_catalog,
     plan_task,
+    start_planner_orchestration,
     uninstall_restricted_tool_plugin,
     update_restricted_tool_plugin,
 )
@@ -123,6 +124,7 @@ __all__ = [
     "save_group",
     "save_workflow",
     "start_group_run",
+    "start_planner_orchestration",
     "start_workflow_run",
     "sync_native_skills",
     "test_agent_model",

@@ -765,6 +765,20 @@ class WorkflowRunSnapshot(RunTimelineSnapshot):
     final_answer: str | None = None
 
 
+class PlannerOrchestrationStartSnapshot(_PublicSnapshot):
+    kind: Literal["workflow", "group_run"] | str
+    status: Literal["started", "handoff", "unsupported", "target_not_found"] | str
+    decision: PlannerDecisionSnapshot
+    target_id: str | None = None
+    target_name: str | None = None
+    objective: str = ""
+    title: str = ""
+    route_to_studio: bool = True
+    message: str = ""
+    workflow_run: WorkflowRunSnapshot | None = None
+    group_run: GroupRunSnapshot | None = None
+
+
 class StartChatTaskRequest(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -895,6 +909,19 @@ class StartWorkflowRunRequest(BaseModel):
     objective: str
     title: str | None = None
     client_run_id: str | None = None
+
+
+class StartPlannerOrchestrationRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    prompt: str
+    objective: str | None = None
+    title: str | None = None
+    target_id: str | None = None
+    target_name: str | None = None
+    allowed_tools: list[str] | None = None
+    client_run_id: str | None = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
 
 
 class RerunRunRequest(BaseModel):

@@ -696,6 +696,20 @@ export type WorkflowRunSnapshot = RunTimelineSnapshot & {
   final_answer?: string | null;
 };
 
+export type PlannerOrchestrationStartSnapshot = {
+  kind: 'workflow' | 'group_run' | string;
+  status: 'started' | 'handoff' | 'unsupported' | 'target_not_found' | string;
+  decision: PlannerDecisionSnapshot;
+  target_id?: string | null;
+  target_name?: string | null;
+  objective?: string;
+  title?: string;
+  route_to_studio?: boolean;
+  message?: string;
+  workflow_run?: WorkflowRunSnapshot | null;
+  group_run?: GroupRunSnapshot | null;
+};
+
 export type FutureTaskTriggerResultSnapshot = {
   ok?: boolean;
   future_task?: FutureTaskSnapshot | null;
@@ -709,5 +723,16 @@ export type StartChatTaskRequest = {
   title?: string | null;
   agent_id?: string | null;
   workflow_id?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export type StartPlannerOrchestrationRequest = {
+  prompt: string;
+  objective?: string | null;
+  title?: string | null;
+  target_id?: string | null;
+  target_name?: string | null;
+  allowed_tools?: string[] | null;
+  client_run_id?: string | null;
   metadata?: Record<string, unknown>;
 };

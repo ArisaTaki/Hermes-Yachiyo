@@ -75,6 +75,14 @@ class PlanTaskBody(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class StartPlannerOrchestrationBody(PlanTaskBody):
+    objective: str | None = Field(default=None, max_length=60000)
+    title: str | None = Field(default=None, max_length=1000)
+    target_id: str | None = Field(default=None, max_length=160)
+    target_name: str | None = Field(default=None, max_length=1000)
+    client_run_id: str | None = Field(default=None, max_length=160)
+
+
 class MemoryBody(BaseModel):
     content: str | None = Field(default=None, max_length=60000)
     old_content: str | None = Field(default=None, max_length=60000)

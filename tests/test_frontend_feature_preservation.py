@@ -2350,6 +2350,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "/yachiyo/studio/skills/install",
             "/yachiyo/studio/skill-folders",
             "/yachiyo/studio/planner",
+            "/yachiyo/studio/planner/orchestration/start",
             "/yachiyo/studio/tools",
             "/yachiyo/studio/tools/restricted-plugins",
             "/yachiyo/studio/memories",
@@ -2415,9 +2416,12 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "WorkflowRunSnapshot",
             "ArtifactContentSnapshot",
             "PlannerDecisionSnapshot",
+            "PlannerOrchestrationStartSnapshot",
             "deleteYachiyoWorkflow",
             "YachiyoStudioPlanTaskRequest",
+            "YachiyoStudioStartPlannerOrchestrationRequest",
             "planYachiyoStudioTask",
+            "startYachiyoStudioPlannerOrchestration",
             "function createClientRunId()",
         ],
     )
@@ -2430,6 +2434,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "ToolPlanSnapshot",
             "RuntimePlanSnapshot",
             "PlannerDecisionSnapshot",
+            "PlannerOrchestrationStartSnapshot",
+            "StartPlannerOrchestrationRequest",
         ],
     )
     _assert_function_contains(
@@ -2438,6 +2444,15 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         [
             "Promise<PlannerDecisionSnapshot>",
             "apiPost<PlannerDecisionSnapshot>('/yachiyo/studio/planner', request)",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        "startYachiyoStudioPlannerOrchestration",
+        [
+            "Promise<PlannerOrchestrationStartSnapshot>",
+            "apiPost<PlannerOrchestrationStartSnapshot>(",
+            "'/yachiyo/studio/planner/orchestration/start'",
         ],
     )
     _assert_function_contains(
