@@ -71,7 +71,12 @@ def test_runtime_run_rerun_service_reruns_agent_and_records_replay_event() -> No
     result = service.rerun("run-original")
 
     assert created_requests == [
-        {"agent_id": "agent-1", "user_goal": "Summarize notes", "source": "rerun"}
+        {
+            "agent_id": "agent-1",
+            "user_goal": "Summarize notes",
+            "source": "rerun",
+            "runtime_planner_entrypoint": True,
+        }
     ]
     assert appended_events == [
         (

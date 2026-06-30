@@ -293,6 +293,7 @@ def test_runnable_run_coordinator_validates_delegation_kind_and_goal() -> None:
                 "agent_id": "agent-1",
                 "user_goal": "Ship it",
                 "source": "delegation",
+                "runtime_planner_entrypoint": True,
             },
         )
     ]

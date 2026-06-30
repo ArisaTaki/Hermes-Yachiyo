@@ -55,6 +55,7 @@ class RuntimeRunRerunService:
                     "agent_id": runnable_id,
                     "user_goal": user_goal,
                     "source": "rerun",
+                    "runtime_planner_entrypoint": True,
                 }
             )
             rerun_key = "agent_run_id"

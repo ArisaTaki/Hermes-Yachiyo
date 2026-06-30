@@ -320,7 +320,12 @@ class RuntimeRunnableRunCoordinator:
         if requested_kind and requested_kind not in {runnable["kind"], f"{runnable['kind']}_run"}:
             raise self._error_type("委派类型与目标不匹配")
         if runnable["kind"] == "agent":
-            run = self._create_agent_run({"agent_id": runnable["id"], "user_goal": goal, "source": "delegation"})
+            run = self._create_agent_run({
+                "agent_id": runnable["id"],
+                "user_goal": goal,
+                "source": "delegation",
+                "runtime_planner_entrypoint": True,
+            })
         else:
             run = self._create_workflow_run({"workflow_id": runnable["id"], "user_goal": goal, "source": "delegation"})
         return {
