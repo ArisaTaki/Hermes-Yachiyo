@@ -689,7 +689,10 @@ JSON files, single-smoke JSON files, and diagnostics bundle manifests into a
 9-item release-smoke checklist: packaged launch, Chat desktop task, approval
 card, Agent Studio run timeline, GroupRun, Workflow, public demo, artifact
 readback, and diagnostics export. It does not run heavy native/provider/UI
-flows; it reports missing evidence and the next commands to run.
+flows; it reports missing evidence and the next commands to run. For partial
+or blocked public-demo reports it now carries through `release_level`,
+`missing_required_flow_ids`, and demo blocker details so the release checklist
+can show exactly which Hanako/Hermes-level demo evidence is still missing.
 `scripts/refresh_local_rc_signoff.py` now generates the
 redacted diagnostics bundle, release-smoke summary, and public-demo smoke
 summary during each local RC refresh, and `--print-status` prints capability

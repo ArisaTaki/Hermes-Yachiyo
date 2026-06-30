@@ -107,6 +107,11 @@ python scripts/summarize_release_smoke.py \
   --output-markdown "tmp/rc-verification-${SHORT_COMMIT}-release-smoke.md"
 ```
 
+When the public demo report is partial or blocked, release-smoke keeps the
+`public_demo` item incomplete and carries through the demo `release_level`,
+missing flow IDs, and blocker details so release notes do not have to infer
+what evidence is still absent.
+
 ## Local Release Gates
 
 Run these before calling a local build release-ready:

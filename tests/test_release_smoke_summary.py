@@ -73,9 +73,14 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
             {
                 "ok": True,
                 "status": "passed",
+                "release_level": "full_public_demo_ready",
                 "complete": True,
                 "selected_count": 13,
                 "passed_count": 13,
+                "required_flow_count": 13,
+                "passed_required_flow_count": 13,
+                "missing_required_flow_ids": [],
+                "release_blockers": [],
                 "flows": [{"id": "real_desktop_app_open", "status": "passed"}],
             }
         ),
@@ -130,9 +135,22 @@ def test_release_smoke_summary_requires_complete_public_demo(tmp_path, monkeypat
             {
                 "ok": True,
                 "status": "partial",
+                "release_level": "partial_demo_ready",
                 "complete": False,
                 "selected_count": 7,
                 "passed_count": 7,
+                "required_flow_count": 13,
+                "passed_required_flow_count": 7,
+                "missing_required_flow_ids": ["real_desktop_app_open"],
+                "release_blockers": [
+                    {
+                        "id": "real_desktop_app_open",
+                        "status": "skipped",
+                        "opt_in_flag": "--include-real-desktop-open",
+                        "reason": "opens a real macOS application",
+                    }
+                ],
+                "full_demo_command": "python scripts/run_public_demo_smokes.py --full-test-command",
                 "flows": [{"id": "real_desktop_discovery", "status": "passed"}],
             }
         ),
@@ -145,6 +163,53 @@ def test_release_smoke_summary_requires_complete_public_demo(tmp_path, monkeypat
     assert public_demo["status"] == "missing"
     assert public_demo["present_evidence_ids"] == []
     assert public_demo["missing_evidence_ids"] == ["public_demo_complete"]
+    assert public_demo["related_evidence_ids"] == [
+        "public_demo_assessment",
+        "public_demo_selected",
+    ]
+    assessment = public_demo["related_evidence"]["public_demo_assessment"][0]
+    assert assessment["release_level"] == "partial_demo_ready"
+    assert assessment["missing_required_flow_ids"] == ["real_desktop_app_open"]
+    assert assessment["release_blockers"][0]["opt_in_flag"] == "--include-real-desktop-open"
+    action = next(item for item in summary["next_actions"] if item["id"] == "public_demo")
+    assert action["command"] == "python scripts/run_public_demo_smokes.py --full-test-command"
+    assert action["release_level"] == "partial_demo_ready"
+    assert action["missing_required_flow_ids"] == ["real_desktop_app_open"]
+
+
+def test_release_smoke_summary_rejects_inconsistent_public_demo_level(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    public_demo_path = tmp_path / "tmp" / "public-demo.json"
+    public_demo_path.parent.mkdir(parents=True, exist_ok=True)
+    public_demo_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "status": "passed",
+                "release_level": "partial_demo_ready",
+                "complete": True,
+                "selected_count": 13,
+                "passed_count": 13,
+                "required_flow_count": 13,
+                "passed_required_flow_count": 13,
+                "missing_required_flow_ids": [],
+                "release_blockers": [],
+                "flows": [{"id": "workflow_ui", "status": "passed"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke([public_demo_path])
+
+    public_demo = next(item for item in summary["items"] if item["id"] == "public_demo")
+    assert public_demo["status"] == "missing"
+    assessment = public_demo["related_evidence"]["public_demo_assessment"][0]
+    assert assessment["complete"] is True
+    assert assessment["release_level"] == "partial_demo_ready"
 
 
 def test_release_smoke_summary_accepts_raw_smoke_mode_reports(tmp_path, monkeypatch):
@@ -191,3 +256,35 @@ def test_release_smoke_cli_writes_json_and_markdown(tmp_path, monkeypatch, capsy
     markdown = output_markdown.read_text(encoding="utf-8")
     assert "# Oha-Yachiyo Release Smoke Summary" in markdown
     assert "`diagnostics_export`" in markdown
+
+
+def test_release_smoke_markdown_shows_public_demo_blockers(tmp_path, monkeypatch):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    public_demo_path = tmp_path / "tmp" / "public-demo.json"
+    public_demo_path.parent.mkdir(parents=True, exist_ok=True)
+    public_demo_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "status": "partial",
+                "release_level": "partial_demo_ready",
+                "complete": False,
+                "selected_count": 7,
+                "passed_count": 7,
+                "required_flow_count": 13,
+                "passed_required_flow_count": 7,
+                "missing_required_flow_ids": ["workflow_provider"],
+                "release_blockers": [
+                    {"id": "workflow_provider", "status": "skipped"}
+                ],
+                "flows": [{"id": "workflow_run", "status": "passed"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke([public_demo_path])
+    markdown = release_smoke.render_markdown(summary)
+
+    assert "Public demo level: `partial_demo_ready`" in markdown
+    assert "Missing demo flows: `workflow_provider`" in markdown

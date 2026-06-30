@@ -98,6 +98,7 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
         "id": "public_demo",
         "label": "Public demo evidence covers release-facing flows",
         "required": ("public_demo_complete",),
+        "related": ("public_demo_assessment", "public_demo_selected"),
         "next_action": (
             "python scripts/run_public_demo_smokes.py "
             "--include-real-desktop --include-provider-workflow --include-ui "
@@ -179,11 +180,31 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         missing = _string_list(item.get("missing_evidence_ids"))
         if missing:
             lines.append(f"  Missing evidence: {', '.join(f'`{value}`' for value in missing)}")
+        demo_details = _public_demo_item_details(item)
+        if demo_details:
+            release_level = str(demo_details.get("release_level") or "")
+            if release_level:
+                lines.append(f"  Public demo level: `{release_level}`")
+            missing_flows = _string_list(demo_details.get("missing_required_flow_ids"))
+            if missing_flows:
+                lines.append(
+                    "  Missing demo flows: "
+                    + ", ".join(f"`{value}`" for value in missing_flows)
+                )
     actions = _dict_list(summary.get("next_actions"))
     if actions:
         lines.extend(["", "## Next Actions", ""])
         for action in actions:
             lines.append(f"- `{action.get('id')}`")
+            release_level = str(action.get("release_level") or "")
+            if release_level:
+                lines.append(f"  Release level: `{release_level}`")
+            missing_flows = _string_list(action.get("missing_required_flow_ids"))
+            if missing_flows:
+                lines.append(
+                    "  Missing demo flows: "
+                    + ", ".join(f"`{value}`" for value in missing_flows)
+                )
             command = str(action.get("command") or "").strip()
             if command:
                 lines.extend(["", "```bash", command, "```", ""])
@@ -262,8 +283,10 @@ def _item_status(
     evidence: Mapping[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
     required = tuple(str(value) for value in item.get("required", ()))
+    related = tuple(str(value) for value in item.get("related", ()))
     present = [value for value in required if value in evidence]
     missing = [value for value in required if value not in evidence]
+    related_present = [value for value in related if value in evidence]
     return {
         "id": str(item["id"]),
         "label": str(item["label"]),
@@ -271,28 +294,45 @@ def _item_status(
         "required_evidence_ids": list(required),
         "present_evidence_ids": present,
         "missing_evidence_ids": missing,
+        "related_evidence_ids": related_present,
         "evidence": {
             evidence_id: evidence[evidence_id]
             for evidence_id in present
+        },
+        "related_evidence": {
+            evidence_id: evidence[evidence_id]
+            for evidence_id in related_present
         },
         "next_action": str(item.get("next_action") or ""),
     }
 
 
-def _next_actions(missing_items: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
-    actions: list[dict[str, str]] = []
+def _next_actions(missing_items: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
     seen_commands: set[str] = set()
     for item in missing_items:
         command = str(item.get("next_action") or "").strip()
         if not command or command in seen_commands:
             continue
         seen_commands.add(command)
-        actions.append(
-            {
-                "id": str(item.get("id") or "next_action"),
-                "command": command,
-            }
-        )
+        action: dict[str, Any] = {
+            "id": str(item.get("id") or "next_action"),
+            "command": command,
+        }
+        if item.get("id") == "public_demo":
+            demo_details = _public_demo_item_details(item)
+            if demo_details:
+                action.update(
+                    {
+                        key: value
+                        for key, value in demo_details.items()
+                        if key in {"release_level", "missing_required_flow_ids", "release_blockers"}
+                    }
+                )
+                full_demo_command = str(demo_details.get("full_demo_command") or "").strip()
+                if full_demo_command:
+                    action["command"] = full_demo_command
+        actions.append(action)
     return actions
 
 
@@ -335,26 +375,63 @@ def _collect_public_demo_evidence(
         return
     if "selected_count" not in report or "complete" not in report:
         return
+    assessment = _public_demo_assessment(report)
+    _add_evidence(
+        evidence,
+        "public_demo_assessment",
+        source=source,
+        kind="public_demo_assessment",
+        **assessment,
+    )
     if report.get("ok") is True:
         _add_evidence(
             evidence,
             "public_demo_selected",
             source=source,
             kind="public_demo",
-            status=str(report.get("status") or ""),
-            selected_count=int(report.get("selected_count") or 0),
-            passed_count=int(report.get("passed_count") or 0),
+            **assessment,
         )
-    if report.get("ok") is True and report.get("complete") is True:
+    if _public_demo_is_complete(report):
         _add_evidence(
             evidence,
             "public_demo_complete",
             source=source,
             kind="public_demo",
-            status=str(report.get("status") or ""),
-            selected_count=int(report.get("selected_count") or 0),
-            passed_count=int(report.get("passed_count") or 0),
+            **assessment,
         )
+
+
+def _public_demo_is_complete(report: Mapping[str, Any]) -> bool:
+    if report.get("ok") is not True or report.get("complete") is not True:
+        return False
+    release_level = str(report.get("release_level") or "").strip()
+    return not release_level or release_level == "full_public_demo_ready"
+
+
+def _public_demo_assessment(report: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "status": str(report.get("status") or ""),
+        "release_level": str(report.get("release_level") or ""),
+        "complete": bool(report.get("complete") is True),
+        "selected_count": int(report.get("selected_count") or 0),
+        "passed_count": int(report.get("passed_count") or 0),
+        "required_flow_count": int(report.get("required_flow_count") or 0),
+        "passed_required_flow_count": int(report.get("passed_required_flow_count") or 0),
+        "missing_required_flow_ids": _string_list(report.get("missing_required_flow_ids")),
+        "release_blockers": _dict_list(report.get("release_blockers")),
+        "full_demo_command": str(report.get("full_demo_command") or ""),
+    }
+
+
+def _public_demo_item_details(item: Mapping[str, Any]) -> dict[str, Any]:
+    related = item.get("related_evidence")
+    if not isinstance(related, dict):
+        return {}
+    for evidence_id in ("public_demo_assessment", "public_demo_selected"):
+        entries = related.get(evidence_id)
+        if isinstance(entries, list) and entries and isinstance(entries[0], dict):
+            return dict(entries[0])
+    return {}
 
 
 def _add_evidence(
