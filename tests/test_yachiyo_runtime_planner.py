@@ -6468,6 +6468,10 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "打开一个能写代码的应用，新建文件 hello.py",
         allowed_tools=allowed_tools,
     )
+    suitable_code = RuntimePlanner().decision(
+        "打开一个适合写代码的应用并新建 Python 文件",
+        allowed_tools=allowed_tools,
+    )
     image = RuntimePlanner().decision(
         "打开一个能编辑图片的应用，新建一张 1024x1024 图片",
         allowed_tools=allowed_tools,
@@ -6477,6 +6481,21 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     assert code.selected_intent.inputs["app_capability_hint"]["query"] == "code"
     assert _step_by_id(code, "discover_apps-desktop-state").input_preview["query"] == "code"
     assert _step_by_id(code, "open-selected-discovered-app").input_preview["query"] == "code"
+    assert suitable_code.selected_intent.kind == "desktop_operation"
+    assert suitable_code.selected_intent.inputs["app_capability_hint"] == {
+        "query": "code",
+        "description": "代码",
+    }
+    assert _step_by_id(suitable_code, "discover_apps-desktop-state").input_preview == {
+        "query": "code",
+        "limit": 20,
+    }
+    assert _step_by_id(suitable_code, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "code",
+        "action": "new_document",
+    }
     assert image.selected_intent.inputs["app_name_hint"] == ""
     assert image.selected_intent.inputs["app_capability_hint"]["query"] == "image"
     assert _step_by_id(image, "discover_apps-desktop-state").input_preview["query"] == "image"
@@ -9849,6 +9868,34 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         punctuated_current_search,
         "type-app-search-query",
     ).input_preview == {"text": "budget"}
+    search_field_verbed_current_search = RuntimePlanner().decision(
+        "在当前应用里找到搜索框，搜索 Q2 budget，然后打开第一个结果",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    assert search_field_verbed_current_search.selected_intent.kind == "desktop_operation"
+    assert search_field_verbed_current_search.selected_intent.inputs["app_search_hint"] == {
+        "query": "Q2 budget",
+        "target": "搜索",
+        "scope": "foreground",
+    }
+    assert [step.step_id for step in search_field_verbed_current_search.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "select-app-search-result",
+    ]
+    assert _step_by_id(
+        search_field_verbed_current_search,
+        "type-app-search-query",
+    ).input_preview == {"text": "Q2 budget"}
 
     english_current_search = RuntimePlanner().decision(
         "in current app search for OpenAI",
@@ -12696,6 +12743,7 @@ def test_runtime_planner_routes_generic_music_app_query_to_search_play_plan() ->
     for prompt in (
         "打开任意音乐 app，搜索 lo-fi beats，然后播放第一个结果",
         "找一个音乐 app 搜索 lo-fi beats 并播放第一个结果",
+        "帮我在任意可用播放器里播放 city pop",
     ):
         decision = RuntimePlanner().decision(
             prompt,
@@ -12713,7 +12761,7 @@ def test_runtime_planner_routes_generic_music_app_query_to_search_play_plan() ->
         assert decision.selected_intent.inputs == {
             "action": "play",
             "app_name": "Music",
-            "query": "lo-fi beats",
+            "query": "city pop" if "city pop" in prompt else "lo-fi beats",
             "control_only": "",
         }
         assert [step.step_id for step in decision.plan.tool_plan.steps] == [
@@ -12725,7 +12773,7 @@ def test_runtime_planner_routes_generic_music_app_query_to_search_play_plan() ->
             "verify-media-search",
         ]
         assert _step_by_id(decision, "type-media-search-query").input_preview == {
-            "text": "lo-fi beats",
+            "text": "city pop" if "city pop" in prompt else "lo-fi beats",
         }
         assert _step_by_id(decision, "play-media-search-result").input_preview == {
             "app_name": "Music",

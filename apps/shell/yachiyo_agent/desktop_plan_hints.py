@@ -1082,7 +1082,7 @@ def _generic_music_app_scope_requested(text: str) -> bool:
     return bool(
         re.search(
             r"(?:任意|任何|默认|一个|个|some|any)?\s*"
-            r"(?:音乐\s*(?:应用|app|软件|播放器)?|music\s+app|music\s+player)",
+            r"(?:音乐\s*(?:应用|app|软件|播放器)?|播放器|music\s+app|music\s+player)",
             value,
             flags=re.IGNORECASE,
         )
@@ -1123,15 +1123,21 @@ def media_query_hint(text: str) -> str:
         r"(?:\s*(?:第?一首|第?一个(?:结果|条目)?|第一条|首个))?",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|启动|找一个|找个|用|在|通过)?\s*"
-        r"(?:任意|任何|默认|一个|个)?\s*(?:音乐\s*(?:应用|app|软件|播放器)?|music\s+app|music\s+player)"
+        r"(?:任意|任何|默认|一个|个|可用)?\s*(?:音乐\s*(?:应用|app|软件|播放器)?|播放器|music\s+app|music\s+player)"
         r"(?:里|中|上|内|里面)?\s*(?:[，,]\s*)?"
-        r"(?:搜索|搜一下|搜|查找|找|检索)(?:一下|下)?\s*"
+        r"(?:播放|播|放|play)(?:一下|下|一首|首|个|点)?\s*"
+        r"(?P<query_generic_music_play>[^。！？!?，,]+)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|找一个|找个|用|在|通过)?\s*"
+        r"(?:任意|任何|默认|一个|个|可用)?\s*(?:音乐\s*(?:应用|app|软件|播放器)?|播放器|music\s+app|music\s+player)"
+        r"(?:里|中|上|内|里面)?\s*(?:[，,]\s*)?"
+        r"(?:搜索|搜一下|搜|查找|找|检索|播放|播|放)(?:一下|下)?\s*"
         r"(?P<query_generic_music_search>[^。！？!?，,]+?)\s*"
         r"(?:[，,]\s*)?(?:(?:并|然后|再|接着|之后)\s*)?(?:播放|播|放|play)(?:一下|下)?"
         r"(?:\s*(?:第?一首|第?一个(?:结果|条目)?|第一条|首个|first\s+(?:result|song|track)|it))?",
         r"(?:搜索|搜一下|搜|查找|找|检索)(?:一下|下)?\s*(?P<query_zh_search>[^。！？!?，,]+?)"
         r"(?:[，,]\s*)?(?:并|然后|再)?(?:播放|播|放)(?:一下)?",
-        r"(?P<query_zh_suffix>[^。！？!?，,]+?)(?:播放|播|放)(?:一下)?$",
+        r"(?P<query_zh_suffix>[^。！？!?，,]+?)(?:播放(?!器)|播(?!放?器)|放)(?:一下)?$",
         r"(?:想听|听听|听一首|听首|听点|来点)\s*(?P<query_listen>[^。！？!?，,]+)",
         r"(?:播放|播|放)(?:一下|一首|首|个|点)?\s*(?P<query>[^。！？!?，,]+)",
         r"(?:play|start playing)\s+(?P<query_en>[^.!?,]+)",
@@ -1150,6 +1156,7 @@ def media_query_hint(text: str) -> str:
             or groups.get("query_open_search")
             or groups.get("query_en_scoped_app")
             or groups.get("query_zh_scoped_search")
+            or groups.get("query_generic_music_play")
             or groups.get("query_generic_music_search")
             or groups.get("query_zh_search")
             or groups.get("query_zh_suffix")
@@ -1189,9 +1196,9 @@ def _clean_media_query(value: str) -> str:
     query = re.sub(r"^(?:in|on|with|using)\s+", "", query, flags=re.IGNORECASE)
     query = re.sub(
         r"^(?:打开|启动|找一个|找个|用|在|通过)?\s*"
-        r"(?:任意|任何|默认|一个|个)?\s*(?:音乐\s*(?:应用|app|软件|播放器)?|music\s+app|music\s+player)"
+        r"(?:任意|任何|默认|一个|个|可用)?\s*(?:音乐\s*(?:应用|app|软件|播放器)?|播放器|music\s+app|music\s+player)"
         r"(?:里|中|上|内|里面)?\s*(?:[，,]\s*)?"
-        r"(?:搜索|搜一下|搜|查找|找|检索)(?:一下|下)?\s*",
+        r"(?:搜索|搜一下|搜|查找|找|检索|播放|播|放)(?:一下|下)?\s*",
         "",
         query,
         flags=re.IGNORECASE,

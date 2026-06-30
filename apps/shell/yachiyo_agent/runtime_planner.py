@@ -464,6 +464,13 @@ class TaskIntentRouter:
                 create_container_action = _generic_create_container_action_hint(text)
                 if create_container_action:
                     safe_shortcut = {"action": create_container_action}
+            if (
+                safe_shortcut
+                and _looks_like_app_scoped_create_followup(text)
+                and not _app_scoped_create_text_hint(text)
+                and not _generic_create_title_text_hint(text)
+            ):
+                foreground_compose_text = ""
         if control_presence_inspection:
             desktop_discovery = None
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
@@ -12756,7 +12763,7 @@ def _generic_create_container_action_hint(text: str) -> str:
         r"(?:新建|创建|新增)\s*(?:一个|一份|一篇|一条|一张|一幅)?\s*"
         r"(?:\d{2,5}\s*(?:x|×|X|\*)\s*\d{2,5}\s*)?"
         r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
-        r"(?:页面|文档|文件(?!夹)|图片|图像|画布|表格|工作簿|演示|演示文稿|幻灯片|项目|任务|卡片)",
+        r"(?:页面|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|图片|图像|画布|表格|工作簿|演示|演示文稿|幻灯片|项目|任务|卡片)",
         value,
         flags=re.IGNORECASE,
     ) or re.search(
@@ -12811,7 +12818,7 @@ def _looks_like_app_scoped_create_followup(text: str) -> bool:
             r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份|一则)?\s*"
             r"(?:今天的|今日的|新的|新|关于.+?的)?\s*"
             r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
-            r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件(?!夹)|演示|演示文稿|幻灯片|项目|任务|卡片)",
+            r"(?:页面|页|笔记|备忘录|日志|日记|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|演示|演示文稿|幻灯片|项目|任务|卡片)",
             value,
             flags=re.IGNORECASE,
         )
@@ -15819,7 +15826,7 @@ def _foreground_app_search_hint(text: str) -> dict[str, str]:
         r"(?:里|中|上|内)?\s*(?:找到|找|定位|聚焦|点击|点按|选择|选中)?(?:一下|下)?\s*"
         r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏|"
         r"search\s+field|search\s+box|search\s+input|search\s+bar)[\s，,：:]*"
-        r"(?:输入|键入|填写|填入|写入|写|type|enter|fill)\s*"
+        r"(?:输入|键入|填写|填入|写入|写|搜索|查找|检索|type|enter|fill|search|find)\s*"
         r"(?P<field_query>.+?)(?:\s*(?:并|然后|再|后|之后|and|then)?\s*"
         r"(?:搜索|查找|检索|提交|确认|回车|search|submit|confirm|press\s+enter|hit\s+enter))?$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?\s*"
@@ -18403,10 +18410,10 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
     patterns = (
         r"(?:打开|启动|找|找一个|找一款|使用|在|用|通过)\s*"
         r"(?:一个|一款|任意|任何|可用)?\s*"
-        r"(?:能|可以|可用于|用来|用于)\s*(?P<capability>[^。！？!?，,]{1,40}?)"
+        r"(?:能|可以|适合|适用于|可用于|用来|用于)\s*(?P<capability>[^。！？!?，,]{1,40}?)"
         r"(?:的)?(?:应用(?:程序)?|app|软件|工具|程序)",
         r"(?:有没有|有无|是否有|装了|安装了|有没有安装).{0,12}"
-        r"(?:能|可以|可用于|用来|用于)\s*(?P<installed_capability>[^。！？!?，,]{1,40}?)"
+        r"(?:能|可以|适合|适用于|可用于|用来|用于)\s*(?P<installed_capability>[^。！？!?，,]{1,40}?)"
         r"(?:的)?(?:应用(?:程序)?|app|软件|工具|程序)",
         r"\b(?:open|launch|start|find|use)\s+"
         r"(?:(?:an?|any|some|available)\s+)?"
