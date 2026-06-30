@@ -89,6 +89,7 @@ def desktop_runtime_blocking_conditions_by_capability(
             return _copy_missing(cached)
 
     blocking: dict[str, list[str]] = {}
+    screen_capture_result = _check_screen_capture_permission()
     if _macos_desktop_session_locked():
         for capability_id in (
             "desktop_execution",
@@ -107,6 +108,15 @@ def desktop_runtime_blocking_conditions_by_capability(
                 "foreground_activation",
                 "foreground_focus_unavailable",
             )
+    if _screen_capture_blank(screen_capture_result):
+        for capability_id in (
+            "desktop_execution",
+            "screen_capture",
+            "active_window",
+            "foreground_activation",
+            "foreground_input",
+        ):
+            _add_missing(blocking, capability_id, "screen_capture_blank")
 
     if use_cache:
         _RUNTIME_BLOCKER_CACHE = (platform_id, now, _copy_missing(blocking))
@@ -146,6 +156,15 @@ def _probe_screen_capture(missing: dict[str, list[str]]) -> None:
         _add_missing(missing, "screen_capture", "screen_recording")
     else:
         _add_missing(missing, "screen_capture", "screen_capture_probe_failed")
+
+
+def _screen_capture_blank(result: Mapping[str, Any]) -> bool:
+    if result.get("ok") is not True or result.get("allowed") is not True:
+        return False
+    return (
+        result.get("blank_frame") is True
+        or str(result.get("visibility_status") or "").strip() == "blank_black"
+    )
 
 
 def _probe_active_window(missing: dict[str, list[str]]) -> None:

@@ -497,6 +497,7 @@ function capabilityLabel(value: string): string {
 function runtimeBlockingLabel(value: string): string {
   if (value === 'desktop_session_locked') return 'desktop session locked';
   if (value === 'foreground_focus_unavailable') return 'foreground focus unavailable';
+  if (value === 'screen_capture_blank') return 'screen capture blank';
   return value.replace(/_/g, ' ');
 }
 

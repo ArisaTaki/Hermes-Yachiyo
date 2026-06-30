@@ -65,6 +65,7 @@ const PERMISSION_RECOVERY_HINTS: Record<string, string> = {
 const BLOCKING_CONDITION_RECOVERY_HINTS: Record<string, string> = {
   desktop_session_locked: '请先解锁当前 macOS 桌面会话，然后重试前台操作。',
   foreground_focus_unavailable: '当前运行环境无法把目标应用切到最前；请在诊断页重新探测桌面权限和前台窗口状态。',
+  screen_capture_blank: '当前截图为空黑画面；请唤醒或解锁桌面会话，并确认远程显示没有黑屏后再重试。',
 };
 
 function objectValue(value: unknown): Record<string, unknown> {

@@ -7695,6 +7695,25 @@ def _runtime_blocking_recovery_actions_for_conditions(
                 },
             ]
         )
+    if "screen_capture_blank" in conditions:
+        actions.extend(
+            [
+                {
+                    "label": "重新截图确认桌面画面",
+                    "tool": "screen.capture",
+                    "input": {"reason": "verify desktop is visible after blank screenshot"},
+                    "permission_target": "desktop_screen_visible",
+                    "risk_level": "low",
+                },
+                {
+                    "label": "查看当前前台窗口",
+                    "tool": "desktop.active_window",
+                    "input": {},
+                    "permission_target": "desktop_screen_visible",
+                    "risk_level": "low",
+                },
+            ]
+        )
     return actions
 
 
@@ -7709,6 +7728,11 @@ def _runtime_blocking_recovery_hints_for_conditions(conditions: list[str]) -> li
         hints.append(
             "The current runtime can observe apps but cannot bring the target app "
             "to the foreground; inspect active_window/screen evidence before retrying."
+        )
+    if "screen_capture_blank" in conditions:
+        hints.append(
+            "The current screen capture is blank/black; wake or unlock the desktop "
+            "session and verify the remote display is visible before retrying."
         )
     return hints
 

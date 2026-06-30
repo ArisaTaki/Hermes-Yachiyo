@@ -4910,6 +4910,44 @@ def test_desktop_permissions_reports_runtime_blockers(monkeypatch) -> None:
     assert result["data"]["recovery_actions"] == result["recovery_actions"]
 
 
+def test_desktop_permissions_reports_blank_screen_runtime_blocker(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.desktop_permissions.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {},
+    )
+    monkeypatch.setattr(
+        desktop_mod,
+        "_desktop_runtime_blocking_conditions",
+        lambda **_kwargs: {"screen_capture": ["screen_capture_blank"]},
+    )
+
+    result = desktop_mod.permissions()
+
+    assert result["ok"] is True
+    assert result["runtime_blocked"] is True
+    assert result["blocking_conditions"] == ["screen_capture_blank"]
+    assert result["runtime_blocking_conditions"] == {
+        "screen_capture": ["screen_capture_blank"]
+    }
+    assert any("blank/black" in hint for hint in result["recovery_hints"])
+    assert result["recovery_actions"] == [
+        {
+            "label": "重新截图确认桌面画面",
+            "tool": "screen.capture",
+            "input": {"reason": "verify desktop is visible after blank screenshot"},
+            "permission_target": "desktop_screen_visible",
+            "risk_level": "low",
+        },
+        {
+            "label": "查看当前前台窗口",
+            "tool": "desktop.active_window",
+            "input": {},
+            "permission_target": "desktop_screen_visible",
+            "risk_level": "low",
+        },
+    ]
+
+
 def test_desktop_permissions_reports_extended_privacy_recovery_actions(monkeypatch) -> None:
     monkeypatch.setattr(
         "apps.shell.yachiyo_agent.desktop_permissions.desktop_permission_missing_by_capability",

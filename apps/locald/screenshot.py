@@ -30,8 +30,24 @@ def check_screen_capture_permission(*, open_settings: bool = False) -> dict[str,
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         tmp_path = Path(tmp.name)
     try:
-        capture_screenshot_to_file(tmp_path)
-        return {"ok": True, "allowed": True, "message": "屏幕录制权限可用"}
+        metadata = capture_screenshot_to_file(tmp_path)
+        return {
+            "ok": True,
+            "allowed": True,
+            "message": "屏幕录制权限可用",
+            **{
+                key: metadata[key]
+                for key in (
+                    "visibility_status",
+                    "blank_frame",
+                    "low_light_frame",
+                    "mean_luminance",
+                    "non_black_pixel_ratio",
+                    "max_channel",
+                )
+                if key in metadata
+            },
+        }
     except ScreenCapturePermissionError as exc:
         if open_settings:
             open_screen_recording_settings()

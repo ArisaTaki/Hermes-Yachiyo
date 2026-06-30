@@ -569,6 +569,7 @@ const permissionTargetLabels: Record<string, string> = {
 const blockingConditionLabels: Record<string, string> = {
   desktop_session_locked: '桌面会话已锁定',
   foreground_focus_unavailable: '前台激活暂不可用',
+  screen_capture_blank: '屏幕画面为空黑',
 };
 
 function taskRecoveryRetryActionWithSelectedCoordinate(

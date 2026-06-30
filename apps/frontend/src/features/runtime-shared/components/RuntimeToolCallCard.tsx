@@ -239,6 +239,7 @@ function runtimeToolBlockingConditionsFromRecords(records: Record<string, unknow
 
 function runtimeToolBlockingConditionLabel(condition: string): string {
   if (condition === 'desktop_session_locked') return 'desktop session locked';
+  if (condition === 'screen_capture_blank') return 'screen capture blank';
   return condition.replace(/_/g, ' ');
 }
 

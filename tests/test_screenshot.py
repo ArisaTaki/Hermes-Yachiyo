@@ -120,7 +120,13 @@ def test_check_screen_capture_permission_reports_allowed(monkeypatch):
     monkeypatch.setattr(
         screenshot_mod,
         "capture_screenshot_to_file",
-        lambda _target: {"path": str(_target), "width": 1, "height": 1},
+        lambda _target: {
+            "path": str(_target),
+            "width": 1,
+            "height": 1,
+            "visibility_status": "blank_black",
+            "blank_frame": True,
+        },
     )
 
     result = screenshot_mod.check_screen_capture_permission(open_settings=True)
@@ -128,6 +134,8 @@ def test_check_screen_capture_permission_reports_allowed(monkeypatch):
     assert result["ok"] is True
     assert result["allowed"] is True
     assert "可用" in str(result["message"])
+    assert result["visibility_status"] == "blank_black"
+    assert result["blank_frame"] is True
 
 
 def test_capture_screenshot_to_file_rejects_invalid_image(monkeypatch, tmp_path):

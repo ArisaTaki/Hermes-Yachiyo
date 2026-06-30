@@ -27,6 +27,11 @@ def test_desktop_permission_probe_marks_non_macos_unsupported() -> None:
 
 def test_desktop_runtime_blocker_probe_reports_locked_macos_session(monkeypatch) -> None:
     monkeypatch.setattr(desktop_permissions_mod, "_macos_desktop_session_locked", lambda: True)
+    monkeypatch.setattr(
+        desktop_permissions_mod,
+        "_check_screen_capture_permission",
+        lambda: {"ok": True, "allowed": True},
+    )
 
     blocking = desktop_permissions_mod.desktop_runtime_blocking_conditions_by_capability(
         platform_name="Darwin",
@@ -39,6 +44,36 @@ def test_desktop_runtime_blocker_probe_reports_locked_macos_session(monkeypatch)
     assert "screen_capture" not in blocking
 
 
+def test_desktop_runtime_blocker_probe_reports_blank_screen(monkeypatch) -> None:
+    monkeypatch.setattr(desktop_permissions_mod, "_macos_desktop_session_locked", lambda: False)
+    monkeypatch.setattr(
+        desktop_permissions_mod,
+        "_check_screen_capture_permission",
+        lambda: {
+            "ok": True,
+            "allowed": True,
+            "visibility_status": "blank_black",
+            "blank_frame": True,
+        },
+    )
+
+    def fake_osascript(script: str, *, timeout: float = 3.0) -> tuple[bool, str]:
+        if "foreground_activation|" in script:
+            return True, "foreground_activation|Finder|true|Finder|Codex|com.openai.codex"
+        raise AssertionError(script)
+
+    monkeypatch.setattr(desktop_permissions_mod, "_run_osascript", fake_osascript)
+
+    blocking = desktop_permissions_mod.desktop_runtime_blocking_conditions_by_capability(
+        platform_name="Darwin",
+        use_cache=False,
+    )
+
+    assert blocking["desktop_execution"] == ["screen_capture_blank"]
+    assert blocking["screen_capture"] == ["screen_capture_blank"]
+    assert blocking["foreground_input"] == ["screen_capture_blank"]
+
+
 def test_desktop_runtime_blocker_probe_uses_cached_copies(monkeypatch) -> None:
     calls = {"locked": 0}
 
@@ -47,6 +82,11 @@ def test_desktop_runtime_blocker_probe_uses_cached_copies(monkeypatch) -> None:
         return True
 
     monkeypatch.setattr(desktop_permissions_mod, "_macos_desktop_session_locked", fake_locked)
+    monkeypatch.setattr(
+        desktop_permissions_mod,
+        "_check_screen_capture_permission",
+        lambda: {"ok": True, "allowed": True},
+    )
 
     first = desktop_permissions_mod.desktop_runtime_blocking_conditions_by_capability(
         platform_name="Darwin",
@@ -177,6 +217,11 @@ def test_desktop_permission_probe_does_not_mark_foreground_activation_runtime_ga
 
 def test_desktop_runtime_blocker_probe_marks_foreground_activation_gap(monkeypatch) -> None:
     monkeypatch.setattr(desktop_permissions_mod, "_macos_desktop_session_locked", lambda: False)
+    monkeypatch.setattr(
+        desktop_permissions_mod,
+        "_check_screen_capture_permission",
+        lambda: {"ok": True, "allowed": True},
+    )
 
     def fake_osascript(script: str, *, timeout: float = 3.0) -> tuple[bool, str]:
         if "foreground_activation|" in script:
@@ -194,6 +239,11 @@ def test_desktop_runtime_blocker_probe_marks_foreground_activation_gap(monkeypat
 def test_cached_desktop_runtime_blockers_returns_cached_copy(monkeypatch) -> None:
     desktop_permissions_mod.clear_desktop_permission_probe_cache()
     monkeypatch.setattr(desktop_permissions_mod, "_macos_desktop_session_locked", lambda: False)
+    monkeypatch.setattr(
+        desktop_permissions_mod,
+        "_check_screen_capture_permission",
+        lambda: {"ok": True, "allowed": True},
+    )
 
     calls = {"count": 0}
 
