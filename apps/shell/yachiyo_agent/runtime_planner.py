@@ -1903,7 +1903,7 @@ class RuntimePlanner:
                     intent.user_goal,
                 ),
             )
-            analysis_tool = _first_allowed(("data.analyze", "terminal.run"), allowed)
+            analysis_tool = _first_allowed(("data.analyze", "python.run", "terminal.run"), allowed)
             if analysis_tool == "data.analyze":
                 artifact_path = artifact_paths[0] if artifact_paths else "analysis-report.md"
                 source_kind = str(
@@ -1955,7 +1955,7 @@ class RuntimePlanner:
                     "run-analysis",
                     "Run reproducible data analysis",
                     "data.analysis",
-                    _first_allowed(("terminal.run",), allowed),
+                    _first_allowed(("python.run", "terminal.run"), allowed),
                     input_preview={"command": "python - <<'PY'\n# analyze captured tabular data\nPY"},
                     risk_level="high",
                     approval_required=True,
@@ -2035,9 +2035,9 @@ class RuntimePlanner:
                 depends_on="analyze-data-file",
             )
         inspect_tool_candidates = (
-            ("workspace.read", "workspace.list")
+            ("workspace.read", "fs.read_file", "workspace.list", "fs.find_files")
             if source_hint
-            else ("workspace.list", "workspace.read")
+            else ("workspace.list", "fs.find_files", "workspace.read", "fs.read_file")
         )
         spreadsheet_steps = (
             [_with_step_dependencies(spreadsheet_app_step, ["inspect-data-source"])]
@@ -2086,7 +2086,7 @@ class RuntimePlanner:
                 "run-analysis",
                 "Run reproducible data analysis",
                 "data.analysis",
-                _first_allowed(("terminal.run",), allowed),
+                _first_allowed(("python.run", "terminal.run"), allowed),
                 input_preview={"command": "python - <<'PY'\n# inspect data, compute summary, generate charts\nPY"},
                 risk_level="high",
                 approval_required=True,
@@ -4238,17 +4238,20 @@ class RuntimePlanner:
                     depends_on=["discover-browser-app"],
                     reason="Prepare the requested browser before running the browser tool.",
                 )
-            tool_name = {
-                "current_page": "browser.current_page",
-                "extract_text": "browser.extract_text",
-                "screenshot": "browser.screenshot",
-                "click": "browser.click",
-                "type_text": "browser.type_text",
-                "open_search": "browser.open_url",
-                "open_url": "browser.open_url",
-                "open_url_extract": "browser.open_url_and_extract_text",
-                "open_url_screenshot": "browser.open_url_and_screenshot",
-            }.get(browser_action)
+            tool_name = _first_allowed(
+                {
+                    "current_page": ("browser.current_page",),
+                    "extract_text": ("browser.extract_text", "browser.extract"),
+                    "screenshot": ("browser.screenshot",),
+                    "click": ("browser.click",),
+                    "type_text": ("browser.type_text",),
+                    "open_search": ("browser.open_url", "browser.search", "browser.open"),
+                    "open_url": ("browser.open_url", "browser.open"),
+                    "open_url_extract": ("browser.open_url_and_extract_text",),
+                    "open_url_screenshot": ("browser.open_url_and_screenshot",),
+                }.get(browser_action, ()),
+                allowed,
+            )
             input_preview: dict[str, Any] = {}
             if browser_action == "click":
                 selector = str(intent.inputs.get("selector") or "").strip()
@@ -4277,7 +4280,10 @@ class RuntimePlanner:
                 "open_url_extract",
                 "open_url_screenshot",
             }:
-                if url:
+                query = str(intent.inputs.get("query") or "").strip()
+                if tool_name == "browser.search" and query:
+                    input_preview["query"] = query
+                elif url:
                     input_preview["url"] = url
             main_step = _step(
                 intent,
@@ -4871,7 +4877,10 @@ class RuntimePlanner:
                 "inspect-file-scope",
                 "Inspect file scope",
                 "file.organization",
-                _first_allowed(("workspace.list", "desktop.reveal_path", "desktop.open_path"), allowed),
+                _first_allowed(
+                    ("workspace.list", "fs.find_files", "desktop.reveal_path", "desktop.open_path"),
+                    allowed,
+                ),
                 input_preview=_file_scope_input_preview(
                     location_hint,
                     file_type_hint,
@@ -6230,8 +6239,10 @@ def _file_apply_input_preview(
 def _file_apply_tool_candidates(operation_hint: str) -> tuple[str, ...]:
     operation = str(operation_hint or "").strip()
     if operation in {"organize", "archive", "move"}:
-        return ("file.organize", "terminal.run")
-    return ("terminal.run",)
+        return ("file.organize", "fs.move_file", "terminal.run", "python.run")
+    if operation == "rename":
+        return ("fs.rename_file", "terminal.run", "python.run")
+    return ("terminal.run", "python.run")
 
 
 def _context_source_capability_id(source: str, tool_name: str | None, fallback: str) -> str:
@@ -7361,10 +7372,17 @@ def _normalize_intent_for_allowed_tools(
     if (
         browser_action == "open_url_extract"
         and "browser.open_url_and_extract_text" not in allowed
-        and "browser.open_url" in allowed
+        and (
+            "browser.open_url" in allowed
+            or "browser.search" in allowed
+            or "browser.open" in allowed
+        )
     ):
         inputs = dict(intent.inputs)
-        inputs["browser_action"] = "open_search" if inputs.get("query") else "open_url"
+        if inputs.get("query") and ("browser.open_url" in allowed or "browser.search" in allowed):
+            inputs["browser_action"] = "open_search"
+        else:
+            inputs["browser_action"] = "open_url"
         return intent.model_copy(update={"inputs": inputs})
     return intent
 

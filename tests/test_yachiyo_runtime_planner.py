@@ -197,6 +197,79 @@ def test_runtime_planner_routes_data_analysis_to_file_terminal_artifact_plan() -
     }
 
 
+def test_runtime_planner_accepts_portable_capability_tool_aliases() -> None:
+    data_prompt = "分析下载目录里的销售 CSV，生成一份带图表的报告"
+    data_allowed = ["fs.find_files", "fs.read_file", "python.run", "artifact.write"]
+    data_decision = RuntimePlanner().decision(data_prompt, allowed_tools=data_allowed)
+
+    assert data_decision.selected_intent.kind == "data_analysis"
+    assert data_decision.plan.tool_plan.missing_capabilities == []
+    assert [
+        _step_by_id(data_decision, step_id).tool_name
+        for step_id in [
+            "inspect-data-source",
+            "run-analysis",
+            "write-analysis-artifact",
+        ]
+    ] == ["fs.find_files", "python.run", "artifact.write"]
+    assert planner_tool_requests(data_prompt, data_allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "fs.find_files",
+            "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+
+    web_prompt = "研究一下 OpenAI 最近的模型发布并整理成报告"
+    web_allowed = ["browser.search", "browser.extract", "artifact.write"]
+    web_decision = RuntimePlanner().decision(web_prompt, allowed_tools=web_allowed)
+
+    assert web_decision.selected_intent.kind == "web_research"
+    assert web_decision.selected_intent.inputs["browser_action"] == "open_search"
+    assert web_decision.plan.tool_plan.missing_capabilities == []
+    assert _step_by_id(web_decision, "open-web-search").tool_name == "browser.search"
+    assert _step_by_id(web_decision, "open-web-search").input_preview == {
+        "query": "OpenAI 最近的模型发布"
+    }
+    assert planner_tool_requests(web_prompt, web_allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.search",
+            "input": {"query": "OpenAI 最近的模型发布"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+
+    file_prompt = "把桌面上的截图按月份整理到文件夹里"
+    file_allowed = ["fs.find_files", "fs.move_file", "artifact.write"]
+    file_decision = RuntimePlanner().decision(file_prompt, allowed_tools=file_allowed)
+
+    assert file_decision.selected_intent.kind == "file_organization"
+    assert file_decision.plan.tool_plan.missing_capabilities == []
+    assert _step_by_id(file_decision, "inspect-file-scope").tool_name == "fs.find_files"
+    assert _step_by_id(file_decision, "apply-file-organization").tool_name == "fs.move_file"
+    assert _step_by_id(file_decision, "apply-file-organization").approval_required is True
+    assert planner_tool_requests(file_prompt, file_allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "fs.find_files",
+            "input": {
+                "path": "Desktop",
+                "pattern": "*.{png,jpg,jpeg,heic,gif,webp}",
+                "file_type": "screenshot",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_file_scope",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_runtime_planner_prefers_builtin_data_analysis_for_simple_reports() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",

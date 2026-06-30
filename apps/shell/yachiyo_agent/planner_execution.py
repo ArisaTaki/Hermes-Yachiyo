@@ -1737,8 +1737,14 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     if tool_name not in allowed:
         return []
     payload: dict[str, Any] = {}
-    if tool_name in {
+    if tool_name == "browser.search":
+        query = str(decision.selected_intent.inputs.get("query") or "").strip()
+        if not query:
+            return []
+        payload = {"query": query}
+    elif tool_name in {
         "browser.open_url",
+        "browser.open",
         "browser.open_url_and_extract_text",
         "browser.open_url_and_screenshot",
     }:
@@ -1749,7 +1755,12 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
             reason = str(decision.selected_intent.inputs.get("reason") or "").strip()
             if reason:
                 payload["reason"] = reason
-    elif tool_name not in {"browser.current_page", "browser.extract_text", "browser.screenshot"}:
+    elif tool_name not in {
+        "browser.current_page",
+        "browser.extract_text",
+        "browser.extract",
+        "browser.screenshot",
+    }:
         return []
     elif not browser_action and not _looks_like_current_page_request(decision.selected_intent.user_goal):
         return []
@@ -1803,6 +1814,7 @@ def _web_read_request_can_direct_present(
     if tool_name not in {
         "browser.current_page",
         "browser.extract_text",
+        "browser.extract",
         "browser.open_url_and_extract_text",
     }:
         return False
@@ -1820,7 +1832,9 @@ def _browser_tool_result_can_feed_model(tool_name: str) -> bool:
     return tool_name in {
         "browser.current_page",
         "browser.extract_text",
+        "browser.extract",
         "browser.screenshot",
+        "browser.search",
         "browser.open_url_and_extract_text",
         "browser.open_url_and_screenshot",
     }
@@ -2064,7 +2078,7 @@ def _context_prefetch_payload(
     tool_name: str,
     payload: dict[str, Any],
 ) -> dict[str, Any] | None:
-    if tool_name == "workspace.list":
+    if tool_name in {"workspace.list", "fs.find_files"}:
         path = str(payload.get("path") or "").strip()
         request_payload: dict[str, Any] = {"path": path} if path else {}
         pattern = str(payload.get("pattern") or "").strip()
@@ -2074,7 +2088,7 @@ def _context_prefetch_payload(
         if file_type:
             request_payload["file_type"] = file_type
         return request_payload
-    if tool_name == "workspace.read":
+    if tool_name in {"workspace.read", "fs.read_file"}:
         path = str(payload.get("path") or "").strip()
         return {"path": path} if path else None
     if tool_name in {"browser.current_page", "browser.extract_text", "browser.screenshot"}:

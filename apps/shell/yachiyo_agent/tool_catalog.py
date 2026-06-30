@@ -229,11 +229,17 @@ def _capability_id_for_tool(tool_name: str) -> str | None:
         return "future_task"
     if tool_name.startswith("workspace."):
         return "workspace"
+    if tool_name in {"fs.find_files", "fs.read_file"}:
+        return "workspace"
+    if tool_name.startswith("fs."):
+        return "file.organization"
     if tool_name.startswith("file."):
         return "file.organization"
     if tool_name.startswith("browser."):
         return "browser_control"
     if tool_name.startswith("terminal."):
+        return "terminal"
+    if tool_name.startswith("python."):
         return "terminal"
     if tool_name.startswith("data."):
         return "data"
@@ -259,7 +265,22 @@ def _risk_level_for_tool(tool_name: str) -> str | None:
         return "low"
     if tool_name in MEDIUM_RISK_BROWSER_TOOL_NAMES:
         return "medium"
-    if tool_name in {"workspace.list", "workspace.read", "artifact.write", "data.analyze", "skill.read"}:
+    if tool_name in {"fs.move_file", "fs.rename_file", "fs.delete_file", "fs.write_file"}:
+        return "high"
+    if tool_name == "python.run":
+        return "high"
+    if tool_name in {
+        "workspace.list",
+        "workspace.read",
+        "fs.find_files",
+        "fs.read_file",
+        "artifact.write",
+        "data.analyze",
+        "browser.search",
+        "browser.open",
+        "browser.extract",
+        "skill.read",
+    }:
         return "low"
     if tool_name.startswith("memory.") or tool_name.startswith("future_task."):
         return "low"
@@ -267,7 +288,12 @@ def _risk_level_for_tool(tool_name: str) -> str | None:
 
 
 def _approval_required_for_tool(tool_name: str) -> bool:
-    return tool_name in HIGH_RISK_AGENT_TOOLS or desktop_tool_risk_level(tool_name) == "high"
+    return (
+        tool_name in HIGH_RISK_AGENT_TOOLS
+        or tool_name == "python.run"
+        or tool_name in {"fs.move_file", "fs.rename_file", "fs.delete_file", "fs.write_file"}
+        or desktop_tool_risk_level(tool_name) == "high"
+    )
 
 
 def _missing_permissions_for_tool(
