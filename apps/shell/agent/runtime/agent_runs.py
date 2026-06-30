@@ -138,7 +138,7 @@ class RuntimeAgentRunExecutor:
                 timeline,
                 artifacts,
                 daily_desktop_planning_context=(
-                    user_goal
+                    _runtime_planner_entrypoint_context(agent, user_goal)
                     if (
                         agent.get("_daily_desktop_policy_overlay") is True
                         or agent.get("_runtime_planner_entrypoint") is True
@@ -344,6 +344,14 @@ class RuntimeAgentRunAsyncCoordinator:
         if override_agent_id != agent_id:
             raise self._error_type("agent_override 与 agent_id 不一致")
         return _with_entrypoint_runtime_planner({**override, "agent_id": agent_id}, payload)
+
+
+def _runtime_planner_entrypoint_context(agent: dict[str, Any], user_goal: str) -> str:
+    if agent.get("_runtime_planner_entrypoint") is True:
+        context = str(agent.get("_runtime_planner_entrypoint_context") or "").strip()
+        if context:
+            return context
+    return user_goal
 
 
 def _with_entrypoint_runtime_planner(agent: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:

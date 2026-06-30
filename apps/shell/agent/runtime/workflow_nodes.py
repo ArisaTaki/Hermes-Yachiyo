@@ -52,6 +52,18 @@ def _port_source(
     return fallback if source is None else source
 
 
+def _agent_with_runtime_planner_entrypoint(
+    agent: dict[str, Any],
+    *,
+    planning_context: str,
+) -> dict[str, Any]:
+    return {
+        **agent,
+        "_runtime_planner_entrypoint": True,
+        "_runtime_planner_entrypoint_context": str(planning_context or "").strip(),
+    }
+
+
 @dataclass(frozen=True)
 class WorkflowAgentNodeHandoff:
     """Child Agent run payload derived from a Workflow agent node."""
@@ -228,7 +240,10 @@ class WorkflowAgentNodeExecution:
             execute_kwargs["workflow_run_id"] = workflow_run_id
         child = execute_agent_run(
             child["run_id"],
-            handoff.agent,
+            _agent_with_runtime_planner_entrypoint(
+                handoff.agent,
+                planning_context=handoff.step_task or handoff.child_goal,
+            ),
             handoff.child_goal,
             **execute_kwargs,
         )

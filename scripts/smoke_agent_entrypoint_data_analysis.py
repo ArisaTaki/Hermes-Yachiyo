@@ -169,6 +169,38 @@ def _data_analysis_case(
                 }
             )
             updated = snapshot.model_dump(mode="json")
+        elif entrypoint == "workflow_agent_node":
+            workflow = service.create_workflow(
+                {
+                    "name": "Data Analysis Workflow Entrypoint",
+                    "nodes": [
+                        {"id": "start", "type": "start", "data": {"label": "Start"}},
+                        {
+                            "id": "analysis",
+                            "type": "agent",
+                            "data": {
+                                "label": "Analyze",
+                                "agent_id": agent["agent_id"],
+                                "task": PROMPT,
+                            },
+                        },
+                    ],
+                    "edges": [{"source": "start", "target": "analysis"}],
+                }
+            )
+            workflow_run = service.create_workflow_run(
+                {
+                    "workflow_id": workflow["workflow_id"],
+                    "user_goal": PROMPT,
+                }
+            )
+            group = service.get_run_group(str(workflow_run.get("run_group_id") or ""))
+            child_run_ids = [
+                str(child_run_id or "")
+                for child_run_id in group.get("child_run_ids") or []
+                if str(child_run_id or "") and str(child_run_id or "") != str(workflow_run.get("run_id") or "")
+            ]
+            updated = service.get_run(child_run_ids[0]) if child_run_ids else workflow_run
         else:
             updated = service.create_agent_run(
                 {
@@ -263,6 +295,11 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
                     _data_analysis_case(
                         service,
                         entrypoint="studio_agent_run",
+                        workdir=data_workdir,
+                    ),
+                    _data_analysis_case(
+                        service,
+                        entrypoint="workflow_agent_node",
                         workdir=data_workdir,
                     ),
                 ]

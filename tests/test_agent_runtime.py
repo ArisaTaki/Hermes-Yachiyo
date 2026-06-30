@@ -3132,7 +3132,11 @@ def test_workflow_agent_node_execution_runs_child_and_builds_replay_payloads():
             "execute_agent_run",
             {
                 "run_id": "child_run",
-                "agent": agent,
+                "agent": {
+                    **agent,
+                    "_runtime_planner_entrypoint": True,
+                    "_runtime_planner_entrypoint_context": "Summarize launch risk.",
+                },
                 "user_goal": "Ship release candidate\n\nStep: Summarize launch risk.",
                 "upstream": "Previous result",
             },
@@ -4496,6 +4500,105 @@ def test_agent_run_runtime_planner_entrypoint_analyzes_data_before_model(tmp_pat
             for artifact in run["artifacts"]
             if isinstance(artifact, dict)
         )
+    finally:
+        service.close()
+
+
+def test_workflow_agent_node_runtime_planner_entrypoint_analyzes_data_before_model(
+    tmp_path,
+    monkeypatch,
+):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "workflow-data-workdir"
+    (workdir / "inputs").mkdir(parents=True)
+    (workdir / "inputs" / "sales.csv").write_text(
+        "region,revenue,units\nEast,10,1\nWest,20,2\nEast,30,3\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: pytest.fail("workflow agent node should execute planner tools before model call"),
+    )
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Workflow Data Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {
+                    "allowed_tools": ["workspace.read", "data.analyze", "artifact.write"],
+                    "approval_required": {},
+                },
+                "workspace_policy": {
+                    "default_workdir": str(workdir),
+                    "readable_scopes": ["."],
+                    "writable_scopes": ["."],
+                },
+            }
+        )
+        workflow = service.create_workflow(
+            {
+                "name": "Workflow Data Analysis Entrypoint",
+                "nodes": [
+                    {"id": "start", "type": "start", "data": {"label": "Start"}},
+                    {
+                        "id": "analysis",
+                        "type": "agent",
+                        "data": {
+                            "label": "Analyze",
+                            "agent_id": agent["agent_id"],
+                            "task": "请分析 inputs/sales.csv 并输出报告",
+                        },
+                    },
+                ],
+                "edges": [{"source": "start", "target": "analysis"}],
+            }
+        )
+
+        run = service.create_workflow_run(
+            {
+                "workflow_id": workflow["workflow_id"],
+                "user_goal": "请分析 inputs/sales.csv 并输出报告",
+            }
+        )
+        group = service.get_run_group(run["run_group_id"])
+        child_runs = [
+            service.get_run(run_id)
+            for run_id in group["child_run_ids"]
+            if run_id != run["run_id"]
+        ]
+        child = child_runs[0]
+        events = service.list_run_events(child["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        selection_event = next(event for event in events if event["event_type"] == "agent.plan.selection")
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+        artifact_event = next(
+            event
+            for event in events
+            if event["event_type"] == "artifact.created"
+            and event.get("payload", {}).get("path") == "analysis-report.md"
+        )
+        parent_agent_event = next(
+            event for event in run["timeline"] if event["event"] == "workflow.node.agent"
+        )
+
+        assert run["status"] == "completed"
+        assert child["status"] == "completed"
+        assert "已分析「inputs/sales.csv」（3 行、3 列）" in child["result"]
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert selection_event["payload"]["intent_kind"] == "data_analysis"
+        assert selection_event["payload"]["selection_reason"] == "runtime_planner_full_plan_execution"
+        assert tool_event["payload"]["tool"] == "data.analyze"
+        assert tool_event["payload"]["result"]["ok"] is True
+        assert tool_event["payload"]["result"]["rows"] == 3
+        assert artifact_event["payload"]["source_tool"] == "data.analyze"
+        assert parent_agent_event["workflow_node_id"] == "analysis"
+        assert "已分析「inputs/sales.csv」（3 行、3 列）" in parent_agent_event["result"]
     finally:
         service.close()
 

@@ -130,6 +130,7 @@ def test_workflow_agent_node_legacy_helpers_accept_port_bundle() -> None:
         "artifacts": [{"kind": "artifact", "path": "risk.md"}],
     }
     calls: list[tuple[str, str]] = []
+    executed_agents: list[dict[str, Any]] = []
     ports = WorkflowNodePortBundle(
         workflow_agent_for_node=lambda node: calls.append(("agent", str(node["id"]))) or agent,
         workflow_node_task=lambda node: calls.append(("task", str(node["id"])))
@@ -138,9 +139,10 @@ def test_workflow_agent_node_legacy_helpers_accept_port_bundle() -> None:
         or f"{workflow_goal}\n\nStep: {step_task}",
         insert_run=lambda **kwargs: calls.append(("insert", str(kwargs["runnable_id"])))
         or {"run_id": "child_run"},
-        execute_agent_run=lambda run_id, _agent, _goal, *, upstream, run_group_id="", workflow_run_id="": calls.append(
-            ("execute", f"{run_id}:{upstream}:{run_group_id}:{workflow_run_id}")
-        )
+        execute_agent_run=lambda run_id, _agent, _goal, *, upstream, run_group_id="", workflow_run_id="": (
+            executed_agents.append(_agent),
+            calls.append(("execute", f"{run_id}:{upstream}:{run_group_id}:{workflow_run_id}")),
+        )[-1]
         or child_run,
         workflow_child_artifact_refs=lambda run, label: calls.append(
             ("artifacts", f"{run['run_id']}:{label}")
@@ -167,6 +169,13 @@ def test_workflow_agent_node_legacy_helpers_accept_port_bundle() -> None:
     )
 
     assert handoff.agent is agent
+    assert "_runtime_planner_entrypoint" not in handoff.agent
+    assert executed_agents[0] == {
+        **agent,
+        "_runtime_planner_entrypoint": True,
+        "_runtime_planner_entrypoint_context": "Summarize launch risk.",
+    }
+    assert executed_agents[0] is not handoff.agent
     assert handoff.child_goal == "Ship release candidate\n\nStep: Summarize launch risk."
     assert execution.child_run is child_run
     assert execution.artifact_count == 1
