@@ -610,6 +610,14 @@ started public run snapshot. Missing targets return a structured handoff
 instead of pretending execution happened, keeping the Hermes/Hanako-style
 "plan -> execute -> observe/replay" chain honest.
 
+Current Agent Studio Tools UI now exposes that boundary directly. The Runtime
+Planner panel keeps the existing `Plan` preview and adds `Start in Studio`,
+which calls `/yachiyo/studio/planner/orchestration/start`, renders the
+`PlannerOrchestrationStartSnapshot`, and opens the started Workflow/GroupRun
+timeline when a run is returned. This makes the Studio planner path executable
+instead of only explanatory while still preserving structured handoff for
+missing targets.
+
 ## Phase 10 - 删除旧硬编码与收敛代码
 
 After coverage proves the new chain works, delete no-longer-needed app aliases,

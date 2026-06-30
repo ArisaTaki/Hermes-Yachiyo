@@ -1,8 +1,12 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 
-import { planYachiyoStudioTask } from '../../yachiyo-studio/api';
+import {
+  planYachiyoStudioTask,
+  startYachiyoStudioPlannerOrchestration,
+} from '../../yachiyo-studio/api';
 import type {
   PlannerDecisionSnapshot,
+  PlannerOrchestrationStartSnapshot,
   ToolCatalogItemSnapshot,
   ToolCatalogSnapshot,
   ToolPlanStepSnapshot,
@@ -20,6 +24,7 @@ type AgentStudioToolsTabProps = {
   error: string;
   loading: boolean;
   onReload: () => void;
+  onPlannerOrchestrationStarted?: (result: PlannerOrchestrationStartSnapshot) => Promise<void> | void;
 };
 
 export function AgentStudioToolsTab({
@@ -27,6 +32,7 @@ export function AgentStudioToolsTab({
   error,
   loading,
   onReload,
+  onPlannerOrchestrationStarted,
 }: AgentStudioToolsTabProps) {
   const catalog = rawCatalog || emptyCatalog;
   const [selectedToolName, setSelectedToolName] = useState('');
@@ -37,6 +43,9 @@ export function AgentStudioToolsTab({
   const [plannerDecision, setPlannerDecision] = useState<PlannerDecisionSnapshot | null>(null);
   const [plannerError, setPlannerError] = useState('');
   const [plannerLoading, setPlannerLoading] = useState(false);
+  const [plannerStartError, setPlannerStartError] = useState('');
+  const [plannerStartLoading, setPlannerStartLoading] = useState(false);
+  const [plannerStartResult, setPlannerStartResult] = useState<PlannerOrchestrationStartSnapshot | null>(null);
 
   useEffect(() => {
     const tools = catalog.tools || [];
@@ -74,6 +83,12 @@ export function AgentStudioToolsTab({
     return catalog.tools.find((tool) => tool.tool_name === selectedToolName) || filteredTools[0] || null;
   }, [catalog.tools, filteredTools, selectedToolName]);
 
+  function handlePlannerPromptChange(value: string) {
+    setPlannerPrompt(value);
+    setPlannerStartError('');
+    setPlannerStartResult(null);
+  }
+
   async function handlePlannerSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     const prompt = plannerPrompt.trim();
@@ -89,10 +104,37 @@ export function AgentStudioToolsTab({
         metadata: { surface: 'agent_studio_tools' },
       });
       setPlannerDecision(decision);
+      setPlannerStartError('');
+      setPlannerStartResult(null);
     } catch (error) {
       setPlannerError(errorMessage(error));
     } finally {
       setPlannerLoading(false);
+    }
+  }
+
+  async function handlePlannerStartOrchestration() {
+    const prompt = plannerPrompt.trim();
+    if (!prompt || plannerStartLoading) return;
+    setPlannerStartLoading(true);
+    setPlannerStartError('');
+    setPlannerStartResult(null);
+    try {
+      const result = await startYachiyoStudioPlannerOrchestration({
+        prompt,
+        allowed_tools: catalog.tools
+          .map((tool) => tool.tool_name)
+          .filter((toolName): toolName is string => Boolean(toolName)),
+        metadata: { surface: 'agent_studio_tools' },
+      });
+      setPlannerStartResult(result);
+      if (result.status === 'started') {
+        await onPlannerOrchestrationStarted?.(result);
+      }
+    } catch (error) {
+      setPlannerStartError(errorMessage(error));
+    } finally {
+      setPlannerStartLoading(false);
     }
   }
 
@@ -178,9 +220,13 @@ export function AgentStudioToolsTab({
           decision={plannerDecision}
           error={plannerError}
           loading={plannerLoading}
-          onPromptChange={setPlannerPrompt}
+          onPromptChange={handlePlannerPromptChange}
+          onStartOrchestration={() => void handlePlannerStartOrchestration()}
           onSubmit={handlePlannerSubmit}
           prompt={plannerPrompt}
+          startError={plannerStartError}
+          startLoading={plannerStartLoading}
+          startResult={plannerStartResult}
         />
         {selectedTool ? <ToolDetail tool={selectedTool} catalog={catalog} /> : null}
         {!selectedTool && !loading ? <span className="studio-tool-empty">No tool selected</span> : null}
@@ -195,15 +241,23 @@ function RuntimePlannerPreview({
   error,
   loading,
   onPromptChange,
+  onStartOrchestration,
   onSubmit,
   prompt,
+  startError,
+  startLoading,
+  startResult,
 }: {
   decision: PlannerDecisionSnapshot | null;
   error: string;
   loading: boolean;
   onPromptChange: (value: string) => void;
+  onStartOrchestration: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   prompt: string;
+  startError: string;
+  startLoading: boolean;
+  startResult: PlannerOrchestrationStartSnapshot | null;
 }) {
   const plan = decision?.plan;
   const toolPlan = plan?.tool_plan;
@@ -233,8 +287,19 @@ function RuntimePlannerPreview({
         >
           {loading ? 'Planning...' : 'Plan'}
         </button>
+        <button
+          type="button"
+          className="hy-btn hy-btn-secondary"
+          disabled={startLoading || loading || !prompt.trim()}
+          data-testid="studio-runtime-planner-start-orchestration"
+          onClick={onStartOrchestration}
+        >
+          {startLoading ? 'Starting...' : 'Start in Studio'}
+        </button>
       </form>
       {error ? <div className="notice danger" data-testid="studio-runtime-planner-error">{error}</div> : null}
+      {startError ? <div className="notice danger" data-testid="studio-runtime-planner-start-error">{startError}</div> : null}
+      {startResult ? <PlannerOrchestrationStartResult result={startResult} /> : null}
       {decision ? (
         <div className="studio-planner-result" data-testid="studio-runtime-planner-result">
           <div className="studio-tool-detail-grid">
@@ -309,6 +374,50 @@ function RuntimePlannerPreview({
   );
 }
 
+function PlannerOrchestrationStartResult({
+  result,
+}: {
+  result: PlannerOrchestrationStartSnapshot;
+}) {
+  const runId = plannerOrchestrationRunId(result);
+  return (
+    <div
+      className="studio-tool-inspector-section"
+      data-orchestration-kind={result.kind}
+      data-orchestration-run-id={runId}
+      data-orchestration-status={result.status}
+      data-orchestration-target-id={result.target_id || ''}
+      data-testid="studio-runtime-planner-orchestration-start"
+    >
+      <div className="studio-tool-inspector-heading">
+        <h3>Studio Orchestration</h3>
+        <span>{result.status}</span>
+      </div>
+      <div className="studio-tool-detail-grid">
+        <span>
+          <small>Kind</small>
+          <strong>{result.kind || 'unknown'}</strong>
+        </span>
+        <span>
+          <small>Target</small>
+          <strong>{result.target_name || result.target_id || 'None'}</strong>
+        </span>
+        <span>
+          <small>Run</small>
+          <strong>{runId || 'Not started'}</strong>
+        </span>
+        <span>
+          <small>Route</small>
+          <strong>{result.route_to_studio ? 'Studio' : 'Direct'}</strong>
+        </span>
+      </div>
+      {result.message ? (
+        <div className="notice">{result.message}</div>
+      ) : null}
+    </div>
+  );
+}
+
 function PlannerStepRow({
   index,
   step,
@@ -325,6 +434,12 @@ function PlannerStepRow({
       <small>{step.status}{step.approval_required ? ' / approval' : ''}</small>
     </div>
   );
+}
+
+function plannerOrchestrationRunId(result: PlannerOrchestrationStartSnapshot): string {
+  if (result.workflow_run?.run_id) return result.workflow_run.run_id;
+  const groupRun = result.group_run;
+  return groupRun?.runs?.[0]?.run_id || groupRun?.child_run_ids?.[0] || '';
 }
 
 function ToolDetail({

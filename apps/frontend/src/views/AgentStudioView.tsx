@@ -62,8 +62,25 @@ import {
   type RuntimeToolRecoveryAction,
 } from '../features/runtime-shared/toolRecoveryActions';
 import { startYachiyoTask } from '../features/yachiyo-chat/api';
-import type { ToolCallSnapshot } from '../features/yachiyo-studio/types';
+import type {
+  PlannerOrchestrationStartSnapshot,
+  ToolCallSnapshot,
+} from '../features/yachiyo-studio/types';
+import { groupRunTimelineRunId } from '../features/agent-studio/utils/groups';
 import { openAppView } from '../lib/bridge';
+
+function plannerOrchestrationRunId(result: PlannerOrchestrationStartSnapshot): string {
+  if (result.workflow_run?.run_id) return result.workflow_run.run_id;
+  return groupRunTimelineRunId(result.group_run || null);
+}
+
+function plannerOrchestrationStatusMessage(result: PlannerOrchestrationStartSnapshot): string {
+  if (result.status === 'started') {
+    const target = result.target_name || result.target_id || result.kind;
+    return `已从 Runtime Planner 启动 ${target}。`;
+  }
+  return result.message || 'Runtime Planner 已返回 Studio 编排 handoff。';
+}
 
 export function AgentStudioView() {
   const {
@@ -451,6 +468,25 @@ export function AgentStudioView() {
     selectedAgentGroupId,
     setRunTarget,
   });
+  const openPlannerOrchestrationRun = async (
+    result: PlannerOrchestrationStartSnapshot,
+  ) => {
+    const runId = plannerOrchestrationRunId(result);
+    const groupRunId = result.group_run?.group_run_id || '';
+    const targetId = result.target_id || '';
+    const statusMessage = plannerOrchestrationStatusMessage(result);
+    if (runId) {
+      openRunDetail(runId, { groupRunId, revealInHistory: true });
+      await refresh({
+        ...(result.kind === 'workflow' && targetId ? { runTarget: targetId } : {}),
+        selectedRunId: runId,
+        statusMessage,
+      });
+      return;
+    }
+    setStatus(statusMessage);
+    await refresh({ statusMessage });
+  };
   const {
     requestCancelFutureTask,
     requestDeleteMemory,
@@ -1032,6 +1068,7 @@ export function AgentStudioView() {
           error={toolCatalogError}
           loading={toolCatalogLoading}
           onReload={() => void reloadToolCatalog()}
+          onPlannerOrchestrationStarted={openPlannerOrchestrationRun}
         />
       ) : null}
 
