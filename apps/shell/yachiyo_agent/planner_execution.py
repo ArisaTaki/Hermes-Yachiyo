@@ -1048,9 +1048,10 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
             return _mark_last_request_for_model_followup([*app_requests, *file_open_requests])
         return _append_model_followup_requests(context_requests, [*app_requests, *file_open_requests])
     source_hint = str(inputs.get("data_source_hint") or "").strip()
-    if _workspace_readable_data_source(source_hint, inputs) and "workspace.read" in allowed:
+    readable_tool = _first_allowed(("workspace.read", "fs.read_file", "file.read"), allowed)
+    if _workspace_readable_data_source(source_hint, inputs) and readable_tool:
         request = _request(
-            "workspace.read",
+            readable_tool,
             {"path": source_hint},
             planning_reason="planner_prefetch_data_source",
         )
@@ -2080,7 +2081,7 @@ def _context_prefetch_payload(
     tool_name: str,
     payload: dict[str, Any],
 ) -> dict[str, Any] | None:
-    if tool_name in {"workspace.list", "fs.find_files"}:
+    if tool_name in {"workspace.list", "fs.find_files", "file.search"}:
         path = str(payload.get("path") or "").strip()
         request_payload: dict[str, Any] = {"path": path} if path else {}
         pattern = str(payload.get("pattern") or "").strip()
@@ -2090,7 +2091,7 @@ def _context_prefetch_payload(
         if file_type:
             request_payload["file_type"] = file_type
         return request_payload
-    if tool_name in {"workspace.read", "fs.read_file"}:
+    if tool_name in {"workspace.read", "fs.read_file", "file.read"}:
         path = str(payload.get("path") or "").strip()
         return {"path": path} if path else None
     if tool_name in {"browser.current_page", "browser.extract_text", "browser.screenshot"}:

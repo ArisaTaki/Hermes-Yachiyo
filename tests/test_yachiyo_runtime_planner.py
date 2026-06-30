@@ -236,6 +236,45 @@ def test_runtime_planner_accepts_portable_capability_tool_aliases() -> None:
         }
     ]
 
+    file_namespace_data_allowed = [
+        "file.search",
+        "file.read",
+        "python.run",
+        "artifact.write",
+    ]
+    file_namespace_data_decision = RuntimePlanner().decision(
+        data_prompt,
+        allowed_tools=file_namespace_data_allowed,
+    )
+
+    assert file_namespace_data_decision.selected_intent.kind == "data_analysis"
+    assert file_namespace_data_decision.plan.tool_plan.missing_capabilities == []
+    assert _step_by_id(file_namespace_data_decision, "inspect-data-source").tool_name == (
+        "file.search"
+    )
+    assert planner_tool_requests(data_prompt, file_namespace_data_allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "file.search",
+            "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+
+    file_namespace_read_prompt = "分析 sales.csv 并输出一份报告"
+    assert planner_tool_requests(file_namespace_read_prompt, file_namespace_data_allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "file.read",
+            "input": {"path": "sales.csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+
     web_prompt = "研究一下 OpenAI 最近的模型发布并整理成报告"
     web_allowed = ["browser.search", "browser.extract", "artifact.write"]
     web_decision = RuntimePlanner().decision(web_prompt, allowed_tools=web_allowed)
@@ -14033,7 +14072,12 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
     snapshots = capability_snapshots()
     by_id = {snapshot.capability_id: snapshot for snapshot in snapshots}
     expected_tools_by_capability = {
-        "file.workspace_read": ["workspace.list", "workspace.read"],
+        "file.workspace_read": [
+            "workspace.list",
+            "workspace.read",
+            "file.search",
+            "file.read",
+        ],
         "file.workspace_write": ["workspace.write_patch"],
         "terminal.execution": ["terminal.run"],
         "data.analysis": ["data.analyze", "terminal.run"],

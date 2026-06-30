@@ -229,7 +229,7 @@ def _capability_id_for_tool(tool_name: str) -> str | None:
         return "future_task"
     if tool_name.startswith("workspace."):
         return "workspace"
-    if tool_name in {"fs.find_files", "fs.read_file"}:
+    if tool_name in {"fs.find_files", "fs.read_file", "file.search", "file.read"}:
         return "workspace"
     if tool_name.startswith("fs."):
         return "file.organization"
@@ -274,6 +274,8 @@ def _risk_level_for_tool(tool_name: str) -> str | None:
         "workspace.read",
         "fs.find_files",
         "fs.read_file",
+        "file.search",
+        "file.read",
         "artifact.write",
         "data.analyze",
         "browser.search",

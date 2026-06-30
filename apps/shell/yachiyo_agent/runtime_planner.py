@@ -2035,9 +2035,23 @@ class RuntimePlanner:
                 depends_on="analyze-data-file",
             )
         inspect_tool_candidates = (
-            ("workspace.read", "fs.read_file", "workspace.list", "fs.find_files")
+            (
+                "workspace.read",
+                "fs.read_file",
+                "file.read",
+                "workspace.list",
+                "fs.find_files",
+                "file.search",
+            )
             if source_hint
-            else ("workspace.list", "fs.find_files", "workspace.read", "fs.read_file")
+            else (
+                "workspace.list",
+                "fs.find_files",
+                "file.search",
+                "workspace.read",
+                "fs.read_file",
+                "file.read",
+            )
         )
         spreadsheet_steps = (
             [_with_step_dependencies(spreadsheet_app_step, ["inspect-data-source"])]
@@ -4625,7 +4639,17 @@ class RuntimePlanner:
                     "inspect-report-file-scope",
                     "Inspect report file scope",
                     "file.workspace_read",
-                    _first_allowed(("workspace.list", "workspace.read"), allowed),
+                    _first_allowed(
+                        (
+                            "workspace.list",
+                            "fs.find_files",
+                            "file.search",
+                            "workspace.read",
+                            "fs.read_file",
+                            "file.read",
+                        ),
+                        allowed,
+                    ),
                     input_preview=list_preview,
                     reason="Discover candidate local files before extracting or summarizing them.",
                 ),
@@ -4763,7 +4787,18 @@ class RuntimePlanner:
                 "gather-context",
                 "Gather available context",
                 "file.workspace_read",
-                _first_allowed(("workspace.list", "browser.current_page", "workspace.read"), allowed),
+                _first_allowed(
+                    (
+                        "workspace.list",
+                        "fs.find_files",
+                        "file.search",
+                        "browser.current_page",
+                        "workspace.read",
+                        "fs.read_file",
+                        "file.read",
+                    ),
+                    allowed,
+                ),
                 reason="Inspect available context before writing.",
             ),
         ]
@@ -4825,7 +4860,17 @@ class RuntimePlanner:
                 "inspect-workspace",
                 "Inspect workspace",
                 "file.workspace_read",
-                _first_allowed(("workspace.list", "workspace.read"), allowed),
+                _first_allowed(
+                    (
+                        "workspace.list",
+                        "fs.find_files",
+                        "file.search",
+                        "workspace.read",
+                        "fs.read_file",
+                        "file.read",
+                    ),
+                    allowed,
+                ),
                 reason="Understand the repo before editing or testing.",
             ),
             _step(
@@ -4878,7 +4923,13 @@ class RuntimePlanner:
                 "Inspect file scope",
                 "file.organization",
                 _first_allowed(
-                    ("workspace.list", "fs.find_files", "desktop.reveal_path", "desktop.open_path"),
+                    (
+                        "workspace.list",
+                        "fs.find_files",
+                        "file.search",
+                        "desktop.reveal_path",
+                        "desktop.open_path",
+                    ),
                     allowed,
                 ),
                 input_preview=_file_scope_input_preview(
@@ -5606,13 +5657,27 @@ def _context_source_steps(
         pattern = str(file_context.get("pattern") or "").strip()
         file_type = str(file_context.get("file_type") or "").strip()
         tool_candidates = (
-            ("workspace.list", "workspace.read")
+            (
+                "workspace.list",
+                "fs.find_files",
+                "file.search",
+                "workspace.read",
+                "fs.read_file",
+                "file.read",
+            )
             if pattern and not _looks_like_specific_data_source_path(path)
-            else ("workspace.read", "workspace.list")
+            else (
+                "workspace.read",
+                "fs.read_file",
+                "file.read",
+                "workspace.list",
+                "fs.find_files",
+                "file.search",
+            )
         )
         tool_name = _first_allowed(tool_candidates, allowed)
         input_preview: dict[str, str] = {"path": path}
-        if tool_name == "workspace.list":
+        if tool_name in {"workspace.list", "fs.find_files", "file.search"}:
             if pattern:
                 input_preview["pattern"] = pattern
             if file_type:
