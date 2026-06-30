@@ -57,6 +57,19 @@ def _capability_by_id(decision: PlannerDecisionSnapshot, capability_id: str):
     return {capability.capability_id: capability for capability in decision.plan.capabilities}[capability_id]
 
 
+def _freeze_schedule_now(monkeypatch: Any, value: datetime) -> None:
+    from apps.shell.yachiyo_agent import schedule_plan_hints
+
+    class FrozenDateTime(datetime):
+        @classmethod
+        def now(cls, tz: Any = None) -> datetime:
+            if tz is not None:
+                return value.replace(tzinfo=tz)
+            return value
+
+    monkeypatch.setattr(schedule_plan_hints, "datetime", FrozenDateTime)
+
+
 def _app_discovery_request(query: str) -> dict[str, Any]:
     return {
         "protocol": "json_fallback",
@@ -14119,9 +14132,13 @@ def test_runtime_planner_routes_iso_calendar_event_to_schedule_capability() -> N
     }
 
 
-def test_runtime_planner_routes_relative_reminder_to_schedule_capability() -> None:
+def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeypatch: Any) -> None:
+    _freeze_schedule_now(monkeypatch, datetime(2026, 6, 30, 10, 0))
     tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
     tomorrow_1000 = f"{(date.today() + timedelta(days=1)).isoformat()}T10:00"
+    today_1030 = "2026-06-30T10:30"
+    today_1045 = "2026-06-30T10:45"
+    today_1200 = "2026-06-30T12:00"
     next_monday = date.today() + timedelta(days=7 - date.today().weekday())
     next_monday_1000 = f"{next_monday.isoformat()}T10:00"
     decision = RuntimePlanner().decision(
@@ -14135,6 +14152,22 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability() -> No
     time_first_plain = RuntimePlanner().decision(
         "帮我下周一上午十点提醒团队复盘",
         allowed_tools=["reminders.create", "group.run"],
+    )
+    duration_cn = RuntimePlanner().decision(
+        "30分钟后提醒我喝水",
+        allowed_tools=["reminders.create"],
+    )
+    half_hour_cn = RuntimePlanner().decision(
+        "半小时后提醒我喝水",
+        allowed_tools=["reminders.create"],
+    )
+    duration_en = RuntimePlanner().decision(
+        "in 45 minutes remind me to stretch",
+        allowed_tools=["reminders.create"],
+    )
+    duration_en_middle = RuntimePlanner().decision(
+        "remind me in 2 hours to check the oven",
+        allowed_tools=["reminders.create"],
     )
 
     assert decision.selected_intent.kind == "schedule"
@@ -14154,6 +14187,23 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability() -> No
     assert time_first_plain_step.input_preview == {
         "title": "团队复盘",
         "due_at": next_monday_1000,
+    }
+    assert duration_cn.selected_intent.kind == "schedule"
+    assert _step_by_id(duration_cn, "create-schedule-item").input_preview == {
+        "title": "喝水",
+        "due_at": today_1030,
+    }
+    assert _step_by_id(half_hour_cn, "create-schedule-item").input_preview == {
+        "title": "喝水",
+        "due_at": today_1030,
+    }
+    assert _step_by_id(duration_en, "create-schedule-item").input_preview == {
+        "title": "stretch",
+        "due_at": today_1045,
+    }
+    assert _step_by_id(duration_en_middle, "create-schedule-item").input_preview == {
+        "title": "check the oven",
+        "due_at": today_1200,
     }
 
 
@@ -14183,7 +14233,12 @@ def test_runtime_planner_falls_back_to_future_task_for_timed_reminders() -> None
     assert untimed_step.status == "unavailable"
 
 
-def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability() -> None:
+def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability(monkeypatch: Any) -> None:
+    _freeze_schedule_now(monkeypatch, datetime(2026, 6, 30, 10, 0))
+    today_1030 = "2026-06-30T10:30"
+    today_1130 = "2026-06-30T11:30"
+    today_1045 = "2026-06-30T10:45"
+    today_1145 = "2026-06-30T11:45"
     tomorrow_1500 = f"{(date.today() + timedelta(days=1)).isoformat()}T15:00"
     tomorrow_1600 = f"{(date.today() + timedelta(days=1)).isoformat()}T16:00"
     next_monday = date.today() + timedelta(days=7 - date.today().weekday())
@@ -14212,6 +14267,14 @@ def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability()
     team_retro = RuntimePlanner().decision(
         "安排下周一上午十点和团队复盘",
         allowed_tools=["calendar.create_event", "group.run"],
+    )
+    duration_cn = RuntimePlanner().decision(
+        "30分钟后安排和张三开会",
+        allowed_tools=["calendar.create_event"],
+    )
+    duration_en = RuntimePlanner().decision(
+        "in 45 minutes schedule a meeting with Alice",
+        allowed_tools=["calendar.create_event"],
     )
 
     assert decision.selected_intent.kind == "schedule"
@@ -14252,6 +14315,17 @@ def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability()
         "title": "和团队复盘",
         "start_at": next_monday_1000,
         "end_at": next_monday_1100,
+    }
+    assert duration_cn.selected_intent.kind == "schedule"
+    assert _step_by_id(duration_cn, "create-schedule-item").input_preview == {
+        "title": "和张三开会",
+        "start_at": today_1030,
+        "end_at": today_1130,
+    }
+    assert _step_by_id(duration_en, "create-schedule-item").input_preview == {
+        "title": "Alice",
+        "start_at": today_1045,
+        "end_at": today_1145,
     }
 
 
@@ -19014,9 +19088,14 @@ def test_planner_tool_requests_maps_explicit_reminder_plan() -> None:
     ]
 
 
-def test_planner_tool_requests_maps_relative_schedule_plans() -> None:
+def test_planner_tool_requests_maps_relative_schedule_plans(monkeypatch: Any) -> None:
+    _freeze_schedule_now(monkeypatch, datetime(2026, 6, 30, 10, 0))
     tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
     tomorrow_1000 = f"{(date.today() + timedelta(days=1)).isoformat()}T10:00"
+    today_1030 = "2026-06-30T10:30"
+    today_1045 = "2026-06-30T10:45"
+    today_1130 = "2026-06-30T11:30"
+    today_1145 = "2026-06-30T11:45"
     tomorrow_1500 = f"{(date.today() + timedelta(days=1)).isoformat()}T15:00"
     tomorrow_1600 = f"{(date.today() + timedelta(days=1)).isoformat()}T16:00"
     next_monday = date.today() + timedelta(days=7 - date.today().weekday())
@@ -19079,6 +19158,30 @@ def test_planner_tool_requests_maps_relative_schedule_plans() -> None:
             "protocol": "json_fallback",
             "tool": "reminders.create",
             "input": {"title": "团队复盘", "due_at": next_monday_1000},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
+        "30分钟后提醒我喝水",
+        allowed_tools=["reminders.create"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {"title": "喝水", "due_at": today_1030},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
+        "in 45 minutes remind me to stretch",
+        allowed_tools=["reminders.create"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {"title": "stretch", "due_at": today_1045},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_schedule",
         }
@@ -19174,6 +19277,38 @@ def test_planner_tool_requests_maps_relative_schedule_plans() -> None:
                 "title": "和团队复盘",
                 "start_at": next_monday_1000,
                 "end_at": next_monday_1100,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
+        "30分钟后安排和张三开会",
+        allowed_tools=["calendar.create_event"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "和张三开会",
+                "start_at": today_1030,
+                "end_at": today_1130,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
+        "in 45 minutes schedule a meeting with Alice",
+        allowed_tools=["calendar.create_event"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "Alice",
+                "start_at": today_1045,
+                "end_at": today_1145,
             },
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_schedule",

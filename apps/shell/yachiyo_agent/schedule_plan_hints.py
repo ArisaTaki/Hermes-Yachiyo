@@ -15,6 +15,18 @@ _CHINESE_DAY_MARKER_RE = (
     r"今天|今日|今晚|明天|明日|明晚|后天|"
     r"下周[一二三四五六日天]|下星期[一二三四五六日天]"
 )
+_ENGLISH_RELATIVE_NUMBER_RE = (
+    r"\d+|one|two|three|four|five|six|seven|eight|nine|ten|"
+    r"eleven|twelve|thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|"
+    r"nineteen|twenty|thirty|forty|fifty|sixty"
+)
+_RELATIVE_DELAY_TEXT_RE = (
+    r"(?:半|半个)\s*(?:小时|钟头)\s*(?:后|之后|以后)|"
+    r"(?:\d+|[零〇一二两三四五六七八九十]{1,4})\s*"
+    r"(?:分钟|分|小时|个小时|钟头|天|日)\s*(?:后|之后|以后)|"
+    rf"\b(?:in|after)\s+(?:{_ENGLISH_RELATIVE_NUMBER_RE})\s*"
+    r"(?:minutes?|mins?|hours?|hrs?|days?)\b"
+)
 
 
 def schedule_tool_preview(
@@ -52,6 +64,10 @@ def reminder_payload(text: str) -> dict[str, Any]:
     if scheduled:
         due_at, title = scheduled
         return {"title": title, "due_at": _local_datetime_text(due_at)} if title else {}
+    relative = _extract_relative_delay_datetime_and_title(body)
+    if relative:
+        due_at, title = relative
+        return {"title": title, "due_at": _local_datetime_text(due_at)} if title else {}
     date_only = _extract_reminder_date_only_datetime_and_title(body)
     if date_only:
         due_at, title = date_only
@@ -78,6 +94,8 @@ def calendar_event_payload(text: str) -> dict[str, Any]:
     if not body:
         return {}
     scheduled = _extract_schedule_datetime_and_title(body)
+    if not scheduled:
+        scheduled = _extract_relative_delay_datetime_and_title(body)
     if not scheduled:
         return {}
     start, title = scheduled
@@ -168,6 +186,16 @@ def _reminder_body(text: str) -> str:
         r"(?P<body_set>[^。！？!?]+?)\s*(?:的)?(?:提醒事项|提醒)$",
         r"^(?:please\s+)?(?:create|add|make)?\s*(?:a\s+)?(?:new\s+)?reminder\s*(?:called|named|for|to)?\s*(?P<title_en>.+)$",
         r"^(?:please\s+)?(?:set)\s+(?:a\s+)?(?:new\s+)?reminder\s*(?:called|named|for|to)?\s*(?P<body_set_en>[^.!?]+)$",
+        r"^(?:please\s+)?(?P<body_time_first_en>(?:in|after)\s+"
+        r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+        r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
+        r"thirty|forty|fifty|sixty)\s*(?:minutes?|mins?|hours?|hrs?|days?))\s+"
+        r"remind\s+me\s+(?:to\s+)?(?P<body_time_after_en>[^.!?]+)$",
+        r"^(?:please\s+)?remind\s+me\s+(?P<body_time_mid_en>(?:in|after)\s+"
+        r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
+        r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
+        r"thirty|forty|fifty|sixty)\s*(?:minutes?|mins?|hours?|hrs?|days?))\s+"
+        r"(?:to\s+)?(?P<body_after_mid_en>[^.!?]+)$",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
@@ -179,6 +207,14 @@ def _reminder_body(text: str) -> str:
         if groups.get("body_time_first_plain") and groups.get("body_time_after_plain"):
             return _strip_schedule_prefix(
                 f"{groups['body_time_first_plain']} {groups['body_time_after_plain']}"
+            )
+        if groups.get("body_time_first_en") and groups.get("body_time_after_en"):
+            return _strip_schedule_prefix(
+                f"{groups['body_time_first_en']} {groups['body_time_after_en']}"
+            )
+        if groups.get("body_time_mid_en") and groups.get("body_after_mid_en"):
+            return _strip_schedule_prefix(
+                f"{groups['body_time_mid_en']} {groups['body_after_mid_en']}"
             )
         body = _strip_schedule_prefix(
             groups.get("body")
@@ -213,6 +249,10 @@ def _calendar_title(text: str, start_at: str) -> str:
 def _calendar_body(text: str) -> str:
     value = _clean(text)
     patterns = (
+        rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?P<relative_time_first>{_RELATIVE_DELAY_TEXT_RE})\s*(?:帮我)?\s*"
+        r"(?:加|新建|创建|添加|新增|安排)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?P<title_after_relative_time>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         rf"(?P<time_first>(?:(?:{_CHINESE_DAY_MARKER_RE})\s*)?"
         r"(?:(?:上午|早上|下午|晚上|今晚|中午|凌晨)\s*)?"
@@ -248,6 +288,10 @@ def _calendar_body(text: str) -> str:
         r"(?:called|named|for)?\s*(?P<body>[^.!?]+)$",
         r"^(?:please\s+)?(?:schedule|add|create|make)\s+(?P<body_to_calendar_en>[^.!?]+?)\s+"
         r"(?:to|on|in)\s+(?:the\s+)?calendar$",
+        rf"^(?:please\s+)?(?P<relative_time_first_en>{_RELATIVE_DELAY_TEXT_RE})\s+"
+        r"(?:schedule|add|create|make)\s+(?:a\s+)?"
+        r"(?:(?:calendar\s+)?(?:event|meeting)\s*(?:with|for)?\s*)?"
+        r"(?P<title_after_relative_time_en>[^.!?]+)$",
         r"^(?:please\s+)?schedule\s+(?P<body_scheduled_en>[^.!?]+)$",
     )
     for pattern in patterns:
@@ -255,6 +299,15 @@ def _calendar_body(text: str) -> str:
         if not match:
             continue
         groups = match.groupdict()
+        if groups.get("relative_time_first") and groups.get("title_after_relative_time"):
+            return _strip_schedule_prefix(
+                f"{groups['relative_time_first']} "
+                f"{_strip_calendar_target_suffix(groups['title_after_relative_time'])}"
+            )
+        if groups.get("relative_time_first_en") and groups.get("title_after_relative_time_en"):
+            return _strip_schedule_prefix(
+                f"{groups['relative_time_first_en']} {groups['title_after_relative_time_en']}"
+            )
         if groups.get("time_first") and groups.get("title_after_calendar"):
             return _strip_schedule_prefix(f"{groups['time_first']} {groups['title_after_calendar']}")
         if groups.get("time_first") and groups.get("title_after_time"):
@@ -283,6 +336,7 @@ def _has_explicit_schedule_time(text: str) -> bool:
         re.search(
             rf"(?:{_CHINESE_DAY_MARKER_RE}|上午|早上|下午|晚上|今晚|中午|凌晨|"
             r"\d{1,2}\s*点|\d{1,2}\s*[:：]\s*\d{1,2}|"
+            rf"{_RELATIVE_DELAY_TEXT_RE}|"
             r"\b(?:today|tomorrow|tonight)\b|\bat\s+\d{1,2}(?::\d{2})?\b)",
             value,
             flags=re.IGNORECASE,
@@ -363,6 +417,60 @@ def _extract_schedule_datetime_and_title(value: str) -> tuple[datetime, str] | N
         title = _strip_schedule_prefix(f"{text[: match.start()]} {text[match.end() :]}")
         if title:
             return scheduled, title
+    return None
+
+
+_RELATIVE_DELAY_PATTERNS = (
+    re.compile(
+        r"(?P<full>"
+        r"(?:(?P<half_cn>半|半个)\s*(?:小时|钟头)|"
+        r"(?P<amount_cn>\d+|[零〇一二两三四五六七八九十]{1,4})\s*"
+        r"(?P<unit_cn>分钟|分|小时|个小时|钟头|天|日))"
+        r"\s*(?:后|之后|以后))"
+    ),
+    re.compile(
+        r"(?P<full>\b(?:in|after)\s+"
+        rf"(?P<amount_en>{_ENGLISH_RELATIVE_NUMBER_RE})\s*"
+        r"(?P<unit_en>minutes?|mins?|hours?|hrs?|days?)\b)",
+        flags=re.IGNORECASE,
+    ),
+)
+
+
+def _extract_relative_delay_datetime_and_title(value: str) -> tuple[datetime, str] | None:
+    text = _clean(value)
+    if not text:
+        return None
+    for pattern in _RELATIVE_DELAY_PATTERNS:
+        match = pattern.search(text)
+        if not match:
+            continue
+        delay = _relative_delay_from_match(match)
+        if delay is None:
+            continue
+        title = _strip_schedule_prefix(f"{text[: match.start()]} {text[match.end() :]}")
+        if title:
+            return datetime.now() + delay, title
+    return None
+
+
+def _relative_delay_from_match(match: re.Match[str]) -> timedelta | None:
+    groups = match.groupdict()
+    if groups.get("half_cn"):
+        return timedelta(minutes=30)
+    amount = _parse_schedule_number(groups.get("amount_cn"))
+    unit = str(groups.get("unit_cn") or "").strip()
+    if amount is None:
+        amount = _parse_english_schedule_number(groups.get("amount_en"))
+        unit = str(groups.get("unit_en") or "").lower()
+    if amount is None or amount <= 0:
+        return None
+    if unit in {"分钟", "分", "minute", "minutes", "min", "mins"}:
+        return timedelta(minutes=amount)
+    if unit in {"小时", "个小时", "钟头", "hour", "hours", "hr", "hrs"}:
+        return timedelta(hours=amount)
+    if unit in {"天", "日", "day", "days"}:
+        return timedelta(days=amount)
     return None
 
 
@@ -512,6 +620,43 @@ def _parse_schedule_number(value: str | None) -> int | None:
             return None
         return head_value * 10 + (_CHINESE_DIGITS.get(tail, 0) if tail else 0)
     return None
+
+
+_ENGLISH_SCHEDULE_NUMBERS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+    "eleven": 11,
+    "twelve": 12,
+    "thirteen": 13,
+    "fourteen": 14,
+    "fifteen": 15,
+    "sixteen": 16,
+    "seventeen": 17,
+    "eighteen": 18,
+    "nineteen": 19,
+    "twenty": 20,
+    "thirty": 30,
+    "forty": 40,
+    "fifty": 50,
+    "sixty": 60,
+}
+
+
+def _parse_english_schedule_number(value: str | None) -> int | None:
+    text = str(value or "").strip().lower()
+    if not text:
+        return None
+    if text.isdigit():
+        return int(text)
+    return _ENGLISH_SCHEDULE_NUMBERS.get(text)
 
 
 def _local_datetime_text(value: datetime) -> str:
