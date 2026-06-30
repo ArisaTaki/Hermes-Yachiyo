@@ -1,0 +1,124 @@
+# Oha-Yachiyo Public Release Readiness
+
+This page is the public-project release checklist for Oha-Yachiyo. It is
+intended for maintainers preparing a release, contributors checking whether a
+change is release-facing, and users who need an honest view of what is supported
+today.
+
+## Supported Product Shape
+
+Oha-Yachiyo is a desktop-first local personal Agent app.
+
+Supported first-class surfaces:
+
+- Chat Window for daily conversation and task entry.
+- Bubble and Live2D as desktop entry points into the shared Chat runtime.
+- Agent Studio for Agent definitions, skills, Groups, Workflow, Run Detail,
+  approvals, artifacts, and replay.
+- Native Agent runtime inside this repository, backed by `NativeRunEngine`,
+  model profiles, `ToolBroker`, policy gates, approvals, artifacts, memory,
+  skills, workflow runs, and group runs.
+- Local Bridge APIs bound to loopback for the frontend and optional integrations.
+
+The project should not require a separate external execution kernel for normal
+Agent tasks. Release packages should not require users to have a global Python,
+Node.js, or editable checkout.
+
+## Known Limitations
+
+Do not claim these as completed release capabilities unless the current RC
+evidence proves them:
+
+- macOS is the primary packaged target. Windows and Linux are still source-first
+  or developer-targeted until they have their own packaged smoke evidence.
+- Unsigned or self-signed macOS builds still require documented Gatekeeper
+  first-launch handling.
+- Screen Recording, Accessibility, Automation, browser/CDP, model profile, and
+  workspace permissions may require user action before desktop tasks work.
+- Real provider smokes require `OHA_YACHIYO_SMOKE_BASE_URL`,
+  `OHA_YACHIYO_SMOKE_MODEL`, and `OHA_YACHIYO_SMOKE_API_KEY`.
+- High-risk actions still require approval. A release must not bypass
+  approval/policy gates to look more autonomous.
+- A capability is roadmap-only when it lacks source, provider, packaged, UI, or
+  manual evidence in the current release candidate.
+
+## Demo Flows
+
+Before presenting Oha-Yachiyo as Hanako/Hermes-level desktop execution, collect
+evidence for these flows:
+
+| Flow | Evidence |
+| --- | --- |
+| Arbitrary app operation | `real_desktop_*` smokes or RC capability matrix entries for app open, UI inspection, and interaction. |
+| Data analysis artifact | `data_analysis_artifact_smoke` and artifact readback evidence. |
+| Browser research | `browser_planner_artifact_smoke` evidence. |
+| Approval resume | `approval_resume_timeline_smoke`, `runtime_approval_resume_smoke`, and route approval evidence. |
+| GroupRun | `group_run_timeline_smoke` and Agent Studio GroupRun replay evidence. |
+| Workflow | native Workflow full-chain provider smoke and Workflow UI smoke evidence. |
+| Studio replay | Run Detail / Agent Studio UI smoke plus RunEvent replay evidence. |
+| Diagnostics export | `collect_release_diagnostics.py` bundle manifest and `release-smoke` diagnostics item. |
+
+The release-smoke summary is the quickest user-path view:
+
+```bash
+SHORT_COMMIT="$(git rev-parse --short=8 HEAD)"
+python scripts/summarize_release_smoke.py \
+  "tmp/rc-verification-${SHORT_COMMIT}-source-capabilities.json" \
+  "tmp/rc-verification-${SHORT_COMMIT}-packaged-batch.json" \
+  "tmp/rc-verification-${SHORT_COMMIT}-screen.json" \
+  --diagnostics-zip "tmp/oha-yachiyo-diagnostics-${SHORT_COMMIT}.zip" \
+  --output-json "tmp/rc-verification-${SHORT_COMMIT}-release-smoke.json" \
+  --output-markdown "tmp/rc-verification-${SHORT_COMMIT}-release-smoke.md"
+```
+
+## Local Release Gates
+
+Run these before calling a local build release-ready:
+
+```bash
+python scripts/verify_release_artifacts.py
+python scripts/verify_secret_redaction.py
+python scripts/refresh_local_rc_signoff.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
+python scripts/refresh_local_rc_signoff.py --print-status
+```
+
+`refresh_local_rc_signoff.py` builds/refreshes the current local RC evidence,
+generates the Native Agent capability matrix, writes release readiness
+diagnostics, exports a redacted diagnostics bundle, summarizes release-smoke
+user paths, and writes signoff drafts. If the final signoff is still blocked by
+manual Gatekeeper or Screen Recording checks, that is a remaining release task,
+not a failure to hide.
+
+## Diagnostics Bundle
+
+When a maintainer needs support evidence, collect a redacted bundle:
+
+```bash
+SHORT_COMMIT="$(git rev-parse --short=8 HEAD)"
+python scripts/collect_release_diagnostics.py \
+  --label "$SHORT_COMMIT" \
+  --include-app-logs \
+  --output-zip "tmp/oha-yachiyo-diagnostics-${SHORT_COMMIT}.zip"
+```
+
+The bundle includes `diagnostics/manifest.json`. It records included and skipped
+files, applies `packages.security` redaction, skips binary or oversized files,
+and fails closed for files that still look secret-like after redaction.
+
+## Release Notes
+
+Use the release workflow or changelog helper to generate notes from git history.
+Release notes must distinguish:
+
+- Shipped capabilities with current evidence.
+- Known limitations.
+- Manual permission steps.
+- Breaking changes or migration notes.
+- Rollback steps and diagnostics collection.
+
+## Contributor Boundary
+
+See [CONTRIBUTING.md](../CONTRIBUTING.md). Release-facing contributions must
+preserve Agent Studio, Groups, Workflow, Run Timeline, approval gates, legacy
+route response shapes, and database schema compatibility unless a dedicated
+migration plan and tests exist.

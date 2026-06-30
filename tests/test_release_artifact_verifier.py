@@ -986,6 +986,10 @@ def test_verifier_requires_user_facing_release_docs_for_first_launch(tmp_path):
     manual = tmp_path / "docs" / "user-manual.md"
     manual.parent.mkdir(parents=True)
     manual.write_text("# Oha-Yachiyo 使用手册\n\n首次启动后进入主窗口。\n", encoding="utf-8")
+    public_release = tmp_path / "docs" / "public-release-readiness.md"
+    public_release.write_text("# Public Release\n\nSupported product shape.\n", encoding="utf-8")
+    contributing = tmp_path / "CONTRIBUTING.md"
+    contributing.write_text("# Contributing\n\nTesting expectations.\n", encoding="utf-8")
 
     findings = verifier._verify_user_facing_release_docs(tmp_path)
     messages = [finding.message for finding in findings]
@@ -994,6 +998,12 @@ def test_verifier_requires_user_facing_release_docs_for_first_launch(tmp_path):
     assert "README must document macOS Screen Recording permission" in messages
     assert "user manual must document Gatekeeper first-launch handling" in messages
     assert "user manual must document macOS Screen Recording permission" in messages
+    assert "README must link the public release readiness guide" in messages
+    assert "README must link the contribution guide" in messages
+    assert "user manual must document the diagnostics bundle support path" in messages
+    assert "public release readiness guide must document known limitations" in messages
+    assert "public release readiness guide must state packaged runtime expectations" in messages
+    assert "contribution guide must document non-negotiable product boundaries" in messages
 
 
 def _write_packaged_app_bundle(

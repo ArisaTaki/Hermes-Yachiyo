@@ -29,6 +29,18 @@ Source runs require:
 
 The `oha-yachiyo` command starts the Electron + React frontend and the Python backend. If frontend dependencies are missing, the launcher can install `apps/frontend/node_modules`; it does not install Node.js itself.
 
+## Public Release Status
+
+Public release work follows an evidence-first rule:
+
+- User flows are documented in [docs/user-manual.md](docs/user-manual.md).
+- Supported product shape, known limitations, demo evidence, release smoke, and diagnostics bundle expectations are documented in [docs/public-release-readiness.md](docs/public-release-readiness.md).
+- macOS packaging, RC signoff, Gatekeeper / Screen Recording, redacted diagnostics bundles, and rollback steps are documented in [docs/release-packaging.md](docs/release-packaging.md).
+- Contributor expectations are documented in [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Capabilities without current smoke, RC report, manual evidence, or tests must be
+described as roadmap work, not shipped behavior.
+
 ## What It Does
 
 Oha-Yachiyo is a local desktop shell, not another hosted chat page:

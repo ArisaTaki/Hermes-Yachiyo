@@ -144,6 +144,36 @@ USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
         "屏幕录制权限",
         "user manual must document macOS Screen Recording permission",
     ),
+    (
+        Path("README.md"),
+        "docs/public-release-readiness.md",
+        "README must link the public release readiness guide",
+    ),
+    (
+        Path("README.md"),
+        "CONTRIBUTING.md",
+        "README must link the contribution guide",
+    ),
+    (
+        Path("docs/user-manual.md"),
+        "诊断包",
+        "user manual must document the diagnostics bundle support path",
+    ),
+    (
+        Path("docs/public-release-readiness.md"),
+        "Known Limitations",
+        "public release readiness guide must document known limitations",
+    ),
+    (
+        Path("docs/public-release-readiness.md"),
+        "Release packages should not require users to have a global Python",
+        "public release readiness guide must state packaged runtime expectations",
+    ),
+    (
+        Path("CONTRIBUTING.md"),
+        "Non-Negotiable Product Boundaries",
+        "contribution guide must document non-negotiable product boundaries",
+    ),
 )
 PACKAGING_CONFIG_FILE = Path("apps/frontend/electron-builder.yml")
 PACKAGED_APP_OUTPUT_DIR = Path("dist/electron")

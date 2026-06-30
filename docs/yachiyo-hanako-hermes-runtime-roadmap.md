@@ -712,6 +712,16 @@ Exit evidence:
 - The release checklist states known limitations honestly and does not claim
   capabilities that lack current smoke or integration evidence.
 
+Current progress: `docs/public-release-readiness.md` defines the supported
+public product shape, known limitations, demo evidence, local release gates,
+diagnostics bundle, release-note expectations, and contributor boundary.
+`CONTRIBUTING.md` now documents setup, non-negotiable product boundaries,
+privacy, tests, release-facing checks, and PR notes. `verify_release_artifacts.py`
+guards the README, user manual, public release readiness guide, and contribution
+guide so public release docs cannot silently drop Gatekeeper, Screen Recording,
+diagnostics bundle, known limitation, packaged runtime, or product-boundary
+language.
+
 ## Non-Negotiable Guards
 
 - 禁止删除 Agent Studio。

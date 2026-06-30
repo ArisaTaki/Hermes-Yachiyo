@@ -29,6 +29,17 @@ Oha-Yachiyo 目前仍是源码开发形态，不是已经打包好的普通桌�
 
 如果你只是想体验桌面软件，建议等 Release 包；如果你愿意从源码运行，请按下面步骤来。
 
+## 公开发布状态
+
+当前公开发布仍按“先证明、再声明”的原则推进：
+
+- 用户使用路径见 [docs/user-manual.md](docs/user-manual.md)。
+- 发布前支持形态、已知限制、demo evidence、release smoke 和诊断包流程见 [docs/public-release-readiness.md](docs/public-release-readiness.md)。
+- macOS 打包、RC 签核、Gatekeeper / Screen Recording、脱敏诊断包和回滚步骤见 [docs/release-packaging.md](docs/release-packaging.md)。
+- 参与开发请先看 [CONTRIBUTING.md](CONTRIBUTING.md)。
+
+没有当前 smoke、RC report、手工 evidence 或测试覆盖的能力，只能作为 roadmap 描述，不能写成已发布能力。
+
 ## 它能做什么
 
 Oha-Yachiyo 不是另一个聊天网页，而是一个本地桌面壳：

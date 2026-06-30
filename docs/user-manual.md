@@ -214,6 +214,18 @@ GPT-SoVITS 音色包导入后，页面会填入权重、参考音频、语言、
 - TTS 测试结果。
 - release-like build 下 debug routes 是否关闭。
 
+维护者排查发布包问题时，可以生成脱敏诊断包。诊断包会收集本轮 RC、signoff、release readiness、release smoke 和日志类文本，并在写入 zip 前清洗明显 secret：
+
+```bash
+SHORT_COMMIT="$(git rev-parse --short=8 HEAD)"
+python scripts/collect_release_diagnostics.py \
+  --label "$SHORT_COMMIT" \
+  --include-app-logs \
+  --output-zip "tmp/oha-yachiyo-diagnostics-${SHORT_COMMIT}.zip"
+```
+
+如果需要确认当前发布用户路径覆盖度，维护者可以查看 `tmp/rc-verification-<short-commit>-release-smoke.json` / `.md`，或运行 `python scripts/refresh_local_rc_signoff.py --print-status`。这类诊断材料只用于排障和签核沟通，不会替代最终人工确认。
+
 ## 17. 备份与恢复
 
 应用维护页可以生成配置和工作空间备份。备份内容包括：
