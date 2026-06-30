@@ -7,10 +7,15 @@ import sys
 from scripts import build_release_candidate_artifacts as builder
 
 
+def _skip_pyinstaller_preflight(monkeypatch) -> None:
+    monkeypatch.setattr(builder, "_ensure_pyinstaller_available", lambda: None)
+
+
 def test_build_release_candidate_artifacts_restores_tracked_metadata(
     monkeypatch,
     tmp_path,
 ):
+    _skip_pyinstaller_preflight(monkeypatch)
     metadata_path = tmp_path / "apps" / "frontend" / "public" / "oha-yachiyo-build.json"
     metadata_path.parent.mkdir(parents=True)
     metadata_path.write_text('{"commit":"dev"}\n', encoding="utf-8")
@@ -74,6 +79,7 @@ def test_build_release_candidate_artifacts_restores_metadata_after_failure(
     monkeypatch,
     tmp_path,
 ):
+    _skip_pyinstaller_preflight(monkeypatch)
     metadata_path = tmp_path / "apps" / "frontend" / "public" / "oha-yachiyo-build.json"
     metadata_path.parent.mkdir(parents=True)
     metadata_path.write_text('{"commit":"dev"}\n', encoding="utf-8")
@@ -104,6 +110,7 @@ def test_build_release_candidate_artifacts_can_preserve_electron_output(
     monkeypatch,
     tmp_path,
 ):
+    _skip_pyinstaller_preflight(monkeypatch)
     metadata_path = tmp_path / "apps" / "frontend" / "public" / "oha-yachiyo-build.json"
     metadata_path.parent.mkdir(parents=True)
     metadata_path.write_text('{"commit":"dev"}\n', encoding="utf-8")
@@ -133,3 +140,54 @@ def test_build_release_candidate_artifacts_can_preserve_electron_output(
     )
 
     assert legacy_dmg_path.exists()
+
+
+def test_build_release_candidate_artifacts_fails_fast_without_pyinstaller(
+    monkeypatch,
+    tmp_path,
+):
+    metadata_path = tmp_path / "apps" / "frontend" / "public" / "oha-yachiyo-build.json"
+    metadata_path.parent.mkdir(parents=True)
+    metadata_path.write_text('{"commit":"dev"}\n', encoding="utf-8")
+    venv_python = tmp_path / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    commands: list[list[str]] = []
+
+    monkeypatch.setattr(builder, "ROOT", tmp_path)
+    monkeypatch.setattr(builder, "BUILD_METADATA_FILE", metadata_path)
+    monkeypatch.setattr(builder, "_pyinstaller_available", lambda: False)
+    monkeypatch.setattr(builder, "_run", lambda command: commands.append(command))
+
+    try:
+        builder.build_release_candidate_artifacts(channel="experimental")
+    except RuntimeError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("missing PyInstaller should fail before mutating metadata")
+
+    assert "PyInstaller is not available" in message
+    assert str(venv_python) in message
+    assert "scripts/build_release_candidate_artifacts.py" in message
+    assert metadata_path.read_text(encoding="utf-8") == '{"commit":"dev"}\n'
+    assert commands == []
+
+
+def test_build_release_candidate_artifacts_cli_reports_missing_pyinstaller(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    venv_python = tmp_path / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(builder, "ROOT", tmp_path)
+    monkeypatch.setattr(builder, "_pyinstaller_available", lambda: False)
+
+    assert builder.main(["--channel", "experimental"]) == 1
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert "release candidate artifact build failed:" in captured.err
+    assert "PyInstaller is not available" in captured.err
+    assert "Traceback" not in captured.err

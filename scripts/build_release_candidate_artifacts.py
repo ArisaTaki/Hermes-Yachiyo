@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import importlib.util
 import shutil
 import subprocess
 import sys
@@ -19,6 +20,26 @@ ELECTRON_DIST_DIR = ROOT / "dist" / "electron"
 
 def _run(command: list[str]) -> None:
     subprocess.run(command, cwd=ROOT, check=True)
+
+
+def _pyinstaller_available() -> bool:
+    return importlib.util.find_spec("PyInstaller") is not None
+
+
+def _ensure_pyinstaller_available() -> None:
+    if _pyinstaller_available():
+        return
+    venv_python = ROOT / ".venv" / "bin" / "python"
+    venv_hint = (
+        f" Run `{venv_python} scripts/build_release_candidate_artifacts.py ...` "
+        "from the project root if the project virtualenv is prepared."
+        if venv_python.exists()
+        else " Install PyInstaller into the selected Python environment first."
+    )
+    raise RuntimeError(
+        f"PyInstaller is not available for {sys.executable}; cannot build the "
+        f"packaged backend.{venv_hint}"
+    )
 
 
 def _restore_metadata(original: bytes | None) -> None:
@@ -51,6 +72,7 @@ def build_release_candidate_artifacts(
     clean_electron: bool = True,
     built_at: str | None = None,
 ) -> dict[str, Path]:
+    _ensure_pyinstaller_available()
     original_metadata = (
         BUILD_METADATA_FILE.read_bytes() if BUILD_METADATA_FILE.exists() else None
     )
@@ -112,13 +134,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Do not remove old dist/electron output before running electron-builder.",
     )
     args = parser.parse_args(argv)
-    artifacts = build_release_candidate_artifacts(
-        channel=args.channel,
-        repository=args.repository,
-        clean_backend=not args.no_clean_backend,
-        clean_electron=not args.no_clean_electron,
-        built_at=args.built_at,
-    )
+    try:
+        artifacts = build_release_candidate_artifacts(
+            channel=args.channel,
+            repository=args.repository,
+            clean_backend=not args.no_clean_backend,
+            clean_electron=not args.no_clean_electron,
+            built_at=args.built_at,
+        )
+    except RuntimeError as exc:
+        print(f"release candidate artifact build failed: {exc}", file=sys.stderr)
+        return 1
     print(f"packaged backend: {artifacts['backend']}")
     print(f"Electron DMG: {artifacts['dmg']}")
     print(f"restored tracked build metadata: {artifacts['metadata']}")
