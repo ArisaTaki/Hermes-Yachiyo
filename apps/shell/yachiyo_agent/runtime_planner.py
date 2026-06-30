@@ -417,6 +417,14 @@ class TaskIntentRouter:
             safe_scroll = app_scoped_safe_operation["safe_scroll"]
         safe_click = safe_click_hint(text)
         foreground_compose_text = _foreground_compose_text_hint(text)
+        if (
+            app_capability
+            and safe_shortcut
+            and _looks_like_app_scoped_create_followup(text)
+            and not _app_scoped_create_text_hint(text)
+            and not _generic_create_title_text_hint(text)
+        ):
+            foreground_compose_text = ""
         if control_presence_inspection:
             foreground_compose_text = ""
         if str((safe_shortcut or {}).get("action") or "").strip() == "new_message":
@@ -18392,7 +18400,7 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
     if not value:
         return {}
     patterns = (
-        r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
+        r"(?:打开|启动|找|找一个|找一款|使用|在|用|通过)\s*"
         r"(?:一个|一款|任意|任何|可用)?\s*"
         r"(?:能|可以|可用于|用来|用于)\s*(?P<capability>[^。！？!?，,]{1,40}?)"
         r"(?:的)?(?:应用(?:程序)?|app|软件|工具|程序)",
@@ -18403,6 +18411,10 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?:(?:an?|any|some|available)\s+)?"
         r"(?:app|application|tool|program)\s+"
         r"(?:that\s+can|to|for)\s+(?P<capability_en>[^.!?,]{1,60})",
+        r"\b(?:in|inside|within|using|with)\s+"
+        r"(?:(?:an?|any|some|available)\s+)?"
+        r"(?:app|application|tool|program)\s+"
+        r"(?:that\s+can|to|for)\s+(?P<scoped_capability_en>[^.!?,]{1,60})",
         r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
         r"(?:一个|一款|任意|任何|可用)?\s*"
         r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
@@ -18640,8 +18652,19 @@ def _discovered_app_open_requested(intent: TaskIntentSnapshot) -> bool:
     text = _clean_prompt(intent.user_goal)
     if not text:
         return False
-    if isinstance(intent.inputs.get("app_capability_hint"), Mapping) and _explicit_app_open_request(text):
-        return True
+    if isinstance(intent.inputs.get("app_capability_hint"), Mapping):
+        safe_shortcut = intent.inputs.get("safe_shortcut_hint")
+        if _explicit_app_open_request(text):
+            return True
+        if str(intent.inputs.get("selected_app_target_path_hint") or "").strip():
+            return True
+        if (
+            isinstance(safe_shortcut, Mapping)
+            and str(safe_shortcut.get("action") or "").strip()
+        ):
+            return True
+        if _looks_like_app_scoped_create_followup(text):
+            return True
     desktop_discovery = intent.inputs.get("desktop_discovery_hint")
     if (
         isinstance(desktop_discovery, Mapping)

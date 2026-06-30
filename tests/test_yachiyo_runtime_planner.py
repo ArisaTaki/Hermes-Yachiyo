@@ -6433,6 +6433,36 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
             "continue_to_model": True,
         }
     ]
+    scoped_markdown = RuntimePlanner().decision(
+        "帮我在一个能写 Markdown 的应用里新建文档",
+        allowed_tools=allowed_tools,
+    )
+    assert scoped_markdown.selected_intent.inputs["app_name_hint"] == ""
+    assert scoped_markdown.selected_intent.inputs["app_capability_hint"] == {
+        "query": "markdown",
+        "description": "Markdown",
+    }
+    assert "foreground_compose_text_hint" not in scoped_markdown.selected_intent.inputs
+    assert [step.step_id for step in scoped_markdown.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+    ]
+    assert _step_by_id(scoped_markdown, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "markdown",
+        "action": "new_document",
+    }
+    scoped_markdown_en = RuntimePlanner().decision(
+        "create a new document in an app that can write markdown",
+        allowed_tools=allowed_tools,
+    )
+    assert scoped_markdown_en.selected_intent.inputs["app_name_hint"] == ""
+    assert scoped_markdown_en.selected_intent.inputs["app_capability_hint"]["query"] == "markdown"
+    assert [step.step_id for step in scoped_markdown_en.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+    ]
 
     code = RuntimePlanner().decision(
         "打开一个能写代码的应用，新建文件 hello.py",
