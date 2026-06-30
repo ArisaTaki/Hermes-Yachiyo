@@ -58,6 +58,16 @@ BROWSER_PLANNER_CASES: tuple[dict[str, Any], ...] = (
         "expected_artifacts": ["research-summary.md"],
         "expect_continue_to_model": True,
     },
+    {
+        "id": "known_site_search_in_browser",
+        "prompt": "在浏览器里打开 GitHub 并搜索 yachiyo",
+        "allowed_tools": ["browser.open_url"],
+        "expected_steps": ["open-web-search"],
+        "expected_request_tool": "browser.open_url",
+        "expected_first_request_input": {"url": "https://github.com/search?q=yachiyo"},
+        "expected_artifacts": [],
+        "expect_continue_to_model": False,
+    },
 )
 
 
@@ -84,6 +94,7 @@ def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
     expected_steps = [str(step_id) for step_id in case["expected_steps"]]
     expected_request_tool = str(case["expected_request_tool"])
     expected_artifacts = [str(path) for path in case["expected_artifacts"]]
+    expected_first_request_input = case.get("expected_first_request_input")
     expected_continue = bool(case.get("expect_continue_to_model"))
     first_request = requests[0] if requests else {}
     has_artifact_write_step = any(step["tool"] == "artifact.write" for step in steps)
@@ -96,6 +107,10 @@ def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
         "continue_to_model_matches": bool(first_request.get("continue_to_model"))
         == expected_continue,
     }
+    if isinstance(expected_first_request_input, dict):
+        checks["first_request_input_matches"] = (
+            first_request.get("input") == expected_first_request_input
+        )
     if expected_artifacts and expected_artifacts != ["browser/current-page.png"]:
         checks["artifact_write_step_present"] = has_artifact_write_step
     return {

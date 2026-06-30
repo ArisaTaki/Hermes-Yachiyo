@@ -16834,6 +16834,8 @@ def _explicit_browser_url_hint(text: str) -> str:
 
 def _known_web_destination_request_url_hint(text: str) -> str:
     value = _clean_prompt(text)
+    if _known_web_destination_search_hint(value):
+        return ""
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:把|将)?\s*"
@@ -17406,10 +17408,12 @@ def _known_web_destination_search_hint(text: str) -> dict[str, str]:
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|用|通过)?\s*(?:任意|任何|默认|当前)?"
         r"(?:浏览器|chrome|google\s*chrome|google|谷歌|safari)?"
-        r"(?:里|中|上|内)?\s*(?:打开|访问|浏览|前往|去|上)?\s*"
+        r"\s*(?:里|中|上|内)?\s*(?:打开|访问|浏览|前往|去|上)?\s*"
         r"(?P<site>[\w .·-]{1,60}?)(?:里|中|上|内)?\s*"
+        r"(?:并|然后|并且|再|接着|之后|后)?\s*"
         r"(?:搜索|搜一下|搜|查找|检索|找)\s*(?P<query>[^。！？!?]+)$",
         r"^(?P<site>[\w .·-]{1,60}?)(?:里|中|上|内)?\s*"
+        r"(?:并|然后|并且|再|接着|之后|后)?\s*"
         r"(?:搜索|搜一下|搜|查找|检索|找)\s*(?P<query>[^。！？!?]+)$",
         r"^(?:(?:please|can\s+you|could\s+you|would\s+you)\s+)?"
         r"(?:(?:use|using|in|on|with)\s+(?:the\s+)?"
