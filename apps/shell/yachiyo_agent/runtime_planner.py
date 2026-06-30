@@ -136,6 +136,8 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        if _looks_like_current_page_link_artifact_request(text):
+            return _empty_intent("data_analysis", text)
         if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
             return _empty_intent("data_analysis", text)
         if _app_file_open_discovery_hint(text, metadata) and not _data_analysis_action_requested(text):
@@ -10488,6 +10490,8 @@ def _looks_like_current_page_data_context_source(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
         return False
+    if _looks_like_current_page_link_artifact_request(value):
+        return False
     return _contains_any(
         value,
         [
@@ -10527,6 +10531,87 @@ def _looks_like_current_page_data_context_source(text: str) -> bool:
             "明细表",
             "报表",
         ],
+    )
+
+
+def _looks_like_current_page_link_artifact_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    if not value:
+        return False
+    if not _contains_any(
+        value,
+        [
+            "current page",
+            "current webpage",
+            "this page",
+            "this webpage",
+            "当前网页",
+            "当前页面",
+            "当前页",
+            "这个网页",
+            "这个页面",
+            "这页",
+        ],
+    ):
+        return False
+    if not _contains_any(
+        value,
+        [
+            "all links",
+            "all urls",
+            "link list",
+            "links list",
+            "list links",
+            "extract links",
+            "export links",
+            "url list",
+            "所有链接",
+            "全部链接",
+            "所有网址",
+            "全部网址",
+            "链接清单",
+            "链接列表",
+            "链接表格",
+            "网址清单",
+            "网址列表",
+            "列出链接",
+            "提取链接",
+            "导出链接",
+            "输出链接",
+        ],
+    ):
+        return False
+    if _contains_any(
+        value,
+        [
+            "export",
+            "output",
+            "generate",
+            "create",
+            "make",
+            "write",
+            "save",
+            "markdown",
+            "table",
+            "csv",
+            "file",
+            "导出",
+            "输出",
+            "生成",
+            "整理",
+            "做成",
+            "写成",
+            "保存",
+            "文件",
+            "表格",
+            "清单",
+            "列表",
+        ],
+    ):
+        return True
+    return bool(
+        re.search(r"\b(?:links|urls)\s+from\s+(?:the\s+)?(?:current|this)\s+page\b", lowered)
     )
 
 
@@ -17727,6 +17812,8 @@ def _browser_current_page_hint(text: str) -> dict[str, Any]:
             "browser_action": "screenshot",
             "reason": "user asked to capture the browser page",
         }
+    if _looks_like_current_page_link_artifact_request(value):
+        return {"browser_action": "extract_text"}
     if (
         _looks_like_browser_current_page_text(value, lowered)
         and _looks_like_browser_current_page_summary(value, lowered)
@@ -18647,8 +18734,12 @@ def _expected_outputs(text: str, *, default: list[str]) -> list[str]:
             "source list",
             "sources",
             "url list",
+            "all links",
+            "all urls",
             "链接清单",
             "链接列表",
+            "所有链接",
+            "全部链接",
             "列出链接",
             "输出链接",
             "来源清单",
@@ -18682,6 +18773,10 @@ def _expected_outputs(text: str, *, default: list[str]) -> list[str]:
             "整理为表格",
             "输出表格",
             "生成表格",
+            "markdown table",
+            "Markdown 表格",
+            "链接表格",
+            "网址表格",
             "make a table",
             "as a table",
         ],

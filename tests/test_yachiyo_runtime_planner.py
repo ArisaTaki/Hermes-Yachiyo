@@ -3471,6 +3471,29 @@ def test_runtime_planner_routes_current_page_browser_actions() -> None:
     assert link_step.tool_name == "browser.current_page"
     assert link_step.action == "read_current_page"
 
+    link_table = RuntimePlanner().decision(
+        "把当前网页里所有链接导出成 Markdown 表格",
+        allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
+    )
+
+    assert link_table.selected_intent.kind == "web_research"
+    assert link_table.selected_intent.inputs == {
+        "url_hint": "",
+        "browser_action": "extract_text",
+    }
+    assert link_table.selected_intent.expected_outputs == ["links", "table"]
+    assert [step.step_id for step in link_table.plan.tool_plan.steps] == [
+        "extract-current-page-text",
+        "write-research-artifact",
+    ]
+    assert _step_by_id(link_table, "extract-current-page-text").tool_name == (
+        "browser.extract_text"
+    )
+    assert _step_by_id(link_table, "write-research-artifact").input_preview == {
+        "path": "research-summary.md"
+    }
+    assert link_table.plan.tool_plan.artifacts_expected == ["research-summary.md"]
+
 
 def test_runtime_planner_reads_page_before_ambiguous_browser_click() -> None:
     prompt = "在当前网页点击最像登录的按钮"
@@ -19395,6 +19418,16 @@ def test_planner_tool_requests_maps_current_page_browser_actions() -> None:
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert planner_tool_requests("把当前网页里所有链接导出成 Markdown 表格", allowed_tools=allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
         }
     ]
 

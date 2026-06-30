@@ -1924,6 +1924,11 @@ def _web_read_request_needs_model_followup(
     return bool(
         _web_request_needs_model_followup(decision.selected_intent.user_goal)
         or str(inputs.get("output_target_hint") or "").strip() == "clipboard"
+        or any(
+            str(getattr(item, "tool_name", "") or "").strip()
+            in {"artifact.write", "clipboard.write"}
+            for item in decision.plan.tool_plan.steps
+        )
         or str(presentation or "").strip()
     )
 
@@ -2519,9 +2524,18 @@ def _web_request_needs_model_followup(prompt: str) -> bool:
             "分析",
             "摘要",
             "输出",
+            "导出",
+            "生成",
+            "markdown",
+            "表格",
             "列出",
+            "所有链接",
+            "全部链接",
             "链接清单",
             "链接列表",
+            "all links",
+            "all urls",
+            "markdown table",
             "来源清单",
             "来源列表",
             "link list",
