@@ -103,6 +103,53 @@ def _default_app_control_surface_visible(
     return int(role_counts.get("AXButton") or 0) >= 20 and deepest_ui_depth >= 4
 
 
+def _ui_inspection_planner_alignment(app_name: str) -> dict[str, Any]:
+    return _planner_alignment(
+        intent_category="desktop_ui_inspection",
+        app_name=app_name,
+        capabilities=[
+            "desktop.app_discovery",
+            "desktop.app_launch",
+            "desktop.window_focus",
+            "desktop.ui_inspection",
+            "desktop.app_verification",
+        ],
+        tool_chain=UI_INSPECTION_TOOL_CHAIN,
+        mutates_desktop=True,
+    )
+
+
+def _locked_session_evidence(app_name: str, preflight: dict[str, Any]) -> dict[str, Any]:
+    blocker_evidence = _merge_blocking_evidence(preflight)
+    checks = {"desktop_session_ready": False}
+    return {
+        "ok": False,
+        "mode": "real_desktop_ui_inspection_smoke",
+        "skipped": False,
+        "platform": "Darwin",
+        "app_name": app_name,
+        "tool_chain": UI_INSPECTION_TOOL_CHAIN,
+        "case_count": 1,
+        "cases": [
+            _desktop_execution_case(
+                "inspect_named_app_ui",
+                app_name=app_name,
+                tool_chain=UI_INSPECTION_TOOL_CHAIN,
+                checks=checks,
+                stage="session_preflight",
+            )
+        ],
+        "planner_alignment": _ui_inspection_planner_alignment(app_name),
+        "stage": "session_preflight",
+        "error": "desktop_session_locked",
+        "blocking_condition": "desktop_session_locked",
+        "blocking_conditions": ["desktop_session_locked"],
+        **{key: value for key, value in blocker_evidence.items() if key != "error"},
+        "preflight": preflight,
+        "checks": checks,
+    }
+
+
 def run_smoke(
     *,
     app_name: str = DEFAULT_APP_NAME,
@@ -119,6 +166,10 @@ def run_smoke(
             "app_name": clean_app_name,
             "reason": "real desktop UI inspection smoke only runs on macOS",
         }
+
+    preflight = desktop_tools.active_window()
+    if preflight.get("error") == "desktop_session_locked":
+        return _locked_session_evidence(clean_app_name, preflight)
 
     broker = _RuntimeDesktopBroker()
     discovery = _runtime_tool_call(
@@ -270,19 +321,7 @@ def run_smoke(
         "tool_chain": UI_INSPECTION_TOOL_CHAIN,
         "case_count": 1,
         "cases": [case],
-        "planner_alignment": _planner_alignment(
-            intent_category="desktop_ui_inspection",
-            app_name=opened_app_name,
-            capabilities=[
-                "desktop.app_discovery",
-                "desktop.app_launch",
-                "desktop.window_focus",
-                "desktop.ui_inspection",
-                "desktop.app_verification",
-            ],
-            tool_chain=UI_INSPECTION_TOOL_CHAIN,
-            mutates_desktop=True,
-        ),
+        "planner_alignment": _ui_inspection_planner_alignment(opened_app_name),
         "app_name": clean_app_name,
         "discovered_app_name": discovered_app_name,
         "opened_app_name": opened_app_name,

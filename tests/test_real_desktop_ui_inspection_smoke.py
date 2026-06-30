@@ -47,6 +47,58 @@ def test_real_desktop_ui_inspection_smoke_skips_non_macos(monkeypatch):
     }
 
 
+def test_real_desktop_ui_inspection_smoke_stops_before_app_mutation_when_locked(
+    monkeypatch,
+):
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "active_window",
+        lambda: {
+            "ok": False,
+            "action": "desktop.active_window",
+            "error": "desktop_session_locked",
+            "blocking_condition": "desktop_session_locked",
+            "data": {"frontmost_app": "loginwindow"},
+            "recovery_actions": [
+                {
+                    "label": "解锁后重新检查前台窗口",
+                    "tool": "desktop.active_window",
+                    "input": {},
+                    "permission_target": "desktop_session_unlocked",
+                    "risk_level": "low",
+                }
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "list_apps",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("must not discover apps while locked")
+        ),
+    )
+
+    evidence = smoke.run_smoke(app_name="Calculator")
+
+    assert evidence["ok"] is False
+    assert evidence["stage"] == "session_preflight"
+    assert evidence["error"] == "desktop_session_locked"
+    assert evidence["blocking_condition"] == "desktop_session_locked"
+    assert evidence["blocking_conditions"] == ["desktop_session_locked"]
+    assert evidence["cases"][0]["id"] == "inspect_named_app_ui"
+    assert evidence["cases"][0]["stage"] == "session_preflight"
+    assert evidence["cases"][0]["passed"] is False
+    assert evidence["planner_alignment"]["intent_category"] == "desktop_ui_inspection"
+    assert evidence["planner_alignment"]["approval_policy"] == {
+        "mutates_desktop": True,
+        "approval_required": False,
+    }
+    assert evidence["checks"] == {"desktop_session_ready": False}
+    assert evidence["preflight"]["error"] == "desktop_session_locked"
+    assert evidence["recovery_actions"][0]["tool"] == "desktop.active_window"
+
+
 def test_real_desktop_ui_inspection_smoke_accepts_menu_level_ui_for_named_app(monkeypatch):
     calls: list[tuple[str, str]] = []
     status_values = iter([False, True, False])
