@@ -10119,18 +10119,25 @@ def _clipboard_output_target_requested(text: str) -> bool:
         return False
     return bool(
         re.search(
-            r"(?:复制|拷贝|写入|放到|放进|保存到|输出到|输出至|复制到|拷贝到|存到|设为|设置为)"
-            r"(?:一下|下)?\s*(?:到|进|至)?\s*(?:系统)?(?:剪贴板|粘贴板)",
+            r"(?:复制|拷贝|写入|写回|放到|放进|放回|保存到|保存回|输出到|输出至|输出回|"
+            r"复制到|复制回|拷贝到|拷贝回|存到|存回|设为|设置为)"
+            r"(?:一下|下)?\s*(?:到|进|至|回)?\s*(?:系统)?(?:剪贴板|粘贴板)",
             value,
             flags=re.IGNORECASE,
         )
         or re.search(
-            r"(?:到|进|至)\s*(?:系统)?(?:剪贴板|粘贴板)",
+            r"(?:到|进|至|回)\s*(?:系统)?(?:剪贴板|粘贴板)",
             value,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"\b(?:copy|write|put|save|output)\b.{0,80}\b(?:to|into)\s+"
+            r"(?:the\s+)?(?:system\s+)?clipboard\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:copy|write|put|save|output)\b.{0,80}\bback\s+to\s+"
             r"(?:the\s+)?(?:system\s+)?clipboard\b",
             value,
             flags=re.IGNORECASE,

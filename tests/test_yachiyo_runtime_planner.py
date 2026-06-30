@@ -5615,6 +5615,10 @@ def test_runtime_planner_distinguishes_clipboard_output_target_from_source() -> 
         "把剪贴板内容摘要后复制到剪贴板",
         allowed_tools=allowed_tools,
     )
+    clipboard_report_back = RuntimePlanner().decision(
+        "把剪贴板内容整理成报告并复制回剪贴板",
+        allowed_tools=allowed_tools,
+    )
     explicit_text = RuntimePlanner().decision(
         "把 hello 复制到剪贴板",
         allowed_tools=allowed_tools,
@@ -5673,6 +5677,21 @@ def test_runtime_planner_distinguishes_clipboard_output_target_from_source() -> 
         "body_source": "clipboard",
         "transform": "summary",
     }
+
+    assert clipboard_report_back.selected_intent.kind == "report_generation"
+    assert clipboard_report_back.selected_intent.inputs == {
+        "context_source": "clipboard",
+        "output_target_hint": "clipboard",
+    }
+    assert [step.step_id for step in clipboard_report_back.plan.tool_plan.steps] == [
+        "read-report-context",
+        "write-clipboard-output",
+    ]
+    assert _step_by_id(clipboard_report_back, "write-clipboard-output").input_preview == {
+        "body_source": "clipboard",
+        "transform": "report",
+    }
+    assert clipboard_report_back.plan.tool_plan.artifacts_expected == []
 
     assert explicit_text.selected_intent.kind == "clipboard_operation"
     assert explicit_text.selected_intent.inputs == {"action": "write", "text": "hello"}
@@ -19879,6 +19898,22 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
     )
 
     assert clipboard_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        }
+    ]
+
+    clipboard_report_back_requests = planner_tool_requests(
+        "把剪贴板内容整理成报告并复制回剪贴板",
+        allowed_tools=["clipboard.read", "clipboard.write", "artifact.write"],
+    )
+
+    assert clipboard_report_back_requests == [
         {
             "protocol": "json_fallback",
             "tool": "clipboard.read",
