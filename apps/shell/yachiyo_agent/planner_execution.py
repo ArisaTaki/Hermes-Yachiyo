@@ -1320,7 +1320,7 @@ def _code_task_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str,
 def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
     app_query_plan = media_app_query_search_plan(inputs, allowed)
     if app_query_plan:
-        requests = [
+        return [
             _request(
                 tool_name,
                 payload,
@@ -1328,9 +1328,6 @@ def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict
             )
             for tool_name, payload in app_query_plan
         ]
-        if _media_app_query_plan_needs_model_followup(app_query_plan):
-            requests[-1]["continue_to_model"] = True
-        return requests
     tool_name, payload = media_tool_preview(inputs, allowed)
     if not tool_name:
         return []
@@ -1345,20 +1342,6 @@ def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict
     if verify_request:
         requests.append(verify_request)
     return requests
-
-
-def _media_app_query_plan_needs_model_followup(
-    app_query_plan: list[tuple[str, dict[str, Any]]],
-) -> bool:
-    has_observation = any(
-        tool_name in {"desktop.ui_elements", "desktop.active_window", "screen.capture"}
-        for tool_name, _payload in app_query_plan
-    )
-    has_play_step = any(
-        str(tool_name or "").startswith("media.")
-        for tool_name, _payload in app_query_plan
-    )
-    return has_observation and not has_play_step
 
 
 def _media_playback_verify_request(inputs: Mapping[str, Any], allowed: set[str]) -> dict[str, Any]:

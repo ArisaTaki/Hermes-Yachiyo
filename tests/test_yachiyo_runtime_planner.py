@@ -1832,6 +1832,55 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         "body_source": "explicit_user_text",
     }
 
+    message_prompt = "打开一个聊天软件，给 Alice 发送 hello"
+    message_decision = RuntimePlanner().decision(
+        message_prompt,
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.inspect_app",
+            "app.focus_and_type_into_ui_element",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    )
+    message_requests = planner_tool_requests(
+        message_prompt,
+        [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.inspect_app",
+            "app.focus_and_type_into_ui_element",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    )
+    message_payload = planner_selection_payload(
+        decision=message_decision,
+        planner_requests=message_requests,
+        legacy_requests=[],
+        selected_requests=message_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert message_payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "messaging",
+        "app_name_source": "desktop.list_apps",
+        "capability_description": "聊天",
+        "target_action": "safe_shortcut",
+        "safe_shortcut_action": "new_message",
+        "communication_compose": {
+            "channel": "message",
+            "recipient": "Alice",
+            "body": "hello",
+            "send_action": "send",
+        },
+    }
+
 
 def test_planner_selection_payload_surfaces_discovered_app_open_path_target() -> None:
     prompt = "找一个代码编辑器打开 README.md"
@@ -17793,11 +17842,10 @@ def test_planner_desktop_tool_requests_verifies_media_app_search_when_available(
         "input": {"role_filter": "", "limit": 80},
         "source": "runtime_planner",
         "planning_reason": "planner_fallback_media_playback",
-        "continue_to_model": True,
     }
 
 
-def test_planner_desktop_tool_requests_searches_generic_music_app_then_continues() -> None:
+def test_planner_desktop_tool_requests_searches_generic_music_app_then_verifies() -> None:
     requests = planner_desktop_tool_requests(
         "打开任意音乐 app，搜索 lo-fi beats，然后播放第一个结果",
         allowed_tools=[
@@ -17844,7 +17892,6 @@ def test_planner_desktop_tool_requests_searches_generic_music_app_then_continues
             "input": {"role_filter": "", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
-            "continue_to_model": True,
         },
     ]
 

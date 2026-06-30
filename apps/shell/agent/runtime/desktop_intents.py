@@ -418,6 +418,19 @@ def daily_desktop_intent_tool_requests(
         return []
     generic_music_play_app = _music_app_generic_play_open_name(context)
     if generic_music_play_app:
+        if generic_music_play_app == "Music":
+            if "media.apple_music_open_and_play" in allowed:
+                return [_request("media.apple_music_open_and_play", {})]
+            if "media.music_app_open_and_play" in allowed:
+                return [
+                    _request(
+                        "media.music_app_open_and_play",
+                        {"app_name": generic_music_play_app},
+                    )
+                ]
+            if "media.apple_music_control" in allowed:
+                return [_request("media.apple_music_control", {"action": "play"})]
+            return []
         if "media.music_app_open_and_play" in allowed:
             return [
                 _request(
@@ -425,12 +438,6 @@ def daily_desktop_intent_tool_requests(
                     {"app_name": generic_music_play_app},
                 )
             ]
-        if generic_music_play_app == "Music":
-            if "media.apple_music_open_and_play" in allowed:
-                return [_request("media.apple_music_open_and_play", {})]
-            if "media.apple_music_control" in allowed:
-                return [_request("media.apple_music_control", {"action": "play"})]
-            return []
         return []
     apple_music_search_play = _apple_music_search_play_query(context)
     music_app_search_play_sequence = _music_app_search_play_tool_requests(context)
@@ -452,10 +459,10 @@ def daily_desktop_intent_tool_requests(
     if system_media_control and str(system_media_control.get("tool") or "") in allowed:
         return [system_media_control]
     if _is_apple_music_open_and_play_request(context):
-        if "media.music_app_open_and_play" in allowed:
-            return [_request("media.music_app_open_and_play", {"app_name": "Music"})]
         if "media.apple_music_open_and_play" in allowed:
             return [_request("media.apple_music_open_and_play", {})]
+        if "media.music_app_open_and_play" in allowed:
+            return [_request("media.music_app_open_and_play", {"app_name": "Music"})]
         if "media.apple_music_control" in allowed:
             return [_request("media.apple_music_control", {"action": "play"})]
         return []
@@ -2455,8 +2462,8 @@ def daily_desktop_intent_candidates(context: str) -> list[dict[str, Any]]:
         candidates.append(system_media_control)
 
     if _is_apple_music_open_and_play_request(text):
-        candidates.append(_request("media.music_app_open_and_play", {"app_name": "Music"}))
         candidates.append(_request("media.apple_music_open_and_play", {}))
+        candidates.append(_request("media.music_app_open_and_play", {"app_name": "Music"}))
         candidates.append(_request("media.apple_music_control", {"action": "play"}))
 
     music_control = _music_control_action(text)
