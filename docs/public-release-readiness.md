@@ -89,6 +89,9 @@ three. These real desktop flags open or operate macOS apps,
 `--include-provider-workflow` requires live provider smoke credentials, and
 `--include-ui` starts Vite/Electron UI smokes. A default run can pass selected
 source demos while still reporting `complete=false` until opt-in flows pass.
+The UI opt-in flows write per-flow JSON reports for Agent Studio Run Detail
+replay and Workflow save/run replay, so release blockers retain the UI smoke
+`stage`, `mode`, and boolean checks instead of only the shell exit code.
 The JSON and Markdown summaries include `release_level`,
 `missing_required_flow_ids`, and `release_blockers`: a public release needs
 `release_level=full_public_demo_ready`; `partial_demo_ready` means the safe

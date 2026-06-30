@@ -765,7 +765,11 @@ Vite/Electron UI smokes. The summary now reports `release_level`,
 project per-flow `evidence_summary` details such as `stage`,
 `blocking_condition`, and boolean checks into Release Blockers and Next
 Actions, so host blockers like `desktop_session_locked` are visible without
-opening the full flow report. Release-smoke and public-release gate summaries
+opening the full flow report. The UI opt-in flows now pass `--report-json` into
+the Agent Studio Run Detail and Workflow save/run Electron smokes, so those
+public-demo rows preserve structured `mode`, `stage`, and UI verification
+checks when Vite/Electron succeeds or fails. Release-smoke and public-release
+gate summaries
 preserve those demo blockers in their Markdown and JSON next actions, so final
 release evidence points to the real host or credential blocker instead of only
 reporting missing public-demo evidence. Only

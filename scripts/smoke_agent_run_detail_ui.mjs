@@ -5,6 +5,12 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  errorText,
+  parseUiSmokeArgs,
+  safeWriteUiSmokeReport,
+  uiSmokeReportPayload,
+} from './ui_smoke_report.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FRONTEND = path.join(ROOT, 'apps', 'frontend');
@@ -2605,13 +2611,36 @@ main().catch((error) => {
 }
 
 async function main() {
-  const bridge = await startMockBridge();
-  const vitePort = await pickPort();
-  const vite = startVite(vitePort);
+  let options = { reportJson: null };
+  let stage = 'parse_args';
+  const checks = {
+    mock_bridge_started: false,
+    vite_ready: false,
+    electron_smoke_completed: false,
+    scoped_workflow_rerun_verified: false,
+    workflow_child_actions_verified: false,
+    active_run_cancel_verified: false,
+    run_history_delete_verified: false,
+    run_event_pagination_verified: false,
+  };
+  let bridge = null;
+  let vite = null;
   try {
+    options = parseUiSmokeArgs(process.argv.slice(2));
+    stage = 'start_mock_bridge';
+    bridge = await startMockBridge();
+    checks.mock_bridge_started = true;
+    stage = 'start_vite';
+    const vitePort = await pickPort();
+    vite = startVite(vitePort);
     const devUrl = `http://127.0.0.1:${vitePort}`;
+    stage = 'wait_for_vite';
     await waitForHttp(devUrl);
+    checks.vite_ready = true;
+    stage = 'run_electron_smoke';
     await runElectronSmoke(devUrl, bridge.url);
+    checks.electron_smoke_completed = true;
+    stage = 'verify_scoped_workflow_rerun';
     const scopedRequest = scopedRerunRequests[scopedRerunRequests.length - 1] || {};
     if (
       scopedRequest.scope !== 'workflow_branch'
@@ -2621,10 +2650,18 @@ async function main() {
     ) {
       throw new Error(`unexpected scoped rerun request ${JSON.stringify(scopedRequest)}`);
     }
+    checks.scoped_workflow_rerun_verified = true;
+    stage = 'verify_workflow_child_actions';
     if (!workflowChildRejected) throw new Error('workflow child reject action was not called');
     if (!workflowChildCancelled) throw new Error('workflow child cancel action was not called');
+    checks.workflow_child_actions_verified = true;
+    stage = 'verify_active_run_cancel';
     if (!activeRunCancelled) throw new Error('active Run Detail cancel action was not called');
+    checks.active_run_cancel_verified = true;
+    stage = 'verify_run_history_delete';
     if (!deletedRunIds.includes(APPROVAL_RUN_ID)) throw new Error('agent run history delete route was not called');
+    checks.run_history_delete_verified = true;
+    stage = 'verify_run_event_pagination';
     const initialReplayRequest = runEventRequests.some((request) => request.after_sequence === 0 && request.limit === 200);
     const loadMoreReplayRequest = runEventRequests.some((request) => request.after_sequence === 200 && request.limit === 200);
     if (!initialReplayRequest) {
@@ -2633,10 +2670,42 @@ async function main() {
     if (!loadMoreReplayRequest) {
       throw new Error(`load-more RunEvent replay request was not made with after_sequence=200&limit=200: ${JSON.stringify(runEventRequests)}`);
     }
+    checks.run_event_pagination_verified = true;
+    stage = 'completed';
+    safeWriteUiSmokeReport(
+      options.reportJson,
+      uiSmokeReportPayload({
+        ok: true,
+        mode: 'agent_run_detail_ui_smoke',
+        stage,
+        checks,
+        details: {
+          run_id: RUN_ID,
+          approval_run_id: APPROVAL_RUN_ID,
+          workflow_run_id: WORKFLOW_RUN_ID,
+          artifact_paths: [ARTIFACT_PATH, WORKFLOW_ARTIFACT_PATH],
+        },
+      }),
+    );
     log('passed');
+  } catch (error) {
+    safeWriteUiSmokeReport(
+      options.reportJson,
+      uiSmokeReportPayload({
+        ok: false,
+        mode: 'agent_run_detail_ui_smoke',
+        stage,
+        checks,
+        error: errorText(error),
+      }),
+    );
+    console.error(error && error.stack ? error.stack : error);
+    process.exitCode = 1;
   } finally {
     killProcess(vite);
-    await new Promise((resolve) => bridge.server.close(resolve));
+    if (bridge) {
+      await new Promise((resolve) => bridge.server.close(resolve));
+    }
   }
 }
 

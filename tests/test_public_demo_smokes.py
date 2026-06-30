@@ -136,7 +136,16 @@ def test_public_demo_smokes_opt_in_selects_all_flows(tmp_path, monkeypatch):
     assert summary["selected_count"] == summary["flow_count"] == 16
     assert summary["skipped_count"] == 0
     assert len(commands) == 16
-    assert ["node", "scripts/smoke_agent_run_detail_ui.mjs"] in commands
+    assert any(
+        command[:2] == ["node", "scripts/smoke_agent_run_detail_ui.mjs"]
+        and "--report-json" in command
+        for command in commands
+    )
+    assert any(
+        command[:2] == ["node", "scripts/smoke_workflow_save_run_ui.mjs"]
+        and "--report-json" in command
+        for command in commands
+    )
 
 
 def test_public_demo_smokes_real_desktop_open_can_be_opted_in_separately(
@@ -308,6 +317,67 @@ def test_public_demo_smokes_marks_selected_failure_as_release_blocker(
     assert action["reason"] == "desktop_session_locked"
     markdown = demo.render_markdown(summary)
     assert "Blocker: `desktop_session_locked`" in markdown
+
+
+def test_public_demo_smokes_records_ui_evidence_reports(tmp_path, monkeypatch):
+    monkeypatch.setattr(demo, "ROOT", tmp_path)
+
+    def fake_run(command):
+        command = list(command)
+        if "--report-json" in command:
+            report = tmp_path / command[command.index("--report-json") + 1]
+            if not report.is_absolute():
+                report = tmp_path / report
+            report.parent.mkdir(parents=True, exist_ok=True)
+            payload = {"ok": True, "mode": report.stem}
+            if report.name == "studio-replay-ui.json":
+                payload = {
+                    "ok": True,
+                    "mode": "agent_run_detail_ui_smoke",
+                    "stage": "completed",
+                    "checks": {
+                        "electron_smoke_completed": True,
+                        "run_event_pagination_verified": True,
+                    },
+                }
+            elif report.name == "workflow-ui.json":
+                payload = {
+                    "ok": True,
+                    "mode": "workflow_save_run_ui_smoke",
+                    "stage": "completed",
+                    "checks": {
+                        "electron_smoke_completed": True,
+                        "bridge_contract_verified": True,
+                    },
+                }
+            report.write_text(json.dumps(payload), encoding="utf-8")
+        return _fake_completed(command)
+
+    monkeypatch.setattr(demo, "_run_command", fake_run)
+
+    summary = demo.run_public_demo_smokes(
+        tmp_dir="tmp/demo",
+        include_real_desktop=True,
+        include_provider_workflow=True,
+        include_ui=True,
+    )
+
+    studio = next(flow for flow in summary["flows"] if flow["id"] == "studio_replay_ui")
+    workflow = next(flow for flow in summary["flows"] if flow["id"] == "workflow_ui")
+    assert studio["report_json"].endswith("studio-replay-ui.json")
+    assert workflow["report_json"].endswith("workflow-ui.json")
+    assert studio["evidence_mode"] == "agent_run_detail_ui_smoke"
+    assert workflow["evidence_mode"] == "workflow_save_run_ui_smoke"
+    assert studio["evidence_summary"]["stage"] == "completed"
+    assert workflow["evidence_summary"]["stage"] == "completed"
+    assert studio["evidence_summary"]["checks"] == {
+        "electron_smoke_completed": True,
+        "run_event_pagination_verified": True,
+    }
+    assert workflow["evidence_summary"]["checks"] == {
+        "electron_smoke_completed": True,
+        "bridge_contract_verified": True,
+    }
 
 
 def test_public_demo_smokes_cli_writes_reports(tmp_path, monkeypatch, capsys):

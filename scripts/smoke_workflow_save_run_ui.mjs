@@ -5,6 +5,12 @@ import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  errorText,
+  parseUiSmokeArgs,
+  safeWriteUiSmokeReport,
+  uiSmokeReportPayload,
+} from './ui_smoke_report.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FRONTEND = path.join(ROOT, 'apps', 'frontend');
@@ -1112,18 +1118,72 @@ function assertMockBridgeContract() {
 }
 
 async function main() {
-  const bridge = await startMockBridge();
-  const vitePort = await pickPort();
-  const vite = startVite(vitePort);
+  let options = { reportJson: null };
+  let stage = 'parse_args';
+  const checks = {
+    mock_bridge_started: false,
+    vite_ready: false,
+    electron_smoke_completed: false,
+    bridge_contract_verified: false,
+    approval_resume_verified: false,
+  };
+  let bridge = null;
+  let vite = null;
   try {
+    options = parseUiSmokeArgs(process.argv.slice(2));
+    stage = 'start_mock_bridge';
+    bridge = await startMockBridge();
+    checks.mock_bridge_started = true;
+    stage = 'start_vite';
+    const vitePort = await pickPort();
+    vite = startVite(vitePort);
     const devUrl = `http://127.0.0.1:${vitePort}`;
+    stage = 'wait_for_vite';
     await waitForHttp(devUrl);
+    checks.vite_ready = true;
+    stage = 'run_electron_smoke';
     await runElectronSmoke(devUrl, bridge.url);
+    checks.electron_smoke_completed = true;
+    checks.approval_resume_verified = approvalRunApproved;
+    stage = 'verify_mock_bridge_contract';
     assertMockBridgeContract();
+    checks.bridge_contract_verified = true;
+    stage = 'completed';
+    safeWriteUiSmokeReport(
+      options.reportJson,
+      uiSmokeReportPayload({
+        ok: true,
+        mode: 'workflow_save_run_ui_smoke',
+        stage,
+        checks,
+        details: {
+          workflow_id: WORKFLOW_ID,
+          run_id: RUN_ID,
+          approval_workflow_id: APPROVAL_WORKFLOW_ID,
+          approval_run_id: APPROVAL_RUN_ID,
+          artifact_paths: [WORKFLOW_ARTIFACT_PATH, APPROVAL_ARTIFACT_PATH],
+        },
+      }),
+    );
     log('passed');
+  } catch (error) {
+    safeWriteUiSmokeReport(
+      options.reportJson,
+      uiSmokeReportPayload({
+        ok: false,
+        mode: 'workflow_save_run_ui_smoke',
+        stage,
+        checks,
+        error: errorText(error),
+      }),
+    );
+    console.error(error && error.stack ? error.stack : error);
+    process.exitCode = 1;
   } finally {
     killProcess(vite);
-    await new Promise((resolve) => bridge.server.close(resolve));
+    if (bridge) {
+      await new Promise((resolve) => bridge.server.close(resolve));
+    }
   }
 }
 
