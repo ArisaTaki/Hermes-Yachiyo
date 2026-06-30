@@ -97,8 +97,16 @@ def test_release_readiness_cli_writes_json_and_markdown(tmp_path, monkeypatch):
                         "case_count": 1,
                         "cases": [{"id": "type_click_verify_control"}],
                         "error": "desktop_session_locked",
+                        "stage": "session_preflight",
                         "blocking_conditions": ["desktop_session_locked"],
                         "recovery_hints": ["Unlock the active macOS user session."],
+                        "recovery_actions": [
+                            {
+                                "label": "Retry foreground check",
+                                "tool": "desktop.active_window",
+                                "permission_target": "desktop_session_unlocked",
+                            }
+                        ],
                     },
                 }
             }
@@ -123,6 +131,12 @@ def test_release_readiness_cli_writes_json_and_markdown(tmp_path, monkeypatch):
     markdown = output_markdown.read_text(encoding="utf-8")
     assert "Capability matrix:" in markdown
     assert "Runtime blocker: desktop_session_locked" in markdown
+    assert "stage: `session_preflight`" in markdown
+    assert "error: `desktop_session_locked`" in markdown
+    assert (
+        "Retry foreground check -> desktop.active_window (desktop_session_unlocked)"
+        in markdown
+    )
     assert "OHA_YACHIYO_SMOKE_API_KEY" in markdown
 
 

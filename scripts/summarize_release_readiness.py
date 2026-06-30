@@ -327,6 +327,16 @@ def render_markdown(diagnostics: Mapping[str, Any]) -> str:
                 if values:
                     label = key.replace("_", " ")
                     lines.append(f"  {label}: {', '.join(f'`{item}`' for item in values)}")
+            for key in ("stage", "error"):
+                value = str(blocker.get(key) or "").strip()
+                if value:
+                    lines.append(f"  {key}: `{value}`")
+            recovery_actions = _recovery_action_labels(blocker.get("recovery_actions"))
+            if recovery_actions:
+                lines.append(
+                    "  recovery actions: "
+                    + ", ".join(f"`{item}`" for item in recovery_actions)
+                )
         lines.append("")
     actions = diagnostics.get("next_actions")
     if isinstance(actions, list) and actions:
@@ -341,6 +351,27 @@ def render_markdown(diagnostics: Mapping[str, Any]) -> str:
                 lines.append("")
                 lines.extend(["```bash", command, "```", ""])
     return "\n".join(lines).rstrip() + "\n"
+
+
+def _recovery_action_labels(value: Any) -> list[str]:
+    labels: list[str] = []
+    for item in _dict_list(value):
+        label = str(item.get("label") or "").strip()
+        tool = str(item.get("tool") or "").strip()
+        permission_target = str(item.get("permission_target") or "").strip()
+        if label and tool:
+            text = f"{label} -> {tool}"
+        elif label:
+            text = label
+        elif tool:
+            text = tool
+        else:
+            continue
+        if permission_target:
+            text = f"{text} ({permission_target})"
+        if text not in labels:
+            labels.append(text)
+    return labels
 
 
 def _matrix_from_reports(report_paths: Sequence[Path]) -> dict[str, Any]:
