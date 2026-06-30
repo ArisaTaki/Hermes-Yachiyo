@@ -2272,6 +2272,10 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
         "分析桌面上的 xlsx 并输出报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
     )
+    arbitrary_scoped_decision = RuntimePlanner().decision(
+        "分析 inputs 里的销售 CSV 并输出报告",
+        allowed_tools=["file.search", "file.read", "python.run", "artifact.write"],
+    )
 
     assert scoped_decision.selected_intent.kind == "data_analysis"
     assert scoped_decision.selected_intent.inputs["data_source_scope_hint"] == "Downloads"
@@ -2318,6 +2322,14 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
         "path": "Desktop",
         "pattern": "*.xlsx",
         "file_type": "xlsx",
+    }
+    assert arbitrary_scoped_decision.selected_intent.inputs["data_source_kind"] == "csv"
+    assert arbitrary_scoped_decision.selected_intent.inputs["data_source_scope_hint"] == "inputs"
+    assert _step_by_id(arbitrary_scoped_decision, "inspect-data-source").tool_name == "file.search"
+    assert _step_by_id(arbitrary_scoped_decision, "inspect-data-source").input_preview == {
+        "path": "inputs",
+        "pattern": "*.csv",
+        "file_type": "csv",
     }
     assert generic_decision.selected_intent.kind == "data_analysis"
     assert generic_decision.selected_intent.missing_inputs == ["data_source"]

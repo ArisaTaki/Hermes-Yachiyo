@@ -4504,6 +4504,178 @@ def test_agent_run_runtime_planner_entrypoint_analyzes_data_before_model(tmp_pat
         service.close()
 
 
+def test_agent_runtime_file_namespace_tools_alias_workspace_access(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "file-namespace-workdir"
+    (workdir / "inputs").mkdir(parents=True)
+    (workdir / "inputs" / "sales.csv").write_text(
+        "region,revenue\nEast,10\nWest,20\n",
+        encoding="utf-8",
+    )
+    calls = []
+
+    def fake_chat(_base_url, _model, _api_key, messages, *, tools=None):
+        calls.append({"messages": messages, "tools": tools})
+        if len(calls) == 1:
+            tool_names = {
+                (tool.get("function") or {}).get("name")
+                for tool in tools or []
+            }
+            assert {"file_search", "file_read"} <= tool_names
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_file_search",
+                        "type": "function",
+                        "function": {
+                            "name": "file_search",
+                            "arguments": json.dumps(
+                                {"path": "inputs", "pattern": "*.csv", "file_type": "csv"}
+                            ),
+                        },
+                    }
+                ],
+            }
+        if len(calls) == 2:
+            assert calls[-1]["messages"][-1]["role"] == "tool"
+            assert "sales.csv" in calls[-1]["messages"][-1]["content"]
+            return {
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": "call_file_read",
+                        "type": "function",
+                        "function": {
+                            "name": "file_read",
+                            "arguments": json.dumps({"path": "inputs/sales.csv"}),
+                        },
+                    }
+                ],
+            }
+        assert calls[-1]["messages"][-1]["role"] == "tool"
+        assert "East,10" in calls[-1]["messages"][-1]["content"]
+        return {"content": "File namespace aliases worked"}
+
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "File Namespace Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {"allowed_tools": ["file.search", "file.read"]},
+                "workspace_policy": {
+                    "default_workdir": str(workdir),
+                    "readable_scopes": ["."],
+                },
+            }
+        )
+        run = service.create_agent_run(
+            {"agent_id": agent["agent_id"], "user_goal": "Inspect sales data"}
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        tool_events = [
+            event for event in events if event["event_type"] == "agent.tool.call"
+        ]
+
+        assert run["status"] == "completed"
+        assert run["result"] == "File namespace aliases worked"
+        assert [event["payload"]["tool"] for event in tool_events] == [
+            "file.search",
+            "file.read",
+        ]
+        assert tool_events[0]["payload"]["result"]["ok"] is True
+        assert tool_events[0]["payload"]["result"]["entries"] == [
+            {"name": "sales.csv", "type": "file"}
+        ]
+        assert tool_events[1]["payload"]["result"]["content"].startswith(
+            "region,revenue"
+        )
+    finally:
+        service.close()
+
+
+def test_agent_runtime_planner_file_search_auto_analyzes_single_data_file(
+    tmp_path,
+    monkeypatch,
+):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "file-search-analysis-workdir"
+    (workdir / "inputs").mkdir(parents=True)
+    (workdir / "inputs" / "sales.csv").write_text(
+        "region,revenue,units\nEast,10,1\nWest,20,2\nEast,30,3\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: pytest.fail(
+            "file.search data-analysis follow-up should not call the model"
+        ),
+    )
+    try:
+        agent = service.create_agent(
+            {
+                "name": "File Search Data Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {
+                    "allowed_tools": ["file.search", "data.analyze", "artifact.write"],
+                    "approval_required": {},
+                },
+                "workspace_policy": {
+                    "default_workdir": str(workdir),
+                    "readable_scopes": ["."],
+                    "writable_scopes": ["."],
+                },
+            }
+        )
+
+        run = service.create_agent_run(
+            {
+                "agent_id": agent["agent_id"],
+                "user_goal": "请分析 inputs 里的销售 CSV 并输出报告",
+                "runtime_planner_entrypoint": True,
+            }
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        tool_events = [
+            event for event in events if event["event_type"] == "agent.tool.call"
+        ]
+        artifact_event = next(
+            event
+            for event in events
+            if event["event_type"] == "artifact.created"
+            and event.get("payload", {}).get("path") == "analysis-report.md"
+        )
+
+        assert run["status"] == "completed"
+        assert "已分析「inputs/sales.csv」（3 行、3 列）" in run["result"]
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert [event["payload"]["tool"] for event in tool_events] == [
+            "file.search",
+            "data.analyze",
+        ]
+        assert tool_events[0]["payload"]["result"]["entries"] == [
+            {"name": "sales.csv", "type": "file"}
+        ]
+        assert tool_events[1]["payload"]["input_preview"]["path"] == "inputs/sales.csv"
+        assert artifact_event["payload"]["source_tool"] == "data.analyze"
+        assert artifact_event["payload"]["path"] == "analysis-report.md"
+    finally:
+        service.close()
+
+
 def test_workflow_agent_node_runtime_planner_entrypoint_analyzes_data_before_model(
     tmp_path,
     monkeypatch,

@@ -39,6 +39,18 @@ def data_source_scope_hint(text: str, metadata: Mapping[str, Any] | None = None)
     )
     if named_folder_match:
         return str(named_folder_match.group("folder") or "").strip()
+    folder_contents_match = re.search(
+        r"(?:读取|读|找一下|找下|查找|从|在|打开|使用|用|分析)?\s*"
+        r"(?P<folder>[A-Za-z0-9_.-]+)\s*"
+        r"(?:里|里的|中|中的|内|内的|下|下面|中的)\s*"
+        r".{0,24}?"
+        r"(?:数据|数据集|文件|表格|电子表格|销售|报表|明细|"
+        r"csv|tsv|xlsx|xls|jsonl?|parquet|txt|markdown|md)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if folder_contents_match:
+        return str(folder_contents_match.group("folder") or "").strip()
     if re.search(
         r"(?:桌面(?:上|里|中|内|文件夹|目录)|桌面\s*(?:的)?(?:文件|数据|表格)|"
         r"桌面.{0,12}(?:文件|数据|表格|csv|tsv|xlsx|xls|json|销售|sales))",
@@ -185,7 +197,8 @@ def _scoped_data_source_kind_hint(lowered_text: str) -> str:
     source_scope = (
         r"(?:downloads?|download\s+folder|desktop|documents?|folder|directory|"
         r"下载(?:文件夹|目录)?|桌面|文档|目录|文件夹|文件|数据源|数据集|"
-        r"[a-z0-9_.-]+\s*目录|[a-z0-9_.-]+\s*文件夹)"
+        r"[a-z0-9_.-]+\s*目录|[a-z0-9_.-]+\s*文件夹|"
+        r"[a-z0-9_.-]+\s*(?:里|里的|中|中的|内|内的|下|下面))"
     )
     format_map = (
         ("jsonl", "jsonl"),

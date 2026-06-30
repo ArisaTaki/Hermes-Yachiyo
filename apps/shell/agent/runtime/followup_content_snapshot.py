@@ -13,6 +13,7 @@ FOLLOWUP_CONTENT_SNAPSHOT_TOOLS: frozenset[str] = frozenset(
         "clipboard.read",
         "data.analyze",
         "desktop.ui_elements",
+        "file.read",
         "screen.capture",
         "workspace.read",
     }
@@ -74,8 +75,8 @@ def followup_content_snapshot_for_tool_call(
         return clipboard_read_content_snapshot(result, input_preview)
     if tool_name == "data.analyze":
         return data_analyze_content_snapshot(result, input_preview)
-    if tool_name == "workspace.read":
-        return workspace_read_content_snapshot(result, input_preview)
+    if tool_name in {"workspace.read", "file.read"}:
+        return workspace_read_content_snapshot(result, input_preview, source_tool=tool_name)
     return {}
 
 
@@ -187,6 +188,8 @@ def clipboard_read_content_snapshot(
 def workspace_read_content_snapshot(
     result: dict[str, Any],
     input_preview: dict[str, Any],
+    *,
+    source_tool: str = "workspace.read",
 ) -> dict[str, Any]:
     raw_text = result.get("content") if "content" in result else result.get("text")
     text, preview_truncated = _clean_followup_content_text_preview(
@@ -195,7 +198,7 @@ def workspace_read_content_snapshot(
         preserve_lines=True,
     )
     snapshot: dict[str, Any] = {
-        "source_tool": "workspace.read",
+        "source_tool": source_tool,
         "ok": bool(result.get("ok")),
         "path": str(result.get("path") or input_preview.get("path") or "").strip(),
         "text_length": len(str(raw_text or "")),

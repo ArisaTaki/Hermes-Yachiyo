@@ -24,6 +24,8 @@ TOOL_FUNCTION_NAMES = {
     "workspace.list": "workspace_list",
     "workspace.read": "workspace_read",
     "workspace.write_patch": "workspace_write_patch",
+    "file.search": "file_search",
+    "file.read": "file_read",
     "file.organize": "file_organize",
     "terminal.run": "terminal_run",
     "artifact.write": "artifact_write",
@@ -1037,6 +1039,36 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description=(
             "Read a UTF-8 text file from the allowed workspace. This only accepts file paths; "
             "use workspace.list for directories."
+        ),
+        properties={"path": {"type": "string", "description": "Relative file path."}},
+        required=("path",),
+    ),
+    "file.search": ToolDescriptor(
+        name="file.search",
+        description=(
+            "Search/list entries in an allowed workspace directory. This is the portable "
+            "file namespace alias for workspace.list and uses the same workspace scope checks."
+        ),
+        properties={
+            "path": {"type": "string", "description": "Relative directory path."},
+            "pattern": {
+                "type": "string",
+                "description": "Optional glob filter such as *.pdf or *.{png,jpg}.",
+            },
+            "file_type": {
+                "type": "string",
+                "description": (
+                    "Optional semantic file type hint such as spreadsheet, csv, tsv, xlsx, "
+                    "json, jsonl, text, document, image, pdf, archive, audio, or video."
+                ),
+            },
+        },
+    ),
+    "file.read": ToolDescriptor(
+        name="file.read",
+        description=(
+            "Read a UTF-8 text file from the allowed workspace. This is the portable file "
+            "namespace alias for workspace.read and uses the same workspace scope checks."
         ),
         properties={"path": {"type": "string", "description": "Relative file path."}},
         required=("path",),

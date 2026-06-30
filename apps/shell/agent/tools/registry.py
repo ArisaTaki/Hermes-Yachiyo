@@ -848,6 +848,8 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "workspace.list": _workspace_list,
     "workspace.read": _workspace_read,
     "workspace.write_patch": _workspace_write_patch,
+    "file.search": _workspace_list,
+    "file.read": _workspace_read,
     "file.organize": _file_organize,
     "terminal.run": _terminal_run,
     "artifact.write": _artifact_write,

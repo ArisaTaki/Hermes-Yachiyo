@@ -4888,7 +4888,11 @@ def _latest_workspace_list_event(timeline: list[dict[str, Any]]) -> dict[str, An
     for event in reversed(timeline):
         if event.get("event") != "agent.tool.call":
             continue
-        if str(event.get("detail") or event.get("tool") or "").strip() == "workspace.list":
+        if str(event.get("detail") or event.get("tool") or "").strip() in {
+            "workspace.list",
+            "fs.find_files",
+            "file.search",
+        }:
             return event
     return None
 

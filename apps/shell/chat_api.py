@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import fnmatch
 import json
 import logging
 import os
@@ -333,7 +334,8 @@ def _can_direct_execute_data_analysis_discovery(
     request = requests[0]
     if not (
         str(request.get("source") or "").strip() == "runtime_planner"
-        and str(request.get("tool") or "").strip() == "workspace.list"
+        and str(request.get("tool") or "").strip()
+        in {"workspace.list", "fs.find_files", "file.search"}
         and str(request.get("planning_reason") or "").strip() == "planner_prefetch_data_source"
         and bool(request.get("continue_to_model"))
     ):
@@ -341,7 +343,12 @@ def _can_direct_execute_data_analysis_discovery(
     if default_workdir is None:
         return False
     payload = request.get("input") if isinstance(request.get("input"), dict) else {}
-    return _has_single_data_analysis_file(default_workdir, str(payload.get("path") or ""))
+    return _has_single_data_analysis_file(
+        default_workdir,
+        str(payload.get("path") or ""),
+        pattern=str(payload.get("pattern") or ""),
+        file_type=str(payload.get("file_type") or ""),
+    )
 
 
 def _discovered_app_followup_target_can_direct_execute(
@@ -377,7 +384,13 @@ def _discovered_app_followup_target_can_direct_execute(
     return True
 
 
-def _has_single_data_analysis_file(default_workdir: Path, path: str) -> bool:
+def _has_single_data_analysis_file(
+    default_workdir: Path,
+    path: str,
+    *,
+    pattern: str = "",
+    file_type: str = "",
+) -> bool:
     root = Path(default_workdir).expanduser().resolve()
     clean_path = str(path or "").strip()
     if Path(clean_path).is_absolute():
@@ -391,11 +404,37 @@ def _has_single_data_analysis_file(default_workdir: Path, path: str) -> bool:
         return False
     count = 0
     for child in target.iterdir():
-        if child.is_file() and _data_analysis_file_kind(child.name):
+        if (
+            child.is_file()
+            and _data_analysis_file_kind(child.name)
+            and _data_analysis_file_matches_filter(
+                child.name,
+                pattern=pattern,
+                file_type=file_type,
+            )
+        ):
             count += 1
             if count > 1:
                 return False
     return count == 1
+
+
+def _data_analysis_file_matches_filter(
+    name: str,
+    *,
+    pattern: str = "",
+    file_type: str = "",
+) -> bool:
+    clean_name = str(name or "").strip()
+    clean_pattern = str(pattern or "").strip()
+    if clean_pattern and not fnmatch.fnmatch(clean_name, clean_pattern):
+        return False
+    clean_type = str(file_type or "").strip().lower()
+    if clean_type in {"csv", "tsv", "json", "jsonl", "xlsx"}:
+        return _data_analysis_file_kind(clean_name) == clean_type
+    if clean_type in {"spreadsheet", "table", "text_table", "data"}:
+        return bool(_data_analysis_file_kind(clean_name))
+    return True
 
 
 def _data_analysis_file_kind(path: str) -> str:
