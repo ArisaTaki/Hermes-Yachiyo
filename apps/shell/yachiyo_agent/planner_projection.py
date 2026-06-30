@@ -286,6 +286,9 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
     desktop_discovered_app_target = _desktop_discovered_app_followup_target(inputs)
     if desktop_discovered_app_target:
         return desktop_discovered_app_target
+    note_write_target = _note_write_followup_target(inputs)
+    if note_write_target:
+        return note_write_target
     target_app = str(inputs.get("target_app_hint") or "").strip()
     target_action = str(inputs.get("target_action_hint") or "").strip()
     context_source = str(inputs.get("context_source") or "").strip()
@@ -324,6 +327,22 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
         value = str(communication_target.get(source_key) or "").strip()
         if value:
             payload[target_key] = value
+    return payload
+
+
+def _note_write_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:
+    if str(inputs.get("action") or "").strip() != "create_note_from_context":
+        return {}
+    context_source = str(inputs.get("source") or inputs.get("context_source") or "").strip()
+    if not context_source:
+        return {}
+    payload = {
+        "kind": "note_write",
+        "target_action": "create_note",
+        "body_source": "model_generated_content",
+        "context_source": context_source,
+        "tool": "notes.create",
+    }
     return payload
 
 

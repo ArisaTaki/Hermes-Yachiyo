@@ -2279,6 +2279,63 @@ def test_model_followup_context_instructs_generated_app_write() -> None:
     ) == {}
 
 
+def test_model_followup_context_instructs_generated_note_write() -> None:
+    payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "browser.extract_text",
+                "planning_reason": "planner_prefetch_information_capture_context",
+                "continue_to_model": True,
+            }
+        ],
+        {
+            "intent_kind": "information_capture",
+            "followup_target": {
+                "kind": "note_write",
+                "target_action": "create_note",
+                "body_source": "model_generated_content",
+                "context_source": "current_page_content",
+                "tool": "notes.create",
+            },
+        },
+        allowed_tools=["browser.extract_text", "notes.create"],
+        timeline=[
+            _timeline(
+                "agent.tool.call",
+                "browser.extract_text",
+                input_preview={},
+                result={"ok": True, "data": {"text": "Raw current page text"}},
+            )
+        ],
+    )
+    message = custom_api_agent_module._model_followup_context_message(payload)
+
+    assert payload["followup_target"] == {
+        "kind": "note_write",
+        "target_action": "create_note",
+        "body_source": "model_generated_content",
+        "write_allowed": True,
+        "recommended_tools": ["notes.create"],
+        "context_source": "current_page_content",
+    }
+    assert "saved as a note in Notes" in message
+    assert "call notes.create next" in message
+    assert "Do not write the raw observed source" in message
+    assert custom_api_agent_module._model_followup_app_write_requests(
+        "整理后的网页摘要",
+        payload["followup_target"],
+        ["notes.create"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "notes.create",
+            "input": {"body": "整理后的网页摘要"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_note_write",
+        }
+    ]
+
+
 def test_custom_api_agent_loop_writes_generated_followup_content_to_target_app() -> None:
     budget = FakeBudget()
     tool_runs: list[dict[str, Any]] = []

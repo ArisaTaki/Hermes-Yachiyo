@@ -3699,6 +3699,8 @@ def _model_followup_target_payload(
         return _model_followup_communication_target_payload(target, allowed)
     if kind == "desktop_discovered_app_action":
         return _model_followup_desktop_discovered_app_target_payload(target, allowed)
+    if kind == "note_write":
+        return _model_followup_note_write_target_payload(target, allowed)
     if kind != "app_write" or not app_name:
         return {}
     container_action = _model_followup_container_action(target)
@@ -3722,6 +3724,30 @@ def _model_followup_target_payload(
     context_source = str(target.get("context_source") or "").strip()
     if context_source:
         payload["context_source"] = context_source
+    return payload
+
+
+def _model_followup_note_write_target_payload(
+    target: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    write_allowed = "notes.create" in allowed
+    payload: dict[str, Any] = {
+        "kind": "note_write",
+        "target_action": str(target.get("target_action") or "create_note").strip(),
+        "body_source": "model_generated_content",
+        "write_allowed": write_allowed,
+        "recommended_tools": ["notes.create"] if write_allowed else [],
+    }
+    context_source = str(target.get("context_source") or "").strip()
+    if context_source:
+        payload["context_source"] = context_source
+    title = str(target.get("title") or "").strip()
+    if title:
+        payload["title"] = title
+    folder_name = str(target.get("folder_name") or "").strip()
+    if folder_name:
+        payload["folder_name"] = folder_name
     return payload
 
 
@@ -3862,6 +3888,8 @@ def _selection_payload_has_model_followup_target(
         return bool(str(target.get("app_name") or "").strip())
     if kind == "communication_message":
         return bool(str(target.get("recipient") or "").strip())
+    if kind == "note_write":
+        return True
     if kind == "desktop_discovered_app_action":
         return bool(str(target.get("app_query") or "").strip())
     return False
@@ -4445,6 +4473,8 @@ def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
         return _model_followup_communication_instruction(target)
     if kind == "desktop_discovered_app_action":
         return _model_followup_desktop_discovered_app_instruction(target)
+    if kind == "note_write":
+        return _model_followup_note_write_instruction(target)
     app_name = str(target.get("app_name") or "").strip()
     if kind != "app_write" or not app_name:
         return ""
@@ -4476,6 +4506,23 @@ def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
         f"replying inline. Prefer {tool_text}; use the generated transformed content as the "
         "text input. Do not write the raw observed source when the user asked for summary, "
         f"cleanup, translation, or todo conversion.{verify_text} "
+    )
+
+
+def _model_followup_note_write_instruction(target: Mapping[str, Any]) -> str:
+    if not bool(target.get("write_allowed")):
+        return (
+            "The user requested a note in Notes, but notes.create is not available. Explain "
+            "the missing capability instead of claiming the note was created."
+        )
+    tools = _string_list(target.get("recommended_tools"))
+    tool_text = ", ".join(tools) or "notes.create"
+    return (
+        "The user requested the transformed content be saved as a note in Notes. "
+        "After deriving the final note body, call notes.create next instead of only "
+        f"replying inline. Prefer {tool_text}; use the generated transformed content as "
+        "the body input. Do not write the raw observed source when the user asked for "
+        "summary, cleanup, translation, or todo conversion. "
     )
 
 
@@ -4618,6 +4665,8 @@ def _model_followup_app_write_requests(
         return []
     if str(target.get("kind") or "").strip() == "communication_message":
         return _model_followup_communication_requests(content, target, allowed_tools)
+    if str(target.get("kind") or "").strip() == "note_write":
+        return _model_followup_note_write_requests(content, target, allowed_tools)
     app_name = str(target.get("app_name") or "").strip()
     if str(target.get("kind") or "").strip() != "app_write" or not app_name:
         return []
@@ -4707,6 +4756,34 @@ def _model_followup_app_write_requests(
         ]
         return [*requests, *([verify_request] if verify_request else [])]
     return []
+
+
+def _model_followup_note_write_requests(
+    generated_content: str,
+    target: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    content = str(generated_content or "").strip()
+    if not content or str(target.get("kind") or "").strip() != "note_write":
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if "notes.create" not in allowed:
+        return []
+    payload: dict[str, Any] = {"body": content}
+    title = str(target.get("title") or "").strip()
+    if title:
+        payload["title"] = title
+    folder_name = str(target.get("folder_name") or "").strip()
+    if folder_name:
+        payload["folder_name"] = folder_name
+    return [
+        _request_like(
+            "notes.create",
+            payload,
+            source="runtime_planner",
+            planning_reason="planner_followup_note_write",
+        )
+    ]
 
 
 def _model_followup_communication_requests(

@@ -15870,6 +15870,34 @@ def test_runtime_planner_routes_foreground_note_context_to_visible_text() -> Non
     )
 
 
+def test_planner_selection_payload_surfaces_context_note_write_target() -> None:
+    prompt = "把当前网页总结一下，保存到备忘录"
+    allowed_tools = ["notes.create", "browser.extract_text"]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert payload["intent_kind"] == "information_capture"
+    assert payload["followup_target"] == {
+        "kind": "note_write",
+        "target_action": "create_note",
+        "body_source": "model_generated_content",
+        "context_source": "current_page_content",
+        "tool": "notes.create",
+    }
+    assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == payload[
+        "followup_target"
+    ]
+
+
 def test_runtime_planner_tracks_context_schedule_source_without_body() -> None:
     decision = RuntimePlanner().decision(
         "create a reminder from selected text",

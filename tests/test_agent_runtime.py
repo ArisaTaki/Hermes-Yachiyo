@@ -5058,7 +5058,10 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
                 "Yachiyo runtime supports discover, act, verify, artifact."
             ) == 1
             assert any(
-                "Tool result for desktop.read_ui" in str(message.get("content") or "")
+                (
+                    "Tool result for desktop.read_ui" in str(message.get("content") or "")
+                    or "Tool result for desktop.ui_elements" in str(message.get("content") or "")
+                )
                 and "Yachiyo runtime supports discover" in str(message.get("content") or "")
                 for message in messages
             )
@@ -5127,7 +5130,7 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
             event
             for event in events
             if event["event_type"] == "agent.desktop.intent_planned"
-            and event["payload"]["tool"] == "desktop.read_ui"
+            and event["payload"]["tool"] in {"desktop.read_ui", "desktop.ui_elements"}
         )
         followup = next(
             event
@@ -5152,7 +5155,7 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
         assert followup["payload"]["artifacts_expected"] == ["desktop-content-report.md"]
         assert followup["payload"]["artifact_write_allowed"] is True
         assert followup["payload"]["content_snapshot"] == {
-            "source_tool": "desktop.read_ui",
+            "source_tool": "desktop.ui_elements",
             "ok": True,
             "app_name": "Obsidian",
             "title": "Search: yachiyo runtime",
@@ -5166,6 +5169,131 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
         }
         assert len(model_calls) == 2
         assert artifact_path.read_text(encoding="utf-8").startswith("# Desktop Content Report")
+    finally:
+        service.close()
+
+
+def test_main_chat_model_loop_writes_generated_page_summary_to_notes(
+    tmp_path,
+    monkeypatch,
+):
+    service = make_service(tmp_path)
+    tool_calls: list[tuple[str, dict[str, Any]]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_extract_text(selector: str = "") -> dict[str, Any]:
+        tool_calls.append(("browser.extract_text", {"selector": selector}))
+        return {
+            "ok": True,
+            "action": "browser.extract_text",
+            "summary": "Extracted current page text",
+            "data": {
+                "selector": selector,
+                "text": "Oha-Yachiyo can discover desktop apps, execute tools, and verify results.",
+                "truncated": False,
+            },
+        }
+
+    def fake_notes_create(
+        body: str,
+        *,
+        title: str = "",
+        folder_name: str = "",
+    ) -> dict[str, Any]:
+        tool_calls.append(
+            (
+                "notes.create",
+                {"body": body, "title": title, "folder_name": folder_name},
+            )
+        )
+        return {
+            "ok": True,
+            "action": "notes.create",
+            "summary": "Created note",
+            "data": {
+                "title": title or "网页摘要",
+                "body_length": len(body),
+                "folder_name": folder_name,
+            },
+        }
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        model_calls.append([dict(message) for message in messages])
+        assert messages[-1]["role"] == "user"
+        assert messages[-1]["content"].startswith("Runtime follow-up context:")
+        assert "saved as a note in Notes" in messages[-1]["content"]
+        assert "call notes.create next" in messages[-1]["content"]
+        assert "Oha-Yachiyo can discover desktop apps" in messages[-1]["content"]
+        return {"content": "网页摘要：Oha-Yachiyo 可以发现桌面应用、执行工具并验证结果。"}
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.notes_create", fake_notes_create)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-page-summary-note",
+            session_id="session-main-page-summary-note",
+            user_goal="把当前网页总结一下，保存到备忘录",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "把当前网页总结一下，保存到备忘录"}],
+            tool_policy={
+                "allowed_tools": [
+                    "browser.extract_text",
+                    "notes.create",
+                ]
+            },
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        planned_events = [
+            event for event in events if event["event_type"] == "agent.desktop.intent_planned"
+        ]
+        followup = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.model.followup_context"
+        )
+        completed_event = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.desktop.intent_completed"
+        )
+
+        assert updated["result"] == "已创建备忘录：网页摘要（36 个字符）。"
+        assert tool_calls == [
+            ("browser.extract_text", {"selector": ""}),
+            (
+                "notes.create",
+                {
+                    "body": "网页摘要：Oha-Yachiyo 可以发现桌面应用、执行工具并验证结果。",
+                    "title": "",
+                    "folder_name": "",
+                },
+            ),
+        ]
+        assert len(model_calls) == 1
+        assert [event["payload"]["tool"] for event in planned_events] == [
+            "browser.extract_text",
+            "notes.create",
+        ]
+        assert planned_events[1]["payload"]["planning_reason"] == "planner_followup_note_write"
+        assert followup["payload"]["followup_target"] == {
+            "kind": "note_write",
+            "target_action": "create_note",
+            "body_source": "model_generated_content",
+            "write_allowed": True,
+            "recommended_tools": ["notes.create"],
+            "context_source": "current_page_content",
+        }
+        assert completed_event["payload"]["tool"] == "notes.create"
+        assert completed_event["payload"]["tools"] == ["notes.create"]
+        assert completed_event["payload"]["planning_reason"] == "planner_followup_note_write"
+        assert "model.request.started" in [event["event_type"] for event in events]
     finally:
         service.close()
 
