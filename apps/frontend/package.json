@@ -1,6 +1,8 @@
 {
   "name": "@oha-yachiyo/desktop-ui",
   "version": "0.4.0",
+  "description": "Desktop shell and agent runtime UI for Oha-Yachiyo.",
+  "author": "Oha-Yachiyo contributors",
   "private": true,
   "type": "module",
   "main": "dist-electron/main.js",
