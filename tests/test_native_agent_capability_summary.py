@@ -94,6 +94,57 @@ def _provider_and_packaged_report() -> dict[str, object]:
     }
 
 
+def _native_provider_contract_report() -> dict[str, object]:
+    return {
+        "provider_smoke": {
+            "status": "skipped",
+            "checks": [],
+        },
+        "native_provider_contract_smoke": {
+            "status": "passed",
+            "evidence": {
+                "ok": True,
+                "mode": "native_provider_contract_smoke",
+                "provider": "local_fake_openai_compatible_sse",
+                "checks": [
+                    {
+                        "label": "native_agent_full_chain_contract",
+                        "ok": True,
+                        "summary": {
+                            "ok": True,
+                            "checks": [
+                                {"name": "model_profile_readiness", "ok": True},
+                                {"name": "agent_workspace_read", "ok": True},
+                                {"name": "agent_artifact_write", "ok": True},
+                                {
+                                    "name": "agent_multi_tool_pipeline",
+                                    "ok": True,
+                                    "tool_call_count": 2,
+                                    "artifact_paths": ["pipeline-report.md"],
+                                },
+                                {"name": "workflow_child_agent_artifact", "ok": True},
+                                {"name": "terminal_approval_resume", "ok": True},
+                                {"name": "main_chat_model_loop", "ok": True},
+                            ],
+                        },
+                    },
+                    {
+                        "label": "native_workflow_full_chain_contract",
+                        "ok": True,
+                        "summary": {
+                            "ok": True,
+                            "checks": [
+                                {"name": "advanced_workflow_orchestration", "ok": True},
+                                {"name": "workflow_budget_boundary", "ok": True},
+                            ],
+                        },
+                    },
+                ],
+            },
+        },
+    }
+
+
 def test_capability_summary_reports_full_native_agent_matrix():
     report = {
         "data_analysis_artifact_smoke": _passed_section(
@@ -229,6 +280,50 @@ def test_capability_summary_reports_full_native_agent_matrix():
     assert multi_tool["status"] == "passed"
     assert multi_tool["evidence_summary"]["tool_call_count"] == 2
     assert "pipeline-report.md" in multi_tool["evidence_summary"]["artifact_paths"]
+
+
+def test_capability_summary_uses_native_provider_contract_for_runtime_full_chain_only():
+    result = summary.summarize_capabilities(_native_provider_contract_report())
+
+    by_id = {item["id"]: item for item in result["capabilities"]}
+    assert by_id["provider_text_stream"]["status"] == "missing"
+    assert by_id["provider_tool_call_stream"]["status"] == "missing"
+    assert by_id["model_profile_readiness"]["status"] == "passed"
+    assert by_id["agent_workspace_read"]["status"] == "passed"
+    assert by_id["agent_artifact_write"]["status"] == "passed"
+    assert by_id["agent_multi_tool_pipeline"]["status"] == "passed"
+    assert by_id["workflow_child_agent_artifact"]["status"] == "passed"
+    assert by_id["terminal_approval_resume"]["status"] == "passed"
+    assert by_id["main_chat_model_loop"]["status"] == "passed"
+    assert by_id["advanced_workflow_orchestration"]["status"] == "passed"
+    assert by_id["workflow_budget_boundary"]["status"] == "passed"
+    assert by_id["agent_multi_tool_pipeline"]["evidence_summary"]["evidence_source"] == (
+        "native_provider_contract_smoke"
+    )
+    provider_action = {
+        item["id"]: item
+        for item in result["next_actions"]
+    }["provider_smoke"]
+    assert provider_action["capability_ids"] == [
+        "provider_text_stream",
+        "provider_tool_call_stream",
+    ]
+
+
+def test_capability_summary_does_not_hide_failed_real_provider_with_contract():
+    report = _native_provider_contract_report()
+    report["provider_smoke"] = {
+        "status": "failed",
+        "run_requested": True,
+        "checks": [],
+    }
+
+    result = summary.summarize_capabilities(report)
+
+    by_id = {item["id"]: item for item in result["capabilities"]}
+    assert by_id["agent_workspace_read"]["status"] == "missing"
+    assert by_id["agent_multi_tool_pipeline"]["status"] == "missing"
+    assert by_id["advanced_workflow_orchestration"]["status"] == "missing"
 
 
 def test_capability_summary_marks_missing_multi_tool_pipeline():

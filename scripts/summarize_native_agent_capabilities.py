@@ -292,6 +292,61 @@ def _provider_checks(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
     return checks
 
 
+def _native_provider_contract_checks(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+    section = report.get("native_provider_contract_smoke")
+    if not isinstance(section, dict) or section.get("status") != "passed":
+        return {}
+    evidence = section.get("evidence")
+    if not isinstance(evidence, dict) or evidence.get("ok") is not True:
+        return {}
+    raw_checks = evidence.get("checks")
+    if not isinstance(raw_checks, list):
+        return {}
+    checks: dict[str, dict[str, Any]] = {}
+    for item in raw_checks:
+        if not isinstance(item, dict):
+            continue
+        label = str(item.get("label") or "").strip()
+        if label:
+            checks[label] = item
+    return checks
+
+
+def _provider_smoke_failed_or_requested(report: dict[str, Any]) -> bool:
+    section = report.get("provider_smoke")
+    if not isinstance(section, dict):
+        return False
+    status = str(section.get("status") or "").strip()
+    if status in {"", "pending", "skipped"}:
+        return False
+    return status != "passed" or section.get("run_requested") is True
+
+
+def _runtime_chain_checks(
+    report: dict[str, Any],
+    provider_checks: dict[str, dict[str, Any]],
+    contract_checks: dict[str, dict[str, Any]],
+    *,
+    provider_label: str,
+    contract_label: str,
+) -> tuple[dict[str, dict[str, Any]], str]:
+    if provider_label in provider_checks:
+        return _nested_checks(provider_checks.get(provider_label)), "provider_smoke"
+    if _provider_smoke_failed_or_requested(report):
+        return {}, "provider_smoke"
+    if contract_label in contract_checks:
+        return _nested_checks(contract_checks.get(contract_label)), "native_provider_contract_smoke"
+    return {}, ""
+
+
+def _with_evidence_source(evidence: dict[str, Any], source: str) -> dict[str, Any]:
+    if not source:
+        return evidence
+    result = dict(evidence)
+    result.setdefault("evidence_source", source)
+    return result
+
+
 def _nested_checks(provider_check: dict[str, Any] | None) -> dict[str, dict[str, Any]]:
     if not isinstance(provider_check, dict):
         return {}
@@ -509,6 +564,8 @@ def _capability_status(
     provider_checks: dict[str, dict[str, Any]],
     native_agent_checks: dict[str, dict[str, Any]],
     native_workflow_checks: dict[str, dict[str, Any]],
+    native_agent_source: str,
+    native_workflow_source: str,
 ) -> tuple[str, dict[str, Any]]:
     source_section = SOURCE_SECTION_CAPABILITIES.get(capability_id)
     if source_section:
@@ -541,10 +598,16 @@ def _capability_status(
             and int(item.get("tool_call_count") or 0) >= 2
             and "pipeline-report.md" in (item.get("artifact_paths") or [])
         )
-        return ("passed" if ok else "missing", {
-            "tool_call_count": item.get("tool_call_count"),
-            "artifact_paths": item.get("artifact_paths", []),
-        })
+        return (
+            "passed" if ok else "missing",
+            _with_evidence_source(
+                {
+                    "tool_call_count": item.get("tool_call_count"),
+                    "artifact_paths": item.get("artifact_paths", []),
+                },
+                native_agent_source,
+            ),
+        )
     if capability_id in {
         "model_profile_readiness",
         "agent_workspace_read",
@@ -555,7 +618,10 @@ def _capability_status(
     }:
         return (
             "passed" if _check_ok(native_agent_checks, capability_id) else "missing",
-            native_agent_checks.get(capability_id, {}),
+            _with_evidence_source(
+                native_agent_checks.get(capability_id, {}),
+                native_agent_source,
+            ),
         )
     if capability_id in {
         "advanced_workflow_orchestration",
@@ -563,7 +629,10 @@ def _capability_status(
     }:
         return (
             "passed" if _check_ok(native_workflow_checks, capability_id) else "missing",
-            native_workflow_checks.get(capability_id, {}),
+            _with_evidence_source(
+                native_workflow_checks.get(capability_id, {}),
+                native_workflow_source,
+            ),
         )
     if capability_id == "packaged_backend_bridge_identity":
         section = report.get("packaged_backend_bridge_smoke")
@@ -584,8 +653,21 @@ def _capability_status(
 
 def summarize_capabilities(report: dict[str, Any]) -> dict[str, Any]:
     provider_checks = _provider_checks(report)
-    native_agent_checks = _nested_checks(provider_checks.get("native_agent_full_chain"))
-    native_workflow_checks = _nested_checks(provider_checks.get("native_workflow_full_chain"))
+    contract_checks = _native_provider_contract_checks(report)
+    native_agent_checks, native_agent_source = _runtime_chain_checks(
+        report,
+        provider_checks,
+        contract_checks,
+        provider_label="native_agent_full_chain",
+        contract_label="native_agent_full_chain_contract",
+    )
+    native_workflow_checks, native_workflow_source = _runtime_chain_checks(
+        report,
+        provider_checks,
+        contract_checks,
+        provider_label="native_workflow_full_chain",
+        contract_label="native_workflow_full_chain_contract",
+    )
     capabilities: list[dict[str, Any]] = []
     for definition in CAPABILITY_DEFINITIONS:
         status, evidence = _capability_status(
@@ -594,6 +676,8 @@ def summarize_capabilities(report: dict[str, Any]) -> dict[str, Any]:
             provider_checks=provider_checks,
             native_agent_checks=native_agent_checks,
             native_workflow_checks=native_workflow_checks,
+            native_agent_source=native_agent_source,
+            native_workflow_source=native_workflow_source,
         )
         capabilities.append(
             {

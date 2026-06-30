@@ -35,8 +35,38 @@ def _stub_native_provider_contract_source_smoke(monkeypatch):
             "mode": "native_provider_contract_smoke",
             "provider": "local_fake_openai_compatible_sse",
             "checks": [
-                {"label": "native_agent_full_chain_contract", "ok": True},
-                {"label": "native_workflow_full_chain_contract", "ok": True},
+                {
+                    "label": "native_agent_full_chain_contract",
+                    "ok": True,
+                    "summary": {
+                        "ok": True,
+                        "checks": [
+                            {"name": "model_profile_readiness", "ok": True},
+                            {"name": "agent_workspace_read", "ok": True},
+                            {"name": "agent_artifact_write", "ok": True},
+                            {
+                                "name": "agent_multi_tool_pipeline",
+                                "ok": True,
+                                "tool_call_count": 2,
+                                "artifact_paths": ["pipeline-report.md"],
+                            },
+                            {"name": "workflow_child_agent_artifact", "ok": True},
+                            {"name": "terminal_approval_resume", "ok": True},
+                            {"name": "main_chat_model_loop", "ok": True},
+                        ],
+                    },
+                },
+                {
+                    "label": "native_workflow_full_chain_contract",
+                    "ok": True,
+                    "summary": {
+                        "ok": True,
+                        "checks": [
+                            {"name": "advanced_workflow_orchestration", "ok": True},
+                            {"name": "workflow_budget_boundary", "ok": True},
+                        ],
+                    },
+                },
             ],
         },
     )
