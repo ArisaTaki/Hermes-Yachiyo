@@ -355,6 +355,15 @@ def _desktop_discovered_app_followup_target(inputs: Mapping[str, Any]) -> dict[s
     if compose_text:
         payload["compose_text"] = compose_text
         payload["body_source"] = "explicit_user_text"
+    communication_compose = inputs.get("communication_compose_hint")
+    if isinstance(communication_compose, Mapping):
+        compose_payload = {
+            str(key): str(communication_compose.get(key) or "").strip()
+            for key in ("channel", "recipient", "body", "send_action")
+            if str(communication_compose.get(key) or "").strip()
+        }
+        if compose_payload:
+            payload["communication_compose"] = compose_payload
     creative_canvas = inputs.get("creative_canvas_hint")
     if isinstance(creative_canvas, Mapping):
         payload["creative_canvas"] = dict(creative_canvas)

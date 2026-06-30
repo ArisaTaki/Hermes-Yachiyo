@@ -3729,6 +3729,10 @@ def _model_followup_desktop_discovered_app_target_payload(
             "desktop.safe_type_text",
             "desktop.click_ui_element",
             "desktop.type_into_ui_element",
+            "desktop.inspect_app",
+            "app.focus_and_type_into_ui_element",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
         )
         if tool in allowed
     ]
@@ -3755,6 +3759,13 @@ def _model_followup_desktop_discovered_app_target_payload(
     if compose_text:
         payload["compose_text"] = compose_text
         payload["body_source"] = str(target.get("body_source") or "explicit_user_text").strip()
+    communication_compose = _discovered_app_communication_compose_payload(target)
+    if communication_compose:
+        payload["communication_compose"] = communication_compose
+        payload["send_allowed"] = (
+            communication_compose.get("send_action") == "send"
+            and "desktop.submit_foreground" in allowed
+        )
     creative_canvas = (
         target.get("creative_canvas")
         if isinstance(target.get("creative_canvas"), Mapping)
@@ -3898,8 +3909,22 @@ def _auto_discovered_app_followup_requests(
         )
         if open_request:
             requests.append(open_request)
+    communication_compose = _discovered_app_communication_compose_payload(target)
+    if communication_compose:
+        compose_requests = _discovered_app_communication_compose_requests(
+            app_query,
+            app_name,
+            communication_compose,
+            allowed,
+            prepared=bool(requests),
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if not compose_requests:
+            return []
+        requests.extend(compose_requests)
     compose_text = str(target.get("compose_text") or "").strip()
-    if requests and compose_text:
+    if requests and compose_text and not communication_compose:
         type_request = _discovered_app_type_text_request(
             app_query,
             app_name,
@@ -4060,6 +4085,195 @@ def _discovered_app_type_text_request(
             app_name,
         )
     return {}
+
+
+def _discovered_app_communication_compose_payload(
+    target: Mapping[str, Any],
+) -> dict[str, str]:
+    raw = (
+        target.get("communication_compose")
+        if isinstance(target.get("communication_compose"), Mapping)
+        else {}
+    )
+    if not raw:
+        return {}
+    payload = {
+        key: str(raw.get(key) or "").strip()
+        for key in ("channel", "recipient", "body", "send_action")
+        if str(raw.get(key) or "").strip()
+    }
+    if not payload.get("recipient") and not payload.get("body"):
+        return {}
+    payload.setdefault("send_action", "draft")
+    return payload
+
+
+def _discovered_app_communication_compose_requests(
+    app_query: str,
+    app_name: str,
+    compose: Mapping[str, str],
+    allowed: set[str],
+    *,
+    prepared: bool,
+    source: str,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    recipient = str(compose.get("recipient") or "").strip()
+    body = str(compose.get("body") or "").strip()
+    if not recipient and not body:
+        return []
+    requests: list[dict[str, Any]] = []
+    if not prepared:
+        requests.extend(
+            _discovered_app_safe_shortcut_requests(
+                app_query,
+                app_name,
+                "new_message",
+                allowed,
+                source=source,
+                planning_reason=planning_reason,
+            )
+        )
+        if not requests:
+            return []
+    inspect_request = _discovered_app_communication_inspect_request(
+        app_query,
+        app_name,
+        allowed,
+        source=source,
+        planning_reason=planning_reason,
+    )
+    if inspect_request:
+        requests.append(inspect_request)
+    channel = str(compose.get("channel") or "").strip()
+    if recipient:
+        recipient_request = _discovered_app_type_into_ui_element_request(
+            app_query,
+            app_name,
+            _discovered_communication_recipient_target(channel),
+            recipient,
+            allowed,
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if not recipient_request or "desktop.search_submit" not in allowed:
+            return []
+        requests.append(recipient_request)
+        requests.append(
+            _request_like(
+                "desktop.search_submit",
+                {},
+                source=source,
+                planning_reason=planning_reason,
+            )
+        )
+    if body:
+        body_request = _discovered_app_type_into_ui_element_request(
+            app_query,
+            app_name,
+            _discovered_communication_body_target(channel),
+            body,
+            allowed,
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if not body_request:
+            return []
+        requests.append(body_request)
+    if (
+        str(compose.get("send_action") or "").strip() == "send"
+        and body
+        and "desktop.submit_foreground" in allowed
+    ):
+        requests.append(
+            _request_like(
+                "desktop.submit_foreground",
+                {"action": "send"},
+                source=source,
+                planning_reason=planning_reason,
+            )
+        )
+    return requests
+
+
+def _discovered_app_communication_inspect_request(
+    app_query: str,
+    app_name: str,
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> dict[str, Any]:
+    if "desktop.inspect_app" in allowed:
+        return _with_discovered_app_resolution(
+            _request_like(
+                "desktop.inspect_app",
+                {
+                    "app_name": app_name,
+                    "open_if_needed": False,
+                    "focus": True,
+                    "role_filter": "text",
+                    "limit": 80,
+                },
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            app_query,
+            app_name,
+        )
+    if "desktop.ui_elements" in allowed:
+        return _request_like(
+            "desktop.ui_elements",
+            {"role_filter": "text", "limit": 80},
+            source=source,
+            planning_reason=planning_reason,
+        )
+    return {}
+
+
+def _discovered_app_type_into_ui_element_request(
+    app_query: str,
+    app_name: str,
+    target: str,
+    text: str,
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> dict[str, Any]:
+    payload = {
+        "target": target,
+        "text": text,
+        "role_filter": "text",
+        "limit": 80,
+    }
+    if "app.focus_and_type_into_ui_element" in allowed:
+        return _with_discovered_app_resolution(
+            _request_like(
+                "app.focus_and_type_into_ui_element",
+                {"app_name": app_name, **payload},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            app_query,
+            app_name,
+        )
+    if "desktop.type_into_ui_element" in allowed:
+        return _request_like(
+            "desktop.type_into_ui_element",
+            payload,
+            source=source,
+            planning_reason=planning_reason,
+        )
+    return {}
+
+
+def _discovered_communication_recipient_target(channel: str) -> str:
+    return "To" if str(channel or "").strip() == "email" else "recipient"
+
+
+def _discovered_communication_body_target(channel: str) -> str:
+    return "message body" if str(channel or "").strip() == "email" else "message"
 
 
 def _discovered_app_observation_request(
@@ -4256,6 +4470,27 @@ def _model_followup_desktop_discovered_app_instruction(target: Mapping[str, Any]
         if verify_tools
         else ""
     )
+    communication_compose = (
+        target.get("communication_compose")
+        if isinstance(target.get("communication_compose"), Mapping)
+        else {}
+    )
+    if communication_compose:
+        recipient = str(communication_compose.get("recipient") or "").strip()
+        body = str(communication_compose.get("body") or "").strip()
+        send_action = str(communication_compose.get("send_action") or "draft").strip()
+        send_text = (
+            " Send only through the approval-gated submit tool after the draft is filled."
+            if send_action == "send"
+            else " Prepare the draft only unless the user explicitly asks to send."
+        )
+        return (
+            f"The runtime discovered an app for {app_query!r}. Continue by opening a new "
+            "message in the discovered app, inspecting the compose UI, filling the explicit "
+            f"recipient {recipient!r}, and typing the explicit body {body!r}. "
+            f"Prefer {tool_text}.{send_text}{verify_text} If these UI tools are unavailable, "
+            "explain the missing capability instead of claiming the message was prepared. "
+        )
     if target_path:
         return (
             f"The runtime discovered an app for {app_query!r}. Continue by opening "

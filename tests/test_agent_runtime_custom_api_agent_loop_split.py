@@ -12668,6 +12668,236 @@ def test_custom_api_agent_loop_executes_named_app_scope_without_model_or_legacy_
     ]
 
 
+def test_custom_api_agent_loop_continues_discovered_communication_app_without_model(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_tool_requests",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_candidates",
+        lambda *_args, **_kwargs: [],
+    )
+    budget = FakeBudget()
+    tool_runs: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append(tool_requests)
+        for tool_request in tool_requests:
+            tool = str(tool_request.get("tool") or "")
+            payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+            if tool == "desktop.list_apps":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Found installed app: Slack",
+                    "data": {
+                        "query": payload["query"],
+                        "best_match": {
+                            "name": "Slack",
+                            "path": "/Applications/Slack.app",
+                            "match_score": 96,
+                            "match_confidence": "high",
+                            "match_reason": "category:messaging",
+                        },
+                        "matches": [
+                            {
+                                "name": "Slack",
+                                "path": "/Applications/Slack.app",
+                                "match_score": 96,
+                                "match_confidence": "high",
+                                "match_reason": "category:messaging",
+                            }
+                        ],
+                    },
+                }
+            elif tool == "app.open_and_safe_shortcut":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Opened Slack and created a new message",
+                    "data": {
+                        "app_name": payload["app_name"],
+                        "shortcut_action": payload["action"],
+                    },
+                }
+            elif tool == "desktop.inspect_app":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Inspected Slack",
+                    "data": {
+                        "app_name": payload["app_name"],
+                        "focus_verified": True,
+                        "ui_elements": {
+                            "ok": True,
+                            "data": {
+                                "app_name": payload["app_name"],
+                                "elements": [
+                                    {"role": "text", "name": "recipient"},
+                                    {"role": "text", "name": "message"},
+                                ],
+                            },
+                        },
+                    },
+                }
+            elif tool == "app.focus_and_type_into_ui_element":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": f"Typed into {payload['target']}",
+                    "data": {
+                        "app_name": payload["app_name"],
+                        "target": payload["target"],
+                        "character_count": len(payload["text"]),
+                    },
+                }
+            elif tool == "desktop.search_submit":
+                result = {"ok": True, "action": tool, "summary": "Selected recipient", "data": {}}
+            elif tool == "desktop.submit_foreground":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Sent foreground message",
+                    "data": {"submit_action": payload["action"]},
+                }
+            elif tool == "desktop.ui_elements":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Read foreground UI",
+                    "data": {"app_name": "Slack", "elements": []},
+                }
+            else:
+                raise AssertionError(f"unexpected tool: {tool}")
+            timeline_arg.append(
+                _timeline("agent.tool.call", tool, input_preview=payload, result=result)
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "desktop.list_apps",
+                    "app.open_and_safe_shortcut",
+                    "desktop.inspect_app",
+                    "app.focus_and_type_into_ui_element",
+                    "desktop.search_submit",
+                    "desktop.submit_foreground",
+                    "desktop.ui_elements",
+                ]
+            },
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("discovered communication compose should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "打开一个聊天软件，给 Alice 发送 hello",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-discovered-communication-compose",
+    )
+
+    assert "Slack" in str(result)
+    assert "确认发送" in str(result)
+    assert [request["tool"] for request in tool_runs[0]] == ["desktop.list_apps"]
+    assert [request["tool"] for request in tool_runs[1]] == [
+        "app.open_and_safe_shortcut",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus_and_type_into_ui_element",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    assert tool_runs[1][0]["input"] == {"app_name": "Slack", "action": "new_message"}
+    assert tool_runs[1][1]["input"] == {
+        "app_name": "Slack",
+        "open_if_needed": False,
+        "focus": True,
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert tool_runs[1][2]["input"] == {
+        "app_name": "Slack",
+        "target": "recipient",
+        "text": "Alice",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert tool_runs[1][4]["input"] == {
+        "app_name": "Slack",
+        "target": "message",
+        "text": "hello",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert tool_runs[1][5]["input"] == {"action": "send"}
+    assert tool_runs[1][0]["input_resolution"] == {
+        "tool": "app.open_and_safe_shortcut",
+        "field": "app_name",
+        "requested_app_name": "messaging",
+        "resolved_app_name": "Slack",
+        "source_tool": "desktop.list_apps",
+        "app_resolution_score": "96",
+        "app_resolution_confidence": "high",
+        "app_resolution_reason": "category:messaging",
+        "resolved_app_path": "/Applications/Slack.app",
+    }
+    selection_events = _planner_selection_events(timeline)
+    assert selection_events[0]["followup_target"]["communication_compose"] == {
+        "channel": "message",
+        "recipient": "Alice",
+        "body": "hello",
+        "send_action": "send",
+    }
+    completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
+    assert completed[-1]["tools"] == [
+        "app.open_and_safe_shortcut",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus_and_type_into_ui_element",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+
+
 def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> None:
     budget = FakeBudget()
     tool_runs: list[list[dict[str, Any]]] = []
