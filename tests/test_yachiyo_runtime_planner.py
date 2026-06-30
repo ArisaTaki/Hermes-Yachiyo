@@ -6225,6 +6225,10 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "把当前网页摘要写进 Notion 新页面",
         allowed_tools=allowed,
     )
+    natural_new_page = RuntimePlanner().decision(
+        "把当前网页总结到 Notion 新页面",
+        allowed_tools=allowed,
+    )
 
     assert new_page.selected_intent.kind == "report_generation"
     assert new_page.selected_intent.inputs == {
@@ -6233,8 +6237,22 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "target_action_hint": "app_paste",
         "target_container_action_hint": "new_document",
     }
+    assert natural_new_page.selected_intent.kind == "report_generation"
+    assert natural_new_page.selected_intent.inputs == new_page.selected_intent.inputs
+    assert [step.step_id for step in natural_new_page.plan.tool_plan.steps] == [
+        "read-report-context",
+        "prepare-report-target-app",
+    ]
+    assert planner_tool_requests(
+        "把当前网页总结到 Notion 新页面",
+        allowed,
+    ) == [page_prefetch]
     english_new_page = RuntimePlanner().decision(
         "write current page summary into Notion new page",
+        allowed_tools=allowed,
+    )
+    english_summary_to_page = RuntimePlanner().decision(
+        "summarize current page to Notion new page",
         allowed_tools=allowed,
     )
     english_new_note = RuntimePlanner().decision(
@@ -6247,6 +6265,11 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "target_action_hint": "app_paste",
         "target_container_action_hint": "new_document",
     }
+    assert english_summary_to_page.selected_intent.kind == "report_generation"
+    assert (
+        english_summary_to_page.selected_intent.inputs
+        == english_new_page.selected_intent.inputs
+    )
     assert english_new_note.selected_intent.inputs == {
         "context_source": "current_page_content",
         "target_app_hint": "Obsidian",

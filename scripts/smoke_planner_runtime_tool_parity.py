@@ -78,6 +78,15 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "approval_required": [],
     },
     {
+        "id": "current_page_summary_to_app",
+        "category": "orchestrator",
+        "prompt": "把当前网页总结到 Notion 新页面",
+        "expected_intent": "report_generation",
+        "expected_plan_tools": ["browser.extract_text", "app.focus"],
+        "expected_request_tools": ["browser.extract_text"],
+        "approval_required": [],
+    },
+    {
         "id": "named_media_app_playback",
         "category": "orchestrator",
         "prompt": "open VLC play test",

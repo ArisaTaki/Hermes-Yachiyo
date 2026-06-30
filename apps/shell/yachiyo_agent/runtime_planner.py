@@ -9996,6 +9996,11 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
             score -= 0.24
         if str(intent.inputs.get("context_source") or "").strip():
             score += 0.34
+        if (
+            str(intent.inputs.get("context_source") or "").strip()
+            and str(intent.inputs.get("target_app_hint") or "").strip()
+        ):
+            score += 0.32
         file_context = intent.inputs.get("file_context_hint")
         if isinstance(file_context, Mapping):
             score += 0.3 if str(file_context.get("file_type") or "").strip() else 0.08
@@ -13470,12 +13475,28 @@ def _looks_like_dynamic_context_transfer(text: str) -> bool:
             value,
             flags=re.IGNORECASE,
         )
+        or re.search(
+            r"(?:总结|摘要|概括|归纳|整理|提炼|生成|输出|导出|做成).{0,16}(?:到|进|至)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:summari[sz]e|summary|organize|organise|convert|format|export|output)\b"
+            r".{0,40}\b(?:to|into|in)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
     )
 
 
 def _dynamic_context_transfer_app_name_hint(text: str) -> str:
     value = _clean_prompt(text)
     patterns = (
+        r"(?:总结|摘要|概括|归纳|整理|提炼|生成|输出|导出|做成).{0,16}(?:到|进|至)\s*"
+        r"(?P<app>[\w .·-]{1,40}?)(?:\s*(?:新笔记|新备忘录|新便签|"
+        r"新页面|新文档|新文件|笔记|备忘录|便签|页面|文档|文件|"
+        r"new\s+note|new\s+page|new\s+document|new\s+file|"
+        r"note|page|document|file))(?:$|[。！？!?，,])",
         r"(?:粘贴到|粘贴在|贴到|输入到|输入进|填到|填入|填写到|放到)\s*"
         r"(?P<app>[\w .·-]{1,40}?)(?:$|[。！？!?，,])",
         r"(?:写进|写入|写到|保存到|记录到|记到|放到)\s*"
@@ -13483,6 +13504,11 @@ def _dynamic_context_transfer_app_name_hint(text: str) -> str:
         r"新页面|新文档|新文件|笔记|备忘录|便签|页面|文档|文件|"
         r"new\s+note|new\s+page|new\s+document|new\s+file|"
         r"note|page|document|file))?(?:$|[。！？!?，,])",
+        r"\b(?:summari[sz]e|summary|organize|organise|convert|format|export|output)\b"
+        r".{0,40}\b(?:to|into|in)\s+"
+        r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:new\s+note|new\s+page|new\s+document|new\s+file|"
+        r"note|page|document|file)(?:$|[.!?,])",
         r"(?:在|用|通过)\s*(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内)?\s*"
         r"(?:粘贴|贴|输入|填入|填写|写进|写入|写到|保存|记录|记下)",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:打开|启动|开启|切到|聚焦)?\s*"
