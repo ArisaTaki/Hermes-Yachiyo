@@ -18879,12 +18879,14 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?:一个|一款|任意|任何|可用)?\s*"
         r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
         r"图片|图像|照片|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
-        r"聊天|通讯|通信|消息|即时通讯|日历)"
+        r"聊天|通讯|通信|消息|即时通讯|日历|项目管理|任务管理|工单|看板|"
+        r"issue|ticket)"
         r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
         r"\b(?:open|launch|start|find|use)\s+"
         r"(?:(?:an?|any|some|available)\s+)?"
         r"(?P<direct_capability_en>markdown|code|image|photo|document|text|spreadsheet|"
-        r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar)[\w\s-]{0,30}?"
+        r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
+        r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
         r"(?:app|application|client|tool|program|editor)\b",
     )
     for pattern in patterns:
@@ -18949,6 +18951,35 @@ def _app_capability_discovery_query(value: str) -> str:
         return "mail"
     if _contains_any(description, ("日历", "calendar")):
         return "calendar"
+    if _contains_any(
+        description,
+        (
+            "项目管理",
+            "project",
+            "projects",
+            "project management",
+            "project-management",
+            "kanban",
+            "看板",
+        ),
+    ):
+        return "project management"
+    if _contains_any(
+        description,
+        (
+            "任务管理",
+            "任务",
+            "工单",
+            "issue",
+            "ticket",
+            "task management",
+            "task-management",
+            "issue tracker",
+            "issue-tracker",
+            "ticket tracker",
+        ),
+    ):
+        return "task management"
     if _contains_any(description, ("文档", "文本", "文章", "document", "text", "writing", "write")):
         return "document"
     return description[:40].strip()

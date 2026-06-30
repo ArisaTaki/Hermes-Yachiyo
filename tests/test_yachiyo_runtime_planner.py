@@ -7013,6 +7013,14 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "打开一个能编辑图片的应用，新建一张 1024x1024 图片",
         allowed_tools=allowed_tools,
     )
+    project_task = RuntimePlanner().decision(
+        "打开任意项目管理工具，新建任务：整理发布清单",
+        allowed_tools=allowed_tools,
+    )
+    issue_tracker = RuntimePlanner().decision(
+        "find an issue tracker app and create an issue titled login bug",
+        allowed_tools=allowed_tools,
+    )
 
     assert code.selected_intent.inputs["app_name_hint"] == ""
     assert code.selected_intent.inputs["app_capability_hint"]["query"] == "code"
@@ -7052,6 +7060,50 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     assert image.selected_intent.inputs["app_capability_hint"]["query"] == "image"
     assert _step_by_id(image, "discover_apps-desktop-state").input_preview["query"] == "image"
     assert _step_by_id(image, "open-selected-discovered-app").input_preview["query"] == "image"
+    assert project_task.selected_intent.inputs["app_name_hint"] == ""
+    assert project_task.selected_intent.inputs["app_capability_hint"] == {
+        "query": "project management",
+        "description": "项目管理",
+    }
+    assert project_task.selected_intent.inputs["foreground_compose_text_hint"] == "整理发布清单"
+    assert [step.step_id for step in project_task.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(project_task, "discover_apps-desktop-state").input_preview == {
+        "query": "project management",
+        "limit": 20,
+    }
+    assert _step_by_id(project_task, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "project management",
+        "action": "new_document",
+    }
+    assert _step_by_id(project_task, "operate-foreground-ui-followup-type").input_preview == {
+        "text": "整理发布清单"
+    }
+    assert planner_tool_requests(
+        "打开任意项目管理工具，新建任务：整理发布清单",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "project management", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+    assert issue_tracker.selected_intent.inputs["app_name_hint"] == ""
+    assert issue_tracker.selected_intent.inputs["app_capability_hint"] == {
+        "query": "task management",
+        "description": "issue",
+    }
+    assert issue_tracker.selected_intent.inputs["foreground_compose_text_hint"] == "login bug"
 
     pdf = RuntimePlanner().decision(
         "找一个能编辑 PDF 的本机应用并打开它",

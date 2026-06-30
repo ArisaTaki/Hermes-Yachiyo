@@ -70,6 +70,22 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "approval_required": [],
     },
     {
+        "id": "capability_project_task_create",
+        "category": "orchestrator",
+        "prompt": "打开任意项目管理工具，新建任务：整理发布清单",
+        "expected_intent": "desktop_operation",
+        "expected_plan_tools": [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+        "expected_request_tools": [
+            "desktop.list_apps",
+        ],
+        "approval_required": [],
+    },
+    {
         "id": "builtin_data_analysis",
         "category": "orchestrator",
         "prompt": "请分析 data/sales.csv 并输出报告",
