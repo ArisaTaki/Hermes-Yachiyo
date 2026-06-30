@@ -363,6 +363,8 @@ def refresh_local_rc_signoff(
     batch_report = tmp_dir / f"rc-verification-{label}-packaged-batch.json"
     screen_report = tmp_dir / f"rc-verification-{label}-screen.json"
     native_capability_matrix_report = tmp_dir / f"rc-verification-{label}-native-capability-matrix.json"
+    release_readiness_report = tmp_dir / f"rc-verification-{label}-release-readiness.json"
+    release_readiness_markdown = tmp_dir / f"rc-verification-{label}-release-readiness.md"
     signoff_draft = tmp_dir / f"rc-signoff-{label}-current.json"
     signoff_markdown = tmp_dir / f"rc-signoff-{label}-current.md"
     signoff_preview = tmp_dir / f"rc-signoff-{label}-preview.json"
@@ -465,6 +467,27 @@ def refresh_local_rc_signoff(
             capability_matrix_command,
         )
 
+    release_readiness_command = [
+        sys.executable,
+        "scripts/summarize_release_readiness.py",
+    ]
+    for source in manual_sources:
+        release_readiness_command.append(str(source.relative_to(ROOT)))
+    release_readiness_command.extend(
+        [
+            "--output-json",
+            str(release_readiness_report.relative_to(ROOT)),
+            "--output-markdown",
+            str(release_readiness_markdown.relative_to(ROOT)),
+        ]
+    )
+    release_readiness_code = _run(release_readiness_command, allow_failure=True)
+    if release_readiness_code and not release_readiness_report.exists():
+        raise subprocess.CalledProcessError(
+            release_readiness_code,
+            release_readiness_command,
+        )
+
     draft_command = [sys.executable, "scripts/verify_release_candidate.py"]
     for source in manual_sources:
         draft_command.extend(["--manual-checks-json", str(source.relative_to(ROOT))])
@@ -506,6 +529,8 @@ def refresh_local_rc_signoff(
         "batch_report": batch_report,
         "screen_report": screen_report,
         "native_capability_matrix_report": native_capability_matrix_report,
+        "release_readiness_report": release_readiness_report,
+        "release_readiness_markdown": release_readiness_markdown,
         "signoff_draft": signoff_draft,
         "signoff_markdown": signoff_markdown,
         "signoff_preview": signoff_preview,

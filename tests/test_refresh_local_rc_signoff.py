@@ -90,6 +90,8 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
     assert reports["source_capability_report"] == tmp_path / "tmp" / "rc-verification-abc12345-source-capabilities.json"
     assert reports["screen_report"] == tmp_path / "tmp" / "rc-verification-abc12345-screen.json"
     assert reports["native_capability_matrix_report"] == tmp_path / "tmp" / "rc-verification-abc12345-native-capability-matrix.json"
+    assert reports["release_readiness_report"] == tmp_path / "tmp" / "rc-verification-abc12345-release-readiness.json"
+    assert reports["release_readiness_markdown"] == tmp_path / "tmp" / "rc-verification-abc12345-release-readiness.md"
     assert reports["signoff_draft"] == tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
     assert reports["signoff_markdown"] == tmp_path / "tmp" / "rc-signoff-abc12345-current.md"
     assert reports["signoff_preview"] == tmp_path / "tmp" / "rc-signoff-abc12345-preview.json"
@@ -136,8 +138,22 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
         ],
         True,
     )
-    assert "--mark-provider-smoke-not-applicable-if-missing" in commands[4][0]
-    assert commands[4][0][:7] == [
+    assert commands[4] == (
+        [
+            sys.executable,
+            "scripts/summarize_release_readiness.py",
+            "tmp/rc-verification-abc12345-source-capabilities.json",
+            "tmp/rc-verification-abc12345-packaged-batch.json",
+            "tmp/rc-verification-abc12345-screen.json",
+            "--output-json",
+            "tmp/rc-verification-abc12345-release-readiness.json",
+            "--output-markdown",
+            "tmp/rc-verification-abc12345-release-readiness.md",
+        ],
+        True,
+    )
+    assert "--mark-provider-smoke-not-applicable-if-missing" in commands[5][0]
+    assert commands[5][0][:7] == [
         sys.executable,
         "scripts/verify_release_candidate.py",
         "--manual-checks-json",
@@ -146,7 +162,7 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
         "tmp/rc-verification-abc12345-packaged-batch.json",
         "--manual-checks-json",
     ]
-    assert commands[5] == (
+    assert commands[6] == (
         [
             sys.executable,
             "scripts/verify_release_candidate.py",
@@ -157,7 +173,7 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
         ],
         False,
     )
-    assert commands[6][1] is True
+    assert commands[7][1] is True
 
 
 def test_refresh_local_rc_signoff_rejects_non_manual_preview_failure(
@@ -292,7 +308,7 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
     assert reports["batch_report"].exists()
     assert reports["screen_report"].exists()
     assert reports["native_capability_matrix_report"].exists()
-    assert len(commands) == 4
+    assert len(commands) == 5
     assert commands[0] == (
         [
             sys.executable,
@@ -305,15 +321,29 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
         ],
         True,
     )
-    assert commands[1][0][:5] == [
+    assert commands[1] == (
+        [
+            sys.executable,
+            "scripts/summarize_release_readiness.py",
+            "tmp/rc-verification-abc12345-source-capabilities.json",
+            "tmp/rc-verification-abc12345-packaged-batch.json",
+            "tmp/rc-verification-abc12345-screen.json",
+            "--output-json",
+            "tmp/rc-verification-abc12345-release-readiness.json",
+            "--output-markdown",
+            "tmp/rc-verification-abc12345-release-readiness.md",
+        ],
+        True,
+    )
+    assert commands[2][0][:5] == [
         sys.executable,
         "scripts/verify_release_candidate.py",
         "--manual-checks-json",
         "tmp/rc-verification-abc12345-source-capabilities.json",
         "--manual-checks-json",
     ]
-    assert "tmp/rc-verification-abc12345-packaged-batch.json" in commands[1][0]
-    assert commands[2][0] == [
+    assert "tmp/rc-verification-abc12345-packaged-batch.json" in commands[2][0]
+    assert commands[3][0] == [
         sys.executable,
         "scripts/verify_release_candidate.py",
         "--manual-checks-json",
@@ -321,7 +351,7 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
         "--write-manual-checks-markdown",
         "tmp/rc-signoff-abc12345-current.md",
     ]
-    assert commands[3][1] is True
+    assert commands[4][1] is True
 
 
 def test_refresh_local_rc_signoff_does_not_reuse_failed_batch_report(
