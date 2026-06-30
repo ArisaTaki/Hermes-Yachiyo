@@ -3787,9 +3787,14 @@ def _read_status_json(bridge_url: str) -> dict[str, Any]:
     return _read_json_url(f"{bridge_url}/status", timeout=1.0)
 
 
-def _bridge_status_report(dmg_path: Path, status: dict[str, Any]) -> dict[str, object]:
+def _bridge_status_report(
+    dmg_path: Path,
+    status: dict[str, Any],
+    *,
+    bridge_url: str | None = None,
+) -> dict[str, object]:
     build_metadata = status.get("build_metadata")
-    return {
+    report = {
         "dmg_path": str(dmg_path),
         "service": str(status.get("service") or ""),
         "version": str(status.get("version") or ""),
@@ -3798,6 +3803,9 @@ def _bridge_status_report(dmg_path: Path, status: dict[str, Any]) -> dict[str, o
         else None,
         "build_metadata": build_metadata if isinstance(build_metadata, dict) else {},
     }
+    if bridge_url:
+        report["bridge_url"] = bridge_url
+    return report
 
 
 def _backend_bridge_status_report(
@@ -4070,7 +4078,13 @@ def verify_dmg_app_startup(
                     findings.append(status_finding)
                     continue
                 if status_payload is not None:
-                    bridge_statuses.append(_bridge_status_report(dmg_path, status_payload))
+                    bridge_statuses.append(
+                        _bridge_status_report(
+                            dmg_path,
+                            status_payload,
+                            bridge_url=bridge_url,
+                        )
+                    )
         finally:
             if process is not None:
                 _terminate_process(process)
@@ -4208,7 +4222,13 @@ def verify_dmg_screen_recording_probe(
                     continue
                 bridge_ready_dmg_paths.append(str(dmg_path))
                 if status_payload is not None:
-                    bridge_statuses.append(_bridge_status_report(dmg_path, status_payload))
+                    bridge_statuses.append(
+                        _bridge_status_report(
+                            dmg_path,
+                            status_payload,
+                            bridge_url=bridge_url,
+                        )
+                    )
                 try:
                     metadata = _read_screen_probe_metadata(bridge_url)
                 except (
@@ -4349,7 +4369,13 @@ def verify_dmg_ui_sampling_smoke(
                     continue
                 bridge_ready_dmg_paths.append(str(dmg_path))
                 if status_payload is not None:
-                    bridge_statuses.append(_bridge_status_report(dmg_path, status_payload))
+                    bridge_statuses.append(
+                        _bridge_status_report(
+                            dmg_path,
+                            status_payload,
+                            bridge_url=bridge_url,
+                        )
+                    )
 
                 sample_report_path = Path(home_dir) / "packaged-ui-sampling.json"
                 command = [
@@ -4357,6 +4383,8 @@ def verify_dmg_ui_sampling_smoke(
                     str(DMG_UI_SAMPLING_SMOKE_SCRIPT),
                     "--debug-port",
                     str(debug_port),
+                    "--expect-bridge-url",
+                    bridge_url,
                     "--timeout-ms",
                     str(int(timeout_seconds * 1000)),
                     "--report-json",

@@ -67,12 +67,14 @@ const ROUTE_SAMPLES = [
 function parseArgs(argv) {
   const args = {
     debugPort: '',
+    expectBridgeUrl: '',
     timeoutMs: DEFAULT_TIMEOUT_MS,
     reportJson: '',
   };
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     if (arg === '--debug-port') args.debugPort = argv[++index] || '';
+    else if (arg === '--expect-bridge-url') args.expectBridgeUrl = argv[++index] || '';
     else if (arg === '--timeout-ms') args.timeoutMs = Number(argv[++index] || DEFAULT_TIMEOUT_MS);
     else if (arg === '--report-json') args.reportJson = argv[++index] || '';
     else throw new Error(`unknown argument: ${arg}`);
@@ -88,7 +90,36 @@ function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-async function waitForPageTarget(debugPort, timeoutMs) {
+function normalizedUrlOrigin(value) {
+  if (!value) return '';
+  try {
+    return new URL(value).origin.replace(/\/$/, '');
+  } catch {
+    return String(value).replace(/\/$/, '');
+  }
+}
+
+function targetMatchesExpectedBridge(target, expectedBridgeUrl) {
+  if (!expectedBridgeUrl) return true;
+  try {
+    const targetUrl = new URL(String(target.url || ''));
+    const targetBridge = targetUrl.searchParams.get('bridge') || '';
+    return normalizedUrlOrigin(targetBridge) === normalizedUrlOrigin(expectedBridgeUrl);
+  } catch {
+    return false;
+  }
+}
+
+function isDesktopSurfaceTarget(target) {
+  try {
+    const targetUrl = new URL(String(target.url || ''));
+    return targetUrl.searchParams.get('surface') === 'desktop';
+  } catch {
+    return false;
+  }
+}
+
+async function waitForPageTarget(debugPort, timeoutMs, expectedBridgeUrl = '') {
   const deadline = Date.now() + timeoutMs;
   let lastError = '';
   while (Date.now() < deadline) {
@@ -96,14 +127,19 @@ async function waitForPageTarget(debugPort, timeoutMs) {
       const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
       if (!response.ok) throw new Error(`DevTools /json/list returned ${response.status}`);
       const targets = await response.json();
-      const page = targets.find((target) => (
+      const pages = targets.filter((target) => (
         target
         && target.type === 'page'
         && target.webSocketDebuggerUrl
         && !String(target.url || '').startsWith('devtools://')
       ));
+      const matchingPages = pages.filter((target) => targetMatchesExpectedBridge(target, expectedBridgeUrl));
+      const page = matchingPages.find((target) => !isDesktopSurfaceTarget(target)) || matchingPages[0];
       if (page) return page;
-      lastError = 'no page target exposed yet';
+      const targetUrls = pages.map((target) => String(target.url || '')).filter(Boolean);
+      lastError = expectedBridgeUrl
+        ? `no page target exposed expected bridge ${expectedBridgeUrl}; targets=${JSON.stringify(targetUrls)}`
+        : 'no page target exposed yet';
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
@@ -188,11 +224,24 @@ async function navigateToRoute(client, route) {
   return evaluate(client, `
     (() => {
       const nextRoute = ${JSON.stringify(route)};
-      if (window.location.hash !== nextRoute) window.location.hash = nextRoute;
+      if (window.location.hash !== nextRoute) window.history.pushState(null, '', nextRoute);
       window.dispatchEvent(new Event('hashchange'));
+      window.dispatchEvent(new Event('oha-route-change'));
       return window.location.href;
     })()
   `);
+}
+
+async function waitForHash(client, route, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let lastSnapshot = {};
+  while (Date.now() < deadline) {
+    const hash = await evaluate(client, 'window.location.hash');
+    if (hash === route) return;
+    lastSnapshot = await pageSnapshot(client);
+    await sleep(100);
+  }
+  throw new Error(`route hash did not update to ${route}; page=${JSON.stringify(lastSnapshot)}`);
 }
 
 async function visibleSelectorMap(client, selectors) {
@@ -221,6 +270,7 @@ async function visibleSelectorMap(client, selectors) {
 async function pageSnapshot(client) {
   return evaluate(client, `
     (() => ({
+      href: window.location.href,
       hash: window.location.hash,
       title: document.title,
       readyState: document.readyState,
@@ -251,6 +301,7 @@ async function sampleRoute(client, sample, timeoutMs) {
     MIN_ROUTE_TIMEOUT_MS,
     Math.floor(timeoutMs / ROUTE_SAMPLES.length),
   );
+  await waitForHash(client, sample.route, routeTimeout);
   await waitForVisibleSelectors(client, sample.selectors, routeTimeout);
   const title = await evaluate(client, 'document.title');
   const hash = await evaluate(client, 'window.location.hash');
@@ -266,7 +317,7 @@ async function sampleRoute(client, sample, timeoutMs) {
 
 async function run() {
   const args = parseArgs(process.argv.slice(2));
-  const target = await waitForPageTarget(args.debugPort, args.timeoutMs);
+  const target = await waitForPageTarget(args.debugPort, args.timeoutMs, args.expectBridgeUrl);
   const client = new CdpClient(target.webSocketDebuggerUrl);
   const samples = [];
   try {

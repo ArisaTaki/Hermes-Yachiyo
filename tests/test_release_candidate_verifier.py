@@ -4493,6 +4493,7 @@ def test_release_candidate_verifier_runs_dmg_app_startup_smoke(
         "bridge_statuses": [
             {
                 "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+                "bridge_url": "http://127.0.0.1:49123",
                 "service": "oha-yachiyo",
                 "version": "0.4.0",
                 "native_agent_ready": False,
@@ -4541,6 +4542,7 @@ def test_release_candidate_verifier_rejects_stale_dmg_bridge_build_metadata(
         return [], [
             {
                 "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+                "bridge_url": "http://127.0.0.1:49124",
                 "service": "oha-yachiyo",
                 "version": "0.4.0",
                 "native_agent_ready": True,
@@ -4720,6 +4722,7 @@ def test_release_candidate_verifier_runs_dmg_screen_recording_probe(
         "bridge_statuses": [
             {
                 "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+                "bridge_url": "http://127.0.0.1:49124",
                 "service": "oha-yachiyo",
                 "version": "0.4.0",
                 "native_agent_ready": True,
@@ -4853,6 +4856,7 @@ def test_release_candidate_verifier_keeps_bridge_evidence_when_dmg_screen_probe_
     assert report["dmg_screen_probe"]["bridge_statuses"] == [
         {
             "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+            "bridge_url": "http://127.0.0.1:49126",
             "service": "oha-yachiyo",
             "version": "0.4.0",
             "native_agent_ready": True,
@@ -5021,6 +5025,7 @@ def test_release_candidate_verifier_runs_dmg_ui_sampling_smoke(
     node_command = commands[node_index]["command"]
     assert node_command[:2] == ["node", str(rc.DMG_UI_SAMPLING_SMOKE_SCRIPT)]
     assert node_command[node_command.index("--debug-port") + 1] == "49225"
+    assert node_command[node_command.index("--expect-bridge-url") + 1] == "http://127.0.0.1:49125"
     assert commands[node_index]["kwargs"]["timeout"] == 190.0
     assert len(popen_calls) == 1
     assert popen_calls[0]["command"][0].endswith("/Oha-Yachiyo.app/Contents/MacOS/Oha-Yachiyo")
@@ -5040,6 +5045,7 @@ def test_release_candidate_verifier_runs_dmg_ui_sampling_smoke(
         "bridge_statuses": [
             {
                 "dmg_path": "release/Oha-Yachiyo-0.4.0-arm64.dmg",
+                "bridge_url": "http://127.0.0.1:49125",
                 "service": "oha-yachiyo",
                 "version": "0.4.0",
                 "native_agent_ready": True,
