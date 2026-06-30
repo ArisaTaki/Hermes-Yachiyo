@@ -6,7 +6,23 @@ import json
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from scripts import verify_release_candidate as rc
+
+
+@pytest.fixture(autouse=True)
+def _stub_media_playback_chain_source_smoke(monkeypatch):
+    monkeypatch.setattr(
+        rc,
+        "run_media_playback_chain_smoke",
+        lambda: {
+            "ok": True,
+            "mode": "media_playback_chain_smoke",
+            "case_count": 0,
+            "cases": [],
+        },
+    )
 
 
 def _manual_check_ids() -> list[str]:
@@ -355,13 +371,14 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     }
     assert report["desktop_planner_discovery_smoke"]["status"] == "passed"
     assert report["desktop_planner_discovery_smoke"]["evidence"]["ok"] is True
-    assert report["desktop_planner_discovery_smoke"]["evidence"]["case_count"] == 7
+    assert report["desktop_planner_discovery_smoke"]["evidence"]["case_count"] == 8
     assert {
         case["id"]
         for case in report["desktop_planner_discovery_smoke"]["evidence"]["cases"]
     } == {
         "generic_app_open",
         "generic_app_read_buttons",
+        "generic_unknown_app_sequenced_read_buttons",
         "app_scoped_click",
         "app_scoped_type",
         "app_scoped_hotkey",
@@ -393,7 +410,7 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     }
     assert report["planner_runtime_tool_parity_smoke"]["status"] == "passed"
     assert report["planner_runtime_tool_parity_smoke"]["evidence"]["ok"] is True
-    assert report["planner_runtime_tool_parity_smoke"]["evidence"]["case_count"] == 8
+    assert report["planner_runtime_tool_parity_smoke"]["evidence"]["case_count"] == 11
     assert {
         case["id"]
         for case in report["planner_runtime_tool_parity_smoke"]["evidence"]["cases"]
@@ -403,7 +420,10 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "builtin_data_analysis",
         "visible_table_analysis",
         "current_page_report",
-        "generic_media_playback",
+        "named_media_app_playback",
+        "clipboard_send_to_slack",
+        "system_settings_bluetooth",
+        "file_organize_invoices",
         "explicit_terminal_command",
         "reminder_creation",
     }
@@ -1200,7 +1220,7 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
     assert section["evidence"]["mode"] == "planner_runtime_tool_parity_smoke"
     case_by_id = {case["id"]: case for case in section["evidence"]["cases"]}
     assert case_by_id["app_scoped_ui_click"]["approval_required_tools"] == [
-        "desktop.click_ui_element"
+        "app.focus_and_click_ui_element"
     ]
     assert case_by_id["visible_table_analysis"]["request_tools"] == [
         "desktop.ui_elements"
@@ -3544,7 +3564,13 @@ def test_release_candidate_verifier_checks_mounted_dmg_app(tmp_path, monkeypatch
         report_json=Path("tmp/rc.json"),
     ) == 0
 
-    mount_path = Path(commands[0][commands[0].index("-mountpoint") + 1])
+    attach_command = next(
+        command for command in commands if command[:2] == ["hdiutil", "attach"]
+    )
+    detach_command = next(
+        command for command in commands if command[:2] == ["hdiutil", "detach"]
+    )
+    mount_path = Path(attach_command[attach_command.index("-mountpoint") + 1])
     assert calls == [
         {"root": tmp_path},
         {
@@ -3562,8 +3588,8 @@ def test_release_candidate_verifier_checks_mounted_dmg_app(tmp_path, monkeypatch
             "check_packaged_app_bundle": True,
         },
     ]
-    assert commands[0][:2] == ["hdiutil", "attach"]
-    assert commands[1][:2] == ["hdiutil", "detach"]
+    assert attach_command[:2] == ["hdiutil", "attach"]
+    assert detach_command[:2] == ["hdiutil", "detach"]
     output = capsys.readouterr().out
     assert "DMG mount guards: passed" in output
     report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))

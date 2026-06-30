@@ -13,6 +13,7 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
     assert set(cases) == {
         "generic_app_open",
         "generic_app_read_buttons",
+        "generic_unknown_app_sequenced_read_buttons",
         "app_scoped_click",
         "app_scoped_type",
         "app_scoped_hotkey",
@@ -27,6 +28,17 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
     assert [request["tool"] for request in cases["generic_app_read_buttons"]["requests"]] == [
         "desktop.inspect_app",
     ]
+    assert [
+        request["tool"]
+        for request in cases["generic_unknown_app_sequenced_read_buttons"]["requests"]
+    ] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+    ]
+    assert cases["generic_unknown_app_sequenced_read_buttons"]["intent_inputs"][
+        "app_name_hint"
+    ] == "PixelForge"
     assert cases["app_scoped_click"]["requests"][0]["tool"] == "desktop.inspect_app"
     assert cases["app_scoped_click"]["requests"][1]["tool"] == (
         "app.focus_and_click_ui_element"

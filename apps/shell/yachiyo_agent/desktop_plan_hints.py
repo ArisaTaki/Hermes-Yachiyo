@@ -1677,7 +1677,7 @@ def _clean_ui_app_name_hint(value: str) -> str:
         flags=re.IGNORECASE,
     ).strip()
     app = re.split(
-        r"(?:看看|看一下|看下|查看|读取|观察|识别|有哪些|有什么|有啥|"
+        r"(?:看看|看一下|看下|查看|读一下|读一读|读|读取|观察|识别|有哪些|有什么|有啥|"
         r"\b(?:look\s+at|inspect|view|show\s+me|show|read|which|what)\b)",
         app,
         maxsplit=1,
@@ -1768,6 +1768,12 @@ def _clean_ui_app_name_hint(value: str) -> str:
         "this",
         "and",
         "then",
+        "并",
+        "然后",
+        "再",
+        "接着",
+        "之后",
+        "后",
         "先",
         "你能",
         "我",

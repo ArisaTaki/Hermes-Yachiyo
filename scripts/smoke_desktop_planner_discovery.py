@@ -51,6 +51,26 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
         ],
     },
     {
+        "id": "generic_unknown_app_sequenced_read_buttons",
+        "prompt": "打开一个我没提过的新应用 PixelForge，然后读一下界面上有哪些按钮",
+        "allowed_tools": [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.ui_elements",
+        ],
+        "expected_app": "PixelForge",
+        "expected_steps": [
+            "discover-desktop-state",
+            "open-or-focus-app",
+            "read-foreground-ui",
+        ],
+        "expected_request_tools": [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.ui_elements",
+        ],
+    },
+    {
         "id": "app_scoped_click",
         "prompt": "在 Notion 点击 New Page",
         "allowed_tools": [

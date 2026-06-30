@@ -6235,6 +6235,29 @@ def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
         "app_name": "PixelForge",
     }
 
+    sequenced_unknown_app_read = RuntimePlanner().decision(
+        "打开一个我没提过的新应用 PixelForge，然后读一下界面上有哪些按钮",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.ui_elements"],
+    )
+    assert sequenced_unknown_app_read.selected_intent.kind == "desktop_operation"
+    assert sequenced_unknown_app_read.selected_intent.inputs["app_name_hint"] == "PixelForge"
+    assert sequenced_unknown_app_read.selected_intent.inputs["ui_inspection_hint"] == {
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert [step.step_id for step in sequenced_unknown_app_read.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "read-foreground-ui",
+    ]
+    assert _step_by_id(sequenced_unknown_app_read, "discover-desktop-state").input_preview == {
+        "query": "PixelForge",
+        "limit": 20,
+    }
+    assert _step_by_id(sequenced_unknown_app_read, "open-or-focus-app").input_preview == {
+        "app_name": "PixelForge",
+    }
+
     descriptor_ui_cases = (
         (
             "在我没提过的 SuperData Studio 里读取有哪些按钮",
