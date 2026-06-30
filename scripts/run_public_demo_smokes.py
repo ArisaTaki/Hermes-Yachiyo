@@ -243,10 +243,12 @@ def run_public_demo_smokes(
         if selected_ok
         else "failed"
     )
+    assessment = _release_assessment(flow_results, plan_only=plan_only)
     return {
         "ok": selected_ok,
         "complete": complete,
         "status": status,
+        **assessment,
         "plan_only": plan_only,
         "generated_at": started_at,
         "tmp_dir": _display_path(resolved_tmp_dir),
@@ -361,12 +363,68 @@ def _next_actions(flows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
     return actions
 
 
+def _release_assessment(
+    flows: Sequence[Mapping[str, Any]],
+    *,
+    plan_only: bool,
+) -> dict[str, Any]:
+    incomplete = [
+        flow for flow in flows if str(flow.get("status") or "") != "passed"
+    ]
+    failed = [flow for flow in flows if str(flow.get("status") or "") == "failed"]
+    passed_count = len(flows) - len(incomplete)
+    if not flows:
+        release_level = "blocked"
+    elif not incomplete:
+        release_level = "full_public_demo_ready"
+    elif plan_only:
+        release_level = "planned"
+    elif failed:
+        release_level = "blocked"
+    else:
+        release_level = "partial_demo_ready"
+    return {
+        "release_level": release_level,
+        "required_flow_count": len(flows),
+        "passed_required_flow_count": passed_count,
+        "missing_required_flow_ids": [
+            str(flow.get("id") or "") for flow in incomplete if flow.get("id")
+        ],
+        "release_blockers": [
+            _release_blocker(flow) for flow in incomplete if isinstance(flow, Mapping)
+        ],
+        "full_demo_command": (
+            "python scripts/run_public_demo_smokes.py "
+            "--include-real-desktop --include-provider-workflow --include-ui "
+            "--output-json tmp/public-demo-smokes-full.json "
+            "--output-markdown tmp/public-demo-smokes-full.md"
+        ),
+    }
+
+
+def _release_blocker(flow: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "id": str(flow.get("id") or ""),
+        "label": str(flow.get("label") or ""),
+        "category": str(flow.get("category") or ""),
+        "status": str(flow.get("status") or ""),
+        "opt_in_flag": str(flow.get("opt_in_flag") or ""),
+        "reason": str(flow.get("opt_in_reason") or flow.get("evidence_reason") or ""),
+        "command": " ".join(str(part) for part in flow.get("command") or []),
+    }
+
+
 def render_markdown(summary: Mapping[str, Any]) -> str:
     lines = [
         "# Oha-Yachiyo Public Demo Smoke Summary",
         "",
         f"Status: {summary.get('status')}",
+        f"Release level: {summary.get('release_level')}",
         f"Selected: {summary.get('passed_count')}/{summary.get('selected_count')} passed",
+        (
+            "Required demo flows: "
+            f"{summary.get('passed_required_flow_count')}/{summary.get('required_flow_count')} passed"
+        ),
         f"Complete demo evidence: {str(bool(summary.get('complete'))).lower()}",
         "",
         "## Flows",
@@ -378,6 +436,19 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         reason = str(flow.get("opt_in_reason") or "")
         if flow.get("status") == "skipped" and reason:
             lines.append(f"  Opt-in: `{flow.get('opt_in_flag')}` ({reason})")
+    blockers = _dict_list(summary.get("release_blockers"))
+    if blockers:
+        lines.extend(["", "## Release Blockers", ""])
+        for blocker in blockers:
+            lines.append(
+                f"- `{blocker.get('id')}` ({blocker.get('status')}) - {blocker.get('label')}"
+            )
+            opt_in = str(blocker.get("opt_in_flag") or "")
+            reason = str(blocker.get("reason") or "")
+            if opt_in:
+                lines.append(f"  Requires `{opt_in}`: {reason}")
+            elif reason:
+                lines.append(f"  Reason: {reason}")
     actions = _dict_list(summary.get("next_actions"))
     if actions:
         lines.extend(["", "## Next Actions", ""])

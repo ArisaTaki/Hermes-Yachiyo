@@ -734,10 +734,14 @@ real desktop operation, provider Workflow, and UI demo flows as next actions.
 Full public demo evidence requires the explicit
 `--include-real-desktop`, `--include-provider-workflow`, and `--include-ui`
 flags because those flows open/operate apps, require live credentials, or start
-Vite/Electron UI smokes. The current default evidence can pass with
-`complete=false`; release parity still requires the opt-in flows to pass for
-the current candidate. `scripts/refresh_local_rc_signoff.py` now writes the
-public-demo evidence to `tmp/rc-verification-<commit>-public-demo.json` and
+Vite/Electron UI smokes. The summary now reports `release_level`,
+`missing_required_flow_ids`, and `release_blockers`; only
+`full_public_demo_ready` is enough for a Hanako/Hermes-level public demo. The
+current default evidence can pass with `complete=false` and
+`release_level=partial_demo_ready`; release parity still requires the opt-in
+flows to pass for the current candidate. `scripts/refresh_local_rc_signoff.py`
+now writes the public-demo evidence to
+`tmp/rc-verification-<commit>-public-demo.json` and
 `tmp/rc-verification-<commit>-public-demo.md`, so the public project demo is
 part of the local RC evidence bundle instead of a separate ad hoc command.
 

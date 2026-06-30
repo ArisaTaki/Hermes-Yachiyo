@@ -40,6 +40,17 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
     assert summary["ok"] is True
     assert summary["complete"] is False
     assert summary["status"] == "partial"
+    assert summary["release_level"] == "partial_demo_ready"
+    assert summary["required_flow_count"] == 13
+    assert summary["passed_required_flow_count"] == 7
+    assert summary["missing_required_flow_ids"] == [
+        "real_desktop_app_open",
+        "real_desktop_ui_inspection",
+        "real_desktop_interaction",
+        "workflow_provider",
+        "studio_replay_ui",
+        "workflow_ui",
+    ]
     assert summary["selected_count"] == 7
     assert summary["passed_count"] == 7
     assert summary["skipped_count"] == 6
@@ -54,6 +65,11 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
     ]
     assert len(commands) == 7
     assert any(action["id"] == "real_desktop_app_open" for action in summary["next_actions"])
+    blocker = next(
+        item for item in summary["release_blockers"] if item["id"] == "real_desktop_app_open"
+    )
+    assert blocker["status"] == "skipped"
+    assert blocker["opt_in_flag"] == "--include-real-desktop-open"
 
 
 def test_public_demo_smokes_plan_only_does_not_run_commands(tmp_path, monkeypatch):
@@ -75,8 +91,12 @@ def test_public_demo_smokes_plan_only_does_not_run_commands(tmp_path, monkeypatc
     assert summary["ok"] is False
     assert summary["complete"] is False
     assert summary["status"] == "planned"
+    assert summary["release_level"] == "planned"
     assert summary["selected_count"] == summary["flow_count"]
     assert {flow["status"] for flow in summary["flows"]} == {"planned"}
+    assert set(summary["missing_required_flow_ids"]) == {
+        flow["id"] for flow in summary["flows"]
+    }
 
 
 def test_public_demo_smokes_opt_in_selects_all_flows(tmp_path, monkeypatch):
@@ -106,6 +126,10 @@ def test_public_demo_smokes_opt_in_selects_all_flows(tmp_path, monkeypatch):
     assert summary["ok"] is True
     assert summary["complete"] is True
     assert summary["status"] == "passed"
+    assert summary["release_level"] == "full_public_demo_ready"
+    assert summary["passed_required_flow_count"] == summary["required_flow_count"] == 13
+    assert summary["missing_required_flow_ids"] == []
+    assert summary["release_blockers"] == []
     assert summary["selected_count"] == summary["flow_count"] == 13
     assert summary["skipped_count"] == 0
     assert len(commands) == 13
@@ -225,7 +249,42 @@ def test_public_demo_smokes_records_selected_skipped_evidence(tmp_path, monkeypa
     assert summary["complete"] is False
     assert summary["passed_count"] == 6
     assert summary["skipped_count"] == 7
+    assert summary["release_level"] == "partial_demo_ready"
+    assert "real_desktop_discovery" in summary["missing_required_flow_ids"]
     assert any(action["id"] == "real_desktop_discovery" for action in summary["next_actions"])
+
+
+def test_public_demo_smokes_marks_selected_failure_as_release_blocker(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(demo, "ROOT", tmp_path)
+
+    def fake_run(command):
+        command = list(command)
+        if "--report-json" in command:
+            report = tmp_path / command[command.index("--report-json") + 1]
+            if not report.is_absolute():
+                report = tmp_path / report
+            report.parent.mkdir(parents=True, exist_ok=True)
+            report.write_text(
+                json.dumps({"ok": report.name != "browser-research-artifact.json"}),
+                encoding="utf-8",
+            )
+        return _fake_completed(command)
+
+    monkeypatch.setattr(demo, "_run_command", fake_run)
+
+    summary = demo.run_public_demo_smokes(tmp_dir="tmp/demo")
+
+    assert summary["ok"] is False
+    assert summary["status"] == "failed"
+    assert summary["release_level"] == "blocked"
+    assert "browser_research_artifact" in summary["missing_required_flow_ids"]
+    blocker = next(
+        item for item in summary["release_blockers"] if item["id"] == "browser_research_artifact"
+    )
+    assert blocker["status"] == "failed"
 
 
 def test_public_demo_smokes_cli_writes_reports(tmp_path, monkeypatch, capsys):
@@ -260,6 +319,9 @@ def test_public_demo_smokes_cli_writes_reports(tmp_path, monkeypatch, capsys):
     assert capsys.readouterr().out == ""
     payload = json.loads(output_json.read_text(encoding="utf-8"))
     assert payload["status"] == "partial"
+    assert payload["release_level"] == "partial_demo_ready"
     markdown = output_markdown.read_text(encoding="utf-8")
     assert "# Oha-Yachiyo Public Demo Smoke Summary" in markdown
+    assert "Release level: partial_demo_ready" in markdown
+    assert "## Release Blockers" in markdown
     assert "`data_analysis_artifact`" in markdown
