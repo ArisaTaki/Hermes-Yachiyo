@@ -330,6 +330,21 @@ python scripts/collect_release_diagnostics.py \
 
 该命令默认收集 `tmp/rc-verification-<short-commit>-*.json/.md`、`tmp/rc-signoff-<short-commit>-*.json/.md`、同 label 的外部集成/Parity 摘要，并可通过重复 `--include <file-or-dir>` 追加崩溃日志或手工 evidence。进入 zip 前，JSON 会按结构递归脱敏，日志/Markdown 会走同一套 `packages.security` 文本脱敏；二进制、超大文件、无法读取或脱敏后仍命中 secret pattern 的文件会被跳过并记录到 `diagnostics/manifest.json`。该支持包只用于排障和签核沟通，不替代 `verify_release_candidate.py --require-manual-checks-complete` 最终 gate。
 
+需要按 Phase 11 的用户路径口径汇总 release smoke 覆盖度时，使用：
+
+```bash
+SHORT_COMMIT="$(git rev-parse --short=8 HEAD)"
+python scripts/summarize_release_smoke.py \
+  "tmp/rc-verification-${SHORT_COMMIT}-source-capabilities.json" \
+  "tmp/rc-verification-${SHORT_COMMIT}-packaged-batch.json" \
+  "tmp/rc-verification-${SHORT_COMMIT}-screen.json" \
+  --diagnostics-zip "tmp/oha-yachiyo-diagnostics-${SHORT_COMMIT}.zip" \
+  --output-json "tmp/rc-verification-${SHORT_COMMIT}-release-smoke.json" \
+  --output-markdown "tmp/rc-verification-${SHORT_COMMIT}-release-smoke.md"
+```
+
+该脚本不启动 NativeRunEngine、Electron 或 provider；它只聚合已有 RC report、单个 smoke JSON 和诊断包 manifest，检查 8 个发布用户路径是否已有证据：packaged launch、Chat desktop task、approval card、Agent Studio run timeline、GroupRun、Workflow、artifact readback、diagnostics export。未覆盖时会返回非零，并在 `next_actions` 里列出要补跑的命令；完整通过也不替代最终人工签核，只说明 release smoke 用户路径已有可复盘 evidence。
+
 使用一次性临时 provider key 做本地验收时，优先用安全 prompt wrapper，避免把 key 放进 shell history 或进程参数：
 
 ```bash

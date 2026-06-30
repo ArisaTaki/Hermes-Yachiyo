@@ -1,0 +1,413 @@
+#!/usr/bin/env python3
+"""Summarize Phase 11 release-smoke coverage from existing evidence."""
+
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+import zipfile
+from pathlib import Path
+from typing import Any, Mapping, Sequence
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
+from scripts.summarize_native_agent_capabilities import (  # noqa: E402
+    SOURCE_SECTION_CAPABILITIES,
+    capability_matrix_from_report,
+    summarize_capabilities,
+)
+
+
+SECTION_TO_CAPABILITY = {
+    section: capability_id
+    for capability_id, section in SOURCE_SECTION_CAPABILITIES.items()
+}
+SECTION_IDS = set(SOURCE_SECTION_CAPABILITIES.values()) | {
+    "dmg_app_smoke",
+    "dmg_ui_sampling_smoke",
+    "dmg_chat_native_file_smoke",
+    "packaged_backend_bridge_smoke",
+    "provider_smoke",
+}
+SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "packaged_launch",
+        "label": "Packaged app launches and uses its own Bridge",
+        "required": ("packaged_app_bridge_isolation",),
+        "next_action": (
+            "python scripts/verify_release_candidate.py --require-artifacts "
+            "--run-dmg-app-smoke --report-json tmp/rc-verification-dmg-app.json"
+        ),
+    },
+    {
+        "id": "chat_desktop_task",
+        "label": "Chat can route a desktop execution task",
+        "required": ("source_agent_entrypoint_desktop_execution",),
+        "next_action": (
+            "python scripts/verify_release_candidate.py --source-only "
+            "--report-json tmp/rc-verification-source-capabilities.json"
+        ),
+    },
+    {
+        "id": "approval_card",
+        "label": "Approval card is observable and resumable",
+        "required": (
+            "source_approval_resume_timeline",
+            "source_yachiyo_route_approval",
+        ),
+        "next_action": (
+            "python scripts/verify_release_candidate.py --source-only "
+            "--report-json tmp/rc-verification-source-capabilities.json"
+        ),
+    },
+    {
+        "id": "agent_studio_run_timeline",
+        "label": "Agent Studio can show a replayable run timeline",
+        "required": ("source_approval_resume_timeline",),
+        "next_action": (
+            "python scripts/smoke_approval_resume_timeline.py "
+            "--report-json tmp/approval-resume-timeline.json"
+        ),
+    },
+    {
+        "id": "group_run",
+        "label": "GroupRun stays observable in Agent Studio",
+        "required": ("source_group_run_timeline",),
+        "next_action": (
+            "python scripts/smoke_group_run_timeline.py "
+            "--report-json tmp/group-run-timeline.json"
+        ),
+    },
+    {
+        "id": "workflow",
+        "label": "Workflow has source entrypoint and provider orchestration evidence",
+        "required": (
+            "source_agent_entrypoint_data_analysis",
+            "advanced_workflow_orchestration",
+        ),
+        "next_action": (
+            "python scripts/verify_release_candidate.py --require-artifacts "
+            "--check-dmg-mount --run-provider-smoke "
+            "--report-json tmp/rc-verification-provider-smoke.json"
+        ),
+    },
+    {
+        "id": "artifact_readback",
+        "label": "Artifacts can be written and read back",
+        "required": ("source_data_analysis_artifact",),
+        "next_action": (
+            "python scripts/verify_release_candidate.py --source-only "
+            "--report-json tmp/rc-verification-source-capabilities.json"
+        ),
+    },
+    {
+        "id": "diagnostics_export",
+        "label": "Redacted diagnostics bundle can be exported",
+        "required": ("diagnostics_export",),
+        "next_action": (
+            "python scripts/collect_release_diagnostics.py "
+            "--label $(git rev-parse --short=8 HEAD) "
+            "--include-app-logs "
+            "--output-zip tmp/oha-yachiyo-diagnostics-$(git rev-parse --short=8 HEAD).zip"
+        ),
+    },
+)
+
+
+def summarize_release_smoke(
+    reports: Sequence[Path | str],
+    *,
+    diagnostics_zips: Sequence[Path | str] = (),
+) -> dict[str, Any]:
+    evidence: dict[str, list[dict[str, Any]]] = {}
+    source_reports: list[str] = []
+    for report_path in reports:
+        path = _resolve_path(Path(report_path))
+        source_reports.append(_display_path(path))
+        report = _load_report(path)
+        _collect_report_evidence(report, source=_display_path(path), evidence=evidence)
+    diagnostics_sources: list[str] = []
+    for archive_path in diagnostics_zips:
+        path = _resolve_path(Path(archive_path))
+        diagnostics_sources.append(_display_path(path))
+        _collect_diagnostics_evidence(path, evidence=evidence)
+
+    items = [_item_status(item, evidence) for item in SMOKE_ITEMS]
+    passed_count = sum(1 for item in items if item["status"] == "passed")
+    missing = [item for item in items if item["status"] != "passed"]
+    return {
+        "ok": not missing,
+        "status": "passed" if not missing else "incomplete",
+        "item_count": len(items),
+        "passed_count": passed_count,
+        "missing_count": len(missing),
+        "missing_item_ids": [item["id"] for item in missing],
+        "items": items,
+        "source_reports": source_reports,
+        "diagnostics_sources": diagnostics_sources,
+        "next_actions": _next_actions(missing),
+    }
+
+
+def render_markdown(summary: Mapping[str, Any]) -> str:
+    lines = [
+        "# Oha-Yachiyo Release Smoke Summary",
+        "",
+        f"Status: {summary.get('status')}",
+        f"Coverage: {summary.get('passed_count')}/{summary.get('item_count')} passed",
+        "",
+        "## Checklist",
+        "",
+    ]
+    for item in _dict_list(summary.get("items")):
+        marker = "x" if item.get("status") == "passed" else " "
+        lines.append(f"- [{marker}] `{item.get('id')}` - {item.get('label')}")
+        missing = _string_list(item.get("missing_evidence_ids"))
+        if missing:
+            lines.append(f"  Missing evidence: {', '.join(f'`{value}`' for value in missing)}")
+    actions = _dict_list(summary.get("next_actions"))
+    if actions:
+        lines.extend(["", "## Next Actions", ""])
+        for action in actions:
+            lines.append(f"- `{action.get('id')}`")
+            command = str(action.get("command") or "").strip()
+            if command:
+                lines.extend(["", "```bash", command, "```", ""])
+    return "\n".join(lines).rstrip() + "\n"
+
+
+def _collect_report_evidence(
+    report: Mapping[str, Any],
+    *,
+    source: str,
+    evidence: dict[str, list[dict[str, Any]]],
+) -> None:
+    mode = str(report.get("mode") or "").strip()
+    if mode and report.get("ok") is True:
+        _add_evidence(evidence, mode, source=source, kind="smoke_mode")
+        capability_id = SECTION_TO_CAPABILITY.get(mode)
+        if capability_id:
+            _add_evidence(
+                evidence,
+                capability_id,
+                source=source,
+                kind="smoke_mode_capability",
+            )
+    for section_id in sorted(SECTION_IDS):
+        section = report.get(section_id)
+        if isinstance(section, dict) and _section_passed(section):
+            _add_evidence(evidence, section_id, source=source, kind="section")
+    matrix = _matrix_from_report(report)
+    capabilities = matrix.get("capabilities") if isinstance(matrix, dict) else []
+    if isinstance(capabilities, list):
+        for capability in capabilities:
+            if not isinstance(capability, dict) or capability.get("status") != "passed":
+                continue
+            capability_id = str(capability.get("id") or "").strip()
+            if capability_id:
+                _add_evidence(
+                    evidence,
+                    capability_id,
+                    source=source,
+                    kind="capability",
+                    label=str(capability.get("label") or ""),
+                )
+
+
+def _collect_diagnostics_evidence(
+    archive_path: Path,
+    *,
+    evidence: dict[str, list[dict[str, Any]]],
+) -> None:
+    try:
+        with zipfile.ZipFile(archive_path) as archive:
+            payload = json.loads(archive.read("diagnostics/manifest.json").decode("utf-8"))
+    except Exception:
+        return
+    if not isinstance(payload, dict):
+        return
+    redaction = payload.get("redaction")
+    redaction = redaction if isinstance(redaction, dict) else {}
+    if (
+        payload.get("ok") is True
+        and int(payload.get("included_count") or 0) > 0
+        and redaction.get("applied") is True
+    ):
+        _add_evidence(
+            evidence,
+            "diagnostics_export",
+            source=_display_path(archive_path),
+            kind="diagnostics_bundle",
+            included_count=int(payload.get("included_count") or 0),
+        )
+
+
+def _item_status(
+    item: Mapping[str, Any],
+    evidence: Mapping[str, list[dict[str, Any]]],
+) -> dict[str, Any]:
+    required = tuple(str(value) for value in item.get("required", ()))
+    present = [value for value in required if value in evidence]
+    missing = [value for value in required if value not in evidence]
+    return {
+        "id": str(item["id"]),
+        "label": str(item["label"]),
+        "status": "passed" if not missing else "missing",
+        "required_evidence_ids": list(required),
+        "present_evidence_ids": present,
+        "missing_evidence_ids": missing,
+        "evidence": {
+            evidence_id: evidence[evidence_id]
+            for evidence_id in present
+        },
+        "next_action": str(item.get("next_action") or ""),
+    }
+
+
+def _next_actions(missing_items: Sequence[Mapping[str, Any]]) -> list[dict[str, str]]:
+    actions: list[dict[str, str]] = []
+    seen_commands: set[str] = set()
+    for item in missing_items:
+        command = str(item.get("next_action") or "").strip()
+        if not command or command in seen_commands:
+            continue
+        seen_commands.add(command)
+        actions.append(
+            {
+                "id": str(item.get("id") or "next_action"),
+                "command": command,
+            }
+        )
+    return actions
+
+
+def _matrix_from_report(report: Mapping[str, Any]) -> dict[str, Any]:
+    raw_matrix = report.get("native_agent_capability_matrix")
+    if isinstance(raw_matrix, dict):
+        try:
+            return capability_matrix_from_report(dict(report))
+        except Exception:
+            return dict(raw_matrix)
+    if _has_capability_sections(report):
+        return summarize_capabilities(dict(report))
+    raw_capabilities = report.get("capabilities")
+    if isinstance(raw_capabilities, list):
+        return dict(report)
+    return {"capabilities": []}
+
+
+def _has_capability_sections(report: Mapping[str, Any]) -> bool:
+    known_sections = tuple(SOURCE_SECTION_CAPABILITIES.values()) + (
+        "provider_smoke",
+        "native_provider_contract_smoke",
+        "packaged_backend_bridge_smoke",
+        "dmg_app_smoke",
+    )
+    return any(isinstance(report.get(section), dict) for section in known_sections)
+
+
+def _section_passed(section: Mapping[str, Any]) -> bool:
+    return section.get("status") == "passed" or section.get("ok") is True
+
+
+def _add_evidence(
+    evidence: dict[str, list[dict[str, Any]]],
+    evidence_id: str,
+    *,
+    source: str,
+    kind: str,
+    **extra: Any,
+) -> None:
+    entry = {
+        "source": source,
+        "kind": kind,
+        **{key: value for key, value in extra.items() if value not in (None, "", [], {})},
+    }
+    bucket = evidence.setdefault(evidence_id, [])
+    if entry not in bucket:
+        bucket.append(entry)
+
+
+def _load_report(path: Path) -> dict[str, Any]:
+    data = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise ValueError(f"report must be a JSON object: {path}")
+    return data
+
+
+def _write_text(path: Path, value: str) -> None:
+    target = _resolve_path(path)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(value, encoding="utf-8")
+
+
+def _write_json(path: Path, payload: Mapping[str, Any]) -> None:
+    _write_text(path, json.dumps(payload, ensure_ascii=False, indent=2) + "\n")
+
+
+def _dict_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, dict)]
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        values: Sequence[Any] = [value]
+    elif isinstance(value, (list, tuple, set)):
+        values = list(value)
+    else:
+        return []
+    return [str(item) for item in values if str(item)]
+
+
+def _resolve_path(path: Path) -> Path:
+    expanded = path.expanduser()
+    if expanded.is_absolute():
+        return expanded
+    return ROOT / expanded
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return path.resolve().relative_to(ROOT.resolve()).as_posix()
+    except ValueError:
+        return str(path)
+
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("reports", nargs="*", type=Path, help="RC or smoke report JSON files.")
+    parser.add_argument(
+        "--diagnostics-zip",
+        action="append",
+        default=[],
+        type=Path,
+        help="Redacted diagnostics zip produced by collect_release_diagnostics.py.",
+    )
+    parser.add_argument("--output-json", type=Path, help="Write summary JSON.")
+    parser.add_argument("--output-markdown", type=Path, help="Write summary Markdown.")
+    args = parser.parse_args(argv)
+
+    try:
+        summary = summarize_release_smoke(
+            args.reports,
+            diagnostics_zips=args.diagnostics_zip,
+        )
+        if args.output_json is not None:
+            _write_json(args.output_json, summary)
+        if args.output_markdown is not None:
+            _write_text(args.output_markdown, render_markdown(summary))
+        if args.output_json is None and args.output_markdown is None:
+            print(json.dumps(summary, ensure_ascii=False, indent=2))
+    except Exception as exc:
+        print(f"release smoke summary: failed\n- {exc}", file=sys.stderr)
+        return 1
+    return 0 if summary.get("ok") is True else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
