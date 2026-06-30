@@ -484,9 +484,73 @@ def test_real_desktop_interaction_smoke_cli_writes_report_json(
     captured = capsys.readouterr()
     output = json.loads(captured.out)
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert output == report
+    assert output != report
+    assert output == {
+        "ok": True,
+        "mode": "real_desktop_interaction_smoke",
+        "skipped": True,
+        "platform": "Linux",
+        "app_name": "Calculator",
+        "tool_chain": smoke.TOOL_CHAIN,
+        "reason": "real desktop interaction smoke only runs on macOS",
+        "report_json": str(report_path),
+    }
     assert report["ok"] is True
     assert report["mode"] == "real_desktop_interaction_smoke"
     assert report["skipped"] is True
     assert "real desktop interaction smoke report:" in captured.err
     assert str(report_path) in captured.err
+
+
+def test_real_desktop_interaction_report_stdout_is_compact_on_blocker(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    report_path = tmp_path / "real-desktop-interaction.json"
+
+    monkeypatch.setattr(
+        smoke,
+        "run_smoke",
+        lambda **kwargs: {
+            "ok": False,
+            "mode": "real_desktop_interaction_smoke",
+            "skipped": False,
+            "platform": "Darwin",
+            "app_name": kwargs["app_name"],
+            "tool_chain": smoke.TOOL_CHAIN,
+            "case_count": 1,
+            "stage": "session_preflight",
+            "error": "desktop_session_locked",
+            "blocking_condition": "desktop_session_locked",
+            "blocking_conditions": ["desktop_session_locked"],
+            "recovery_hints": [
+                "Unlock the active macOS user session, then retry the foreground desktop action."
+            ],
+            "recommended_tools": ["desktop.active_window"],
+            "checks": {"desktop_session_ready": False},
+            "preflight": {"data": {"large": ["not for stdout"]}},
+            "before_ui": {"data": {"elements": [{"name": "not for stdout"}]}},
+            "click_attempts": [
+                {"attempt": 1, "result": {"ok": False, "data": {"large": "hidden"}}}
+            ],
+        },
+    )
+
+    assert smoke.main(["--report-json", str(report_path)]) == 1
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert output["ok"] is False
+    assert output["stage"] == "session_preflight"
+    assert output["blocking_condition"] == "desktop_session_locked"
+    assert output["recommended_tools"] == ["desktop.active_window"]
+    assert output["checks"] == {"desktop_session_ready": False}
+    assert output["click_attempt_count"] == 1
+    assert "preflight" not in output
+    assert "before_ui" not in output
+    assert "click_attempts" not in output
+    assert report["preflight"]["data"]["large"] == ["not for stdout"]
+    assert report["before_ui"]["data"]["elements"] == [{"name": "not for stdout"}]
+    assert report["click_attempts"][0]["result"]["data"]["large"] == "hidden"

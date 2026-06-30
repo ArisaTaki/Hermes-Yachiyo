@@ -20,6 +20,7 @@ from apps.shell.agent.tools import desktop as desktop_tools
 from scripts.smoke_real_desktop_app_open import (
     DEFAULT_APP_NAME,
     _app_names,
+    _bool_checks,
     _cleanup_evidence,
     _desktop_execution_case,
     _merge_blocking_evidence,
@@ -706,6 +707,50 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
+def _console_summary(evidence: dict[str, Any], report_json: Path) -> dict[str, Any]:
+    summary_keys = (
+        "ok",
+        "mode",
+        "skipped",
+        "platform",
+        "app_name",
+        "opened_app_name",
+        "tool_chain",
+        "case_count",
+        "stage",
+        "error",
+        "reason",
+        "blocking_condition",
+        "blocking_conditions",
+        "recovery_hints",
+        "recommended_tools",
+        "input_text",
+        "expected_signed_value",
+        "sign_target",
+        "before_values",
+        "after_values",
+        "pre_click_active_app",
+        "retry_active_app",
+        "retry_active_app_matches",
+    )
+    summary = {
+        key: evidence[key]
+        for key in summary_keys
+        if key in evidence and evidence[key] not in ("", [], {}, None)
+    }
+    checks = evidence.get("checks")
+    if isinstance(checks, dict):
+        summary["checks"] = _bool_checks(checks)
+    click_attempts = evidence.get("click_attempts")
+    if isinstance(click_attempts, list):
+        summary["click_attempt_count"] = len(click_attempts)
+    after_value_polls = evidence.get("after_value_polls")
+    if isinstance(after_value_polls, list):
+        summary["after_value_poll_count"] = len(after_value_polls)
+    summary["report_json"] = str(report_json)
+    return summary
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     evidence = run_smoke(
@@ -719,7 +764,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"real desktop interaction smoke report: {args.report_json}",
             file=sys.stderr,
         )
-    print(json.dumps(evidence, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                _console_summary(evidence, args.report_json),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        print(json.dumps(evidence, ensure_ascii=False, indent=2))
     return 0 if evidence.get("ok") is True else 1
 
 

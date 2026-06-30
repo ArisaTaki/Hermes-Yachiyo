@@ -241,6 +241,9 @@ value, reads the named app UI tree, clicks a semantic accessibility control,
 and verifies the visible result changed before cleaning up. It fails before
 mutation when the desktop session is locked or the app was already running,
 and the RC verifier only enables it with `--run-real-desktop-interaction-smoke`.
+With `--report-json`, stdout is limited to the interaction stage, blocker,
+checks, and compact value/click counters; full preflight, UI, click, poll, and
+cleanup evidence remains in the JSON report.
 
 Runtime failures can also expose a non-permission `blocking_condition` such as
 `desktop_session_locked`. Chat task cards plus Bubble and Live2D launcher task
