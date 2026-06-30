@@ -661,6 +661,20 @@ jobs:
           fi
           python scripts/verify_release_candidate.py --write-manual-checks-template release/manual-rc-checks.template.json
           python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount --check-gatekeeper-readiness --run-packaged-backend-bridge-smoke --run-dmg-app-smoke "${provider_smoke_args[@]}" "${provider_smoke_status_args[@]}" --report-json release/rc-verification.json
+          release_smoke_status=0
+          python scripts/summarize_release_smoke.py \
+            release/rc-verification.json \
+            release/public-release-gate/public-demo.json \
+            --diagnostics-zip release/public-release-gate/diagnostics.zip \
+            --output-json release/release-smoke.json \
+            --output-markdown release/release-smoke.md || release_smoke_status=$?
+          if [[ ! -s release/release-smoke.json ]]; then
+            echo "Release smoke summary did not produce release/release-smoke.json."
+            exit 1
+          fi
+          if [[ "${release_smoke_status}" -ne 0 ]]; then
+            echo "Release smoke evidence is incomplete; see release/release-smoke.json."
+          fi
           python scripts/verify_release_candidate.py --manual-checks-json release/rc-verification.json --manual-checks-json release/electron-ui-smoke.json --write-manual-checks-draft release/manual-rc-checks.draft.json "${provider_smoke_status_args[@]}"
           python scripts/verify_release_candidate.py --manual-checks-json release/manual-rc-checks.draft.json --write-manual-checks-markdown release/manual-rc-checks.md "${provider_smoke_status_args[@]}"
 

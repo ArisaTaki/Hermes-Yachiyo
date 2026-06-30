@@ -1915,6 +1915,27 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
         in messages
     )
     assert "macOS release workflow must upload a release-candidate verification report" in messages
+    assert "macOS release workflow must summarize release-smoke evidence after RC verification" in messages
+    assert "macOS release workflow release-smoke summary must include public demo evidence" in messages
+    assert (
+        "macOS release workflow release-smoke summary must include diagnostics bundle evidence"
+        in messages
+    )
+    assert "macOS release workflow must archive release-smoke JSON evidence" in messages
+    assert "macOS release workflow must archive release-smoke Markdown evidence" in messages
+    assert (
+        "macOS release workflow must fail when release-smoke report generation produces no JSON"
+        in messages
+    )
+    assert (
+        "macOS release workflow must explain missing release-smoke report failures"
+        in messages
+    )
+    assert (
+        "macOS release workflow must surface incomplete release-smoke evidence without hiding the report"
+        in messages
+    )
+    assert "macOS release workflow must summarize release smoke after the RC report before upload" in messages
     assert "macOS release workflow must archive a manual RC check evidence template" in messages
     assert (
         "macOS release workflow must archive a manual RC check draft seeded from the RC report and Electron UI smoke report"

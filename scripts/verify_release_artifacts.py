@@ -1256,6 +1256,38 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "macOS release workflow must upload a release-candidate verification report",
     ),
     (
+        "python scripts/summarize_release_smoke.py",
+        "macOS release workflow must summarize release-smoke evidence after RC verification",
+    ),
+    (
+        "release/public-release-gate/public-demo.json",
+        "macOS release workflow release-smoke summary must include public demo evidence",
+    ),
+    (
+        "--diagnostics-zip release/public-release-gate/diagnostics.zip",
+        "macOS release workflow release-smoke summary must include diagnostics bundle evidence",
+    ),
+    (
+        "--output-json release/release-smoke.json",
+        "macOS release workflow must archive release-smoke JSON evidence",
+    ),
+    (
+        "--output-markdown release/release-smoke.md",
+        "macOS release workflow must archive release-smoke Markdown evidence",
+    ),
+    (
+        "if [[ ! -s release/release-smoke.json ]]",
+        "macOS release workflow must fail when release-smoke report generation produces no JSON",
+    ),
+    (
+        "Release smoke summary did not produce release/release-smoke.json.",
+        "macOS release workflow must explain missing release-smoke report failures",
+    ),
+    (
+        "Release smoke evidence is incomplete; see release/release-smoke.json.",
+        "macOS release workflow must surface incomplete release-smoke evidence without hiding the report",
+    ),
+    (
         "--write-manual-checks-template release/manual-rc-checks.template.json",
         "macOS release workflow must archive a manual RC check evidence template",
     ),
@@ -4567,6 +4599,7 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
     write_signoff_draft = workflow.find(
         "--manual-checks-json release/rc-verification.json --manual-checks-json release/electron-ui-smoke.json --write-manual-checks-draft release/manual-rc-checks.draft.json"
     )
+    summarize_release_smoke = workflow.find("python scripts/summarize_release_smoke.py")
     write_signoff_markdown = workflow.find(
         "--manual-checks-json release/manual-rc-checks.draft.json --write-manual-checks-markdown release/manual-rc-checks.md"
     )
@@ -4582,6 +4615,19 @@ def _verify_release_workflow_guards(root: Path) -> list[Finding]:
             Finding(
                 workflow_path,
                 "macOS release workflow must run local RC verification gate after preparing release artifacts before upload",
+            )
+        )
+    if (
+        verify_rc < 0
+        or summarize_release_smoke < 0
+        or upload_artifact < 0
+        or summarize_release_smoke < verify_rc
+        or summarize_release_smoke > upload_artifact
+    ):
+        findings.append(
+            Finding(
+                workflow_path,
+                "macOS release workflow must summarize release smoke after the RC report before upload",
             )
         )
     if (
