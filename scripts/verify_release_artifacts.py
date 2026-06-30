@@ -186,6 +186,11 @@ USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
     ),
     (
         Path("docs/public-release-readiness.md"),
+        "--include-real-desktop-open",
+        "public release readiness guide must document granular real desktop demo flags",
+    ),
+    (
+        Path("docs/public-release-readiness.md"),
         "WorkflowRun replay",
         "public release readiness guide must document WorkflowRun public demo evidence",
     ),
@@ -198,6 +203,11 @@ USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
         Path("CONTRIBUTING.md"),
         "run_public_demo_smokes.py",
         "contribution guide must document public demo smoke evidence",
+    ),
+    (
+        Path("CONTRIBUTING.md"),
+        "--include-real-desktop-open",
+        "contribution guide must document granular real desktop demo flags",
     ),
 )
 PACKAGING_CONFIG_FILE = Path("apps/frontend/electron-builder.yml")

@@ -129,7 +129,7 @@ def demo_flows(tmp_dir: Path) -> list[DemoFlow]:
                 str(tmp_dir / "real-desktop-app-open.json"),
             ),
             report_json=tmp_dir / "real-desktop-app-open.json",
-            opt_in_flag="--include-real-desktop",
+            opt_in_flag="--include-real-desktop-open",
             opt_in_reason="opens a real macOS application",
         ),
         DemoFlow(
@@ -143,7 +143,7 @@ def demo_flows(tmp_dir: Path) -> list[DemoFlow]:
                 str(tmp_dir / "real-desktop-ui-inspection.json"),
             ),
             report_json=tmp_dir / "real-desktop-ui-inspection.json",
-            opt_in_flag="--include-real-desktop",
+            opt_in_flag="--include-real-desktop-ui-inspection",
             opt_in_reason="opens and inspects a real macOS application",
         ),
         DemoFlow(
@@ -157,7 +157,7 @@ def demo_flows(tmp_dir: Path) -> list[DemoFlow]:
                 str(tmp_dir / "real-desktop-interaction.json"),
             ),
             report_json=tmp_dir / "real-desktop-interaction.json",
-            opt_in_flag="--include-real-desktop",
+            opt_in_flag="--include-real-desktop-interaction",
             opt_in_reason="types and clicks in a real macOS application",
         ),
         DemoFlow(
@@ -197,6 +197,9 @@ def run_public_demo_smokes(
     *,
     tmp_dir: Path | str = Path("tmp/public-demo-smokes"),
     include_real_desktop: bool = False,
+    include_real_desktop_open: bool = False,
+    include_real_desktop_ui_inspection: bool = False,
+    include_real_desktop_interaction: bool = False,
     include_provider_workflow: bool = False,
     include_ui: bool = False,
     plan_only: bool = False,
@@ -204,7 +207,13 @@ def run_public_demo_smokes(
     resolved_tmp_dir = _resolve_path(Path(tmp_dir))
     flows = demo_flows(resolved_tmp_dir)
     selected_flags = {
-        "--include-real-desktop": include_real_desktop,
+        "--include-real-desktop-open": include_real_desktop or include_real_desktop_open,
+        "--include-real-desktop-ui-inspection": (
+            include_real_desktop or include_real_desktop_ui_inspection
+        ),
+        "--include-real-desktop-interaction": (
+            include_real_desktop or include_real_desktop_interaction
+        ),
         "--include-provider-workflow": include_provider_workflow,
         "--include-ui": include_ui,
     }
@@ -420,6 +429,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--tmp-dir", type=Path, default=Path("tmp/public-demo-smokes"))
     parser.add_argument("--include-real-desktop", action="store_true")
+    parser.add_argument("--include-real-desktop-open", action="store_true")
+    parser.add_argument("--include-real-desktop-ui-inspection", action="store_true")
+    parser.add_argument("--include-real-desktop-interaction", action="store_true")
     parser.add_argument("--include-provider-workflow", action="store_true")
     parser.add_argument("--include-ui", action="store_true")
     parser.add_argument("--plan-only", action="store_true")
@@ -430,6 +442,9 @@ def main(argv: Sequence[str] | None = None) -> int:
     summary = run_public_demo_smokes(
         tmp_dir=args.tmp_dir,
         include_real_desktop=bool(args.include_real_desktop),
+        include_real_desktop_open=bool(args.include_real_desktop_open),
+        include_real_desktop_ui_inspection=bool(args.include_real_desktop_ui_inspection),
+        include_real_desktop_interaction=bool(args.include_real_desktop_interaction),
         include_provider_workflow=bool(args.include_provider_workflow),
         include_ui=bool(args.include_ui),
         plan_only=bool(args.plan_only),

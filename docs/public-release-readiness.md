@@ -80,7 +80,10 @@ python scripts/run_public_demo_smokes.py \
   --output-markdown tmp/public-demo-smokes-full.md
 ```
 
-`--include-real-desktop` opens and operates real macOS apps,
+Use `--include-real-desktop-open`, `--include-real-desktop-ui-inspection`, and
+`--include-real-desktop-interaction` to collect the real desktop evidence in
+smaller batches. `--include-real-desktop` remains the umbrella flag for all
+three. These real desktop flags open or operate macOS apps,
 `--include-provider-workflow` requires live provider smoke credentials, and
 `--include-ui` starts Vite/Electron UI smokes. A default run can pass selected
 source demos while still reporting `complete=false` until opt-in flows pass.

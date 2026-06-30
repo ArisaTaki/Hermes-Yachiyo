@@ -112,6 +112,84 @@ def test_public_demo_smokes_opt_in_selects_all_flows(tmp_path, monkeypatch):
     assert ["node", "scripts/smoke_agent_run_detail_ui.mjs"] in commands
 
 
+def test_public_demo_smokes_real_desktop_open_can_be_opted_in_separately(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(demo, "ROOT", tmp_path)
+    commands: list[list[str]] = []
+
+    def fake_run(command):
+        command = list(command)
+        commands.append(command)
+        if "--report-json" in command:
+            report = tmp_path / command[command.index("--report-json") + 1]
+            if not report.is_absolute():
+                report = tmp_path / report
+            report.parent.mkdir(parents=True, exist_ok=True)
+            report.write_text(json.dumps({"ok": True}), encoding="utf-8")
+        return _fake_completed(command)
+
+    monkeypatch.setattr(demo, "_run_command", fake_run)
+
+    summary = demo.run_public_demo_smokes(
+        tmp_dir="tmp/demo",
+        include_real_desktop_open=True,
+    )
+
+    selected_ids = [flow["id"] for flow in summary["flows"] if flow["selected"]]
+    assert "real_desktop_app_open" in selected_ids
+    assert "real_desktop_ui_inspection" not in selected_ids
+    assert "real_desktop_interaction" not in selected_ids
+    assert summary["selected_count"] == 8
+    assert summary["passed_count"] == 8
+    assert any("smoke_real_desktop_app_open.py" in part for command in commands for part in command)
+    assert not any(
+        "smoke_real_desktop_interaction.py" in part
+        for command in commands
+        for part in command
+    )
+
+
+def test_public_demo_smokes_cli_accepts_granular_real_desktop_open_flag(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    monkeypatch.setattr(demo, "ROOT", tmp_path)
+    output_json = tmp_path / "tmp" / "demo-open.json"
+
+    def fake_run(command):
+        command = list(command)
+        if "--report-json" in command:
+            report = tmp_path / command[command.index("--report-json") + 1]
+            if not report.is_absolute():
+                report = tmp_path / report
+            report.parent.mkdir(parents=True, exist_ok=True)
+            report.write_text(json.dumps({"ok": True}), encoding="utf-8")
+        return _fake_completed(command)
+
+    monkeypatch.setattr(demo, "_run_command", fake_run)
+
+    exit_code = demo.main(
+        [
+            "--tmp-dir",
+            "tmp/demo",
+            "--include-real-desktop-open",
+            "--output-json",
+            str(output_json),
+        ]
+    )
+
+    assert exit_code == 0
+    assert capsys.readouterr().out == ""
+    payload = json.loads(output_json.read_text(encoding="utf-8"))
+    selected_ids = [flow["id"] for flow in payload["flows"] if flow["selected"]]
+    assert "real_desktop_app_open" in selected_ids
+    assert "real_desktop_ui_inspection" not in selected_ids
+    assert "real_desktop_interaction" not in selected_ids
+
+
 def test_public_demo_smokes_records_selected_skipped_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(demo, "ROOT", tmp_path)
 

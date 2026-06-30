@@ -736,6 +736,13 @@ Vite/Electron UI smokes. The current default evidence can pass with
 `complete=false`; release parity still requires the opt-in flows to pass for
 the current candidate.
 
+The real desktop opt-in can now be collected incrementally with
+`--include-real-desktop-open`, `--include-real-desktop-ui-inspection`, and
+`--include-real-desktop-interaction`. The umbrella `--include-real-desktop`
+flag still runs all three, but the granular flags let release evidence preserve
+a passing app-open result even when foreground focus or UI interaction is
+blocked by the host session.
+
 ## Non-Negotiable Guards
 
 - 禁止删除 Agent Studio。
