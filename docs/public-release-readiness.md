@@ -96,6 +96,7 @@ python scripts/summarize_release_smoke.py \
   "tmp/rc-verification-${SHORT_COMMIT}-source-capabilities.json" \
   "tmp/rc-verification-${SHORT_COMMIT}-packaged-batch.json" \
   "tmp/rc-verification-${SHORT_COMMIT}-screen.json" \
+  "tmp/rc-verification-${SHORT_COMMIT}-public-demo.json" \
   --diagnostics-zip "tmp/oha-yachiyo-diagnostics-${SHORT_COMMIT}.zip" \
   --output-json "tmp/rc-verification-${SHORT_COMMIT}-release-smoke.json" \
   --output-markdown "tmp/rc-verification-${SHORT_COMMIT}-release-smoke.md"

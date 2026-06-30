@@ -95,6 +95,17 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
         ),
     },
     {
+        "id": "public_demo",
+        "label": "Public demo evidence covers release-facing flows",
+        "required": ("public_demo_complete",),
+        "next_action": (
+            "python scripts/run_public_demo_smokes.py "
+            "--include-real-desktop --include-provider-workflow --include-ui "
+            "--output-json tmp/public-demo-smokes-full.json "
+            "--output-markdown tmp/public-demo-smokes-full.md"
+        ),
+    },
+    {
         "id": "artifact_readback",
         "label": "Artifacts can be written and read back",
         "required": ("source_data_analysis_artifact",),
@@ -196,6 +207,7 @@ def _collect_report_evidence(
                 source=source,
                 kind="smoke_mode_capability",
             )
+    _collect_public_demo_evidence(report, source=source, evidence=evidence)
     for section_id in sorted(SECTION_IDS):
         section = report.get(section_id)
         if isinstance(section, dict) and _section_passed(section):
@@ -311,6 +323,38 @@ def _has_capability_sections(report: Mapping[str, Any]) -> bool:
 
 def _section_passed(section: Mapping[str, Any]) -> bool:
     return section.get("status") == "passed" or section.get("ok") is True
+
+
+def _collect_public_demo_evidence(
+    report: Mapping[str, Any],
+    *,
+    source: str,
+    evidence: dict[str, list[dict[str, Any]]],
+) -> None:
+    if not isinstance(report.get("flows"), list):
+        return
+    if "selected_count" not in report or "complete" not in report:
+        return
+    if report.get("ok") is True:
+        _add_evidence(
+            evidence,
+            "public_demo_selected",
+            source=source,
+            kind="public_demo",
+            status=str(report.get("status") or ""),
+            selected_count=int(report.get("selected_count") or 0),
+            passed_count=int(report.get("passed_count") or 0),
+        )
+    if report.get("ok") is True and report.get("complete") is True:
+        _add_evidence(
+            evidence,
+            "public_demo_complete",
+            source=source,
+            kind="public_demo",
+            status=str(report.get("status") or ""),
+            selected_count=int(report.get("selected_count") or 0),
+            passed_count=int(report.get("passed_count") or 0),
+        )
 
 
 def _add_evidence(

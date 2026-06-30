@@ -182,6 +182,17 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
     assert commands[8] == (
         [
             sys.executable,
+            "scripts/run_public_demo_smokes.py",
+            "--output-json",
+            "tmp/rc-verification-abc12345-public-demo.json",
+            "--output-markdown",
+            "tmp/rc-verification-abc12345-public-demo.md",
+        ],
+        True,
+    )
+    assert commands[9] == (
+        [
+            sys.executable,
             "scripts/collect_release_diagnostics.py",
             "--label",
             "abc12345",
@@ -191,30 +202,20 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
         ],
         True,
     )
-    assert commands[9] == (
+    assert commands[10] == (
         [
             sys.executable,
             "scripts/summarize_release_smoke.py",
             "tmp/rc-verification-abc12345-source-capabilities.json",
             "tmp/rc-verification-abc12345-packaged-batch.json",
             "tmp/rc-verification-abc12345-screen.json",
+            "tmp/rc-verification-abc12345-public-demo.json",
             "--diagnostics-zip",
             "tmp/oha-yachiyo-diagnostics-abc12345.zip",
             "--output-json",
             "tmp/rc-verification-abc12345-release-smoke.json",
             "--output-markdown",
             "tmp/rc-verification-abc12345-release-smoke.md",
-        ],
-        True,
-    )
-    assert commands[10] == (
-        [
-            sys.executable,
-            "scripts/run_public_demo_smokes.py",
-            "--output-json",
-            "tmp/rc-verification-abc12345-public-demo.json",
-            "--output-markdown",
-            "tmp/rc-verification-abc12345-public-demo.md",
         ],
         True,
     )
@@ -399,6 +400,17 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
     assert commands[5] == (
         [
             sys.executable,
+            "scripts/run_public_demo_smokes.py",
+            "--output-json",
+            "tmp/rc-verification-abc12345-public-demo.json",
+            "--output-markdown",
+            "tmp/rc-verification-abc12345-public-demo.md",
+        ],
+        True,
+    )
+    assert commands[6] == (
+        [
+            sys.executable,
             "scripts/collect_release_diagnostics.py",
             "--label",
             "abc12345",
@@ -408,12 +420,13 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
         ],
         True,
     )
-    assert commands[6][0] == [
+    assert commands[7][0] == [
         sys.executable,
         "scripts/summarize_release_smoke.py",
         "tmp/rc-verification-abc12345-source-capabilities.json",
         "tmp/rc-verification-abc12345-packaged-batch.json",
         "tmp/rc-verification-abc12345-screen.json",
+        "tmp/rc-verification-abc12345-public-demo.json",
         "--diagnostics-zip",
         "tmp/oha-yachiyo-diagnostics-abc12345.zip",
         "--output-json",
@@ -421,18 +434,7 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
         "--output-markdown",
         "tmp/rc-verification-abc12345-release-smoke.md",
     ]
-    assert commands[6][1] is True
-    assert commands[7] == (
-        [
-            sys.executable,
-            "scripts/run_public_demo_smokes.py",
-            "--output-json",
-            "tmp/rc-verification-abc12345-public-demo.json",
-            "--output-markdown",
-            "tmp/rc-verification-abc12345-public-demo.md",
-        ],
-        True,
-    )
+    assert commands[7][1] is True
 
 
 def test_refresh_local_rc_signoff_does_not_reuse_failed_batch_report(

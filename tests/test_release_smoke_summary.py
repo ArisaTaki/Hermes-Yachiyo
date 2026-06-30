@@ -51,6 +51,7 @@ def _diagnostics_zip(path):
 def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypatch):
     monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
     report_path = tmp_path / "tmp" / "rc.json"
+    public_demo_path = tmp_path / "tmp" / "public-demo.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
         json.dumps(
@@ -67,17 +68,30 @@ def test_release_smoke_summary_passes_with_required_evidence(tmp_path, monkeypat
         ),
         encoding="utf-8",
     )
+    public_demo_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "status": "passed",
+                "complete": True,
+                "selected_count": 13,
+                "passed_count": 13,
+                "flows": [{"id": "real_desktop_app_open", "status": "passed"}],
+            }
+        ),
+        encoding="utf-8",
+    )
     diagnostics_zip = tmp_path / "tmp" / "diagnostics.zip"
     _diagnostics_zip(diagnostics_zip)
 
     summary = release_smoke.summarize_release_smoke(
-        [report_path],
+        [report_path, public_demo_path],
         diagnostics_zips=[diagnostics_zip],
     )
 
     assert summary["ok"] is True
     assert summary["status"] == "passed"
-    assert summary["passed_count"] == summary["item_count"] == 8
+    assert summary["passed_count"] == summary["item_count"] == 9
     assert summary["missing_item_ids"] == []
 
 
@@ -97,12 +111,40 @@ def test_release_smoke_summary_reports_missing_items_and_next_actions(
 
     assert summary["ok"] is False
     assert "diagnostics_export" in summary["missing_item_ids"]
+    assert "public_demo" in summary["missing_item_ids"]
     artifact = next(item for item in summary["items"] if item["id"] == "artifact_readback")
     assert artifact["status"] == "passed"
     packaged = next(item for item in summary["items"] if item["id"] == "packaged_launch")
     assert packaged["missing_evidence_ids"] == ["packaged_app_bridge_isolation"]
     commands = [item["command"] for item in summary["next_actions"]]
     assert any("collect_release_diagnostics.py" in command for command in commands)
+    assert any("run_public_demo_smokes.py" in command for command in commands)
+
+
+def test_release_smoke_summary_requires_complete_public_demo(tmp_path, monkeypatch):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    public_demo_path = tmp_path / "tmp" / "public-demo.json"
+    public_demo_path.parent.mkdir(parents=True, exist_ok=True)
+    public_demo_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "status": "partial",
+                "complete": False,
+                "selected_count": 7,
+                "passed_count": 7,
+                "flows": [{"id": "real_desktop_discovery", "status": "passed"}],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke([public_demo_path])
+
+    public_demo = next(item for item in summary["items"] if item["id"] == "public_demo")
+    assert public_demo["status"] == "missing"
+    assert public_demo["present_evidence_ids"] == []
+    assert public_demo["missing_evidence_ids"] == ["public_demo_complete"]
 
 
 def test_release_smoke_summary_accepts_raw_smoke_mode_reports(tmp_path, monkeypatch):

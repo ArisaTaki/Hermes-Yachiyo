@@ -684,12 +684,13 @@ optional app logs or crash files. The bundle includes `diagnostics/manifest.json
 with included/skipped files and fails closed by skipping files that are binary,
 too large, unreadable, or still secret-like after redaction.
 
-`scripts/summarize_release_smoke.py` now turns existing RC reports, single-smoke
-JSON files, and diagnostics bundle manifests into an 8-item release-smoke
-checklist: packaged launch, Chat desktop task, approval card, Agent Studio run
-timeline, GroupRun, Workflow, artifact readback, and diagnostics export. It
-does not run heavy native/provider/UI flows; it reports missing evidence and the
-next commands to run. `scripts/refresh_local_rc_signoff.py` now generates the
+`scripts/summarize_release_smoke.py` now turns existing RC reports, public-demo
+JSON files, single-smoke JSON files, and diagnostics bundle manifests into a
+9-item release-smoke checklist: packaged launch, Chat desktop task, approval
+card, Agent Studio run timeline, GroupRun, Workflow, public demo, artifact
+readback, and diagnostics export. It does not run heavy native/provider/UI
+flows; it reports missing evidence and the next commands to run.
+`scripts/refresh_local_rc_signoff.py` now generates the
 redacted diagnostics bundle, release-smoke summary, and public-demo smoke
 summary during each local RC refresh, and `--print-status` prints capability
 readiness, user-path release smoke coverage, and public-demo progress when

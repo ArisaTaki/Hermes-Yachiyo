@@ -529,8 +529,29 @@ def refresh_local_rc_signoff(
     if preview_code and not _preview_failure_is_only_manual_incomplete(signoff_preview):
         raise subprocess.CalledProcessError(preview_code, preview_command)
 
-    for stale_release_smoke in (release_smoke_report, release_smoke_markdown):
+    for stale_release_smoke in (
+        release_smoke_report,
+        release_smoke_markdown,
+        public_demo_report,
+        public_demo_markdown,
+    ):
         stale_release_smoke.unlink(missing_ok=True)
+
+    public_demo_command = [
+        sys.executable,
+        "scripts/run_public_demo_smokes.py",
+        "--output-json",
+        str(public_demo_report.relative_to(ROOT)),
+        "--output-markdown",
+        str(public_demo_markdown.relative_to(ROOT)),
+    ]
+    if run_real_desktop_smokes:
+        public_demo_command.append("--include-real-desktop")
+    if run_provider_smoke:
+        public_demo_command.append("--include-provider-workflow")
+    public_demo_code = _run(public_demo_command, allow_failure=True)
+    if public_demo_code and not public_demo_report.exists():
+        raise subprocess.CalledProcessError(public_demo_code, public_demo_command)
 
     diagnostics_command = [
         sys.executable,
@@ -551,6 +572,8 @@ def refresh_local_rc_signoff(
     ]
     for source in manual_sources:
         release_smoke_command.append(str(source.relative_to(ROOT)))
+    if public_demo_report.exists():
+        release_smoke_command.append(str(public_demo_report.relative_to(ROOT)))
     release_smoke_command.extend(
         [
             "--diagnostics-zip",
@@ -567,22 +590,6 @@ def refresh_local_rc_signoff(
             release_smoke_code,
             release_smoke_command,
         )
-
-    public_demo_command = [
-        sys.executable,
-        "scripts/run_public_demo_smokes.py",
-        "--output-json",
-        str(public_demo_report.relative_to(ROOT)),
-        "--output-markdown",
-        str(public_demo_markdown.relative_to(ROOT)),
-    ]
-    if run_real_desktop_smokes:
-        public_demo_command.append("--include-real-desktop")
-    if run_provider_smoke:
-        public_demo_command.append("--include-provider-workflow")
-    public_demo_code = _run(public_demo_command, allow_failure=True)
-    if public_demo_code and not public_demo_report.exists():
-        raise subprocess.CalledProcessError(public_demo_code, public_demo_command)
 
     return {
         "source_capability_report": source_capability_report,
