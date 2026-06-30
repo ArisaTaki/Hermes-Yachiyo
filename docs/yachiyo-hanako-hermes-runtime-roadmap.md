@@ -690,9 +690,10 @@ checklist: packaged launch, Chat desktop task, approval card, Agent Studio run
 timeline, GroupRun, Workflow, artifact readback, and diagnostics export. It
 does not run heavy native/provider/UI flows; it reports missing evidence and the
 next commands to run. `scripts/refresh_local_rc_signoff.py` now generates the
-redacted diagnostics bundle and release-smoke summary during each local RC
-refresh, and `--print-status` prints both capability readiness and user-path
-release smoke coverage when those reports exist.
+redacted diagnostics bundle, release-smoke summary, and public-demo smoke
+summary during each local RC refresh, and `--print-status` prints capability
+readiness, user-path release smoke coverage, and public-demo progress when
+those reports exist.
 
 ## Phase 12 - Public Project Release
 
@@ -734,7 +735,10 @@ Full public demo evidence requires the explicit
 flags because those flows open/operate apps, require live credentials, or start
 Vite/Electron UI smokes. The current default evidence can pass with
 `complete=false`; release parity still requires the opt-in flows to pass for
-the current candidate.
+the current candidate. `scripts/refresh_local_rc_signoff.py` now writes the
+public-demo evidence to `tmp/rc-verification-<commit>-public-demo.json` and
+`tmp/rc-verification-<commit>-public-demo.md`, so the public project demo is
+part of the local RC evidence bundle instead of a separate ad hoc command.
 
 The real desktop opt-in can now be collected incrementally with
 `--include-real-desktop-open`, `--include-real-desktop-ui-inspection`, and

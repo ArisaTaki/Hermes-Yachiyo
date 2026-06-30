@@ -368,6 +368,8 @@ def refresh_local_rc_signoff(
     diagnostics_bundle = tmp_dir / f"oha-yachiyo-diagnostics-{label}.zip"
     release_smoke_report = tmp_dir / f"rc-verification-{label}-release-smoke.json"
     release_smoke_markdown = tmp_dir / f"rc-verification-{label}-release-smoke.md"
+    public_demo_report = tmp_dir / f"rc-verification-{label}-public-demo.json"
+    public_demo_markdown = tmp_dir / f"rc-verification-{label}-public-demo.md"
     signoff_draft = tmp_dir / f"rc-signoff-{label}-current.json"
     signoff_markdown = tmp_dir / f"rc-signoff-{label}-current.md"
     signoff_preview = tmp_dir / f"rc-signoff-{label}-preview.json"
@@ -566,6 +568,22 @@ def refresh_local_rc_signoff(
             release_smoke_command,
         )
 
+    public_demo_command = [
+        sys.executable,
+        "scripts/run_public_demo_smokes.py",
+        "--output-json",
+        str(public_demo_report.relative_to(ROOT)),
+        "--output-markdown",
+        str(public_demo_markdown.relative_to(ROOT)),
+    ]
+    if run_real_desktop_smokes:
+        public_demo_command.append("--include-real-desktop")
+    if run_provider_smoke:
+        public_demo_command.append("--include-provider-workflow")
+    public_demo_code = _run(public_demo_command, allow_failure=True)
+    if public_demo_code and not public_demo_report.exists():
+        raise subprocess.CalledProcessError(public_demo_code, public_demo_command)
+
     return {
         "source_capability_report": source_capability_report,
         "batch_report": batch_report,
@@ -576,6 +594,8 @@ def refresh_local_rc_signoff(
         "diagnostics_bundle": diagnostics_bundle,
         "release_smoke_report": release_smoke_report,
         "release_smoke_markdown": release_smoke_markdown,
+        "public_demo_report": public_demo_report,
+        "public_demo_markdown": public_demo_markdown,
         "signoff_draft": signoff_draft,
         "signoff_markdown": signoff_markdown,
         "signoff_preview": signoff_preview,
@@ -620,6 +640,7 @@ def print_local_rc_signoff_status(*, short_commit: str | None = None) -> bool:
     if ok:
         _print_release_readiness_status(label=label)
         _print_release_smoke_status(label=label)
+        _print_public_demo_status(label=label)
         _print_os_evidence_command(label=label, signoff_draft=signoff_draft)
     return ok
 
@@ -691,6 +712,39 @@ def _print_release_smoke_status(*, label: str) -> None:
         missing = ", ".join(str(item) for item in missing_ids if str(item))
         if missing:
             print(f"- missing user paths: {missing}")
+
+
+def _print_public_demo_status(*, label: str) -> None:
+    public_demo_report = ROOT / "tmp" / f"rc-verification-{label}-public-demo.json"
+    if not public_demo_report.exists():
+        return
+    try:
+        report = _load_report(public_demo_report)
+    except (OSError, json.JSONDecodeError) as exc:
+        print(
+            f"local RC public demo: could not read {public_demo_report.relative_to(ROOT)}: {exc}",
+            file=sys.stderr,
+        )
+        return
+    print("local RC public demo:")
+    status = str(report.get("status") or "unknown")
+    print(f"- status: {status}")
+    passed = report.get("passed_count")
+    selected = report.get("selected_count")
+    if isinstance(passed, int) and isinstance(selected, int):
+        print(f"- selected demos: {passed}/{selected} passed")
+    complete = report.get("complete")
+    if isinstance(complete, bool):
+        print(f"- complete evidence: {str(complete).lower()}")
+    next_actions = report.get("next_actions")
+    if isinstance(next_actions, list) and next_actions:
+        action_ids = [
+            str(action.get("id") or "")
+            for action in next_actions
+            if isinstance(action, dict) and str(action.get("id") or "")
+        ]
+        if action_ids:
+            print(f"- remaining demos: {', '.join(action_ids)}")
 
 
 def write_local_os_manual_evidence(

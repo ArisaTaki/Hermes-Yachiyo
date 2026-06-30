@@ -115,9 +115,10 @@ python scripts/refresh_local_rc_signoff.py --print-status
 `refresh_local_rc_signoff.py` builds/refreshes the current local RC evidence,
 generates the Native Agent capability matrix, writes release readiness
 diagnostics, exports a redacted diagnostics bundle, summarizes release-smoke
-user paths, and writes signoff drafts. If the final signoff is still blocked by
-manual Gatekeeper or Screen Recording checks, that is a remaining release task,
-not a failure to hide.
+user paths, writes `tmp/rc-verification-${SHORT_COMMIT}-public-demo.json` and
+`tmp/rc-verification-${SHORT_COMMIT}-public-demo.md`, and writes signoff drafts.
+If the final signoff is still blocked by manual Gatekeeper or Screen Recording
+checks, that is a remaining release task, not a failure to hide.
 
 ## Diagnostics Bundle
 

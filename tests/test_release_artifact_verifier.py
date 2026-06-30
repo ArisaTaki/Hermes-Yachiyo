@@ -1004,6 +1004,7 @@ def test_verifier_requires_user_facing_release_docs_for_first_launch(tmp_path):
     assert "public release readiness guide must document known limitations" in messages
     assert "public release readiness guide must state packaged runtime expectations" in messages
     assert "public release readiness guide must document the public demo smoke runner" in messages
+    assert "public release readiness guide must document RC public demo evidence output" in messages
     assert "public release readiness guide must document desktop planner public demo evidence" in messages
     assert "public release readiness guide must document real desktop discovery public demo evidence" in messages
     assert "public release readiness guide must document granular real desktop demo flags" in messages

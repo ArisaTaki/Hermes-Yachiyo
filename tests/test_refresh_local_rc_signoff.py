@@ -95,6 +95,8 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
     assert reports["diagnostics_bundle"] == tmp_path / "tmp" / "oha-yachiyo-diagnostics-abc12345.zip"
     assert reports["release_smoke_report"] == tmp_path / "tmp" / "rc-verification-abc12345-release-smoke.json"
     assert reports["release_smoke_markdown"] == tmp_path / "tmp" / "rc-verification-abc12345-release-smoke.md"
+    assert reports["public_demo_report"] == tmp_path / "tmp" / "rc-verification-abc12345-public-demo.json"
+    assert reports["public_demo_markdown"] == tmp_path / "tmp" / "rc-verification-abc12345-public-demo.md"
     assert reports["signoff_draft"] == tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
     assert reports["signoff_markdown"] == tmp_path / "tmp" / "rc-signoff-abc12345-current.md"
     assert reports["signoff_preview"] == tmp_path / "tmp" / "rc-signoff-abc12345-preview.json"
@@ -202,6 +204,17 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
             "tmp/rc-verification-abc12345-release-smoke.json",
             "--output-markdown",
             "tmp/rc-verification-abc12345-release-smoke.md",
+        ],
+        True,
+    )
+    assert commands[10] == (
+        [
+            sys.executable,
+            "scripts/run_public_demo_smokes.py",
+            "--output-json",
+            "tmp/rc-verification-abc12345-public-demo.json",
+            "--output-markdown",
+            "tmp/rc-verification-abc12345-public-demo.md",
         ],
         True,
     )
@@ -339,7 +352,7 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
     assert reports["batch_report"].exists()
     assert reports["screen_report"].exists()
     assert reports["native_capability_matrix_report"].exists()
-    assert len(commands) == 7
+    assert len(commands) == 8
     assert commands[0] == (
         [
             sys.executable,
@@ -409,6 +422,17 @@ def test_refresh_local_rc_signoff_reuses_current_reports(monkeypatch, tmp_path):
         "tmp/rc-verification-abc12345-release-smoke.md",
     ]
     assert commands[6][1] is True
+    assert commands[7] == (
+        [
+            sys.executable,
+            "scripts/run_public_demo_smokes.py",
+            "--output-json",
+            "tmp/rc-verification-abc12345-public-demo.json",
+            "--output-markdown",
+            "tmp/rc-verification-abc12345-public-demo.md",
+        ],
+        True,
+    )
 
 
 def test_refresh_local_rc_signoff_does_not_reuse_failed_batch_report(
@@ -578,6 +602,12 @@ def test_refresh_local_rc_signoff_reruns_batch_for_provider_smoke(
     batch_command = commands[0][0]
     assert "tmp/rc-verification-abc12345-packaged-batch.json" in batch_command
     assert "--run-provider-smoke" in batch_command
+    public_demo_command = next(
+        command
+        for command, _allow_failure in commands
+        if command[:2] == [sys.executable, "scripts/run_public_demo_smokes.py"]
+    )
+    assert "--include-provider-workflow" in public_demo_command
 
 
 def test_refresh_local_rc_signoff_can_run_real_desktop_source_capability_smokes(
@@ -640,6 +670,12 @@ def test_refresh_local_rc_signoff_can_run_real_desktop_source_capability_smokes(
     assert "--run-real-desktop-ui-inspection-smoke" in source_command
     assert "--run-real-desktop-interaction-smoke" in source_command
     assert "tmp/rc-verification-abc12345-source-capabilities.json" in source_command
+    public_demo_command = next(
+        command
+        for command, _allow_failure in commands
+        if command[:2] == [sys.executable, "scripts/run_public_demo_smokes.py"]
+    )
+    assert "--include-real-desktop" in public_demo_command
 
 
 def test_refresh_local_rc_signoff_print_status_uses_current_draft(
@@ -737,6 +773,22 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
         ),
         encoding="utf-8",
     )
+    public_demo = tmp_path / "tmp" / "rc-verification-abc12345-public-demo.json"
+    public_demo.write_text(
+        json.dumps(
+            {
+                "status": "partial",
+                "complete": False,
+                "passed_count": 7,
+                "selected_count": 8,
+                "next_actions": [
+                    {"id": "real_desktop_interaction"},
+                    {"id": "workflow_provider"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
 
     assert refresh.main(["--short-commit", "abc12345", "--print-status"]) == 0
     output = capsys.readouterr().out
@@ -751,6 +803,12 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
     assert "- user paths: 6/8 passed" in output
     assert "chat_desktop_task" in output
     assert "workflow" in output
+    assert "local RC public demo:" in output
+    assert "- status: partial" in output
+    assert "- selected demos: 7/8 passed" in output
+    assert "- complete evidence: false" in output
+    assert "real_desktop_interaction" in output
+    assert "workflow_provider" in output
     assert (
         f"{sys.executable} scripts/verify_release_candidate.py --require-artifacts "
         "--run-dmg-screen-smoke --report-json "

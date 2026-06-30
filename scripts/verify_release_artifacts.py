@@ -176,6 +176,11 @@ USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
     ),
     (
         Path("docs/public-release-readiness.md"),
+        "rc-verification-${SHORT_COMMIT}-public-demo.json",
+        "public release readiness guide must document RC public demo evidence output",
+    ),
+    (
+        Path("docs/public-release-readiness.md"),
         "desktop_planner_discovery_smoke",
         "public release readiness guide must document desktop planner public demo evidence",
     ),
