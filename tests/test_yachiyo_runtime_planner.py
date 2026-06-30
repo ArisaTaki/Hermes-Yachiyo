@@ -5949,6 +5949,59 @@ def test_runtime_planner_discovers_chinese_generic_editor_apps_before_acting() -
     ).selected_intent.kind == "data_analysis"
 
 
+def test_runtime_planner_carries_target_file_when_discovering_app_capabilities() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.open_path",
+        "workspace.read",
+        "terminal.run",
+        "artifact.write",
+        "data.analyze",
+    ]
+
+    cases = (
+        ("找一个代码编辑器打开 README.md", "code", "README.md"),
+        ("用一个文本编辑器打开 notes.txt", "document", "notes.txt"),
+        ("找一个表格应用打开 data/sales.csv", "spreadsheet", "data/sales.csv"),
+        ("找一个 PDF 编辑器打开 ~/Downloads/report.pdf", "pdf", "~/Downloads/report.pdf"),
+    )
+
+    for prompt, query, target_path in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+            "action": "discover_apps",
+            "query": query,
+        }
+        assert decision.selected_intent.inputs["selected_app_target_path_hint"] == target_path
+        selected_app_step = _step_by_id(decision, "open-selected-discovered-app")
+        assert selected_app_step.action == "open_path_with_selected_app"
+        assert selected_app_step.input_preview == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": query,
+            "target_path": target_path,
+            "action": "open_path_with_selected_app",
+        }
+        assert planner_tool_requests(prompt, allowed_tools) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": query, "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
+            }
+        ]
+
+    assert RuntimePlanner().decision(
+        "总结 ~/Downloads/report.pdf",
+        allowed_tools=allowed_tools,
+    ).selected_intent.kind == "report_generation"
+
+
 def test_runtime_planner_discovers_generic_browser_before_acting() -> None:
     open_allowed = ["desktop.list_apps", "app.open", "desktop.active_window"]
     open_decision = RuntimePlanner().decision("打开默认浏览器", allowed_tools=open_allowed)

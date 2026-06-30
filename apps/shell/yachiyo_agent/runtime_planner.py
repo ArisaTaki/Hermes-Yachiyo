@@ -310,7 +310,8 @@ class TaskIntentRouter:
             return _empty_intent("desktop_operation", text)
         if _known_web_destination_search_hint(text):
             return _empty_intent("desktop_operation", text)
-        app_search_app_hint = _app_name_hint(text)
+        app_capability = _app_capability_discovery_hint(text)
+        app_search_app_hint = "" if app_capability else _app_name_hint(text)
         if (
             _explicit_system_settings_request(text)
             and not (app_search_app_hint and _app_search_hint(text, app_search_app_hint))
@@ -319,6 +320,7 @@ class TaskIntentRouter:
         if (
             _report_file_context_hint(text)
             and _desktop_content_artifact_requested(text)
+            and not app_capability
             and not _app_name_hint(text)
         ):
             return _empty_intent("desktop_operation", text)
@@ -406,7 +408,6 @@ class TaskIntentRouter:
             and _app_name_hint(text)
         ):
             desktop_discovery = None
-        app_capability = _app_capability_discovery_hint(text)
         if app_capability:
             desktop_discovery = {
                 "action": "discover_apps",
@@ -830,6 +831,7 @@ class TaskIntentRouter:
             return _empty_intent("desktop_operation", text)
         if (
             context_source
+            and not app_capability
             and not app_name_hint
             and operation_hint == "open"
             and ui_inspection is None
@@ -851,6 +853,9 @@ class TaskIntentRouter:
             app_name_hint = ""
             app_management = None
             app_search = {}
+        selected_app_target_path = (
+            _selected_discovered_app_target_path_hint(text) if app_capability else ""
+        )
         inputs: dict[str, Any] = {
             "app_name_hint": app_name_hint,
             "operation_hint": operation_hint,
@@ -909,6 +914,8 @@ class TaskIntentRouter:
             inputs["generic_terminal_app_discovery_hint"] = {"query": "terminal"}
         if app_capability:
             inputs["app_capability_hint"] = app_capability
+        if selected_app_target_path:
+            inputs["selected_app_target_path_hint"] = selected_app_target_path
         finder_operation_mode = str(finder_special_location.get("mode") or "").strip()
         if finder_operation_mode:
             inputs["operation_mode_hint"] = finder_operation_mode
@@ -1242,6 +1249,8 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
+            return _empty_intent("report_generation", text)
         shortcut = safe_shortcut_hint(text)
         shortcut_action = str((shortcut or {}).get("action") or "").strip()
         if (
@@ -1522,6 +1531,8 @@ class TaskIntentRouter:
         )
 
     def _file_access_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
+            return _empty_intent("file_access", text)
         if _explicit_browser_url_hint(text) or _browser_internal_page_hint(text):
             return _empty_intent("file_access", text)
         if _looks_like_scoped_data_analysis_request(text):
@@ -2720,6 +2731,23 @@ class RuntimePlanner:
                     if selected_app_tool == "app.open"
                     else "desktop.ui_operation"
                 )
+                selected_app_target_path = str(
+                    intent.inputs.get("selected_app_target_path_hint") or ""
+                ).strip()
+                selected_app_input_preview = {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": str(input_preview.get("query") or "").strip(),
+                    **_selected_discovered_app_operation_preview(
+                        selected_app_tool,
+                        safe_shortcut=safe_shortcut,
+                    ),
+                }
+                selected_app_action = "open_app"
+                if selected_app_target_path:
+                    selected_app_input_preview["target_path"] = selected_app_target_path
+                    selected_app_input_preview["action"] = "open_path_with_selected_app"
+                    selected_app_action = "open_path_with_selected_app"
                 steps.append(
                     _step(
                         intent,
@@ -2727,24 +2755,16 @@ class RuntimePlanner:
                         "Open selected discovered app",
                         selected_app_capability,
                         selected_app_tool,
-                        input_preview={
-                            "app_name": "<selected app from desktop.list_apps>",
-                            "selection_source": "desktop.list_apps",
-                            "query": str(input_preview.get("query") or "").strip(),
-                            **_selected_discovered_app_operation_preview(
-                                selected_app_tool,
-                                safe_shortcut=safe_shortcut,
-                            ),
-                        },
+                        input_preview=selected_app_input_preview,
                         depends_on=[
                             f"{action}-desktop-state"
                             if action
                             else "discover-desktop-state"
                         ],
-                        action="open_app",
+                        action=selected_app_action,
                         reason=(
                             "After desktop.list_apps returns candidates, the model selects the "
-                            "best matching app before opening it."
+                            "best matching app before opening it or continuing with the target file."
                         ),
                     )
                 )
@@ -17108,6 +17128,29 @@ def _app_capability_discovery_query(value: str) -> str:
     if _contains_any(description, ("文档", "文本", "文章", "document", "text", "writing", "write")):
         return "document"
     return description[:40].strip()
+
+
+def _selected_discovered_app_target_path_hint(text: str) -> str:
+    source_hint = data_source_hint(text)
+    if source_hint:
+        return source_hint
+    file_hint = file_access_hint(text)
+    if str(file_hint.get("action") or "").strip() == "open_path":
+        path = str(file_hint.get("path") or "").strip()
+        if path:
+            return path
+    value = _clean_prompt(text)
+    match = re.search(
+        r"(?P<path>(?:~|/|\./|\../)?[^\s\"'“”‘’，,。；;]+"
+        r"\.(?:pdf|md|markdown|txt|csv|tsv|xlsx|xls|json|jsonl|doc|docx|rtf|"
+        r"pages|numbers|py|js|jsx|ts|tsx|java|go|rs|swift|kt|kts|c|cc|cpp|h|hpp|"
+        r"png|jpg|jpeg|heic|gif|webp|ppt|pptx|key))",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    return str(match.group("path") or "").rstrip("。.,，；;")
 
 
 def _clean_app_capability_description(value: str) -> str:

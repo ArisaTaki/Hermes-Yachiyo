@@ -634,6 +634,14 @@ terminal, and music-player labels are no longer canonicalized to Chrome,
 Finder, Terminal, or Music at that boundary; explicit app aliases such as
 Chrome, Finder, Apple Music, iTerm, and Warp remain available for compatibility.
 
+Capability discovery now carries target-file context into the selected-app
+continuation plan. Requests such as "找一个代码编辑器打开 README.md", "用一个文本
+编辑器打开 notes.txt", "找一个表格应用打开 data/sales.csv", and "找一个 PDF 编辑器
+打开 ~/Downloads/report.pdf" still start with `desktop.list_apps`, but the
+`open-selected-discovered-app` step now includes `target_path` and
+`action=open_path_with_selected_app` so the model and Agent Studio can continue
+from discovered app evidence instead of losing the file objective.
+
 ## Phase 11 - Release Productization
 
 Turn the runtime migration into a product that can be installed and diagnosed
