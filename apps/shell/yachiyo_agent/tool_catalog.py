@@ -515,6 +515,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "desktop.open_path": [
             "Opens folders and safe document/media files; unsafe executable, script, app bundle, and unknown file types are blocked.",
         ],
+        "desktop.open_path_with_app": [
+            "Opens folders and safe document/media files with a specific discovered app; unsafe executable, script, app bundle, and unknown file types are blocked.",
+        ],
         "desktop.hide_app": [
             "Requires Accessibility permission and hides the current foreground app without closing it.",
         ],

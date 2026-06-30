@@ -765,6 +765,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "app_quit",
         "desktop_reveal_path",
         "desktop_open_path",
+        "desktop_open_path_with_app",
         "media_apple_music_play",
         "media_apple_music_open_and_play",
         "media_apple_music_control",
@@ -1352,6 +1353,30 @@ def test_desktop_open_path_schema_accepts_local_path() -> None:
 
     with pytest.raises(AgentRuntimeError, match="desktop.open_path 参数 path 必须是非空字符串"):
         ToolDescriptorRegistry.validate_payload("desktop.open_path", {"path": ""})
+
+
+def test_desktop_open_path_with_app_schema_accepts_local_path_and_app() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "desktop.open_path_with_app",
+        {"app_name": "Preview", "path": "~/Downloads/report.pdf"},
+    )
+
+    with pytest.raises(
+        AgentRuntimeError,
+        match="desktop.open_path_with_app 参数 path 必须是非空字符串",
+    ):
+        ToolDescriptorRegistry.validate_payload(
+            "desktop.open_path_with_app",
+            {"app_name": "Preview", "path": ""},
+        )
+    with pytest.raises(
+        AgentRuntimeError,
+        match="desktop.open_path_with_app 参数 app_name 必须是非空字符串",
+    ):
+        ToolDescriptorRegistry.validate_payload(
+            "desktop.open_path_with_app",
+            {"app_name": "", "path": "~/Downloads/report.pdf"},
+        )
 
 
 def test_system_settings_open_schema_requires_target() -> None:
@@ -3462,6 +3487,36 @@ def test_desktop_open_path_opens_safe_existing_file(monkeypatch, tmp_path) -> No
     assert calls[0][0] == ["open", expanded]
 
 
+def test_desktop_open_path_with_app_opens_safe_existing_file(monkeypatch, tmp_path) -> None:
+    target = tmp_path / "report.pdf"
+    target.write_text("pdf", encoding="utf-8")
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append((command, kwargs))
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod.subprocess, "run", fake_run)
+
+    result = desktop_mod.open_path_with_app(str(target), "Preview")
+    expanded = str(target.resolve(strict=False))
+
+    assert result["ok"] is True
+    assert result["action"] == "desktop.open_path_with_app"
+    assert result["summary"] == "Opened report.pdf with Preview"
+    assert result["data"] == {
+        "path": str(target),
+        "expanded_path": expanded,
+        "app_name": "Preview",
+        "open_target": "app_open",
+        "exists": True,
+        "is_dir": False,
+        "suffix": ".pdf",
+    }
+    assert calls[0][0] == ["open", "-a", "Preview", expanded]
+
+
 def test_desktop_open_path_resolves_latest_download_alias(monkeypatch, tmp_path) -> None:
     downloads = tmp_path / "Downloads"
     downloads.mkdir()
@@ -3739,6 +3794,29 @@ def test_desktop_open_path_blocks_unsafe_file_types(monkeypatch, tmp_path) -> No
     assert result["summary"] == "desktop.open_path blocked"
     assert result["error_code"] == "unsafe_path_type"
     assert ".sh" in result["error"]
+    assert result["data"]["suffix"] == ".sh"
+    assert calls == []
+
+
+def test_desktop_open_path_with_app_blocks_unsafe_file_types(monkeypatch, tmp_path) -> None:
+    target = tmp_path / "run.sh"
+    target.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    calls = []
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        desktop_mod.subprocess,
+        "run",
+        lambda *_args, **_kwargs: calls.append((_args, _kwargs)),
+    )
+
+    result = desktop_mod.open_path_with_app(str(target), "Terminal")
+
+    assert result["ok"] is False
+    assert result["action"] == "desktop.open_path_with_app"
+    assert result["summary"] == "desktop.open_path_with_app blocked"
+    assert result["error_code"] == "unsafe_path_type"
+    assert result["data"]["app_name"] == "Terminal"
     assert result["data"]["suffix"] == ".sh"
     assert calls == []
 

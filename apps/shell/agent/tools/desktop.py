@@ -563,6 +563,7 @@ _PERMISSION_CAPABILITY_TOOLS = {
         "app.quit",
         "desktop.reveal_path",
         "desktop.open_path",
+        "desktop.open_path_with_app",
         "system.display_sleep",
         "system.screen_saver_start",
         "notes.create",
@@ -2040,6 +2041,93 @@ def open_path(path: str) -> dict[str, Any]:
         "data": {
             **data_base,
             "open_target": "system_open",
+            "exists": True,
+            "is_dir": target.is_dir(),
+            "suffix": target.suffix.lower(),
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def open_path_with_app(path: str, app_name: str) -> dict[str, Any]:
+    if _desktop_platform() != "macos":
+        return _unsupported("desktop.open_path_with_app")
+    clean_path = _clean_required(path, "path")
+    clean_app_name = _clean_required(app_name, "app_name")
+    special = _special_desktop_object_path(
+        clean_path,
+        "desktop.open_path_with_app",
+        "app_open",
+    )
+    if special and "error_payload" in special:
+        return special["error_payload"]
+    target = special["target"] if special else _expanded_local_path(clean_path)
+    data_base = special["data"] if special else {"path": clean_path, "expanded_path": str(target)}
+    if not target.exists():
+        return {
+            "ok": False,
+            "action": "desktop.open_path_with_app",
+            "summary": "desktop.open_path_with_app failed",
+            "error": f"Path not found: {clean_path}",
+            "error_code": "path_not_found",
+            "data": {
+                **data_base,
+                "app_name": clean_app_name,
+                "open_target": "app_open",
+                "exists": False,
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    safety_error = _unsafe_open_path_reason(target)
+    if safety_error:
+        return {
+            "ok": False,
+            "action": "desktop.open_path_with_app",
+            "summary": "desktop.open_path_with_app blocked",
+            "error": safety_error,
+            "error_code": "unsafe_path_type",
+            "data": {
+                **data_base,
+                "app_name": clean_app_name,
+                "open_target": "app_open",
+                "exists": True,
+                "is_dir": target.is_dir(),
+                "suffix": target.suffix.lower(),
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+    try:
+        result = subprocess.run(
+            ["open", "-a", clean_app_name, str(target)],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            check=False,
+        )
+    except Exception as exc:
+        return _error("desktop.open_path_with_app", exc)
+    if result.returncode != 0:
+        payload = _failed("desktop.open_path_with_app", result)
+        payload["data"] = {
+            **data_base,
+            "app_name": clean_app_name,
+            "open_target": "app_open",
+            "exists": True,
+            "is_dir": target.is_dir(),
+            "suffix": target.suffix.lower(),
+        }
+        return payload
+    return {
+        "ok": True,
+        "action": "desktop.open_path_with_app",
+        "summary": f"Opened {target.name or str(target)} with {clean_app_name}",
+        "data": {
+            **data_base,
+            "app_name": clean_app_name,
+            "open_target": "app_open",
             "exists": True,
             "is_dir": target.is_dir(),
             "suffix": target.suffix.lower(),

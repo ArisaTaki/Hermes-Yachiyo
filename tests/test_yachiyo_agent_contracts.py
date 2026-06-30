@@ -1353,6 +1353,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.click") == "medium"
     assert desktop_tool_risk_level("desktop.reveal_path") == "low"
     assert desktop_tool_risk_level("desktop.open_path") == "low"
+    assert desktop_tool_risk_level("desktop.open_path_with_app") == "low"
     assert desktop_tool_risk_level("media.apple_music_status") == "low"
     assert desktop_tool_risk_level("media.music_app_open_and_play") == "low"
     assert desktop_tool_risk_level("system.settings_open") == "low"
@@ -1406,7 +1407,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:30] == [
+    assert list(catalog)[:31] == [
         "read_screen",
         "diagnose_permissions",
         "read_active_window",
@@ -1424,6 +1425,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "quit_app",
         "reveal_path",
         "open_path",
+        "open_path_with_app",
         "play_or_pause_media",
         "control_system_volume",
         "control_system_brightness",
@@ -1466,6 +1468,8 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["reveal_path"].tools == ["desktop.reveal_path"]
     assert catalog["open_path"].risk_level == "low"
     assert catalog["open_path"].tools == ["desktop.open_path"]
+    assert catalog["open_path_with_app"].risk_level == "low"
+    assert catalog["open_path_with_app"].tools == ["desktop.open_path_with_app"]
     assert catalog["play_or_pause_media"].tools == [
         "media.apple_music_play",
         "media.apple_music_open_and_play",

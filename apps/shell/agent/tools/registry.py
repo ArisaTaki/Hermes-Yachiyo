@@ -523,6 +523,17 @@ def _desktop_open_path(broker: Any, payload: dict[str, Any], _approved: bool) ->
     return broker.desktop_open_path(str(payload.get("path") or ""))
 
 
+def _desktop_open_path_with_app(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return broker.desktop_open_path_with_app(
+        str(payload.get("path") or ""),
+        str(payload.get("app_name") or ""),
+    )
+
+
 def _media_apple_music_play(
     broker: Any,
     payload: dict[str, Any],
@@ -949,6 +960,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "app.quit": _app_quit,
     "desktop.reveal_path": _desktop_reveal_path,
     "desktop.open_path": _desktop_open_path,
+    "desktop.open_path_with_app": _desktop_open_path_with_app,
     "media.apple_music_play": _media_apple_music_play,
     "media.apple_music_status": _media_apple_music_status,
     "media.apple_music_open_and_play": _media_apple_music_open_and_play,

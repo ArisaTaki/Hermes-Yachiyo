@@ -1414,6 +1414,9 @@ class ToolBroker:
     def desktop_open_path(self, path: str) -> dict[str, Any]:
         return desktop.open_path(path)
 
+    def desktop_open_path_with_app(self, path: str, app_name: str) -> dict[str, Any]:
+        return desktop.open_path_with_app(path, app_name)
+
     def media_apple_music_play(self, query: str) -> dict[str, Any]:
         return desktop.apple_music_play(query)
 

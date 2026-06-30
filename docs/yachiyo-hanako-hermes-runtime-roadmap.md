@@ -642,6 +642,12 @@ continuation plan. Requests such as "找一个代码编辑器打开 README.md", 
 `action=open_path_with_selected_app` so the model and Agent Studio can continue
 from discovered app evidence instead of losing the file objective.
 
+The runtime now includes `desktop.open_path_with_app`, a low-risk desktop tool
+that opens a safe local file or folder with a specific discovered app via the
+same path existence and unsafe-file checks used by `desktop.open_path`. When this
+tool is available, app-capability discovery plans use it for selected-app file
+continuations; otherwise they keep the previous model-follow-up plan shape.
+
 ## Phase 11 - Release Productization
 
 Turn the runtime migration into a product that can be installed and diagnosed

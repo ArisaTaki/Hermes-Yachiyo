@@ -926,7 +926,11 @@ def _desktop_discovery_step_needs_model_followup(
 
 
 def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if tool_name.startswith("app.") or tool_name in {"desktop.open_app", "desktop.focus_app"}:
+    if tool_name.startswith("app.") or tool_name in {
+        "desktop.open_app",
+        "desktop.focus_app",
+        "desktop.open_path_with_app",
+    }:
         return _canonicalize_app_payload(payload)
     if tool_name == "desktop.list_apps":
         query = str(payload.get("query") or "").strip()

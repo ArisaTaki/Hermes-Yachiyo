@@ -184,8 +184,8 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         title="Open Or Reveal Local Files",
         category="file",
         description="Open safe local paths or reveal them in Finder through desktop file tools.",
-        tools=("desktop.open_path", "desktop.reveal_path"),
-        execution_actions=("open_path", "reveal_path"),
+        tools=("desktop.open_path", "desktop.open_path_with_app", "desktop.reveal_path"),
+        execution_actions=("open_path", "open_path_with_app", "reveal_path"),
         output_kinds=("desktop_state",),
     ),
     CapabilityDefinition(
@@ -460,7 +460,11 @@ _DYNAMIC_CAPABILITY_TOOL_NAMES: dict[str, tuple[str, ...]] = {
         "file.read",
     ),
     "file.workspace_write": ("workspace.write_patch",),
-    "file.desktop_access": ("desktop.open_path", "desktop.reveal_path"),
+    "file.desktop_access": (
+        "desktop.open_path",
+        "desktop.open_path_with_app",
+        "desktop.reveal_path",
+    ),
     "file.organization": (
         "workspace.list",
         "fs.find_files",
@@ -470,6 +474,7 @@ _DYNAMIC_CAPABILITY_TOOL_NAMES: dict[str, tuple[str, ...]] = {
         "fs.rename_file",
         "desktop.reveal_path",
         "desktop.open_path",
+        "desktop.open_path_with_app",
         "terminal.run",
         "python.run",
         "artifact.write",

@@ -2721,19 +2721,22 @@ class RuntimePlanner:
                     reason="Run the explicit desktop discovery or permission diagnostic request.",
                 )
             ]
+            selected_app_target_path = str(
+                intent.inputs.get("selected_app_target_path_hint") or ""
+            ).strip()
             selected_app_tool = _selected_discovered_app_tool(
                 allowed,
                 safe_shortcut=safe_shortcut,
+                target_path=selected_app_target_path,
             )
             if action == "discover_apps" and _discovered_app_open_requested(intent) and selected_app_tool:
                 selected_app_capability = (
-                    "desktop.app_control"
-                    if selected_app_tool == "app.open"
+                    "file.desktop_access"
+                    if selected_app_tool == "desktop.open_path_with_app"
+                    else "desktop.app_control"
+                    if selected_app_tool in {"app.open", "desktop.open_app"}
                     else "desktop.ui_operation"
                 )
-                selected_app_target_path = str(
-                    intent.inputs.get("selected_app_target_path_hint") or ""
-                ).strip()
                 selected_app_input_preview = {
                     "app_name": "<selected app from desktop.list_apps>",
                     "selection_source": "desktop.list_apps",
@@ -6966,7 +6969,12 @@ def _selected_discovered_app_tool(
     allowed: set[str] | None,
     *,
     safe_shortcut: Mapping[str, Any] | None,
+    target_path: str = "",
 ) -> str:
+    if str(target_path or "").strip():
+        tool_name = _first_allowed(("desktop.open_path_with_app",), allowed)
+        if tool_name:
+            return tool_name
     tool_name = _first_allowed(("app.open",), allowed)
     if tool_name:
         return tool_name

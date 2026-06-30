@@ -253,6 +253,7 @@ function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, 
   if (tool === 'browser.screenshot') return '截取当前网页';
   if (tool === 'system.settings_open' && target) return `打开${target}`;
   if (tool === 'desktop.open_path' && path) return `打开 ${path}`;
+  if (tool === 'desktop.open_path_with_app' && appName && path) return `用${appName}打开 ${path}`;
   if (tool === 'media.apple_music_play' && query) return `播放${query}`;
   if (tool === 'media.apple_music_open_and_play') return '打开Apple Music并播放';
   if (tool === 'media.apple_music_control') return appleMusicControlRetryPrompt(String(input.action || '').trim());
@@ -306,6 +307,7 @@ function isLowRiskExecutableRecoveryTool(tool: string): boolean {
     || tool === 'clipboard.write'
     || tool === 'desktop.active_window'
     || tool === 'desktop.open_path'
+    || tool === 'desktop.open_path_with_app'
     || tool === 'desktop.permissions'
     || tool === 'desktop.list_apps'
     || tool === 'desktop.running_apps'
@@ -362,6 +364,7 @@ function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unkn
   if (tool === 'desktop.windows') return appName ? `查看${appName}窗口` : '查看桌面窗口';
   if (tool === 'desktop.permissions') return '检查桌面权限';
   if (tool === 'desktop.open_path' && path) return `打开 ${path}`;
+  if (tool === 'desktop.open_path_with_app' && appName && path) return `用${appName}打开 ${path}`;
   if (tool === 'desktop.safe_shortcut') return desktopSafeShortcutPrompt(action);
   if (tool === 'desktop.safe_key') return desktopSafeKeyPrompt(input);
   if (tool === 'desktop.safe_scroll') return desktopSafeScrollPrompt(input);

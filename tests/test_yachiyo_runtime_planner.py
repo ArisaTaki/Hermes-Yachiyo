@@ -5954,6 +5954,7 @@ def test_runtime_planner_carries_target_file_when_discovering_app_capabilities()
         "desktop.list_apps",
         "app.open",
         "desktop.open_path",
+        "desktop.open_path_with_app",
         "workspace.read",
         "terminal.run",
         "artifact.write",
@@ -5978,6 +5979,7 @@ def test_runtime_planner_carries_target_file_when_discovering_app_capabilities()
         assert decision.selected_intent.inputs["selected_app_target_path_hint"] == target_path
         selected_app_step = _step_by_id(decision, "open-selected-discovered-app")
         assert selected_app_step.action == "open_path_with_selected_app"
+        assert selected_app_step.tool_name == "desktop.open_path_with_app"
         assert selected_app_step.input_preview == {
             "app_name": "<selected app from desktop.list_apps>",
             "selection_source": "desktop.list_apps",
@@ -6000,6 +6002,30 @@ def test_runtime_planner_carries_target_file_when_discovering_app_capabilities()
         "总结 ~/Downloads/report.pdf",
         allowed_tools=allowed_tools,
     ).selected_intent.kind == "report_generation"
+
+
+def test_runtime_planner_keeps_selected_app_target_path_when_open_with_app_tool_is_missing() -> None:
+    allowed_tools = ["desktop.list_apps", "app.open"]
+
+    decision = RuntimePlanner().decision(
+        "找一个代码编辑器打开 README.md",
+        allowed_tools=allowed_tools,
+    )
+    selected_app_step = _step_by_id(decision, "open-selected-discovered-app")
+
+    assert selected_app_step.tool_name == "app.open"
+    assert selected_app_step.action == "open_path_with_selected_app"
+    assert selected_app_step.input_preview["target_path"] == "README.md"
+    assert planner_tool_requests("找一个代码编辑器打开 README.md", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "code", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
 
 
 def test_runtime_planner_discovers_generic_browser_before_acting() -> None:
