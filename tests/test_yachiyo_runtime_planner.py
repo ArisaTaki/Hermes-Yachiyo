@@ -6255,6 +6255,74 @@ def test_runtime_planner_discovers_generic_terminal_app_before_acting() -> None:
     ]
 
 
+def test_runtime_planner_discovers_generic_communication_app_before_acting() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+        "app.focus_and_type_into_ui_element",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+
+    cases = (
+        ("打开聊天软件", "messaging", None),
+        ("打开一个聊天软件，给 Alice 输入 hello", "messaging", "messaging"),
+        ("open a messenger app", "messaging", None),
+        ("open an email app", "mail", "mail"),
+    )
+
+    for prompt, query, capability_query in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == ""
+        assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+            "action": "discover_apps",
+            "query": query,
+        }
+        if capability_query:
+            assert decision.selected_intent.inputs["app_capability_hint"]["query"] == capability_query
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover_apps-desktop-state",
+            "open-selected-discovered-app",
+        ]
+        assert planner_tool_requests(prompt, allowed_tools) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": query, "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
+            }
+        ]
+
+    assert planner_tool_requests("打开 Slack", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Slack", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation() -> None:
     allowed_tools = [
         "desktop.list_apps",

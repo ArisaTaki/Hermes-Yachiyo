@@ -699,6 +699,23 @@ class TaskIntentRouter:
             app_name_hint = ""
             app_management = None
             generic_terminal_app_discovery = True
+        generic_communication_app_discovery = False
+        generic_communication_query = ""
+        if desktop_discovery is None and safe_shortcut is None and (
+            _is_generic_communication_app_label(app_name_hint)
+            or _generic_communication_app_target_requested(text)
+        ):
+            generic_communication_query = _generic_communication_app_discovery_query(
+                text,
+                app_name_hint,
+            )
+            desktop_discovery = {
+                "action": "discover_apps",
+                "query": generic_communication_query,
+            }
+            app_name_hint = ""
+            app_management = None
+            generic_communication_app_discovery = True
         if not app_type_scope and _target_first_foreground_type_hint(text):
             app_name_hint = ""
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
@@ -912,6 +929,10 @@ class TaskIntentRouter:
             inputs["generic_file_manager_discovery_hint"] = {"query": "file manager"}
         if generic_terminal_app_discovery:
             inputs["generic_terminal_app_discovery_hint"] = {"query": "terminal"}
+        if generic_communication_app_discovery:
+            inputs["generic_communication_app_discovery_hint"] = {
+                "query": generic_communication_query
+            }
         if app_capability:
             inputs["app_capability_hint"] = app_capability
         if selected_app_target_path:
@@ -12752,6 +12773,38 @@ def _generic_terminal_app_target_requested(text: str) -> bool:
     return any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in patterns)
 
 
+def _generic_communication_app_target_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|开启|切到|聚焦|查看|看看|检查)\s*"
+        r"(?:一个|一款|任意|任何|默认|可用)?\s*"
+        r"(?:聊天|通讯|通信|消息|即时通讯|IM)\s*(?:应用|app|软件|工具|程序)?"
+        r"(?:\s*(?:一下|下|起来|开了吗|打开了吗))?\s*[?？。！!]*$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|开启|切到|聚焦|查看|看看|检查)\s*"
+        r"(?:一个|一款|任意|任何|默认|可用)?\s*"
+        r"(?:邮件|电子邮件|邮箱)\s*(?:应用|app|软件|客户端|工具|程序)?"
+        r"(?:\s*(?:一下|下|起来|开了吗|打开了吗))?\s*[?？。！!]*$",
+        r"\b(?:open|launch|start|focus|inspect|check)\s+"
+        r"(?:an?\s+|the\s+|any\s+|default\s+)?"
+        r"(?:chat|messaging|message|messenger|communication|email|mail)\s+"
+        r"(?:app|application|client|tool|program)\b\s*[.!?]*$",
+        r"\b(?:open|launch|start|focus|inspect|check)\s+"
+        r"(?:an?\s+|the\s+|any\s+|default\s+)?(?:messenger|email|mail)\b\s*[.!?]*$",
+    )
+    return any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def _generic_communication_app_discovery_query(text: str, app_name_hint: str = "") -> str:
+    value = _clean_prompt(f"{app_name_hint} {text}")
+    if _contains_any(value, ("邮件", "电子邮件", "邮箱", "email", "mail")):
+        return "mail"
+    return "messaging"
+
+
 def _browser_internal_shortcut_action(surface: str) -> str:
     if surface == "history":
         return "show_history"
@@ -13798,16 +13851,44 @@ def _looks_like_communication_draft_request(value: str) -> bool:
 def _is_generic_communication_app_label(value: str) -> bool:
     normalized = re.sub(r"[\s._·-]+", "", str(value or "").strip().lower())
     return normalized in {
+        "聊天",
+        "聊天应用",
+        "聊天app",
+        "聊天软件",
+        "通讯",
+        "通讯应用",
+        "通讯app",
+        "通讯软件",
+        "通信",
+        "通信应用",
+        "通信app",
+        "通信软件",
         "消息",
+        "消息应用",
+        "消息app",
+        "消息软件",
         "送消息",
         "信息",
         "私信",
         "邮件",
         "电子邮件",
+        "邮箱",
+        "邮件客户端",
         "mail",
         "email",
+        "emailapp",
+        "mailapp",
+        "mailclient",
+        "chat",
+        "chatapp",
+        "messaging",
+        "messagingapp",
+        "messenger",
+        "messengerapp",
+        "communicationapp",
         "message",
         "messages",
+        "messageapp",
         "msg",
         "dm",
     }
@@ -17079,12 +17160,13 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
         r"(?:一个|一款|任意|任何|可用)?\s*"
         r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
-        r"图片|图像|照片|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|日历)"
+        r"图片|图像|照片|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
+        r"聊天|通讯|通信|消息|即时通讯|日历)"
         r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|工具|程序)",
         r"\b(?:open|launch|start|find|use)\s+"
         r"(?:(?:an?|any|some|available)\s+)?"
         r"(?P<direct_capability_en>markdown|code|image|photo|document|text|spreadsheet|"
-        r"presentation|slide|note|mail|calendar)[\w\s-]{0,30}?"
+        r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar)[\w\s-]{0,30}?"
         r"(?:app|application|tool|program|editor)\b",
     )
     for pattern in patterns:
@@ -17127,7 +17209,9 @@ def _app_capability_discovery_query(value: str) -> str:
         return "presentation"
     if _contains_any(description, ("笔记", "备忘录", "note", "notes")):
         return "notes"
-    if _contains_any(description, ("邮件", "email", "mail")):
+    if _contains_any(description, ("聊天", "通讯", "通信", "消息", "即时通讯", "chat", "messaging", "message", "messenger")):
+        return "messaging"
+    if _contains_any(description, ("邮件", "电子邮件", "邮箱", "email", "mail")):
         return "mail"
     if _contains_any(description, ("日历", "calendar")):
         return "calendar"
