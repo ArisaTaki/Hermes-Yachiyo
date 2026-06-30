@@ -1165,8 +1165,11 @@ def _data_analysis_requires_model_followup(decision: Any) -> bool:
         target_action = str(inputs.get("target_action_hint") or "").strip()
         if target_app and target_action == "app_paste":
             return True
+        if str(inputs.get("output_target_hint") or "").strip() == "clipboard":
+            return True
     followup_step_ids = {
         "prepare-analysis-target-app",
+        "write-clipboard-output",
         "draft-analysis-communication",
         "draft-analysis-communication-message",
         "send-analysis-communication-message",

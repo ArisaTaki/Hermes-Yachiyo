@@ -2513,6 +2513,52 @@ def test_runtime_planner_predicts_data_analysis_artifacts_by_requested_outputs()
     }
 
 
+def test_runtime_planner_routes_data_analysis_output_to_clipboard() -> None:
+    builtin = RuntimePlanner().decision(
+        "分析 sales.csv 并把报告复制回剪贴板",
+        allowed_tools=["data.analyze", "clipboard.write"],
+    )
+
+    assert builtin.selected_intent.kind == "data_analysis"
+    assert builtin.selected_intent.inputs == {
+        "data_source_hint": "sales.csv",
+        "data_source_kind": "csv",
+        "output_target_hint": "clipboard",
+    }
+    assert [step.step_id for step in builtin.plan.tool_plan.steps] == [
+        "analyze-data-file",
+        "write-clipboard-output",
+    ]
+    assert _step_by_id(builtin, "write-clipboard-output").input_preview == {
+        "body_source": "analysis_result",
+        "transform": "report",
+    }
+    assert _step_by_id(builtin, "write-clipboard-output").depends_on == [
+        "analyze-data-file"
+    ]
+
+    scoped = RuntimePlanner().decision(
+        "把 Downloads 最新 CSV 分析成图表并复制回剪贴板",
+        allowed_tools=["workspace.list", "python.run", "clipboard.write"],
+    )
+
+    assert scoped.selected_intent.kind == "data_analysis"
+    assert scoped.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "csv",
+        "data_source_scope_hint": "Downloads",
+        "output_target_hint": "clipboard",
+    }
+    assert [step.step_id for step in scoped.plan.tool_plan.steps] == [
+        "inspect-data-source",
+        "run-analysis",
+        "write-clipboard-output",
+    ]
+    assert _step_by_id(scoped, "write-clipboard-output").depends_on == ["run-analysis"]
+    assert scoped.plan.tool_plan.artifacts_expected == []
+    assert scoped.plan.tool_plan.missing_capabilities == []
+
+
 def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
     decision = RuntimePlanner().decision(
         "整理 Downloads 里的文件并按类型归档",
@@ -18791,6 +18837,36 @@ def test_planner_tool_requests_passes_builtin_data_analysis_artifact_paths() -> 
             ),
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
+        }
+    ]
+
+
+def test_planner_tool_requests_continues_after_data_analysis_for_clipboard() -> None:
+    assert planner_tool_requests(
+        "分析 sales.csv 并把报告复制回剪贴板",
+        allowed_tools=["data.analyze", "clipboard.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": _data_analysis_preview("sales.csv", "csv"),
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+            "continue_to_model": True,
+        }
+    ]
+
+    assert planner_tool_requests(
+        "把 Downloads 最新 CSV 分析成图表并复制回剪贴板",
+        allowed_tools=["workspace.list", "python.run", "clipboard.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
         }
     ]
 

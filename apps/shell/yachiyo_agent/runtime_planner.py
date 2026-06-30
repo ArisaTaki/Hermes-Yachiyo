@@ -253,9 +253,13 @@ class TaskIntentRouter:
         )
         if app_write_target:
             inputs.update(app_write_target)
+        output_target = _task_output_target_hint(text)
+        if output_target:
+            inputs["output_target_hint"] = output_target
         preferred_capabilities = [
             "data.analysis",
             *(["desktop.app_control"] if spreadsheet_app_hint else []),
+            *(["clipboard.read_write"] if output_target == "clipboard" else []),
         ]
         if app_search_result_source:
             preferred_capabilities.extend(
@@ -2110,26 +2114,31 @@ class RuntimePlanner:
                     depends_on=depends_on,
                     reason="Analyze the captured selection or clipboard data after inspecting it.",
                 ),
-                _step(
-                    intent,
-                    "write-analysis-artifact",
-                    "Write analysis artifact",
-                    "artifact.write",
-                    _first_allowed(("artifact.write",), allowed),
-                    input_preview={
-                        "paths": artifact_paths,
-                        "body_source": context_source,
-                    },
-                    depends_on=["run-analysis"],
-                    reason="Return a durable data-analysis artifact that Studio and Chat can replay.",
-                ),
             ]
+            depends_on_step = "run-analysis"
+            if _task_output_target_hint(intent.user_goal) != "clipboard":
+                steps.append(
+                    _step(
+                        intent,
+                        "write-analysis-artifact",
+                        "Write analysis artifact",
+                        "artifact.write",
+                        _first_allowed(("artifact.write",), allowed),
+                        input_preview={
+                            "paths": artifact_paths,
+                            "body_source": context_source,
+                        },
+                        depends_on=["run-analysis"],
+                        reason="Return a durable data-analysis artifact that Studio and Chat can replay.",
+                    )
+                )
+                depends_on_step = "write-analysis-artifact"
             return _append_data_analysis_followup_steps(
                 intent,
                 allowed,
                 steps,
                 artifact_paths=artifact_paths,
-                depends_on="write-analysis-artifact",
+                depends_on=depends_on_step,
             )
         if _can_use_builtin_data_analysis(intent, allowed):
             artifact_paths = _artifact_output_paths(
@@ -2259,25 +2268,30 @@ class RuntimePlanner:
                 ],
                 reason="Use local Python/pandas-style analysis instead of manually operating a spreadsheet app.",
             ),
-            _step(
-                intent,
-                "write-analysis-artifact",
-                "Write analysis artifact",
-                "artifact.write",
-                _first_allowed(("artifact.write",), allowed),
-                input_preview={
-                    "paths": artifact_paths
-                },
-                depends_on=["run-analysis"],
-                reason="Return a durable report artifact that Studio and Chat can replay.",
-            ),
         ]
+        depends_on_step = "run-analysis"
+        if _task_output_target_hint(intent.user_goal) != "clipboard":
+            steps.append(
+                _step(
+                    intent,
+                    "write-analysis-artifact",
+                    "Write analysis artifact",
+                    "artifact.write",
+                    _first_allowed(("artifact.write",), allowed),
+                    input_preview={
+                        "paths": artifact_paths
+                    },
+                    depends_on=["run-analysis"],
+                    reason="Return a durable report artifact that Studio and Chat can replay.",
+                )
+            )
+            depends_on_step = "write-analysis-artifact"
         return _append_data_analysis_followup_steps(
             intent,
             allowed,
             steps,
             artifact_paths=artifact_paths,
-            depends_on="write-analysis-artifact",
+            depends_on=depends_on_step,
         )
 
     def _desktop_operation_steps(
@@ -8283,13 +8297,24 @@ def _append_data_analysis_followup_steps(
     depends_on: str,
 ) -> list[ToolPlanStepSnapshot]:
     paths = [str(path or "").strip() for path in artifact_paths if str(path or "").strip()]
-    followup_steps = _append_artifact_reveal_step(
-        intent,
-        allowed,
-        steps,
-        artifact_paths=paths,
-        depends_on=depends_on,
-    )
+    if _task_output_target_hint(intent.user_goal) == "clipboard":
+        followup_steps = [
+            *steps,
+            _clipboard_output_step(
+                intent,
+                allowed,
+                depends_on=[depends_on],
+                body_source="analysis_result",
+            ),
+        ]
+    else:
+        followup_steps = _append_artifact_reveal_step(
+            intent,
+            allowed,
+            steps,
+            artifact_paths=paths,
+            depends_on=depends_on,
+        )
     followup_steps = _append_analysis_app_write_target_steps(
         intent,
         allowed,
