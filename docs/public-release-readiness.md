@@ -105,10 +105,10 @@ The JSON and Markdown summaries include `release_level`,
 default demos passed but required real desktop, provider, or UI evidence is
 still missing.
 When evidence is collected in batches, pass previous public-demo JSON files back
-to the gate with `--public-demo-report`. The gate and release-smoke summary merge
-only flows that actually passed, so a successful real app-open batch remains
-credited while blocked UI inspection, interaction, provider, or UI flows stay in
-Next Actions.
+to the gate or local RC refresh helper with `--public-demo-report`. The gate,
+`refresh_local_rc_signoff.py`, and release-smoke summary merge only flows that
+actually passed, so a successful real app-open batch remains credited while
+blocked UI inspection, interaction, provider, or UI flows stay in Next Actions.
 
 The release-smoke summary is the quickest user-path view:
 

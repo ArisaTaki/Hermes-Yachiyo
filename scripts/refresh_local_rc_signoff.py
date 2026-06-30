@@ -90,6 +90,13 @@ def _load_report(path: Path) -> dict[str, object]:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def _relative_or_display(path: Path) -> Path:
+    try:
+        return path.resolve(strict=False).relative_to(ROOT.resolve(strict=False))
+    except ValueError:
+        return path
+
+
 def _write_report(path: Path, payload: dict[str, object]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(payload, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
@@ -371,6 +378,7 @@ def refresh_local_rc_signoff(
     run_provider_smoke: bool = False,
     skip_screen_smoke: bool = False,
     reuse_current_reports: bool = False,
+    public_demo_reports: tuple[Path, ...] = (),
 ) -> dict[str, Path]:
     label = short_commit or _git_short_commit()
     tmp_dir = ROOT / "tmp"
@@ -588,6 +596,8 @@ def refresh_local_rc_signoff(
     ]
     for source in manual_sources:
         release_smoke_command.append(str(source.relative_to(ROOT)))
+    for source in public_demo_reports:
+        release_smoke_command.append(str(_relative_or_display(source)))
     if public_demo_report.exists():
         release_smoke_command.append(str(public_demo_report.relative_to(ROOT)))
     release_smoke_command.extend(
@@ -969,6 +979,16 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help="Run real provider smoke during the packaged batch gate.",
     )
+    parser.add_argument(
+        "--public-demo-report",
+        action="append",
+        default=[],
+        type=Path,
+        help=(
+            "Existing public-demo JSON to merge into the release-smoke summary. "
+            "May be repeated for batched real desktop, provider, or UI evidence."
+        ),
+    )
     args = parser.parse_args(argv)
     selected_actions = [
         args.print_status,
@@ -1032,6 +1052,7 @@ def main(argv: list[str] | None = None) -> int:
             run_provider_smoke=args.run_provider_smoke,
             skip_screen_smoke=args.skip_screen_smoke,
             reuse_current_reports=args.reuse_current_reports,
+            public_demo_reports=tuple(args.public_demo_report),
         )
     except subprocess.CalledProcessError as exc:
         print(
