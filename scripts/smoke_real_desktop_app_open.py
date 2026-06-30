@@ -7,6 +7,7 @@ import argparse
 import json
 import platform
 import sys
+import time
 from pathlib import Path
 from typing import Any, Sequence
 
@@ -17,6 +18,8 @@ if str(PROJECT_ROOT) not in sys.path:
 from apps.shell.agent.tools import desktop as desktop_tools
 
 DEFAULT_APP_NAME = "Calculator"
+_CLEANUP_STATUS_MAX_POLLS = 12
+_CLEANUP_STATUS_POLL_INTERVAL_SECONDS = 0.25
 
 
 def _app_names(result: dict[str, Any]) -> list[str]:
@@ -181,8 +184,17 @@ def _cleanup_evidence(
             "reason": "app was not verified running after open",
         }
     quit_result = desktop_tools.app_quit(app_name)
-    final_status = desktop_tools.app_status(app_name)
-    final_running = _status_running(final_status)
+    final_status: dict[str, Any] = {}
+    final_running: bool | None = None
+    status_polls: list[dict[str, Any]] = []
+    for attempt in range(1, _CLEANUP_STATUS_MAX_POLLS + 1):
+        final_status = desktop_tools.app_status(app_name)
+        final_running = _status_running(final_status)
+        status_polls.append({"attempt": attempt, "running": final_running})
+        if final_running is False:
+            break
+        if attempt < _CLEANUP_STATUS_MAX_POLLS:
+            time.sleep(_CLEANUP_STATUS_POLL_INTERVAL_SECONDS)
     return {
         "requested": True,
         "attempted": True,
@@ -190,6 +202,7 @@ def _cleanup_evidence(
         "result": quit_result,
         "final_status": final_status,
         "final_running": final_running,
+        "status_polls": status_polls,
     }
 
 

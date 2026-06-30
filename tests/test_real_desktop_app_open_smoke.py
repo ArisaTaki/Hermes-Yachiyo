@@ -152,6 +152,86 @@ def test_real_desktop_app_open_smoke_cleans_up_app_started_by_smoke(monkeypatch)
     ]
 
 
+def test_real_desktop_app_open_smoke_waits_for_async_quit(monkeypatch):
+    status_values = iter([False, True, True, True, False])
+    calls: list[tuple[str, str]] = []
+
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(smoke.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "list_apps",
+        lambda *, query="", limit=200: {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "data": {"query": query, "apps": [{"name": "Calculator"}]},
+            "permission_error": False,
+        },
+    )
+
+    def fake_status(app_name):
+        running = next(status_values)
+        calls.append(("status", app_name))
+        return {
+            "ok": True,
+            "action": "app.status",
+            "data": {
+                "app_name": app_name,
+                "running": running,
+                "status": "running" if running else "not_running",
+            },
+            "permission_error": False,
+        }
+
+    monkeypatch.setattr(smoke.desktop_tools, "app_status", fake_status)
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_open",
+        lambda app_name: {
+            "ok": True,
+            "action": "app.open",
+            "data": {
+                "app_name": app_name,
+                "launch_verified": True,
+                "launch_status": "running",
+            },
+        },
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_quit",
+        lambda app_name: calls.append(("quit", app_name))
+        or {
+            "ok": True,
+            "action": "app.quit",
+            "data": {
+                "app_name": app_name,
+                "quit_verified": False,
+                "running": True,
+            },
+        },
+    )
+
+    evidence = smoke.run_smoke(app_name="Calculator", cleanup=True)
+
+    assert evidence["ok"] is True
+    assert evidence["checks"]["cleanup_ok"] is True
+    assert evidence["cleanup"]["final_running"] is False
+    assert evidence["cleanup"]["status_polls"] == [
+        {"attempt": 1, "running": True},
+        {"attempt": 2, "running": True},
+        {"attempt": 3, "running": False},
+    ]
+    assert calls == [
+        ("status", "Calculator"),
+        ("status", "Calculator"),
+        ("quit", "Calculator"),
+        ("status", "Calculator"),
+        ("status", "Calculator"),
+        ("status", "Calculator"),
+    ]
+
+
 def test_real_desktop_app_open_smoke_does_not_quit_existing_app(monkeypatch):
     calls: list[str] = []
 
