@@ -89,6 +89,10 @@ three. These real desktop flags open or operate macOS apps,
 `--include-provider-workflow` requires live provider smoke credentials, and
 `--include-ui` starts Vite/Electron UI smokes. A default run can pass selected
 source demos while still reporting `complete=false` until opt-in flows pass.
+If the provider credentials are not configured, the Workflow provider smoke
+writes `skipped=true`, `reason=provider_smoke_credentials_missing`, and the
+missing `OHA_YACHIYO_SMOKE_*` variable names as release blocker evidence instead
+of treating the local host as a product failure.
 When the host can capture only a blank/black screen, `screen.capture` records
 `visibility_status=blank_black` and `blocking_condition=screen_capture_blank`,
 so release evidence does not treat an unobservable desktop as actionable UI.

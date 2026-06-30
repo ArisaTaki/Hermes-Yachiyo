@@ -421,6 +421,7 @@ def _evidence_summary(evidence: Mapping[str, Any]) -> dict[str, Any]:
         "reason",
         "blocking_condition",
         "blocking_conditions",
+        "missing_env",
         "recovery_hints",
         "recommended_tools",
         "app_name",

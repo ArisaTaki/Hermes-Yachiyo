@@ -51,13 +51,22 @@ def test_workflow_full_chain_smoke_reports_missing_environment(monkeypatch, caps
     monkeypatch.delenv(base_smoke.MODEL_ENV, raising=False)
     monkeypatch.delenv(base_smoke.API_KEY_ENV, raising=False)
 
-    assert smoke.main([]) == 1
+    assert smoke.main([]) == 0
 
     output = json.loads(capsys.readouterr().out)
     assert output["ok"] is False
-    assert base_smoke.BASE_URL_ENV in output["error"]
-    assert base_smoke.MODEL_ENV in output["error"]
-    assert base_smoke.API_KEY_ENV in output["error"]
+    assert output["skipped"] is True
+    assert output["mode"] == "native_workflow_full_chain_smoke"
+    assert output["reason"] == "provider_smoke_credentials_missing"
+    assert output["blocking_condition"] == "provider_smoke_credentials_missing"
+    assert output["missing_env"] == [
+        base_smoke.BASE_URL_ENV,
+        base_smoke.MODEL_ENV,
+        base_smoke.API_KEY_ENV,
+    ]
+    assert "scripts/run_public_demo_smokes.py --include-provider-workflow" in output[
+        "recommended_tools"
+    ]
 
 
 def test_workflow_full_chain_smoke_missing_environment_writes_report_json(
@@ -70,14 +79,16 @@ def test_workflow_full_chain_smoke_missing_environment_writes_report_json(
     monkeypatch.delenv(base_smoke.MODEL_ENV, raising=False)
     monkeypatch.delenv(base_smoke.API_KEY_ENV, raising=False)
 
-    assert smoke.main(["--report-json", str(report_path)]) == 1
+    assert smoke.main(["--report-json", str(report_path)]) == 0
 
     captured = capsys.readouterr()
     output = json.loads(captured.out)
     report = json.loads(report_path.read_text(encoding="utf-8"))
     assert output == report
     assert report["ok"] is False
-    assert base_smoke.API_KEY_ENV in report["error"]
+    assert report["skipped"] is True
+    assert base_smoke.API_KEY_ENV in report["missing_env"]
+    assert report["blocking_conditions"] == ["provider_smoke_credentials_missing"]
     assert "native workflow full-chain smoke report:" in captured.err
     assert str(report_path) in captured.err
 

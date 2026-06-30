@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import tempfile
 from pathlib import Path
@@ -27,6 +28,9 @@ from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.model_profiles import ModelProfileService
 from packages.security import contains_sensitive_text, redact_sensitive_text, sanitize_sensitive_value
 from scripts.smoke_native_agent_full_chain import (
+    API_KEY_ENV,
+    BASE_URL_ENV,
+    MODEL_ENV,
     _agent_model_config,
     _artifact_paths,
     _check,
@@ -37,6 +41,36 @@ from scripts.smoke_native_agent_full_chain import (
     _required_env,
     _temporary_model_profile_service,
 )
+
+PROVIDER_ENV_NAMES = (BASE_URL_ENV, MODEL_ENV, API_KEY_ENV)
+
+
+def _missing_provider_env() -> list[str]:
+    return [name for name in PROVIDER_ENV_NAMES if not os.getenv(name, "").strip()]
+
+
+def _missing_provider_credentials_summary(missing_env: list[str]) -> dict[str, Any]:
+    return sanitize_sensitive_value(
+        {
+            "ok": False,
+            "skipped": True,
+            "mode": "native_workflow_full_chain_smoke",
+            "stage": "provider_credentials",
+            "reason": "provider_smoke_credentials_missing",
+            "blocking_condition": "provider_smoke_credentials_missing",
+            "blocking_conditions": ["provider_smoke_credentials_missing"],
+            "missing_env": missing_env,
+            "recovery_hints": [
+                "Configure OHA_YACHIYO_SMOKE_BASE_URL, OHA_YACHIYO_SMOKE_MODEL, and OHA_YACHIYO_SMOKE_API_KEY.",
+                "Re-run scripts/run_public_demo_smokes.py --include-provider-workflow after credentials are available.",
+            ],
+            "recommended_tools": [
+                "scripts/run_provider_smoke_with_prompt.py",
+                "scripts/run_public_demo_smokes.py --include-provider-workflow",
+            ],
+        },
+        max_depth=4,
+    )
 
 
 def _create_exact_agent(
@@ -342,6 +376,17 @@ def main(argv: list[str] | None = None) -> int:
         help="Optional JSON evidence report path.",
     )
     args = parser.parse_args(argv)
+    missing_env = _missing_provider_env()
+    if missing_env:
+        summary = _missing_provider_credentials_summary(missing_env)
+        if args.report_json is not None:
+            _write_report(args.report_json, summary)
+            print(
+                f"native workflow full-chain smoke report: {args.report_json}",
+                file=sys.stderr,
+            )
+        print(json.dumps(summary, ensure_ascii=False, sort_keys=True))
+        return 0
     try:
         base_url, model, api_key = _required_env()
         summary = run_workflow_full_chain_smoke(base_url=base_url, model=model, api_key=api_key)

@@ -274,6 +274,77 @@ def test_public_demo_smokes_records_selected_skipped_evidence(tmp_path, monkeypa
     assert any(action["id"] == "real_desktop_discovery" for action in summary["next_actions"])
 
 
+def test_public_demo_smokes_projects_provider_missing_env_as_skipped_blocker(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(demo, "ROOT", tmp_path)
+
+    def fake_run(command):
+        command = list(command)
+        if "--report-json" in command:
+            report = tmp_path / command[command.index("--report-json") + 1]
+            if not report.is_absolute():
+                report = tmp_path / report
+            report.parent.mkdir(parents=True, exist_ok=True)
+            payload = {"ok": True, "mode": report.stem}
+            if report.name == "workflow-provider.json":
+                payload = {
+                    "ok": False,
+                    "skipped": True,
+                    "mode": "native_workflow_full_chain_smoke",
+                    "stage": "provider_credentials",
+                    "reason": "provider_smoke_credentials_missing",
+                    "blocking_condition": "provider_smoke_credentials_missing",
+                    "blocking_conditions": ["provider_smoke_credentials_missing"],
+                    "missing_env": [
+                        "OHA_YACHIYO_SMOKE_BASE_URL",
+                        "OHA_YACHIYO_SMOKE_MODEL",
+                        "OHA_YACHIYO_SMOKE_API_KEY",
+                    ],
+                    "recovery_hints": [
+                        "Configure OHA_YACHIYO_SMOKE_* credentials.",
+                    ],
+                }
+            report.write_text(json.dumps(payload), encoding="utf-8")
+        return _fake_completed(command)
+
+    monkeypatch.setattr(demo, "_run_command", fake_run)
+
+    summary = demo.run_public_demo_smokes(
+        tmp_dir="tmp/demo",
+        include_provider_workflow=True,
+    )
+
+    provider = next(flow for flow in summary["flows"] if flow["id"] == "workflow_provider")
+    assert provider["selected"] is True
+    assert provider["status"] == "skipped"
+    assert provider["evidence_skipped"] is True
+    assert provider["evidence_summary"]["blocking_condition"] == (
+        "provider_smoke_credentials_missing"
+    )
+    assert provider["evidence_summary"]["missing_env"] == [
+        "OHA_YACHIYO_SMOKE_BASE_URL",
+        "OHA_YACHIYO_SMOKE_MODEL",
+        "OHA_YACHIYO_SMOKE_API_KEY",
+    ]
+    assert summary["ok"] is True
+    assert summary["release_level"] == "partial_demo_ready"
+    assert "workflow_provider" in summary["missing_required_flow_ids"]
+    blocker = next(
+        item for item in summary["release_blockers"] if item["id"] == "workflow_provider"
+    )
+    assert blocker["reason"] == "provider_smoke_credentials_missing"
+    assert blocker["evidence_summary"]["missing_env"] == [
+        "OHA_YACHIYO_SMOKE_BASE_URL",
+        "OHA_YACHIYO_SMOKE_MODEL",
+        "OHA_YACHIYO_SMOKE_API_KEY",
+    ]
+    action = next(item for item in summary["next_actions"] if item["id"] == "workflow_provider")
+    assert action["status"] == "skipped"
+    assert action["reason"] == "provider_smoke_credentials_missing"
+
+
 def test_public_demo_smokes_marks_selected_failure_as_release_blocker(
     tmp_path,
     monkeypatch,
