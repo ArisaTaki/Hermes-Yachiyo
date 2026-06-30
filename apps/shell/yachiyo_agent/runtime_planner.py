@@ -3010,6 +3010,12 @@ class RuntimePlanner:
                     selected_app_tool=selected_app_tool,
                     depends_on="open-selected-discovered-app",
                 )
+                _append_selected_discovered_foreground_compose_steps(
+                    steps,
+                    intent,
+                    allowed,
+                    depends_on="open-selected-discovered-app",
+                )
             return steps
         if (
             not app_name
@@ -7560,6 +7566,63 @@ def _selected_discovered_app_operation_preview(
         return {}
     action = str((safe_shortcut or {}).get("action") or "").strip()
     return {"action": action} if action else {}
+
+
+def _append_selected_discovered_foreground_compose_steps(
+    steps: list[ToolPlanStepSnapshot],
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    *,
+    depends_on: str,
+) -> None:
+    if isinstance(intent.inputs.get("communication_compose_hint"), Mapping):
+        return
+    compose_text = str(intent.inputs.get("foreground_compose_text_hint") or "").strip()
+    if not compose_text:
+        return
+    type_tool = _first_allowed(("desktop.safe_type_text", "desktop.type_text"), allowed)
+    if not type_tool:
+        return
+    type_step_id = "operate-foreground-ui-followup-type"
+    steps.append(
+        _step(
+            intent,
+            type_step_id,
+            "Type after selected app create action",
+            "desktop.ui_operation",
+            type_tool,
+            input_preview={"text": compose_text},
+            depends_on=[depends_on],
+            action="type",
+            reason=(
+                "After the model selects and opens a capable app, type only the explicit "
+                "text requested by the user."
+            ),
+        )
+    )
+    verify_tool = _first_allowed(
+        ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
+        allowed,
+    )
+    if not verify_tool:
+        return
+    steps.append(
+        _step(
+            intent,
+            "verify-desktop-result",
+            "Verify desktop result",
+            "desktop.app_discovery",
+            verify_tool,
+            input_preview=_desktop_verify_input_preview(
+                verify_tool,
+                app_name="<selected app from desktop.list_apps>",
+                operation_preview={},
+            ),
+            depends_on=[type_step_id],
+            action=_desktop_discovery_action(verify_tool),
+            reason="Observe the selected app after typing the requested text.",
+        )
+    )
 
 
 def _append_selected_discovered_communication_compose_steps(

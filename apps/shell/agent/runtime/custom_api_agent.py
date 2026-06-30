@@ -4627,6 +4627,20 @@ def _model_followup_desktop_discovered_app_instruction(target: Mapping[str, Any]
             f"Prefer {tool_text}.{verify_text} If direct open-with-app tooling is unavailable, "
             "explain the missing capability and do not claim the file was opened. "
         )
+    compose_text = str(target.get("compose_text") or "").strip()
+    if compose_text:
+        safe_shortcut_action = str(target.get("safe_shortcut_action") or "").strip()
+        action_text = (
+            f"run {safe_shortcut_action!r} in the discovered app, then type"
+            if safe_shortcut_action
+            else "open the discovered app, then type"
+        )
+        return (
+            f"The runtime discovered an app for {app_query!r}. Continue by using desktop "
+            f"tools to {action_text} the explicit user text {compose_text!r}. "
+            f"Prefer {tool_text}.{verify_text} If text insertion tools are unavailable, "
+            "explain the missing capability instead of claiming the app was updated. "
+        )
     if creative_canvas:
         width = str(creative_canvas.get("width") or "").strip()
         height = str(creative_canvas.get("height") or "").strip()

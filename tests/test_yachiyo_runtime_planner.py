@@ -1916,6 +1916,10 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         "safe_shortcut_action": "new_document",
         "compose_text": "周报",
         "body_source": "explicit_user_text",
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
     }
     assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == payload[
         "followup_target"
@@ -1992,6 +1996,10 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         "safe_shortcut_action": "new_document",
         "compose_text": "project review",
         "body_source": "explicit_user_text",
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
     }
 
     diagram_prompt = "打开一个能画流程图的应用，创建新图，然后输入登录流程"
@@ -2025,6 +2033,10 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         "safe_shortcut_action": "new_document",
         "compose_text": "登录流程",
         "body_source": "explicit_user_text",
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
     }
 
     message_prompt = "打开一个聊天软件，给 Alice 发送 hello"
@@ -6663,6 +6675,8 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     assert [step.step_id for step in markdown.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
     ]
     assert markdown.plan.route_to_studio is True
     assert markdown.plan.tool_plan.required_capabilities == [
@@ -6682,6 +6696,15 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     }
     assert _step_by_id(markdown, "open-selected-discovered-app").depends_on == [
         "discover_apps-desktop-state"
+    ]
+    assert _step_by_id(markdown, "operate-foreground-ui-followup-type").input_preview == {
+        "text": "周报"
+    }
+    assert _step_by_id(markdown, "operate-foreground-ui-followup-type").depends_on == [
+        "open-selected-discovered-app"
+    ]
+    assert _step_by_id(markdown, "verify-desktop-result").depends_on == [
+        "operate-foreground-ui-followup-type"
     ]
     assert planner_tool_requests("打开一个能写 markdown 的应用，新建文档标题为周报", allowed_tools) == [
         {

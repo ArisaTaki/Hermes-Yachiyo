@@ -472,6 +472,10 @@ def _desktop_discovered_app_followup_target(inputs: Mapping[str, Any]) -> dict[s
     if compose_text:
         payload["compose_text"] = compose_text
         payload["body_source"] = "explicit_user_text"
+        payload["post_action_observation"] = {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        }
     communication_compose = inputs.get("communication_compose_hint")
     if isinstance(communication_compose, Mapping):
         compose_payload = {

@@ -13341,6 +13341,83 @@ def test_auto_discovered_app_open_followup_verifies_active_window() -> None:
     ]
 
 
+def test_auto_discovered_app_compose_followup_types_and_verifies() -> None:
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.list_apps",
+            input_preview={"query": "markdown", "limit": 20},
+            result={
+                "ok": True,
+                "action": "desktop.list_apps",
+                "summary": "Found Obsidian",
+                "data": {
+                    "query": "markdown",
+                    "apps": [
+                        {
+                            "name": "Obsidian",
+                            "path": "/Applications/Obsidian.app",
+                            "match_score": 91,
+                        }
+                    ],
+                },
+            },
+        )
+    ]
+
+    requests = custom_api_agent_module._auto_discovered_app_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "markdown",
+                "target_action": "safe_shortcut",
+                "safe_shortcut_action": "new_document",
+                "compose_text": "周报",
+                "body_source": "explicit_user_text",
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {},
+                },
+            }
+        },
+        ["app.open_and_safe_shortcut", "desktop.safe_type_text", "desktop.ui_elements"],
+        timeline,
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Obsidian", "action": "new_document"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+            "input_resolution": {
+                "tool": "app.open_and_safe_shortcut",
+                "field": "app_name",
+                "requested_app_name": "markdown",
+                "resolved_app_name": "Obsidian",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/Obsidian.app",
+                "app_resolution_score": "91",
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "周报"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+        },
+    ]
+
+
 def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> None:
     budget = FakeBudget()
     tool_runs: list[list[dict[str, Any]]] = []
