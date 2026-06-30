@@ -449,6 +449,62 @@ def test_yachiyo_agent_service_returns_runtime_planner_metadata_on_chat_task() -
     assert task.metadata["yachiyo_plan_approvals_required"] == ["operate-foreground-ui"]
 
 
+def test_yachiyo_agent_service_surfaces_workflow_orchestration_metadata() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="运行 Daily Summary workflow",
+            conversation_id="chat-1",
+            metadata={"client_message_id": "client-1"},
+        )
+    )
+
+    metadata = port.calls[0][1]["metadata"]
+    assert metadata["client_message_id"] == "client-1"
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "workflow_orchestration"
+    assert metadata["yachiyo_plan_tools"] == ["workflow.start"]
+    assert metadata["yachiyo_orchestration"] is True
+    assert metadata["yachiyo_orchestration_kind"] == "workflow"
+    assert metadata["yachiyo_orchestration_target"] == "Daily Summary"
+    assert metadata["yachiyo_orchestration_planning_reason"] == "planner_orchestration_workflow"
+    assert task.metadata["yachiyo_orchestration_kind"] == "workflow"
+
+
+def test_yachiyo_agent_service_surfaces_group_orchestration_metadata_without_false_positive() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="让两个 agent 分别调研 Hanako 和 Hermes 然后汇总",
+            conversation_id="chat-1",
+        )
+    )
+    conceptual = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="介绍一下 multi-agent 架构",
+            conversation_id="chat-1",
+        )
+    )
+
+    metadata = port.calls[0][1]["metadata"]
+    conceptual_metadata = port.calls[1][1]["metadata"]
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "multi_agent"
+    assert metadata["yachiyo_plan_tools"] == ["group.start"]
+    assert metadata["yachiyo_orchestration"] is True
+    assert metadata["yachiyo_orchestration_kind"] == "group_run"
+    assert metadata["yachiyo_orchestration_target"] == ""
+    assert metadata["yachiyo_orchestration_planning_reason"] == "planner_orchestration_group_run"
+    assert task.metadata["yachiyo_orchestration_kind"] == "group_run"
+    assert conceptual.metadata["yachiyo_runtime_planner"] is True
+    assert "yachiyo_orchestration_kind" not in conceptual_metadata
+    assert "yachiyo_orchestration_kind" not in conceptual.metadata
+
+
 def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
@@ -496,7 +552,7 @@ def test_yachiyo_agent_service_surfaces_data_analysis_open_questions_to_chat_tas
     ]
     assert metadata["yachiyo_plan_tools"] == [
         "workspace.list",
-        "terminal.run",
+        "python.run",
         "artifact.write",
     ]
     assert metadata["yachiyo_required_capabilities"] == [

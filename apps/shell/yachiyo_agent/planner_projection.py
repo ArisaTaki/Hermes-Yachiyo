@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .contracts import PlannerDecisionSnapshot
+from .planner_execution import planner_orchestration_requests
 from .runtime_planner import RuntimePlanner
 
 _MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
@@ -78,11 +79,35 @@ def planner_enriched_chat_request(
     )
     if decision is None:
         return payload
+    orchestration_metadata = _planner_orchestration_metadata(
+        str(payload.get("prompt") or payload.get("goal") or ""),
+        metadata=metadata,
+    )
     payload["metadata"] = {
         **dict(metadata),
         **runtime_planner_metadata(decision),
+        **orchestration_metadata,
     }
     return payload
+
+
+def _planner_orchestration_metadata(
+    prompt: str,
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    requests = planner_orchestration_requests(prompt, metadata=metadata)
+    if not requests:
+        return {}
+    request = requests[0]
+    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return {
+        "yachiyo_orchestration": True,
+        "yachiyo_orchestration_kind": str(request.get("orchestration_kind") or ""),
+        "yachiyo_orchestration_target": str(request_input.get("target_name") or ""),
+        "yachiyo_orchestration_planning_reason": str(request.get("planning_reason") or ""),
+        "yachiyo_orchestration_route_to_studio": bool(request.get("route_to_studio")),
+    }
 
 
 def _candidate_intent_summaries(decision: PlannerDecisionSnapshot) -> list[dict[str, Any]]:
