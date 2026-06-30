@@ -5,6 +5,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import plistlib
 import subprocess
 import zipfile
 
@@ -62,6 +63,12 @@ def _stub_active_window(monkeypatch, app_name: str) -> None:
             "data": {"app_name": app_name, "title": ""},
         },
     )
+
+
+def _write_app_bundle(app_dir, name: str, info: dict) -> None:
+    contents = app_dir / f"{name}.app" / "Contents"
+    contents.mkdir(parents=True)
+    (contents / "Info.plist").write_bytes(plistlib.dumps(info))
 
 
 def test_tool_dispatch_registry_covers_known_agent_tools() -> None:
@@ -5053,6 +5060,88 @@ def test_desktop_list_apps_does_not_match_ascii_query_inside_token(monkeypatch, 
 
     assert result["ok"] is True
     assert [app["name"] for app in result["data"]["apps"]] == ["Microsoft Word"]
+
+
+def test_desktop_list_apps_matches_browser_capability_from_bundle_metadata(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    app_dir = tmp_path / "Applications"
+    _write_app_bundle(
+        app_dir,
+        "Safari",
+        {
+            "CFBundleName": "Safari",
+            "CFBundleIdentifier": "com.apple.Safari",
+            "CFBundleURLTypes": [
+                {"CFBundleURLSchemes": ["http", "https", "file"]},
+            ],
+            "CFBundleDocumentTypes": [
+                {"LSItemContentTypes": ["public.html", "public.xhtml"]},
+            ],
+        },
+    )
+    _write_app_bundle(
+        app_dir,
+        "Calculator",
+        {
+            "CFBundleName": "Calculator",
+            "CFBundleIdentifier": "com.apple.calculator",
+        },
+    )
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_application_search_dirs", lambda: [app_dir])
+
+    result = desktop_mod.list_apps(query="browser")
+
+    assert result["ok"] is True
+    assert [app["name"] for app in result["data"]["apps"]] == ["Safari"]
+    assert result["data"]["apps"][0]["matched_capability"] == "web_browser"
+    assert result["data"]["apps"][0]["match_reason"] == "capability_web_browser"
+    assert result["data"]["resolution"]["app_resolution_reason"] == "capability_web_browser"
+
+
+def test_desktop_list_apps_matches_file_manager_capability_from_finder_metadata(
+    monkeypatch,
+    tmp_path,
+) -> None:
+    core_services = tmp_path / "CoreServices"
+    _write_app_bundle(
+        core_services,
+        "Finder",
+        {
+            "CFBundleName": "Finder",
+            "CFBundleIdentifier": "com.apple.finder",
+            "CFBundleURLTypes": [
+                {"CFBundleURLSchemes": ["file", "smb", "afp"]},
+            ],
+            "CFBundleDocumentTypes": [
+                {"LSItemContentTypes": ["public.folder"], "CFBundleTypeName": "Folder"},
+            ],
+        },
+    )
+    _write_app_bundle(
+        core_services,
+        "Preview",
+        {
+            "CFBundleName": "Preview",
+            "CFBundleIdentifier": "com.apple.Preview",
+            "CFBundleDocumentTypes": [
+                {"LSItemContentTypes": ["public.folder"], "CFBundleTypeName": "Folder"},
+            ],
+        },
+    )
+
+    monkeypatch.setattr(desktop_mod, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(desktop_mod, "_application_search_dirs", lambda: [core_services])
+
+    result = desktop_mod.list_apps(query="file manager")
+
+    assert result["ok"] is True
+    assert [app["name"] for app in result["data"]["apps"]] == ["Finder"]
+    assert result["data"]["apps"][0]["matched_capability"] == "file_manager"
+    assert result["data"]["apps"][0]["match_reason"] == "capability_file_manager"
 
 
 def test_desktop_running_apps_returns_foreground_app_list(monkeypatch) -> None:

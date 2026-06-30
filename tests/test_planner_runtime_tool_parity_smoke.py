@@ -13,31 +13,31 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
     case_by_id = {case["id"]: case for case in evidence["cases"]}
     assert case_by_id["generic_app_open"]["request_tools"] == [
         "desktop.list_apps",
-        "desktop.open_app",
+        "app.open",
         "desktop.active_window",
     ]
     assert case_by_id["app_scoped_ui_click"]["request_tools"] == [
         "desktop.inspect_app",
         "app.focus_and_click_ui_element",
-        "desktop.read_ui",
+        "desktop.ui_elements",
     ]
     assert case_by_id["app_scoped_ui_click"]["approval_required_tools"] == [
         "app.focus_and_click_ui_element"
     ]
     assert case_by_id["builtin_data_analysis"]["request_tools"] == ["data.analyze"]
     assert case_by_id["visible_table_analysis"]["plan_tools"] == [
-        "desktop.read_ui",
+        "desktop.ui_elements",
         "data.analyze",
     ]
     assert case_by_id["visible_table_analysis"]["request_tools"] == [
-        "desktop.read_ui"
+        "desktop.ui_elements"
     ]
     assert case_by_id["current_page_report"]["plan_tools"] == [
         "browser.extract_text",
         "artifact.write",
     ]
     assert case_by_id["clipboard_send_to_slack"]["request_tools"] == [
-        "desktop.focus_app",
+        "app.focus",
         "desktop.safe_shortcut",
         "desktop.safe_type_text",
         "desktop.search_submit",

@@ -917,11 +917,20 @@ def test_release_candidate_verifier_reports_real_desktop_discovery_smoke(
             "safari",
             "system_settings",
             "textedit",
+            "browser_capability",
+            "file_manager_capability",
         }
         assert all(
             case["checks"]["did_not_open_app"]
             for case in section["evidence"]["cases"]
         )
+        capability_cases = {
+            case["id"]: case
+            for case in section["evidence"]["cases"]
+            if str(case["id"]).endswith("_capability")
+        }
+        assert "web_browser" in capability_cases["browser_capability"]["matched_capabilities"]
+        assert "file_manager" in capability_cases["file_manager_capability"]["matched_capabilities"]
 
 
 def test_release_candidate_verifier_fails_when_real_desktop_discovery_smoke_fails(
@@ -1377,7 +1386,7 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
         "app.focus_and_click_ui_element"
     ]
     assert case_by_id["visible_table_analysis"]["request_tools"] == [
-        "desktop.read_ui"
+        "desktop.ui_elements"
     ]
     assert case_by_id["explicit_terminal_command"]["approval_required_tools"] == [
         "terminal.run"

@@ -6,6 +6,7 @@ import math
 import json
 import os
 import platform
+import plistlib
 import re
 import shutil
 import subprocess
@@ -18,6 +19,176 @@ from urllib.request import Request, urlopen
 
 _ELECTRON_NATIVE_URL_ENV = "OHA_YACHIYO_ELECTRON_NATIVE_URL"
 _ELECTRON_NATIVE_TOKEN_ENV = "OHA_YACHIYO_ELECTRON_NATIVE_TOKEN"
+
+_APP_CAPABILITY_QUERY_PROFILES = (
+    {
+        "id": "web_browser",
+        "aliases": (
+            "browser",
+            "browser app",
+            "web browser",
+            "web browser app",
+            "default browser",
+            "浏览器",
+            "网页浏览器",
+        ),
+        "schemes": ("http", "https"),
+        "documents": ("public.html", "public.xhtml", "html", "htm", "xhtml"),
+        "score": 92,
+        "require_scheme_and_document": True,
+    },
+    {
+        "id": "file_manager",
+        "aliases": (
+            "file manager",
+            "file manager app",
+            "file browser",
+            "file browser app",
+            "文件管理器",
+            "文件浏览器",
+            "访达",
+        ),
+        "schemes": ("file", "afp", "smb", "cifs"),
+        "documents": ("folder", "public.folder"),
+        "score": 94,
+        "require_scheme_and_document": True,
+    },
+    {
+        "id": "communication",
+        "aliases": (
+            "communication",
+            "communication app",
+            "communicator",
+            "chat",
+            "chat app",
+            "messaging",
+            "messaging app",
+            "messenger",
+            "通讯",
+            "通信",
+            "聊天",
+            "消息",
+        ),
+        "schemes": (
+            "mailto",
+            "message",
+            "sms",
+            "im",
+            "imessage",
+            "ichat",
+            "slack",
+            "wechat",
+            "weixin",
+            "discord",
+            "telegram",
+            "msteams",
+            "zoommtg",
+        ),
+        "categories": ("social-networking",),
+        "documents": ("email message", "plain text"),
+        "score": 88,
+    },
+    {
+        "id": "markdown",
+        "aliases": (
+            "markdown",
+            "markdown app",
+            "markdown editor",
+            "md",
+            "mdown",
+            "mdtext",
+            "mdtxt",
+            "mkd",
+            "mkdn",
+        ),
+        "documents": ("markdown", "md", "mdown", "mdtext", "mdtxt", "mkd", "mkdn"),
+        "score": 88,
+    },
+    {
+        "id": "pdf",
+        "aliases": ("pdf", "PDF", "pdf app", "pdf editor", "pdf viewer"),
+        "documents": ("pdf", "com.adobe.pdf", "pdf document"),
+        "score": 86,
+    },
+    {
+        "id": "code",
+        "aliases": ("code", "code editor", "coding", "programming", "代码", "编程"),
+        "documents": (
+            "python",
+            "javascript",
+            "typescript",
+            "source code",
+            "public.source-code",
+            "py",
+            "js",
+            "ts",
+            "tsx",
+            "jsx",
+            "java",
+            "go",
+            "rs",
+        ),
+        "categories": ("developer-tools",),
+        "score": 86,
+    },
+    {
+        "id": "image",
+        "aliases": ("image", "image editor", "photo", "photo editor", "picture", "图片", "图像", "照片"),
+        "documents": (
+            "image",
+            "public.image",
+            "public.jpeg",
+            "public.png",
+            "public.tiff",
+            "gif",
+            "jpeg",
+            "jpg",
+            "png",
+            "tiff",
+            "webp",
+        ),
+        "score": 84,
+    },
+    {
+        "id": "spreadsheet",
+        "aliases": (
+            "spreadsheet",
+            "spreadsheet app",
+            "spreadsheet editor",
+            "sheet",
+            "excel",
+            "xlsx",
+            "csv",
+            "表格",
+            "电子表格",
+        ),
+        "documents": ("xlsx", "xls", "csv", "tsv", "spreadsheet", "comma-separated"),
+        "score": 86,
+    },
+    {
+        "id": "presentation",
+        "aliases": (
+            "presentation",
+            "presentation app",
+            "slides",
+            "slides app",
+            "ppt",
+            "pptx",
+            "keynote",
+            "演示文稿",
+            "幻灯片",
+        ),
+        "documents": ("ppt", "pptx", "presentation", "keynote", "slide"),
+        "score": 86,
+    },
+    {
+        "id": "music",
+        "aliases": ("music", "music app", "music player", "audio player", "音乐", "播放器"),
+        "schemes": ("music", "itmss", "spotify"),
+        "documents": ("audio", "public.audio", "mp3", "m4a", "wav", "flac"),
+        "score": 86,
+    },
+)
 
 _COMMON_FOLDER_TARGETS = {
     "desktop": "Desktop",
@@ -2728,19 +2899,30 @@ def _installed_app_match_candidates(query_name: str) -> list[dict[str, Any]]:
     matches: list[dict[str, Any]] = []
     for bundle in _iter_installed_app_bundles():
         candidate = bundle.stem
-        score = _installed_app_match_score(query, candidate)
+        metadata = _app_bundle_metadata(bundle)
+        capability_match = _installed_app_capability_match(query, metadata)
+        score = _installed_app_match_score(query, candidate, metadata)
         if score <= 0:
             continue
-        matches.append(
-            {
-                "name": candidate,
-                "path": str(bundle),
-                "match_score": score,
-                "match_confidence": _installed_app_match_confidence(score),
-                "match_reason": _installed_app_match_reason(score),
-                "normalized_name": _compact_app_match_name(candidate),
-            }
-        )
+        match_reason = _installed_app_match_reason(score)
+        matched_capability = ""
+        if capability_match and int(capability_match.get("score") or 0) >= score:
+            match_reason = str(capability_match.get("reason") or match_reason)
+            matched_capability = str(capability_match.get("capability") or "")
+        candidate_payload = {
+            "name": candidate,
+            "path": str(bundle),
+            "match_score": score,
+            "match_confidence": _installed_app_match_confidence(score),
+            "match_reason": match_reason,
+            "normalized_name": _compact_app_match_name(candidate),
+        }
+        if matched_capability:
+            candidate_payload["matched_capability"] = matched_capability
+        metadata_preview = _app_bundle_metadata_preview(metadata)
+        if metadata_preview:
+            candidate_payload["metadata"] = metadata_preview
+        matches.append(candidate_payload)
     if not matches:
         return []
     matches.sort(
@@ -2843,6 +3025,7 @@ def _application_search_dirs() -> list[Path]:
         Path("/Applications/Utilities"),
         Path("/System/Applications"),
         Path("/System/Applications/Utilities"),
+        Path("/System/Library/CoreServices"),
         Path.home() / "Applications",
     ]
 
@@ -2852,7 +3035,10 @@ def _iter_installed_app_bundles() -> list[Path]:
     seen: set[str] = set()
     for folder in _application_search_dirs():
         try:
-            candidates = list(folder.glob("*.app"))
+            if folder == Path("/System/Library/CoreServices"):
+                candidates = [folder / "Finder.app"]
+            else:
+                candidates = list(folder.glob("*.app"))
             if folder.name == "Applications":
                 candidates.extend(folder.glob("*/*.app"))
         except OSError:
@@ -2866,33 +3052,185 @@ def _iter_installed_app_bundles() -> list[Path]:
     return bundles
 
 
-def _installed_app_match_score(query_name: str, candidate_name: str) -> int:
+def _app_bundle_metadata(bundle: Path) -> dict[str, Any]:
+    info_path = bundle / "Contents" / "Info.plist"
+    raw: Mapping[str, Any] = {}
+    if info_path.exists():
+        try:
+            with info_path.open("rb") as handle:
+                loaded = plistlib.load(handle)
+            if isinstance(loaded, Mapping):
+                raw = loaded
+        except (OSError, ValueError, plistlib.InvalidFileException):
+            raw = {}
+    names = _app_metadata_text_values(
+        [
+            bundle.stem,
+            raw.get("CFBundleName"),
+            raw.get("CFBundleDisplayName"),
+            raw.get("CFBundleExecutable"),
+        ]
+    )
+    schemes: set[str] = set()
+    for url_type in raw.get("CFBundleURLTypes") or []:
+        if isinstance(url_type, Mapping):
+            schemes.update(_app_metadata_text_values(url_type.get("CFBundleURLSchemes") or []))
+    documents: set[str] = set()
+    for document_type in raw.get("CFBundleDocumentTypes") or []:
+        if not isinstance(document_type, Mapping):
+            continue
+        documents.update(_app_metadata_text_values(document_type.get("CFBundleTypeExtensions") or []))
+        documents.update(_app_metadata_text_values(document_type.get("LSItemContentTypes") or []))
+        documents.update(_app_metadata_text_values([document_type.get("CFBundleTypeName")]))
+    return {
+        "bundle_id": str(raw.get("CFBundleIdentifier") or "").strip(),
+        "category": str(raw.get("LSApplicationCategoryType") or "").strip(),
+        "names": names,
+        "schemes": schemes,
+        "documents": documents,
+    }
+
+
+def _app_metadata_text_values(values: Any) -> set[str]:
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple, set)):
+        return set()
+    result: set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            result.add(text.casefold())
+    return result
+
+
+def _app_bundle_metadata_preview(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    preview: dict[str, Any] = {}
+    bundle_id = str(metadata.get("bundle_id") or "").strip()
+    category = str(metadata.get("category") or "").strip()
+    if bundle_id:
+        preview["bundle_id"] = bundle_id
+    if category:
+        preview["category"] = category
+    schemes = sorted(str(item) for item in metadata.get("schemes") or [] if str(item))
+    if schemes:
+        preview["url_schemes"] = schemes[:8]
+    documents = sorted(str(item) for item in metadata.get("documents") or [] if str(item))
+    if documents:
+        preview["document_types"] = documents[:12]
+    return preview
+
+
+def _installed_app_match_score(
+    query_name: str,
+    candidate_name: str,
+    metadata: Mapping[str, Any] | None = None,
+) -> int:
     query_compact = _compact_app_match_name(query_name)
     candidate_compact = _compact_app_match_name(candidate_name)
     if not query_compact or not candidate_compact:
         return 0
+    capability_match = _installed_app_capability_match(query_name, metadata or {})
+    capability_score = int(capability_match.get("score") or 0)
     if candidate_compact == query_compact:
-        return 100
+        return max(100, capability_score)
     query_tokens = _app_match_tokens(query_name)
     candidate_tokens = _app_match_tokens(candidate_name)
     if query_tokens and all(token in candidate_tokens for token in query_tokens):
-        return 90
+        return max(90, capability_score)
     if candidate_tokens and all(token in query_tokens for token in candidate_tokens):
-        return 85
+        return max(85, capability_score)
     if query_tokens and all(
         any(candidate_token.startswith(token) for candidate_token in candidate_tokens)
         for token in query_tokens
     ):
-        return 82
+        return max(82, capability_score)
     if candidate_compact.endswith(query_compact):
-        return 80
+        return max(80, capability_score)
     if query_compact.endswith(candidate_compact):
-        return 75
+        return max(75, capability_score)
     if _contains_non_ascii(query_name) and query_compact in candidate_compact:
-        return 70
+        return max(70, capability_score)
     if _contains_non_ascii(candidate_name) and candidate_compact in query_compact:
-        return 65
-    return 0
+        return max(65, capability_score)
+    return capability_score
+
+
+def _installed_app_capability_match(
+    query_name: str,
+    metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    profiles = _app_capability_profiles_for_query(query_name)
+    if not profiles:
+        return {}
+    schemes = {str(item or "").casefold() for item in metadata.get("schemes") or []}
+    documents = {str(item or "").casefold() for item in metadata.get("documents") or []}
+    category = str(metadata.get("category") or "").casefold()
+    names = {str(item or "").casefold() for item in metadata.get("names") or []}
+    bundle_id = str(metadata.get("bundle_id") or "").casefold()
+    best: dict[str, Any] = {}
+    for profile in profiles:
+        profile_id = str(profile.get("id") or "").strip()
+        scheme_matches = _metadata_term_matches(schemes, profile.get("schemes") or ())
+        document_matches = _metadata_term_matches(documents, profile.get("documents") or ())
+        category_matches = _metadata_term_matches({category}, profile.get("categories") or ())
+        name_matches = _metadata_term_matches(names | {bundle_id}, profile.get("aliases") or ())
+        if profile.get("require_scheme_and_document") and not (scheme_matches and document_matches):
+            continue
+        if not any((scheme_matches, document_matches, category_matches, name_matches)):
+            continue
+        score = int(profile.get("score") or 80)
+        if scheme_matches and document_matches:
+            score += 3
+        elif category_matches:
+            score += 1
+        if not best or score > int(best.get("score") or 0):
+            best = {
+                "score": min(score, 99),
+                "capability": profile_id,
+                "reason": f"capability_{profile_id}",
+            }
+    return best
+
+
+def _app_capability_profiles_for_query(query_name: str) -> list[Mapping[str, Any]]:
+    query = str(query_name or "").strip()
+    query_compact = _compact_app_match_name(query)
+    if not query_compact:
+        return []
+    matches: list[Mapping[str, Any]] = []
+    for profile in _APP_CAPABILITY_QUERY_PROFILES:
+        aliases = tuple(str(alias or "").strip() for alias in profile.get("aliases") or ())
+        if any(_capability_alias_matches_query(query, query_compact, alias) for alias in aliases):
+            matches.append(profile)
+    return matches
+
+
+def _capability_alias_matches_query(query: str, query_compact: str, alias: str) -> bool:
+    alias_compact = _compact_app_match_name(alias)
+    if not alias_compact:
+        return False
+    if query_compact == alias_compact:
+        return True
+    if _contains_non_ascii(alias) or _contains_non_ascii(query):
+        return alias_compact in query_compact
+    return False
+
+
+def _metadata_term_matches(values: set[str], terms: Any) -> bool:
+    if isinstance(terms, str):
+        terms = (terms,)
+    if not isinstance(terms, (tuple, list, set)):
+        return False
+    clean_terms = [str(term or "").casefold().strip() for term in terms if str(term or "").strip()]
+    if not clean_terms:
+        return False
+    for value in values:
+        if not value:
+            continue
+        if any(term == value or term in value for term in clean_terms):
+            return True
+    return False
 
 
 def _compact_app_match_name(value: str) -> str:

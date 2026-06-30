@@ -26,6 +26,29 @@ CORE_APP_QUERIES: tuple[dict[str, Any], ...] = (
     {"id": "textedit", "query": "TextEdit", "expected_names": ["TextEdit"]},
 )
 
+CAPABILITY_APP_QUERIES: tuple[dict[str, Any], ...] = (
+    {
+        "id": "browser_capability",
+        "query": "browser",
+        "expected_names": [
+            "Safari",
+            "Google Chrome",
+            "Firefox",
+            "Arc",
+            "Microsoft Edge",
+            "Brave Browser",
+            "Quark",
+        ],
+        "expected_capability": "web_browser",
+    },
+    {
+        "id": "file_manager_capability",
+        "query": "file manager",
+        "expected_names": ["Finder"],
+        "expected_capability": "file_manager",
+    },
+)
+
 
 def _app_names(result: dict[str, Any]) -> list[str]:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
@@ -37,11 +60,23 @@ def _app_names(result: dict[str, Any]) -> list[str]:
     ]
 
 
+def _matched_capabilities(result: dict[str, Any]) -> list[str]:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    apps = data.get("apps") if isinstance(data.get("apps"), list) else []
+    return [
+        str(app.get("matched_capability") or "").strip()
+        for app in apps
+        if isinstance(app, dict) and str(app.get("matched_capability") or "").strip()
+    ]
+
+
 def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
     query = str(case["query"])
     expected_names = [str(name) for name in case["expected_names"]]
+    expected_capability = str(case.get("expected_capability") or "").strip()
     result = desktop_tools.list_apps(query=query, limit=10)
     names = _app_names(result)
+    matched_capabilities = _matched_capabilities(result)
     checks = {
         "list_apps_ok": result.get("ok") is True,
         "query_preserved": (
@@ -52,12 +87,16 @@ def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
         "did_not_open_app": result.get("action") == "desktop.list_apps"
         and result.get("permission_error") is False,
     }
+    if expected_capability:
+        checks["matched_expected_capability"] = expected_capability in matched_capabilities
     return {
         "id": str(case["id"]),
         "ok": all(checks.values()),
         "query": query,
         "expected_names": expected_names,
+        "expected_capability": expected_capability,
         "names": names,
+        "matched_capabilities": matched_capabilities,
         "summary": str(result.get("summary") or ""),
         "checks": checks,
     }
@@ -113,7 +152,7 @@ def run_smoke() -> dict[str, Any]:
             "cases": [],
         }
     catalog = _catalog_evidence()
-    cases = [_case_evidence(case) for case in CORE_APP_QUERIES]
+    cases = [_case_evidence(case) for case in (*CORE_APP_QUERIES, *CAPABILITY_APP_QUERIES)]
     permission_preflight = _permission_preflight_evidence()
     return {
         "ok": catalog["ok"] and all(case["ok"] for case in cases),

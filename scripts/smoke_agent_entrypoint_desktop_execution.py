@@ -227,8 +227,8 @@ def _generic_app_open_case(
     completed_tools = completed_payload.get("tools")
     selection_payload = _payload(selection_event)
     selected_intent_payload = _payload(selected_intent_event)
-    expected_plan_tools = ["desktop.list_apps", "desktop.open_app", "desktop.active_window"]
-    expected_execution_tools = ["desktop.list_apps", "desktop.open_app"]
+    expected_plan_tools = ["desktop.list_apps", "app.open", "desktop.active_window"]
+    expected_execution_tools = ["desktop.list_apps", "app.open"]
     checks = {
         "run_completed": updated.get("status") == "completed",
         "summary_names_generic_app": "已打开 PixelForge" in str(updated.get("result") or ""),

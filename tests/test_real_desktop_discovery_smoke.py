@@ -54,6 +54,26 @@ def test_real_desktop_discovery_smoke_covers_macos_app_discovery(monkeypatch):
             "data": {"query": "TextEdit", "apps": [{"name": "TextEdit"}]},
             "permission_error": False,
         },
+        "browser": {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": "Installed apps matching browser: Safari",
+            "data": {
+                "query": "browser",
+                "apps": [{"name": "Safari", "matched_capability": "web_browser"}],
+            },
+            "permission_error": False,
+        },
+        "file manager": {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": "Installed apps matching file manager: Finder",
+            "data": {
+                "query": "file manager",
+                "apps": [{"name": "Finder", "matched_capability": "file_manager"}],
+            },
+            "permission_error": False,
+        },
     }
 
     def fake_list_apps(*, query="", limit=200):
@@ -83,13 +103,20 @@ def test_real_desktop_discovery_smoke_covers_macos_app_discovery(monkeypatch):
     assert evidence["skipped"] is False
     assert evidence["platform"] == "Darwin"
     assert evidence["catalog"]["total_count"] == 2
-    assert evidence["case_count"] == 3
+    assert evidence["case_count"] == 5
     assert {case["id"] for case in evidence["cases"]} == {
         "safari",
         "system_settings",
         "textedit",
+        "browser_capability",
+        "file_manager_capability",
     }
     assert all(case["checks"]["did_not_open_app"] for case in evidence["cases"])
+    capability_cases = {
+        case["id"]: case for case in evidence["cases"] if case["id"].endswith("_capability")
+    }
+    assert capability_cases["browser_capability"]["matched_capabilities"] == ["web_browser"]
+    assert capability_cases["file_manager_capability"]["matched_capabilities"] == ["file_manager"]
     assert evidence["permission_preflight"]["diagnostic_route"] == "/yachiyo/readiness"
 
 
