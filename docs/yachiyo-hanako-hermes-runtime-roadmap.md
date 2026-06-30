@@ -131,7 +131,10 @@ through the runtime dispatch registry against Calculator by default, then
 attempts cleanup only if the app was not already running before the smoke. The
 RC verifier keeps this evidence skipped by default and only runs it with
 `--run-real-desktop-app-open-smoke`, so source gates do not open user apps
-unless explicitly requested.
+unless explicitly requested. When `--report-json` is provided, stdout now emits
+only a compact pass/blocker summary while the full tool evidence, including any
+foreground-readiness blocker such as `desktop_session_locked`, remains in the
+JSON report.
 
 Current opt-in real desktop UI inspection evidence is reproducible with:
 

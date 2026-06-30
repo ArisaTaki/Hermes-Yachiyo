@@ -937,10 +937,87 @@ def test_real_desktop_app_open_smoke_cli_writes_report_json(
     captured = capsys.readouterr()
     output = json.loads(captured.out)
     report = json.loads(report_path.read_text(encoding="utf-8"))
-    assert output == report
+    assert output != report
+    assert output == {
+        "ok": True,
+        "mode": "real_desktop_app_open_smoke",
+        "skipped": True,
+        "platform": "Linux",
+        "app_name": "Calculator",
+        "report_json": str(report_path),
+    }
     assert report["ok"] is True
     assert report["mode"] == "real_desktop_app_open_smoke"
     assert report["skipped"] is True
     assert report["app_name"] == "Calculator"
     assert "real desktop app open smoke report:" in captured.err
     assert str(report_path) in captured.err
+
+
+def test_real_desktop_app_open_smoke_report_stdout_is_compact_on_blocker(
+    monkeypatch,
+    tmp_path,
+    capsys,
+):
+    report_path = tmp_path / "real-desktop-app-open.json"
+
+    monkeypatch.setattr(
+        smoke,
+        "run_smoke",
+        lambda **kwargs: {
+            "ok": False,
+            "mode": "real_desktop_app_open_smoke",
+            "skipped": False,
+            "platform": "Darwin",
+            "app_name": kwargs["app_name"],
+            "discovered_app_name": "Calculator",
+            "opened_app_name": "Calculator",
+            "tool_chain": ["desktop.list_apps", "desktop.open_app", "desktop.verify"],
+            "case_count": 1,
+            "error": "desktop_session_locked",
+            "blocking_condition": "desktop_session_locked",
+            "checks": {
+                "open_ok": True,
+                "foreground_ready_when_required": False,
+            },
+            "foreground_readiness": {
+                "required": True,
+                "final": {
+                    "ready": False,
+                    "summary": "foreground action is not ready",
+                    "blocking_condition": "desktop_session_locked",
+                },
+            },
+            "open_result": {"data": {"large": ["not for stdout"]}},
+            "verify_result": {"data": {"elements": [{"name": "not for stdout"}]}},
+        },
+    )
+
+    assert (
+        smoke.main(
+            [
+                "--app-name",
+                "Calculator",
+                "--require-foreground-ready",
+                "--report-json",
+                str(report_path),
+            ]
+        )
+        == 1
+    )
+
+    captured = capsys.readouterr()
+    output = json.loads(captured.out)
+    report = json.loads(report_path.read_text(encoding="utf-8"))
+    assert output["ok"] is False
+    assert output["blocking_condition"] == "desktop_session_locked"
+    assert output["foreground_readiness"] == {
+        "required": True,
+        "ready": False,
+        "summary": "foreground action is not ready",
+        "blocking_condition": "desktop_session_locked",
+    }
+    assert "open_result" not in output
+    assert "verify_result" not in output
+    assert report["open_result"]["data"]["large"] == ["not for stdout"]
+    assert report["verify_result"]["data"]["elements"] == [{"name": "not for stdout"}]

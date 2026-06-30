@@ -770,6 +770,47 @@ def _write_report(path: Path, payload: dict[str, Any]) -> None:
     )
 
 
+def _console_summary(evidence: dict[str, Any], report_json: Path) -> dict[str, Any]:
+    summary_keys = (
+        "ok",
+        "mode",
+        "skipped",
+        "platform",
+        "app_name",
+        "capability_query",
+        "selection_source",
+        "discovery_query",
+        "discovered_app_name",
+        "opened_app_name",
+        "tool_chain",
+        "case_count",
+        "error",
+        "blocking_condition",
+        "blocking_conditions",
+        "recovery_hints",
+    )
+    summary = {
+        key: evidence[key]
+        for key in summary_keys
+        if key in evidence and evidence[key] not in ("", [], {}, None)
+    }
+    checks = evidence.get("checks")
+    if isinstance(checks, dict):
+        summary["checks"] = _bool_checks(checks)
+    foreground_readiness = evidence.get("foreground_readiness")
+    if isinstance(foreground_readiness, dict):
+        final = foreground_readiness.get("final")
+        if isinstance(final, dict):
+            summary["foreground_readiness"] = {
+                "required": foreground_readiness.get("required") is True,
+                "ready": final.get("ready") is True,
+                "summary": str(final.get("summary") or "").strip(),
+                "blocking_condition": str(final.get("blocking_condition") or "").strip(),
+            }
+    summary["report_json"] = str(report_json)
+    return summary
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     evidence = run_smoke(
@@ -784,7 +825,15 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"real desktop app open smoke report: {args.report_json}",
             file=sys.stderr,
         )
-    print(json.dumps(evidence, ensure_ascii=False, indent=2))
+        print(
+            json.dumps(
+                _console_summary(evidence, args.report_json),
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+    else:
+        print(json.dumps(evidence, ensure_ascii=False, indent=2))
     return 0 if evidence.get("ok") is True else 1
 
 
