@@ -10,7 +10,12 @@ from .app_name_hints import is_legacy_app_name_hint, legacy_app_name_hint
 from .capture_plan_hints import capture_tool_preview
 from .data_analysis_plan_hints import data_source_kind_hint
 from .clipboard_plan_hints import clipboard_tool_preview
-from .desktop_plan_hints import app_control_tool_candidates, media_app_query_search_plan, media_tool_preview
+from .desktop_plan_hints import (
+    app_control_tool_candidates,
+    media_app_prepare_plan,
+    media_app_query_search_plan,
+    media_tool_preview,
+)
 from .file_access_plan_hints import file_access_tool_preview
 from .runtime_planner import RuntimePlanner
 from .schedule_plan_hints import schedule_tool_preview
@@ -1454,7 +1459,17 @@ def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict
         ]
     tool_name, payload = media_tool_preview(inputs, allowed)
     if not tool_name:
-        return []
+        prepare_plan = media_app_prepare_plan(inputs, allowed)
+        if not prepare_plan:
+            return []
+        return [
+            _request(
+                tool_name,
+                payload,
+                planning_reason="planner_fallback_media_playback",
+            )
+            for tool_name, payload in prepare_plan
+        ]
     requests = [
         _request(
             tool_name,

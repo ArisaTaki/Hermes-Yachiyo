@@ -12269,6 +12269,46 @@ def test_runtime_planner_verifies_simple_media_playback_when_available() -> None
     ]
 
 
+def test_runtime_planner_prepares_media_app_when_playback_tool_is_missing() -> None:
+    decision = RuntimePlanner().decision(
+        "帮我播放 Apple Music",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert decision.selected_intent.inputs == {
+        "action": "play",
+        "app_name": "Music",
+        "query": "",
+        "control_only": "",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-media-app",
+        "open-media-app",
+        "control-media-playback",
+        "verify-media-playback",
+    ]
+    assert _step_by_id(decision, "discover-media-app").input_preview == {
+        "query": "Music",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "open-media-app").input_preview == {
+        "app_name": "Music"
+    }
+    playback = _step_by_id(decision, "control-media-playback")
+    assert playback.status == "unavailable"
+    assert playback.tool_name is None
+    assert playback.depends_on == ["open-media-app"]
+    verify = _step_by_id(decision, "verify-media-playback")
+    assert verify.tool_name == "desktop.ui_elements"
+    assert verify.depends_on == ["open-media-app"]
+    assert decision.plan.tool_plan.missing_capabilities == ["media.playback"]
+
+
 def test_runtime_planner_routes_media_permission_questions_to_permission_diagnostics() -> None:
     decision = RuntimePlanner().decision(
         "为什么不能播放 Apple Music？",
@@ -18267,6 +18307,41 @@ def test_planner_desktop_tool_requests_verifies_simple_media_playback_when_avail
             "protocol": "json_fallback",
             "tool": "media.music_app_open_and_play",
             "input": {"app_name": "Spotify"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_prepares_media_app_when_playback_tool_is_missing() -> None:
+    requests = planner_desktop_tool_requests(
+        "帮我播放 Apple Music",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Music", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Music"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },

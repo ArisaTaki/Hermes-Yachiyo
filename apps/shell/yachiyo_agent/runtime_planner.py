@@ -47,6 +47,7 @@ from .desktop_plan_hints import (
     focus_window_hint,
     foreground_management_hint,
     hotkey_hint,
+    media_app_prepare_plan,
     media_app_query_search_plan,
     media_playback_hint,
     media_tool_preview,
@@ -4397,6 +4398,87 @@ class RuntimePlanner:
             return steps
 
         tool_name, input_preview = media_tool_preview(intent.inputs, allowed)
+        if not tool_name:
+            prepare_plan = media_app_prepare_plan(intent.inputs, allowed)
+            if prepare_plan:
+                steps = []
+                previous_step_id = ""
+                playback_depends_on: list[str] = []
+                verify_items: list[tuple[str, dict[str, Any]]] = []
+                for prepare_tool_name, prepare_input in prepare_plan:
+                    if prepare_tool_name == "desktop.list_apps":
+                        step_id = "discover-media-app"
+                        title = "Discover media app"
+                        capability_id = "desktop.app_discovery"
+                        action = "discover"
+                        reason = "Resolve the requested media app through desktop discovery before opening it."
+                    elif prepare_tool_name in {"app.open", "app.focus"}:
+                        step_id = (
+                            "open-media-app"
+                            if prepare_tool_name == "app.open"
+                            else "focus-media-app"
+                        )
+                        title = "Open media app" if prepare_tool_name == "app.open" else "Focus media app"
+                        capability_id = "desktop.app_control"
+                        action = "open" if prepare_tool_name == "app.open" else "focus"
+                        reason = (
+                            "Open or focus the requested media app as a low-risk fallback "
+                            "when no dedicated media playback tool is available."
+                        )
+                    elif prepare_tool_name in {
+                        "desktop.ui_elements",
+                        "desktop.active_window",
+                        "screen.capture",
+                    }:
+                        verify_items.append((prepare_tool_name, prepare_input))
+                        continue
+                    else:
+                        continue
+                    steps.append(
+                        _step(
+                            intent,
+                            step_id,
+                            title,
+                            capability_id,
+                            prepare_tool_name,
+                            input_preview=prepare_input,
+                            depends_on=[previous_step_id] if previous_step_id else [],
+                            action=action,
+                            reason=reason,
+                        )
+                    )
+                    previous_step_id = step_id
+                    if prepare_tool_name in {"app.open", "app.focus"}:
+                        playback_depends_on = [step_id]
+                steps.append(
+                    _step(
+                        intent,
+                        "control-media-playback",
+                        "Control media playback",
+                        "media.playback",
+                        None,
+                        depends_on=playback_depends_on,
+                        reason=(
+                            "No dedicated media playback tool is available; the app can be "
+                            "opened, but playback itself remains a missing capability."
+                        ),
+                    )
+                )
+                for verify_tool_name, verify_input in verify_items:
+                    steps.append(
+                        _step(
+                            intent,
+                            "verify-media-playback",
+                            "Verify media playback",
+                            "desktop.app_discovery",
+                            verify_tool_name,
+                            input_preview=verify_input,
+                            depends_on=playback_depends_on,
+                            action=_desktop_discovery_action(verify_tool_name),
+                            reason="Observe the media app after preparing it for playback.",
+                        )
+                    )
+                return steps
         steps = [
             _step(
                 intent,
