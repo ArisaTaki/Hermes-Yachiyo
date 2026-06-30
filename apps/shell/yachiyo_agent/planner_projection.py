@@ -307,26 +307,51 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
         return payload
 
     communication_target = _communication_followup_hint(inputs)
-    if not communication_target:
+    if communication_target:
+        recipient = str(communication_target.get("recipient") or "").strip()
+        if recipient:
+            payload = {
+                "kind": "communication_message",
+                "recipient": recipient,
+                "body_source": "model_generated_content",
+                "send_action": str(communication_target.get("send_action") or "send").strip(),
+                "mode": str(communication_target.get("mode") or "focus").strip() or "focus",
+            }
+            for source_key, target_key in (
+                ("app_name", "app_name"),
+                ("channel", "channel"),
+                ("content_transform_hint", "transform"),
+            ):
+                value = str(communication_target.get(source_key) or "").strip()
+                if value:
+                    payload[target_key] = value
+            return payload
+    return _artifact_write_followup_target(decision, inputs)
+
+
+def _artifact_write_followup_target(
+    decision: Any | None,
+    inputs: Mapping[str, Any],
+) -> dict[str, Any]:
+    intent = getattr(decision, "selected_intent", None)
+    intent_kind = str(getattr(intent, "kind", "") or "").strip()
+    if intent_kind not in {"report_generation", "web_research"}:
         return {}
-    recipient = str(communication_target.get("recipient") or "").strip()
-    if not recipient:
+    artifact_paths = _tool_plan_values(decision, "artifacts_expected")
+    if not artifact_paths:
         return {}
     payload = {
-        "kind": "communication_message",
-        "recipient": recipient,
+        "kind": "artifact_write",
+        "target_action": "write_artifact",
+        "path": artifact_paths[0],
         "body_source": "model_generated_content",
-        "send_action": str(communication_target.get("send_action") or "send").strip(),
-        "mode": str(communication_target.get("mode") or "focus").strip() or "focus",
+        "tool": "artifact.write",
     }
-    for source_key, target_key in (
-        ("app_name", "app_name"),
-        ("channel", "channel"),
-        ("content_transform_hint", "transform"),
-    ):
-        value = str(communication_target.get(source_key) or "").strip()
-        if value:
-            payload[target_key] = value
+    context_source = str(inputs.get("context_source") or "").strip()
+    if context_source:
+        payload["context_source"] = context_source
+    if intent_kind:
+        payload["intent_kind"] = intent_kind
     return payload
 
 

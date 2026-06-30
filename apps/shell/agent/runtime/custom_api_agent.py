@@ -47,6 +47,7 @@ from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_OPERATING_
 
 _DIRECT_DAILY_DESKTOP_TOOLS = {
     *DAILY_DESKTOP_TOOL_NAMES,
+    "artifact.write",
     "data.analyze",
     "terminal.run",
 }
@@ -1730,6 +1731,9 @@ class RuntimeCustomApiAgentLoop:
                 return _clipboard_read_summary(result) or result_summary or "已读取剪贴板。"
             if tool_name == "notes.create":
                 return _notes_create_summary(result, planned_input) or result_summary or "已创建备忘录。"
+            if tool_name == "artifact.write":
+                path = str(result.get("path") or planned_input.get("path") or "").strip()
+                return f"已生成文件：{path}。" if path else (result_summary or "已写入 Artifact。")
             if tool_name == "reminders.create":
                 return _reminders_create_summary(result, planned_input) or result_summary or "已创建提醒事项。"
             if tool_name == "calendar.create_event":
@@ -3699,6 +3703,8 @@ def _model_followup_target_payload(
         return _model_followup_communication_target_payload(target, allowed)
     if kind == "desktop_discovered_app_action":
         return _model_followup_desktop_discovered_app_target_payload(target, allowed)
+    if kind == "artifact_write":
+        return _model_followup_artifact_write_target_payload(target, allowed)
     if kind == "note_write":
         return _model_followup_note_write_target_payload(target, allowed)
     if kind != "app_write" or not app_name:
@@ -3724,6 +3730,31 @@ def _model_followup_target_payload(
     context_source = str(target.get("context_source") or "").strip()
     if context_source:
         payload["context_source"] = context_source
+    return payload
+
+
+def _model_followup_artifact_write_target_payload(
+    target: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    path = str(target.get("path") or "").strip()
+    if not path:
+        return {}
+    write_allowed = "artifact.write" in allowed
+    payload: dict[str, Any] = {
+        "kind": "artifact_write",
+        "target_action": str(target.get("target_action") or "write_artifact").strip(),
+        "path": path,
+        "body_source": "model_generated_content",
+        "write_allowed": write_allowed,
+        "recommended_tools": ["artifact.write"] if write_allowed else [],
+    }
+    context_source = str(target.get("context_source") or "").strip()
+    if context_source:
+        payload["context_source"] = context_source
+    intent_kind = str(target.get("intent_kind") or "").strip()
+    if intent_kind:
+        payload["intent_kind"] = intent_kind
     return payload
 
 
@@ -3888,6 +3919,8 @@ def _selection_payload_has_model_followup_target(
         return bool(str(target.get("app_name") or "").strip())
     if kind == "communication_message":
         return bool(str(target.get("recipient") or "").strip())
+    if kind == "artifact_write":
+        return bool(str(target.get("path") or "").strip())
     if kind == "note_write":
         return True
     if kind == "desktop_discovered_app_action":
@@ -4473,6 +4506,8 @@ def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
         return _model_followup_communication_instruction(target)
     if kind == "desktop_discovered_app_action":
         return _model_followup_desktop_discovered_app_instruction(target)
+    if kind == "artifact_write":
+        return _model_followup_artifact_write_instruction(target)
     if kind == "note_write":
         return _model_followup_note_write_instruction(target)
     app_name = str(target.get("app_name") or "").strip()
@@ -4506,6 +4541,26 @@ def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
         f"replying inline. Prefer {tool_text}; use the generated transformed content as the "
         "text input. Do not write the raw observed source when the user asked for summary, "
         f"cleanup, translation, or todo conversion.{verify_text} "
+    )
+
+
+def _model_followup_artifact_write_instruction(target: Mapping[str, Any]) -> str:
+    path = str(target.get("path") or "").strip()
+    if not path:
+        return ""
+    if not bool(target.get("write_allowed")):
+        return (
+            f"The user requested a durable artifact at {path!r}, but artifact.write is not "
+            "available. Explain the missing capability instead of claiming the file was written."
+        )
+    tools = _string_list(target.get("recommended_tools"))
+    tool_text = ", ".join(tools) or "artifact.write"
+    return (
+        f"The user requested a durable artifact at {path!r}. After deriving the final artifact "
+        "content, call artifact.write next instead of only replying inline. "
+        f"Prefer {tool_text}; use the generated transformed content as the content input. "
+        "Do not write an empty or placeholder artifact, and do not write the raw observed source "
+        "when the user asked for summary, cleanup, translation, or report generation. "
     )
 
 
@@ -4665,6 +4720,8 @@ def _model_followup_app_write_requests(
         return []
     if str(target.get("kind") or "").strip() == "communication_message":
         return _model_followup_communication_requests(content, target, allowed_tools)
+    if str(target.get("kind") or "").strip() == "artifact_write":
+        return _model_followup_artifact_write_requests(content, target, allowed_tools)
     if str(target.get("kind") or "").strip() == "note_write":
         return _model_followup_note_write_requests(content, target, allowed_tools)
     app_name = str(target.get("app_name") or "").strip()
@@ -4756,6 +4813,30 @@ def _model_followup_app_write_requests(
         ]
         return [*requests, *([verify_request] if verify_request else [])]
     return []
+
+
+def _model_followup_artifact_write_requests(
+    generated_content: str,
+    target: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    content = str(generated_content or "").strip()
+    if not content or str(target.get("kind") or "").strip() != "artifact_write":
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if "artifact.write" not in allowed:
+        return []
+    path = str(target.get("path") or "").strip()
+    if not path:
+        return []
+    return [
+        _request_like(
+            "artifact.write",
+            {"path": path, "content": content},
+            source="runtime_planner",
+            planning_reason="planner_followup_artifact_write",
+        )
+    ]
 
 
 def _model_followup_note_write_requests(

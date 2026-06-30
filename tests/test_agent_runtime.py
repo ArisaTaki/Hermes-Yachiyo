@@ -5298,6 +5298,105 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_notes(
         service.close()
 
 
+def test_main_chat_model_loop_writes_generated_page_summary_to_artifact(
+    tmp_path,
+    monkeypatch,
+):
+    service = make_service(tmp_path)
+    tool_calls: list[tuple[str, dict[str, Any]]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    generated = "# 网页摘要\n\nOha-Yachiyo 可以发现桌面应用、执行工具并验证结果。"
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_extract_text(selector: str = "") -> dict[str, Any]:
+        tool_calls.append(("browser.extract_text", {"selector": selector}))
+        return {
+            "ok": True,
+            "action": "browser.extract_text",
+            "summary": "Extracted current page text",
+            "data": {
+                "selector": selector,
+                "text": "Oha-Yachiyo can discover desktop apps, execute tools, and verify results.",
+                "truncated": False,
+            },
+        }
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        model_calls.append([dict(message) for message in messages])
+        assert messages[-1]["role"] == "user"
+        assert messages[-1]["content"].startswith("Runtime follow-up context:")
+        assert "durable artifact" in messages[-1]["content"]
+        assert "call artifact.write next" in messages[-1]["content"]
+        assert "Downloads/research-summary.md" in messages[-1]["content"]
+        assert "Oha-Yachiyo can discover desktop apps" in messages[-1]["content"]
+        return {"content": generated}
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-page-summary-artifact",
+            session_id="session-main-page-summary-artifact",
+            user_goal="把当前网页总结成 markdown 保存到 Downloads",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "把当前网页总结成 markdown 保存到 Downloads"}],
+            tool_policy={
+                "allowed_tools": [
+                    "browser.extract_text",
+                    "artifact.write",
+                ]
+            },
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        planned_events = [
+            event for event in events if event["event_type"] == "agent.desktop.intent_planned"
+        ]
+        followup = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.model.followup_context"
+        )
+        completed_event = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.desktop.intent_completed"
+            and event["payload"]["tool"] == "artifact.write"
+        )
+        artifact = service.read_run_artifact(run["run_id"], "Downloads/research-summary.md")
+
+        assert updated["result"] == "已生成文件：Downloads/research-summary.md。"
+        assert tool_calls == [("browser.extract_text", {"selector": ""})]
+        assert len(model_calls) == 1
+        assert [event["payload"]["tool"] for event in planned_events] == [
+            "browser.extract_text",
+            "artifact.write",
+        ]
+        assert planned_events[1]["payload"]["planning_reason"] == (
+            "planner_followup_artifact_write"
+        )
+        assert followup["payload"]["followup_target"] == {
+            "kind": "artifact_write",
+            "target_action": "write_artifact",
+            "path": "Downloads/research-summary.md",
+            "body_source": "model_generated_content",
+            "write_allowed": True,
+            "recommended_tools": ["artifact.write"],
+            "intent_kind": "web_research",
+        }
+        assert completed_event["payload"]["tool"] == "artifact.write"
+        assert completed_event["payload"]["tools"] == ["artifact.write"]
+        assert completed_event["payload"]["planning_reason"] == "planner_followup_artifact_write"
+        assert artifact["content"] == generated
+        assert "model.request.started" in [event["event_type"] for event in events]
+    finally:
+        service.close()
+
+
 def test_main_chat_daily_desktop_approval_resumes_without_chat_model_profile(tmp_path, monkeypatch):
     from apps.shell.yachiyo_agent import YachiyoAgentService
     from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort

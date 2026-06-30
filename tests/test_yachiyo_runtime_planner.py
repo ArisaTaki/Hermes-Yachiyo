@@ -15898,6 +15898,65 @@ def test_planner_selection_payload_surfaces_context_note_write_target() -> None:
     ]
 
 
+def test_planner_selection_payload_surfaces_context_artifact_write_target() -> None:
+    prompt = "把当前网页总结成 markdown 保存到 Downloads"
+    allowed_tools = ["browser.extract_text", "artifact.write"]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert payload["intent_kind"] == "web_research"
+    assert payload["artifacts_expected"] == ["Downloads/research-summary.md"]
+    assert payload["followup_target"] == {
+        "kind": "artifact_write",
+        "target_action": "write_artifact",
+        "path": "Downloads/research-summary.md",
+        "body_source": "model_generated_content",
+        "tool": "artifact.write",
+        "intent_kind": "web_research",
+    }
+    assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == payload[
+        "followup_target"
+    ]
+
+    window_prompt = "把当前窗口内容总结成 markdown 文件并保存到 Downloads"
+    window_allowed_tools = ["desktop.ui_elements", "artifact.write"]
+    window_decision = RuntimePlanner().decision(
+        window_prompt,
+        allowed_tools=window_allowed_tools,
+    )
+    window_requests = planner_tool_requests(window_prompt, window_allowed_tools)
+
+    window_payload = planner_selection_payload(
+        decision=window_decision,
+        planner_requests=window_requests,
+        legacy_requests=[],
+        selected_requests=window_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert window_payload["intent_kind"] == "report_generation"
+    assert window_payload["artifacts_expected"] == ["Downloads/report.md"]
+    assert window_payload["followup_target"] == {
+        "kind": "artifact_write",
+        "target_action": "write_artifact",
+        "path": "Downloads/report.md",
+        "body_source": "model_generated_content",
+        "tool": "artifact.write",
+        "context_source": "visible_text",
+        "intent_kind": "report_generation",
+    }
+
+
 def test_runtime_planner_tracks_context_schedule_source_without_body() -> None:
     decision = RuntimePlanner().decision(
         "create a reminder from selected text",

@@ -2336,6 +2336,69 @@ def test_model_followup_context_instructs_generated_note_write() -> None:
     ]
 
 
+def test_model_followup_context_instructs_generated_artifact_write() -> None:
+    payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "browser.extract_text",
+                "planning_reason": "planner_fallback_web_research",
+                "continue_to_model": True,
+            }
+        ],
+        {
+            "intent_kind": "web_research",
+            "artifacts_expected": ["Downloads/research-summary.md"],
+            "followup_target": {
+                "kind": "artifact_write",
+                "target_action": "write_artifact",
+                "path": "Downloads/research-summary.md",
+                "body_source": "model_generated_content",
+                "tool": "artifact.write",
+                "intent_kind": "web_research",
+            },
+        },
+        allowed_tools=["browser.extract_text", "artifact.write"],
+        timeline=[
+            _timeline(
+                "agent.tool.call",
+                "browser.extract_text",
+                input_preview={},
+                result={"ok": True, "data": {"text": "Raw current page text"}},
+            )
+        ],
+    )
+    message = custom_api_agent_module._model_followup_context_message(payload)
+
+    assert payload["followup_target"] == {
+        "kind": "artifact_write",
+        "target_action": "write_artifact",
+        "path": "Downloads/research-summary.md",
+        "body_source": "model_generated_content",
+        "write_allowed": True,
+        "recommended_tools": ["artifact.write"],
+        "intent_kind": "web_research",
+    }
+    assert "durable artifact" in message
+    assert "call artifact.write next" in message
+    assert "do not write the raw observed source" in message
+    assert custom_api_agent_module._model_followup_app_write_requests(
+        "整理后的网页摘要",
+        payload["followup_target"],
+        ["artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "artifact.write",
+            "input": {
+                "path": "Downloads/research-summary.md",
+                "content": "整理后的网页摘要",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_artifact_write",
+        }
+    ]
+
+
 def test_custom_api_agent_loop_writes_generated_followup_content_to_target_app() -> None:
     budget = FakeBudget()
     tool_runs: list[dict[str, Any]] = []
