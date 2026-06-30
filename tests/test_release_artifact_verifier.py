@@ -906,8 +906,12 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document reusable app build metadata preparation" in messages
     assert "release packaging docs must document local RC artifact build helper" in messages
     assert "release packaging docs must document local RC signoff refresh helper" in messages
+    assert "release packaging docs must document local RC public demo evidence output" in messages
+    assert "release packaging docs must document public demo release assessment fields" in messages
+    assert "release packaging docs must document the 9-item release smoke checklist" in messages
     assert "release packaging docs must document local RC signoff resume/reuse mode" in messages
     assert "release packaging docs must document local RC signoff status shortcut" in messages
+    assert "release packaging docs must document print-status public demo blocker output" in messages
     assert "release packaging docs must document local RC OS evidence shortcut" in messages
     assert "release packaging docs must document per-DMG checksum file validation" in messages
     assert "release packaging docs must document the local RC verification entrypoint" in messages
@@ -931,6 +935,13 @@ def test_verifier_requires_release_packaging_docs_for_release_gates(tmp_path):
     assert "release packaging docs must document the archived Electron UI smoke report" in messages
     assert (
         "release packaging docs must document standalone Electron UI smoke signoff evidence merging"
+        in messages
+    )
+    assert "release packaging docs must include public demo JSON in release smoke command" in messages
+    assert "release packaging docs must document release smoke checks 9 user paths" in messages
+    assert "release packaging docs must include public demo in release smoke user paths" in messages
+    assert (
+        "release packaging docs must document partial or blocked public demo release smoke behavior"
         in messages
     )
     assert "release packaging docs must document the source-only RC dry run" in messages

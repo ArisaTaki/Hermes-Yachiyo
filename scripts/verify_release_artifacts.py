@@ -757,12 +757,28 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document local RC refresh includes Gatekeeper readiness diagnostics",
     ),
     (
+        "tmp/rc-verification-<short-commit>-public-demo.json",
+        "release packaging docs must document local RC public demo evidence output",
+    ),
+    (
+        "public-demo summary 会记录 `release_level`、`missing_required_flow_ids` 和 `release_blockers`",
+        "release packaging docs must document public demo release assessment fields",
+    ),
+    (
+        "汇总 9 项用户路径覆盖度",
+        "release packaging docs must document the 9-item release smoke checklist",
+    ),
+    (
         "--reuse-current-reports",
         "release packaging docs must document local RC signoff resume/reuse mode",
     ),
     (
         "python scripts/refresh_local_rc_signoff.py --print-status",
         "release packaging docs must document local RC signoff status shortcut",
+    ),
+    (
+        "public-demo release level、required demo 覆盖率、缺失 flow 和 opt-in blocker",
+        "release packaging docs must document print-status public demo blocker output",
     ),
     (
         "python scripts/refresh_local_rc_signoff.py --print-os-signoff-guide",
@@ -855,6 +871,22 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "python scripts/summarize_native_agent_capabilities.py",
         "release packaging docs must document standalone Native Agent capability matrix generation",
+    ),
+    (
+        '"tmp/rc-verification-${SHORT_COMMIT}-public-demo.json"',
+        "release packaging docs must include public demo JSON in release smoke command",
+    ),
+    (
+        "检查 9 个发布用户路径是否已有证据",
+        "release packaging docs must document release smoke checks 9 user paths",
+    ),
+    (
+        "public demo、artifact readback、diagnostics export",
+        "release packaging docs must include public demo in release smoke user paths",
+    ),
+    (
+        "partial_demo_ready` 或 `blocked`",
+        "release packaging docs must document partial or blocked public demo release smoke behavior",
     ),
     (
         "python scripts/verify_release_candidate.py --require-artifacts --run-ui-smoke",

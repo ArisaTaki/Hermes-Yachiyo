@@ -123,7 +123,7 @@ CI 仍直接运行 `python scripts/prepare_app_build_metadata.py`、`python scri
 python scripts/refresh_local_rc_signoff.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
 ```
 
-该命令会生成 `tmp/rc-verification-<short-commit>-source-capabilities.json`、`tmp/rc-verification-<short-commit>-packaged-batch.json`、`tmp/rc-verification-<short-commit>-screen.json`、`tmp/rc-verification-<short-commit>-native-capability-matrix.json`、`tmp/rc-verification-<short-commit>-release-readiness.json`、`tmp/rc-verification-<short-commit>-release-readiness.md`、`tmp/oha-yachiyo-diagnostics-<short-commit>.zip`、`tmp/rc-verification-<short-commit>-release-smoke.json`、`tmp/rc-verification-<short-commit>-release-smoke.md`、`tmp/rc-signoff-<short-commit>-current.json`、`tmp/rc-signoff-<short-commit>-current.md` 和 `tmp/rc-signoff-<short-commit>-preview.json`；其中 source capabilities report 归档 source-level planner/artifact/approval/entrypoint/desktop discovery evidence，packaged batch report 会同时归档 DMG mount、Gatekeeper readiness、packaged backend bridge identity、packaged app startup、packaged UI sampling 和 packaged Chat native file smoke evidence，native capability matrix report 会按 capability id 合并多份 RC report 并标出 source/provider/packaged 缺口，release readiness diagnostics 会把同一矩阵转成面向签核人/维护者的 blocker 摘要和下一步命令，diagnostics zip 会收集并脱敏本轮 RC/signoff/readiness evidence，release smoke summary 会按 packaged launch、Chat desktop task、approval card、Agent Studio run timeline、GroupRun、Workflow、artifact readback 和 diagnostics export 汇总用户路径覆盖度。如果 final signoff 只因为 Gatekeeper / Screen Recording 仍为 `manual_required` 而失败，命令仍返回成功，方便把“还差多少”作为状态刷新而不是构建失败处理。签核人可以直接填写 Markdown checklist，再用 `--manual-checks-markdown` 进入最终 gate。
+该命令会生成 `tmp/rc-verification-<short-commit>-source-capabilities.json`、`tmp/rc-verification-<short-commit>-packaged-batch.json`、`tmp/rc-verification-<short-commit>-screen.json`、`tmp/rc-verification-<short-commit>-native-capability-matrix.json`、`tmp/rc-verification-<short-commit>-release-readiness.json`、`tmp/rc-verification-<short-commit>-release-readiness.md`、`tmp/oha-yachiyo-diagnostics-<short-commit>.zip`、`tmp/rc-verification-<short-commit>-public-demo.json`、`tmp/rc-verification-<short-commit>-public-demo.md`、`tmp/rc-verification-<short-commit>-release-smoke.json`、`tmp/rc-verification-<short-commit>-release-smoke.md`、`tmp/rc-signoff-<short-commit>-current.json`、`tmp/rc-signoff-<short-commit>-current.md` 和 `tmp/rc-signoff-<short-commit>-preview.json`；其中 source capabilities report 归档 source-level planner/artifact/approval/entrypoint/desktop discovery evidence，packaged batch report 会同时归档 DMG mount、Gatekeeper readiness、packaged backend bridge identity、packaged app startup、packaged UI sampling 和 packaged Chat native file smoke evidence，native capability matrix report 会按 capability id 合并多份 RC report 并标出 source/provider/packaged 缺口，release readiness diagnostics 会把同一矩阵转成面向签核人/维护者的 blocker 摘要和下一步命令，diagnostics zip 会收集并脱敏本轮 RC/signoff/readiness evidence，public-demo summary 会记录 `release_level`、`missing_required_flow_ids` 和 `release_blockers`，release smoke summary 会按 packaged launch、Chat desktop task、approval card、Agent Studio run timeline、GroupRun、Workflow、public demo、artifact readback 和 diagnostics export 汇总 9 项用户路径覆盖度。如果 final signoff 只因为 Gatekeeper / Screen Recording 仍为 `manual_required` 而失败，命令仍返回成功，方便把“还差多少”作为状态刷新而不是构建失败处理。签核人可以直接填写 Markdown checklist，再用 `--manual-checks-markdown` 进入最终 gate。
 
 只查看当前 HEAD 还剩哪些签核项时，运行：
 
@@ -131,7 +131,7 @@ python scripts/refresh_local_rc_signoff.py --channel experimental --repository k
 python scripts/refresh_local_rc_signoff.py --print-status
 ```
 
-该命令只读取 `tmp/rc-signoff-<short-commit>-current.json` 并打印剩余项，不运行 build、DMG 或 UI gate；如果同一 commit 的 `tmp/rc-verification-<short-commit>-release-readiness.json` 存在，也会同步打印 29 项能力矩阵通过数、缺失 capability 和 blocker 摘要；如果 `tmp/rc-verification-<short-commit>-release-smoke.json` 存在，也会打印 8 项发布用户路径通过数和缺失项。
+该命令只读取 `tmp/rc-signoff-<short-commit>-current.json` 并打印剩余项，不运行 build、DMG 或 UI gate；如果同一 commit 的 `tmp/rc-verification-<short-commit>-release-readiness.json` 存在，也会同步打印 29 项能力矩阵通过数、缺失 capability 和 blocker 摘要；如果 `tmp/rc-verification-<short-commit>-release-smoke.json` 存在，也会打印 9 项发布用户路径通过数和缺失项，并带出 public demo 的 `release_level`、缺失 demo flow 和 blocker；如果 `tmp/rc-verification-<short-commit>-public-demo.json` 存在，也会直接打印 public-demo release level、required demo 覆盖率、缺失 flow 和 opt-in blocker。
 
 需要按当前 draft 完成最后的 Gatekeeper / Screen Recording 收证时，可以先打印聚合操作指南；该命令只读已有 draft / screen report，不会写入 evidence，也不会把人工项标为通过：
 
@@ -338,12 +338,13 @@ python scripts/summarize_release_smoke.py \
   "tmp/rc-verification-${SHORT_COMMIT}-source-capabilities.json" \
   "tmp/rc-verification-${SHORT_COMMIT}-packaged-batch.json" \
   "tmp/rc-verification-${SHORT_COMMIT}-screen.json" \
+  "tmp/rc-verification-${SHORT_COMMIT}-public-demo.json" \
   --diagnostics-zip "tmp/oha-yachiyo-diagnostics-${SHORT_COMMIT}.zip" \
   --output-json "tmp/rc-verification-${SHORT_COMMIT}-release-smoke.json" \
   --output-markdown "tmp/rc-verification-${SHORT_COMMIT}-release-smoke.md"
 ```
 
-该脚本不启动 NativeRunEngine、Electron 或 provider；它只聚合已有 RC report、单个 smoke JSON 和诊断包 manifest，检查 8 个发布用户路径是否已有证据：packaged launch、Chat desktop task、approval card、Agent Studio run timeline、GroupRun、Workflow、artifact readback、diagnostics export。未覆盖时会返回非零，并在 `next_actions` 里列出要补跑的命令；完整通过也不替代最终人工签核，只说明 release smoke 用户路径已有可复盘 evidence。`refresh_local_rc_signoff.py` 已在每次刷新时自动生成这份 summary；上面的手动命令用于重建、合并额外单项 smoke JSON 或排查历史 evidence。
+该脚本不启动 NativeRunEngine、Electron 或 provider；它只聚合已有 RC report、public-demo JSON、单个 smoke JSON 和诊断包 manifest，检查 9 个发布用户路径是否已有证据：packaged launch、Chat desktop task、approval card、Agent Studio run timeline、GroupRun、Workflow、public demo、artifact readback、diagnostics export。未覆盖时会返回非零，并在 `next_actions` 里列出要补跑的命令；当 public demo 仍是 `partial_demo_ready` 或 `blocked` 时，release-smoke 会保留 `public_demo` 缺失并显示缺失 demo flow 和 blocker。完整通过也不替代最终人工签核，只说明 release smoke 用户路径已有可复盘 evidence。`refresh_local_rc_signoff.py` 已在每次刷新时自动生成这份 summary；上面的手动命令用于重建、合并额外单项 smoke JSON 或排查历史 evidence。
 
 使用一次性临时 provider key 做本地验收时，优先用安全 prompt wrapper，避免把 key 放进 shell history 或进程参数：
 
