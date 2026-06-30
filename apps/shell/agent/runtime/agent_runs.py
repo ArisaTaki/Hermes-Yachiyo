@@ -138,7 +138,12 @@ class RuntimeAgentRunExecutor:
                 timeline,
                 artifacts,
                 daily_desktop_planning_context=(
-                    user_goal if agent.get("_daily_desktop_policy_overlay") is True else ""
+                    user_goal
+                    if (
+                        agent.get("_daily_desktop_policy_overlay") is True
+                        or agent.get("_runtime_planner_entrypoint") is True
+                    )
+                    else ""
                 ),
                 run_id=run_id,
             )
@@ -220,11 +225,11 @@ class RuntimeAgentRunCoordinator:
         override = payload.get("agent_override")
         if not isinstance(override, dict):
             agent = self._get_agent_private(agent_id)
-            return _with_daily_desktop_policy_overlay(agent, payload)
+            return _with_entrypoint_runtime_planner(agent, payload)
         override_agent_id = str(override.get("agent_id") or override.get("id") or agent_id)
         if override_agent_id != agent_id:
             raise self._error_type("agent_override 与 agent_id 不一致")
-        return _with_daily_desktop_policy_overlay({**override, "agent_id": agent_id}, payload)
+        return _with_entrypoint_runtime_planner({**override, "agent_id": agent_id}, payload)
 
 
 class RuntimeAgentRunAsyncCoordinator:
@@ -334,11 +339,32 @@ class RuntimeAgentRunAsyncCoordinator:
         override = payload.get("agent_override")
         if not isinstance(override, dict):
             agent = self._get_agent_private(agent_id)
-            return _with_daily_desktop_policy_overlay(agent, payload)
+            return _with_entrypoint_runtime_planner(agent, payload)
         override_agent_id = str(override.get("agent_id") or override.get("id") or agent_id)
         if override_agent_id != agent_id:
             raise self._error_type("agent_override 与 agent_id 不一致")
-        return _with_daily_desktop_policy_overlay({**override, "agent_id": agent_id}, payload)
+        return _with_entrypoint_runtime_planner({**override, "agent_id": agent_id}, payload)
+
+
+def _with_entrypoint_runtime_planner(agent: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
+    agent = _with_daily_desktop_policy_overlay(agent, payload)
+    if not payload.get("runtime_planner_entrypoint"):
+        return agent
+    user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
+    if _looks_like_daily_desktop_howto_question(user_goal):
+        return agent
+    policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
+    allowed = _string_list(policy.get("allowed_tools"))
+    _decision, direct_requests = planner_first_direct_decision_and_tool_requests(
+        user_goal,
+        allowed,
+    )
+    if not direct_requests:
+        return agent
+    return {
+        **agent,
+        "_runtime_planner_entrypoint": True,
+    }
 
 
 def _with_daily_desktop_policy_overlay(agent: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:

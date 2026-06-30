@@ -4419,6 +4419,87 @@ def test_agent_run_daily_desktop_overlay_plans_from_user_goal_before_context(tmp
         service.close()
 
 
+def test_agent_run_runtime_planner_entrypoint_analyzes_data_before_model(tmp_path, monkeypatch):
+    service = make_service(tmp_path)
+    workdir = tmp_path / "data-workdir"
+    (workdir / "inputs").mkdir(parents=True)
+    (workdir / "inputs" / "sales.csv").write_text(
+        "region,revenue,units\nEast,10,1\nWest,20,2\nEast,30,3\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: pytest.fail("agent data analysis entrypoint should execute before model call"),
+    )
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Data Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {
+                    "allowed_tools": ["workspace.read", "data.analyze", "artifact.write"],
+                    "approval_required": {},
+                },
+                "workspace_policy": {
+                    "default_workdir": str(workdir),
+                    "readable_scopes": ["."],
+                    "writable_scopes": ["."],
+                },
+            }
+        )
+
+        run = service.create_agent_run(
+            {
+                "agent_id": agent["agent_id"],
+                "user_goal": "请分析 inputs/sales.csv 并输出报告",
+                "runtime_planner_entrypoint": True,
+            }
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        selection_event = next(event for event in events if event["event_type"] == "agent.plan.selection")
+        planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+        artifact_event = next(
+            event
+            for event in events
+            if event["event_type"] == "artifact.created"
+            and event.get("payload", {}).get("path") == "analysis-report.md"
+        )
+        completed_event = next(
+            event for event in events if event["event_type"] == "agent.desktop.intent_completed"
+        )
+
+        assert run["status"] == "completed"
+        assert "已分析「inputs/sales.csv」（3 行、3 列）" in run["result"]
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert selection_event["payload"]["intent_kind"] == "data_analysis"
+        assert selection_event["payload"]["selection_reason"] == "runtime_planner_full_plan_execution"
+        assert planned_event["payload"]["tool"] == "data.analyze"
+        assert planned_event["payload"]["input_preview"]["path"] == "inputs/sales.csv"
+        assert tool_event["payload"]["tool"] == "data.analyze"
+        assert tool_event["payload"]["result"]["ok"] is True
+        assert tool_event["payload"]["result"]["rows"] == 3
+        assert artifact_event["payload"]["source_tool"] == "data.analyze"
+        assert artifact_event["payload"]["path"] == "analysis-report.md"
+        assert completed_event["payload"]["source"] == "runtime_planner"
+        assert completed_event["payload"]["result"]["artifact_path"] == "analysis-report.md"
+        assert any(
+            artifact.get("path") == "analysis-report.md"
+            and artifact.get("source_tool") == "data.analyze"
+            for artifact in run["artifacts"]
+            if isinstance(artifact, dict)
+        )
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_executes_daily_desktop_intent_without_chat_model_profile(tmp_path, monkeypatch):
     service = make_service(tmp_path)
     open_calls: list[str] = []
