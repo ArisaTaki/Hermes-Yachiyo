@@ -20,6 +20,7 @@ from apps.shell.agent.runtime.desktop_intents import (
 )
 from apps.shell.agent.runtime.events import tool_input_preview
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
+from apps.shell.agent.runtime.tool_approvals import ToolPendingApprovalBuilder
 from apps.shell.agent.runtime.tool_execution import RuntimeToolCallExecutor, RuntimeToolRequestRunner
 from apps.shell.agent.runtime.tool_loop import RuntimeToolLoopProjectionBuilder
 from apps.shell.agent.runtime.tool_operations import RuntimeToolOperations
@@ -12896,6 +12897,240 @@ def test_custom_api_agent_loop_continues_discovered_communication_app_without_mo
         "desktop.submit_foreground",
         "desktop.ui_elements",
     ]
+
+
+def test_custom_api_agent_loop_preserves_discovered_app_compose_remaining_requests_on_approval(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_tool_requests",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_candidates",
+        lambda *_args, **_kwargs: [],
+    )
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = []
+    appended_events: list[dict[str, Any]] = []
+    tool_calls: list[tuple[str, dict[str, Any]]] = []
+
+    def append_run_event(run_id: str, event_type: str, payload: dict[str, Any]) -> None:
+        appended_events.append({"run_id": run_id, "event_type": event_type, "payload": payload})
+
+    def call_agent_tool(
+        tool_request,
+        _allowed_tools,
+        _broker,
+        timeline_arg,
+        *,
+        artifacts=None,
+        run_id="",
+        budget=None,
+    ):
+        tool = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        tool_calls.append((tool, payload))
+        if tool == "desktop.list_apps":
+            result = {
+                "ok": True,
+                "action": tool,
+                "summary": "Found installed app: Slack",
+                "data": {
+                    "query": payload["query"],
+                    "best_match": {
+                        "name": "Slack",
+                        "path": "/Applications/Slack.app",
+                        "match_score": 96,
+                        "match_confidence": "high",
+                        "match_reason": "category:messaging",
+                    },
+                    "matches": [
+                        {
+                            "name": "Slack",
+                            "path": "/Applications/Slack.app",
+                            "match_score": 96,
+                            "match_confidence": "high",
+                            "match_reason": "category:messaging",
+                        }
+                    ],
+                },
+            }
+        elif tool == "app.open_and_safe_shortcut":
+            result = {
+                "ok": True,
+                "action": tool,
+                "summary": "Opened Slack and created a new message",
+                "data": {"app_name": payload["app_name"], "shortcut_action": payload["action"]},
+            }
+        elif tool == "desktop.inspect_app":
+            result = {
+                "ok": True,
+                "action": tool,
+                "summary": "Inspected Slack",
+                "data": {
+                    "app_name": payload["app_name"],
+                    "ready_for_foreground_action": True,
+                    "checks": {"app_running": True, "frontmost": True},
+                    "ui_elements": {
+                        "ok": True,
+                        "data": {
+                            "app_name": payload["app_name"],
+                            "elements": [
+                                {"role": "text", "name": "recipient"},
+                                {"role": "text", "name": "message"},
+                            ],
+                        },
+                    },
+                },
+            }
+        elif tool == "app.focus_and_type_into_ui_element":
+            result = {
+                "ok": False,
+                "approval_required": True,
+                "tool": tool,
+                "risk_level": "medium",
+                "policy_reason": "Typing into a foreground app needs review.",
+            }
+        else:
+            raise AssertionError(f"unexpected tool before approval pause: {tool}")
+        timeline_arg.append(_timeline("agent.tool.call", tool, input_preview=payload, result=result))
+        if run_id:
+            append_run_event(
+                run_id,
+                "agent.tool.call",
+                {"tool": tool, "input_preview": payload, "result": result},
+            )
+        return result
+
+    request_runner = RuntimeToolRequestRunner(
+        normalize_tool_name=lambda value: str(value or "").strip(),
+        input_preview=tool_input_preview,
+        run_budget=lambda _run_id, _timeline_value: budget,
+        user_goal_from_messages=lambda messages: str(messages[0].get("content") or ""),
+        goal_disallows_tool=lambda _user_goal, _tool_name: "",
+        timeline_factory=_timeline,
+        append_run_event=append_run_event,
+        tool_loop_projection=RuntimeToolLoopProjectionBuilder(),
+        pending_approval_builder=ToolPendingApprovalBuilder(
+            approval_id_factory=lambda: "approval-1",
+            now=lambda: "2026-06-30T00:00:00Z",
+        ),
+        call_agent_tool=call_agent_tool,
+    )
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "desktop.list_apps",
+                    "app.open_and_safe_shortcut",
+                    "desktop.inspect_app",
+                    "app.focus_and_type_into_ui_element",
+                    "desktop.search_submit",
+                    "desktop.submit_foreground",
+                    "desktop.ui_elements",
+                ]
+            },
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("approval-paused discovered compose should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=RuntimeToolLoopProjectionBuilder(),
+        run_tool_requests=request_runner.run,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=append_run_event,
+    )
+
+    try:
+        loop.run(
+            {"name": "Yachiyo"},
+            "打开一个聊天软件，给 Alice 发送 hello",
+            broker={"broker": True},
+            timeline=timeline,
+            artifacts=[],
+            run_id="run-discovered-compose-approval",
+        )
+    except AgentApprovalRequired as exc:
+        pending = exc.pending_approval
+    else:
+        raise AssertionError("expected discovered app compose to pause for approval")
+
+    assert [tool for tool, _payload in tool_calls] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+    ]
+    assert pending["tool"] == "app.focus_and_type_into_ui_element"
+    assert pending["tool_request"]["input"] == {
+        "app_name": "Slack",
+        "target": "recipient",
+        "text": "Alice",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert pending["risk_level"] == "medium"
+    assert pending["policy_reason"] == "Typing into a foreground app needs review."
+    remaining_requests = pending["remaining_tool_requests"]
+    assert [request["tool"] for request in remaining_requests] == [
+        "desktop.search_submit",
+        "app.focus_and_type_into_ui_element",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    assert remaining_requests[1]["input"] == {
+        "app_name": "Slack",
+        "target": "message",
+        "text": "hello",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert remaining_requests[2]["input"] == {"action": "send"}
+    assert remaining_requests[1]["source"] == "runtime_planner"
+    assert remaining_requests[1]["planning_reason"] == "planner_discovered_app_followup"
+    approval_events = [
+        event for event in timeline if event["event"] == "agent.desktop.intent_approval_required"
+    ]
+    assert approval_events[-1] == {
+        "event": "agent.desktop.intent_approval_required",
+        "detail": "app.focus_and_type_into_ui_element",
+        "tool": "app.focus_and_type_into_ui_element",
+        "status": "approval_required",
+        "source": "runtime_planner",
+        "reason": "tool_policy_requires_approval",
+        "input_preview": {
+            "app_name": "Slack",
+            "target": "recipient",
+            "text": "Alice",
+            "role_filter": "text",
+            "limit": 80,
+        },
+        "planning_reason": "planner_discovered_app_followup",
+        "approval_id": "approval-1",
+        "risk_level": "medium",
+        "policy_reason": "Typing into a foreground app needs review.",
+    }
+    assert appended_events[-1]["event_type"] == "agent.desktop.intent_approval_required"
+    assert appended_events[-1]["payload"]["source"] == "runtime_planner"
+    assert appended_events[-1]["payload"]["planning_reason"] == "planner_discovered_app_followup"
 
 
 def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> None:
