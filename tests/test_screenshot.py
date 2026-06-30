@@ -5,11 +5,33 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import subprocess
+import zlib
 from pathlib import Path
 
 import pytest
 
 import apps.locald.screenshot as screenshot_mod
+
+
+def _png_chunk(kind: bytes, payload: bytes) -> bytes:
+    checksum = zlib.crc32(kind + payload) & 0xFFFFFFFF
+    return len(payload).to_bytes(4, "big") + kind + payload + checksum.to_bytes(4, "big")
+
+
+def _rgba_png(width: int, height: int, pixel: tuple[int, int, int, int]) -> bytes:
+    header = (
+        width.to_bytes(4, "big")
+        + height.to_bytes(4, "big")
+        + b"\x08\x06\x00\x00\x00"
+    )
+    row = bytes(pixel) * width
+    raw = b"".join(b"\x00" + row for _ in range(height))
+    return (
+        b"\x89PNG\r\n\x1a\n"
+        + _png_chunk(b"IHDR", header)
+        + _png_chunk(b"IDAT", zlib.compress(raw))
+        + _png_chunk(b"IEND", b"")
+    )
 
 
 def _load_screen_route_module():
@@ -131,6 +153,11 @@ def test_capture_screenshot_to_file_returns_metadata(monkeypatch, tmp_path):
 
     monkeypatch.setattr(screenshot_mod.subprocess, "run", fake_run)
     monkeypatch.setattr(screenshot_mod, "_image_size", lambda _path: (120, 80))
+    monkeypatch.setattr(
+        screenshot_mod,
+        "_image_visibility_metadata",
+        lambda _path: {"visibility_status": "visible", "blank_frame": False},
+    )
 
     meta = screenshot_mod.capture_screenshot_to_file(target)
 
@@ -139,6 +166,53 @@ def test_capture_screenshot_to_file_returns_metadata(monkeypatch, tmp_path):
     assert meta["width"] == 120
     assert meta["height"] == 80
     assert meta["size"] == len(b"png-data")
+    assert meta["visibility_status"] == "visible"
+    assert meta["blank_frame"] is False
+
+
+def test_png_visibility_metadata_detects_blank_and_visible_frames(tmp_path):
+    black = tmp_path / "black.png"
+    visible = tmp_path / "visible.png"
+    black.write_bytes(_rgba_png(4, 4, (0, 0, 0, 255)))
+    visible.write_bytes(_rgba_png(4, 4, (220, 20, 20, 255)))
+
+    black_meta = screenshot_mod._image_visibility_metadata(black)
+    visible_meta = screenshot_mod._image_visibility_metadata(visible)
+
+    assert black_meta["visibility_status"] == "blank_black"
+    assert black_meta["blank_frame"] is True
+    assert visible_meta["visibility_status"] == "visible"
+    assert visible_meta["blank_frame"] is False
+
+
+def test_screen_capture_promotes_blank_frame_diagnostics(monkeypatch, tmp_path):
+    from apps.shell.agent.tools import desktop as desktop_tools
+
+    target = tmp_path / "screen.png"
+
+    monkeypatch.setattr(desktop_tools, "_desktop_platform", lambda: "macos")
+    monkeypatch.setattr(
+        screenshot_mod,
+        "capture_screenshot_to_file",
+        lambda _target: {
+            "path": str(target),
+            "mime_type": "image/png",
+            "format": "png",
+            "width": 120,
+            "height": 80,
+            "size": 10,
+            "visibility_status": "blank_black",
+            "blank_frame": True,
+        },
+    )
+
+    result = desktop_tools.screen_capture(target)
+
+    assert result["ok"] is True
+    assert result["blocking_condition"] == "screen_capture_blank"
+    assert result["data"]["visibility_status"] == "blank_black"
+    assert result["data"]["visibility_limited"] is True
+    assert result["recommended_tools"] == ["desktop.active_window", "desktop.permissions"]
 
 
 def test_png_image_size_reads_header(tmp_path):

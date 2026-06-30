@@ -89,6 +89,9 @@ three. These real desktop flags open or operate macOS apps,
 `--include-provider-workflow` requires live provider smoke credentials, and
 `--include-ui` starts Vite/Electron UI smokes. A default run can pass selected
 source demos while still reporting `complete=false` until opt-in flows pass.
+When the host can capture only a blank/black screen, `screen.capture` records
+`visibility_status=blank_black` and `blocking_condition=screen_capture_blank`,
+so release evidence does not treat an unobservable desktop as actionable UI.
 The UI opt-in flows write per-flow JSON reports for Agent Studio Run Detail
 replay and Workflow save/run replay, so release blockers retain the UI smoke
 `stage`, `mode`, and boolean checks instead of only the shell exit code.

@@ -12,6 +12,7 @@ import platform
 import subprocess
 import sys
 import tempfile
+import zlib
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -112,6 +113,7 @@ def capture_screenshot_to_file(target_path: Path) -> dict[str, object]:
         "width": width,
         "height": height,
         "size": size,
+        **_image_visibility_metadata(target),
     }
 
 
@@ -162,6 +164,189 @@ def _png_image_size(path: Path) -> tuple[int, int]:
     width = int.from_bytes(header[16:20], "big")
     height = int.from_bytes(header[20:24], "big")
     return (width, height) if width > 0 and height > 0 else (0, 0)
+
+
+def _image_visibility_metadata(path: Path) -> dict[str, object]:
+    png_metadata = _png_visibility_metadata(path)
+    if png_metadata:
+        return png_metadata
+    try:
+        from PIL import Image
+
+        with Image.open(path) as image:
+            sample = image.convert("RGB")
+            sample.thumbnail((64, 64))
+            pixels = list(sample.getdata())
+    except Exception:
+        return {}
+    if not pixels:
+        return {}
+    luminances = [
+        (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
+        for red, green, blue in pixels
+    ]
+    mean_luminance = sum(luminances) / len(luminances)
+    non_black_pixels = sum(1 for red, green, blue in pixels if max(red, green, blue) > 8)
+    non_black_ratio = non_black_pixels / len(pixels)
+    max_channel = max(max(red, green, blue) for red, green, blue in pixels)
+    return _visibility_stats(
+        mean_luminance=mean_luminance,
+        non_black_ratio=non_black_ratio,
+        max_channel=max_channel,
+    )
+
+
+def _png_visibility_metadata(path: Path) -> dict[str, object]:
+    try:
+        data = Path(path).read_bytes()
+    except OSError:
+        return {}
+    if data[:8] != b"\x89PNG\r\n\x1a\n":
+        return {}
+    width = 0
+    height = 0
+    bit_depth = 0
+    color_type = -1
+    idat_parts: list[bytes] = []
+    position = 8
+    while position + 8 <= len(data):
+        length = int.from_bytes(data[position : position + 4], "big")
+        chunk_type = data[position + 4 : position + 8]
+        chunk = data[position + 8 : position + 8 + length]
+        position += 12 + length
+        if chunk_type == b"IHDR" and len(chunk) >= 13:
+            width = int.from_bytes(chunk[0:4], "big")
+            height = int.from_bytes(chunk[4:8], "big")
+            bit_depth = int(chunk[8])
+            color_type = int(chunk[9])
+        elif chunk_type == b"IDAT":
+            idat_parts.append(chunk)
+        elif chunk_type == b"IEND":
+            break
+    if width <= 0 or height <= 0 or bit_depth != 8 or color_type not in {0, 2, 4, 6}:
+        return {}
+    channels_by_type = {0: 1, 2: 3, 4: 2, 6: 4}
+    channels = channels_by_type[color_type]
+    stride = width * channels
+    try:
+        raw = zlib.decompress(b"".join(idat_parts))
+    except Exception:
+        return {}
+    expected_min = height * (stride + 1)
+    if len(raw) < expected_min:
+        return {}
+    previous = bytearray(stride)
+    offset = 0
+    sample_x_step = max(1, width // 128)
+    sample_y_step = max(1, height // 128)
+    total_samples = 0
+    luminance_sum = 0.0
+    non_black_pixels = 0
+    max_channel = 0
+    for y in range(height):
+        filter_type = raw[offset]
+        offset += 1
+        scanline = bytearray(raw[offset : offset + stride])
+        offset += stride
+        _png_unfilter_scanline(scanline, previous, channels, filter_type)
+        if y % sample_y_step == 0:
+            for x in range(0, width, sample_x_step):
+                index = x * channels
+                red, green, blue = _png_rgb_at(scanline, index, color_type)
+                luminance_sum += (0.2126 * red) + (0.7152 * green) + (0.0722 * blue)
+                pixel_max = max(red, green, blue)
+                max_channel = max(max_channel, pixel_max)
+                if pixel_max > 8:
+                    non_black_pixels += 1
+                total_samples += 1
+        previous = scanline
+    if total_samples <= 0:
+        return {}
+    return _visibility_stats(
+        mean_luminance=luminance_sum / total_samples,
+        non_black_ratio=non_black_pixels / total_samples,
+        max_channel=max_channel,
+    )
+
+
+def _png_unfilter_scanline(
+    scanline: bytearray,
+    previous: bytearray,
+    bytes_per_pixel: int,
+    filter_type: int,
+) -> None:
+    if filter_type == 0:
+        return
+    for index, value in enumerate(scanline):
+        left = scanline[index - bytes_per_pixel] if index >= bytes_per_pixel else 0
+        up = previous[index] if index < len(previous) else 0
+        up_left = (
+            previous[index - bytes_per_pixel]
+            if index >= bytes_per_pixel and index - bytes_per_pixel < len(previous)
+            else 0
+        )
+        if filter_type == 1:
+            predictor = left
+        elif filter_type == 2:
+            predictor = up
+        elif filter_type == 3:
+            predictor = (left + up) // 2
+        elif filter_type == 4:
+            predictor = _paeth_predictor(left, up, up_left)
+        else:
+            return
+        scanline[index] = (value + predictor) & 0xFF
+
+
+def _png_rgb_at(scanline: bytearray, index: int, color_type: int) -> tuple[int, int, int]:
+    if color_type == 0:
+        value = scanline[index]
+        return value, value, value
+    if color_type == 4:
+        value = scanline[index]
+        return value, value, value
+    return scanline[index], scanline[index + 1], scanline[index + 2]
+
+
+def _paeth_predictor(left: int, up: int, up_left: int) -> int:
+    estimate = left + up - up_left
+    distance_left = abs(estimate - left)
+    distance_up = abs(estimate - up)
+    distance_up_left = abs(estimate - up_left)
+    if distance_left <= distance_up and distance_left <= distance_up_left:
+        return left
+    if distance_up <= distance_up_left:
+        return up
+    return up_left
+
+
+def _visibility_stats(
+    *,
+    mean_luminance: float,
+    non_black_ratio: float,
+    max_channel: int,
+) -> dict[str, object]:
+    blank_frame = mean_luminance <= 2.0 and max_channel <= 8 and non_black_ratio <= 0.001
+    low_light_frame = (
+        not blank_frame
+        and mean_luminance <= 6.0
+        and max_channel <= 24
+        and non_black_ratio <= 0.02
+    )
+    return {
+        "visibility_status": (
+            "blank_black"
+            if blank_frame
+            else "low_light"
+            if low_light_frame
+            else "visible"
+        ),
+        "blank_frame": blank_frame,
+        "low_light_frame": low_light_frame,
+        "mean_luminance": round(mean_luminance, 2),
+        "non_black_pixel_ratio": round(non_black_ratio, 4),
+        "max_channel": int(max_channel),
+    }
 
 
 def _looks_like_screen_permission_error(output: str) -> bool:

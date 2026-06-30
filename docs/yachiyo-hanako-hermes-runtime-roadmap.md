@@ -787,7 +787,11 @@ The real desktop opt-in can now be collected incrementally with
 `--include-real-desktop-interaction`. The umbrella `--include-real-desktop`
 flag still runs all three, but the granular flags let release evidence preserve
 a passing app-open result even when foreground focus or UI interaction is
-blocked by the host session.
+blocked by the host session. `screen.capture` now samples the captured PNG and
+marks black/blank frames with `visibility_status=blank_black` and
+`blocking_condition=screen_capture_blank`, giving the planner and release gate a
+concrete desktop-observability blocker instead of a misleading successful
+screenshot.
 
 ## Non-Negotiable Guards
 

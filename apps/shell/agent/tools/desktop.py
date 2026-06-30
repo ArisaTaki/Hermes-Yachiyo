@@ -965,7 +965,7 @@ def screen_capture(target_path: Path) -> dict[str, Any]:
         metadata = capture_screenshot_to_file(target_path)
     except Exception as exc:
         return _error("screen.capture", exc)
-    return {
+    payload = {
         "ok": True,
         "action": "screen.capture",
         "summary": (
@@ -976,6 +976,25 @@ def screen_capture(target_path: Path) -> dict[str, Any]:
         "permission_error": False,
         "fallback_used": False,
     }
+    if metadata.get("blank_frame") is True:
+        data = payload["data"] if isinstance(payload["data"], dict) else {}
+        data["visibility_limited"] = True
+        data["blocking_condition"] = "screen_capture_blank"
+        payload.update(
+            {
+                "summary": (
+                    f"{payload['summary']} but the frame is blank/black; "
+                    "foreground desktop interaction is not observable"
+                ),
+                "blocking_condition": "screen_capture_blank",
+                "recommended_tools": ["desktop.active_window", "desktop.permissions"],
+                "recovery_hints": [
+                    "Unlock or wake the active macOS desktop session, then retry screen.capture.",
+                    "If the screen is unlocked, verify the display is not blacked out by remote session state.",
+                ],
+            }
+        )
+    return payload
 
 
 def active_window() -> dict[str, Any]:
