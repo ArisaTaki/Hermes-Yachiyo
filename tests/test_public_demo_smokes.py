@@ -67,6 +67,13 @@ def test_public_demo_smokes_default_runs_source_flows_only(tmp_path, monkeypatch
         "workflow_run",
     ]
     assert len(commands) == 10
+    entrypoint_commands = [
+        command
+        for command in commands
+        if any("smoke_agent_entrypoint_" in part for part in command)
+    ]
+    assert entrypoint_commands
+    assert all("--workdir" not in command for command in entrypoint_commands)
     assert any(action["id"] == "real_desktop_app_open" for action in summary["next_actions"])
     blocker = next(
         item for item in summary["release_blockers"] if item["id"] == "real_desktop_app_open"
@@ -317,6 +324,41 @@ def test_public_demo_smokes_marks_selected_failure_as_release_blocker(
     assert action["reason"] == "desktop_session_locked"
     markdown = demo.render_markdown(summary)
     assert "Blocker: `desktop_session_locked`" in markdown
+
+
+def test_public_demo_smokes_does_not_reuse_stale_report_after_failed_flow(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(demo, "ROOT", tmp_path)
+    stale_report = tmp_path / "tmp" / "demo" / "browser-research-artifact.json"
+    stale_report.parent.mkdir(parents=True, exist_ok=True)
+    stale_report.write_text(
+        json.dumps({"ok": True, "mode": "stale-success"}),
+        encoding="utf-8",
+    )
+
+    def fake_run(command):
+        command = list(command)
+        if "scripts/smoke_browser_planner_artifacts.py" in command:
+            return _fake_completed(command, returncode=1)
+        if "--report-json" in command:
+            report = tmp_path / command[command.index("--report-json") + 1]
+            if not report.is_absolute():
+                report = tmp_path / report
+            report.parent.mkdir(parents=True, exist_ok=True)
+            report.write_text(json.dumps({"ok": True}), encoding="utf-8")
+        return _fake_completed(command)
+
+    monkeypatch.setattr(demo, "_run_command", fake_run)
+
+    summary = demo.run_public_demo_smokes(tmp_dir="tmp/demo")
+
+    flow = next(flow for flow in summary["flows"] if flow["id"] == "browser_research_artifact")
+    assert flow["status"] == "failed"
+    assert flow["evidence_ok"] is False
+    assert flow["evidence_summary"] == {}
+    assert not stale_report.exists()
 
 
 def test_public_demo_smokes_records_ui_evidence_reports(tmp_path, monkeypatch):

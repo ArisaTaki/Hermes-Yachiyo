@@ -77,8 +77,6 @@ def demo_flows(tmp_dir: Path) -> list[DemoFlow]:
             command=(
                 sys.executable,
                 "scripts/smoke_agent_entrypoint_desktop_execution.py",
-                "--workdir",
-                str(tmp_dir / "agent-entrypoint-desktop-workspace"),
                 "--report-json",
                 str(tmp_dir / "agent-entrypoint-desktop-execution.json"),
             ),
@@ -91,8 +89,6 @@ def demo_flows(tmp_dir: Path) -> list[DemoFlow]:
             command=(
                 sys.executable,
                 "scripts/smoke_agent_entrypoint_data_analysis.py",
-                "--workdir",
-                str(tmp_dir / "agent-entrypoint-data-workspace"),
                 "--report-json",
                 str(tmp_dir / "agent-entrypoint-data-analysis.json"),
             ),
@@ -336,6 +332,7 @@ def _flow_result(
     if plan_only:
         return {**base, "status": "planned"}
 
+    _clear_evidence(flow.report_json)
     result = _run_command(command)
     evidence = _load_evidence(flow.report_json) if flow.report_json else {}
     evidence_ok = evidence.get("ok") is True if evidence else result.returncode == 0
@@ -386,6 +383,17 @@ def _load_evidence(path: Path | None) -> dict[str, Any]:
     except (OSError, json.JSONDecodeError):
         return {}
     return data if isinstance(data, dict) else {}
+
+
+def _clear_evidence(path: Path | None) -> None:
+    if path is None:
+        return
+    try:
+        path.unlink()
+    except FileNotFoundError:
+        return
+    except OSError:
+        return
 
 
 def _evidence_summary(evidence: Mapping[str, Any]) -> dict[str, Any]:
