@@ -13307,6 +13307,8 @@ def _app_write_followup_target_hint(text: str) -> dict[str, str]:
     value = _clean_prompt(text)
     if not _looks_like_dynamic_context_transfer(value):
         return {}
+    if _app_capability_discovery_hint(value):
+        return {}
     app_name = _non_notes_dynamic_context_target_app(value)
     if not app_name:
         return {}
@@ -18915,6 +18917,19 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?:(?:an?|any|some|available)\s+)?"
         r"(?:app|application|tool|program)\s+"
         r"(?:that\s+can|to|for)\s+(?P<scoped_capability_en>[^.!?,]{1,60})",
+        r"(?:写进|写入|写到|放进|放到|保存到|导出到|输出到|整理到|总结到|发到)\s*"
+        r"(?:一个|一款|任意|任何|可用)?\s*"
+        r"(?P<target_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
+        r"图片|图像|照片|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
+        r"聊天|通讯|通信|消息|即时通讯|日历|项目管理|任务管理|工单|看板|"
+        r"issue|ticket)"
+        r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
+        r"\b(?:write|save|export|output|put|send|copy|paste)\b.{0,80}?"
+        r"\b(?:to|into|in)\s+(?:(?:an?|any|some|available)\s+)?"
+        r"(?P<target_capability_en>markdown|code|image|photo|document|text|spreadsheet|"
+        r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
+        r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
+        r"(?:app|application|client|tool|program|editor)\b",
         r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
         r"(?:一个|一款|任意|任何|可用)?\s*"
         r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"

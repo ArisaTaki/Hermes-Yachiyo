@@ -2448,6 +2448,91 @@ def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -
         "safe_shortcut_action": "new_document",
     }
 
+    document_prompt = "分析 data/sales.csv 并把图表报告写进任意文档应用"
+    document_decision = RuntimePlanner().decision(
+        document_prompt,
+        allowed_tools=allowed_tools,
+    )
+    assert document_decision.selected_intent.kind == "data_analysis"
+    assert document_decision.selected_intent.inputs == {
+        "data_source_hint": "data/sales.csv",
+        "data_source_kind": "csv",
+        "target_app_capability_hint": {
+            "query": "document",
+            "description": "文档",
+        },
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert [step.step_id for step in document_decision.plan.tool_plan.steps] == [
+        "analyze-data-file",
+        "discover-analysis-target-app",
+        "prepare-analysis-discovered-target-app",
+    ]
+    assert _step_by_id(document_decision, "discover-analysis-target-app").input_preview == {
+        "query": "document",
+        "limit": 20,
+    }
+    assert _step_by_id(
+        document_decision,
+        "prepare-analysis-discovered-target-app",
+    ).input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "document",
+        "target_action": "app_paste",
+        "body_source": "model_generated_content",
+        "action": "new_document",
+    }
+    assert planner_tool_requests(document_prompt, allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "path": "data/sales.csv",
+                "artifact_path": "analysis-report.md",
+                "source_kind": "csv",
+                "requested_outputs": ["chart", "report"],
+                "artifact_manifest": [
+                    {"path": "analysis-report.md", "kind": "markdown"},
+                    {"path": "analysis-chart.png", "kind": "chart"},
+                ],
+                "artifact_paths": ["analysis-report.md", "analysis-chart.png"],
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+            "continue_to_model": True,
+        }
+    ]
+
+    visible_prompt = "分析当前窗口里的表格并把报告写进任意文档应用"
+    visible_decision = RuntimePlanner().decision(
+        visible_prompt,
+        allowed_tools=allowed_tools,
+    )
+    assert visible_decision.selected_intent.kind == "data_analysis"
+    assert visible_decision.selected_intent.inputs["context_source"] == "visible_text"
+    assert visible_decision.selected_intent.inputs["target_app_capability_hint"] == {
+        "query": "document",
+        "description": "文档",
+    }
+    assert [step.step_id for step in visible_decision.plan.tool_plan.steps] == [
+        "read-data-context",
+        "analyze-data-context",
+        "discover-analysis-target-app",
+        "prepare-analysis-discovered-target-app",
+    ]
+    assert planner_tool_requests(visible_prompt, allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+
 
 def test_runtime_planner_routes_web_research_report_to_app_write_target() -> None:
     prompt = "调研 https://example.com 的信息并把报告写进 Notion 新页面"
