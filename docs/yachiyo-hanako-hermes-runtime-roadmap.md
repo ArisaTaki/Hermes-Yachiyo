@@ -351,7 +351,8 @@ discovery smoke, real desktop app open smoke when requested, Electron native
 bridge auth/status smoke when requested,
 planner/runtime tool parity smoke, approval policy gate smoke, approval resume
 timeline smoke, runtime approval resume smoke, Yachiyo route approval smoke,
-and GroupRun timeline smoke. It intentionally skipped opt-in or
+GroupRun timeline smoke, and WorkflowRun timeline smoke. It intentionally
+skipped opt-in or
 artifact-dependent gates: real desktop UI inspection/interaction, real Electron
 focus-app bridge attempts, built artifacts, DMG
 launch/screen/UI/native-file checks, real provider smoke, UI smokes, and manual
@@ -725,13 +726,13 @@ language.
 `scripts/run_public_demo_smokes.py` now provides the maintained public-demo
 evidence entry point. The default run executes safe source-level demonstrations
 for data-analysis artifacts, browser-research planner artifacts, approval
-resume replay, and GroupRun replay, then reports skipped real desktop,
-provider Workflow, and UI demo flows as next actions. Full public demo evidence
-requires the explicit `--include-real-desktop`, `--include-provider-workflow`,
-and `--include-ui` flags because those flows open/operate apps, require live
-credentials, or start Vite/Electron UI smokes. The current default evidence can
-pass with `complete=false`; release parity still requires the opt-in flows to
-pass for the current candidate.
+resume replay, GroupRun replay, and WorkflowRun replay, then reports skipped
+real desktop, provider Workflow, and UI demo flows as next actions. Full public
+demo evidence requires the explicit `--include-real-desktop`,
+`--include-provider-workflow`, and `--include-ui` flags because those flows
+open/operate apps, require live credentials, or start Vite/Electron UI smokes.
+The current default evidence can pass with `complete=false`; release parity
+still requires the opt-in flows to pass for the current candidate.
 
 ## Non-Negotiable Guards
 

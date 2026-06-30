@@ -83,6 +83,18 @@ def demo_flows(tmp_dir: Path) -> list[DemoFlow]:
             report_json=tmp_dir / "group-run.json",
         ),
         DemoFlow(
+            id="workflow_run",
+            label="WorkflowRun public snapshot and replay",
+            category="source",
+            command=(
+                sys.executable,
+                "scripts/smoke_workflow_run_timeline.py",
+                "--report-json",
+                str(tmp_dir / "workflow-run.json"),
+            ),
+            report_json=tmp_dir / "workflow-run.json",
+        ),
+        DemoFlow(
             id="real_desktop_app_open",
             label="Arbitrary installed app discovery and open",
             category="real_desktop",

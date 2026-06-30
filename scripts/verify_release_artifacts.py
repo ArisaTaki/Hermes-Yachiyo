@@ -175,6 +175,11 @@ USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
         "public release readiness guide must document the public demo smoke runner",
     ),
     (
+        Path("docs/public-release-readiness.md"),
+        "WorkflowRun replay",
+        "public release readiness guide must document WorkflowRun public demo evidence",
+    ),
+    (
         Path("CONTRIBUTING.md"),
         "Non-Negotiable Product Boundaries",
         "contribution guide must document non-negotiable product boundaries",

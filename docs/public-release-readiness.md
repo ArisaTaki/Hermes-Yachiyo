@@ -54,7 +54,7 @@ evidence for these flows:
 | Browser research | `browser_planner_artifact_smoke` evidence. |
 | Approval resume | `approval_resume_timeline_smoke`, `runtime_approval_resume_smoke`, and route approval evidence. |
 | GroupRun | `group_run_timeline_smoke` and Agent Studio GroupRun replay evidence. |
-| Workflow | native Workflow full-chain provider smoke and Workflow UI smoke evidence. |
+| Workflow | `workflow_run_timeline_smoke`, native Workflow full-chain provider smoke, and Workflow UI smoke evidence. |
 | Studio replay | Run Detail / Agent Studio UI smoke plus RunEvent replay evidence. |
 | Diagnostics export | `collect_release_diagnostics.py` bundle manifest and `release-smoke` diagnostics item. |
 
@@ -67,8 +67,9 @@ python scripts/run_public_demo_smokes.py \
 ```
 
 By default it runs only safe source-level demos: data analysis artifact,
-browser research artifact planning, approval resume, and GroupRun replay.
-Full Hanako/Hermes-level demo evidence requires explicit opt-in:
+browser research artifact planning, approval resume, GroupRun replay, and
+WorkflowRun replay. Full Hanako/Hermes-level demo evidence requires explicit
+opt-in:
 
 ```bash
 python scripts/run_public_demo_smokes.py \
