@@ -146,7 +146,11 @@ class TaskIntentRouter:
             return _empty_intent("data_analysis", text)
         if _looks_like_current_page_link_artifact_request(text):
             return _empty_intent("data_analysis", text)
-        if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
+        if (
+            _explicit_app_open_request(text)
+            and _app_capability_discovery_hint(text)
+            and not _data_analysis_action_requested(text)
+        ):
             return _empty_intent("data_analysis", text)
         if _app_file_open_discovery_hint(text, metadata) and not _data_analysis_action_requested(text):
             return _empty_intent("data_analysis", text)
@@ -274,6 +278,8 @@ class TaskIntentRouter:
             if communication_target
             else _app_write_followup_target_hint(text)
         )
+        if not app_write_target and not communication_target:
+            app_write_target = _discovered_app_write_followup_target_hint(text)
         if app_write_target:
             inputs.update(app_write_target)
         output_target = _task_output_target_hint(text)
@@ -284,12 +290,22 @@ class TaskIntentRouter:
             *(["desktop.app_control"] if spreadsheet_app_hint else []),
             *(["clipboard.read_write"] if output_target == "clipboard" else []),
         ]
+        app_write_target_capability = isinstance(
+            app_write_target.get("target_app_capability_hint")
+            if isinstance(app_write_target, Mapping)
+            else None,
+            Mapping,
+        )
         if app_search_result_source:
             preferred_capabilities.extend(
                 ["desktop.app_discovery", "desktop.app_control", "desktop.ui_operation"]
             )
         if app_write_target:
             preferred_capabilities.append("desktop.app_control")
+            if app_write_target_capability:
+                preferred_capabilities.extend(
+                    ["desktop.app_discovery", "desktop.ui_operation"]
+                )
         if communication_target:
             if str(communication_target.get("app_name") or "").strip() or (
                 str(communication_target.get("channel") or "").strip() == "email"
@@ -322,6 +338,11 @@ class TaskIntentRouter:
                     "file.workspace_read",
                     "terminal.execution",
                     "artifact.write",
+                    *(
+                        ["desktop.app_discovery", "desktop.ui_operation"]
+                        if app_write_target_capability
+                        else []
+                    ),
                     *(["desktop.app_control"] if app_write_target else []),
                 ]
             ),
@@ -8611,6 +8632,12 @@ def _append_data_analysis_followup_steps(
         followup_steps,
         depends_on=depends_on,
     )
+    followup_steps = _append_analysis_discovered_app_write_target_steps(
+        intent,
+        allowed,
+        followup_steps,
+        depends_on=depends_on,
+    )
     return _append_analysis_communication_steps(
         intent,
         allowed,
@@ -8725,6 +8752,83 @@ def _append_analysis_app_write_target_steps(
             reason=(
                 "After the local data analysis artifact is available, focus the requested app "
                 "before inserting the model-generated report."
+            ),
+        ),
+    ]
+
+
+def _append_analysis_discovered_app_write_target_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    depends_on: str,
+) -> list[ToolPlanStepSnapshot]:
+    target_capability = intent.inputs.get("target_app_capability_hint")
+    target_action = str(intent.inputs.get("target_action_hint") or "").strip()
+    if not isinstance(target_capability, Mapping) or target_action != "app_paste":
+        return steps
+    query = str(target_capability.get("query") or "").strip()
+    if not query:
+        return steps
+    container_action = str(
+        intent.inputs.get("target_container_action_hint") or ""
+    ).strip()
+    safe_shortcut = {"action": container_action} if container_action else None
+    selected_app_tool = _selected_discovered_app_tool(
+        allowed,
+        safe_shortcut=safe_shortcut,
+    )
+    if not selected_app_tool:
+        return steps
+    selected_app_input = {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": query,
+        "target_action": target_action,
+        "body_source": "model_generated_content",
+        **_selected_discovered_app_operation_preview(
+            selected_app_tool,
+            safe_shortcut=safe_shortcut,
+        ),
+    }
+    selected_app_capability = (
+        "desktop.app_control"
+        if selected_app_tool in {"app.open", "desktop.open_app"}
+        else "desktop.ui_operation"
+    )
+    selected_app_action = (
+        "safe_shortcut"
+        if selected_app_tool == "app.open_and_safe_shortcut"
+        else "open_app"
+    )
+    return [
+        *steps,
+        _step(
+            intent,
+            "discover-analysis-target-app",
+            "Discover analysis target app",
+            "desktop.app_discovery",
+            _first_allowed(("desktop.list_apps",), allowed),
+            input_preview={"query": query, "limit": 20},
+            depends_on=[depends_on],
+            reason=(
+                "Discover an installed app by capability before writing the generated "
+                "analysis result into it."
+            ),
+        ),
+        _step(
+            intent,
+            "prepare-analysis-discovered-target-app",
+            "Prepare discovered analysis target app",
+            selected_app_capability,
+            selected_app_tool,
+            input_preview=selected_app_input,
+            depends_on=["discover-analysis-target-app"],
+            action=selected_app_action,
+            reason=(
+                "After desktop.list_apps returns candidates, the model selects the best "
+                "matching app and prepares it for the generated analysis report."
             ),
         ),
     ]
@@ -13069,6 +13173,58 @@ def _app_write_followup_target_hint(text: str) -> dict[str, str]:
     container_action = _dynamic_context_target_container_action_hint(value)
     return {
         "target_app_hint": app_name,
+        "target_action_hint": "app_paste",
+        **(
+            {"target_container_action_hint": container_action}
+            if container_action
+            else {}
+        ),
+    }
+
+
+def _discovered_app_write_followup_target_hint(text: str) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    if not _data_analysis_action_requested(value):
+        return {}
+    if not (
+        _looks_like_dynamic_context_transfer(value)
+        or _contains_any(
+            value,
+            (
+                "报告",
+                "报表",
+                "文档",
+                "文件",
+                "markdown",
+                "Markdown",
+                "report",
+                "document",
+                "file",
+            ),
+        )
+    ):
+        return {}
+    app_capability = _app_capability_discovery_hint(value)
+    if not app_capability:
+        return {}
+    container_action = _dynamic_context_target_container_action_hint(value)
+    if not container_action and _contains_any(
+        value,
+        (
+            "报告",
+            "报表",
+            "文档",
+            "文件",
+            "markdown",
+            "Markdown",
+            "report",
+            "document",
+            "file",
+        ),
+    ):
+        container_action = "new_document"
+    return {
+        "target_app_capability_hint": app_capability,
         "target_action_hint": "app_paste",
         **(
             {"target_container_action_hint": container_action}

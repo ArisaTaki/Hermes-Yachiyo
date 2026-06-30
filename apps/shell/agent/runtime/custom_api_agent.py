@@ -3792,6 +3792,7 @@ def _model_followup_desktop_discovered_app_target_payload(
     recommended_tools = [
         tool
         for tool in (
+            "desktop.list_apps",
             "app.open_and_safe_shortcut",
             "app.focus_and_safe_shortcut",
             "app.open",
@@ -3831,6 +3832,9 @@ def _model_followup_desktop_discovered_app_target_payload(
     if compose_text:
         payload["compose_text"] = compose_text
         payload["body_source"] = str(target.get("body_source") or "explicit_user_text").strip()
+    body_source = str(target.get("body_source") or "").strip()
+    if body_source and "body_source" not in payload:
+        payload["body_source"] = body_source
     communication_compose = _discovered_app_communication_compose_payload(target)
     if communication_compose:
         payload["communication_compose"] = communication_compose
@@ -4026,6 +4030,11 @@ def _auto_discovered_app_followup_requests(
     )
     if observation_request:
         requests.append(observation_request)
+    if (
+        str(target.get("body_source") or "").strip() == "model_generated_content"
+        and requests
+    ):
+        requests[-1]["continue_to_model"] = True
     return requests
 
 
@@ -4626,6 +4635,23 @@ def _model_followup_desktop_discovered_app_instruction(target: Mapping[str, Any]
             f"{target_path!r} with the discovered app using the allowed desktop tools. "
             f"Prefer {tool_text}.{verify_text} If direct open-with-app tooling is unavailable, "
             "explain the missing capability and do not claim the file was opened. "
+        )
+    if str(target.get("body_source") or "").strip() == "model_generated_content":
+        safe_shortcut_action = str(target.get("safe_shortcut_action") or "").strip()
+        container_text = (
+            f" create the requested target container with {safe_shortcut_action!r}, then"
+            if safe_shortcut_action
+            else ""
+        )
+        return (
+            f"The user requested the generated content be written into an app matching "
+            f"{app_query!r}. After deriving the final content, call desktop.list_apps for "
+            f"{app_query!r}, select the best matching app, then use desktop tools to"
+            f"{container_text} insert the generated content. Prefer {tool_text}."
+            f"{verify_text} Do not write the raw observed source when the user asked for "
+            "summary, analysis, report generation, cleanup, translation, or todo conversion. "
+            "If app discovery or text insertion tools are unavailable, explain the missing "
+            "capability instead of claiming the app was updated. "
         )
     compose_text = str(target.get("compose_text") or "").strip()
     if compose_text:

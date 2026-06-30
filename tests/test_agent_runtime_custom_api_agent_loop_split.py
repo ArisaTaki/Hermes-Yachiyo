@@ -2279,6 +2279,76 @@ def test_model_followup_context_instructs_generated_app_write() -> None:
     ) == {}
 
 
+def test_model_followup_context_instructs_generated_discovered_app_write() -> None:
+    payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "data.analyze",
+                "planning_reason": "planner_builtin_data_analysis",
+                "continue_to_model": True,
+            }
+        ],
+        {
+            "intent_kind": "data_analysis",
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "markdown",
+                "app_name_source": "desktop.list_apps",
+                "target_action": "safe_shortcut",
+                "body_source": "model_generated_content",
+                "safe_shortcut_action": "new_document",
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {},
+                },
+            },
+        },
+        allowed_tools=[
+            "data.analyze",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+        timeline=[
+            _timeline(
+                "agent.tool.call",
+                "data.analyze",
+                input_preview={"path": "sales.csv", "source_kind": "csv"},
+                result={
+                    "ok": True,
+                    "path": "sales.csv",
+                    "source_kind": "csv",
+                    "rows": 2,
+                    "columns": ["region", "revenue"],
+                    "artifact_paths": ["analysis-report.md"],
+                    "artifact_manifest": [{"path": "analysis-report.md", "kind": "markdown"}],
+                },
+            )
+        ],
+    )
+    message = custom_api_agent_module._model_followup_context_message(payload)
+
+    assert payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "markdown",
+        "app_name_source": "desktop.list_apps",
+        "target_action": "safe_shortcut",
+        "recommended_tools": [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+        ],
+        "verify_tools": ["desktop.ui_elements"],
+        "safe_shortcut_action": "new_document",
+        "body_source": "model_generated_content",
+    }
+    assert "Data analysis result for sales.csv (csv)." in message
+    assert "call desktop.list_apps for 'markdown'" in message
+    assert "insert the generated content" in message
+    assert "Do not write the raw observed source" in message
+
+
 def test_model_followup_context_instructs_generated_note_write() -> None:
     payload = custom_api_agent_module._model_followup_context_payload(
         [
@@ -13414,6 +13484,76 @@ def test_auto_discovered_app_compose_followup_types_and_verifies() -> None:
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_discovered_app_followup",
+        },
+    ]
+
+
+def test_auto_discovered_app_generated_write_followup_returns_to_model() -> None:
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.list_apps",
+            input_preview={"query": "markdown", "limit": 20},
+            result={
+                "ok": True,
+                "action": "desktop.list_apps",
+                "summary": "Found Obsidian",
+                "data": {
+                    "query": "markdown",
+                    "apps": [
+                        {
+                            "name": "Obsidian",
+                            "path": "/Applications/Obsidian.app",
+                            "match_score": 91,
+                        }
+                    ],
+                },
+            },
+        )
+    ]
+
+    requests = custom_api_agent_module._auto_discovered_app_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "markdown",
+                "target_action": "safe_shortcut",
+                "safe_shortcut_action": "new_document",
+                "body_source": "model_generated_content",
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {},
+                },
+            }
+        },
+        ["app.open_and_safe_shortcut", "desktop.safe_type_text", "desktop.ui_elements"],
+        timeline,
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Obsidian", "action": "new_document"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+            "input_resolution": {
+                "tool": "app.open_and_safe_shortcut",
+                "field": "app_name",
+                "requested_app_name": "markdown",
+                "resolved_app_name": "Obsidian",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/Obsidian.app",
+                "app_resolution_score": "91",
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+            "continue_to_model": True,
         },
     ]
 

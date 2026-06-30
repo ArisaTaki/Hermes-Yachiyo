@@ -74,6 +74,10 @@ def test_discovered_app_followup_rejects_model_required_or_risky_targets() -> No
         _target(compose_text="hello"),
         ["app.open", "desktop.safe_type_text"],
     )
+    assert not discovered_app_followup_target_can_direct_execute(
+        _target(body_source="model_generated_content"),
+        ["app.open", "desktop.safe_type_text"],
+    )
 
 
 def test_planner_discovered_app_followup_requires_list_apps_continuation() -> None:

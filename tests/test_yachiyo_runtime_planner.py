@@ -2334,6 +2334,115 @@ def test_runtime_planner_routes_data_analysis_report_to_app_write_target() -> No
     }
 
 
+def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -> None:
+    prompt = "把 sales.csv 做数据分析，生成图表，然后打开一个能写 markdown 的应用新建报告"
+    allowed_tools = [
+        "data.analyze",
+        "artifact.write",
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs == {
+        "data_source_hint": "sales.csv",
+        "data_source_kind": "csv",
+        "target_app_capability_hint": {
+            "query": "markdown",
+            "description": "markdown",
+        },
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert decision.selected_intent.required_capabilities == [
+        "file.workspace_read",
+        "terminal.execution",
+        "artifact.write",
+        "desktop.app_discovery",
+        "desktop.ui_operation",
+        "desktop.app_control",
+    ]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "analyze-data-file",
+        "discover-analysis-target-app",
+        "prepare-analysis-discovered-target-app",
+    ]
+    assert _step_by_id(decision, "analyze-data-file").input_preview == {
+        "path": "sales.csv",
+        "artifact_path": "analysis-report.md",
+        "source_kind": "csv",
+        "requested_outputs": ["chart", "report"],
+        "artifact_manifest": [
+            {"path": "analysis-report.md", "kind": "markdown"},
+            {"path": "analysis-chart.png", "kind": "chart"},
+        ],
+        "artifact_paths": ["analysis-report.md", "analysis-chart.png"],
+    }
+    assert _step_by_id(decision, "discover-analysis-target-app").input_preview == {
+        "query": "markdown",
+        "limit": 20,
+    }
+    assert _step_by_id(
+        decision,
+        "prepare-analysis-discovered-target-app",
+    ).input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "markdown",
+        "target_action": "app_paste",
+        "body_source": "model_generated_content",
+        "action": "new_document",
+    }
+
+    requests = planner_tool_requests(prompt, allowed_tools)
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "path": "sales.csv",
+                "artifact_path": "analysis-report.md",
+                "source_kind": "csv",
+                "requested_outputs": ["chart", "report"],
+                "artifact_manifest": [
+                    {"path": "analysis-report.md", "kind": "markdown"},
+                    {"path": "analysis-chart.png", "kind": "chart"},
+                ],
+                "artifact_paths": ["analysis-report.md", "analysis-chart.png"],
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+            "continue_to_model": True,
+        }
+    ]
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+    assert payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "markdown",
+        "app_name_source": "desktop.list_apps",
+        "target_action": "safe_shortcut",
+        "body_source": "model_generated_content",
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
+        "capability_description": "markdown",
+        "safe_shortcut_action": "new_document",
+    }
+
+
 def test_runtime_planner_routes_web_research_report_to_app_write_target() -> None:
     prompt = "调研 https://example.com 的信息并把报告写进 Notion 新页面"
     allowed_tools = [

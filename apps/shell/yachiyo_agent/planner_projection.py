@@ -283,6 +283,9 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
     desktop_file_open_target = _desktop_file_open_followup_target(inputs)
     if desktop_file_open_target:
         return desktop_file_open_target
+    discovered_app_write_target = _discovered_app_write_followup_target(inputs)
+    if discovered_app_write_target:
+        return discovered_app_write_target
     desktop_discovered_app_target = _desktop_discovered_app_followup_target(inputs)
     if desktop_discovered_app_target:
         return desktop_discovered_app_target
@@ -436,6 +439,35 @@ def _desktop_file_open_followup_target(inputs: Mapping[str, Any]) -> dict[str, A
         "target_path_source": "workspace.list",
         "file_query": file_query,
     }
+
+
+def _discovered_app_write_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:
+    app_capability = inputs.get("target_app_capability_hint")
+    if not isinstance(app_capability, Mapping):
+        return {}
+    if str(inputs.get("target_action_hint") or "").strip() != "app_paste":
+        return {}
+    query = str(app_capability.get("query") or "").strip()
+    if not query:
+        return {}
+    payload: dict[str, Any] = {
+        "kind": "desktop_discovered_app_action",
+        "app_query": query,
+        "app_name_source": "desktop.list_apps",
+        "target_action": "safe_shortcut",
+        "body_source": "model_generated_content",
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
+    }
+    description = str(app_capability.get("description") or "").strip()
+    if description:
+        payload["capability_description"] = description
+    container_action = str(inputs.get("target_container_action_hint") or "").strip()
+    if container_action:
+        payload["safe_shortcut_action"] = container_action
+    return payload
 
 
 def _desktop_discovered_app_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:

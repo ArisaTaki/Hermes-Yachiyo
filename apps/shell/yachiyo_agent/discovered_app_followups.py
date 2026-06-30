@@ -47,6 +47,8 @@ def discovered_app_followup_target_can_direct_execute(
         return False
     if isinstance(target.get("communication_compose"), Mapping) and not allow_communication_compose:
         return False
+    if str(target.get("body_source") or "").strip() == "model_generated_content":
+        return False
 
     allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
     target_action = str(target.get("target_action") or "").strip()
