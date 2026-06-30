@@ -675,6 +675,7 @@ jobs:
             release/*.md
             release/public-release-gate/*.json
             release/public-release-gate/*.md
+            release/public-release-gate/*.zip
 
       - name: Create or update versioned GitHub release
         env:

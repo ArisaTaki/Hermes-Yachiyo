@@ -7,6 +7,7 @@ import argparse
 import json
 import subprocess
 import sys
+import zipfile
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -59,6 +60,7 @@ def public_release_gate_checks(
                 "tests/test_release_smoke_summary.py",
                 "tests/test_public_demo_smokes.py",
                 "tests/test_refresh_local_rc_signoff.py",
+                "tests/test_release_diagnostics_bundle.py",
             ),
         ),
     ]
@@ -99,6 +101,7 @@ def run_public_release_gate(
     include_release_smoke: bool = True,
     release_smoke_reports: Sequence[Path | str] = (),
     diagnostics_zips: Sequence[Path | str] = (),
+    include_diagnostics_bundle: bool = True,
     include_real_desktop: bool = False,
     include_provider_workflow: bool = False,
     include_ui: bool = False,
@@ -118,6 +121,16 @@ def run_public_release_gate(
         _check_result(check, plan_only=plan_only)
         for check in checks
     ]
+    generated_diagnostics_zips: list[Path] = []
+    if include_diagnostics_bundle and include_public_demo:
+        diagnostics_result = _diagnostics_bundle_check(
+            tmp_dir=resolved_tmp_dir,
+            plan_only=plan_only,
+        )
+        check_results.append(diagnostics_result)
+        if diagnostics_result.get("status") == "passed":
+            output_zip = _resolve_path(Path(str(diagnostics_result.get("output_zip") or "")))
+            generated_diagnostics_zips.append(output_zip)
     failed = [item for item in check_results if item["status"] == "failed"]
     demo_release_blockers = [
         blocker
@@ -129,7 +142,7 @@ def run_public_release_gate(
             tmp_dir=resolved_tmp_dir,
             checks=checks,
             extra_reports=release_smoke_reports,
-            diagnostics_zips=diagnostics_zips,
+            diagnostics_zips=[*generated_diagnostics_zips, *diagnostics_zips],
             plan_only=plan_only,
         )
         if include_release_smoke
@@ -188,6 +201,44 @@ def _check_result(check: GateCheck, *, plan_only: bool) -> dict[str, Any]:
         if payload.get("release_level") != "full_public_demo_ready":
             payload["release_blockers"] = _public_demo_release_blockers(payload)
     return payload
+
+
+def _diagnostics_bundle_check(
+    *,
+    tmp_dir: Path,
+    plan_only: bool,
+) -> dict[str, Any]:
+    output_zip = tmp_dir / "diagnostics.zip"
+    command = [
+        sys.executable,
+        "scripts/collect_release_diagnostics.py",
+        "--label",
+        "public-release-gate",
+        "--include",
+        str(tmp_dir),
+        "--output-zip",
+        str(output_zip),
+    ]
+    base: dict[str, Any] = {
+        "id": "diagnostics_export",
+        "label": "Redacted public release diagnostics bundle",
+        "command": command,
+        "output_zip": _display_path(output_zip),
+    }
+    if plan_only:
+        return {**base, "status": "planned"}
+    result = _run_command(command)
+    manifest = _load_diagnostics_manifest(output_zip)
+    status = "passed" if result.returncode == 0 and manifest.get("ok") is True else "failed"
+    return {
+        **base,
+        "status": status,
+        "returncode": result.returncode,
+        "included_count": int(manifest.get("included_count") or 0),
+        "skipped_count": int(manifest.get("skipped_count") or 0),
+        "stdout_tail": _tail(result.stdout),
+        "stderr_tail": _tail(result.stderr),
+    }
 
 
 def _public_demo_gate_fields(path: Path | None, *, command: Sequence[str]) -> dict[str, Any]:
@@ -419,6 +470,15 @@ def _load_json(path: Path | None) -> dict[str, Any]:
     return data if isinstance(data, dict) else {}
 
 
+def _load_diagnostics_manifest(path: Path) -> dict[str, Any]:
+    try:
+        with zipfile.ZipFile(path) as archive:
+            data = json.loads(archive.read("diagnostics/manifest.json").decode("utf-8"))
+    except Exception:
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
 def _tail(value: str, *, limit: int = 1200) -> str:
     redacted = redact_log_text(value or "")
     if len(redacted) <= limit:
@@ -484,6 +544,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--skip-release-smoke-assessment", action="store_true")
     parser.add_argument("--release-smoke-report", action="append", default=[], type=Path)
     parser.add_argument("--diagnostics-zip", action="append", default=[], type=Path)
+    parser.add_argument("--skip-diagnostics-bundle", action="store_true")
     parser.add_argument("--include-real-desktop", action="store_true")
     parser.add_argument("--include-provider-workflow", action="store_true")
     parser.add_argument("--include-ui", action="store_true")
@@ -499,6 +560,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         include_release_smoke=not args.skip_release_smoke_assessment,
         release_smoke_reports=args.release_smoke_report,
         diagnostics_zips=args.diagnostics_zip,
+        include_diagnostics_bundle=not args.skip_diagnostics_bundle,
         include_real_desktop=bool(args.include_real_desktop),
         include_provider_workflow=bool(args.include_provider_workflow),
         include_ui=bool(args.include_ui),

@@ -782,7 +782,7 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document public release preflight gate",
     ),
     (
-        "release artifact guard、secret redaction、focused release pytest 和安全 public-demo smoke",
+        "release artifact guard、secret redaction、focused release pytest、安全 public-demo smoke 和本轮 gate evidence 的脱敏 diagnostics bundle",
         "release packaging docs must document public release gate coverage",
     ),
     (
@@ -1226,6 +1226,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "release/public-release-gate/*.md",
         "macOS release workflow must upload public release gate nested Markdown evidence",
+    ),
+    (
+        "release/public-release-gate/*.zip",
+        "macOS release workflow must upload public release gate diagnostics bundles",
     ),
     (
         "python scripts/verify_release_candidate.py --require-artifacts --check-dmg-mount",

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import subprocess
 import sys
+import zipfile
 from pathlib import Path
 
 from scripts import run_public_release_gate as gate
@@ -26,10 +27,10 @@ def _write_public_demo_report(command: list[str], *, release_level: str) -> None
         "status": "passed" if release_level == "full_public_demo_ready" else "partial",
         "release_level": release_level,
         "complete": release_level == "full_public_demo_ready",
-        "selected_count": 14 if release_level == "full_public_demo_ready" else 8,
-        "passed_count": 14 if release_level == "full_public_demo_ready" else 8,
-        "required_flow_count": 14,
-        "passed_required_flow_count": 14 if release_level == "full_public_demo_ready" else 8,
+        "selected_count": 16 if release_level == "full_public_demo_ready" else 10,
+        "passed_count": 16 if release_level == "full_public_demo_ready" else 10,
+        "required_flow_count": 16,
+        "passed_required_flow_count": 16 if release_level == "full_public_demo_ready" else 10,
         "missing_required_flow_ids": []
         if release_level == "full_public_demo_ready"
         else ["real_desktop_interaction", "workflow_provider"],
@@ -58,24 +59,25 @@ def _write_release_smoke_report(command: list[str], *, ok: bool) -> None:
     if "scripts/summarize_release_smoke.py" not in command:
         return
     output_json = command[command.index("--output-json") + 1]
+    missing_item_ids = [
+        "packaged_launch",
+        "chat_desktop_task",
+        "approval_card",
+        "agent_studio_run_timeline",
+        "group_run",
+        "workflow",
+        "artifact_readback",
+        "diagnostics_export",
+    ]
+    if "--diagnostics-zip" in command:
+        missing_item_ids.remove("diagnostics_export")
     payload = {
         "ok": ok,
         "status": "passed" if ok else "incomplete",
         "item_count": 9,
-        "passed_count": 9 if ok else 1,
-        "missing_count": 0 if ok else 8,
-        "missing_item_ids": []
-        if ok
-        else [
-            "packaged_launch",
-            "chat_desktop_task",
-            "approval_card",
-            "agent_studio_run_timeline",
-            "group_run",
-            "workflow",
-            "artifact_readback",
-            "diagnostics_export",
-        ],
+        "passed_count": 9 if ok else 9 - len(missing_item_ids),
+        "missing_count": 0 if ok else len(missing_item_ids),
+        "missing_item_ids": [] if ok else missing_item_ids,
         "items": [],
         "next_actions": []
         if ok
@@ -91,6 +93,23 @@ def _write_release_smoke_report(command: list[str], *, ok: bool) -> None:
     output_path.write_text(json.dumps(payload), encoding="utf-8")
 
 
+def _write_diagnostics_bundle(command: list[str]) -> None:
+    if "scripts/collect_release_diagnostics.py" not in command:
+        return
+    output_zip = command[command.index("--output-zip") + 1]
+    output_path = gate._resolve_path(Path(output_zip))
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    manifest = {
+        "ok": True,
+        "included_count": 1,
+        "skipped_count": 0,
+        "redaction": {"applied": True},
+        "included": [{"source": "tmp/gate/public-demo.json"}],
+    }
+    with zipfile.ZipFile(output_path, "w") as archive:
+        archive.writestr("diagnostics/manifest.json", json.dumps(manifest))
+
+
 def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     tmp_path,
     monkeypatch,
@@ -102,6 +121,7 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
         command = list(command)
         commands.append(command)
         _write_public_demo_report(command, release_level="partial_demo_ready")
+        _write_diagnostics_bundle(command)
         _write_release_smoke_report(command, ok=False)
         return _completed(command)
 
@@ -112,7 +132,7 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     assert summary["ok"] is True
     assert summary["release_ready"] is False
     assert summary["status"] == "needs_release_evidence"
-    assert summary["check_count"] == 4
+    assert summary["check_count"] == 5
     assert summary["failed_count"] == 0
     assert [command[:2] for command in commands[:2]] == [
         [sys.executable, "scripts/verify_release_artifacts.py"],
@@ -126,6 +146,19 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     assert public_demo_command[public_demo_command.index("--tmp-dir") + 1] == str(
         tmp_path / "tmp" / "gate"
     )
+    diagnostics_command = next(
+        command for command in commands if "scripts/collect_release_diagnostics.py" in command
+    )
+    assert diagnostics_command[diagnostics_command.index("--include") + 1] == str(
+        tmp_path / "tmp" / "gate"
+    )
+    assert diagnostics_command[diagnostics_command.index("--output-zip") + 1] == str(
+        tmp_path / "tmp" / "gate" / "diagnostics.zip"
+    )
+    release_smoke_command = next(
+        command for command in commands if "scripts/summarize_release_smoke.py" in command
+    )
+    assert str(tmp_path / "tmp" / "gate" / "diagnostics.zip") in release_smoke_command
     public_demo = next(item for item in summary["checks"] if item["id"] == "public_demo")
     assert public_demo["release_level"] == "partial_demo_ready"
     assert public_demo["missing_required_flow_ids"] == [
@@ -136,6 +169,7 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     assert action["command"] == "python scripts/run_public_demo_smokes.py --full-demo"
     assert summary["release_smoke"]["status"] == "incomplete"
     assert "packaged_launch" in summary["release_smoke"]["missing_item_ids"]
+    assert "diagnostics_export" not in summary["release_smoke"]["missing_item_ids"]
     assert any(action["id"] == "packaged_launch" for action in summary["next_actions"])
 
 
@@ -151,6 +185,7 @@ def test_public_release_gate_strict_mode_fails_until_release_ready(
     def fake_run(command):
         command = list(command)
         _write_public_demo_report(command, release_level="partial_demo_ready")
+        _write_diagnostics_bundle(command)
         _write_release_smoke_report(command, ok=False)
         return _completed(command)
 
@@ -189,6 +224,7 @@ def test_public_release_gate_passes_when_full_release_smoke_is_present(
     def fake_run(command):
         command = list(command)
         _write_public_demo_report(command, release_level="full_public_demo_ready")
+        _write_diagnostics_bundle(command)
         _write_release_smoke_report(command, ok=True)
         return _completed(command)
 
@@ -212,6 +248,7 @@ def test_public_release_gate_reports_failed_checks(tmp_path, monkeypatch):
     def fake_run(command):
         command = list(command)
         _write_public_demo_report(command, release_level="full_public_demo_ready")
+        _write_diagnostics_bundle(command)
         _write_release_smoke_report(command, ok=True)
         return _completed(
             command,

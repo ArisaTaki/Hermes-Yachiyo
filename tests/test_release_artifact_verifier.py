@@ -1909,6 +1909,7 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     assert "macOS release workflow must archive a public release gate Markdown report" in messages
     assert "macOS release workflow must upload public release gate nested JSON evidence" in messages
     assert "macOS release workflow must upload public release gate nested Markdown evidence" in messages
+    assert "macOS release workflow must upload public release gate diagnostics bundles" in messages
     assert (
         "macOS release workflow must run public release preflight after Python dependencies before smoke tests"
         in messages

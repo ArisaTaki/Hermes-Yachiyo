@@ -115,7 +115,7 @@ python scripts/app_version.py check
 python scripts/build_release_candidate_artifacts.py --channel experimental --repository kuguya-AI-app-develop/oha-yachiyo
 ```
 
-CI 仍直接运行 `python scripts/prepare_app_build_metadata.py`、`python scripts/build_backend.py --clean` 和 `npm --prefix apps/frontend run dist:mac`，因为 workflow 工作区不会把临时 metadata 改动提交回仓库。macOS release workflow 会在 smoke tests 前运行 `python scripts/run_public_release_gate.py`，并上传 `release/public-release-gate.json`、`release/public-release-gate.md` 与 `release/public-release-gate/*.json` / `.md` nested evidence。
+CI 仍直接运行 `python scripts/prepare_app_build_metadata.py`、`python scripts/build_backend.py --clean` 和 `npm --prefix apps/frontend run dist:mac`，因为 workflow 工作区不会把临时 metadata 改动提交回仓库。macOS release workflow 会在 smoke tests 前运行 `python scripts/run_public_release_gate.py`，并上传 `release/public-release-gate.json`、`release/public-release-gate.md` 与 `release/public-release-gate/*.json` / `.md` / `.zip` nested evidence。
 
 在真正刷新本地 RC evidence 前，可以先跑低成本 public-release preflight：
 
@@ -125,7 +125,7 @@ python scripts/run_public_release_gate.py \
   --output-markdown tmp/public-release-gate.md
 ```
 
-该入口会运行 release artifact guard、secret redaction、focused release pytest 和安全 public-demo smoke，并把 public-demo JSON 投影成非阻断的 `tmp/public-release-gate/release-smoke.json` / `.md` 评估。默认模式用于快速发现文档、secret、release-smoke/public-demo 回归；当 public demo 仍是 `partial_demo_ready` 或 9 项 release-smoke 用户路径证据不完整时，报告会显示 `status=needs_release_evidence`、缺失 demo flow、缺失 user path 和下一步命令，但不会因为缺少 opt-in/RC 证据返回失败。已有 RC report 和 diagnostics bundle 可通过重复 `--release-smoke-report` 与 `--diagnostics-zip` 合入同一份 assessment。最终发布前加 `--require-release-ready`，让缺少完整 public-demo release evidence 或完整 9 项 release-smoke evidence 的候选版本直接失败。
+该入口会运行 release artifact guard、secret redaction、focused release pytest、安全 public-demo smoke 和本轮 gate evidence 的脱敏 diagnostics bundle，并把 public-demo JSON 与 diagnostics zip 投影成非阻断的 `tmp/public-release-gate/release-smoke.json` / `.md` 评估。默认模式用于快速发现文档、secret、release-smoke/public-demo/diagnostics 回归；当 public demo 仍是 `partial_demo_ready` 或 9 项 release-smoke 用户路径证据不完整时，报告会显示 `status=needs_release_evidence`、缺失 demo flow、缺失 user path 和下一步命令，但不会因为缺少 opt-in/RC 证据返回失败。已有 RC report 和 diagnostics bundle 可通过重复 `--release-smoke-report` 与 `--diagnostics-zip` 合入同一份 assessment。最终发布前加 `--require-release-ready`，让缺少完整 public-demo release evidence 或完整 9 项 release-smoke evidence 的候选版本直接失败。
 
 如果要一次刷新当前 HEAD 的本地 RC evidence、Gatekeeper readiness diagnostics、Screen Recording attempt、provider-not-applicable 草稿和 final signoff preview，运行：
 
