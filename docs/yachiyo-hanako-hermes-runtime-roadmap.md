@@ -677,6 +677,12 @@ Exit evidence:
   Workflow, permissions, troubleshooting, and safe rollback.
 - Crash/log diagnostics can be collected without exposing secrets.
 
+Current progress: `scripts/collect_release_diagnostics.py` creates a redacted
+zip from RC verification reports, signoff drafts, readiness diagnostics, and
+optional app logs or crash files. The bundle includes `diagnostics/manifest.json`
+with included/skipped files and fails closed by skipping files that are binary,
+too large, unreadable, or still secret-like after redaction.
+
 ## Phase 12 - Public Project Release
 
 Make Oha-Yachiyo publishable as a complete project rather than a private

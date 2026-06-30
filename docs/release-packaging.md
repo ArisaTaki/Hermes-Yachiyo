@@ -318,6 +318,18 @@ python scripts/summarize_release_readiness.py \
 
 该摘要基于同一份 Native Agent capability matrix，保留失败 smoke 的 `error`、`blocking_condition(s)`、`missing_permissions`、`recovery_hints` 和可重试 `recovery_actions`，并把 provider smoke 缺失时需要配置的 `OHA_YACHIYO_SMOKE_*` 变量列为变量名而不是值。它适合附在 release issue、签核记录或用户支持诊断里；如果矩阵仍未完整通过，命令会返回非零退出码，避免把 `desktop_session_locked`、Screen Recording/Accessibility 缺口或真实 provider evidence 缺口误写成已发布能力。
 
+需要把当前 RC/signoff/readiness evidence 和现场日志打包给维护者排障时，使用脱敏诊断包命令：
+
+```bash
+SHORT_COMMIT="$(git rev-parse --short=8 HEAD)"
+python scripts/collect_release_diagnostics.py \
+  --label "$SHORT_COMMIT" \
+  --include-app-logs \
+  --output-zip "tmp/oha-yachiyo-diagnostics-${SHORT_COMMIT}.zip"
+```
+
+该命令默认收集 `tmp/rc-verification-<short-commit>-*.json/.md`、`tmp/rc-signoff-<short-commit>-*.json/.md`、同 label 的外部集成/Parity 摘要，并可通过重复 `--include <file-or-dir>` 追加崩溃日志或手工 evidence。进入 zip 前，JSON 会按结构递归脱敏，日志/Markdown 会走同一套 `packages.security` 文本脱敏；二进制、超大文件、无法读取或脱敏后仍命中 secret pattern 的文件会被跳过并记录到 `diagnostics/manifest.json`。该支持包只用于排障和签核沟通，不替代 `verify_release_candidate.py --require-manual-checks-complete` 最终 gate。
+
 使用一次性临时 provider key 做本地验收时，优先用安全 prompt wrapper，避免把 key 放进 shell history 或进程参数：
 
 ```bash
