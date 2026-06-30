@@ -1573,6 +1573,12 @@ def _looks_like_ui_inspection_request(value: str, lowered: str) -> bool:
             r"(?:button|control|ui element|text field)\b",
             lowered,
         )
+        or re.search(
+            r"(?:控件|按钮|输入框|文本框|元素|选项|ui|可点击|可操作)"
+            r".{0,12}(?:在哪|在哪里|哪里|位置|坐标)",
+            value,
+            flags=re.IGNORECASE,
+        )
         or re.search(r"\bwhat\s+can\s+i\s+(?:click|press|use)\b", lowered)
     )
 

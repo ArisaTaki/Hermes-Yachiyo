@@ -60,10 +60,72 @@ def planner_execution_tool_requests(
     normalized_requests = [dict(request) for request in requests if isinstance(request, Mapping)]
     if not normalized_requests:
         return []
+    normalized_requests = _expand_inspect_app_execution_requests(normalized_requests, allowed)
     if not _has_discovered_app_foreground_verification_chain(normalized_requests):
         normalized_requests = _collapse_app_foreground_direct_requests(normalized_requests, allowed)
     normalized_requests = _drop_redundant_post_inspect_app_prepare_requests(normalized_requests)
     return _drop_redundant_execution_verification_requests(normalized_requests)
+
+
+def _expand_inspect_app_execution_requests(
+    requests: list[dict[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    expanded: list[dict[str, Any]] = []
+    for index, request in enumerate(requests):
+        tool_name = str(request.get("tool") or "").strip()
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        app_name = str(payload.get("app_name") or "").strip()
+        if tool_name != "desktop.inspect_app" or not app_name or "desktop.ui_elements" not in allowed:
+            expanded.append(request)
+            continue
+        if _has_later_app_ui_approval_request(requests[index + 1 :]):
+            continue
+        focus_tool = _first_allowed(
+            ("app.focus", "desktop.focus_app", "app.open", "desktop.open_app"),
+            allowed,
+        )
+        if not focus_tool:
+            expanded.append(request)
+            continue
+        planning_reason = str(request.get("planning_reason") or "planner_desktop_operation").strip()
+        expanded.append(
+            _request(
+                focus_tool,
+                {"app_name": app_name},
+                planning_reason=planning_reason,
+            )
+        )
+        ui_payload = {
+            key: payload[key]
+            for key in ("role_filter", "limit")
+            if key in payload and payload[key] not in (None, "")
+        }
+        ui_request = _request(
+            "desktop.ui_elements",
+            ui_payload,
+            planning_reason=planning_reason,
+        )
+        if request.get("continue_to_model"):
+            ui_request["continue_to_model"] = True
+        expanded.append(ui_request)
+    return expanded
+
+
+def _has_later_app_ui_approval_request(requests: Iterable[Mapping[str, Any]]) -> bool:
+    return any(
+        str(request.get("tool") or "").strip()
+        in {
+            "app.open_and_click_ui_element",
+            "app.focus_and_click_ui_element",
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_type_into_ui_element",
+            "desktop.click_ui_element",
+            "desktop.type_into_ui_element",
+        }
+        for request in requests
+        if isinstance(request, Mapping)
+    )
 
 
 def planner_orchestration_requests(
@@ -693,13 +755,7 @@ def _keep_post_mutation_verification_request(
     if tool_name in {"desktop.ui_elements", "desktop.read_ui", "desktop.windows", "desktop.list_windows"}:
         return True
     if tool_name in {"desktop.active_window", "desktop.running_apps"}:
-        return previous_mutation_tool.startswith("app.") or previous_mutation_tool in {
-            "desktop.hide_app",
-            "desktop.show_all_apps",
-            "desktop.minimize_window",
-            "desktop.close_window",
-            "desktop.quit_app",
-        }
+        return False
     if tool_name == "screen.capture":
         payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
         return bool(str(payload.get("reason") or "").strip())
@@ -859,7 +915,7 @@ def _desktop_observation_step_needs_model_followup(
         inputs.get("control_presence_inspection_hint"),
         Mapping,
     ):
-        return True
+        return _control_presence_prompt_needs_model_followup(prompt)
     if (
         step_id == "verify-desktop-result"
         and isinstance(inputs, Mapping)
@@ -873,6 +929,25 @@ def _desktop_observation_step_needs_model_followup(
     if _desktop_verify_step_is_direct_control(step_id, tool_name, inputs):
         return False
     return False
+
+
+def _control_presence_prompt_needs_model_followup(prompt: str) -> bool:
+    value = str(prompt or "").strip()
+    if not value:
+        return False
+    if re.search(
+        r"(?:有哪些|有什么|列出|列一下|显示|查看|看看|看一下|读取|识别|在哪|在哪里|哪里|位置|坐标)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    if re.search(
+        r"\b(?:list|show|read|inspect|where|what|which)\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return True
 
 
 def _coordinate_click_resolution_requests(

@@ -2303,7 +2303,6 @@ def test_tool_broker_app_open_and_safe_type_text_sequences_foreground_action(
     assert list(result["fallback_result"]) == [
         "open",
         "focus",
-        "active_window",
         "safe_type_text",
     ]
 
@@ -2522,7 +2521,6 @@ def test_tool_broker_app_open_and_safe_click_sequences_foreground_action(
     assert list(result["fallback_result"]) == [
         "open",
         "focus",
-        "active_window",
         "safe_click",
     ]
 

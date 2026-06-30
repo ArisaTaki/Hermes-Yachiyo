@@ -9337,7 +9337,7 @@ def test_send_message_focuses_app_prefix_then_reads_ui_elements_without_model(
             "已切换到 Google Chrome。 当前 Google Chrome 界面控件：Button Send（640, 720）。"
         )
         assert run["status"] == "completed"
-        assert event_types.count("agent.desktop.intent_planned") == 3
+        assert event_types.count("agent.desktop.intent_planned") == 2
         assert "agent.tool.call" in event_types
         assert "agent.desktop.intent_completed" in event_types
         assert "agent.desktop.intent_approval_required" not in event_types
@@ -12439,7 +12439,17 @@ def test_agent_mention_session_title_uses_goal_without_mention(tmp_path, monkeyp
                 return agent
             return None
 
-        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+        def create_run_for_runnable_async(
+            self,
+            *,
+            runnable_id="",
+            name="",
+            user_goal="",
+            run_group_id="",
+            upstream="",
+            on_complete=None,
+            **_kwargs,
+        ):
             run = {
                 "run_id": "agent_run_fake",
                 "run_group_id": run_group_id or "run_group_fake",
@@ -12750,7 +12760,17 @@ def test_manual_group_session_keeps_context_for_agent_mentions(tmp_path, monkeyp
                     return agent
             return None
 
-        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+        def create_run_for_runnable_async(
+            self,
+            *,
+            runnable_id="",
+            name="",
+            user_goal="",
+            run_group_id="",
+            upstream="",
+            on_complete=None,
+            **_kwargs,
+        ):
             runnable = self.resolve_runnable(runnable_id=runnable_id, name=name)
             if run_group_id:
                 next_run_group_id = run_group_id
@@ -17728,7 +17748,17 @@ def test_group_direct_agent_completion_keeps_full_goal_in_chat(tmp_path, monkeyp
                 return design
             return None
 
-        def create_run_for_runnable_async(self, *, runnable_id="", name="", user_goal="", run_group_id="", upstream="", on_complete=None):
+        def create_run_for_runnable_async(
+            self,
+            *,
+            runnable_id="",
+            name="",
+            user_goal="",
+            run_group_id="",
+            upstream="",
+            on_complete=None,
+            **_kwargs,
+        ):
             run = {
                 "run_id": "agent_run_long_goal",
                 "run_group_id": run_group_id or "run_group_direct_long_goal",

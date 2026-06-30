@@ -1646,7 +1646,13 @@ class ToolBroker:
 
         action_name, action, *action_options = action_step
         expected_app_name = _foreground_expected_app_name(clean_app_name, step_results)
-        if action_name in {"safe_shortcut", "safe_key", "safe_scroll"}:
+        if action_name in {
+            "safe_shortcut",
+            "safe_key",
+            "safe_scroll",
+            "safe_type_text",
+            "safe_click",
+        }:
             action_result = action(expected_app_name) if action_options else action()
             action_data = action_result.get("data") if isinstance(action_result.get("data"), dict) else {}
             data = dict(action_data)

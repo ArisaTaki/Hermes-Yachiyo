@@ -5884,11 +5884,11 @@ _DESKTOP_OPERATION_TOOL_ALIASES = {
 
 def _first_allowed(tools: Iterable[str], allowed: set[str] | None) -> str | None:
     for tool in tools:
+        if allowed is None or tool in allowed:
+            return tool
         alias = _DESKTOP_OPERATION_TOOL_ALIASES.get(tool)
         if allowed is not None and alias in allowed:
             return alias
-        if allowed is None or tool in allowed:
-            return tool
     return None
 
 
