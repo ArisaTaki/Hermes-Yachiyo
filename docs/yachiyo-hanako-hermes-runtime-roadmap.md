@@ -589,6 +589,14 @@ generic music-app tools are allowed, clear Apple Music playback requests select
 `media.music_app_open_and_play` with `app_name=Music`; Apple Music-specific
 tools remain available only as compatibility fallbacks.
 
+Generic browser requests now stay discovery-led instead of being silently
+canonicalized to Google Chrome. Prompts such as "打开默认浏览器" and "默认浏览器有
+哪些按钮" produce `desktop.list_apps` with `query=browser` and
+`continue_to_model=true`, while explicit Chrome requests still resolve to the
+Chrome app alias. This keeps default/any-browser behavior aligned with the
+Hanako/Hermes-style "discover first, then select" chain without deleting the
+legacy Chrome compatibility alias yet.
+
 ## Phase 11 - Release Productization
 
 Turn the runtime migration into a product that can be installed and diagnosed

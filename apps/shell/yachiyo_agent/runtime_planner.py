@@ -657,6 +657,18 @@ class TaskIntentRouter:
             and _contains_any(app_name_hint, ("搜索", "查找", "检索", "search", "find", "look up"))
         ):
             app_name_hint = direct_app_name_hint
+        generic_browser_discovery = False
+        if desktop_discovery is None and (
+            _is_generic_browser_app_label(app_name_hint)
+            or _generic_browser_app_target_requested(text)
+        ):
+            desktop_discovery = {
+                "action": "discover_apps",
+                "query": "browser",
+            }
+            app_name_hint = ""
+            app_management = None
+            generic_browser_discovery = True
         if not app_type_scope and _target_first_foreground_type_hint(text):
             app_name_hint = ""
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
@@ -858,6 +870,8 @@ class TaskIntentRouter:
             inputs["hotkey_hint"] = hotkey
         if desktop_discovery is not None:
             inputs["desktop_discovery_hint"] = desktop_discovery
+        if generic_browser_discovery:
+            inputs["generic_browser_discovery_hint"] = {"query": "browser"}
         if app_capability:
             inputs["app_capability_hint"] = app_capability
         finder_operation_mode = str(finder_special_location.get("mode") or "").strip()
@@ -12587,6 +12601,30 @@ def _is_generic_browser_app_label(app_name: str) -> bool:
     }
 
 
+def _generic_browser_app_target_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if _explicit_browser_url_hint(value) or _known_web_destination_request_url_hint(value):
+        return False
+    if _known_web_destination_search_hint(value):
+        return False
+    if _browser_internal_surface_kind(value):
+        return False
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|开启|切到|聚焦|检查|查看|看看)\s*"
+        r"(?:默认|任意|任何)?\s*浏览器(?:\s*(?:一下|下|起来|开了吗|打开了吗))?\s*[?？。！!]*$",
+        r"^(?:默认|任意|任何)?\s*浏览器.{0,24}"
+        r"(?:有哪些|有什么|按钮|控件|元素|界面|窗口|开了吗|打开了吗|是否打开)",
+        r"\b(?:open|launch|start|focus|inspect|check)\s+(?:the\s+)?"
+        r"(?:(?:default|any)\s+)?browser\b\s*[.!?]*$",
+        r"\b(?:(?:default|any)\s+)?browser\s+"
+        r"(?:buttons?|controls?|elements?|visible|running|open)\b",
+    )
+    return any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in patterns)
+
+
 def _browser_internal_shortcut_action(surface: str) -> str:
     if surface == "history":
         return "show_history"
@@ -16996,6 +17034,13 @@ def _discovered_app_open_requested(intent: TaskIntentSnapshot) -> bool:
     if not text:
         return False
     if isinstance(intent.inputs.get("app_capability_hint"), Mapping) and _explicit_app_open_request(text):
+        return True
+    desktop_discovery = intent.inputs.get("desktop_discovery_hint")
+    if (
+        isinstance(desktop_discovery, Mapping)
+        and str(desktop_discovery.get("action") or "").strip() == "discover_apps"
+        and _explicit_app_open_request(text)
+    ):
         return True
     return bool(
         re.search(

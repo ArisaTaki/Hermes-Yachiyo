@@ -5871,6 +5871,70 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     ]
 
 
+def test_runtime_planner_discovers_generic_browser_before_acting() -> None:
+    open_allowed = ["desktop.list_apps", "app.open", "desktop.active_window"]
+    open_decision = RuntimePlanner().decision("打开默认浏览器", allowed_tools=open_allowed)
+
+    assert open_decision.selected_intent.inputs["app_name_hint"] == ""
+    assert open_decision.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "browser",
+    }
+    assert open_decision.selected_intent.inputs["generic_browser_discovery_hint"] == {
+        "query": "browser",
+    }
+    assert [step.step_id for step in open_decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+    ]
+    assert planner_tool_requests("打开默认浏览器", open_allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "browser", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+    inspect_allowed = ["desktop.list_apps", "app.focus", "desktop.ui_elements"]
+    assert planner_tool_requests("默认浏览器有哪些按钮", inspect_allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "browser", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+    assert planner_tool_requests("打开 Chrome", open_allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Chrome", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Google Chrome"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation() -> None:
     allowed_tools = [
         "desktop.list_apps",
