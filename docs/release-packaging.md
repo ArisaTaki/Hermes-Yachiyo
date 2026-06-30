@@ -305,6 +305,19 @@ python scripts/verify_release_candidate.py --require-artifacts --run-provider-sm
 
 同一份 RC report 还会写入 `native_agent_capability_matrix`，把 source planner/artifact/approval/entrypoint/desktop discovery、真实 macOS app open/UI inspection/interaction、provider text stream、provider tool-call stream、model profile readiness、workspace read、artifact write、multi-tool pipeline、Workflow child Agent artifact、terminal approval resume、main chat model loop、advanced Workflow orchestration、Workflow budget boundary、packaged backend bridge identity 和 packaged app bridge isolation 汇总为 29 项 `passed` / `missing` 能力矩阵。矩阵同时写入 `category_status_counts`、`missing_by_category` 和 `next_actions`，把缺口分成 source、provider、packaged 三类并给出可直接复跑的命令。后续用 `--manual-checks-json` 合并多个 RC report 时，consolidated report、signoff draft、signoff Markdown 和 `--print-manual-checks-status` 都会保留并显示这份矩阵，便于最终签核报告直接展示 Native Agent 覆盖状态。需要从既有 RC report 单独重建矩阵时，可运行 `python scripts/summarize_native_agent_capabilities.py tmp/rc-verification-source-capabilities.json tmp/rc-verification-provider-smoke.json tmp/rc-verification-dmg-app.json --output-json tmp/native-agent-capability-matrix.json`；该命令会按 capability id 合并多份 report，优先保留通过项，也可以直接传入已经包含 `native_agent_capability_matrix` 的综合 RC report，避免已合并 evidence 被重新按顶层 smoke section 误判；矩阵未完整通过时仍以非零退出码提醒后续补证。
 
+需要给维护者或发布签核人一份更短的“为什么还没到 release parity”诊断摘要时，运行：
+
+```bash
+python scripts/summarize_release_readiness.py \
+  tmp/rc-verification-source-capabilities.json \
+  tmp/rc-verification-provider-smoke.json \
+  tmp/rc-verification-dmg-app.json \
+  --output-json tmp/release-readiness-diagnostics.json \
+  --output-markdown tmp/release-readiness-diagnostics.md
+```
+
+该摘要基于同一份 Native Agent capability matrix，保留失败 smoke 的 `error`、`blocking_condition(s)`、`missing_permissions`、`recovery_hints` 和可重试 `recovery_actions`，并把 provider smoke 缺失时需要配置的 `OHA_YACHIYO_SMOKE_*` 变量列为变量名而不是值。它适合附在 release issue、签核记录或用户支持诊断里；如果矩阵仍未完整通过，命令会返回非零退出码，避免把 `desktop_session_locked`、Screen Recording/Accessibility 缺口或真实 provider evidence 缺口误写成已发布能力。
+
 使用一次性临时 provider key 做本地验收时，优先用安全 prompt wrapper，避免把 key 放进 shell history 或进程参数：
 
 ```bash

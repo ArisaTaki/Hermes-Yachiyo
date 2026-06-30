@@ -9,6 +9,8 @@ import sys
 from pathlib import Path
 from typing import Any, Sequence
 
+from packages.security import sanitize_sensitive_value
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -518,6 +520,70 @@ def _section_case_ids(evidence: dict[str, Any]) -> list[str]:
     return case_ids
 
 
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_values: list[Any] = [value]
+    elif isinstance(value, (list, tuple, set)):
+        raw_values = list(value)
+    else:
+        return []
+    values: list[str] = []
+    for item in raw_values:
+        clean = str(item or "").strip()
+        if clean and clean not in values:
+            values.append(clean)
+    return values
+
+
+def _safe_recovery_actions(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    actions: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        action: dict[str, Any] = {}
+        for key in ("label", "tool", "permission_target", "risk_level"):
+            clean = str(item.get(key) or "").strip()
+            if clean:
+                action[key] = clean
+        raw_input = item.get("input")
+        if isinstance(raw_input, dict) and raw_input:
+            action["input"] = sanitize_sensitive_value(
+                raw_input,
+                max_depth=2,
+                text_limit=240,
+                max_items=12,
+            )
+        if action:
+            actions.append(action)
+    return actions
+
+
+def _copy_failure_recovery_metadata(
+    *,
+    summary: dict[str, Any],
+    evidence: dict[str, Any],
+) -> None:
+    for key in ("stage", "error", "blocking_condition"):
+        clean = str(evidence.get(key) or "").strip()
+        if clean:
+            summary[key] = clean
+    for key in (
+        "blocking_conditions",
+        "permission_targets",
+        "missing_permissions",
+        "recovery_hints",
+        "recommended_tools",
+    ):
+        values = _string_list(evidence.get(key))
+        if values:
+            summary[key] = values
+    recovery_actions = _safe_recovery_actions(evidence.get("recovery_actions"))
+    if recovery_actions:
+        summary["recovery_actions"] = recovery_actions
+
+
 def _source_section_summary(report: dict[str, Any], section_name: str) -> dict[str, Any]:
     section = report.get(section_name)
     section = section if isinstance(section, dict) else {}
@@ -540,6 +606,7 @@ def _source_section_summary(report: dict[str, Any], section_name: str) -> dict[s
     tool_chain = evidence.get("tool_chain")
     if isinstance(tool_chain, list):
         summary["tool_chain"] = [str(item) for item in tool_chain if str(item)]
+    _copy_failure_recovery_metadata(summary=summary, evidence=evidence)
     if evidence.get("skipped") is True:
         summary["skipped"] = True
         reason = str(evidence.get("reason") or "").strip()

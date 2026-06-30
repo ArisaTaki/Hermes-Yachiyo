@@ -400,6 +400,55 @@ def test_capability_summary_reports_source_only_partial_matrix():
     assert "--run-provider-smoke" in action_by_id["provider_smoke"]["command"]
 
 
+def test_capability_summary_preserves_runtime_blocker_recovery_metadata():
+    report = {
+        "real_desktop_interaction_smoke": {
+            "status": "failed",
+            "evidence": {
+                "ok": False,
+                "mode": "real_desktop_interaction_smoke",
+                "case_count": 1,
+                "cases": [{"id": "type_click_verify_control"}],
+                "stage": "session_preflight",
+                "error": "desktop_session_locked",
+                "blocking_condition": "desktop_session_locked",
+                "blocking_conditions": ["desktop_session_locked"],
+                "recovery_hints": [
+                    "Unlock the active macOS user session, then retry the foreground desktop action."
+                ],
+                "recommended_tools": ["desktop.active_window"],
+                "recovery_actions": [
+                    {
+                        "label": "Retry foreground check",
+                        "tool": "desktop.active_window",
+                        "input": {
+                            "app_name": "Calculator",
+                            "api_key": "sk-sensitive-value",
+                        },
+                        "permission_target": "desktop_session_unlocked",
+                        "risk_level": "low",
+                    }
+                ],
+                "checks": {"desktop_session_ready": False},
+                "tool_chain": ["desktop.active_window", "desktop.click_ui_element"],
+            },
+        }
+    }
+
+    result = summary.summarize_capabilities(report)
+
+    by_id = {item["id"]: item for item in result["capabilities"]}
+    evidence = by_id["source_real_desktop_interaction"]["evidence_summary"]
+    assert evidence["stage"] == "session_preflight"
+    assert evidence["error"] == "desktop_session_locked"
+    assert evidence["blocking_conditions"] == ["desktop_session_locked"]
+    assert evidence["recommended_tools"] == ["desktop.active_window"]
+    assert evidence["recovery_actions"][0]["tool"] == "desktop.active_window"
+    assert evidence["recovery_actions"][0]["input"]["app_name"] == "Calculator"
+    assert evidence["recovery_actions"][0]["input"]["api_key"] == "[redacted]"
+    assert "sk-sensitive" not in json.dumps(evidence)
+
+
 def test_capability_summary_cli_merges_multiple_reports(tmp_path):
     source_path = tmp_path / "source-rc.json"
     provider_path = tmp_path / "provider-rc.json"
