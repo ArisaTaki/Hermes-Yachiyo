@@ -28,6 +28,7 @@ def test_legacy_studio_agent_run_appends_runtime_planner_events() -> None:
         "source": "yachiyo_studio",
         "client_run_id": "client-agent-run-1",
         "run_group_id": None,
+        "runtime_planner_entrypoint": True,
     }
     events = runtime.events["agent-run-1"]
     assert [event["event_type"] for event in events[:3]] == [
@@ -37,6 +38,34 @@ def test_legacy_studio_agent_run_appends_runtime_planner_events() -> None:
     ]
     assert events[0]["payload"]["intent"]["kind"] == "data_analysis"
     assert events[1]["payload"]["plan"]["tool_plan"]["steps"][0]["tool_name"] == "data.analyze"
+
+
+def test_legacy_studio_agent_run_does_not_duplicate_runtime_planner_events() -> None:
+    runtime = _FakeStudioRunRuntime()
+    runtime.events["agent-run-1"] = [
+        {
+            "event_type": "agent.intent.selected",
+            "payload": {
+                "source": "runtime_planner",
+                "intent": {"kind": "data_analysis"},
+            },
+            "run_id": "agent-run-1",
+        }
+    ]
+
+    run = LegacyStudioPort(runtime).start_agent_run(
+        {
+            "agent_id": "agent-1",
+            "objective": "请分析 data/sales.csv 并输出报告",
+            "client_run_id": "client-agent-run-1",
+        }
+    )
+
+    assert run["run_id"] == "agent-run-1"
+    assert runtime.agent_run_payload["runtime_planner_entrypoint"] is True
+    assert [event["event_type"] for event in runtime.events["agent-run-1"]] == [
+        "agent.intent.selected"
+    ]
 
 
 def test_legacy_studio_workflow_run_appends_runtime_planner_events() -> None:
@@ -270,6 +299,20 @@ class _FakeStudioRunRuntime:
         }
         self.events.setdefault(run_id, []).append(event)
         return event
+
+    def list_run_events(
+        self,
+        run_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        return {
+            "run_id": run_id,
+            "after_sequence": after_sequence,
+            "limit": limit,
+            "events": list(self.events.get(run_id, [])),
+        }
 
 
 class _FakeGroupRuntime:

@@ -18,6 +18,8 @@ if str(PROJECT_ROOT) not in sys.path:
 import apps.shell.agent_runtime as agent_runtime_mod
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
+from apps.shell.yachiyo_agent.legacy_ports import LegacyStudioPort
+from apps.shell.yachiyo_agent.studio_service import AgentStudioService
 
 SAMPLE_CSV = "region,revenue,units\nEast,10,1\nWest,20,2\nEast,30,3\n"
 SAMPLE_PATH = "inputs/sales.csv"
@@ -144,7 +146,7 @@ def _data_analysis_case(
     else:
         agent = service.create_agent(
             {
-                "name": "Data Analysis Agent",
+                "name": f"Data Analysis Agent {entrypoint}",
                 "model_mode": "custom_api",
                 "model_config": {
                     "base_url": "https://api.example.test/v1",
@@ -158,13 +160,23 @@ def _data_analysis_case(
                 "workspace_policy": policy,
             }
         )
-        updated = service.create_agent_run(
-            {
-                "agent_id": agent["agent_id"],
-                "user_goal": PROMPT,
-                "runtime_planner_entrypoint": True,
-            }
-        )
+        if entrypoint == "studio_agent_run":
+            snapshot = AgentStudioService(LegacyStudioPort(service)).start_agent_run(
+                {
+                    "agent_id": agent["agent_id"],
+                    "objective": PROMPT,
+                    "client_run_id": "smoke-studio-agent-data-analysis-run",
+                }
+            )
+            updated = snapshot.model_dump(mode="json")
+        else:
+            updated = service.create_agent_run(
+                {
+                    "agent_id": agent["agent_id"],
+                    "user_goal": PROMPT,
+                    "runtime_planner_entrypoint": True,
+                }
+            )
         run_id = str(updated.get("run_id") or "")
         loop_status = ""
 
@@ -183,10 +195,11 @@ def _data_analysis_case(
     completed_result = _payload(completed_event).get("result")
     completed_result = completed_result if isinstance(completed_result, dict) else {}
     artifacts = updated.get("artifacts")
+    summary_text = str(updated.get("result") or _payload(completed_event).get("summary") or "")
     checks = {
         "run_completed": updated.get("status") == "completed",
         "summary_mentions_data_analysis": f"已分析「{SAMPLE_PATH}」（3 行、3 列）"
-        in str(updated.get("result") or ""),
+        in summary_text,
         "model_not_called": _model_event_free(events),
         "selection_is_data_analysis": _payload(selection_event).get("intent_kind") == "data_analysis",
         "selection_uses_runtime_planner_full_plan": _payload(selection_event).get("selection_reason")
@@ -208,7 +221,7 @@ def _data_analysis_case(
         "run_id": run_id,
         "status": updated.get("status"),
         "loop_status": loop_status,
-        "result": updated.get("result"),
+        "result": summary_text,
         "artifact_paths": _artifact_paths(artifacts),
         "event_types": _event_types(events),
         "selection_event": selection_event,
@@ -247,6 +260,11 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
                 cases = [
                     _data_analysis_case(service, entrypoint="main_chat", workdir=data_workdir),
                     _data_analysis_case(service, entrypoint="agent_run", workdir=data_workdir),
+                    _data_analysis_case(
+                        service,
+                        entrypoint="studio_agent_run",
+                        workdir=data_workdir,
+                    ),
                 ]
         finally:
             service.close()

@@ -834,18 +834,24 @@ class LegacyStudioPort:
         user_goal = str(request.get("objective") or request.get("goal") or "").strip()
         metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
         planner_metadata = _planner_metadata_with_desktop_readiness(metadata)
+        agent_id = request.get("agent_id")
         run = self._runtime.create_agent_run(
             {
-                "agent_id": request.get("agent_id"),
+                "agent_id": agent_id,
                 "user_goal": user_goal,
                 "source": "yachiyo_studio",
                 "client_run_id": request.get("client_run_id"),
                 "run_group_id": request.get("run_group_id"),
+                "runtime_planner_entrypoint": True,
             }
         )
         self._append_planner_run_events(
             _run_id_from_payload(run),
-            runtime_planner_decision(user_goal, metadata=planner_metadata),
+            runtime_planner_decision(
+                user_goal,
+                allowed_tools=_agent_allowed_tools(self._runtime, agent_id),
+                metadata=planner_metadata,
+            ),
         )
         return run
 
@@ -1081,6 +1087,8 @@ class LegacyStudioPort:
         append_run_event = getattr(self._runtime, "append_run_event", None)
         if not run_id or not callable(append_run_event):
             return
+        if _run_has_runtime_planner_events(self._runtime, run_id):
+            return
         for event_type, payload in planner_run_event_payloads(planner_decision):
             try:
                 append_run_event(run_id, event_type, payload)
@@ -1099,6 +1107,60 @@ def _run_id_from_payload(payload: dict[str, Any]) -> str:
         or payload.get("agent_run_id")
         or ""
     ).strip()
+
+
+def _run_has_runtime_planner_events(runtime: Any, run_id: str) -> bool:
+    list_run_events = getattr(runtime, "list_run_events", None)
+    if not callable(list_run_events):
+        return False
+    try:
+        payload = list_run_events(run_id, after_sequence=0, limit=20)
+    except TypeError:
+        try:
+            payload = list_run_events(run_id)
+        except Exception:
+            return False
+    except Exception:
+        return False
+    events = payload.get("events") if isinstance(payload, dict) else payload
+    if not isinstance(events, list):
+        return False
+    return any(
+        isinstance(event, dict)
+        and str(event.get("event_type") or event.get("event") or "").strip()
+        in {"agent.intent.selected", "agent.plan.created", "agent.plan.selection"}
+        and (
+            _event_payload_source(event) == "runtime_planner"
+            or _event_payload_source(event) == ""
+        )
+        for event in events
+    )
+
+
+def _event_payload_source(event: dict[str, Any]) -> str:
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    return str(payload.get("source") or event.get("source") or "").strip()
+
+
+def _agent_allowed_tools(runtime: Any, agent_id: Any) -> list[str] | None:
+    clean_agent_id = str(agent_id or "").strip()
+    if not clean_agent_id:
+        return None
+    get_agent = getattr(runtime, "get_agent", None)
+    if not callable(get_agent):
+        return None
+    try:
+        agent = get_agent(clean_agent_id)
+    except Exception:
+        return None
+    if not isinstance(agent, dict):
+        return None
+    policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
+    allowed = policy.get("allowed_tools")
+    if not isinstance(allowed, list):
+        return None
+    tools = [str(tool or "").strip() for tool in allowed if str(tool or "").strip()]
+    return tools or None
 
 
 def _safe_runtime_planner_tool_requests(
