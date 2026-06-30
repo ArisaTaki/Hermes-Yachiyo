@@ -5705,6 +5705,41 @@ def test_runtime_planner_exposes_desktop_discover_operate_action_layer() -> None
     } <= observed_actions
 
 
+def test_runtime_planner_can_use_generic_desktop_operation_aliases() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge 并点击登录按钮",
+        allowed_tools=[
+            "desktop.list_apps",
+            "desktop.open_app",
+            "desktop.click_ui_element",
+            "desktop.verify",
+        ],
+    )
+    read_ui_decision = RuntimePlanner().decision(
+        "当前界面有哪些按钮",
+        allowed_tools=["desktop.read_ui"],
+    )
+    type_decision = RuntimePlanner().decision(
+        "输入 hello",
+        allowed_tools=["desktop.type", "desktop.verify"],
+    )
+    shortcut_decision = RuntimePlanner().decision(
+        "按 Command+L",
+        allowed_tools=["desktop.shortcut", "desktop.verify"],
+    )
+
+    assert _step_by_id(decision, "open-or-focus-app").tool_name == "desktop.open_app"
+    assert _step_by_id(decision, "open-or-focus-app").action == "open_app"
+    assert _step_by_id(read_ui_decision, "read-foreground-ui").tool_name == "desktop.read_ui"
+    assert _step_by_id(read_ui_decision, "read-foreground-ui").action == "read_ui"
+    assert _step_by_id(decision, "verify-desktop-result").tool_name == "desktop.verify"
+    assert _step_by_id(decision, "verify-desktop-result").action == "verify"
+    assert _step_by_id(type_decision, "operate-foreground-ui").tool_name == "desktop.type"
+    assert _step_by_id(type_decision, "operate-foreground-ui").action == "type"
+    assert _step_by_id(shortcut_decision, "operate-foreground-ui").tool_name == "desktop.shortcut"
+    assert _step_by_id(shortcut_decision, "operate-foreground-ui").action == "shortcut"
+
+
 def test_runtime_planner_discovers_installed_apps_before_opening() -> None:
     decision = RuntimePlanner().decision(
         "打开 SuperData Studio",

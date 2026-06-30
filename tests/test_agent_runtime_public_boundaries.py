@@ -75,3 +75,91 @@ def test_tools_package_exports_broker_policy_and_dispatch_boundaries() -> None:
     assert {"future_task.schedule", "future_task.list"} <= set(FUTURE_TASK_TOOL_NAMES)
     assert PolicyGate.allows_tool("workspace.read", ["workspace.read"]) is True
     assert RuntimePolicyCompiler.default_tool_policy("coding")["approval_required"]["terminal.run"] is True
+
+
+def test_desktop_operation_aliases_dispatch_to_stable_runtime_tools() -> None:
+    class FakeBroker:
+        def __init__(self) -> None:
+            self.calls = []
+
+        def app_open(self, app_name):
+            self.calls.append(("app_open", app_name))
+            return {"ok": True, "action": "app.open"}
+
+        def app_focus(self, app_name):
+            self.calls.append(("app_focus", app_name))
+            return {"ok": True, "action": "app.focus"}
+
+        def desktop_windows(self, app_name):
+            self.calls.append(("desktop_windows", app_name))
+            return {"ok": True, "action": "desktop.windows"}
+
+        def desktop_ui_elements(self, *, role_filter="", limit=80, app_name=""):
+            self.calls.append(("desktop_ui_elements", app_name, role_filter, limit))
+            return {"ok": True, "action": "desktop.ui_elements"}
+
+        def desktop_hotkey(self, key, *, modifiers=None):
+            self.calls.append(("desktop_hotkey", key, modifiers or []))
+            return {"ok": True, "action": "desktop.hotkey"}
+
+        def desktop_type_text(self, text):
+            self.calls.append(("desktop_type_text", text))
+            return {"ok": True, "action": "desktop.type_text"}
+
+        def desktop_inspect_app(
+            self,
+            app_name,
+            *,
+            open_if_needed=True,
+            focus=True,
+            role_filter="",
+            limit=80,
+        ):
+            self.calls.append(
+                (
+                    "desktop_inspect_app",
+                    app_name,
+                    open_if_needed,
+                    focus,
+                    role_filter,
+                    limit,
+                )
+            )
+            return {"ok": True, "action": "desktop.inspect_app"}
+
+        def desktop_active_window(self):
+            self.calls.append(("desktop_active_window",))
+            return {"ok": True, "action": "desktop.active_window"}
+
+    broker = FakeBroker()
+
+    assert dispatch_tool_call(broker, "desktop.open_app", {"app_name": "Music"})["ok"] is True
+    assert dispatch_tool_call(broker, "desktop.focus_app", {"app_name": "Music"})["ok"] is True
+    assert dispatch_tool_call(broker, "desktop.list_windows", {"app_name": "Music"})["ok"] is True
+    assert dispatch_tool_call(
+        broker,
+        "desktop.read_ui",
+        {"app_name": "Music", "role_filter": "button", "limit": 10},
+    )["ok"] is True
+    assert dispatch_tool_call(
+        broker,
+        "desktop.shortcut",
+        {"key": "l", "modifiers": ["command"]},
+    )["ok"] is True
+    assert dispatch_tool_call(broker, "desktop.type", {"text": "hello"})["ok"] is True
+    verify = dispatch_tool_call(
+        broker,
+        "desktop.verify",
+        {"app_name": "Music", "role_filter": "button", "limit": 5},
+    )
+
+    assert verify["action"] == "desktop.verify"
+    assert broker.calls == [
+        ("app_open", "Music"),
+        ("app_focus", "Music"),
+        ("desktop_windows", "Music"),
+        ("desktop_ui_elements", "Music", "button", 10),
+        ("desktop_hotkey", "l", ["command"]),
+        ("desktop_type_text", "hello"),
+        ("desktop_inspect_app", "Music", False, False, "button", 5),
+    ]

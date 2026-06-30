@@ -187,8 +187,51 @@ def _desktop_list_apps(broker: Any, payload: dict[str, Any], _approved: bool) ->
     )
 
 
+def _with_alias_action(result: dict[str, Any], action: str) -> dict[str, Any]:
+    return {**result, "action": action}
+
+
+def _desktop_open_app(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return _with_alias_action(_app_open(broker, payload, _approved), "desktop.open_app")
+
+
+def _desktop_focus_app(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return _with_alias_action(_app_focus(broker, payload, _approved), "desktop.focus_app")
+
+
+def _desktop_verify(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    app_name = str(payload.get("app_name") or "").strip()
+    if app_name:
+        result = broker.desktop_inspect_app(
+            app_name,
+            open_if_needed=False,
+            focus=False,
+            role_filter=str(payload.get("role_filter") or ""),
+            limit=payload.get("limit", 80),
+        )
+        return {
+            **result,
+            "action": "desktop.verify",
+            "summary": result.get("summary") or f"Verified desktop app: {app_name}",
+        }
+    result = broker.desktop_active_window()
+    return {
+        **result,
+        "action": "desktop.verify",
+        "summary": result.get("summary") or "Verified active desktop window",
+    }
+
+
 def _desktop_windows(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.desktop_windows(str(payload.get("app_name") or ""))
+
+
+def _desktop_list_windows(
+    broker: Any,
+    payload: dict[str, Any],
+    _approved: bool,
+) -> dict[str, Any]:
+    return _with_alias_action(_desktop_windows(broker, payload, _approved), "desktop.list_windows")
 
 
 def _desktop_ui_elements(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
@@ -197,6 +240,10 @@ def _desktop_ui_elements(broker: Any, payload: dict[str, Any], _approved: bool) 
         limit=payload.get("limit", 80),
         app_name=str(payload.get("app_name") or ""),
     )
+
+
+def _desktop_read_ui(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return _with_alias_action(_desktop_ui_elements(broker, payload, _approved), "desktop.read_ui")
 
 
 def _desktop_inspect_app(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
@@ -691,6 +738,10 @@ def _desktop_hotkey(broker: Any, payload: dict[str, Any], _approved: bool) -> di
     )
 
 
+def _desktop_shortcut(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return _with_alias_action(_desktop_hotkey(broker, payload, _approved), "desktop.shortcut")
+
+
 def _desktop_submit_foreground(
     broker: Any,
     payload: dict[str, Any],
@@ -713,6 +764,10 @@ def _desktop_type_text(
     _approved: bool,
 ) -> dict[str, Any]:
     return broker.desktop_type_text(str(payload.get("text") or ""))
+
+
+def _desktop_type(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return _with_alias_action(_desktop_type_text(broker, payload, _approved), "desktop.type")
 
 
 def _desktop_safe_type_text(
@@ -859,6 +914,10 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.active_window": _desktop_active_window,
     "desktop.running_apps": _desktop_running_apps,
     "desktop.list_apps": _desktop_list_apps,
+    "desktop.open_app": _desktop_open_app,
+    "desktop.focus_app": _desktop_focus_app,
+    "desktop.list_windows": _desktop_list_windows,
+    "desktop.read_ui": _desktop_read_ui,
     "desktop.windows": _desktop_windows,
     "desktop.ui_elements": _desktop_ui_elements,
     "desktop.inspect_app": _desktop_inspect_app,
@@ -914,6 +973,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.close_window": _desktop_close_window,
     "desktop.quit_app": _desktop_quit_app,
     "desktop.hotkey": _desktop_hotkey,
+    "desktop.shortcut": _desktop_shortcut,
     "desktop.submit_foreground": _desktop_submit_foreground,
     "desktop.search_submit": _desktop_search_submit,
     "desktop.safe_key": _desktop_safe_key,
@@ -921,7 +981,9 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.safe_click": _desktop_safe_click,
     "desktop.safe_scroll": _desktop_safe_scroll,
     "desktop.type_text": _desktop_type_text,
+    "desktop.type": _desktop_type,
     "desktop.click": _desktop_click,
+    "desktop.verify": _desktop_verify,
     "browser.open_url": _browser_open_url,
     "browser.open_url_and_extract_text": _browser_open_url_and_extract_text,
     "browser.open_url_and_screenshot": _browser_open_url_and_screenshot,

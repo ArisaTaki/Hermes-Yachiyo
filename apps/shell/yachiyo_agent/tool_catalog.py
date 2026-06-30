@@ -410,6 +410,18 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "desktop.list_apps": [
             "Discovers installed app bundles without opening them; use before app.open when the exact app name is uncertain.",
         ],
+        "desktop.open_app": [
+            "Generic desktop operation alias for app.open; launch failures are surfaced as tool results.",
+        ],
+        "desktop.focus_app": [
+            "Generic desktop operation alias for app.focus; Automation failures are surfaced as tool results.",
+        ],
+        "desktop.list_windows": [
+            "Generic desktop operation alias for desktop.windows; requires Automation or Accessibility permission.",
+        ],
+        "desktop.read_ui": [
+            "Generic desktop operation alias for desktop.ui_elements; reads foreground or named-app UI controls.",
+        ],
         "desktop.windows": [
             "Requires Automation or Accessibility permission to read desktop window titles.",
         ],
@@ -418,6 +430,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         ],
         "desktop.inspect_app": [
             "Combines app discovery, optional open/focus, windows, and named-app UI inspection into one observable readiness snapshot.",
+        ],
+        "desktop.verify": [
+            "Read-only post-operation verification; with app_name it inspects without opening or focusing the app.",
         ],
         "app.status": [
             "Checks whether a local desktop app is running without opening or focusing it.",
@@ -537,8 +552,14 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "desktop.hotkey": [
             "Requires Accessibility permission and is recorded in the Run Timeline.",
         ],
+        "desktop.shortcut": [
+            "Generic desktop operation alias for desktop.hotkey; requires Accessibility permission and is recorded in the Run Timeline.",
+        ],
         "desktop.submit_foreground": [
             "Always requires approval because it sends, submits, or confirms the current foreground input by pressing Return.",
+        ],
+        "desktop.type": [
+            "Generic desktop operation alias for desktop.type_text; requires Accessibility permission and is recorded in the Run Timeline.",
         ],
         "desktop.type_text": [
             "Requires Accessibility permission and is recorded in the Run Timeline.",

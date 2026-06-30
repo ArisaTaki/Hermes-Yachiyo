@@ -105,7 +105,7 @@ def _fake_app_open(app_name: str) -> dict[str, Any]:
     return {
         "ok": True,
         "action": "app.open",
-        "summary": f"Opened {app_name}",
+        "summary": f"已打开 {app_name}",
         "data": {
             "app_name": str(app_name or "").strip(),
             "running": True,
@@ -227,7 +227,8 @@ def _generic_app_open_case(
     completed_tools = completed_payload.get("tools")
     selection_payload = _payload(selection_event)
     selected_intent_payload = _payload(selected_intent_event)
-    expected_tools = ["desktop.list_apps", "app.open", "desktop.active_window"]
+    expected_plan_tools = ["desktop.list_apps", "desktop.open_app", "desktop.active_window"]
+    expected_execution_tools = ["desktop.list_apps", "desktop.open_app"]
     checks = {
         "run_completed": updated.get("status") == "completed",
         "summary_names_generic_app": "已打开 PixelForge" in str(updated.get("result") or ""),
@@ -240,7 +241,8 @@ def _generic_app_open_case(
         "selection_uses_runtime_planner_full_plan": selection_payload.get("selection_reason")
         == "runtime_planner_full_plan_execution",
         "selection_source_runtime_planner": selection_payload.get("selection_source") == "runtime_planner",
-        "planned_tool_chain": planned_tools == expected_tools,
+        "selection_plan_tool_chain": selection_payload.get("plan_tools") == expected_plan_tools,
+        "planned_tool_chain": planned_tools == expected_execution_tools,
         "planned_discovery_query": _payload(planned_events[0]).get("input_preview")
         == {"query": "PixelForge", "limit": 20}
         if planned_events
@@ -249,10 +251,10 @@ def _generic_app_open_case(
         == {"app_name": "PixelForge"}
         if len(planned_events) > 1
         else False,
-        "tool_call_chain": tool_call_tools == expected_tools,
-        "tool_results_match_chain": tool_result_actions == expected_tools,
+        "tool_call_chain": tool_call_tools == expected_execution_tools,
+        "tool_results_match_chain": tool_result_actions == expected_execution_tools,
         "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
-        "completed_tools_match": completed_tools == expected_tools,
+        "completed_tools_match": completed_tools == expected_execution_tools,
         "completed_summary_names_generic_app": "已打开 PixelForge" in str(
             completed_payload.get("summary") or ""
         ),

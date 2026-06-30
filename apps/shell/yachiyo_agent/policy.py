@@ -32,9 +32,14 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "desktop.active_window",
         "desktop.running_apps",
         "desktop.list_apps",
+        "desktop.open_app",
+        "desktop.focus_app",
+        "desktop.list_windows",
+        "desktop.read_ui",
         "desktop.windows",
         "desktop.ui_elements",
         "desktop.inspect_app",
+        "desktop.verify",
         "app.status",
         "app.open",
         "app.focus",
@@ -94,6 +99,8 @@ MEDIUM_RISK_DESKTOP_TOOLS = frozenset(
         "desktop.close_window",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
+        "desktop.shortcut",
+        "desktop.type",
         "desktop.hotkey",
         "desktop.type_text",
         "desktop.click",
@@ -243,12 +250,12 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "read_active_window": ("desktop.active_window",),
     "read_running_apps": ("desktop.running_apps",),
     "discover_apps": ("desktop.list_apps",),
-    "read_windows": ("desktop.windows",),
-    "read_ui_elements": ("desktop.ui_elements",),
+    "read_windows": ("desktop.list_windows", "desktop.windows"),
+    "read_ui_elements": ("desktop.read_ui", "desktop.ui_elements"),
     "inspect_app": ("desktop.inspect_app",),
     "read_app_status": ("app.status",),
-    "open_app": ("app.open",),
-    "focus_app": ("app.focus",),
+    "open_app": ("desktop.open_app", "app.open"),
+    "focus_app": ("desktop.focus_app", "app.focus"),
     "focus_app_window": ("app.focus_window",),
     "show_app": ("app.show",),
     "hide_app": ("app.hide",),
@@ -294,8 +301,8 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     ),
     "foreground_click": ("desktop.click", "browser.click"),
     "foreground_close_window": ("desktop.close_window",),
-    "foreground_type_text": ("desktop.type_text", "browser.type_text"),
-    "foreground_hotkey": ("desktop.hotkey",),
+    "foreground_type_text": ("desktop.type", "desktop.type_text", "browser.type_text"),
+    "foreground_hotkey": ("desktop.shortcut", "desktop.hotkey"),
     "foreground_submit": ("desktop.submit_foreground",),
     "delete_or_overwrite_user_file": ("workspace.write_patch",),
     "delete_user_file": ("workspace.write_patch",),
@@ -424,9 +431,14 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.active_window",
         "desktop.running_apps",
         "desktop.list_apps",
+        "desktop.open_app",
+        "desktop.focus_app",
+        "desktop.list_windows",
+        "desktop.read_ui",
         "desktop.windows",
         "desktop.ui_elements",
         "desktop.inspect_app",
+        "desktop.verify",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
         "app.status",
@@ -482,8 +494,10 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.show_all_apps",
         "desktop.minimize_window",
         "desktop.close_window",
+        "desktop.shortcut",
         "desktop.hotkey",
         "desktop.submit_foreground",
+        "desktop.type",
         "desktop.type_text",
         "desktop.click",
         "browser.open_url",
@@ -499,14 +513,19 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
     "active_window": (
         "desktop.active_window",
         "desktop.running_apps",
+        "desktop.list_windows",
         "desktop.windows",
+        "desktop.read_ui",
         "desktop.ui_elements",
         "desktop.inspect_app",
+        "desktop.verify",
     ),
     "app_control": (
         "app.status",
+        "desktop.open_app",
         "app.open",
         "system.settings_open",
+        "desktop.focus_app",
         "app.focus",
         "app.focus_window",
         "app.show",
@@ -555,8 +574,10 @@ DESKTOP_CAPABILITY_TOOLS: dict[str, tuple[str, ...]] = {
         "desktop.safe_scroll",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
+        "desktop.shortcut",
         "desktop.hotkey",
         "desktop.submit_foreground",
+        "desktop.type",
         "desktop.type_text",
         "desktop.click",
     ),
@@ -945,11 +966,11 @@ def _tool_missing_permissions(
         "foreground_activation",
     )
     foreground_input_missing = _missing_permissions(missing_by_capability, "foreground_input")
-    if tool == "app.open":
+    if tool in {"app.open", "desktop.open_app"}:
         values.extend(value for value in capability_missing if value == "open_command")
     elif tool == "system.settings_open":
         values.extend(value for value in capability_missing if value == "open_command")
-    elif tool == "app.focus":
+    elif tool in {"app.focus", "desktop.focus_app"}:
         values.extend(value for value in app_control_missing if value != "open_command")
         values.extend(foreground_activation_missing)
     elif tool in {"app.focus_window", "app.show"}:
@@ -1036,7 +1057,7 @@ def _tool_blocking_conditions(
         "foreground_activation",
     )
     foreground_input_blocking = _missing_permissions(blocking_by_capability, "foreground_input")
-    if tool in {"app.focus", "app.focus_window", "app.show"}:
+    if tool in {"app.focus", "desktop.focus_app", "app.focus_window", "app.show"}:
         values.extend(foreground_activation_blocking)
     elif tool in {
         "app.open_and_safe_type_text",
@@ -1060,7 +1081,7 @@ def _tool_blocking_conditions(
         values.extend(foreground_activation_blocking)
     elif tool in {"media.music_app_open_and_play", "media.music_app_control"}:
         values.extend(foreground_activation_blocking)
-    elif tool in {"desktop.click", "desktop.type_text"}:
+    elif tool in {"desktop.click", "desktop.type_text", "desktop.type", "desktop.shortcut"}:
         values.extend(foreground_input_blocking)
     else:
         values.extend(capability_blocking)

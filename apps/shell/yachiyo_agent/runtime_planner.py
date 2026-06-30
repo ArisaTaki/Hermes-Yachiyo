@@ -5410,8 +5410,21 @@ def _service_step(
     )
 
 
+_DESKTOP_OPERATION_TOOL_ALIASES = {
+    "app.open": "desktop.open_app",
+    "app.focus": "desktop.focus_app",
+    "desktop.windows": "desktop.list_windows",
+    "desktop.ui_elements": "desktop.read_ui",
+    "desktop.hotkey": "desktop.shortcut",
+    "desktop.type_text": "desktop.type",
+}
+
+
 def _first_allowed(tools: Iterable[str], allowed: set[str] | None) -> str | None:
     for tool in tools:
+        alias = _DESKTOP_OPERATION_TOOL_ALIASES.get(tool)
+        if allowed is not None and alias in allowed:
+            return alias
         if allowed is None or tool in allowed:
             return tool
     return None
@@ -6901,7 +6914,7 @@ def _selected_discovered_app_operation_preview(
 
 
 def _information_capture_context_payload(tool_name: str | None) -> dict[str, Any]:
-    if tool_name == "desktop.ui_elements":
+    if tool_name in {"desktop.ui_elements", "desktop.read_ui"}:
         return {"role_filter": "text", "limit": 80}
     if tool_name == "screen.capture":
         return {"reason": "capture note context"}
@@ -6914,7 +6927,7 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
     if step_key == "inspect-app":
         return "inspect_app"
     if step_key == "open-or-focus-app":
-        return "focus_app" if tool_name == "app.focus" else "open_app"
+        return "focus_app" if tool_name in {"app.focus", "desktop.focus_app"} else "open_app"
     if step_key == "list-app-windows":
         return "list_windows"
     if step_key == "focus-app-window":
@@ -6928,7 +6941,7 @@ def _step_action(step_key: str, capability_id: str, tool_name: str | None) -> st
     if step_key == "manage-foreground":
         return _foreground_management_action(tool_name)
     if step_key == "verify-desktop-result":
-        return "read_ui" if tool_name == "desktop.ui_elements" else "verify"
+        return "read_ui" if tool_name in {"desktop.ui_elements", "desktop.read_ui"} else "verify"
     if step_key.startswith("operate-foreground-ui"):
         return _desktop_operation_action(tool_name)
     if step_key == "submit-foreground-ui":
@@ -7006,6 +7019,7 @@ def _is_context_source_tool(tool_name: str | None) -> bool:
         "browser.current_page",
         "browser.extract_text",
         "desktop.ui_elements",
+        "desktop.read_ui",
         "screen.capture",
     }
 
@@ -7022,7 +7036,7 @@ def _context_source_action(tool_name: str | None) -> str:
         return "read_current_page"
     if clean_tool.startswith("browser."):
         return "extract_text"
-    if clean_tool == "desktop.ui_elements":
+    if clean_tool in {"desktop.ui_elements", "desktop.read_ui"}:
         return "read_ui"
     if clean_tool == "screen.capture":
         return "capture_screen"
@@ -7092,8 +7106,20 @@ def _foreground_management_action(tool_name: str | None) -> str:
 
 def _desktop_verify_tool_candidates(depends_on: list[str]) -> tuple[str, ...]:
     if _desktop_verify_depends_on_ui_operation(depends_on):
-        return ("desktop.ui_elements", "desktop.windows", "desktop.active_window", "screen.capture")
-    return ("desktop.active_window", "desktop.windows", "desktop.ui_elements", "screen.capture")
+        return (
+            "desktop.ui_elements",
+            "desktop.windows",
+            "desktop.active_window",
+            "desktop.verify",
+            "screen.capture",
+        )
+    return (
+        "desktop.active_window",
+        "desktop.windows",
+        "desktop.ui_elements",
+        "desktop.verify",
+        "screen.capture",
+    )
 
 
 def _desktop_verify_reason(depends_on: list[str]) -> str:
@@ -7115,9 +7141,9 @@ def _desktop_verify_input_preview(
     app_name: str,
     operation_preview: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if tool_name == "desktop.windows":
+    if tool_name in {"desktop.windows", "desktop.list_windows", "desktop.verify"}:
         return {"app_name": app_name} if app_name else {}
-    if tool_name != "desktop.ui_elements":
+    if tool_name not in {"desktop.ui_elements", "desktop.read_ui"}:
         return {}
     preview = {
         key: operation_preview[key]
@@ -7172,7 +7198,7 @@ def _media_playback_verify_step(
 
 
 def _media_playback_verify_input_preview(tool_name: str | None) -> dict[str, Any]:
-    if tool_name == "desktop.ui_elements":
+    if tool_name in {"desktop.ui_elements", "desktop.read_ui"}:
         return {"role_filter": "", "limit": 80}
     if tool_name == "screen.capture":
         return {"reason": "verify media playback"}
@@ -7205,12 +7231,18 @@ def _desktop_discovery_action(tool_name: str | None) -> str:
         return "read_running_apps"
     if clean_tool == "desktop.list_apps":
         return "list_apps"
+    if clean_tool == "desktop.open_app":
+        return "open_app"
+    if clean_tool == "desktop.focus_app":
+        return "focus_app"
     if clean_tool == "desktop.inspect_app":
         return "inspect_app"
-    if clean_tool == "desktop.windows":
+    if clean_tool in {"desktop.windows", "desktop.list_windows"}:
         return "list_windows"
-    if clean_tool == "desktop.ui_elements":
+    if clean_tool in {"desktop.ui_elements", "desktop.read_ui"}:
         return "read_ui"
+    if clean_tool == "desktop.verify":
+        return "verify"
     if clean_tool == "screen.capture":
         return "capture_screen"
     return "discover"

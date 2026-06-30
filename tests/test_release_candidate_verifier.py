@@ -1224,7 +1224,7 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
         "app.focus_and_click_ui_element"
     ]
     assert case_by_id["visible_table_analysis"]["request_tools"] == [
-        "desktop.ui_elements"
+        "desktop.read_ui"
     ]
     assert case_by_id["explicit_terminal_command"]["approval_required_tools"] == [
         "terminal.run"

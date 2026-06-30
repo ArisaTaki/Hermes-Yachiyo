@@ -459,7 +459,12 @@ def _has_discovered_app_foreground_verification_chain(
         return False
     has_foreground_operation = False
     for index, request in enumerate(requests[:-1]):
-        if str(request.get("tool") or "").strip() not in {"app.open", "app.focus"}:
+        if str(request.get("tool") or "").strip() not in {
+            "app.open",
+            "app.focus",
+            "desktop.open_app",
+            "desktop.focus_app",
+        }:
             continue
         for later_request in requests[index + 1 :]:
             if str(later_request.get("tool") or "").strip() in _APP_FOREGROUND_DIRECT_OPERATION_SUFFIX:
@@ -490,14 +495,19 @@ _EXECUTION_VERIFICATION_TOOLS = {
     "desktop.active_window",
     "desktop.running_apps",
     "desktop.windows",
+    "desktop.list_windows",
     "desktop.ui_elements",
+    "desktop.read_ui",
     "desktop.inspect_app",
+    "desktop.verify",
     "screen.capture",
 }
 
 _EXECUTION_MUTATION_TOOLS = {
     "app.open",
     "app.focus",
+    "desktop.open_app",
+    "desktop.focus_app",
     "app.focus_window",
     "app.status",
     "app.show",
@@ -525,7 +535,9 @@ _EXECUTION_MUTATION_TOOLS = {
     "desktop.safe_scroll",
     "desktop.safe_click",
     "desktop.safe_type_text",
+    "desktop.shortcut",
     "desktop.hotkey",
+    "desktop.type",
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
     "desktop.submit_foreground",
@@ -581,7 +593,7 @@ def _drop_redundant_post_inspect_app_prepare_requests(
         payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
         app_name = str(payload.get("app_name") or "").strip()
         if (
-            tool_name in {"app.open", "app.focus"}
+            tool_name in {"app.open", "app.focus", "desktop.open_app", "desktop.focus_app"}
             and app_name
             and inspect_app_name
             and app_name == inspect_app_name
@@ -592,7 +604,7 @@ def _drop_redundant_post_inspect_app_prepare_requests(
             focus_requested = payload.get("focus", True) is not False
             open_requested = payload.get("open_if_needed", True) is not False
             inspect_app_name = app_name if focus_requested or open_requested else ""
-        elif tool_name not in {"app.open", "app.focus"}:
+        elif tool_name not in {"app.open", "app.focus", "desktop.open_app", "desktop.focus_app"}:
             inspect_app_name = ""
     return filtered
 
@@ -602,7 +614,7 @@ def _keep_pre_mutation_verification_request(request: dict[str, Any]) -> bool:
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     if tool_name == "desktop.inspect_app":
         return bool(str(payload.get("app_name") or "").strip())
-    if tool_name == "desktop.windows":
+    if tool_name in {"desktop.windows", "desktop.list_windows", "desktop.verify"}:
         return bool(str(payload.get("app_name") or "").strip())
     if tool_name == "screen.capture":
         return bool(str(payload.get("reason") or "").strip())
@@ -614,7 +626,7 @@ def _keep_post_mutation_verification_request(
     previous_mutation_tool: str,
 ) -> bool:
     tool_name = str(request.get("tool") or "").strip()
-    if tool_name in {"desktop.ui_elements", "desktop.windows"}:
+    if tool_name in {"desktop.ui_elements", "desktop.read_ui", "desktop.windows", "desktop.list_windows"}:
         return True
     if tool_name in {"desktop.active_window", "desktop.running_apps"}:
         return previous_mutation_tool.startswith("app.") or previous_mutation_tool in {
@@ -633,13 +645,20 @@ def _keep_post_mutation_verification_request(
 def _later_verification_supersedes(current_tool: str, later_tool: str) -> bool:
     if current_tool == later_tool:
         return False
-    if later_tool == "desktop.inspect_app":
+    if later_tool in {"desktop.inspect_app", "desktop.verify"}:
         return True
-    if current_tool == "screen.capture" and later_tool in {"desktop.ui_elements", "desktop.windows"}:
+    if current_tool == "screen.capture" and later_tool in {
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.windows",
+        "desktop.list_windows",
+    }:
         return True
     if current_tool in {"desktop.running_apps", "desktop.active_window"} and later_tool in {
         "desktop.ui_elements",
+        "desktop.read_ui",
         "desktop.windows",
+        "desktop.list_windows",
     }:
         return True
     return False
@@ -752,7 +771,13 @@ def _desktop_observation_step_needs_model_followup(
         "read-foreground-ui",
         "verify-desktop-result",
         "inspect-app",
-    } and tool_name not in {"screen.capture", "desktop.ui_elements", "desktop.inspect_app"}:
+    } and tool_name not in {
+        "screen.capture",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.inspect_app",
+        "desktop.verify",
+    }:
         return False
     prompt = str(getattr(getattr(decision, "selected_intent", None), "user_goal", "") or "")
     if not prompt:
@@ -805,6 +830,8 @@ def _desktop_verify_step_is_direct_control(
     if step_id != "verify-desktop-result" or tool_name not in {
         "desktop.active_window",
         "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.verify",
     }:
         return False
     if not isinstance(inputs, Mapping):
@@ -891,7 +918,7 @@ def _desktop_discovery_step_needs_model_followup(
 
 
 def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
-    if tool_name.startswith("app."):
+    if tool_name.startswith("app.") or tool_name in {"desktop.open_app", "desktop.focus_app"}:
         return _canonicalize_app_payload(payload)
     if tool_name == "desktop.list_apps":
         query = str(payload.get("query") or "").strip()
@@ -914,7 +941,7 @@ def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[st
     if tool_name == "screen.capture":
         reason = str(payload.get("reason") or "").strip()
         return {"reason": reason} if reason else {}
-    if tool_name == "desktop.ui_elements":
+    if tool_name in {"desktop.ui_elements", "desktop.read_ui"}:
         request_payload = {
             key: payload[key]
             for key in ("app_name", "role_filter", "limit")
@@ -925,9 +952,16 @@ def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[st
                 str(request_payload["app_name"] or "")
             )
         return request_payload
-    if tool_name == "desktop.windows":
+    if tool_name in {"desktop.windows", "desktop.list_windows", "desktop.verify"}:
         app_name = str(payload.get("app_name") or "").strip()
-        return {"app_name": _canonical_app_name(app_name)} if app_name else {}
+        request_payload = {
+            key: payload[key]
+            for key in ("role_filter", "limit")
+            if key in payload and payload[key] not in (None, "")
+        }
+        if app_name:
+            request_payload["app_name"] = _canonical_app_name(app_name)
+        return request_payload
     return payload
 
 
@@ -2101,7 +2135,7 @@ def _context_prefetch_payload(
     if tool_name == "desktop.safe_shortcut":
         action = str(payload.get("action") or "").strip()
         return {"action": action} if action else None
-    if tool_name == "desktop.ui_elements":
+    if tool_name in {"desktop.ui_elements", "desktop.read_ui"}:
         request_payload = {
             key: payload[key]
             for key in ("role_filter", "limit")

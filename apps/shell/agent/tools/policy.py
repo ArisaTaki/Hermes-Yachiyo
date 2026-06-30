@@ -35,6 +35,10 @@ TOOL_FUNCTION_NAMES = {
     "desktop.active_window": "desktop_active_window",
     "desktop.running_apps": "desktop_running_apps",
     "desktop.list_apps": "desktop_list_apps",
+    "desktop.open_app": "desktop_open_app",
+    "desktop.focus_app": "desktop_focus_app",
+    "desktop.list_windows": "desktop_list_windows",
+    "desktop.read_ui": "desktop_read_ui",
     "desktop.windows": "desktop_windows",
     "desktop.ui_elements": "desktop_ui_elements",
     "desktop.inspect_app": "desktop_inspect_app",
@@ -96,8 +100,11 @@ TOOL_FUNCTION_NAMES = {
     "desktop.quit_app": "desktop_quit_app",
     "desktop.hotkey": "desktop_hotkey",
     "desktop.submit_foreground": "desktop_submit_foreground",
+    "desktop.shortcut": "desktop_shortcut",
+    "desktop.type": "desktop_type",
     "desktop.type_text": "desktop_type_text",
     "desktop.click": "desktop_click",
+    "desktop.verify": "desktop_verify",
     "browser.open_url": "browser_open_url",
     "browser.open_url_and_extract_text": "browser_open_url_and_extract_text",
     "browser.open_url_and_screenshot": "browser_open_url_and_screenshot",
@@ -187,9 +194,14 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.active_window",
     "desktop.running_apps",
     "desktop.list_apps",
+    "desktop.open_app",
+    "desktop.focus_app",
+    "desktop.list_windows",
+    "desktop.read_ui",
     "desktop.windows",
     "desktop.ui_elements",
     "desktop.inspect_app",
+    "desktop.verify",
     "app.status",
     "app.open",
     "app.focus",
@@ -248,6 +260,8 @@ MEDIUM_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.quit_app",
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
+    "desktop.shortcut",
+    "desktop.type",
     "desktop.hotkey",
     "desktop.type_text",
     "desktop.click",
@@ -750,8 +764,10 @@ class ToolDescriptor:
                     ) from exc
                 if coordinate < 0 or coordinate > 100000:
                     raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是非负坐标数字")
-        if self.name == "desktop.type_text" and not str(payload.get("text") or "").strip():
-            raise AgentRuntimeError("desktop.type_text 参数 text 必须是非空字符串")
+        if self.name in {"desktop.type_text", "desktop.type"} and not str(
+            payload.get("text") or ""
+        ).strip():
+            raise AgentRuntimeError(f"{self.name} 参数 text 必须是非空字符串")
         if self.name == "desktop.safe_click":
             for key in ("x", "y"):
                 value = payload.get(key)
@@ -793,7 +809,12 @@ class ToolDescriptor:
                     raise AgentRuntimeError("desktop.click 参数 click_count 必须是 1-3 的整数")
                 if click_count < 1 or click_count > 3:
                     raise AgentRuntimeError("desktop.click 参数 click_count 必须是 1-3 的整数")
-        if self.name in {"desktop.hotkey", "app.open_and_hotkey", "app.focus_and_hotkey"}:
+        if self.name in {
+            "desktop.hotkey",
+            "desktop.shortcut",
+            "app.open_and_hotkey",
+            "app.focus_and_hotkey",
+        }:
             if not str(payload.get("key") or "").strip():
                 raise AgentRuntimeError(f"{self.name} 参数 key 必须是非空字符串")
             modifiers = payload.get("modifiers", [])
@@ -1272,6 +1293,61 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
     ),
+    "desktop.open_app": ToolDescriptor(
+        name="desktop.open_app",
+        description=(
+            "Open a local desktop application by user-facing display name. This is the "
+            "generic desktop operation alias for app.open."
+        ),
+        properties={"app_name": {"type": "string", "description": "Application name."}},
+        required=("app_name",),
+    ),
+    "desktop.focus_app": ToolDescriptor(
+        name="desktop.focus_app",
+        description=(
+            "Bring a local desktop application to the foreground. This is the generic "
+            "desktop operation alias for app.focus."
+        ),
+        properties={"app_name": {"type": "string", "description": "Application name."}},
+        required=("app_name",),
+    ),
+    "desktop.list_windows": ToolDescriptor(
+        name="desktop.list_windows",
+        description=(
+            "Read open desktop window titles, optionally filtered to one app. This is "
+            "the generic desktop operation alias for desktop.windows."
+        ),
+        properties={
+            "app_name": {
+                "type": "string",
+                "description": "Optional application name to filter windows.",
+            }
+        },
+    ),
+    "desktop.read_ui": ToolDescriptor(
+        name="desktop.read_ui",
+        description=(
+            "Read visible Accessibility UI elements from the current foreground window "
+            "or a named running app. This is the generic desktop operation alias for "
+            "desktop.ui_elements."
+        ),
+        properties={
+            "app_name": {
+                "type": "string",
+                "description": "Optional running application name to inspect instead of the foreground app.",
+            },
+            "role_filter": {
+                "type": "string",
+                "description": "Optional case-insensitive role/name/description filter, such as button or text.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200,
+                "description": "Maximum number of UI elements to return. Defaults to 80.",
+            },
+        },
+    ),
     "desktop.windows": ToolDescriptor(
         name="desktop.windows",
         description=(
@@ -1405,6 +1481,55 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("target", "text"),
+    ),
+    "desktop.shortcut": ToolDescriptor(
+        name="desktop.shortcut",
+        description=(
+            "Send an explicit keyboard shortcut to the foreground app. This is the "
+            "generic desktop operation alias for desktop.hotkey and is recorded in the Run Timeline."
+        ),
+        properties={
+            "key": {"type": "string", "description": "Key name, such as l, return, or escape."},
+            "modifiers": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "Optional modifier keys: command/cmd, shift, option/alt, control/ctrl.",
+            },
+        },
+        required=("key",),
+    ),
+    "desktop.type": ToolDescriptor(
+        name="desktop.type",
+        description=(
+            "Type user-provided text into the foreground app. This is the generic "
+            "desktop operation alias for desktop.type_text and is recorded in the Run Timeline."
+        ),
+        properties={"text": {"type": "string", "description": "User-provided text to type."}},
+        required=("text",),
+    ),
+    "desktop.verify": ToolDescriptor(
+        name="desktop.verify",
+        description=(
+            "Read desktop state after an operation to verify visible progress. With app_name it "
+            "uses the same non-mutating app inspection path as desktop.inspect_app with "
+            "open_if_needed=false and focus=false; without app_name it reads the active window."
+        ),
+        properties={
+            "app_name": {
+                "type": "string",
+                "description": "Optional application name to verify without opening or focusing it.",
+            },
+            "role_filter": {
+                "type": "string",
+                "description": "Optional UI element role/name/description filter when app_name is provided.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 200,
+                "description": "Maximum number of UI elements to return when app_name is provided. Defaults to 80.",
+            },
+        },
     ),
     "app.status": ToolDescriptor(
         name="app.status",

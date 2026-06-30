@@ -1108,8 +1108,10 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         "desktop.safe_scroll",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
+        "desktop.shortcut",
         "desktop.hotkey",
         "desktop.submit_foreground",
+        "desktop.type",
         "desktop.type_text",
         "desktop.click",
     ]
@@ -1265,6 +1267,8 @@ def test_desktop_execution_capability_policy_reports_tool_level_degradation() ->
     ]
     assert app_control["unavailable_tools"] == [
         "app.status",
+        "desktop.open_app",
+        "desktop.focus_app",
         "app.focus",
         "app.focus_window",
         "app.show",
@@ -1302,8 +1306,13 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.permissions") == "low"
     assert desktop_tool_risk_level("desktop.running_apps") == "low"
     assert desktop_tool_risk_level("desktop.list_apps") == "low"
+    assert desktop_tool_risk_level("desktop.open_app") == "low"
+    assert desktop_tool_risk_level("desktop.focus_app") == "low"
+    assert desktop_tool_risk_level("desktop.list_windows") == "low"
+    assert desktop_tool_risk_level("desktop.read_ui") == "low"
     assert desktop_tool_risk_level("desktop.windows") == "low"
     assert desktop_tool_risk_level("desktop.ui_elements") == "low"
+    assert desktop_tool_risk_level("desktop.verify") == "low"
     assert desktop_tool_risk_level("app.status") == "low"
     assert desktop_tool_risk_level("app.show") == "low"
     assert desktop_tool_risk_level("app.focus_window") == "low"
@@ -1338,6 +1347,8 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.click_ui_element") == "medium"
     assert desktop_tool_risk_level("desktop.type_into_ui_element") == "medium"
     assert desktop_tool_risk_level("desktop.submit_foreground") == "high"
+    assert desktop_tool_risk_level("desktop.shortcut") == "medium"
+    assert desktop_tool_risk_level("desktop.type") == "medium"
     assert desktop_tool_risk_level("desktop.type_text") == "medium"
     assert desktop_tool_risk_level("desktop.click") == "medium"
     assert desktop_tool_risk_level("desktop.reveal_path") == "low"
@@ -1436,9 +1447,9 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["discover_apps"].risk_level == "low"
     assert catalog["discover_apps"].tools == ["desktop.list_apps"]
     assert catalog["read_windows"].risk_level == "low"
-    assert catalog["read_windows"].tools == ["desktop.windows"]
+    assert catalog["read_windows"].tools == ["desktop.list_windows", "desktop.windows"]
     assert catalog["read_ui_elements"].risk_level == "low"
-    assert catalog["read_ui_elements"].tools == ["desktop.ui_elements"]
+    assert catalog["read_ui_elements"].tools == ["desktop.read_ui", "desktop.ui_elements"]
     assert catalog["read_app_status"].risk_level == "low"
     assert catalog["read_app_status"].tools == ["app.status"]
     assert catalog["focus_app_window"].risk_level == "low"
@@ -1611,6 +1622,11 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     screen_saver = tools["system.screen_saver_start"]
     permissions = tools["desktop.permissions"]
     list_apps = tools["desktop.list_apps"]
+    open_app_alias = tools["desktop.open_app"]
+    focus_app_alias = tools["desktop.focus_app"]
+    list_windows_alias = tools["desktop.list_windows"]
+    read_ui_alias = tools["desktop.read_ui"]
+    verify_alias = tools["desktop.verify"]
     quit_app = tools["app.quit"]
     named_show_app = tools["app.show"]
     named_focus_window = tools["app.focus_window"]
@@ -1639,6 +1655,8 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     safe_type_text = tools["desktop.safe_type_text"]
     safe_click = tools["desktop.safe_click"]
     safe_scroll = tools["desktop.safe_scroll"]
+    shortcut_alias = tools["desktop.shortcut"]
+    type_alias = tools["desktop.type"]
     click_ui_element = tools["desktop.click_ui_element"]
     type_into_ui_element = tools["desktop.type_into_ui_element"]
     minimize_window = tools["desktop.minimize_window"]
@@ -1687,6 +1705,24 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert list_apps.risk_level == "low"
     assert list_apps.input_schema["required"] == []
     assert any("without opening" in note for note in list_apps.fallback_notes)
+    assert open_app_alias.capability_id == "app_control"
+    assert open_app_alias.risk_level == "low"
+    assert open_app_alias.input_schema["required"] == ["app_name"]
+    assert any("alias for app.open" in note for note in open_app_alias.fallback_notes)
+    assert focus_app_alias.capability_id == "app_control"
+    assert focus_app_alias.risk_level == "low"
+    assert focus_app_alias.input_schema["required"] == ["app_name"]
+    assert any("alias for app.focus" in note for note in focus_app_alias.fallback_notes)
+    assert list_windows_alias.capability_id == "active_window"
+    assert list_windows_alias.risk_level == "low"
+    assert any("alias for desktop.windows" in note for note in list_windows_alias.fallback_notes)
+    assert read_ui_alias.capability_id == "active_window"
+    assert read_ui_alias.risk_level == "low"
+    assert any("alias for desktop.ui_elements" in note for note in read_ui_alias.fallback_notes)
+    assert verify_alias.capability_id == "active_window"
+    assert verify_alias.risk_level == "low"
+    assert verify_alias.input_schema["required"] == []
+    assert any("Read-only post-operation verification" in note for note in verify_alias.fallback_notes)
     assert quit_app.capability_id == "app_control"
     assert quit_app.risk_level == "medium"
     assert quit_app.approval_required is False
@@ -1829,6 +1865,16 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert safe_scroll.input_schema["required"] == ["direction"]
     assert safe_scroll.input_schema["properties"]["direction"]["enum"] == ["up", "down"]
     assert any("scrolls only explicit foreground up/down page requests" in note for note in safe_scroll.fallback_notes)
+    assert shortcut_alias.capability_id == "foreground_input"
+    assert shortcut_alias.risk_level == "medium"
+    assert shortcut_alias.approval_required is False
+    assert shortcut_alias.input_schema["required"] == ["key"]
+    assert any("alias for desktop.hotkey" in note for note in shortcut_alias.fallback_notes)
+    assert type_alias.capability_id == "foreground_input"
+    assert type_alias.risk_level == "medium"
+    assert type_alias.approval_required is False
+    assert type_alias.input_schema["required"] == ["text"]
+    assert any("alias for desktop.type_text" in note for note in type_alias.fallback_notes)
     assert click_ui_element.capability_id == "foreground_input"
     assert click_ui_element.risk_level == "medium"
     assert click_ui_element.input_schema["required"] == ["target"]
