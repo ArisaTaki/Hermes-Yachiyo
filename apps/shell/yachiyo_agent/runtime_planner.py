@@ -10117,7 +10117,7 @@ def _app_search_result_communication_hint(text: str) -> dict[str, str]:
         "body_source": "app_search_result",
         "source_app_search_query": query,
         "mode": _communication_app_mode(value),
-        "send_action": "send",
+        "send_action": _communication_send_action(value),
     }
     if target_app:
         hint["app_name"] = target_app
@@ -10293,7 +10293,7 @@ def _web_research_communication_target_hint(text: str) -> dict[str, str]:
         "recipient": recipient,
         "body_source": "research_artifact",
         "mode": _communication_app_mode(value),
-        "send_action": "send",
+        "send_action": _communication_send_action(value),
     }
     if app_name:
         hint["app_name"] = app_name
@@ -10345,7 +10345,7 @@ def _data_analysis_communication_target_hint(text: str) -> dict[str, str]:
         "recipient": recipient,
         "body_source": "analysis_artifact",
         "mode": _communication_app_mode(value),
-        "send_action": "send",
+        "send_action": _communication_send_action(value),
     }
     if app_name:
         hint["app_name"] = app_name
@@ -14590,9 +14590,7 @@ def _direct_file_context_communication_hint(
                 "recipient": recipient,
                 "body_source": "file",
                 "mode": _communication_app_mode(value),
-                "send_action": (
-                    "draft" if _looks_like_communication_draft_request(value) else "send"
-                ),
+                "send_action": _communication_send_action(value),
             }
             if app_name:
                 hint["app_name"] = app_name
@@ -14660,7 +14658,7 @@ def _direct_paste_communication_hint(text: str) -> dict[str, str]:
             "recipient": recipient,
             "body_source": "clipboard",
             "mode": _communication_app_mode(value),
-            "send_action": "send",
+            "send_action": _communication_send_action(value),
         }
     return {}
 
@@ -14772,7 +14770,7 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
             "recipient": recipient,
             "body": body,
             "mode": _communication_app_mode(value),
-            "send_action": "send",
+            "send_action": _communication_send_action(value),
         }
     return _generic_direct_communication_hint(value)
 
@@ -14840,9 +14838,7 @@ def _generic_direct_communication_hint(text: str) -> dict[str, str]:
             "recipient": recipient,
             "body": body,
             "mode": _communication_app_mode(value),
-            "send_action": (
-                "draft" if _looks_like_communication_draft_request(value) else "send"
-            ),
+            "send_action": _communication_send_action(value),
         }
         if channel:
             hint["channel"] = channel
@@ -14938,9 +14934,7 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
             "recipient": recipient,
             "body_source": source,
             "mode": _communication_app_mode(value),
-            "send_action": (
-                "draft" if _looks_like_communication_draft_request(value) else "send"
-            ),
+            "send_action": _communication_send_action(value),
         }
         if not app_name:
             hint.pop("app_name")
@@ -15140,6 +15134,10 @@ def _looks_like_communication_draft_request(value: str) -> bool:
             flags=re.IGNORECASE,
         )
     )
+
+
+def _communication_send_action(value: str) -> str:
+    return "draft" if _looks_like_communication_draft_request(value) else "send"
 
 
 def _looks_like_recipient_scoped_communication_app_capture(value: str) -> bool:

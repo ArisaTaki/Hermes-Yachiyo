@@ -13793,6 +13793,79 @@ def test_runtime_planner_routes_app_recipient_body_communication_sequence() -> N
         "desktop.safe_shortcut"
     )
 
+    draft_decision = RuntimePlanner().decision(
+        "打开 Slack 给 yachiyo 发消息：构建完成，不要发送",
+        allowed_tools=allowed_tools,
+    )
+
+    assert draft_decision.selected_intent.kind == "communication"
+    assert draft_decision.selected_intent.inputs == {
+        "direct_message_hint": {
+            "app_name": "Slack",
+            "recipient": "yachiyo",
+            "body": "构建完成",
+            "mode": "open",
+            "send_action": "draft",
+        }
+    }
+    assert [step.step_id for step in draft_decision.plan.tool_plan.steps] == [
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+    ]
+    assert "send-communication-message" not in {
+        step.step_id for step in draft_decision.plan.tool_plan.steps
+    }
+    assert planner_tool_requests(
+        "打开 Slack 给 yachiyo 发消息：构建完成，不要发送",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "构建完成"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+    ]
+
 
 def test_runtime_planner_defaults_email_send_channel_to_mail_sequence() -> None:
     allowed_tools = [
