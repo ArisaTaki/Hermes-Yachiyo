@@ -1368,23 +1368,44 @@ def _artifact_reveal_tool_requests(
         (
             item
             for item in decision.plan.tool_plan.steps
-            if getattr(item, "step_id", "") == "reveal-artifact-in-finder"
+            if getattr(item, "step_id", "")
+            in {
+                "reveal-artifact-in-finder",
+                "open-analysis-artifact-with-app",
+            }
         ),
         None,
     )
     tool_name = str(getattr(step, "tool_name", "") or "").strip()
     if not _step_available(step):
         return []
-    if tool_name != "desktop.reveal_path" or tool_name not in allowed:
+    if tool_name not in {"desktop.reveal_path", "desktop.open_path_with_app", "desktop.open_path"}:
+        return []
+    if tool_name not in allowed:
         return []
     input_preview = getattr(step, "input_preview", None)
     payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
     path = str(payload.get("path") or "").strip()
     if not path:
         return []
+    if tool_name == "desktop.open_path_with_app":
+        app_name = str(payload.get("app_name") or "").strip()
+        if not app_name:
+            return []
+        request_input = _desktop_request_payload(
+            tool_name,
+            {"path": path, "app_name": app_name},
+        )
+        return [
+            _request(
+                tool_name,
+                request_input,
+                planning_reason=planning_reason,
+            )
+        ]
     return [
         _request(
-            "desktop.reveal_path",
+            tool_name,
             {"path": path},
             planning_reason=planning_reason,
         )

@@ -222,6 +222,7 @@ class TaskIntentRouter:
             return _empty_intent("data_analysis", text)
         if score <= 0:
             return _empty_intent("data_analysis", text)
+        result_open_app_hint = _analysis_result_open_app_hint(text)
         spreadsheet_app_hint = _spreadsheet_ui_app_hint(text)
         source_scope_is_output = bool(
             source_scope and source_scope == _artifact_output_location_hint(text)
@@ -240,8 +241,10 @@ class TaskIntentRouter:
                 else data_source_kind_hint(source_hint, text)
             ),
         }
-        if spreadsheet_app_hint:
+        if spreadsheet_app_hint and spreadsheet_app_hint != result_open_app_hint:
             inputs["spreadsheet_app_hint"] = spreadsheet_app_hint
+        if result_open_app_hint:
+            inputs["analysis_result_open_app_hint"] = result_open_app_hint
         if source_name and not source_hint:
             inputs["data_source_name_hint"] = source_name
         if context_source:
@@ -296,7 +299,10 @@ class TaskIntentRouter:
             confidence=min(0.95, 0.48 + score),
             description="Analyze structured data and produce a report or artifact.",
             inputs=inputs,
-            expected_outputs=_expected_outputs(text, default=["analysis_report"]),
+            expected_outputs=_data_analysis_expected_outputs(
+                text,
+                result_open_app_hint=result_open_app_hint,
+            ),
             required_capabilities=(
                 [
                     "desktop.app_discovery",
@@ -8460,10 +8466,17 @@ def _append_data_analysis_followup_steps(
             ),
         ]
     else:
-        followup_steps = _append_artifact_reveal_step(
+        followup_steps = _append_analysis_result_open_app_steps(
             intent,
             allowed,
             steps,
+            artifact_paths=paths,
+            depends_on=depends_on,
+        )
+        followup_steps = _append_artifact_reveal_step(
+            intent,
+            allowed,
+            followup_steps,
             artifact_paths=paths,
             depends_on=depends_on,
         )
@@ -8480,6 +8493,67 @@ def _append_data_analysis_followup_steps(
         artifact_paths=paths,
         depends_on=depends_on,
     )
+
+
+def _append_analysis_result_open_app_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    artifact_paths: Iterable[str],
+    depends_on: str,
+) -> list[ToolPlanStepSnapshot]:
+    app_name = str(intent.inputs.get("analysis_result_open_app_hint") or "").strip()
+    if not app_name:
+        return steps
+    path = _analysis_result_open_path(intent.user_goal, artifact_paths, app_name)
+    if not path:
+        return steps
+    tool_name = _first_allowed(("desktop.open_path_with_app", "desktop.open_path"), allowed)
+    input_preview = {"path": path}
+    if tool_name == "desktop.open_path_with_app":
+        input_preview["app_name"] = app_name
+    return [
+        *steps,
+        _step(
+            intent,
+            "open-analysis-artifact-with-app",
+            "Open analysis artifact",
+            "file.desktop_access",
+            tool_name,
+            input_preview=input_preview,
+            depends_on=[depends_on],
+            action="open_path_with_app" if tool_name == "desktop.open_path_with_app" else "open_path",
+            reason=(
+                "Open the generated analysis artifact only after the analysis step has "
+                "produced it."
+            ),
+        ),
+    ]
+
+
+def _analysis_result_open_path(
+    text: str,
+    artifact_paths: Iterable[str],
+    app_name: str,
+) -> str:
+    paths = [
+        str(path or "").strip()
+        for path in artifact_paths
+        if str(path or "").strip()
+    ]
+    if not paths:
+        return ""
+    value = _clean_prompt(text)
+    if app_name in {"Excel", "Numbers"}:
+        table_path = _first_path_with_suffix(paths, (".csv", ".tsv", ".xlsx"))
+        if table_path:
+            return table_path
+    if _contains_any(value, ("图表", "趋势图", "chart", "plot")):
+        chart_path = _first_path_with_suffix(paths, (".png", ".jpg", ".jpeg", ".svg"))
+        if chart_path:
+            return chart_path
+    return _artifact_reveal_path(text, paths)
 
 
 def _append_analysis_app_write_target_steps(
@@ -11127,13 +11201,41 @@ def _spreadsheet_ui_app_hint(text: str) -> str:
         match = re.search(pattern, value, flags=re.IGNORECASE)
         if not match:
             continue
-        app = re.sub(r"\s+", " ", str(match.group("app") or "").strip())
-        if app.lower() == "microsoft excel":
-            return "Excel"
-        if app.lower() == "apple numbers":
-            return "Numbers"
-        return "Numbers" if app.lower() == "numbers" else "Excel"
+        return _canonical_spreadsheet_app_hint(match.group("app"))
     return ""
+
+
+def _analysis_result_open_app_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if not value:
+        return ""
+    app_pattern = r"(?P<app>Microsoft\s+Excel|Apple\s+Numbers|Excel|Numbers)"
+    result_pattern = (
+        r"(?:分析)?(?:结果|报告|汇总表|表格|产物|artifact|result|results|report|summary|table|csv)"
+    )
+    patterns = (
+        rf"(?:用|通过|在)\s*{app_pattern}\s*(?:里|中|上)?\s*(?:打开|查看)\s*{result_pattern}",
+        rf"(?:打开|查看)\s*{result_pattern}\s*(?:用|通过|在)\s*{app_pattern}",
+        rf"\b(?:open|view)\s+(?:the\s+)?{result_pattern}\s+"
+        rf"(?:with|in|using)\s+(?:the\s+)?{app_pattern}\b",
+        rf"\b(?:with|in|using)\s+(?:the\s+)?{app_pattern}\b.{0,32}"
+        rf"\b(?:open|view)\s+(?:the\s+)?{result_pattern}\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        return _canonical_spreadsheet_app_hint(match.group("app"))
+    return ""
+
+
+def _canonical_spreadsheet_app_hint(value: str) -> str:
+    app = re.sub(r"\s+", " ", str(value or "").strip())
+    if app.lower() == "microsoft excel":
+        return "Excel"
+    if app.lower() == "apple numbers":
+        return "Numbers"
+    return "Numbers" if app.lower() == "numbers" else "Excel" if app else ""
 
 
 def _file_location_hint(text: str) -> str:
@@ -19046,3 +19148,15 @@ def _expected_outputs(text: str, *, default: list[str]) -> list[str]:
     ):
         outputs.append("table")
     return outputs or list(default)
+
+
+def _data_analysis_expected_outputs(
+    text: str,
+    *,
+    result_open_app_hint: str = "",
+) -> list[str]:
+    outputs = _expected_outputs(text, default=["analysis_report"])
+    if result_open_app_hint and result_open_app_hint in {"Excel", "Numbers"}:
+        if "table" not in outputs:
+            outputs.append("table")
+    return outputs
