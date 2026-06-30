@@ -77,8 +77,70 @@ def _fake_apple_music_open_and_play() -> dict[str, Any]:
     }
 
 
+def _fake_list_apps(*, query: str = "", limit: Any = 200) -> dict[str, Any]:
+    clean_query = str(query or "").strip()
+    return {
+        "ok": True,
+        "action": "desktop.list_apps",
+        "summary": f"Installed apps matching {clean_query}: PixelForge",
+        "data": {
+            "query": clean_query,
+            "apps": [
+                {
+                    "name": "PixelForge",
+                    "path": "/Applications/PixelForge.app",
+                    "match_score": 100,
+                }
+            ],
+            "count": 1,
+            "total_count": 1,
+            "truncated": False,
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def _fake_app_open(app_name: str) -> dict[str, Any]:
+    return {
+        "ok": True,
+        "action": "app.open",
+        "summary": f"Opened {app_name}",
+        "data": {
+            "app_name": str(app_name or "").strip(),
+            "running": True,
+            "status": "running",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
+def _fake_active_window() -> dict[str, Any]:
+    return {
+        "ok": True,
+        "action": "desktop.active_window",
+        "summary": "PixelForge is active",
+        "data": {
+            "app_name": "PixelForge",
+            "frontmost_app": "PixelForge",
+            "title": "PixelForge",
+        },
+        "permission_error": False,
+        "fallback_used": False,
+    }
+
+
 def _event_types(events: Sequence[dict[str, Any]]) -> list[str]:
     return [str(event.get("event_type") or "") for event in events if isinstance(event, dict)]
+
+
+def _events_of_type(events: Sequence[dict[str, Any]], event_type: str) -> list[dict[str, Any]]:
+    return [
+        event
+        for event in events
+        if isinstance(event, dict) and event.get("event_type") == event_type
+    ]
 
 
 def _first_event(events: Sequence[dict[str, Any]], event_type: str) -> dict[str, Any]:
@@ -98,6 +160,117 @@ def _model_event_free(events: Sequence[dict[str, Any]]) -> bool:
         event_type in {"model.request.started", "model.requested"}
         for event_type in _event_types(events)
     )
+
+
+def _generic_app_open_case(
+    service: AgentRuntimeService,
+    *,
+    entrypoint: str,
+) -> dict[str, Any]:
+    prompt = "打开 PixelForge"
+    if entrypoint == "main_chat":
+        run = service.start_main_chat_run(
+            task_id="smoke-main-chat-pixelforge",
+            session_id="smoke-main-chat-generic-app-session",
+            user_goal=prompt,
+        )
+        loop_result = service.execute_main_chat_model_loop(
+            str(run["run_id"]),
+            [{"role": "user", "content": prompt}],
+        )
+        updated = service.complete_main_chat_run(
+            str(run["run_id"]),
+            str(loop_result.get("result") or ""),
+        )
+        run_id = str(run.get("run_id") or "")
+        loop_status = loop_result.get("status")
+    else:
+        agent = service.create_agent(
+            {
+                "name": "Generic Desktop Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {
+                    "allowed_tools": ["workspace.read"],
+                    "approval_required": {},
+                },
+            }
+        )
+        updated = service.create_agent_run(
+            {
+                "agent_id": agent["agent_id"],
+                "user_goal": prompt,
+                "daily_desktop_policy_overlay": True,
+            }
+        )
+        run_id = str(updated.get("run_id") or "")
+        loop_status = ""
+
+    events = service.list_run_events(run_id)["events"]
+    planned_events = _events_of_type(events, "agent.desktop.intent_planned")
+    tool_events = _events_of_type(events, "agent.tool.call")
+    completed_event = _first_event(events, "agent.desktop.intent_completed")
+    selection_event = _first_event(events, "agent.plan.selection")
+    selected_intent_event = _first_event(events, "agent.intent.selected")
+    planned_tools = [_payload(event).get("tool") for event in planned_events]
+    tool_call_tools = [_payload(event).get("tool") for event in tool_events]
+    tool_result_actions = [
+        (_payload(event).get("result") or {}).get("action")
+        for event in tool_events
+        if isinstance(_payload(event).get("result"), dict)
+    ]
+    completed_payload = _payload(completed_event)
+    completed_tools = completed_payload.get("tools")
+    selection_payload = _payload(selection_event)
+    selected_intent_payload = _payload(selected_intent_event)
+    expected_tools = ["desktop.list_apps", "app.open", "desktop.active_window"]
+    checks = {
+        "run_completed": updated.get("status") == "completed",
+        "summary_names_generic_app": "已打开 PixelForge" in str(updated.get("result") or ""),
+        "model_not_called": _model_event_free(events),
+        "intent_is_desktop_operation": (
+            (selected_intent_payload.get("intent") or {}).get("kind") == "desktop_operation"
+            if isinstance(selected_intent_payload.get("intent"), dict)
+            else False
+        ),
+        "selection_uses_runtime_planner_full_plan": selection_payload.get("selection_reason")
+        == "runtime_planner_full_plan_execution",
+        "selection_source_runtime_planner": selection_payload.get("selection_source") == "runtime_planner",
+        "planned_tool_chain": planned_tools == expected_tools,
+        "planned_discovery_query": _payload(planned_events[0]).get("input_preview")
+        == {"query": "PixelForge", "limit": 20}
+        if planned_events
+        else False,
+        "planned_open_input": _payload(planned_events[1]).get("input_preview")
+        == {"app_name": "PixelForge"}
+        if len(planned_events) > 1
+        else False,
+        "tool_call_chain": tool_call_tools == expected_tools,
+        "tool_results_match_chain": tool_result_actions == expected_tools,
+        "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
+        "completed_tools_match": completed_tools == expected_tools,
+        "completed_summary_names_generic_app": "已打开 PixelForge" in str(
+            completed_payload.get("summary") or ""
+        ),
+    }
+    return {
+        "id": f"{entrypoint}_generic_app_open_before_model",
+        "ok": all(checks.values()),
+        "run_id": run_id,
+        "status": updated.get("status"),
+        "loop_status": loop_status,
+        "result": updated.get("result"),
+        "event_types": _event_types(events),
+        "selection_event": selection_event,
+        "planned_events": planned_events,
+        "tool_events": tool_events,
+        "completed_event": completed_event,
+        "checks": checks,
+    }
 
 
 def _main_chat_loop_case(service: AgentRuntimeService) -> dict[str, Any]:
@@ -226,8 +399,22 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
                 desktop_tools,
                 "apple_music_open_and_play",
                 _fake_apple_music_open_and_play,
+            ), _patched_attr(
+                desktop_tools,
+                "list_apps",
+                _fake_list_apps,
+            ), _patched_attr(
+                desktop_tools,
+                "app_open",
+                _fake_app_open,
+            ), _patched_attr(
+                desktop_tools,
+                "active_window",
+                _fake_active_window,
             ):
                 cases = [
+                    _generic_app_open_case(service, entrypoint="main_chat"),
+                    _generic_app_open_case(service, entrypoint="agent_run"),
                     _main_chat_loop_case(service),
                     _agent_run_overlay_case(service),
                 ]
