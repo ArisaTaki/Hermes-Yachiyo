@@ -259,7 +259,7 @@ def _public_demo_gate_fields(path: Path | None, *, command: Sequence[str]) -> di
         "passed_required_flow_count": int(report.get("passed_required_flow_count") or 0),
         "missing_required_flow_ids": _string_list(report.get("missing_required_flow_ids")),
         "release_blockers": _dict_list(report.get("release_blockers")),
-        "full_demo_command": str(report.get("full_demo_command") or "") or _full_demo_command(),
+        "full_demo_command": _full_demo_command(),
         "public_demo_command": " ".join(str(part) for part in command),
     }
 

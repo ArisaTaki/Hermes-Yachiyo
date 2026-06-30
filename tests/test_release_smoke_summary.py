@@ -172,7 +172,8 @@ def test_release_smoke_summary_requires_complete_public_demo(tmp_path, monkeypat
     assert assessment["missing_required_flow_ids"] == ["real_desktop_app_open"]
     assert assessment["release_blockers"][0]["opt_in_flag"] == "--include-real-desktop-open"
     action = next(item for item in summary["next_actions"] if item["id"] == "public_demo")
-    assert action["command"] == "python scripts/run_public_demo_smokes.py --full-test-command"
+    assert action["command"] == release_smoke.FULL_PUBLIC_DEMO_COMMAND
+    assert "--full-test-command" not in action["command"]
     assert action["release_level"] == "partial_demo_ready"
     assert action["missing_required_flow_ids"] == ["real_desktop_app_open"]
 

@@ -166,7 +166,8 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
         "workflow_provider",
     ]
     action = next(item for item in summary["next_actions"] if item["id"] == "public_demo")
-    assert action["command"] == "python scripts/run_public_demo_smokes.py --full-demo"
+    assert action["command"] == gate._full_demo_command()
+    assert "--full-demo" not in action["command"]
     assert summary["release_smoke"]["status"] == "incomplete"
     assert "packaged_launch" in summary["release_smoke"]["missing_item_ids"]
     assert "diagnostics_export" not in summary["release_smoke"]["missing_item_ids"]
@@ -212,7 +213,8 @@ def test_public_release_gate_strict_mode_fails_until_release_ready(
     markdown = output_markdown.read_text(encoding="utf-8")
     assert "Release level: `partial_demo_ready`" in markdown
     assert "## Release Smoke" in markdown
-    assert "python scripts/run_public_demo_smokes.py --full-demo" in markdown
+    assert gate._full_demo_command() in markdown
+    assert "--full-demo" not in markdown
 
 
 def test_public_release_gate_passes_when_full_release_smoke_is_present(

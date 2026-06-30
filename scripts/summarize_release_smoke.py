@@ -32,6 +32,12 @@ SECTION_IDS = set(SOURCE_SECTION_CAPABILITIES.values()) | {
     "packaged_backend_bridge_smoke",
     "provider_smoke",
 }
+FULL_PUBLIC_DEMO_COMMAND = (
+    "python scripts/run_public_demo_smokes.py "
+    "--include-real-desktop --include-provider-workflow --include-ui "
+    "--output-json tmp/public-demo-smokes-full.json "
+    "--output-markdown tmp/public-demo-smokes-full.md"
+)
 SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
     {
         "id": "packaged_launch",
@@ -99,12 +105,7 @@ SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
         "label": "Public demo evidence covers release-facing flows",
         "required": ("public_demo_complete",),
         "related": ("public_demo_assessment", "public_demo_selected"),
-        "next_action": (
-            "python scripts/run_public_demo_smokes.py "
-            "--include-real-desktop --include-provider-workflow --include-ui "
-            "--output-json tmp/public-demo-smokes-full.json "
-            "--output-markdown tmp/public-demo-smokes-full.md"
-        ),
+        "next_action": FULL_PUBLIC_DEMO_COMMAND,
     },
     {
         "id": "artifact_readback",
@@ -466,7 +467,7 @@ def _public_demo_assessment(report: Mapping[str, Any]) -> dict[str, Any]:
         "passed_required_flow_count": int(report.get("passed_required_flow_count") or 0),
         "missing_required_flow_ids": _string_list(report.get("missing_required_flow_ids")),
         "release_blockers": _dict_list(report.get("release_blockers")),
-        "full_demo_command": str(report.get("full_demo_command") or ""),
+        "full_demo_command": FULL_PUBLIC_DEMO_COMMAND,
     }
 
 
