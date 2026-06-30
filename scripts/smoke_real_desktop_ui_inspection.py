@@ -26,6 +26,9 @@ from scripts.smoke_real_desktop_app_open import (
     _planner_alignment,
     _resolved_open_app_name,
     _runtime_tool_call,
+    _screen_observability_probe,
+    _screen_probe_checks,
+    _screen_probe_evidence,
     _status_running,
 )
 
@@ -121,8 +124,9 @@ def _ui_inspection_planner_alignment(app_name: str) -> dict[str, Any]:
 
 
 def _locked_session_evidence(app_name: str, preflight: dict[str, Any]) -> dict[str, Any]:
-    blocker_evidence = _merge_blocking_evidence(preflight)
-    checks = {"desktop_session_ready": False}
+    screen_probe = _screen_observability_probe()
+    blocker_evidence = _merge_blocking_evidence(preflight, screen_probe)
+    checks = {"desktop_session_ready": False, **_screen_probe_checks(screen_probe)}
     return {
         "ok": False,
         "mode": "real_desktop_ui_inspection_smoke",
@@ -145,8 +149,10 @@ def _locked_session_evidence(app_name: str, preflight: dict[str, Any]) -> dict[s
         "error": "desktop_session_locked",
         "blocking_condition": "desktop_session_locked",
         "blocking_conditions": ["desktop_session_locked"],
+        **_screen_probe_evidence(screen_probe),
         **{key: value for key, value in blocker_evidence.items() if key != "error"},
         "preflight": preflight,
+        "screen_probe": screen_probe,
         "checks": checks,
     }
 

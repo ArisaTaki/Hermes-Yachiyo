@@ -294,6 +294,10 @@ def test_public_demo_smokes_marks_selected_failure_as_release_blocker(
                         "stage": "browser_planner",
                         "error": "desktop_session_locked",
                         "blocking_condition": "desktop_session_locked",
+                        "blocking_conditions": [
+                            "desktop_session_locked",
+                            "screen_capture_blank",
+                        ],
                         "checks": {"desktop_session_ready": False},
                     }
                 )
@@ -315,15 +319,19 @@ def test_public_demo_smokes_marks_selected_failure_as_release_blocker(
         item for item in summary["release_blockers"] if item["id"] == "browser_research_artifact"
     )
     assert blocker["status"] == "failed"
-    assert blocker["reason"] == "desktop_session_locked"
+    assert blocker["reason"] == "desktop_session_locked, screen_capture_blank"
     assert blocker["evidence_summary"]["blocking_condition"] == "desktop_session_locked"
+    assert blocker["evidence_summary"]["blocking_conditions"] == [
+        "desktop_session_locked",
+        "screen_capture_blank",
+    ]
     assert blocker["evidence_summary"]["checks"] == {"desktop_session_ready": False}
     action = next(
         item for item in summary["next_actions"] if item["id"] == "browser_research_artifact"
     )
-    assert action["reason"] == "desktop_session_locked"
+    assert action["reason"] == "desktop_session_locked, screen_capture_blank"
     markdown = demo.render_markdown(summary)
-    assert "Blocker: `desktop_session_locked`" in markdown
+    assert "Blocker: `desktop_session_locked, screen_capture_blank`" in markdown
 
 
 def test_public_demo_smokes_does_not_reuse_stale_report_after_failed_flow(

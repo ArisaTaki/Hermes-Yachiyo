@@ -7,6 +7,7 @@ import argparse
 import json
 import platform
 import sys
+import tempfile
 import time
 from pathlib import Path
 from typing import Any, Sequence
@@ -288,6 +289,82 @@ def _merge_blocking_evidence(*results: dict[str, Any]) -> dict[str, Any]:
         if actions:
             merged["recovery_actions"] = actions
     return merged
+
+
+def _screen_observability_probe() -> dict[str, Any]:
+    with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
+        target = Path(tmp.name)
+    try:
+        result = desktop_tools.screen_capture(target)
+    except Exception as exc:
+        result = {
+            "ok": False,
+            "action": "screen.capture",
+            "summary": "screen.capture probe failed",
+            "error": str(exc),
+        }
+    finally:
+        target.unlink(missing_ok=True)
+    return _compact_screen_probe(result)
+
+
+def _compact_screen_probe(result: dict[str, Any]) -> dict[str, Any]:
+    data = _tool_data(result)
+    compact: dict[str, Any] = {
+        "ok": result.get("ok") is True,
+        "action": str(result.get("action") or "screen.capture"),
+        "summary": str(result.get("summary") or "").strip(),
+    }
+    for key in ("error", "blocking_condition"):
+        value = str(result.get(key) or data.get(key) or "").strip()
+        if value:
+            compact[key] = value
+    for key in ("recommended_tools", "recovery_hints"):
+        values: list[str] = []
+        _append_unique(values, _string_list(result.get(key)))
+        _append_unique(values, _string_list(data.get(key)))
+        if values:
+            compact[key] = values
+    screen_data = {
+        key: data[key]
+        for key in (
+            "visibility_status",
+            "blank_frame",
+            "low_light_frame",
+            "visibility_limited",
+            "mean_luminance",
+            "non_black_pixel_ratio",
+            "max_channel",
+            "blocking_condition",
+        )
+        if key in data and data[key] not in ("", [], {}, None)
+    }
+    if screen_data:
+        compact["data"] = screen_data
+    return compact
+
+
+def _screen_probe_checks(screen_probe: dict[str, Any]) -> dict[str, bool]:
+    data = _tool_data(screen_probe)
+    available = screen_probe.get("ok") is True
+    return {
+        "screen_capture_available": available,
+        "screen_observable": available and data.get("blank_frame") is not True,
+    }
+
+
+def _screen_probe_evidence(screen_probe: dict[str, Any]) -> dict[str, Any]:
+    data = _tool_data(screen_probe)
+    evidence: dict[str, Any] = {}
+    visibility_status = str(data.get("visibility_status") or "").strip()
+    if visibility_status:
+        evidence["screen_visibility_status"] = visibility_status
+    screen_blocker = str(
+        screen_probe.get("blocking_condition") or data.get("blocking_condition") or ""
+    ).strip()
+    if screen_blocker:
+        evidence["screen_blocking_condition"] = screen_blocker
+    return evidence
 
 
 def _merge_blocking_evidence_from_flat_results(

@@ -413,6 +413,8 @@ def _evidence_summary(evidence: Mapping[str, Any]) -> dict[str, Any]:
         "recommended_tools",
         "app_name",
         "opened_app_name",
+        "screen_visibility_status",
+        "screen_blocking_condition",
         "release_level",
     )
     summary = {
@@ -513,11 +515,29 @@ def _release_blocker(flow: Mapping[str, Any]) -> dict[str, Any]:
 
 def _flow_blocker_reason(flow: Mapping[str, Any]) -> str:
     evidence_summary = _dict(flow.get("evidence_summary"))
+    blocking_conditions = _string_list(evidence_summary.get("blocking_conditions"))
+    if len(blocking_conditions) > 1:
+        return ", ".join(blocking_conditions)
     for key in ("blocking_condition", "error", "reason"):
         value = str(evidence_summary.get(key) or "").strip()
         if value:
             return value
     return str(flow.get("evidence_reason") or flow.get("opt_in_reason") or "").strip()
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        raw_values: list[Any] = [value]
+    elif isinstance(value, (list, tuple, set)):
+        raw_values = list(value)
+    else:
+        return []
+    values: list[str] = []
+    for item in raw_values:
+        clean = str(item or "").strip()
+        if clean and clean not in values:
+            values.append(clean)
+    return values
 
 
 def render_markdown(summary: Mapping[str, Any]) -> str:

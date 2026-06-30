@@ -32,6 +32,22 @@ def test_real_desktop_interaction_smoke_stops_before_app_mutation_when_locked(mo
         "list_apps",
         lambda **_kwargs: (_ for _ in ()).throw(AssertionError("must not discover apps while locked")),
     )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "screen_capture",
+        lambda _target: {
+            "ok": True,
+            "action": "screen.capture",
+            "summary": "Captured blank screen",
+            "blocking_condition": "screen_capture_blank",
+            "data": {
+                "visibility_status": "blank_black",
+                "blank_frame": True,
+                "blocking_condition": "screen_capture_blank",
+            },
+            "recommended_tools": ["desktop.active_window", "desktop.permissions"],
+        },
+    )
 
     evidence = smoke.run_smoke()
 
@@ -39,7 +55,13 @@ def test_real_desktop_interaction_smoke_stops_before_app_mutation_when_locked(mo
     assert evidence["stage"] == "session_preflight"
     assert evidence["error"] == "desktop_session_locked"
     assert evidence["blocking_condition"] == "desktop_session_locked"
-    assert evidence["blocking_conditions"] == ["desktop_session_locked"]
+    assert evidence["blocking_conditions"] == [
+        "desktop_session_locked",
+        "screen_capture_blank",
+    ]
+    assert evidence["screen_visibility_status"] == "blank_black"
+    assert evidence["screen_blocking_condition"] == "screen_capture_blank"
+    assert evidence["screen_probe"]["blocking_condition"] == "screen_capture_blank"
     assert evidence["case_count"] == 1
     assert evidence["cases"][0]["id"] == "type_click_verify_control"
     assert evidence["cases"][0]["stage"] == "session_preflight"
@@ -49,7 +71,11 @@ def test_real_desktop_interaction_smoke_stops_before_app_mutation_when_locked(mo
         "mutates_desktop": True,
         "approval_required": False,
     }
-    assert evidence["checks"] == {"desktop_session_ready": False}
+    assert evidence["checks"] == {
+        "desktop_session_ready": False,
+        "screen_capture_available": True,
+        "screen_observable": False,
+    }
 
 
 def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
