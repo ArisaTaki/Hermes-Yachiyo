@@ -48,6 +48,146 @@ def _command_index(commands: list[object], predicate) -> int:
     raise AssertionError("expected command was not recorded")
 
 
+def _passed_source_smoke_section(mode: str, *case_ids: str) -> dict[str, object]:
+    return {
+        "status": "passed",
+        "evidence": {
+            "ok": True,
+            "mode": mode,
+            "case_count": len(case_ids),
+            "cases": [{"id": case_id} for case_id in case_ids],
+        },
+    }
+
+
+def _provider_capability_check(
+    label: str,
+    checks: list[dict[str, object]],
+) -> dict[str, object]:
+    return {
+        "label": label,
+        "exit_code": 0,
+        "summary": {
+            "ok": True,
+            "checks": checks,
+        },
+    }
+
+
+def _source_desktop_capability_report() -> dict[str, object]:
+    return {
+        "data_analysis_artifact_smoke": _passed_source_smoke_section(
+            "data_analysis_artifact_smoke", "csv", "json", "xlsx"
+        ),
+        "browser_planner_artifact_smoke": _passed_source_smoke_section(
+            "browser_planner_artifact_smoke", "current_page_report"
+        ),
+        "desktop_planner_discovery_smoke": _passed_source_smoke_section(
+            "desktop_planner_discovery_smoke", "generic_app_open"
+        ),
+        "real_desktop_discovery_smoke": _passed_source_smoke_section(
+            "real_desktop_discovery_smoke", "safari"
+        ),
+        "real_desktop_app_open_smoke": _passed_source_smoke_section(
+            "real_desktop_app_open_smoke", "open_discovered_app"
+        ),
+        "real_desktop_ui_inspection_smoke": _passed_source_smoke_section(
+            "real_desktop_ui_inspection_smoke", "inspect_named_app_ui"
+        ),
+        "real_desktop_interaction_smoke": _passed_source_smoke_section(
+            "real_desktop_interaction_smoke", "type_click_verify_control"
+        ),
+        "planner_runtime_tool_parity_smoke": _passed_source_smoke_section(
+            "planner_runtime_tool_parity_smoke", "app_scoped_ui_click"
+        ),
+        "media_playback_chain_smoke": _passed_source_smoke_section(
+            "media_playback_chain_smoke", "apple_music_open_and_play"
+        ),
+        "agent_entrypoint_desktop_execution_smoke": _passed_source_smoke_section(
+            "agent_entrypoint_desktop_execution_smoke",
+            "main_chat_generic_app_open_before_model",
+        ),
+        "agent_entrypoint_data_analysis_smoke": _passed_source_smoke_section(
+            "agent_entrypoint_data_analysis_smoke",
+            "studio_agent_run_data_analysis_before_model",
+        ),
+        "approval_policy_gate_smoke": _passed_source_smoke_section(
+            "approval_policy_gate_smoke"
+        ),
+        "approval_resume_timeline_smoke": _passed_source_smoke_section(
+            "approval_resume_timeline_smoke"
+        ),
+        "runtime_approval_resume_smoke": _passed_source_smoke_section(
+            "runtime_approval_resume_smoke"
+        ),
+        "yachiyo_route_approval_smoke": _passed_source_smoke_section(
+            "yachiyo_route_approval_smoke"
+        ),
+        "group_run_timeline_smoke": _passed_source_smoke_section(
+            "group_run_timeline_smoke"
+        ),
+    }
+
+
+def _provider_package_capability_report() -> dict[str, object]:
+    return {
+        "provider_smoke": {
+            "checks": [
+                {
+                    "label": "text_stream",
+                    "exit_code": 0,
+                    "summary": {
+                        "ok": True,
+                        "finish_reasons": ["stop"],
+                        "content_chars": 42,
+                    },
+                },
+                {
+                    "label": "tool_call_stream",
+                    "exit_code": 0,
+                    "summary": {
+                        "ok": True,
+                        "tool_call_count": 1,
+                        "tool_result_followup_finish_reasons": ["stop"],
+                    },
+                },
+                _provider_capability_check(
+                    "native_agent_full_chain",
+                    [
+                        {"name": "model_profile_readiness", "ok": True},
+                        {"name": "agent_workspace_read", "ok": True},
+                        {"name": "agent_artifact_write", "ok": True},
+                        {
+                            "name": "agent_multi_tool_pipeline",
+                            "ok": True,
+                            "tool_call_count": 2,
+                            "artifact_paths": ["agent-context.md", "pipeline-report.md"],
+                        },
+                        {"name": "workflow_child_agent_artifact", "ok": True},
+                        {"name": "terminal_approval_resume", "ok": True},
+                        {"name": "main_chat_model_loop", "ok": True},
+                    ],
+                ),
+                _provider_capability_check(
+                    "native_workflow_full_chain",
+                    [
+                        {"name": "advanced_workflow_orchestration", "ok": True},
+                        {"name": "workflow_budget_boundary", "ok": True},
+                    ],
+                ),
+            ],
+        },
+        "packaged_backend_bridge_smoke": {
+            "status": "passed",
+            "bridge_statuses": [{"service": "oha-yachiyo"}],
+        },
+        "dmg_app_smoke": {
+            "status": "passed",
+            "bridge_statuses": [{"service": "oha-yachiyo"}],
+        },
+    }
+
+
 def test_release_candidate_verifier_runs_source_and_artifact_guards(tmp_path, monkeypatch, capsys):
     (tmp_path / "release").mkdir()
     calls: list[dict[str, object]] = []
@@ -2051,6 +2191,69 @@ def test_release_candidate_verifier_preserves_manual_source_capability_matrix(
     assert matrix["missing_capability_ids"] == []
     assert matrix["source_reports"] == ["tmp/provider-rc.json"]
     assert matrix["capabilities"][0]["id"] == "agent_multi_tool_pipeline"
+
+
+def test_release_candidate_verifier_merges_manual_source_capability_matrices(
+    tmp_path,
+    monkeypatch,
+    capsys,
+):
+    source_statuses = rc._manual_release_candidate_check_report()
+    provider_statuses = rc._manual_release_candidate_check_report()
+    for check in provider_statuses:
+        if check["id"] == "real_provider_smoke":
+            check["status"] = "passed"
+            check["evidence"] = "Provider and packaged smoke passed."
+            check["evidence_source"] = "automated_rc_gate"
+    source_path = tmp_path / "tmp" / "source-rc.json"
+    provider_path = tmp_path / "tmp" / "provider-rc.json"
+    source_path.parent.mkdir(parents=True)
+    source_payload = {
+        "manual_release_candidate_check_statuses": source_statuses,
+        **_source_desktop_capability_report(),
+    }
+    provider_payload = {
+        "manual_release_candidate_check_statuses": provider_statuses,
+        **_provider_package_capability_report(),
+    }
+    source_path.write_text(json.dumps(source_payload), encoding="utf-8")
+    provider_path.write_text(json.dumps(provider_payload), encoding="utf-8")
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        manual_checks_json=(Path("tmp/source-rc.json"), Path("tmp/provider-rc.json")),
+        report_json=Path("tmp/rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "Native Agent capability matrix: passed (29 capabilities)" in output
+    assert (
+        "Native Agent capability matrix sources: tmp/source-rc.json, tmp/provider-rc.json"
+        in output
+    )
+    report = json.loads((tmp_path / "tmp" / "rc.json").read_text(encoding="utf-8"))
+    matrix = report["native_agent_capability_matrix"]
+    assert matrix["status"] == "passed"
+    assert matrix["ok"] is True
+    assert matrix["capability_count"] == 29
+    assert matrix["status_counts"] == {"passed": 29, "missing": 0}
+    assert matrix["missing_capability_ids"] == []
+    assert matrix["source_reports"] == ["tmp/source-rc.json", "tmp/provider-rc.json"]
+    capability_by_id = {item["id"]: item for item in matrix["capabilities"]}
+    assert capability_by_id["source_real_desktop_interaction"]["status"] == "passed"
+    assert capability_by_id["provider_text_stream"]["status"] == "passed"
+    assert capability_by_id["agent_multi_tool_pipeline"]["status"] == "passed"
+    assert capability_by_id["packaged_app_bridge_isolation"]["status"] == "passed"
+    matrix_from_merged_report = rc._native_agent_capability_matrix_from_manual_inputs(
+        tmp_path,
+        Path("tmp/rc.json"),
+        None,
+        run_requested=False,
+    )
+    assert matrix_from_merged_report is not None
+    assert matrix_from_merged_report["status"] == "passed"
+    assert matrix_from_merged_report["capability_count"] == 29
 
 
 def test_release_candidate_verifier_merges_multiple_manual_check_json_sources(

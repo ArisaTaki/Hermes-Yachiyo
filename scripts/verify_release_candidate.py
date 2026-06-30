@@ -479,11 +479,13 @@ def _native_agent_capability_matrix_from_payload(
     run_requested: bool,
 ) -> dict[str, Any] | None:
     raw_matrix = payload.get("native_agent_capability_matrix")
-    if isinstance(raw_matrix, dict) and isinstance(raw_matrix.get("capabilities"), list):
+    if _should_preserve_raw_native_agent_capability_matrix(raw_matrix):
         matrix = dict(raw_matrix)
-    elif isinstance(payload.get("provider_smoke"), dict):
+    elif _payload_can_rebuild_native_agent_capability_matrix(payload):
         matrix = summarize_capabilities(payload)
         matrix["status"] = "passed" if matrix.get("ok") is True else "incomplete"
+    elif isinstance(raw_matrix, dict) and isinstance(raw_matrix.get("capabilities"), list):
+        matrix = dict(raw_matrix)
     else:
         return None
     return _native_agent_capability_matrix_with_source(
@@ -491,6 +493,41 @@ def _native_agent_capability_matrix_from_payload(
         source_label=source_label,
         run_requested=run_requested,
     )
+
+
+def _should_preserve_raw_native_agent_capability_matrix(raw_matrix: Any) -> bool:
+    if not isinstance(raw_matrix, dict) or not isinstance(raw_matrix.get("capabilities"), list):
+        return False
+    if isinstance(raw_matrix.get("source_reports"), list) and raw_matrix.get("source_reports"):
+        return True
+    raw_count = raw_matrix.get("capability_count")
+    return isinstance(raw_count, int) and raw_count >= 29
+
+
+def _payload_can_rebuild_native_agent_capability_matrix(payload: dict[str, Any]) -> bool:
+    if isinstance(payload.get("provider_smoke"), dict):
+        return True
+    rebuild_sections = (
+        "data_analysis_artifact_smoke",
+        "browser_planner_artifact_smoke",
+        "desktop_planner_discovery_smoke",
+        "real_desktop_discovery_smoke",
+        "real_desktop_app_open_smoke",
+        "real_desktop_ui_inspection_smoke",
+        "real_desktop_interaction_smoke",
+        "planner_runtime_tool_parity_smoke",
+        "media_playback_chain_smoke",
+        "agent_entrypoint_desktop_execution_smoke",
+        "agent_entrypoint_data_analysis_smoke",
+        "approval_policy_gate_smoke",
+        "approval_resume_timeline_smoke",
+        "runtime_approval_resume_smoke",
+        "yachiyo_route_approval_smoke",
+        "group_run_timeline_smoke",
+        "packaged_backend_bridge_smoke",
+        "dmg_app_smoke",
+    )
+    return any(isinstance(payload.get(section), dict) for section in rebuild_sections)
 
 
 def _native_agent_capability_matrix_from_markdown(
@@ -3133,14 +3170,64 @@ def _native_agent_capability_matrix_from_manual_sources(
         matrices.append(matrix)
     if not matrices:
         return None
+    if len(matrices) == 1:
+        return matrices[0]
+    return _merge_native_agent_capability_matrices(
+        matrices,
+        run_requested=run_requested,
+    )
 
-    def rank(matrix: dict[str, Any]) -> tuple[int, int]:
-        ok_score = 1 if matrix.get("ok") is True or matrix.get("status") == "passed" else 0
-        counts = matrix.get("status_counts")
-        passed = int(counts.get("passed") or 0) if isinstance(counts, dict) else 0
-        return ok_score, passed
 
-    return max(matrices, key=rank)
+def _merge_native_agent_capability_matrices(
+    matrices: list[dict[str, Any]],
+    *,
+    run_requested: bool,
+) -> dict[str, Any]:
+    capability_order: list[str] = []
+    capability_by_id: dict[str, dict[str, Any]] = {}
+    source_reports: list[str] = []
+    for matrix in matrices:
+        for source_report in _native_agent_capability_matrix_source_reports(matrix):
+            if source_report not in source_reports:
+                source_reports.append(source_report)
+        raw_capabilities = matrix.get("capabilities")
+        if not isinstance(raw_capabilities, list):
+            continue
+        for raw_capability in raw_capabilities:
+            if not isinstance(raw_capability, dict):
+                continue
+            capability_id = str(raw_capability.get("id") or "").strip()
+            if not capability_id:
+                continue
+            if capability_id not in capability_order:
+                capability_order.append(capability_id)
+            existing = capability_by_id.get(capability_id)
+            if existing is None:
+                capability_by_id[capability_id] = dict(raw_capability)
+                continue
+            if existing.get("status") != "passed" and raw_capability.get("status") == "passed":
+                capability_by_id[capability_id] = dict(raw_capability)
+
+    capabilities = [capability_by_id[capability_id] for capability_id in capability_order]
+    missing_ids = [
+        str(capability.get("id"))
+        for capability in capabilities
+        if capability.get("status") != "passed"
+    ]
+    status_counts = {
+        status: sum(1 for capability in capabilities if capability.get("status") == status)
+        for status in ("passed", "missing")
+    }
+    return {
+        "status": "passed" if not missing_ids else "incomplete",
+        "ok": not missing_ids,
+        "capability_count": len(capabilities),
+        "status_counts": status_counts,
+        "missing_capability_ids": missing_ids,
+        "capabilities": capabilities,
+        "source_reports": source_reports,
+        "run_requested": run_requested,
+    }
 
 
 def _native_agent_capability_matrix_from_manual_inputs(
@@ -5432,6 +5519,12 @@ def verify_release_candidate(
         print(f"Native Agent capability matrix: incomplete\n- missing: {missing_label}")
     else:
         print("Native Agent capability matrix: skipped; run --run-provider-smoke with summary-capable smokes to populate it")
+    source_reports = _native_agent_capability_matrix_source_reports(capability_matrix)
+    if source_reports:
+        print(
+            "Native Agent capability matrix sources: "
+            + ", ".join(source_reports)
+        )
 
     selected_smoke_scripts = tuple(smoke_scripts) if smoke_scripts is not None else release_ui_smoke_scripts(root)
     if run_ui_smoke:
