@@ -534,6 +534,17 @@ Exit evidence:
   launch/playback cases.
 - Fallback branches are marked by source and planning reason.
 
+Current `/yachiyo/tasks` entrypoint evidence standardizes planner metadata for
+daily surfaces before the task reaches the runtime port. Main Chat tasks default
+to `entrypoint_source=chat_window` and `planner_entrypoint=chat_window`, while
+preserving more specific Chat entrypoints such as `chat_default`; Bubble and
+Live2D launcher tasks preserve `source=launcher`, default `planner_entrypoint`
+to `{mode}_default`, and carry `launcher_mode`, `launcher_surface`, and
+`runnable_kind` into planner metadata. Service tests prove Bubble/Live2D can
+submit data-analysis tasks through the planner, not only desktop app
+launch/playback requests, and Agent Studio can read those entrypoint fields
+from the shared planner selection payload.
+
 ## Phase 9 - Agent Studio Debug Surface
 
 Agent Studio exposes Intent, Capabilities, Plan, Tool Calls, Approvals,

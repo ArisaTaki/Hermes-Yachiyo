@@ -532,6 +532,86 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     assert metadata["yachiyo_missing_capabilities"] == []
 
 
+def test_yachiyo_agent_service_defaults_main_chat_entrypoint_metadata() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="请分析 data/sales.csv 并输出报告",
+            conversation_id="chat-1",
+        )
+    )
+
+    metadata = port.calls[0][1]["metadata"]
+    assert metadata["entrypoint_source"] == "chat_window"
+    assert metadata["planner_entrypoint"] == "chat_window"
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "data_analysis"
+    assert metadata["yachiyo_plan_tools"] == ["data.analyze"]
+    assert task.metadata["entrypoint_source"] == "chat_window"
+    assert task.metadata["planner_entrypoint"] == "chat_window"
+
+
+def test_yachiyo_agent_service_preserves_explicit_chat_entrypoint_metadata() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="请分析 data/sales.csv 并输出报告",
+            conversation_id="chat-1",
+            metadata={
+                "client_message_id": "client-1",
+                "source": "chat",
+                "runnable_kind": "main",
+                "planner_entrypoint": "chat_default",
+            },
+        )
+    )
+
+    metadata = port.calls[0][1]["metadata"]
+    assert metadata["client_message_id"] == "client-1"
+    assert metadata["source"] == "chat"
+    assert metadata["entrypoint_source"] == "chat_window"
+    assert metadata["runnable_kind"] == "main"
+    assert metadata["planner_entrypoint"] == "chat_default"
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "data_analysis"
+    assert task.metadata["source"] == "chat"
+    assert task.metadata["entrypoint_source"] == "chat_window"
+    assert task.metadata["planner_entrypoint"] == "chat_default"
+
+
+def test_yachiyo_agent_service_preserves_launcher_entrypoint_for_data_analysis() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    for mode in ("bubble", "live2d"):
+        task = service.start_chat_task(
+            StartChatTaskRequest(
+                prompt="请分析 data/sales.csv 并输出报告",
+                conversation_id=f"{mode}-chat",
+                metadata={
+                    "source": "launcher",
+                    "launcher_mode": mode,
+                },
+            )
+        )
+        metadata = port.calls[-1][1]["metadata"]
+        assert metadata["source"] == "launcher"
+        assert metadata["entrypoint_source"] == "launcher"
+        assert metadata["launcher_mode"] == mode
+        assert metadata["launcher_surface"] == "desktop_launcher"
+        assert metadata["planner_entrypoint"] == f"{mode}_default"
+        assert metadata["runnable_kind"] == "main"
+        assert metadata["yachiyo_runtime_planner"] is True
+        assert metadata["yachiyo_intent_kind"] == "data_analysis"
+        assert metadata["yachiyo_plan_tools"] == ["data.analyze"]
+        assert metadata["yachiyo_plan_artifacts_expected"] == ["analysis-report.md"]
+        assert task.metadata["planner_entrypoint"] == f"{mode}_default"
+
+
 def test_yachiyo_agent_service_surfaces_data_analysis_open_questions_to_chat_task() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)

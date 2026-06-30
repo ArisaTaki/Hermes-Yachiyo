@@ -71,7 +71,9 @@ def planner_enriched_chat_request(
     runnable_id = str(payload.get("agent_id") or payload.get("runnable_id") or "").strip()
     if runnable_id and runnable_id != _MAIN_CHAT_AGENT_ID:
         return payload
-    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    metadata = _normalized_entrypoint_metadata(
+        payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    )
     decision = runtime_planner_decision(
         str(payload.get("prompt") or payload.get("goal") or ""),
         allowed_tools=allowed_tools,
@@ -89,6 +91,36 @@ def planner_enriched_chat_request(
         **orchestration_metadata,
     }
     return payload
+
+
+def _normalized_entrypoint_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = dict(metadata)
+    source = _metadata_text(normalized, "entrypoint_source") or _metadata_text(normalized, "source")
+    launcher_mode = _metadata_text(normalized, "launcher_mode")
+    launcher_surface = _metadata_text(normalized, "launcher_surface")
+    is_launcher = (
+        source == "launcher"
+        or launcher_mode in {"bubble", "live2d"}
+        or bool(launcher_surface)
+    )
+    if is_launcher:
+        normalized.setdefault("source", "launcher")
+        normalized.setdefault("entrypoint_source", "launcher")
+        if launcher_mode in {"bubble", "live2d"}:
+            normalized.setdefault("planner_entrypoint", f"{launcher_mode}_default")
+        else:
+            normalized.setdefault("planner_entrypoint", "launcher_default")
+        normalized.setdefault("launcher_surface", launcher_surface or "desktop_launcher")
+        normalized.setdefault("runnable_kind", "main")
+        return normalized
+
+    normalized.setdefault("entrypoint_source", "chat_window")
+    normalized.setdefault("planner_entrypoint", "chat_window")
+    return normalized
+
+
+def _metadata_text(metadata: Mapping[str, Any], key: str) -> str:
+    return str(metadata.get(key) or "").strip()
 
 
 def _planner_orchestration_metadata(
@@ -349,7 +381,6 @@ def _selection_entrypoint_payload(metadata: Mapping[str, Any] | None) -> dict[st
     payload: dict[str, Any] = {}
     key_map = {
         "planner_entrypoint": "planner_entrypoint",
-        "source": "entrypoint_source",
         "launcher_mode": "launcher_mode",
         "launcher_surface": "launcher_surface",
         "runnable_kind": "runnable_kind",
@@ -358,6 +389,12 @@ def _selection_entrypoint_payload(metadata: Mapping[str, Any] | None) -> dict[st
         value = str(metadata.get(key) or "").strip()
         if value:
             payload[payload_key] = value
+    entrypoint_source = (
+        str(metadata.get("entrypoint_source") or "").strip()
+        or str(metadata.get("source") or "").strip()
+    )
+    if entrypoint_source:
+        payload["entrypoint_source"] = entrypoint_source
     if isinstance(metadata.get("daily_desktop_intent"), bool):
         payload["entrypoint_daily_desktop_intent"] = bool(metadata.get("daily_desktop_intent"))
     return payload
