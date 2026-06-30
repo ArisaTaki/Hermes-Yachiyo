@@ -1973,6 +1973,66 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         },
     }
 
+    browser_prompt = "打开一个浏览器"
+    open_allowed_tools = ["desktop.list_apps", "app.open", "desktop.active_window"]
+    browser_decision = RuntimePlanner().decision(
+        browser_prompt,
+        allowed_tools=open_allowed_tools,
+    )
+    browser_requests = planner_tool_requests(browser_prompt, open_allowed_tools)
+    browser_payload = planner_selection_payload(
+        decision=browser_decision,
+        planner_requests=browser_requests,
+        legacy_requests=[],
+        selected_requests=browser_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert browser_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "browser", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+    assert browser_payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "browser",
+        "app_name_source": "desktop.list_apps",
+        "capability_description": "browser",
+        "target_action": "open_app",
+    }
+    assert runtime_planner_metadata(browser_decision)["yachiyo_followup_target"] == (
+        browser_payload["followup_target"]
+    )
+
+    file_manager_prompt = "打开文件管理器"
+    file_manager_decision = RuntimePlanner().decision(
+        file_manager_prompt,
+        allowed_tools=open_allowed_tools,
+    )
+    file_manager_requests = planner_tool_requests(file_manager_prompt, open_allowed_tools)
+    file_manager_payload = planner_selection_payload(
+        decision=file_manager_decision,
+        planner_requests=file_manager_requests,
+        legacy_requests=[],
+        selected_requests=file_manager_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert file_manager_payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "file manager",
+        "app_name_source": "desktop.list_apps",
+        "capability_description": "file manager",
+        "target_action": "open_app",
+    }
+
 
 def test_planner_selection_payload_surfaces_discovered_app_open_path_target() -> None:
     prompt = "找一个代码编辑器打开 README.md"
@@ -6640,12 +6700,34 @@ def test_runtime_planner_discovers_generic_browser_before_acting() -> None:
     }
     assert open_decision.selected_intent.inputs["generic_browser_discovery_hint"] == {
         "query": "browser",
+        "description": "browser",
     }
     assert [step.step_id for step in open_decision.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
     ]
     assert planner_tool_requests("打开默认浏览器", open_allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "browser", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+    open_one_decision = RuntimePlanner().decision("打开一个浏览器", allowed_tools=open_allowed)
+    assert open_one_decision.selected_intent.inputs["app_name_hint"] == ""
+    assert open_one_decision.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "browser",
+    }
+    assert open_one_decision.selected_intent.inputs["generic_browser_discovery_hint"] == {
+        "query": "browser",
+        "description": "browser",
+    }
+    assert planner_tool_requests("打开一个浏览器", open_allowed) == [
         {
             "protocol": "json_fallback",
             "tool": "desktop.list_apps",
@@ -6707,6 +6789,7 @@ def test_runtime_planner_discovers_generic_file_manager_before_acting() -> None:
         }
         assert decision.selected_intent.inputs["generic_file_manager_discovery_hint"] == {
             "query": "file manager",
+            "description": "file manager",
         }
         assert [step.step_id for step in decision.plan.tool_plan.steps] == [
             "discover_apps-desktop-state",
@@ -6762,6 +6845,7 @@ def test_runtime_planner_discovers_generic_terminal_app_before_acting() -> None:
         }
         assert decision.selected_intent.inputs["generic_terminal_app_discovery_hint"] == {
             "query": "terminal",
+            "description": "terminal",
         }
         assert [step.step_id for step in decision.plan.tool_plan.steps] == [
             "discover_apps-desktop-state",
@@ -7392,6 +7476,7 @@ def test_runtime_planner_discovers_generic_music_app_before_acting() -> None:
         }
         assert decision.selected_intent.inputs["generic_music_app_discovery_hint"] == {
             "query": "music",
+            "description": "music",
         }
         assert [step.step_id for step in decision.plan.tool_plan.steps] == [
             "discover_apps-desktop-state",

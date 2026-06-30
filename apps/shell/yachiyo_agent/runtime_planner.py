@@ -982,13 +982,25 @@ class TaskIntentRouter:
         if desktop_discovery is not None:
             inputs["desktop_discovery_hint"] = desktop_discovery
         if generic_browser_discovery:
-            inputs["generic_browser_discovery_hint"] = {"query": "browser"}
+            inputs["generic_browser_discovery_hint"] = {
+                "query": "browser",
+                "description": "browser",
+            }
         if generic_music_app_discovery:
-            inputs["generic_music_app_discovery_hint"] = {"query": "music"}
+            inputs["generic_music_app_discovery_hint"] = {
+                "query": "music",
+                "description": "music",
+            }
         if generic_file_manager_discovery:
-            inputs["generic_file_manager_discovery_hint"] = {"query": "file manager"}
+            inputs["generic_file_manager_discovery_hint"] = {
+                "query": "file manager",
+                "description": "file manager",
+            }
         if generic_terminal_app_discovery:
-            inputs["generic_terminal_app_discovery_hint"] = {"query": "terminal"}
+            inputs["generic_terminal_app_discovery_hint"] = {
+                "query": "terminal",
+                "description": "terminal",
+            }
         if generic_communication_app_discovery:
             inputs["generic_communication_app_discovery_hint"] = {
                 "query": generic_communication_query
@@ -13687,7 +13699,7 @@ def _generic_browser_app_target_requested(text: str) -> bool:
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|启动|开启|切到|聚焦|检查|查看|看看)\s*"
-        r"(?:默认|任意|任何)?\s*浏览器(?:\s*(?:一下|下|起来|开了吗|打开了吗))?\s*[?？。！!]*$",
+        r"(?:一个|一款|默认|任意|任何|可用)?\s*浏览器(?:\s*(?:一下|下|起来|开了吗|打开了吗))?\s*[?？。！!]*$",
         r"^(?:默认|任意|任何)?\s*浏览器.{0,24}"
         r"(?:有哪些|有什么|按钮|控件|元素|界面|窗口|开了吗|打开了吗|是否打开)",
         r"\b(?:open|launch|start|focus|inspect|check)\s+(?:the\s+)?"

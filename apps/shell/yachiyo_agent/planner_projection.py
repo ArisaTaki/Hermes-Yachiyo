@@ -348,12 +348,12 @@ def _desktop_file_open_followup_target(inputs: Mapping[str, Any]) -> dict[str, A
 
 
 def _desktop_discovered_app_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:
-    app_capability = inputs.get("app_capability_hint")
     desktop_discovery = inputs.get("desktop_discovery_hint")
-    if not isinstance(app_capability, Mapping) or not isinstance(desktop_discovery, Mapping):
+    if not isinstance(desktop_discovery, Mapping):
         return {}
     if str(desktop_discovery.get("action") or "").strip() != "discover_apps":
         return {}
+    app_capability = _desktop_discovery_capability_hint(inputs)
     query = str(desktop_discovery.get("query") or app_capability.get("query") or "").strip()
     if not query:
         return {}
@@ -404,6 +404,21 @@ def _desktop_discovered_app_followup_target(inputs: Mapping[str, Any]) -> dict[s
             },
         }
     return payload
+
+
+def _desktop_discovery_capability_hint(inputs: Mapping[str, Any]) -> Mapping[str, Any]:
+    for key in (
+        "app_capability_hint",
+        "generic_browser_discovery_hint",
+        "generic_music_app_discovery_hint",
+        "generic_file_manager_discovery_hint",
+        "generic_terminal_app_discovery_hint",
+        "generic_communication_app_discovery_hint",
+    ):
+        value = inputs.get(key)
+        if isinstance(value, Mapping):
+            return value
+    return {}
 
 
 def _communication_followup_hint(inputs: Mapping[str, Any]) -> Mapping[str, Any]:
