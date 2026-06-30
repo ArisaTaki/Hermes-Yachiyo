@@ -402,6 +402,9 @@ def focus_window_hint(text: str) -> dict[str, str] | None:
 def ui_inspection_hint(text: str) -> dict[str, Any] | None:
     value = clean(text)
     lowered = value.lower()
+    presence = ui_control_presence_hint(value)
+    if presence:
+        return presence
     if not _looks_like_ui_inspection_request(value, lowered):
         return None
     payload: dict[str, Any] = {
@@ -1550,7 +1553,72 @@ def _looks_like_ui_inspection_request(value: str, lowered: str) -> bool:
     )
 
 
+def ui_control_presence_hint(text: str) -> dict[str, Any] | None:
+    value = clean(text)
+    lowered = value.lower()
+    if not re.search(
+        r"(?:有没有|是否有|有无|是否存在|是否显示|能否看到|能不能看到|看得到|找得到|"
+        r"is\s+there|are\s+there|has|have|contains?|visible|shown|available)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return None
+    if not re.search(
+        r"(?:控件|按钮|输入框|文本框|输入栏|菜单项|菜单|复选框|元素|选项|"
+        r"button|control|ui\s+element|text\s+field|textbox|input|menu|checkbox)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return None
+    app_name = _ui_control_presence_app_name_hint(value)
+    payload: dict[str, Any] = {
+        "role_filter": _ui_role_filter_hint(value),
+        "limit": 80,
+    }
+    if app_name:
+        payload["app_name"] = app_name
+    return payload
+
+
+def _ui_control_presence_app_name_hint(value: str) -> str:
+    current_scope = (
+        r"(?:(?:当前|现在|这个|前台|该)\s*(?:窗口|界面|屏幕|应用|app|ui)|"
+        r"(?:current|active|foreground|this)\s*(?:window|interface|screen|app|application|ui)?)"
+    )
+    if re.search(current_scope, value, flags=re.IGNORECASE):
+        return ""
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以|直接|检查|查看|看看|确认|识别)?\s*"
+        r"(?P<app>[\w .·-]{1,40}?)\s*(?:里|中|上|内)?\s*"
+        r"(?:有没有|是否有|有无|是否存在|是否显示|能否看到|能不能看到|看得到|找得到)",
+        r"\b(?:check|see|inspect|verify)\s+(?:whether|if)?\s*(?:the\s+)?"
+        r"(?P<app_en>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
+        r"(?:has|have|contains?|shows?)\b",
+        r"\b(?:is\s+there|are\s+there)\s+[^.!?]{1,50}?\s+"
+        r"(?:in|on|inside)\s+(?:the\s+)?"
+        r"(?P<app_en_post>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = next(
+            (
+                item
+                for item in match.groupdict().values()
+                if item is not None and str(item).strip()
+            ),
+            "",
+        )
+        app_name = _clean_ui_app_name_hint(raw_app)
+        if app_name:
+            return app_name
+    return ""
+
+
 def _looks_like_foreground_mutation(value: str, lowered: str) -> bool:
+    if ui_control_presence_hint(value):
+        return False
     if re.search(r"\bwhat\s+can\s+i\s+(?:click|press|use)\b", lowered):
         return False
     if _looks_like_ui_click_advice_request(value):

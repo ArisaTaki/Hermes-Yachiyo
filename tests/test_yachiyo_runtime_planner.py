@@ -6848,6 +6848,85 @@ def test_runtime_planner_routes_current_ui_inspection_to_ui_elements() -> None:
     ]
 
 
+def test_runtime_planner_treats_control_presence_as_observation() -> None:
+    allowed_tools = [
+        "desktop.running_apps",
+        "desktop.ui_elements",
+        "desktop.click_ui_element",
+        "desktop.submit_foreground",
+        "desktop.list_apps",
+        "app.open",
+        "desktop.inspect_app",
+    ]
+    cases = (
+        ("检查当前应用里有没有发送按钮", "button"),
+        ("当前窗口有没有搜索输入框", "text"),
+        ("check whether the current app has a Send button", "button"),
+    )
+
+    for prompt, role_filter in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs == {
+            "app_name_hint": "",
+            "operation_hint": "read_ui",
+            "ui_inspection_hint": {"role_filter": role_filter, "limit": 80},
+            "control_presence_inspection_hint": {"role_filter": role_filter, "limit": 80},
+        }
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover-desktop-state",
+            "read-foreground-ui",
+        ]
+        assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+            "desktop.running_apps",
+            "desktop.ui_elements",
+        ]
+        assert planner_tool_requests(prompt, allowed_tools)[:2] == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.running_apps",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {"role_filter": role_filter, "limit": 80},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
+            },
+        ]
+        assert not any(
+            step.tool_name in {"app.open", "desktop.click_ui_element", "desktop.submit_foreground"}
+            for step in decision.plan.tool_plan.steps
+        )
+
+    slack = RuntimePlanner().decision("Slack 有没有发送按钮", allowed_tools=allowed_tools)
+    assert slack.selected_intent.inputs == {
+        "app_name_hint": "Slack",
+        "operation_hint": "read_ui",
+        "ui_inspection_hint": {
+            "role_filter": "button",
+            "limit": 80,
+            "app_name": "Slack",
+        },
+        "control_presence_inspection_hint": {
+            "role_filter": "button",
+            "limit": 80,
+            "app_name": "Slack",
+        },
+    }
+    assert [step.step_id for step in slack.plan.tool_plan.steps] == ["inspect-app"]
+    assert _step_by_id(slack, "inspect-app").tool_name == "desktop.inspect_app"
+
+    click = RuntimePlanner().decision("点击发送按钮", allowed_tools=allowed_tools)
+    assert click.selected_intent.inputs["operation_hint"] == "click"
+    assert any(step.tool_name == "desktop.click_ui_element" for step in click.plan.tool_plan.steps)
+
+
 def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
     decision = RuntimePlanner().decision(
         "Slack 有哪些按钮",

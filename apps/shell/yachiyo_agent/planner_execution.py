@@ -783,6 +783,11 @@ def _desktop_observation_step_needs_model_followup(
     if not prompt:
         return False
     inputs = getattr(getattr(decision, "selected_intent", None), "inputs", None)
+    if isinstance(inputs, Mapping) and isinstance(
+        inputs.get("control_presence_inspection_hint"),
+        Mapping,
+    ):
+        return True
     if (
         step_id == "verify-desktop-result"
         and isinstance(inputs, Mapping)

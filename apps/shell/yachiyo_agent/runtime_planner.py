@@ -60,6 +60,7 @@ from .desktop_plan_hints import (
     clean_followup_text,
     clean_type_target,
     type_into_ui_hint,
+    ui_control_presence_hint,
     ui_inspection_hint,
     window_list_hint,
 )
@@ -336,6 +337,7 @@ class TaskIntentRouter:
                 "role_filter": str((click_target or {}).get("role_filter") or ""),
                 "limit": 80,
             }
+        control_presence_inspection = ui_control_presence_hint(text)
         app_management = app_management_hint(text)
         foreground_management = foreground_management_hint(text)
         safe_shortcut = safe_shortcut_hint(text)
@@ -386,6 +388,8 @@ class TaskIntentRouter:
             safe_scroll = app_scoped_safe_operation["safe_scroll"]
         safe_click = safe_click_hint(text)
         foreground_compose_text = _foreground_compose_text_hint(text)
+        if control_presence_inspection:
+            foreground_compose_text = ""
         if str((safe_shortcut or {}).get("action") or "").strip() == "new_message":
             foreground_compose_text = ""
         container_action = _dynamic_context_target_container_action_hint(text)
@@ -417,6 +421,8 @@ class TaskIntentRouter:
                 create_container_action = _generic_create_container_action_hint(text)
                 if create_container_action:
                     safe_shortcut = {"action": create_container_action}
+        if control_presence_inspection:
+            desktop_discovery = None
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
             desktop_discovery = None
         context_source = context_source_hint(text)
@@ -453,9 +459,13 @@ class TaskIntentRouter:
         ):
             return _empty_intent("desktop_operation", text)
         foreground_submit_action = _foreground_submit_action_hint(text)
+        if ui_inspection is not None and ui_control_presence_hint(text):
+            foreground_submit_action = ""
         if hotkey and not _contains_any(text, ("发送", "提交", "send", "submit")):
             foreground_submit_action = ""
         foreground_search_submit = _foreground_search_submit_hint(text)
+        if control_presence_inspection:
+            foreground_search_submit = False
         foreground_app_search = _foreground_app_search_hint(text)
         command_palette = _app_command_palette_hint(text)
         browser_internal_page = _browser_internal_page_hint(text)
@@ -775,6 +785,8 @@ class TaskIntentRouter:
             or (app_type_scope and not _app_search_field_input_allows_safe_search(text))
         ):
             app_search = _app_search_hint(text, app_name_hint)
+        if control_presence_inspection:
+            app_search = {}
         app_search_app_name = str(app_search.get("app_name") or "").strip()
         if app_search_app_name and (
             not app_name_hint
@@ -870,6 +882,15 @@ class TaskIntentRouter:
             app_name_hint = ""
             app_management = None
             app_search = {}
+        if control_presence_inspection and not str(
+            control_presence_inspection.get("app_name") or ""
+        ).strip():
+            app_name_hint = ""
+            app_management = None
+            desktop_discovery = None
+            app_search = {}
+            foreground_submit_action = ""
+            foreground_search_submit = False
         selected_app_target_path = (
             _selected_discovered_app_target_path_hint(text) if app_capability else ""
         )
@@ -883,6 +904,8 @@ class TaskIntentRouter:
             inputs["focus_window_hint"] = focus_window
         if ui_inspection is not None:
             inputs["ui_inspection_hint"] = ui_inspection
+        if control_presence_inspection:
+            inputs["control_presence_inspection_hint"] = dict(control_presence_inspection)
         if screen_capture is not None:
             inputs["screen_capture_hint"] = screen_capture
         if app_management is not None:
@@ -1643,6 +1666,8 @@ class TaskIntentRouter:
         )
 
     def _communication_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        if ui_control_presence_hint(text):
+            return _empty_intent("communication", text)
         scoped_new_item = _app_scoped_safe_operation_hint(text)
         scoped_action = str(
             (scoped_new_item.get("safe_shortcut") or {}).get("action") or ""
@@ -2228,6 +2253,10 @@ class RuntimePlanner:
         intent_ui_inspection = intent.inputs.get("ui_inspection_hint")
         if isinstance(intent_ui_inspection, Mapping):
             ui_inspection = dict(intent_ui_inspection)
+        control_presence_inspection = isinstance(
+            intent.inputs.get("control_presence_inspection_hint"),
+            Mapping,
+        ) or bool(ui_control_presence_hint(intent.user_goal))
         if window_list is not None:
             ui_inspection = None
         elif ui_inspection is not None and not focus_window:
@@ -2308,6 +2337,19 @@ class RuntimePlanner:
         desktop_discovery = intent.inputs.get("desktop_discovery_hint")
         if not isinstance(desktop_discovery, Mapping):
             desktop_discovery = _desktop_discovery_hint(intent.user_goal)
+        control_presence_app_name = (
+            str(
+                (
+                    intent.inputs.get("control_presence_inspection_hint")
+                    if isinstance(intent.inputs.get("control_presence_inspection_hint"), Mapping)
+                    else {}
+                ).get("app_name")
+                or ""
+            ).strip()
+        )
+        control_presence_current_scope = control_presence_inspection and not control_presence_app_name
+        if control_presence_current_scope:
+            desktop_discovery = {}
         app_capability = intent.inputs.get("app_capability_hint")
         if not isinstance(app_capability, Mapping):
             app_capability = {}
@@ -2321,6 +2363,8 @@ class RuntimePlanner:
                 intent.user_goal,
                 str(intent.inputs.get("app_name_hint") or ""),
             )
+        if control_presence_current_scope:
+            app_search = {}
         app_type_scope_hint = _app_first_type_scope_hint(intent.user_goal)
         if _app_first_click_scope_hint(intent.user_goal) or (
             app_type_scope_hint
@@ -2375,6 +2419,9 @@ class RuntimePlanner:
             and _contains_any(app_name, ("搜索", "查找", "检索", "search", "find", "look up"))
         ):
             app_name = direct_app_name
+        if control_presence_current_scope:
+            app_name = ""
+            app_management = None
         if not _app_first_type_scope_hint(intent.user_goal) and _target_first_foreground_type_hint(intent.user_goal):
             app_name = ""
         if _standalone_hotkey_request(intent.user_goal):
@@ -2532,7 +2579,7 @@ class RuntimePlanner:
             app_search = {}
         foreground_compose_text = (
             ""
-            if type_target or defer_ambiguous_type_target
+            if type_target or defer_ambiguous_type_target or control_presence_inspection
             else str(
                 intent.inputs.get("foreground_compose_text_hint")
                 or _foreground_compose_text_hint(intent.user_goal)
@@ -2547,6 +2594,7 @@ class RuntimePlanner:
             if (
                 type_target
                 or defer_ambiguous_type_target
+                or control_presence_inspection
                 or str((safe_shortcut or {}).get("action") or "").strip() == "new_message"
             )
             else (
@@ -2566,6 +2614,9 @@ class RuntimePlanner:
         if defer_ambiguous_type_target:
             foreground_submit_action = ""
             foreground_search_submit = False
+        if control_presence_inspection:
+            foreground_submit_action = ""
+            foreground_search_submit = False
         if (
             app_name
             and (foreground_submit_action or foreground_compose_text or foreground_paste)
@@ -2576,6 +2627,8 @@ class RuntimePlanner:
             click_target = None
         submit_action = submit_action_hint(intent.user_goal) or foreground_submit_action
         if defer_ambiguous_type_target:
+            submit_action = ""
+        if control_presence_inspection:
             submit_action = ""
         if hotkey and not _contains_any(intent.user_goal, ("发送", "提交", "send", "submit")):
             submit_action = ""
@@ -11572,6 +11625,8 @@ def _is_finder_app_name(value: str) -> bool:
 
 def _foreground_submit_action_hint(text: str) -> str:
     value = _clean_prompt(text)
+    if ui_control_presence_hint(value):
+        return ""
     lowered = value.lower()
     app_scoped_submit = bool(_app_scoped_foreground_submit_app_name_hint(value))
     looks_like_send = _contains_any(value, ("发送", "发出", "send")) or bool(
