@@ -3029,6 +3029,11 @@ def test_app_open_resolves_installed_bundle_after_open_failure(monkeypatch, tmp_
         "requested_app_name": "Word",
         "resolved_app_name": "Microsoft Word",
         "app_resolution": "installed_app_bundle",
+        "app_resolution_source": "desktop.list_apps",
+        "app_resolution_score": 90,
+        "app_resolution_confidence": "high",
+        "app_resolution_reason": "query_tokens_in_app_name",
+        "resolved_app_path": str(app_dir / "Microsoft Word.app"),
     }
     assert [call[0] for call in calls] == [
         ["open", "-a", "Word"],
@@ -3067,6 +3072,11 @@ def test_app_open_resolves_shorter_bundle_from_qualified_request(monkeypatch, tm
     assert result["data"]["app_name"] == "Music"
     assert result["data"]["requested_app_name"] == "Apple Music"
     assert result["data"]["resolved_app_name"] == "Music"
+    assert result["data"]["app_resolution_source"] == "desktop.list_apps"
+    assert result["data"]["app_resolution_score"] == 85
+    assert result["data"]["app_resolution_confidence"] == "medium"
+    assert result["data"]["app_resolution_reason"] == "app_name_tokens_in_query"
+    assert result["data"]["resolved_app_path"] == str(app_dir / "Music.app")
     assert [call[0] for call in calls] == [
         ["open", "-a", "Apple Music"],
         ["open", "-a", "Music"],
@@ -4944,9 +4954,15 @@ def test_desktop_list_apps_filters_by_query(monkeypatch, tmp_path) -> None:
     assert result["ok"] is True
     assert result["summary"] == "Installed apps matching Apple Music: Music"
     assert result["data"]["query"] == "Apple Music"
+    assert result["data"]["normalized_query"] == "applemusic"
     assert result["data"]["count"] == 1
     assert result["data"]["apps"][0]["name"] == "Music"
     assert result["data"]["apps"][0]["match_score"] > 0
+    assert result["data"]["apps"][0]["match_confidence"] == "medium"
+    assert result["data"]["best_match"]["name"] == "Music"
+    assert result["data"]["resolution"]["requested_app_name"] == "Apple Music"
+    assert result["data"]["resolution"]["resolved_app_name"] == "Music"
+    assert result["data"]["resolution"]["app_resolution_source"] == "desktop.list_apps"
 
 
 def test_desktop_list_apps_does_not_match_ascii_query_inside_token(monkeypatch, tmp_path) -> None:

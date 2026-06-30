@@ -72,6 +72,12 @@ def _app_match_is_high_confidence(app: dict[str, Any], query: str) -> bool:
     return True
 
 
+def _best_match_from_list_apps_result(result: dict[str, Any]) -> dict[str, Any] | None:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    best_match = data.get("best_match")
+    return best_match if isinstance(best_match, dict) else None
+
+
 def _discovered_app_name_for_query(
     timeline: list[dict[str, Any]],
     query: str,
@@ -88,6 +94,11 @@ def _discovered_app_name_for_query(
         if not _app_lookups_related(input_preview.get("query"), clean_query):
             continue
         result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        best_match = _best_match_from_list_apps_result(result)
+        if best_match is not None and _app_match_is_high_confidence(best_match, query):
+            app_name = str(best_match.get("name") or "").strip()
+            if app_name:
+                return app_name
         discovered_apps = [
             app
             for app in _apps_from_list_apps_result(result)
@@ -152,7 +163,53 @@ def _tool_request_app_name_resolution(
         "requested_app_name": requested_app_name,
         "resolved_app_name": discovered_app_name,
         "source_tool": "desktop.list_apps",
+        **_discovered_app_resolution_evidence(timeline, requested_app_name, discovered_app_name),
     }
+
+
+def _discovered_app_resolution_evidence(
+    timeline: list[dict[str, Any]],
+    requested_app_name: str,
+    resolved_app_name: str,
+) -> dict[str, str]:
+    clean_requested = _normalized_app_lookup(requested_app_name)
+    clean_resolved = _normalized_app_lookup(resolved_app_name)
+    if not clean_requested or not clean_resolved:
+        return {}
+    for event in reversed(timeline):
+        if event.get("event") != "agent.tool.call":
+            continue
+        if str(event.get("detail") or "") != "desktop.list_apps":
+            continue
+        input_preview = event.get("input_preview") if isinstance(event.get("input_preview"), dict) else {}
+        if not _app_lookups_related(input_preview.get("query"), clean_requested):
+            continue
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        candidates = []
+        best_match = _best_match_from_list_apps_result(result)
+        if isinstance(best_match, dict):
+            candidates.append(best_match)
+        candidates.extend(
+            app for app in _apps_from_list_apps_result(result) if isinstance(app, dict)
+        )
+        for app in candidates:
+            if _normalized_app_lookup(app.get("name")) != clean_resolved:
+                continue
+            evidence: dict[str, str] = {}
+            score = _app_match_score(app)
+            if score is not None:
+                evidence["app_resolution_score"] = str(score)
+            confidence = str(app.get("match_confidence") or "").strip()
+            if confidence:
+                evidence["app_resolution_confidence"] = confidence
+            reason = str(app.get("match_reason") or "").strip()
+            if reason:
+                evidence["app_resolution_reason"] = reason
+            path = str(app.get("path") or "").strip()
+            if path:
+                evidence["resolved_app_path"] = path
+            return evidence
+    return {}
 
 
 def _input_preview_with_app_name_resolution(
@@ -172,6 +229,15 @@ def _input_preview_with_app_name_resolution(
         preview.setdefault("requested_app_name", requested_app_name)
     if source_tool:
         preview.setdefault("app_resolution_source", source_tool)
+    for key in (
+        "app_resolution_score",
+        "app_resolution_confidence",
+        "app_resolution_reason",
+        "resolved_app_path",
+    ):
+        value = str(resolution.get(key) or "").strip()
+        if value:
+            preview.setdefault(key, value)
     return preview
 
 

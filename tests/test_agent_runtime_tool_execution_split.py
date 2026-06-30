@@ -1026,6 +1026,7 @@ def test_runtime_tool_request_runner_records_discovered_app_name_resolution() ->
         "requested_app_name": "Apple Music",
         "resolved_app_name": "Music",
         "source_tool": "desktop.list_apps",
+        "resolved_app_path": "/Applications/Music.app",
     }
     assert [
         event for event in timeline if event["event"] == "agent.tool.input_resolved"
@@ -1037,6 +1038,85 @@ def test_runtime_tool_request_runner_records_discovered_app_name_resolution() ->
         }
     ]
     assert ("run-1", "agent.tool.input_resolved", resolution_payload) in run_events
+
+
+def test_runtime_tool_request_runner_records_best_match_resolution_evidence() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        calls.append((tool_name, payload))
+        result = (
+            {
+                "ok": True,
+                "action": "desktop.list_apps",
+                "data": {
+                    "query": payload["query"],
+                    "apps": [
+                        {
+                            "name": "Archive Utility",
+                            "path": "/System/Applications/Utilities/Archive Utility.app",
+                            "match_score": 80,
+                            "match_confidence": "medium",
+                        }
+                    ],
+                    "best_match": {
+                        "name": "Arc Browser",
+                        "path": "/Applications/Arc Browser.app",
+                        "match_score": 100,
+                        "match_confidence": "high",
+                        "match_reason": "exact_name",
+                    },
+                },
+            }
+            if tool_name == "desktop.list_apps"
+            else {
+                "ok": True,
+                "action": "app.open",
+                "data": {"app_name": payload["app_name"], "launch_verified": True},
+            }
+        )
+        timeline_arg.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool)
+    messages = [{"role": "user", "content": "打开 Arc Browser"}]
+
+    runner.run(
+        [
+            {"tool": "desktop.list_apps", "input": {"query": "Arc Browser", "limit": 20}},
+            {"tool": "app.open", "input": {"app_name": "Arc"}},
+        ],
+        ["desktop.list_apps", "app.open"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert calls == [
+        ("desktop.list_apps", {"query": "Arc Browser", "limit": 20}),
+        ("app.open", {"app_name": "Arc Browser"}),
+    ]
+    resolution = next(event for event in timeline if event["event"] == "agent.tool.input_resolved")
+    assert resolution["resolved_app_name"] == "Arc Browser"
+    assert resolution["app_resolution_score"] == "100"
+    assert resolution["app_resolution_confidence"] == "high"
+    assert resolution["app_resolution_reason"] == "exact_name"
+    assert resolution["resolved_app_path"] == "/Applications/Arc Browser.app"
 
 
 def test_runtime_tool_request_runner_uses_related_discovered_app_match_name() -> None:

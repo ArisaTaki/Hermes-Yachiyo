@@ -756,6 +756,9 @@ function toolCallCorrelationPreview(preview: Record<string, unknown>): Record<st
     'agent_name',
     'approval_id',
     'app_resolution_source',
+    'app_resolution_score',
+    'app_resolution_confidence',
+    'app_resolution_reason',
     'group_id',
     'group_run_id',
     'member_agent_id',
@@ -763,6 +766,7 @@ function toolCallCorrelationPreview(preview: Record<string, unknown>): Record<st
     'policy_reason',
     'requested_app_name',
     'resolved_app_name',
+    'resolved_app_path',
     'risk_level',
     'run_id',
     'run_group_id',
@@ -793,6 +797,10 @@ function toolInputResolutionPreview(
   const resolvedAppName = publicRunEventPayloadString(payload, 'resolved_app_name');
   const requestedAppName = publicRunEventPayloadString(payload, 'requested_app_name');
   const sourceTool = publicRunEventPayloadString(payload, 'source_tool');
+  const resolutionScore = publicRunEventPayloadString(payload, 'app_resolution_score');
+  const resolutionConfidence = publicRunEventPayloadString(payload, 'app_resolution_confidence');
+  const resolutionReason = publicRunEventPayloadString(payload, 'app_resolution_reason');
+  const resolvedAppPath = publicRunEventPayloadString(payload, 'resolved_app_path');
   if (resolvedAppName) {
     if (!preview.app_name) preview.app_name = resolvedAppName;
     if (!preview.resolved_app_name) preview.resolved_app_name = resolvedAppName;
@@ -802,6 +810,18 @@ function toolInputResolutionPreview(
   }
   if (sourceTool && !preview.app_resolution_source) {
     preview.app_resolution_source = sourceTool;
+  }
+  if (resolutionScore && !preview.app_resolution_score) {
+    preview.app_resolution_score = resolutionScore;
+  }
+  if (resolutionConfidence && !preview.app_resolution_confidence) {
+    preview.app_resolution_confidence = resolutionConfidence;
+  }
+  if (resolutionReason && !preview.app_resolution_reason) {
+    preview.app_resolution_reason = resolutionReason;
+  }
+  if (resolvedAppPath && !preview.resolved_app_path) {
+    preview.resolved_app_path = resolvedAppPath;
   }
   return preview;
 }

@@ -11,7 +11,7 @@ import shutil
 import subprocess
 from datetime import datetime, timedelta
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 from urllib.error import HTTPError
 from urllib.parse import quote_plus, urlparse
 from urllib.request import Request, urlopen
@@ -1483,18 +1483,14 @@ def list_apps(query: str = "", limit: Any = 200) -> dict[str, Any]:
         clean_limit = max(1, min(500, int(limit or 200)))
     except (TypeError, ValueError):
         clean_limit = 200
-    apps: list[dict[str, Any]] = []
-    for bundle in _iter_installed_app_bundles():
-        score = _installed_app_match_score(clean_query, bundle.stem) if clean_query else 0
-        if clean_query and score <= 0:
-            continue
-        apps.append(
-            {
-                "name": bundle.stem,
-                "path": str(bundle),
-                "match_score": score,
-            }
-        )
+    apps = _installed_app_match_candidates(clean_query) if clean_query else [
+        {
+            "name": bundle.stem,
+            "path": str(bundle),
+            "match_score": 0,
+        }
+        for bundle in _iter_installed_app_bundles()
+    ]
     if clean_query:
         apps.sort(
             key=lambda item: (
@@ -1516,17 +1512,26 @@ def list_apps(query: str = "", limit: Any = 200) -> dict[str, Any]:
         )
     else:
         summary = f"Installed apps: {', '.join(names)}" if names else "No installed apps found"
+    best_match = limited_apps[0] if clean_query and limited_apps else None
+    resolution = _app_discovery_resolution(clean_query, best_match)
+    data = {
+        "query": clean_query,
+        "apps": limited_apps,
+        "count": len(limited_apps),
+        "total_count": total_count,
+        "truncated": total_count > len(limited_apps),
+    }
+    if clean_query:
+        data["normalized_query"] = _compact_app_match_name(clean_query)
+    if best_match is not None:
+        data["best_match"] = best_match
+    if resolution:
+        data["resolution"] = resolution
     return {
         "ok": True,
         "action": "desktop.list_apps",
         "summary": summary,
-        "data": {
-            "query": clean_query,
-            "apps": limited_apps,
-            "count": len(limited_apps),
-            "total_count": total_count,
-            "truncated": total_count > len(limited_apps),
-        },
+        "data": data,
         "permission_error": False,
         "fallback_used": False,
     }
@@ -1694,12 +1699,14 @@ def app_open(app_name: str) -> dict[str, Any]:
         return _open_common_folder(clean_name, folder_path)
     resolved_name = clean_name
     app_resolution = "requested_app_name"
+    resolution_metadata: dict[str, Any] = {}
     try:
         result = _run_open_app(resolved_name)
     except Exception as exc:
         return _error("app.open", exc)
     if result.returncode != 0:
-        resolved_name = _resolve_installed_app_name(clean_name)
+        resolved_app = _resolve_installed_app(clean_name)
+        resolved_name = str(resolved_app.get("name") or "").strip()
         if not resolved_name or resolved_name == clean_name:
             return _app_open_failed(clean_name, result)
         try:
@@ -1710,16 +1717,12 @@ def app_open(app_name: str) -> dict[str, Any]:
             return _app_open_failed(clean_name, result)
         result = resolved_result
         app_resolution = "installed_app_bundle"
+        resolution_metadata = _app_resolution_metadata_from_match(clean_name, resolved_app)
     verification = _app_running_verification(resolved_name)
     data = {"app_name": resolved_name, **verification}
     if resolved_name != clean_name:
-        data.update(
-            {
-                "requested_app_name": clean_name,
-                "resolved_app_name": resolved_name,
-                "app_resolution": app_resolution,
-            }
-        )
+        data.update(resolution_metadata or _app_resolution_metadata(clean_name, resolved_name))
+        data["app_resolution"] = app_resolution
     return {
         "ok": True,
         "action": "app.open",
@@ -2620,20 +2623,90 @@ def _run_open_app(app_name: str) -> subprocess.CompletedProcess[str]:
 
 
 def _resolve_installed_app_name(app_name: str) -> str:
-    query = _compact_app_match_name(app_name)
-    if not query:
-        return ""
-    matches: list[tuple[int, int, str]] = []
+    match = _resolve_installed_app(app_name)
+    return str(match.get("name") or "").strip()
+
+
+def _resolve_installed_app(app_name: str) -> dict[str, Any]:
+    candidates = _installed_app_match_candidates(app_name)
+    return candidates[0] if candidates else {}
+
+
+def _installed_app_match_candidates(query_name: str) -> list[dict[str, Any]]:
+    query = str(query_name or "").strip()
+    query_key = _compact_app_match_name(query)
+    if not query_key:
+        return []
+    matches: list[dict[str, Any]] = []
     for bundle in _iter_installed_app_bundles():
         candidate = bundle.stem
-        score = _installed_app_match_score(app_name, candidate)
+        score = _installed_app_match_score(query, candidate)
         if score <= 0:
             continue
-        matches.append((score, -len(candidate), candidate))
+        matches.append(
+            {
+                "name": candidate,
+                "path": str(bundle),
+                "match_score": score,
+                "match_confidence": _installed_app_match_confidence(score),
+                "match_reason": _installed_app_match_reason(score),
+                "normalized_name": _compact_app_match_name(candidate),
+            }
+        )
     if not matches:
-        return ""
-    matches.sort(reverse=True)
-    return matches[0][2]
+        return []
+    matches.sort(
+        key=lambda item: (
+            -int(item["match_score"]),
+            len(str(item["name"])),
+            str(item["name"]),
+        )
+    )
+    return matches
+
+
+def _app_discovery_resolution(
+    requested_app_name: str,
+    best_match: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not best_match:
+        return {}
+    resolved = str(best_match.get("name") or "").strip()
+    if not resolved:
+        return {}
+    return _app_resolution_metadata_from_match(requested_app_name, best_match)
+
+
+def _app_resolution_metadata_from_match(
+    requested_app_name: str,
+    match: Mapping[str, Any],
+) -> dict[str, Any]:
+    requested = str(requested_app_name or "").strip()
+    resolved = str(match.get("name") or "").strip()
+    if not requested or not resolved:
+        return {}
+    metadata: dict[str, Any] = {
+        "requested_app_name": requested,
+        "resolved_app_name": resolved,
+        "app_resolution": "installed_app_bundle",
+        "app_resolution_source": "desktop.list_apps",
+    }
+    score = match.get("match_score")
+    if score is not None:
+        try:
+            metadata["app_resolution_score"] = int(score)
+        except (TypeError, ValueError):
+            pass
+    confidence = str(match.get("match_confidence") or "").strip()
+    if confidence:
+        metadata["app_resolution_confidence"] = confidence
+    reason = str(match.get("match_reason") or "").strip()
+    if reason:
+        metadata["app_resolution_reason"] = reason
+    path = str(match.get("path") or "").strip()
+    if path:
+        metadata["resolved_app_path"] = path
+    return metadata
 
 
 def _app_resolution_metadata(requested_app_name: str, resolved_app_name: str) -> dict[str, str]:
@@ -2646,6 +2719,34 @@ def _app_resolution_metadata(requested_app_name: str, resolved_app_name: str) ->
         "resolved_app_name": resolved,
         "app_resolution": "installed_app_bundle",
     }
+
+
+def _installed_app_match_confidence(score: int) -> str:
+    if score >= 90:
+        return "high"
+    if score >= 80:
+        return "medium"
+    return "low"
+
+
+def _installed_app_match_reason(score: int) -> str:
+    if score >= 100:
+        return "exact_name"
+    if score >= 90:
+        return "query_tokens_in_app_name"
+    if score >= 85:
+        return "app_name_tokens_in_query"
+    if score >= 82:
+        return "query_token_prefix"
+    if score >= 80:
+        return "app_name_suffix"
+    if score >= 75:
+        return "query_suffix"
+    if score >= 70:
+        return "non_ascii_query_substring"
+    if score >= 65:
+        return "non_ascii_app_name_substring"
+    return "unknown"
 
 
 def _application_search_dirs() -> list[Path]:
@@ -2980,7 +3081,13 @@ def app_focus(app_name: str) -> dict[str, Any]:
     if _desktop_platform() != "macos":
         return _unsupported("app.focus")
     clean_name = _clean_required(app_name, "app_name")
-    resolved_name = _resolve_installed_app_name(clean_name) or clean_name
+    resolved_app = _resolve_installed_app(clean_name)
+    resolved_name = str(resolved_app.get("name") or "").strip() or clean_name
+    resolution_metadata = (
+        _app_resolution_metadata_from_match(clean_name, resolved_app)
+        if resolved_name != clean_name
+        else {}
+    )
     focus_attempts: list[dict[str, Any]] = []
     result = _system_events_focus_app(resolved_name)
     if not result["ok"]:
@@ -3001,7 +3108,7 @@ def app_focus(app_name: str) -> dict[str, Any]:
                         "app_name": clean_name,
                         **fallback_data,
                         **appkit_data,
-                        **_app_resolution_metadata(clean_name, resolved_name),
+                        **resolution_metadata,
                         "focus_fallback": "app.open_then_appkit",
                         "focus_attempts": focus_attempts,
                     },
@@ -3034,7 +3141,7 @@ def app_focus(app_name: str) -> dict[str, Any]:
                             "app_name": clean_name,
                             **fallback_data,
                             **electron_native_data,
-                            **_app_resolution_metadata(clean_name, resolved_name),
+                            **resolution_metadata,
                             "focus_fallback": "electron_native_bridge",
                             "focus_attempts": focus_attempts,
                         },
@@ -3053,9 +3160,12 @@ def app_focus(app_name: str) -> dict[str, Any]:
             failed_data = {
                 "app_name": clean_name,
                 **fallback_data,
-                **_app_resolution_metadata(
-                    clean_name,
-                    str(fallback_data.get("app_name") or resolved_name),
+                **(
+                    resolution_metadata
+                    or _app_resolution_metadata(
+                        clean_name,
+                        str(fallback_data.get("app_name") or resolved_name),
+                    )
                 ),
                 **latest_observation,
                 "focus_fallback": "app.open",
@@ -3125,7 +3235,7 @@ def app_focus(app_name: str) -> dict[str, Any]:
     focus_verified = focus_data.get("focus_verified") is True
     data = {
         **focus_data,
-        **_app_resolution_metadata(clean_name, resolved_name),
+        **resolution_metadata,
     }
     if focus_verified:
         return {

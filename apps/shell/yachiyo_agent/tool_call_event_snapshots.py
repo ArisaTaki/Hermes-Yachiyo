@@ -418,6 +418,15 @@ def tool_input_resolution_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
         input_preview.setdefault("requested_app_name", requested_app_name)
     if source_tool:
         input_preview.setdefault("app_resolution_source", source_tool)
+    for key in (
+        "app_resolution_score",
+        "app_resolution_confidence",
+        "app_resolution_reason",
+        "resolved_app_path",
+    ):
+        value = _text(payload.get(key))
+        if value:
+            input_preview.setdefault(key, value)
     normalized = dict(payload)
     if input_preview:
         normalized["input_preview"] = input_preview
@@ -474,8 +483,12 @@ def _tool_call_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]
         "member_agent_name",
         "policy_reason",
         "app_resolution_source",
+        "app_resolution_score",
+        "app_resolution_confidence",
+        "app_resolution_reason",
         "requested_app_name",
         "resolved_app_name",
+        "resolved_app_path",
         "risk_level",
         "run_id",
         "run_group_id",

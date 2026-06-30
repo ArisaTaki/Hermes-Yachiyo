@@ -92,6 +92,12 @@ This proves arbitrary app names and app-scoped click/type requests plan through
 `desktop.list_apps`, app foreground tools, verification steps, and
 Studio-routable events.
 
+Current app-name resolution evidence records the normalized query, best match,
+match score/confidence/reason, resolved bundle path, and
+`agent.tool.input_resolved` timeline event before follow-up app tools run. This
+keeps arbitrary app handling explainable in Chat and Agent Studio without
+adding app-specific branches.
+
 Current real desktop discovery evidence is reproducible with:
 
 ```bash
