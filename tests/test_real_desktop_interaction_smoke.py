@@ -69,7 +69,11 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
                 "data": {
                     "app_name": "Calculator",
                     "elements": [
-                        {"role": "AXStaticText", "name": "\u200e-42", "value": "\u200e-42"},
+                        {
+                            "role": "AXStaticText",
+                            "name": "\u200e(\u200e-\u200e42\u200e)",
+                            "value": "\u200e(\u200e-\u200e42\u200e)",
+                        },
                     ],
                 },
             },
@@ -145,7 +149,8 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
 
     assert evidence["ok"] is True
     assert evidence["before_values"] == ["42"]
-    assert evidence["after_values"] == ["-42"]
+    assert evidence["after_values"] == ["(-42)"]
+    assert evidence["checks"]["signed_value_visible"] is True
     assert evidence["sign_target"] == "更改数值符号"
     assert all(evidence["checks"].values())
     assert calls == [

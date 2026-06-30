@@ -44,6 +44,19 @@ def _normalized_visible_text(value: Any) -> str:
     return _BIDI_MARKS.sub("", str(value or "")).strip()
 
 
+def _normalized_numeric_text(value: Any) -> str:
+    text = _normalized_visible_text(value).replace("−", "-")
+    return re.sub(r"\s+", "", text)
+
+
+def _signed_value_visible(values: Sequence[str], expected_signed_value: str) -> bool:
+    expected = _normalized_numeric_text(expected_signed_value)
+    acceptable = {expected, f"({expected})"}
+    if expected.startswith("-"):
+        acceptable.add(f"({expected[1:]})")
+    return any(_normalized_numeric_text(value) in acceptable for value in values)
+
+
 def _normalized_app_name(value: Any) -> str:
     name = str(value or "").strip()
     if name.casefold().endswith(".app"):
@@ -425,7 +438,7 @@ def run_smoke(
         "pre_click_active_app_matches": pre_click_active_app_matches,
         "click_ok": click_result.get("ok") is True,
         "after_ui_matches_app": after_ui_matches_app,
-        "signed_value_visible": expected_signed_value in after_values,
+        "signed_value_visible": _signed_value_visible(after_values, expected_signed_value),
         "visible_value_changed": before_values != after_values,
         "cleanup_ok": cleanup_result.get("ok") is True,
     }
