@@ -179,6 +179,93 @@ SOURCE_SECTION_CAPABILITIES: dict[str, str] = {
     "source_group_run_timeline": "group_run_timeline_smoke",
 }
 
+REAL_DESKTOP_OPT_IN_CAPABILITY_IDS = {
+    "source_real_desktop_app_open",
+    "source_real_desktop_ui_inspection",
+    "source_real_desktop_interaction",
+}
+
+SOURCE_CAPABILITY_IDS = set(SOURCE_SECTION_CAPABILITIES)
+PROVIDER_CAPABILITY_IDS = {
+    "provider_text_stream",
+    "provider_tool_call_stream",
+    "model_profile_readiness",
+    "agent_workspace_read",
+    "agent_artifact_write",
+    "agent_multi_tool_pipeline",
+    "workflow_child_agent_artifact",
+    "terminal_approval_resume",
+    "main_chat_model_loop",
+    "advanced_workflow_orchestration",
+    "workflow_budget_boundary",
+}
+PACKAGED_CAPABILITY_IDS = {
+    "packaged_backend_bridge_identity",
+    "packaged_app_bridge_isolation",
+}
+
+NEXT_ACTION_DEFINITIONS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "source_capability_smoke",
+        "category": "source",
+        "reason": "Refresh source-level planner, artifact, approval, entrypoint, and default desktop discovery evidence.",
+        "command": (
+            "python scripts/verify_release_candidate.py --source-only "
+            "--report-json tmp/rc-verification-source-capabilities.json"
+        ),
+        "capability_ids": tuple(
+            capability_id
+            for capability_id in SOURCE_SECTION_CAPABILITIES
+            if capability_id not in REAL_DESKTOP_OPT_IN_CAPABILITY_IDS
+        ),
+    },
+    {
+        "id": "real_desktop_smokes",
+        "category": "source",
+        "reason": "Run opt-in real macOS app open, UI inspection, and interaction evidence.",
+        "command": (
+            "python scripts/verify_release_candidate.py --source-only "
+            "--run-real-desktop-app-open-smoke "
+            "--run-real-desktop-ui-inspection-smoke "
+            "--run-real-desktop-interaction-smoke "
+            "--report-json tmp/rc-verification-real-desktop.json"
+        ),
+        "capability_ids": tuple(sorted(REAL_DESKTOP_OPT_IN_CAPABILITY_IDS)),
+    },
+    {
+        "id": "provider_smoke",
+        "category": "provider",
+        "reason": "Run live provider, model loop, Agent, Workflow, tool-call, and approval resume evidence.",
+        "command": (
+            "python scripts/verify_release_candidate.py --require-artifacts "
+            "--check-dmg-mount --run-provider-smoke "
+            "--report-json tmp/rc-verification-provider-smoke.json"
+        ),
+        "capability_ids": tuple(sorted(PROVIDER_CAPABILITY_IDS)),
+    },
+    {
+        "id": "packaged_backend_bridge_smoke",
+        "category": "packaged",
+        "reason": "Verify the packaged backend Bridge identity.",
+        "command": (
+            "python scripts/verify_release_candidate.py --require-artifacts "
+            "--run-packaged-backend-bridge-smoke "
+            "--report-json tmp/rc-verification-backend-bridge.json"
+        ),
+        "capability_ids": ("packaged_backend_bridge_identity",),
+    },
+    {
+        "id": "packaged_app_smoke",
+        "category": "packaged",
+        "reason": "Verify the packaged app uses its own Bridge instead of a development backend.",
+        "command": (
+            "python scripts/verify_release_candidate.py --require-artifacts "
+            "--run-dmg-app-smoke --report-json tmp/rc-verification-dmg-app.json"
+        ),
+        "capability_ids": ("packaged_app_bridge_isolation",),
+    },
+)
+
 
 def _load_report(root: Path, path: Path) -> dict[str, Any]:
     candidate = path if path.is_absolute() else root / path
@@ -239,6 +326,110 @@ def _check_ok(checks: dict[str, dict[str, Any]], name: str) -> bool:
 def _report_section_passed(report: dict[str, Any], section_name: str) -> bool:
     section = report.get(section_name)
     return isinstance(section, dict) and section.get("status") == "passed"
+
+
+def capability_category(capability_id: str) -> str:
+    if capability_id in SOURCE_CAPABILITY_IDS:
+        return "source"
+    if capability_id in PROVIDER_CAPABILITY_IDS:
+        return "provider"
+    if capability_id in PACKAGED_CAPABILITY_IDS:
+        return "packaged"
+    return "unknown"
+
+
+def _status_counts(capabilities: Sequence[dict[str, Any]]) -> dict[str, int]:
+    return {
+        status: sum(1 for capability in capabilities if capability.get("status") == status)
+        for status in ("passed", "missing")
+    }
+
+
+def _capability_category_value(capability: dict[str, Any]) -> str:
+    return str(
+        capability.get("category")
+        or capability_category(str(capability.get("id") or ""))
+    )
+
+
+def _category_status_counts(capabilities: Sequence[dict[str, Any]]) -> dict[str, dict[str, int]]:
+    categories = ("source", "provider", "packaged", "unknown")
+    counts: dict[str, dict[str, int]] = {}
+    for category in categories:
+        category_capabilities = [
+            capability
+            for capability in capabilities
+            if _capability_category_value(capability) == category
+        ]
+        if category_capabilities:
+            counts[category] = _status_counts(category_capabilities)
+    return counts
+
+
+def _missing_by_category(capabilities: Sequence[dict[str, Any]]) -> dict[str, list[str]]:
+    missing: dict[str, list[str]] = {}
+    for capability in capabilities:
+        if capability.get("status") == "passed":
+            continue
+        capability_id = str(capability.get("id") or "").strip()
+        if not capability_id:
+            continue
+        category = str(capability.get("category") or capability_category(capability_id))
+        missing.setdefault(category, []).append(capability_id)
+    return missing
+
+
+def capability_next_actions(capabilities: Sequence[dict[str, Any]]) -> list[dict[str, Any]]:
+    missing_ids = {
+        str(capability.get("id") or "").strip()
+        for capability in capabilities
+        if capability.get("status") != "passed"
+    }
+    missing_ids.discard("")
+    actions: list[dict[str, Any]] = []
+    for action in NEXT_ACTION_DEFINITIONS:
+        raw_capability_ids = action.get("capability_ids")
+        action_capability_ids = (
+            [str(item) for item in raw_capability_ids if str(item)]
+            if isinstance(raw_capability_ids, (list, tuple))
+            else []
+        )
+        target_ids = [
+            capability_id
+            for capability_id in action_capability_ids
+            if capability_id in missing_ids
+        ]
+        if not target_ids:
+            continue
+        actions.append(
+            {
+                "id": action["id"],
+                "category": action["category"],
+                "reason": action["reason"],
+                "command": action["command"],
+                "capability_ids": target_ids,
+            }
+        )
+    return actions
+
+
+def capability_matrix_status_summary(
+    capabilities: Sequence[dict[str, Any]],
+) -> dict[str, Any]:
+    missing_ids = [
+        str(capability.get("id"))
+        for capability in capabilities
+        if capability.get("status") != "passed"
+    ]
+    return {
+        "ok": not missing_ids,
+        "capability_count": len(capabilities),
+        "status_counts": _status_counts(capabilities),
+        "category_status_counts": _category_status_counts(capabilities),
+        "missing_capability_ids": missing_ids,
+        "missing_by_category": _missing_by_category(capabilities),
+        "next_actions": capability_next_actions(capabilities),
+    }
 
 
 def _section_evidence(report: dict[str, Any], section_name: str) -> dict[str, Any]:
@@ -407,24 +598,13 @@ def summarize_capabilities(report: dict[str, Any]) -> dict[str, Any]:
         capabilities.append(
             {
                 **definition,
+                "category": capability_category(definition["id"]),
                 "status": status,
                 "evidence_summary": evidence,
             }
         )
-    status_counts = {
-        status: sum(1 for capability in capabilities if capability["status"] == status)
-        for status in ("passed", "missing")
-    }
-    missing_ids = [
-        str(capability["id"])
-        for capability in capabilities
-        if capability["status"] != "passed"
-    ]
     return {
-        "ok": not missing_ids,
-        "capability_count": len(capabilities),
-        "status_counts": status_counts,
-        "missing_capability_ids": missing_ids,
+        **capability_matrix_status_summary(capabilities),
         "capabilities": capabilities,
     }
 

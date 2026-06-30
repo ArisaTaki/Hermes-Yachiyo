@@ -139,11 +139,19 @@ def test_capability_summary_reports_full_native_agent_matrix():
 
     assert result["ok"] is True
     assert result["status_counts"] == {"passed": 29, "missing": 0}
+    assert result["category_status_counts"] == {
+        "source": {"passed": 16, "missing": 0},
+        "provider": {"passed": 11, "missing": 0},
+        "packaged": {"passed": 2, "missing": 0},
+    }
     assert result["missing_capability_ids"] == []
+    assert result["missing_by_category"] == {}
+    assert result["next_actions"] == []
     assert result["capability_count"] == 29
     by_id = {item["id"]: item for item in result["capabilities"]}
     source_desktop = by_id["source_agent_entrypoint_desktop_execution"]
     assert source_desktop["status"] == "passed"
+    assert source_desktop["category"] == "source"
     assert source_desktop["evidence_summary"]["case_ids"] == [
         "main_chat_generic_app_open_before_model"
     ]
@@ -204,6 +212,24 @@ def test_capability_summary_reports_source_only_partial_matrix():
     assert by_id["provider_text_stream"]["status"] == "missing"
     assert "provider_text_stream" in result["missing_capability_ids"]
     assert result["status_counts"] == {"passed": 3, "missing": 26}
+    assert result["missing_by_category"]["source"]
+    assert result["missing_by_category"]["provider"]
+    assert result["missing_by_category"]["packaged"] == [
+        "packaged_backend_bridge_identity",
+        "packaged_app_bridge_isolation",
+    ]
+    action_by_id = {item["id"]: item for item in result["next_actions"]}
+    assert set(action_by_id) == {
+        "source_capability_smoke",
+        "real_desktop_smokes",
+        "provider_smoke",
+        "packaged_backend_bridge_smoke",
+        "packaged_app_smoke",
+    }
+    assert "source_browser_research_artifact" in action_by_id["source_capability_smoke"]["capability_ids"]
+    assert "source_real_desktop_interaction" in action_by_id["real_desktop_smokes"]["capability_ids"]
+    assert "provider_text_stream" in action_by_id["provider_smoke"]["capability_ids"]
+    assert "--run-provider-smoke" in action_by_id["provider_smoke"]["command"]
 
 
 def test_capability_summary_cli_writes_json(tmp_path):

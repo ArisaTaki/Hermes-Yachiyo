@@ -1363,6 +1363,9 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
     output = capsys.readouterr().out
     assert "planner runtime tool parity smoke: passed" in output
     assert "Native Agent capability matrix: incomplete" in output
+    assert "- missing[provider]: provider_text_stream" in output
+    assert "Native Agent capability matrix next actions:" in output
+    assert "--run-provider-smoke" in output
     report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
     section = report["planner_runtime_tool_parity_smoke"]
     assert section["status"] == "passed"
@@ -1386,6 +1389,8 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
     assert capability_by_id["source_planner_runtime_tool_parity"]["status"] == "passed"
     assert capability_by_id["source_agent_entrypoint_desktop_execution"]["status"] == "passed"
     assert capability_by_id["provider_text_stream"]["status"] == "missing"
+    assert matrix["missing_by_category"]["provider"]
+    assert matrix["next_actions"]
     assert all(
         case["checks"]["request_tools_dispatched"]
         for case in section["evidence"]["cases"]
