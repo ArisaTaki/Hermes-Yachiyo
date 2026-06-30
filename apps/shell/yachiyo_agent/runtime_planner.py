@@ -72,7 +72,11 @@ from .policy import (
     desktop_tool_blocking_conditions,
     desktop_tool_missing_permissions,
 )
-from .schedule_plan_hints import schedule_context_source_hint, schedule_tool_preview
+from .schedule_plan_hints import (
+    schedule_context_source_hint,
+    schedule_tool_preview,
+    scheduled_runnable_payload,
+)
 from .system_plan_hints import system_control_hint, system_tool_preview
 from .terminal_plan_hints import terminal_command_hint
 from .web_destination_hints import (
@@ -138,6 +142,8 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        if scheduled_runnable_payload(text):
+            return _empty_intent("data_analysis", text)
         if _looks_like_current_page_link_artifact_request(text):
             return _empty_intent("data_analysis", text)
         if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
@@ -1700,6 +1706,8 @@ class TaskIntentRouter:
         )
 
     def _workflow_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        if scheduled_runnable_payload(text):
+            return _empty_intent("workflow_orchestration", text)
         score = _score_terms(text, ["workflow", "flow", "工作流", "流程"])
         action_hint = _workflow_action_hint(text)
         known_target_hint = _known_orchestration_target_hint(
@@ -1733,6 +1741,8 @@ class TaskIntentRouter:
         )
 
     def _multi_agent_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        if scheduled_runnable_payload(text):
+            return _empty_intent("multi_agent", text)
         known_target_hint = _known_orchestration_target_hint(
             text,
             metadata,
@@ -1874,6 +1884,7 @@ class TaskIntentRouter:
         )
 
     def _schedule_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
+        scheduled_runnable = scheduled_runnable_payload(text)
         scoped_new_item = _app_scoped_safe_operation_hint(text)
         scoped_action = str(
             (scoped_new_item.get("safe_shortcut") or {}).get("action") or ""
@@ -1889,17 +1900,25 @@ class TaskIntentRouter:
         if _looks_like_meeting_content_task(text):
             return _empty_intent("schedule", text)
         score = _score_terms(text, ["remind", "calendar", "schedule", "event", "提醒", "日历", "日程", "会议", "安排"])
+        if score <= 0 and scheduled_runnable:
+            score = 0.38
         if score <= 0:
             return _empty_intent("schedule", text)
         context_source = schedule_context_source_hint(text)
+        inputs: dict[str, Any] = {"context_source": context_source} if context_source else {}
+        if scheduled_runnable:
+            inputs["scheduled_runnable"] = True
+            runnable_name = str(scheduled_runnable.get("runnable_name") or "").strip()
+            if runnable_name:
+                inputs["target_name_hint"] = runnable_name
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "schedule", text),
             kind="schedule",
             title="Schedule Or Reminder",
             user_goal=text,
-            confidence=min(0.86, 0.38 + score),
+            confidence=min(0.9, 0.38 + score),
             description="Create reminders, calendar events, or future tasks.",
-            inputs={"context_source": context_source} if context_source else {},
+            inputs=inputs,
             required_capabilities=["schedule.reminder"],
             preferred_capabilities=[
                 *(

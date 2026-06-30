@@ -16363,6 +16363,55 @@ def test_runtime_planner_falls_back_to_future_task_for_timed_reminders() -> None
     assert untimed_step.status == "unavailable"
 
 
+def test_runtime_planner_schedules_future_runnable_runs(monkeypatch: Any) -> None:
+    _freeze_schedule_now(monkeypatch, datetime(2026, 6, 30, 10, 0))
+    tomorrow_1500 = f"{(date.today() + timedelta(days=1)).isoformat()}T15:00"
+    tomorrow_1500_epoch = datetime.fromisoformat(tomorrow_1500).timestamp()
+    today_1030_epoch = datetime.fromisoformat("2026-06-30T10:30").timestamp()
+    workflow = RuntimePlanner().decision(
+        "明天下午三点帮我运行 Daily Summary workflow",
+        allowed_tools=["future_task.schedule", "workflow.start"],
+    )
+    no_future_task = RuntimePlanner().decision(
+        "明天下午三点帮我运行 Daily Summary workflow",
+        allowed_tools=["workflow.start"],
+    )
+    group = RuntimePlanner().decision(
+        "30分钟后运行 Research Team group",
+        allowed_tools=["future_task.schedule", "group.run"],
+    )
+
+    assert workflow.selected_intent.kind == "schedule"
+    assert workflow.selected_intent.inputs == {
+        "scheduled_runnable": True,
+        "target_name_hint": "Daily Summary",
+    }
+    workflow_step = _step_by_id(workflow, "create-schedule-item")
+    assert workflow_step.tool_name == "future_task.schedule"
+    assert workflow_step.input_preview == {
+        "title": "运行 Daily Summary workflow",
+        "prompt": "运行 Daily Summary workflow",
+        "scheduled_at_epoch": tomorrow_1500_epoch,
+        "runnable_name": "Daily Summary",
+    }
+    assert workflow_step.approval_required is True
+
+    no_future_task_step = _step_by_id(no_future_task, "create-schedule-item")
+    assert no_future_task.selected_intent.kind == "schedule"
+    assert no_future_task_step.tool_name is None
+    assert no_future_task_step.status == "unavailable"
+
+    assert group.selected_intent.kind == "schedule"
+    group_step = _step_by_id(group, "create-schedule-item")
+    assert group_step.tool_name == "future_task.schedule"
+    assert group_step.input_preview == {
+        "title": "运行 Research Team group",
+        "prompt": "运行 Research Team group",
+        "scheduled_at_epoch": today_1030_epoch,
+        "runnable_name": "Research Team",
+    }
+
+
 def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability(monkeypatch: Any) -> None:
     _freeze_schedule_now(monkeypatch, datetime(2026, 6, 30, 10, 0))
     today_1030 = "2026-06-30T10:30"
@@ -21507,6 +21556,25 @@ def test_planner_tool_requests_maps_relative_schedule_plans(monkeypatch: Any) ->
                 "title": "买牛奶",
                 "prompt": "提醒用户：买牛奶。原始请求：提醒我明天买牛奶",
                 "scheduled_at_epoch": tomorrow_0900_epoch,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    tomorrow_1500 = f"{(date.today() + timedelta(days=1)).isoformat()}T15:00"
+    tomorrow_1500_epoch = datetime.fromisoformat(tomorrow_1500).timestamp()
+    assert planner_tool_requests(
+        "明天下午三点帮我运行 Daily Summary workflow",
+        allowed_tools=["future_task.schedule", "workflow.start"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "future_task.schedule",
+            "input": {
+                "title": "运行 Daily Summary workflow",
+                "prompt": "运行 Daily Summary workflow",
+                "scheduled_at_epoch": tomorrow_1500_epoch,
+                "runnable_name": "Daily Summary",
             },
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_schedule",

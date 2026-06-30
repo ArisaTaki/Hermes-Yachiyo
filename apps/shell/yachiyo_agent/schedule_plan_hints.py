@@ -35,6 +35,12 @@ def schedule_tool_preview(
     allowed_tools: Iterable[str] | None,
 ) -> tuple[str | None, dict[str, Any]]:
     allowed = _allowed_tool_set(allowed_tools)
+    scheduled_runnable = scheduled_runnable_payload(text)
+    if scheduled_runnable:
+        tool_name = _first_allowed(("future_task.schedule",), allowed)
+        if tool_name:
+            return tool_name, scheduled_runnable
+        return None, scheduled_runnable
     if _looks_like_calendar_event(text):
         payload = calendar_event_payload(text)
         if payload:
@@ -49,6 +55,35 @@ def schedule_tool_preview(
             return tool_name, payload
         return _future_task_schedule_preview(text, payload, allowed)
     return None, {}
+
+
+def scheduled_runnable_payload(text: str) -> dict[str, Any]:
+    value = _clean(text)
+    if not value:
+        return {}
+    runnable = _scheduled_runnable_target(value)
+    if not runnable:
+        return {}
+    scheduled_at = _extract_schedule_datetime(value) or _extract_relative_delay_datetime(value)
+    if scheduled_at is None:
+        scheduled_at = _extract_reminder_date_only_datetime(value)
+    if scheduled_at is None:
+        return {}
+    scheduled_epoch = _local_iso_to_epoch(_local_datetime_text(scheduled_at))
+    if scheduled_epoch is None:
+        return {}
+    runnable_name = str(runnable.get("runnable_name") or "").strip()
+    runnable_kind = str(runnable.get("runnable_kind") or "").strip()
+    prompt = _scheduled_runnable_prompt(value, runnable_name, runnable_kind)
+    title = _scheduled_runnable_title(runnable_name, runnable_kind)
+    payload: dict[str, Any] = {
+        "title": title,
+        "prompt": prompt,
+        "scheduled_at_epoch": scheduled_epoch,
+    }
+    if runnable_name:
+        payload["runnable_name"] = runnable_name
+    return payload
 
 
 def reminder_payload(text: str) -> dict[str, Any]:
@@ -738,6 +773,142 @@ def _future_task_prompt(title: str, text: str) -> str:
     if clean_text:
         return f"提醒用户：{clean_title}。原始请求：{clean_text}"
     return f"提醒用户：{clean_title}"
+
+
+def _scheduled_runnable_target(text: str) -> dict[str, str]:
+    value = _strip_schedule_time_text(_clean(text))
+    if not _scheduled_runnable_action_requested(value):
+        return {}
+    workflow_patterns = (
+        r"(?:workflow|flow)\s+(?P<name>[A-Za-z0-9 ._-]{1,80})$",
+        r"(?:工作流|流程)\s*(?P<name>[^。！？!?，,]{1,80})$",
+        r"(?P<name>[\w .·-]{1,80}?)\s*(?:workflow|flow|工作流|流程)",
+    )
+    group_patterns = (
+        r"(?P<name>[\w .·-]{1,80}?)\s*(?:agent\s*group|group|群组|小组)",
+        r"(?:agent\s*group|group|群组|小组)\s+(?P<name>[A-Za-z0-9 ._-]{1,80})$",
+        r"(?:群组|小组)\s*(?P<name>[^。！？!?，,]{1,80})$",
+    )
+    agent_patterns = (
+        r"(?P<name>[\w .·-]{1,80}?)\s*(?:agent|智能体|代理)",
+        r"(?:agent|智能体|代理)\s*(?P<name>[^。！？!?，,]{1,80})$",
+    )
+    pattern_groups = (
+        (
+            "workflow",
+            workflow_patterns,
+        ),
+        (
+            "group",
+            group_patterns,
+        ),
+        (
+            "agent",
+            agent_patterns,
+        ),
+    )
+    for runnable_kind, patterns in pattern_groups:
+        for pattern in patterns:
+            match = re.search(pattern, value, flags=re.IGNORECASE)
+            if not match:
+                continue
+            runnable_name = _clean_scheduled_runnable_name(match.group("name"))
+            if runnable_name:
+                return {
+                    "runnable_kind": runnable_kind,
+                    "runnable_name": runnable_name,
+                }
+    return {}
+
+
+def _scheduled_runnable_action_requested(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:运行|启动|执行|跑|安排|调度|定时|"
+            r"\brun\b|\bstart\b|\bexecute\b|\bschedule\b)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _clean_scheduled_runnable_name(value: str) -> str:
+    name = re.sub(
+        rf"(?:{_RELATIVE_DELAY_TEXT_RE}|{_CHINESE_DAY_MARKER_RE})",
+        " ",
+        str(value or ""),
+        flags=re.IGNORECASE,
+    )
+    for pattern in _SCHEDULE_TIME_PATTERNS:
+        name = pattern.sub(" ", name)
+    previous = None
+    while previous != name:
+        previous = name
+        name = re.sub(
+            r"^\s*(?:帮我|给我|请|麻烦|能否|能不能|可以|直接)\s*",
+            " ",
+            name,
+            flags=re.IGNORECASE,
+        )
+        name = re.sub(
+            r"^\s*(?:安排|调度|定时|运行|启动|执行|跑)\s*",
+            " ",
+            name,
+            flags=re.IGNORECASE,
+        )
+        name = re.sub(
+            r"^\s*(?:please|can\s+you|could\s+you|would\s+you|"
+            r"run|start|execute|schedule)\s+",
+            " ",
+            name,
+            flags=re.IGNORECASE,
+        )
+    return _clean(name).strip(" .，,。")
+
+
+def _scheduled_runnable_prompt(text: str, runnable_name: str, runnable_kind: str) -> str:
+    label = {
+        "workflow": "workflow",
+        "group": "group",
+        "agent": "agent",
+    }.get(runnable_kind, "runnable")
+    prompt = _strip_schedule_time_text(text)
+    prompt = re.sub(
+        r"^(?:帮我|给我|请|麻烦|能否|能不能|可以|直接)\s*",
+        "",
+        prompt,
+        flags=re.IGNORECASE,
+    )
+    prompt = re.sub(
+        r"^(?:please|can\s+you|could\s+you|would\s+you)\s+",
+        "",
+        prompt,
+        flags=re.IGNORECASE,
+    )
+    prompt = _clean(prompt).strip(" .，,。")
+    return prompt or f"运行 {runnable_name} {label}".strip()
+
+
+def _scheduled_runnable_title(runnable_name: str, runnable_kind: str) -> str:
+    label = {
+        "workflow": "workflow",
+        "group": "group",
+        "agent": "agent",
+    }.get(runnable_kind, "runnable")
+    return f"运行 {runnable_name} {label}".strip()
+
+
+def _strip_schedule_time_text(text: str) -> str:
+    value = _clean(text)
+    value = re.sub(
+        rf"(?:{_RELATIVE_DELAY_TEXT_RE}|{_CHINESE_DAY_MARKER_RE})",
+        " ",
+        value,
+        flags=re.IGNORECASE,
+    )
+    for pattern in _SCHEDULE_TIME_PATTERNS:
+        value = pattern.sub(" ", value)
+    return _clean(value)
 
 
 def _clean(value: str) -> str:
