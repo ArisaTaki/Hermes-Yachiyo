@@ -15935,6 +15935,31 @@ def test_planner_desktop_tool_requests_uses_list_apps_when_available() -> None:
     ]
 
 
+def test_planner_desktop_tool_requests_extracts_named_installed_app() -> None:
+    requests = planner_desktop_tool_requests(
+        "打开一个我刚装的叫 PixelForge 的应用",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+    )
+
+    assert requests == [
+        _app_discovery_request("PixelForge"),
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_planner_desktop_tool_requests_maps_explicit_discovery_actions() -> None:
     allowed_tools = [
         "desktop.permissions",
