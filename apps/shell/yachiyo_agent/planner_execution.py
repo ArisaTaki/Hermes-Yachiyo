@@ -73,7 +73,7 @@ def planner_orchestration_requests(
 ) -> list[dict[str, Any]]:
     decision = RuntimePlanner().decision(
         prompt,
-        allowed_tools=["workflow.run", "group.run"],
+        allowed_tools=["workflow.run", "group.run", "agent.group_run"],
         metadata=metadata,
     )
     intent_kind = str(decision.selected_intent.kind or "").strip()
@@ -188,6 +188,8 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
         return _schedule_tool_requests(decision, allowed)
     if decision.selected_intent.kind == "clipboard_operation":
         return _clipboard_tool_requests(decision.selected_intent.inputs, allowed)
+    if decision.selected_intent.kind == "multi_agent":
+        return _multi_agent_tool_requests(decision, allowed)
     if decision.selected_intent.kind != "desktop_operation":
         return []
     return _desktop_tool_requests(decision, allowed)
@@ -256,6 +258,25 @@ def _orchestration_request(decision: Any, orchestration_kind: str) -> dict[str, 
             "target_name": target_name,
         },
     }
+
+
+def _multi_agent_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    if "agent.group_run" not in allowed:
+        return []
+    intent = decision.selected_intent
+    inputs = intent.inputs if isinstance(intent.inputs, Mapping) else {}
+    target_name = str(inputs.get("target_name_hint") or "").strip()
+    return [
+        _request(
+            "agent.group_run",
+            {
+                "objective": str(intent.user_goal or "").strip(),
+                "title": str(intent.title or "").strip(),
+                "target_name": target_name,
+            },
+            planning_reason="planner_fallback_group_run",
+        )
+    ]
 
 
 def _looks_like_orchestration_action(prompt: str, orchestration_kind: str) -> bool:

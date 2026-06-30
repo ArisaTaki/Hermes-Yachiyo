@@ -7990,7 +7990,7 @@ def _service_tool_candidates(
             return ("workflow.debug", "workflow.start", "workflow.run", "workflow.list")
         return ("workflow.start", "workflow.run", "workflow.list")
     if capability_id == "group.multi_agent":
-        return ("group.start", "group.run", "group.list")
+        return ("group.start", "group.run", "agent.group_run", "group.list")
     return ()
 
 
@@ -9597,6 +9597,10 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         or bool(intent.inputs.get("target_name_hint"))
     ):
         score += 0.28
+        if _looks_like_multi_agent_request(text):
+            score += 0.3
+        if _contains_any(text, ["分工", "分别", "各自", "并行", "delegate", "assign"]):
+            score += 0.14
         if _looks_like_explicit_group_run_request(text):
             score += 0.24
     if intent.kind in _TASK_INTENT_KINDS and _contains_any(text, _TASK_DELIVERABLE_TERMS):
@@ -9726,6 +9730,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.34
     if intent.kind == "web_research" and _looks_like_explicit_group_run_request(text):
         score -= 0.36
+    if (
+        intent.kind == "web_research"
+        and _looks_like_multi_agent_request(text)
+        and not _url_hint(text)
+    ):
+        score -= 0.42
     if intent.kind == "web_research" and _looks_like_schedule_request(text):
         score -= 0.24
     if intent.kind == "web_research" and _contains_any(text, _COMMUNICATION_ACTION_TERMS):
@@ -11764,6 +11774,10 @@ def _group_target_hint(text: str) -> str:
         text,
         nouns=("group", "Group", "群组", "小组"),
         reject_prefixes=(
+            "一个",
+            "一位",
+            "1个",
+            "1 个",
             "两个",
             "多个",
             "多位",

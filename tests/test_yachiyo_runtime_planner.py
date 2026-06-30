@@ -3028,6 +3028,48 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     assert group_step.action == "start_group_run"
     assert group_step.tool_name == "group.run"
     assert group_step.status == "planned"
+    assert planner_tool_requests(
+        "让两个 agent 分别调研 Hanako 和 Hermes 然后汇总",
+        ["group.run", "artifact.write"],
+    ) == []
+
+    ad_hoc_group_prompt = "让研究员和写作者两个 Agent 协作，研究 Hermes 和 Hanako 的差异并产出报告"
+    ad_hoc_group = RuntimePlanner().decision(
+        ad_hoc_group_prompt,
+        allowed_tools=["agent.group_run", "artifact.write"],
+    )
+    assert ad_hoc_group.selected_intent.kind == "multi_agent"
+    assert ad_hoc_group.plan.route_to_studio is True
+    assert ad_hoc_group.plan.tool_plan.missing_capabilities == []
+    ad_hoc_group_step = _step_by_id(ad_hoc_group, "group-multi_agent")
+    assert ad_hoc_group_step.tool_name == "agent.group_run"
+    assert planner_tool_requests(
+        ad_hoc_group_prompt,
+        ["agent.group_run", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "agent.group_run",
+            "input": {
+                "objective": ad_hoc_group_prompt,
+                "title": "Multi-Agent Coordination",
+                "target_name": "",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_group_run",
+        }
+    ]
+
+    division_group_prompt = "让两个 Agent 分工：一个搜索 AI 新闻，一个写摘要报告"
+    division_group = RuntimePlanner().decision(
+        division_group_prompt,
+        allowed_tools=["agent.group_run", "browser.search", "artifact.write"],
+    )
+    assert division_group.selected_intent.kind == "multi_agent"
+    assert planner_tool_requests(
+        division_group_prompt,
+        ["agent.group_run", "browser.search", "artifact.write"],
+    )[0]["tool"] == "agent.group_run"
 
     named_group = RuntimePlanner().decision(
         "运行 Research Team group",
@@ -3051,6 +3093,13 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     current_page_group_step = _step_by_id(current_page_group, "group-multi_agent")
     assert current_page_group_step.tool_name == "group.run"
     assert current_page_group_step.input_preview == {"target_name": "研究"}
+
+    generic_group = RuntimePlanner().decision(
+        "运行一个 Agent 群组：研究 Hermes 和 Hanako 的差异并产出报告",
+        allowed_tools=["group.run", "artifact.write"],
+    )
+    assert generic_group.selected_intent.kind == "multi_agent"
+    assert generic_group.selected_intent.inputs == {}
 
     single_agent_research = RuntimePlanner().decision(
         "研究 agent runtime 并总结",
@@ -3108,6 +3157,17 @@ def test_planner_orchestration_requests_project_workflow_and_group_handoffs() ->
     assert group_request[0]["intent_kind"] == "multi_agent"
     assert group_request[0]["route_to_studio"] is True
     assert group_request[0]["input"]["target_name"] == ""
+    role_group_request = planner_orchestration_requests(
+        "让研究员和写作者两个 Agent 协作，研究 Hermes 和 Hanako 的差异并产出报告"
+    )
+    assert len(role_group_request) == 1
+    assert role_group_request[0]["orchestration_kind"] == "group_run"
+    assert role_group_request[0]["intent_kind"] == "multi_agent"
+    division_group_request = planner_orchestration_requests(
+        "让两个 Agent 分工：一个搜索 AI 新闻，一个写摘要报告"
+    )
+    assert len(division_group_request) == 1
+    assert division_group_request[0]["orchestration_kind"] == "group_run"
     assert planner_orchestration_requests("什么是 Workflow？") == []
     assert planner_orchestration_requests("介绍一下 multi-agent 架构") == []
 
@@ -15643,8 +15703,14 @@ def test_capability_registry_exposes_workflow_and_group_run_tools() -> None:
 
     assert by_id["workflow.orchestration"].tools == ["workflow.run"]
     assert by_id["workflow.orchestration"].available_tools == ["workflow.run"]
-    assert by_id["group.multi_agent"].tools == ["group.run"]
+    assert by_id["group.multi_agent"].tools == ["group.run", "agent.group_run"]
     assert by_id["group.multi_agent"].available_tools == ["group.run"]
+
+    agent_group_snapshots = capability_snapshots(
+        allowed_tools=["agent.group_run"],
+        capability_ids=["group.multi_agent"],
+    )
+    assert agent_group_snapshots[0].available_tools == ["agent.group_run"]
 
 
 def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
@@ -15686,7 +15752,7 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
         "memory.runtime": ["memory.add", "memory.replace", "memory.remove"],
         "skill.runtime": ["skill.read"],
         "workflow.orchestration": ["workflow.run"],
-        "group.multi_agent": ["group.run"],
+        "group.multi_agent": ["group.run", "agent.group_run"],
     }
 
     assert expected_tools_by_capability.keys() <= by_id.keys()
