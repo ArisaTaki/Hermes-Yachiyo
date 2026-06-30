@@ -60,13 +60,10 @@ def daily_desktop_entrypoint_requests(
     allowed_tools: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     allowed = daily_desktop_allowed_tools(allowed_tools)
-    return _prefer_generic_music_app_entrypoint_requests(
-        daily_desktop_entrypoint_tool_requests(
-            str(text or ""),
-            allowed,
-            metadata=metadata,
-        ),
+    return daily_desktop_entrypoint_tool_requests(
+        str(text or ""),
         allowed,
+        metadata=metadata,
     )
 
 
@@ -204,28 +201,6 @@ def _visible_entrypoint_plan_requests(
             continue
         visible.append(request)
     return visible or items
-
-
-def _prefer_generic_music_app_entrypoint_requests(
-    requests: list[dict[str, Any]],
-    allowed_tools: Sequence[str],
-) -> list[dict[str, Any]]:
-    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
-    if "media.music_app_open_and_play" not in allowed:
-        return requests
-    updated: list[dict[str, Any]] = []
-    for request in requests:
-        if str(request.get("tool") or "").strip() == "media.apple_music_open_and_play":
-            updated.append(
-                {
-                    **request,
-                    "tool": "media.music_app_open_and_play",
-                    "input": {"app_name": "Music"},
-                }
-            )
-            continue
-        updated.append(request)
-    return updated
 
 
 def daily_desktop_planned_timeline(

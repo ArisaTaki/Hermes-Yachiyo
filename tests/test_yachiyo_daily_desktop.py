@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import date, timedelta
 
+from apps.shell.agent.runtime.desktop_intents import daily_desktop_entrypoint_tool_requests
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_direct_metadata_request,
     daily_desktop_entrypoint_requests,
@@ -5605,6 +5606,22 @@ def test_daily_desktop_entrypoint_routes_music_app_playback_questions_to_desktop
             "protocol": "json_fallback",
             "tool": "media.apple_music_control",
             "input": {"action": "play"},
+        }
+    ]
+
+
+def test_legacy_daily_desktop_intent_prefers_generic_music_app_tool() -> None:
+    assert daily_desktop_entrypoint_tool_requests(
+        "能帮我播放 Apple Music 吗",
+        [
+            "media.apple_music_open_and_play",
+            "media.music_app_open_and_play",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Music"},
         }
     ]
 

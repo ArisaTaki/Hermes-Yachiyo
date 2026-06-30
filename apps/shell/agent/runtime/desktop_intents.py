@@ -418,8 +418,6 @@ def daily_desktop_intent_tool_requests(
         return []
     generic_music_play_app = _music_app_generic_play_open_name(context)
     if generic_music_play_app:
-        if generic_music_play_app == "Music" and "media.apple_music_open_and_play" in allowed:
-            return [_request("media.apple_music_open_and_play", {})]
         if "media.music_app_open_and_play" in allowed:
             return [
                 _request(
@@ -454,10 +452,10 @@ def daily_desktop_intent_tool_requests(
     if system_media_control and str(system_media_control.get("tool") or "") in allowed:
         return [system_media_control]
     if _is_apple_music_open_and_play_request(context):
-        if "media.apple_music_open_and_play" in allowed:
-            return [_request("media.apple_music_open_and_play", {})]
         if "media.music_app_open_and_play" in allowed:
             return [_request("media.music_app_open_and_play", {"app_name": "Music"})]
+        if "media.apple_music_open_and_play" in allowed:
+            return [_request("media.apple_music_open_and_play", {})]
         if "media.apple_music_control" in allowed:
             return [_request("media.apple_music_control", {"action": "play"})]
         return []

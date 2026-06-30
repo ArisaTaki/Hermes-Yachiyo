@@ -580,6 +580,15 @@ Exit evidence:
 - No cleanup removes user-facing Studio, Groups, Workflow, Timeline, Approval,
   Artifact, or legacy route behavior.
 
+Current cleanup evidence removes the Yachiyo-side wrapper that rewrote
+`media.apple_music_open_and_play` into `media.music_app_open_and_play`.
+The generic-first selection now lives in the legacy daily desktop intent
+itself, where it belongs until that fallback is fully retired. The replacement
+test covers the legacy intent directly: when both Apple Music-specific and
+generic music-app tools are allowed, clear Apple Music playback requests select
+`media.music_app_open_and_play` with `app_name=Music`; Apple Music-specific
+tools remain available only as compatibility fallbacks.
+
 ## Phase 11 - Release Productization
 
 Turn the runtime migration into a product that can be installed and diagnosed
