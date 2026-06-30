@@ -19821,8 +19821,8 @@ button.activity-item {
 .model-provider-logo {
   display: block;
   flex: none;
-  width: 20px;
-  height: 20px;
+  width: var(--provider-logo-size, 20px);
+  height: var(--provider-logo-size, 20px);
   object-fit: contain;
 }
 
@@ -19837,6 +19837,7 @@ button.activity-item {
   font-size: 9px;
   font-weight: 800;
   line-height: 1;
+  letter-spacing: 0;
 }
 
 .model-source-main {
