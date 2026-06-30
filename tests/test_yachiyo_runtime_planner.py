@@ -4775,6 +4775,112 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "operate-foreground-ui-followup-type",
     ).input_preview == {"text": "weekly sales improved"}
 
+    app_task_create = RuntimePlanner().decision(
+        "帮我打开 Linear 并创建一个任务：修复登录错误",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    assert app_task_create.selected_intent.kind == "desktop_operation"
+    assert app_task_create.selected_intent.inputs == {
+        "app_name_hint": "Linear",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "new_document"},
+        "foreground_compose_text_hint": "修复登录错误",
+    }
+    assert [step.step_id for step in app_task_create.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "focus-opened-app",
+        "operate-foreground-ui",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(app_task_create, "operate-foreground-ui").input_preview == {
+        "action": "new_document",
+    }
+    assert _step_by_id(
+        app_task_create,
+        "operate-foreground-ui-followup-type",
+    ).input_preview == {"text": "修复登录错误"}
+    assert planner_tool_requests(
+        "帮我打开 Linear 并创建一个任务：修复登录错误",
+        [
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Linear", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Linear"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus",
+            "input": {"app_name": "Linear"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "new_document"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "修复登录错误"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+    english_app_task_create = RuntimePlanner().decision(
+        "open Linear and create a task: Fix login bug",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    assert english_app_task_create.selected_intent.inputs["safe_shortcut_hint"] == {
+        "action": "new_document"
+    }
+    assert english_app_task_create.selected_intent.inputs["foreground_compose_text_hint"] == (
+        "Fix login bug"
+    )
+
 
 def test_runtime_planner_routes_current_page_find_actions() -> None:
     static = RuntimePlanner().decision(

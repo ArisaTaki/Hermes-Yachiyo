@@ -4819,7 +4819,7 @@ def test_main_chat_model_loop_executes_daily_desktop_intent_without_chat_model_p
             event
             for event in events
             if event["event_type"] == "agent.tool.call"
-            and event["payload"]["tool"] == "desktop.open_app"
+            and event["payload"]["tool"] == "app.open"
         )
 
         assert open_calls == ["Music"]
@@ -4828,12 +4828,158 @@ def test_main_chat_model_loop_executes_daily_desktop_intent_without_chat_model_p
         assert "model.requested" not in event_types
         assert [event["payload"]["tool"] for event in planned_events] == [
             "desktop.list_apps",
-            "desktop.open_app",
+            "app.open",
         ]
         assert planned_events[1]["payload"]["source"] == "runtime_planner"
         assert planned_events[1]["payload"]["input_preview"] == {"app_name": "Music"}
-        assert tool_event["payload"]["tool"] == "desktop.open_app"
+        assert tool_event["payload"]["tool"] == "app.open"
         assert tool_event["payload"]["input_preview"] == {"app_name": "Music"}
+    finally:
+        service.close()
+
+
+def test_main_chat_model_loop_creates_app_task_without_chat_model_profile(
+    tmp_path,
+    monkeypatch,
+):
+    service = make_service(tmp_path)
+    desktop_calls: list[tuple[str, dict[str, Any]]] = []
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: pytest.fail("model should not be required for direct app task creation"),
+    )
+
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict[str, Any]:
+        desktop_calls.append(("desktop.list_apps", {"query": query, "limit": limit}))
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "matches": [{"name": "Linear", "path": "/Applications/Linear.app"}],
+        }
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        desktop_calls.append(("app.open", {"app_name": app_name}))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_app_focus(app_name: str) -> dict[str, Any]:
+        desktop_calls.append(("app.focus", {"app_name": app_name}))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict[str, Any]:
+        desktop_calls.append(("desktop.safe_shortcut", {"action": action}))
+        return {"ok": True, "action": "desktop.safe_shortcut", "data": {"action": action}}
+
+    def fake_safe_type_text(text: str) -> dict[str, Any]:
+        desktop_calls.append(("desktop.safe_type_text", {"text": text}))
+        return {"ok": True, "action": "desktop.safe_type_text", "data": {"text": text}}
+
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        desktop_calls.append(
+            (
+                "desktop.ui_elements",
+                {"role_filter": role_filter, "limit": limit, "app_name": app_name},
+            )
+        )
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read Linear task editor",
+            "data": {
+                "app_name": "Linear",
+                "title": "New task",
+                "count": 1,
+                "elements": [{"role": "AXTextField", "value": "修复登录错误"}],
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
+        fake_safe_shortcut,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_type_text",
+        fake_safe_type_text,
+    )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-linear-create-task-no-profile",
+            session_id="session-main-linear-create-task-no-profile",
+            user_goal="帮我打开 Linear 并创建一个任务：修复登录错误",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "帮我打开 Linear 并创建一个任务：修复登录错误"}],
+            tool_policy={
+                "allowed_tools": [
+                    "desktop.list_apps",
+                    "app.open",
+                    "app.focus",
+                    "desktop.safe_shortcut",
+                    "desktop.safe_type_text",
+                    "desktop.ui_elements",
+                ]
+            },
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        planned_events = [
+            event for event in events if event["event_type"] == "agent.desktop.intent_planned"
+        ]
+        completed_event = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.desktop.intent_completed"
+        )
+
+        assert [name for name, _payload in desktop_calls] == [
+            "desktop.list_apps",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ]
+        assert desktop_calls[3] == ("desktop.safe_shortcut", {"action": "new_document"})
+        assert desktop_calls[4] == ("desktop.safe_type_text", {"text": "修复登录错误"})
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert [event["payload"]["tool"] for event in planned_events] == [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ]
+        assert completed_event["payload"]["tools"] == [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ]
+        assert completed_event["payload"]["planning_reason"] == "planner_desktop_operation"
+        assert "已打开 Linear 并新建文档" in updated["result"]
+        assert "已向前台输入文字" in updated["result"]
     finally:
         service.close()
 

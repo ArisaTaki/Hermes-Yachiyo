@@ -1845,19 +1845,27 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        hint = capture_note_hint(text)
+        if not hint:
+            return _empty_intent("information_capture", text)
+        body_text = str(hint.get("body") or "").strip()
+        has_body = bool(body_text) and not re.fullmatch(
+            r"(?:新建|创建|新增|new|create|compose)",
+            body_text,
+            flags=re.IGNORECASE,
+        )
+        source = str(hint.get("source") or "").strip()
         scoped_new_item = _app_scoped_safe_operation_hint(text)
         scoped_action = str(
             (scoped_new_item.get("safe_shortcut") or {}).get("action") or ""
         ).strip()
-        if scoped_action == "new_note":
+        scoped_app = str(scoped_new_item.get("app_name") or "").strip()
+        if scoped_action == "new_note" and (
+            not (has_body or source) or not _is_structured_notes_app_target(scoped_app)
+        ):
             return _empty_intent("information_capture", text)
         if _dynamic_context_source_hint(text) and _non_notes_dynamic_context_target_app(text):
             return _empty_intent("information_capture", text)
-        hint = capture_note_hint(text)
-        if not hint:
-            return _empty_intent("information_capture", text)
-        has_body = bool(str(hint.get("body") or "").strip())
-        source = str(hint.get("source") or "").strip()
         if (
             not has_body
             and not source
@@ -12835,6 +12843,10 @@ def _app_scoped_create_text_hint(text: str) -> str:
     if not _looks_like_app_scoped_create_followup(followup):
         return ""
     patterns = (
+        r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份|一则|一张|一幅|新的|新)?\s*"
+        r"(?:页面|页|笔记|备忘录|日志|日记|文档|文件|演示|演示文稿|幻灯片|项目|任务|卡片)"
+        r"\s*(?:(?:标题|名称|名字|题目)\s*)?(?:是|为|叫|:|：)\s*"
+        r"(?P<text>[^。！？!?，,]+)",
         r"(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*"
         r"(?P<text>[^。！？!?，,]+?)"
         r"(?:\s*的\s*(?:页面|页|笔记|备忘录|日志|日记|文档|文件|演示|演示文稿|幻灯片|项目|任务|卡片))?"
@@ -12845,6 +12857,9 @@ def _app_scoped_create_text_hint(text: str) -> str:
         r"(?:内容|正文)\s*(?:是|为|写|写成|写下|:|：)\s*(?P<text>[^。！？!?，,]+)",
         r"(?:写下|写入|记录下|记下|写)\s*(?P<text>[^。！？!?，,]+)",
         r"\b(?:titled|called|named)\s+(?P<text_en>[^.!?,]+)",
+        r"\b(?:new|create|make)\b.{0,40}\b"
+        r"(?:page|note|document|file|presentation|slide|project|task|card)\b"
+        r"\s*(?::|-)\s*(?P<text_en>[^.!?,]+)",
         r"\babout\s+(?P<text_en>[^.!?,]+)",
         r"\b(?:saying|with(?:\s+(?:content|text|body))?|content|text|body)\s+"
         r"(?P<text_en>[^.!?,]+)",
@@ -15356,6 +15371,10 @@ def _app_scoped_safe_operation_hint(text: str) -> dict[str, Any]:
     canonical_app_name = _canonical_app_name_hint(app_name)
     if safe_shortcut is None and _looks_like_app_scoped_create_followup(followup):
         safe_shortcut = safe_shortcut_hint(f"打开 {followup}")
+    if safe_shortcut is None and _looks_like_app_scoped_create_followup(followup):
+        create_container_action = _generic_create_container_action_hint(followup)
+        if create_container_action:
+            safe_shortcut = {"action": create_container_action}
     if safe_shortcut is None:
         default_new_action = _app_default_new_item_shortcut_action(canonical_app_name, followup)
         if default_new_action:
