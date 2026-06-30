@@ -131,6 +131,15 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "approval_required": [],
     },
     {
+        "id": "current_window_release_notes_artifact",
+        "category": "orchestrator",
+        "prompt": "把当前窗口里的内容整理成发布说明并保存到 Downloads",
+        "expected_intent": "report_generation",
+        "expected_plan_tools": ["desktop.ui_elements", "artifact.write"],
+        "expected_request_tools": ["desktop.ui_elements"],
+        "approval_required": [],
+    },
+    {
         "id": "named_media_app_playback",
         "category": "orchestrator",
         "prompt": "open VLC play test",

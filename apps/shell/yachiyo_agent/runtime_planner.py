@@ -1429,8 +1429,15 @@ class TaskIntentRouter:
                 and str(clipboard_hint.get("action") or "").strip()
                 not in {"read", "copy_selection_read"}
             )
-            or (capture_note_hint(text) and not transform_target)
-            or _direct_communication_hint(text)
+            or (
+                capture_note_hint(text)
+                and not transform_target
+                and not _release_notes_report_request(text)
+            )
+            or (
+                _direct_communication_hint(text)
+                and not _release_notes_report_request(text)
+            )
             or (
                 _looks_like_ui_operation(text)
                 and not _looks_like_context_artifact_request(text)
@@ -1458,6 +1465,11 @@ class TaskIntentRouter:
                 "纪要",
                 "简报",
                 "复盘",
+                "发布说明",
+                "变更说明",
+                "更新说明",
+                "release notes",
+                "changelog",
             ],
         )
         app_write_target = (
@@ -1858,6 +1870,8 @@ class TaskIntentRouter:
             return _empty_intent("communication", text)
         if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
             return _empty_intent("communication", text)
+        if _release_notes_report_request(text):
+            return _empty_intent("communication", text)
         scoped_new_item = _app_scoped_safe_operation_hint(text)
         scoped_action = str(
             (scoped_new_item.get("safe_shortcut") or {}).get("action") or ""
@@ -1922,6 +1936,8 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        if _release_notes_report_request(text):
+            return _empty_intent("information_capture", text)
         hint = capture_note_hint(text)
         if not hint:
             return _empty_intent("information_capture", text)
@@ -13944,8 +13960,32 @@ def _desktop_content_artifact_requested(text: str) -> bool:
             "链接清单",
             "链接列表",
             "列出链接",
+            "发布说明",
+            "变更说明",
+            "更新说明",
+            "release notes",
+            "changelog",
         ),
     )
+
+
+def _release_notes_report_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if not _contains_any(
+        value,
+        (
+            "发布说明",
+            "发行说明",
+            "变更说明",
+            "更新说明",
+            "release notes",
+            "changelog",
+        ),
+    ):
+        return False
+    return not _contains_any(value, _COMMUNICATION_ACTION_TERMS)
 
 
 def _desktop_content_artifact_hint(text: str) -> dict[str, str]:

@@ -6128,6 +6128,23 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
         "把当前应用里的文字整理成 markdown 文件",
         allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
     )
+    current_app_release_notes = RuntimePlanner().decision(
+        "把当前应用的内容整理成发布说明并在 Finder 显示",
+        allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
+    )
+    current_app_release_notes_en = RuntimePlanner().decision(
+        "把当前应用内容整理成 release notes",
+        allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
+    )
+    release_notes_delivery = RuntimePlanner().decision(
+        "把发布说明发给张三",
+        allowed_tools=[
+            "desktop.active_window",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+            "artifact.write",
+        ],
+    )
     assert clipboard.selected_intent.kind == "report_generation"
     assert clipboard.selected_intent.inputs == {"context_source": "clipboard"}
     assert [step.step_id for step in clipboard.plan.tool_plan.steps] == [
@@ -6221,6 +6238,23 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
         "read-report-context",
         "write-report-artifact",
     ]
+    assert current_app_release_notes.selected_intent.kind == "report_generation"
+    assert current_app_release_notes.selected_intent.inputs == {
+        "context_source": "visible_text"
+    }
+    assert [step.step_id for step in current_app_release_notes.plan.tool_plan.steps] == [
+        "read-report-context",
+        "write-report-artifact",
+        "reveal-artifact-in-finder",
+    ]
+    assert _step_by_id(current_app_release_notes, "read-report-context").tool_name == (
+        "desktop.ui_elements"
+    )
+    assert current_app_release_notes_en.selected_intent.kind == "report_generation"
+    assert current_app_release_notes_en.selected_intent.inputs == {
+        "context_source": "visible_text"
+    }
+    assert release_notes_delivery.selected_intent.kind == "communication"
 
     read_only = RuntimePlanner().decision(
         "读取剪贴板",
@@ -6429,6 +6463,10 @@ def test_runtime_planner_applies_artifact_output_locations() -> None:
         "把当前窗口内容总结成 markdown 文件并保存到 Downloads",
         allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
     )
+    current_window_release_notes = RuntimePlanner().decision(
+        "把当前窗口里的内容整理成发布说明并保存到 Downloads",
+        allowed_tools=["desktop.ui_elements", "workspace.list", "artifact.write"],
+    )
     current_page_markdown = RuntimePlanner().decision(
         "把当前网页总结成 markdown 文件并保存到桌面",
         allowed_tools=["browser.current_page", "browser.extract_text", "artifact.write"],
@@ -6457,6 +6495,14 @@ def test_runtime_planner_applies_artifact_output_locations() -> None:
         "body_source": "visible_text",
     }
     assert current_window_report.plan.tool_plan.artifacts_expected == [
+        "Downloads/report.md"
+    ]
+    assert current_window_release_notes.selected_intent.kind == "report_generation"
+    assert _step_by_id(current_window_release_notes, "write-report-artifact").input_preview == {
+        "path": "Downloads/report.md",
+        "body_source": "visible_text",
+    }
+    assert current_window_release_notes.plan.tool_plan.artifacts_expected == [
         "Downloads/report.md"
     ]
     assert current_page_markdown.selected_intent.kind == "web_research"
