@@ -8222,6 +8222,69 @@ def test_runtime_planner_discovers_generic_design_tool_before_searching() -> Non
     ]
 
 
+def test_runtime_planner_discovers_prefixed_generic_tool_categories() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+    ]
+
+    cases = (
+        ("打开一个视频剪辑工具，搜索 vlog 模板", "video", "视频剪辑", "vlog 模板"),
+        ("打开一个压缩工具", "archive", "压缩", ""),
+        ("打开一个白板工具，新建文档", "whiteboard", "白板", ""),
+        ("打开一个思维导图工具，搜索 产品路线图", "diagram", "思维导图", "产品路线图"),
+        ("打开一个截图工具", "screenshot", "截图", ""),
+        ("打开一个音频编辑工具，搜索 降噪", "audio", "音频编辑", "降噪"),
+        ("打开一个数据库工具，连接本地数据库", "database", "数据库", ""),
+    )
+
+    for prompt, query, description, search_query in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == ""
+        assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+            "action": "discover_apps",
+            "query": query,
+        }
+        assert decision.selected_intent.inputs["app_capability_hint"] == {
+            "query": query,
+            "description": description,
+        }
+        assert _step_by_id(decision, "discover_apps-desktop-state").input_preview == {
+            "query": query,
+            "limit": 20,
+        }
+        selected_app_step = _step_by_id(decision, "open-selected-discovered-app")
+        assert selected_app_step.input_preview["app_name"] == "<selected app from desktop.list_apps>"
+        assert selected_app_step.input_preview["query"] == query
+        if prompt == "打开一个白板工具，新建文档":
+            assert selected_app_step.tool_name == "app.open_and_safe_shortcut"
+            assert selected_app_step.input_preview["action"] == "new_document"
+        if search_query:
+            assert decision.selected_intent.inputs["app_search_hint"]["query"] == search_query
+            assert _step_by_id(decision, "focus-app-search-field").depends_on == [
+                "open-selected-discovered-app"
+            ]
+            assert _step_by_id(decision, "type-app-search-query").input_preview == {
+                "text": search_query
+            }
+        assert planner_tool_requests(prompt, allowed_tools) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": query, "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
+            }
+        ]
+
+
 def test_runtime_planner_carries_target_file_when_discovering_app_capabilities() -> None:
     allowed_tools = [
         "desktop.list_apps",

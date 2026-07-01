@@ -20046,8 +20046,15 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?:(?:一个|一款|任意|任何|默认|可用|合适|适合|推荐|能用|可使用|已安装)"
         r"(?:的)?\s*)*"
     )
+    required_generic_prefix = (
+        r"(?:(?:一个|一款|任意|任何|默认|可用|合适|适合|推荐|能用|可使用|已安装)"
+        r"(?:的)?\s*)+"
+    )
     generic_prefix_en = (
         r"(?:(?:an?|any|some|available|default|suitable|best|usable|installed)\s+)*"
+    )
+    required_generic_prefix_en = (
+        r"(?:(?:an?|any|some|available|default|suitable|best|usable|installed)\s+)+"
     )
     patterns = (
         r"(?:打开|启动|找|找一个|找一款|使用|在|用|通过)\s*"
@@ -20068,28 +20075,42 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?:写进|写入|写到|放进|放到|保存到|导出到|输出到|整理到|总结到|发到)\s*"
         rf"{generic_prefix}"
         r"(?P<target_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
-        r"图片|图像|照片|绘图|画图|设计|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
+        r"图片|图像|照片|绘图|画图|设计|视频|视频剪辑|视频编辑|音频|音频编辑|"
+        r"压缩|解压|归档|白板|数据库|截图|截屏|流程图|思维导图|脑图|pdf|PDF|"
+        r"演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
         r"聊天|通讯|通信|消息|即时通讯|日历|项目管理|任务管理|工单|看板|"
         r"issue|ticket)"
         r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
         r"\b(?:write|save|export|output|put|send|copy|paste)\b.{0,80}?"
         rf"\b(?:to|into|in)\s+{generic_prefix_en}"
-        r"(?P<target_capability_en>markdown|code|image|photo|design|document|text|spreadsheet|"
+        r"(?P<target_capability_en>markdown|code|image|photo|design|video|audio|archive|"
+        r"zip|whiteboard|database|screenshot|diagram|mindmap|document|text|spreadsheet|"
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
         r"(?:app|application|client|tool|program|editor)\b",
         r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
         rf"{generic_prefix}"
         r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
-        r"图片|图像|照片|绘图|画图|设计|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
+        r"图片|图像|照片|绘图|画图|设计|视频|视频剪辑|视频编辑|音频|音频编辑|"
+        r"压缩|解压|归档|白板|数据库|截图|截屏|流程图|思维导图|脑图|pdf|PDF|"
+        r"演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
         r"聊天|通讯|通信|消息|即时通讯|日历|项目管理|任务管理|工单|看板|"
         r"issue|ticket)"
         r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
         r"\b(?:open|launch|start|find|use)\s+"
         rf"{generic_prefix_en}"
-        r"(?P<direct_capability_en>markdown|code|image|photo|design|document|text|spreadsheet|"
+        r"(?P<direct_capability_en>markdown|code|image|photo|design|video|audio|archive|"
+        r"zip|whiteboard|database|screenshot|diagram|mindmap|document|text|spreadsheet|"
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
+        r"(?:app|application|client|tool|program|editor)\b",
+        r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
+        rf"{required_generic_prefix}"
+        r"(?P<generic_prefixed_capability_cn>[^。！？!?，,]{1,24}?)"
+        r"(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
+        r"\b(?:open|launch|start|find|use)\s+"
+        rf"{required_generic_prefix_en}"
+        r"(?P<generic_prefixed_capability_en>[\w\s-]{2,40}?)\s*"
         r"(?:app|application|client|tool|program|editor)\b",
     )
     for pattern in patterns:
@@ -20140,6 +20161,71 @@ def _app_capability_discovery_query(value: str) -> str:
         return "code"
     if _contains_any(description, ("图片", "图像", "照片", "绘图", "画图", "设计", "image", "photo", "picture", "design")):
         return "image"
+    if _contains_any(
+        description,
+        (
+            "视频",
+            "剪辑",
+            "剪片",
+            "视频剪辑",
+            "视频编辑",
+            "video",
+            "movie",
+            "film",
+            "video editing",
+            "video editor",
+        ),
+    ):
+        return "video"
+    if _contains_any(
+        description,
+        (
+            "音频",
+            "录音",
+            "声音",
+            "音频编辑",
+            "audio",
+            "sound",
+            "voice recording",
+            "audio editing",
+            "audio editor",
+        ),
+    ):
+        return "audio"
+    if _contains_any(
+        description,
+        (
+            "压缩",
+            "解压",
+            "归档",
+            "zip",
+            "archive",
+            "compress",
+            "decompress",
+            "unzip",
+        ),
+    ):
+        return "archive"
+    if _contains_any(description, ("白板", "whiteboard")):
+        return "whiteboard"
+    if _contains_any(
+        description,
+        (
+            "截图",
+            "截屏",
+            "录屏",
+            "screenshot",
+            "screen capture",
+            "screen recording",
+        ),
+    ):
+        return "screenshot"
+    if _contains_any(description, ("数据库", "database", "db", "sql")):
+        return "database"
+    if _contains_any(description, ("浏览器", "网页", "browser", "web")):
+        return "browser"
+    if _contains_any(description, ("终端", "命令行", "terminal", "command line", "cli")):
+        return "terminal"
     if _contains_any(description, ("流程图", "思维导图", "脑图", "diagram", "flowchart", "mind map", "mindmap")):
         return "diagram"
     if _contains_any(description, ("表格", "数据表", "spreadsheet", "sheet", "csv")):
