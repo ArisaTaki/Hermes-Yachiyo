@@ -933,6 +933,9 @@ def test_run_timeline_snapshot_synthesizes_scoped_workflow_replan_event() -> Non
         "请分析 sales.csv 并输出一份数据分析报告",
         allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
     )
+    analysis_step = next(
+        step for step in decision.plan.tool_plan.steps if step.tool_name == "data.analyze"
+    )
     scoped_events = []
     for event_type, payload in planner_run_event_payloads(decision):
         scoped_type = {
@@ -955,7 +958,7 @@ def test_run_timeline_snapshot_synthesizes_scoped_workflow_replan_event() -> Non
         {
             "event_type": "agent.tool.call",
             "payload": {
-                "step_id": "run-analysis",
+                "step_id": analysis_step.step_id,
                 "tool_name": "data.analyze",
                 "status": "failed",
                 "result": {"ok": False, "error": "empty result"},
@@ -975,7 +978,56 @@ def test_run_timeline_snapshot_synthesizes_scoped_workflow_replan_event() -> Non
     assert replan_event.event_type == "workflow.run.replan.requested"
     assert replan_event.payload["planner_event_type"] == "agent.replan.requested"
     assert replan_event.payload["planner_scope"] == "workflow_run"
-    assert replan_event.payload["source_step_id"] == "run-analysis"
+    assert replan_event.payload["source_step_id"] == analysis_step.step_id
+
+
+def test_group_run_snapshot_synthesizes_scoped_replan_event() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+    analysis_step = next(
+        step for step in decision.plan.tool_plan.steps if step.tool_name == "data.analyze"
+    )
+    events = [
+        {"event_type": event_type, "payload": payload}
+        for event_type, payload in planner_run_event_payloads(decision)
+    ]
+    events.append(
+        {
+            "event_type": "agent.tool.call",
+            "payload": {
+                "step_id": analysis_step.step_id,
+                "tool_name": "data.analyze",
+                "status": "failed",
+                "result": {"ok": False, "error": "empty result"},
+            },
+        }
+    )
+
+    snapshot = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-1",
+            "group_id": "group-1",
+            "status": "failed",
+            "objective": "Analyze sales as a group",
+            "events": events,
+        }
+    )
+
+    event_types = [event.event_type for event in snapshot.events]
+    assert "group.run.intent.selected" in event_types
+    assert "group.run.plan.created" in event_types
+    assert "group.run.task_core.created" in event_types
+    assert "group.run.plan.step" in event_types
+    replan_event = next(
+        event for event in snapshot.events if event.event_type == "group.run.replan.requested"
+    )
+    assert replan_event.event_type == "group.run.replan.requested"
+    assert replan_event.payload["planner_event_type"] == "agent.replan.requested"
+    assert replan_event.payload["planner_scope"] == "group_run"
+    assert replan_event.payload["source_step_id"] == analysis_step.step_id
+    assert "group.run.failed" in event_types
 
 
 def test_workflow_run_snapshot_scopes_agent_planner_events_to_workflow_run() -> None:

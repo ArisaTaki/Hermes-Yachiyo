@@ -18,6 +18,7 @@ from .contracts import (
     ToolCallSnapshot,
 )
 from .group_member_snapshots import group_run_participants_from_payload
+from .replan_event_projection import run_events_with_replan_requests
 from .run_snapshots import RunSnapshotProjector
 
 _RUN_PROJECTOR = RunSnapshotProjector()
@@ -47,6 +48,12 @@ def group_run_snapshot_from_payload(
         },
         run_id=group_run_id,
         keys=("events",),
+    )
+    events = run_events_with_replan_requests(
+        payload,
+        events,
+        run_id=group_run_id,
+        task_id=_text(payload.get("task_id")),
     )
     runs = [
         _RUN_PROJECTOR.timeline_snapshot_from_payload(
@@ -121,6 +128,7 @@ def group_run_events_with_lifecycle(
         group_run_id=group_run_id,
         group_id=group_id,
     )
+    raw_events = _group_scoped_planner_events(raw_events)
 
     existing_types = {_event_type(event) for event in raw_events}
     lifecycle_context = _group_run_lifecycle_context(
@@ -515,6 +523,43 @@ def _raw_events_from_payload(
 
 def _event_type(event: Mapping[str, Any]) -> str:
     return _text(event.get("event_type") or event.get("event"))
+
+
+_GROUP_PLANNER_EVENT_TYPES = {
+    "agent.intent.selected": "group.run.intent.selected",
+    "agent.plan.created": "group.run.plan.created",
+    "agent.task_core.created": "group.run.task_core.created",
+    "agent.plan.step": "group.run.plan.step",
+    "agent.plan.selection": "group.run.plan.selection",
+    "agent.replan.requested": "group.run.replan.requested",
+    "agent.task.todo.updated": "group.run.task.todo.updated",
+    "agent.task.checkpoint.updated": "group.run.task.checkpoint.updated",
+}
+
+
+def _group_scoped_planner_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    scoped_events: list[dict[str, Any]] = []
+    for event in events:
+        event_type = _event_type(event)
+        group_type = _GROUP_PLANNER_EVENT_TYPES.get(event_type)
+        if not group_type:
+            scoped_events.append(event)
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+        scoped_events.append(
+            {
+                **event,
+                "event_type": group_type,
+                "payload": {
+                    **dict(payload),
+                    "planner_event_type": str(
+                        payload.get("planner_event_type") or event_type
+                    ),
+                    "planner_scope": str(payload.get("planner_scope") or "group_run"),
+                },
+            }
+        )
+    return scoped_events
 
 
 def _group_run_lifecycle_context(
