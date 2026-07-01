@@ -64,3 +64,61 @@ def test_workflow_run_payload_with_lifecycle_does_not_duplicate_aliases() -> Non
         "workflow.started",
         "workflow.completed",
     ]
+
+
+def test_workflow_run_snapshot_projects_planner_summary_from_workflow_events() -> None:
+    workflow_run = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-planner",
+            "kind": "workflow_run",
+            "status": "processing",
+            "events": [
+                {
+                    "event_type": "workflow.run.plan.created",
+                    "payload": {
+                        "source": "runtime_planner",
+                        "decision_id": "decision-workflow",
+                        "plan": {
+                            "plan_id": "plan-workflow",
+                            "intent": {
+                                "intent_id": "intent-workflow",
+                                "kind": "data_analysis",
+                                "title": "Analyze sales",
+                            },
+                            "capabilities": [{"capability_id": "data.analysis"}],
+                            "tool_plan": {
+                                "steps": [
+                                    {
+                                        "step_id": "analyze",
+                                        "capability_id": "data.analysis",
+                                        "tool_name": "python.exec",
+                                    }
+                                ],
+                                "required_capabilities": ["data.analysis"],
+                                "artifacts_expected": ["markdown_report"],
+                            },
+                        },
+                    },
+                },
+                {
+                    "event_type": "workflow.run.plan.selection",
+                    "payload": {
+                        "source": "runtime_planner",
+                        "selection_source": "runtime_planner",
+                        "selection_role": "workflow_primary",
+                        "selected_tools": ["python.exec"],
+                    },
+                },
+            ],
+        }
+    )
+
+    assert workflow_run.planner_summary is not None
+    assert workflow_run.planner_summary.decision_id == "decision-workflow"
+    assert workflow_run.planner_summary.plan_id == "plan-workflow"
+    assert workflow_run.planner_summary.intent_kind == "data_analysis"
+    assert workflow_run.planner_summary.plan_tools == ["python.exec"]
+    assert workflow_run.planner_summary.selected_tools == ["python.exec"]
+    assert workflow_run.planner_summary.plan_capabilities == ["data.analysis"]
+    assert workflow_run.planner_summary.artifacts_expected == ["markdown_report"]
+    assert workflow_run.planner_summary.event_count == 2

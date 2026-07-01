@@ -39,12 +39,42 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'agent.runtime.compiled') return '运行环境已准备';
   if (name === 'agent.artifact.write') return '上下文/产物已写入';
   if (name === 'agent.model.response') return '模型响应';
-  if (name === 'agent.intent.selected') return detail ? `Intent 识别 · ${detail}` : 'Intent 识别';
-  if (name === 'agent.plan.created') return detail ? `Planner 计划 · ${detail}` : 'Planner 计划';
-  if (name === 'agent.plan.step') return detail ? `计划步骤 · ${detail}` : '计划步骤';
-  if (name === 'agent.task.todo.updated' || name === 'group.run.task.todo.updated') return detail ? `Task Todo · ${detail}` : 'Task Todo';
-  if (name === 'agent.task.checkpoint.updated' || name === 'group.run.task.checkpoint.updated') return detail ? `Task Checkpoint · ${detail}` : 'Task Checkpoint';
-  if (name === 'agent.plan.selection') {
+  if (
+    name === 'agent.intent.selected'
+    || name === 'group.run.intent.selected'
+    || name === 'workflow.intent.selected'
+    || name === 'workflow.run.intent.selected'
+  ) return detail ? `Intent 识别 · ${detail}` : 'Intent 识别';
+  if (
+    name === 'agent.plan.created'
+    || name === 'group.run.plan.created'
+    || name === 'workflow.plan.created'
+    || name === 'workflow.run.plan.created'
+  ) return detail ? `Planner 计划 · ${detail}` : 'Planner 计划';
+  if (
+    name === 'agent.plan.step'
+    || name === 'group.run.plan.step'
+    || name === 'workflow.plan.step'
+    || name === 'workflow.run.plan.step'
+  ) return detail ? `计划步骤 · ${detail}` : '计划步骤';
+  if (
+    name === 'agent.task.todo.updated'
+    || name === 'group.run.task.todo.updated'
+    || name === 'workflow.task.todo.updated'
+    || name === 'workflow.run.task.todo.updated'
+  ) return detail ? `Task Todo · ${detail}` : 'Task Todo';
+  if (
+    name === 'agent.task.checkpoint.updated'
+    || name === 'group.run.task.checkpoint.updated'
+    || name === 'workflow.task.checkpoint.updated'
+    || name === 'workflow.run.task.checkpoint.updated'
+  ) return detail ? `Task Checkpoint · ${detail}` : 'Task Checkpoint';
+  if (
+    name === 'agent.plan.selection'
+    || name === 'group.run.plan.selection'
+    || name === 'workflow.plan.selection'
+    || name === 'workflow.run.plan.selection'
+  ) {
     const selectionDetail = plannerSelectionTimelineDetail(event, detail);
     return selectionDetail ? `Planner 选择 · ${selectionDetail}` : 'Planner 选择';
   }
@@ -184,8 +214,24 @@ export function timelineEventTone(event: Record<string, unknown>): string {
     || name === 'agent.plan.selection'
     || name === 'agent.task.todo.updated'
     || name === 'agent.task.checkpoint.updated'
+    || name === 'group.run.intent.selected'
+    || name === 'group.run.plan.created'
+    || name === 'group.run.plan.step'
+    || name === 'group.run.plan.selection'
     || name === 'group.run.task.todo.updated'
     || name === 'group.run.task.checkpoint.updated'
+    || name === 'workflow.intent.selected'
+    || name === 'workflow.run.intent.selected'
+    || name === 'workflow.plan.created'
+    || name === 'workflow.run.plan.created'
+    || name === 'workflow.plan.step'
+    || name === 'workflow.run.plan.step'
+    || name === 'workflow.plan.selection'
+    || name === 'workflow.run.plan.selection'
+    || name === 'workflow.task.todo.updated'
+    || name === 'workflow.run.task.todo.updated'
+    || name === 'workflow.task.checkpoint.updated'
+    || name === 'workflow.run.task.checkpoint.updated'
   ) return 'tool';
   if (name.includes('tool')) return 'tool';
   if (name.startsWith('model.') || name.includes('model.response')) return 'model';

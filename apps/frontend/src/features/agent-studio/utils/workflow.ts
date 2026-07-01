@@ -1017,7 +1017,11 @@ function workflowChildPlannerOutputCounts(childRun: RunSpec | null): {
   (childRun?.timeline || []).forEach((event) => {
     const eventName = String(event.event || event.event_type || '').trim();
     const payload = workflowPlannerEventPayload(event);
-    if (eventName === 'agent.plan.created') {
+    if (
+      eventName === 'agent.plan.created'
+      || eventName === 'workflow.plan.created'
+      || eventName === 'workflow.run.plan.created'
+    ) {
       const plan = workflowRecord(payload.plan);
       const toolPlan = workflowRecord(plan.tool_plan);
       addWorkflowStringValues(approvals, toolPlan.approvals_required);
@@ -1025,7 +1029,11 @@ function workflowChildPlannerOutputCounts(childRun: RunSpec | null): {
       addWorkflowStringValues(questions, toolPlan.open_questions);
       return;
     }
-    if (eventName !== 'agent.plan.selection') return;
+    if (
+      eventName !== 'agent.plan.selection'
+      && eventName !== 'workflow.plan.selection'
+      && eventName !== 'workflow.run.plan.selection'
+    ) return;
     addWorkflowStringValues(approvals, payload.approvals_required);
     addWorkflowStringValues(artifacts, payload.artifacts_expected);
     addWorkflowStringValues(questions, payload.open_questions);

@@ -9,10 +9,30 @@ from apps.shell.agent.runtime.events import redact_run_event_payload, redact_sec
 
 from .contracts import PlannerTraceSummarySnapshot, PublicRunEvent, RunTimelineChildSnapshot
 
-_PLANNER_INTENT_EVENTS = {"agent.intent.selected", "group.run.intent.selected"}
-_PLANNER_CREATED_EVENTS = {"agent.plan.created", "group.run.plan.created"}
-_PLANNER_STEP_EVENTS = {"agent.plan.step", "group.run.plan.step"}
-_PLANNER_SELECTION_EVENTS = {"agent.plan.selection", "group.run.plan.selection"}
+_PLANNER_INTENT_EVENTS = {
+    "agent.intent.selected",
+    "group.run.intent.selected",
+    "workflow.intent.selected",
+    "workflow.run.intent.selected",
+}
+_PLANNER_CREATED_EVENTS = {
+    "agent.plan.created",
+    "group.run.plan.created",
+    "workflow.plan.created",
+    "workflow.run.plan.created",
+}
+_PLANNER_STEP_EVENTS = {
+    "agent.plan.step",
+    "group.run.plan.step",
+    "workflow.plan.step",
+    "workflow.run.plan.step",
+}
+_PLANNER_SELECTION_EVENTS = {
+    "agent.plan.selection",
+    "group.run.plan.selection",
+    "workflow.plan.selection",
+    "workflow.run.plan.selection",
+}
 
 
 def timeline_child_snapshots_from_payloads(payloads: Any) -> list[RunTimelineChildSnapshot]:

@@ -82,7 +82,12 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
   if (type === 'agent.tool.policy_decision' || type === 'tool.policy_decision') {
     return runtimeTimelinePolicyDecisionLabel(event);
   }
-  if (type === 'agent.plan.selection' || type === 'group.run.plan.selection') {
+  if (
+    type === 'agent.plan.selection'
+    || type === 'group.run.plan.selection'
+    || type === 'workflow.plan.selection'
+    || type === 'workflow.run.plan.selection'
+  ) {
     const selectionDetail = runtimeTimelinePlannerSelectionDetail(event);
     return selectionDetail ? `Planner 选择 · ${selectionDetail}` : 'Planner 选择';
   }
@@ -149,11 +154,36 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'model.output.ready') return '模型输出就绪';
   if (type === 'model.output.completed' || type === 'model.completed') return '模型完成';
   if (type === 'agent.model.followup_context') return '模型后续上下文';
-  if (type === 'agent.intent.selected' || type === 'group.run.intent.selected') return 'Intent 识别';
-  if (type === 'agent.plan.created' || type === 'group.run.plan.created') return 'Planner 计划';
-  if (type === 'agent.plan.step' || type === 'group.run.plan.step') return '计划步骤';
-  if (type === 'agent.task.todo.updated' || type === 'group.run.task.todo.updated') return 'Task Todo';
-  if (type === 'agent.task.checkpoint.updated' || type === 'group.run.task.checkpoint.updated') return 'Task Checkpoint';
+  if (
+    type === 'agent.intent.selected'
+    || type === 'group.run.intent.selected'
+    || type === 'workflow.intent.selected'
+    || type === 'workflow.run.intent.selected'
+  ) return 'Intent 识别';
+  if (
+    type === 'agent.plan.created'
+    || type === 'group.run.plan.created'
+    || type === 'workflow.plan.created'
+    || type === 'workflow.run.plan.created'
+  ) return 'Planner 计划';
+  if (
+    type === 'agent.plan.step'
+    || type === 'group.run.plan.step'
+    || type === 'workflow.plan.step'
+    || type === 'workflow.run.plan.step'
+  ) return '计划步骤';
+  if (
+    type === 'agent.task.todo.updated'
+    || type === 'group.run.task.todo.updated'
+    || type === 'workflow.task.todo.updated'
+    || type === 'workflow.run.task.todo.updated'
+  ) return 'Task Todo';
+  if (
+    type === 'agent.task.checkpoint.updated'
+    || type === 'group.run.task.checkpoint.updated'
+    || type === 'workflow.task.checkpoint.updated'
+    || type === 'workflow.run.task.checkpoint.updated'
+  ) return 'Task Checkpoint';
   if (type === 'tool.requested') return '工具请求';
   if (type === 'agent.tool.policy_decision' || type === 'tool.policy_decision') return '工具策略决策';
   if (type === 'agent.tool.input_resolved') return '工具输入解析';
