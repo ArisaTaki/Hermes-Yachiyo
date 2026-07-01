@@ -9,8 +9,9 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
     evidence = smoke.run_smoke()
 
     assert evidence["ok"] is True
-    assert evidence["case_count"] == 11
+    assert evidence["case_count"] == len(smoke.PLANNER_TOOL_PARITY_CASES)
     case_by_id = {case["id"]: case for case in evidence["cases"]}
+    assert set(case_by_id) == {case["id"] for case in smoke.PLANNER_TOOL_PARITY_CASES}
     assert case_by_id["generic_app_open"]["request_tools"] == [
         "desktop.list_apps",
         "app.open",
@@ -32,9 +33,23 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
     assert case_by_id["visible_table_analysis"]["request_tools"] == [
         "desktop.ui_elements"
     ]
+    assert case_by_id["visible_table_analysis_to_document_app"]["plan_tools"] == [
+        "desktop.ui_elements",
+        "data.analyze",
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+    ]
     assert case_by_id["current_page_report"]["plan_tools"] == [
         "browser.extract_text",
         "artifact.write",
+    ]
+    assert case_by_id["current_page_summary_to_document_app"]["plan_tools"] == [
+        "browser.extract_text",
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+    ]
+    assert case_by_id["capability_media_app_playback"]["request_tools"] == [
+        "desktop.list_apps"
     ]
     assert case_by_id["clipboard_send_to_slack"]["request_tools"] == [
         "app.focus",

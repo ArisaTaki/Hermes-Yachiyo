@@ -52,6 +52,16 @@ def public_release_gate_checks(
             command=(sys.executable, "scripts/verify_secret_redaction.py"),
         ),
         GateCheck(
+            id="agent_market_parity",
+            label="Hermes/Hanako-style Agent market parity evidence",
+            command=(sys.executable, "scripts/summarize_agent_market_parity.py"),
+        ),
+        GateCheck(
+            id="planner_runtime_tool_parity",
+            label="Runtime Planner to executable tool parity smoke",
+            command=(sys.executable, "scripts/smoke_planner_runtime_tool_parity.py"),
+        ),
+        GateCheck(
             id="release_pytest",
             label="Focused release pytest coverage",
             command=(

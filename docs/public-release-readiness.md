@@ -144,9 +144,10 @@ python scripts/refresh_local_rc_signoff.py --print-status
 ```
 
 `run_public_release_gate.py` is the cheap public-release preflight. By default
-it runs release artifact guards, secret redaction, focused release pytest, and
-the safe public demo smoke, then writes a non-blocking release-smoke assessment
-to `tmp/public-release-gate/release-smoke.json`. A partial public demo or
+it runs release artifact guards, secret redaction, Agent market-parity evidence,
+Planner-to-runtime tool parity, focused release pytest, and the safe public demo
+smoke, then writes a non-blocking release-smoke assessment to
+`tmp/public-release-gate/release-smoke.json`. A partial public demo or
 incomplete release-smoke checklist keeps the report at
 `status=needs_release_evidence` while still returning success if no command
 failed; add `--require-release-ready` for final release signoff so missing

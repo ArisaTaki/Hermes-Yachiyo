@@ -209,12 +209,20 @@ def test_public_release_gate_defaults_to_safe_preflight_with_demo_blockers(
     assert summary["ok"] is True
     assert summary["release_ready"] is False
     assert summary["status"] == "needs_release_evidence"
-    assert summary["check_count"] == 5
+    assert summary["check_count"] == 7
     assert summary["failed_count"] == 0
     assert [command[:2] for command in commands[:2]] == [
         [sys.executable, "scripts/verify_release_artifacts.py"],
         [sys.executable, "scripts/verify_secret_redaction.py"],
     ]
+    assert any(
+        "scripts/summarize_agent_market_parity.py" in command
+        for command in commands
+    )
+    assert any(
+        "scripts/smoke_planner_runtime_tool_parity.py" in command
+        for command in commands
+    )
     release_pytest_command = next(command for command in commands if "pytest" in command)
     assert "tests/test_public_release_gate.py" in release_pytest_command
     public_demo_command = next(
