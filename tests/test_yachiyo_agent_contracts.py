@@ -98,6 +98,7 @@ from apps.shell.yachiyo_agent.task_cards import (
     agent_task_snapshot_from_payload,
 )
 from apps.shell.yachiyo_agent.tool_catalog import runtime_tool_catalog_snapshot
+from apps.shell.yachiyo_agent.workflow_run_snapshots import workflow_run_snapshot_from_payload
 
 
 def _json(model) -> dict:
@@ -864,6 +865,61 @@ def test_run_timeline_snapshot_projects_task_core_from_plan_event() -> None:
     assert snapshot.task_core.core_id == "task-core-1"
     assert snapshot.task_core.workspace.items[0].kind == "artifact"
     assert snapshot.task_core.todos[0].tool_name == "artifact.write"
+
+
+def test_workflow_run_snapshot_scopes_agent_planner_events_to_workflow_run() -> None:
+    snapshot = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-1",
+            "workflow_run_id": "workflow-run-1",
+            "workflow_id": "workflow-1",
+            "status": "running",
+            "user_goal": "Build report",
+            "events": [
+                {
+                    "event_type": "agent.intent.selected",
+                    "payload": {
+                        "source": "runtime_planner",
+                        "intent": {
+                            "intent_id": "intent-1",
+                            "kind": "workflow_orchestration",
+                            "title": "Workflow Orchestration",
+                        },
+                    },
+                },
+                {
+                    "event_type": "agent.task_core.created",
+                    "payload": {
+                        "source": "runtime_planner",
+                        "core_id": "task-core-1",
+                        "task_core": {
+                            "core_id": "task-core-1",
+                            "workspace": {
+                                "workspace_id": "task-workspace-1",
+                                "title": "Workflow Workspace",
+                            },
+                            "todos": [],
+                            "checkpoints": [],
+                            "replan_signals": [],
+                        },
+                    },
+                },
+            ],
+        }
+    )
+
+    event_types = [event.event_type for event in snapshot.events]
+    assert event_types[:3] == [
+        "workflow.run.started",
+        "workflow.run.intent.selected",
+        "workflow.run.task_core.created",
+    ]
+    planner_event = snapshot.events[1]
+    assert planner_event.payload["planner_scope"] == "workflow_run"
+    assert planner_event.payload["planner_event_type"] == "agent.intent.selected"
+    task_core_event = snapshot.events[2]
+    assert task_core_event.payload["planner_event_type"] == "agent.task_core.created"
+    assert task_core_event.payload["task_core"]["workspace"]["title"] == "Workflow Workspace"
 
 
 def test_planner_summary_redacts_followup_target_secret_fields() -> None:

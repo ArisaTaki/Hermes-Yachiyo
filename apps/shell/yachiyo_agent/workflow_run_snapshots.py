@@ -60,9 +60,11 @@ def workflow_run_payload_with_lifecycle(payload: Mapping[str, Any]) -> dict[str,
     if not run_id:
         return dict(payload)
 
-    raw_events = _raw_events_from_payload(
-        payload,
-        ("events", "run_events", "recent_events", "timeline"),
+    raw_events = _workflow_scoped_planner_events(
+        _raw_events_from_payload(
+            payload,
+            ("events", "run_events", "recent_events", "timeline"),
+        )
     )
     existing_types = {_event_type(event) for event in raw_events}
     lifecycle_context = _workflow_lifecycle_context(payload, run_id)
@@ -119,6 +121,43 @@ def _raw_events_from_payload(
         if value and isinstance(value, list):
             return [dict(item) for item in value if isinstance(item, Mapping)]
     return []
+
+
+_WORKFLOW_PLANNER_EVENT_TYPES = {
+    "agent.intent.selected": "workflow.run.intent.selected",
+    "agent.plan.created": "workflow.run.plan.created",
+    "agent.task_core.created": "workflow.run.task_core.created",
+    "agent.plan.step": "workflow.run.plan.step",
+    "agent.plan.selection": "workflow.run.plan.selection",
+    "agent.replan.requested": "workflow.run.replan.requested",
+    "agent.task.todo.updated": "workflow.run.task.todo.updated",
+    "agent.task.checkpoint.updated": "workflow.run.task.checkpoint.updated",
+}
+
+
+def _workflow_scoped_planner_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    scoped_events: list[dict[str, Any]] = []
+    for event in events:
+        event_type = _event_type(event)
+        workflow_type = _WORKFLOW_PLANNER_EVENT_TYPES.get(event_type)
+        if not workflow_type:
+            scoped_events.append(event)
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+        scoped_events.append(
+            {
+                **event,
+                "event_type": workflow_type,
+                "payload": {
+                    **dict(payload),
+                    "planner_event_type": str(
+                        payload.get("planner_event_type") or event_type
+                    ),
+                    "planner_scope": str(payload.get("planner_scope") or "workflow_run"),
+                },
+            }
+        )
+    return scoped_events
 
 
 def _event_type(event: Mapping[str, Any]) -> str:
