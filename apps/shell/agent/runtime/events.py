@@ -490,11 +490,16 @@ class RuntimeToolCallEventRecorder:
         run_id: str,
         tool_name: str,
         input_preview: Any,
+        *,
+        trace: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
+        payload = {"tool": tool_name, "input_preview": input_preview}
+        if trace:
+            payload.update(trace)
         return self._append(
             run_id,
             "agent.tool.denied",
-            {"tool": tool_name, "input_preview": input_preview},
+            payload,
         )
 
     def requested(
@@ -504,17 +509,21 @@ class RuntimeToolCallEventRecorder:
         input_preview: Any,
         *,
         approved: bool = False,
+        trace: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
+        payload = self._payload_builder.payload(
+            tool_name,
+            input_preview,
+            approved=approved,
+            pre_validation=True,
+            status="requested",
+        )
+        if trace:
+            payload.update(trace)
         return self._append(
             run_id,
             "tool.requested",
-            self._payload_builder.payload(
-                tool_name,
-                input_preview,
-                approved=approved,
-                pre_validation=True,
-                status="requested",
-            ),
+            payload,
         )
 
     def started(
@@ -524,16 +533,20 @@ class RuntimeToolCallEventRecorder:
         input_preview: Any,
         *,
         approved: bool = False,
+        trace: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
+        payload = self._payload_builder.payload(
+            tool_name,
+            input_preview,
+            approved=approved,
+            status="running",
+        )
+        if trace:
+            payload.update(trace)
         return self._append(
             run_id,
             "tool.started",
-            self._payload_builder.payload(
-                tool_name,
-                input_preview,
-                approved=approved,
-                status="running",
-            ),
+            payload,
         )
 
     def failed(
@@ -545,18 +558,22 @@ class RuntimeToolCallEventRecorder:
         approved: bool = False,
         pre_validation: bool = False,
         error: Any = None,
+        trace: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
+        payload = self._payload_builder.payload(
+            tool_name,
+            input_preview,
+            approved=approved,
+            pre_validation=pre_validation,
+            error=error,
+            status="failed",
+        )
+        if trace:
+            payload.update(trace)
         return self._append(
             run_id,
             "tool.failed",
-            self._payload_builder.payload(
-                tool_name,
-                input_preview,
-                approved=approved,
-                pre_validation=pre_validation,
-                error=error,
-                status="failed",
-            ),
+            payload,
         )
 
     def result(
@@ -567,30 +584,37 @@ class RuntimeToolCallEventRecorder:
         tool_result: dict[str, Any],
         *,
         approved: bool = False,
+        trace: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         if tool_result.get("approval_required"):
-            return self._append(
-                run_id,
-                "tool.approval_required",
-                self._payload_builder.payload(
-                    tool_name,
-                    input_preview,
-                    approved=approved,
-                    result=tool_result,
-                    status="waiting_approval",
-                ),
-            )
-        ok = bool(tool_result.get("ok"))
-        return self._append(
-            run_id,
-            "tool.completed" if ok else "tool.failed",
-            self._payload_builder.payload(
+            payload = self._payload_builder.payload(
                 tool_name,
                 input_preview,
                 approved=approved,
                 result=tool_result,
-                status="completed" if ok else "failed",
-            ),
+                status="waiting_approval",
+            )
+            if trace:
+                payload.update(trace)
+            return self._append(
+                run_id,
+                "tool.approval_required",
+                payload,
+            )
+        ok = bool(tool_result.get("ok"))
+        payload = self._payload_builder.payload(
+            tool_name,
+            input_preview,
+            approved=approved,
+            result=tool_result,
+            status="completed" if ok else "failed",
+        )
+        if trace:
+            payload.update(trace)
+        return self._append(
+            run_id,
+            "tool.completed" if ok else "tool.failed",
+            payload,
         )
 
     def agent_tool_call(

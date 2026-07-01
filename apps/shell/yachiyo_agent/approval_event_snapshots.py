@@ -18,6 +18,20 @@ from .approval_snapshot_merging import (
 from .approvals import approval_card_from_payload
 from .contracts import ApprovalCardSnapshot, PublicRunEvent
 
+_PLANNER_TRACE_KEYS = (
+    "source",
+    "planning_reason",
+    "decision_id",
+    "plan_id",
+    "tool_plan_id",
+    "intent_kind",
+    "step_id",
+    "planner_step_id",
+    "capability_id",
+    "replan_request_id",
+    "replan_trigger",
+)
+
 
 def approval_snapshots_from_events(
     events: list[PublicRunEvent],
@@ -112,6 +126,7 @@ def merge_trace_context_into_approval(source: dict[str, Any], payload: dict[str,
             "workflow_run_id",
             "workflow_node_id",
             "workflow_node_label",
+            *_PLANNER_TRACE_KEYS,
         )
         if payload.get(key)
     }

@@ -421,7 +421,10 @@ class ApprovalCardSnapshot(_PublicSnapshot):
     workflow_node_label: str | None = None
     group_id: str | None = None
     group_run_id: str | None = None
+    source: str | None = None
+    planning_reason: str | None = None
     step_id: str | None = None
+    planner_step_id: str | None = None
     capability_id: str | None = None
     decision_id: str | None = None
     plan_id: str | None = None
@@ -490,6 +493,17 @@ class ToolCallSnapshot(_PublicSnapshot):
     workflow_node_label: str | None = None
     group_id: str | None = None
     group_run_id: str | None = None
+    source: str | None = None
+    planning_reason: str | None = None
+    decision_id: str | None = None
+    plan_id: str | None = None
+    tool_plan_id: str | None = None
+    intent_kind: str | None = None
+    step_id: str | None = None
+    planner_step_id: str | None = None
+    capability_id: str | None = None
+    replan_request_id: str | None = None
+    replan_trigger: str | None = None
     tool_name: str
     status: str
     risk_level: str | None = None

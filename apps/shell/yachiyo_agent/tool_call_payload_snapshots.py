@@ -15,6 +15,19 @@ _LEGACY_APPLE_MUSIC_AFFECTED_TOOLS = [
     "media.apple_music_open_and_play",
     "media.apple_music_control",
 ]
+_PLANNER_TRACE_KEYS = (
+    "source",
+    "planning_reason",
+    "decision_id",
+    "plan_id",
+    "tool_plan_id",
+    "intent_kind",
+    "step_id",
+    "planner_step_id",
+    "capability_id",
+    "replan_request_id",
+    "replan_trigger",
+)
 
 
 def tool_call_snapshot_from_payload(
@@ -81,6 +94,10 @@ def tool_call_snapshot_from_payload(
             or input_preview.get("group_run_id")
             or input_preview.get("run_group_id")
         ),
+        **{
+            key: _optional_text(payload.get(key) or input_preview.get(key))
+            for key in _PLANNER_TRACE_KEYS
+        },
         tool_name=tool_name,
         status=status,
         risk_level=_optional_text(payload.get("risk_level") or payload.get("risk")),
@@ -203,6 +220,10 @@ def _redacted_tool_call_snapshot(snapshot: ToolCallSnapshot) -> ToolCallSnapshot
             "workflow_node_label": _optional_text(snapshot.workflow_node_label),
             "group_id": _optional_text(snapshot.group_id),
             "group_run_id": _optional_text(snapshot.group_run_id),
+            **{
+                key: _optional_text(getattr(snapshot, key))
+                for key in _PLANNER_TRACE_KEYS
+            },
             "tool_name": _text(snapshot.tool_name),
             "status": _text(snapshot.status),
             "risk_level": _optional_text(snapshot.risk_level),

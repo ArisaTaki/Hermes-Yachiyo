@@ -388,13 +388,19 @@ class RuntimeToolCallExecutor:
                     **trace_payload,
                 )
             )
-            self._tool_call_events.denied(run_id, tool_name, input_preview)
+            self._tool_call_events.denied(
+                run_id,
+                tool_name,
+                input_preview,
+                trace=trace_payload,
+            )
             raise AgentRuntimeError(f"Agent 试图调用未授权工具：{tool_name}")
         self._tool_call_events.requested(
             run_id,
             tool_name,
             input_preview,
             approved=approved,
+            trace=trace_payload,
         )
         try:
             self._validate_tool_payload(tool_name, payload)
@@ -406,6 +412,7 @@ class RuntimeToolCallExecutor:
                 approved=approved,
                 pre_validation=True,
                 error=exc,
+                trace=trace_payload,
             )
             raise
         budget.claim_tool_call(
@@ -417,6 +424,7 @@ class RuntimeToolCallExecutor:
             tool_name,
             input_preview,
             approved=approved,
+            trace=trace_payload,
         )
         try:
             tool_result = broker.call(tool_name, payload, approved=approved)
@@ -428,6 +436,7 @@ class RuntimeToolCallExecutor:
                     input_preview,
                     approved=approved,
                     error=exc,
+                    trace=trace_payload,
                 )
                 raise
             terminal_hint = (
@@ -458,6 +467,7 @@ class RuntimeToolCallExecutor:
             input_preview,
             tool_result,
             approved=approved,
+            trace=trace_payload,
         )
         timeline.append(
             self._timeline(

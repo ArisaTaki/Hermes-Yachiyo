@@ -133,29 +133,44 @@ def test_runtime_tool_call_event_recorder_records_lifecycle_events() -> None:
         return {"run_id": run_id, "event_type": event_type, "payload": payload}
 
     recorder = RuntimeToolCallEventRecorder(append_run_event=append_run_event)
+    trace = {
+        "source": "runtime_planner",
+        "step_id": "inspect-data-source",
+        "capability_id": "file.workspace_read",
+        "replan_request_id": "replan-1",
+    }
 
     assert recorder.requested("", "workspace.read", {"path": "README.md"}) is None
     recorder.denied("run-1", "terminal.run", {"command": "rm -rf tmp"})
-    recorder.requested("run-1", "workspace.read", {"path": "README.md"})
-    recorder.started("run-1", "workspace.read", {"path": "README.md"}, approved=True)
+    recorder.requested("run-1", "workspace.read", {"path": "README.md"}, trace=trace)
+    recorder.started(
+        "run-1",
+        "workspace.read",
+        {"path": "README.md"},
+        approved=True,
+        trace=trace,
+    )
     recorder.failed(
         "run-1",
         "terminal.run",
         {"command": "echo ok", "API_KEY": "sk-secret-value"},
         pre_validation=True,
         error=RuntimeError("sk-secret-value"),
+        trace={**trace, "capability_id": "terminal.execution"},
     )
     recorder.result(
         "run-1",
         "terminal.run",
         {"command": "echo ok"},
         {"ok": False, "approval_required": True, "error": "needs approval"},
+        trace={**trace, "capability_id": "terminal.execution"},
     )
     recorder.result(
         "run-1",
         "workspace.read",
         {"path": "README.md"},
         {"ok": True, "content": "hello"},
+        trace=trace,
     )
     recorder.agent_tool_call(
         "run-1",
@@ -178,6 +193,10 @@ def test_runtime_tool_call_event_recorder_records_lifecycle_events() -> None:
         "agent.tool.call",
     ]
     assert failed_payload["input_preview"] == {"redacted": True, "reason": "sensitive_input"}
+    assert events[1][2]["step_id"] == "inspect-data-source"
+    assert events[2][2]["capability_id"] == "file.workspace_read"
+    assert failed_payload["capability_id"] == "terminal.execution"
+    assert events[5][2]["replan_request_id"] == "replan-1"
     assert "sk-secret-value" not in json.dumps(events, ensure_ascii=False)
     assert events[-1][2]["approved"] is True
 

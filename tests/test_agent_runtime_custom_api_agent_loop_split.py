@@ -357,17 +357,57 @@ class RecordingToolCallEvents:
     def __init__(self, events: list[dict[str, Any]]) -> None:
         self.events = events
 
-    def denied(self, run_id: str, tool_name: str, input_preview: Any) -> None:
-        self._append(run_id, "agent.tool.denied", tool_name, input_preview, "denied")
+    def denied(
+        self,
+        run_id: str,
+        tool_name: str,
+        input_preview: Any,
+        *,
+        trace: dict[str, Any] | None = None,
+    ) -> None:
+        self._append(run_id, "agent.tool.denied", tool_name, input_preview, "denied", **(trace or {}))
 
-    def requested(self, run_id: str, tool_name: str, input_preview: Any, *, approved: bool = False) -> None:
-        self._append(run_id, "tool.requested", tool_name, input_preview, "requested", approved=approved)
+    def requested(
+        self,
+        run_id: str,
+        tool_name: str,
+        input_preview: Any,
+        *,
+        approved: bool = False,
+        trace: dict[str, Any] | None = None,
+    ) -> None:
+        self._append(
+            run_id,
+            "tool.requested",
+            tool_name,
+            input_preview,
+            "requested",
+            approved=approved,
+            **(trace or {}),
+        )
 
-    def failed(self, run_id: str, tool_name: str, input_preview: Any, **_kwargs: Any) -> None:
-        self._append(run_id, "tool.failed", tool_name, input_preview, "failed")
+    def failed(self, run_id: str, tool_name: str, input_preview: Any, **kwargs: Any) -> None:
+        trace = kwargs.get("trace") if isinstance(kwargs.get("trace"), dict) else {}
+        self._append(run_id, "tool.failed", tool_name, input_preview, "failed", **trace)
 
-    def started(self, run_id: str, tool_name: str, input_preview: Any, *, approved: bool = False) -> None:
-        self._append(run_id, "tool.started", tool_name, input_preview, "running", approved=approved)
+    def started(
+        self,
+        run_id: str,
+        tool_name: str,
+        input_preview: Any,
+        *,
+        approved: bool = False,
+        trace: dict[str, Any] | None = None,
+    ) -> None:
+        self._append(
+            run_id,
+            "tool.started",
+            tool_name,
+            input_preview,
+            "running",
+            approved=approved,
+            **(trace or {}),
+        )
 
     def result(
         self,
@@ -377,6 +417,7 @@ class RecordingToolCallEvents:
         tool_result: dict[str, Any],
         *,
         approved: bool = False,
+        trace: dict[str, Any] | None = None,
     ) -> None:
         self._append(
             run_id,
@@ -386,6 +427,7 @@ class RecordingToolCallEvents:
             "completed" if tool_result.get("ok") else "failed",
             approved=approved,
             output_preview=tool_result,
+            **(trace or {}),
         )
 
     def agent_tool_call(
@@ -396,6 +438,7 @@ class RecordingToolCallEvents:
         tool_result: dict[str, Any],
         *,
         approved: bool = False,
+        trace: dict[str, Any] | None = None,
     ) -> None:
         if not run_id:
             return
@@ -408,6 +451,7 @@ class RecordingToolCallEvents:
                     "input_preview": input_preview,
                     "result": tool_result,
                     "approved": approved,
+                    **(trace or {}),
                 },
             }
         )

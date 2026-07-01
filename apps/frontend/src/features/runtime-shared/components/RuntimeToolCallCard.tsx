@@ -27,6 +27,17 @@ export type RuntimeToolCallCardSnapshot = {
   workflow_node_label?: string | null;
   group_id?: string | null;
   group_run_id?: string | null;
+  source?: string | null;
+  planning_reason?: string | null;
+  decision_id?: string | null;
+  plan_id?: string | null;
+  tool_plan_id?: string | null;
+  intent_kind?: string | null;
+  step_id?: string | null;
+  planner_step_id?: string | null;
+  capability_id?: string | null;
+  replan_request_id?: string | null;
+  replan_trigger?: string | null;
   tool_name: string;
   status: string;
   risk_level?: string | null;
@@ -216,6 +227,10 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
     { label: 'agent', value: toolCall.source_runnable_name || toolCall.source_runnable_id || '' },
     { label: 'workflow', value: toolCall.workflow_node_label || toolCall.workflow_node_id || toolCall.workflow_run_id || toolCall.workflow_id || '' },
     { label: 'group', value: toolCall.group_run_id || toolCall.group_id || '' },
+    { label: 'intent', value: toolCall.intent_kind || '' },
+    { label: 'capability', value: toolCall.capability_id || '' },
+    { label: 'step', value: toolCall.step_id || toolCall.planner_step_id || '' },
+    { label: 'replan', value: toolCall.replan_request_id || toolCall.replan_trigger || '' },
   ].filter((item) => item.value);
 }
 

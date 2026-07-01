@@ -347,7 +347,10 @@ export type ApprovalCardSnapshot = {
   workflow_node_label?: string | null;
   group_id?: string | null;
   group_run_id?: string | null;
+  source?: string | null;
+  planning_reason?: string | null;
   step_id?: string | null;
+  planner_step_id?: string | null;
   capability_id?: string | null;
   decision_id?: string | null;
   plan_id?: string | null;
@@ -416,6 +419,17 @@ export type ToolCallSnapshot = {
   workflow_node_label?: string | null;
   group_id?: string | null;
   group_run_id?: string | null;
+  source?: string | null;
+  planning_reason?: string | null;
+  decision_id?: string | null;
+  plan_id?: string | null;
+  tool_plan_id?: string | null;
+  intent_kind?: string | null;
+  step_id?: string | null;
+  planner_step_id?: string | null;
+  capability_id?: string | null;
+  replan_request_id?: string | null;
+  replan_trigger?: string | null;
   tool_name: string;
   status: string;
   risk_level?: string | null;

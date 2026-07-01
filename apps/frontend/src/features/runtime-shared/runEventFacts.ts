@@ -15,6 +15,19 @@ const DAILY_DESKTOP_INTENT_TOOL_EVENTS = new Set([
   'agent.desktop.intent_unavailable',
 ]);
 const TOOL_INPUT_RESOLUTION_EVENT_TYPE = 'agent.tool.input_resolved';
+const PLANNER_TRACE_KEYS = [
+  'source',
+  'planning_reason',
+  'decision_id',
+  'plan_id',
+  'tool_plan_id',
+  'intent_kind',
+  'step_id',
+  'planner_step_id',
+  'capability_id',
+  'replan_request_id',
+  'replan_trigger',
+];
 
 export function toolCallsFromRunEventReplay(events: PublicRunEvent[]): ToolCallSnapshot[] {
   const calls: ToolCallSnapshot[] = [];
@@ -187,10 +200,11 @@ function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | nul
   const approvalId = publicRunEventPayloadString(source, 'approval_id')
     || `${event.run_id}:${event.event_type}:${event.sequence}`;
   const status = publicRunEventPayloadString(source, 'status') || approvalStatusFromRunEvent(event.event_type);
+  const inputPreview = objectPreview(source.input_preview) || objectPreview(source.input) || {};
   return {
     approval_id: approvalId,
     description: publicRunEventPayloadString(source, 'description') || null,
-    input_preview: objectPreview(source.input_preview) || objectPreview(source.input) || {},
+    input_preview: inputPreview,
     policy_reason: publicRunEventPayloadString(source, 'policy_reason') || null,
     requested_at: publicRunEventPayloadString(source, 'requested_at') || event.created_at || '',
     resolved_at: publicRunEventPayloadString(source, 'resolved_at')
@@ -240,6 +254,17 @@ function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | nul
       || publicRunEventPayloadString(payload, 'group_run_id')
       || publicRunEventPayloadString(payload, 'run_group_id')
       || null,
+    source: eventTraceString(source, payload, inputPreview, 'source'),
+    planning_reason: eventTraceString(source, payload, inputPreview, 'planning_reason'),
+    decision_id: eventTraceString(source, payload, inputPreview, 'decision_id'),
+    plan_id: eventTraceString(source, payload, inputPreview, 'plan_id'),
+    tool_plan_id: eventTraceString(source, payload, inputPreview, 'tool_plan_id'),
+    intent_kind: eventTraceString(source, payload, inputPreview, 'intent_kind'),
+    step_id: eventTraceString(source, payload, inputPreview, 'step_id'),
+    planner_step_id: eventTraceString(source, payload, inputPreview, 'planner_step_id'),
+    capability_id: eventTraceString(source, payload, inputPreview, 'capability_id'),
+    replan_request_id: eventTraceString(source, payload, inputPreview, 'replan_request_id'),
+    replan_trigger: eventTraceString(source, payload, inputPreview, 'replan_trigger'),
     status,
     title: publicRunEventPayloadString(source, 'title') || `Approval · ${toolName}`,
     tool_name: toolName,
@@ -293,6 +318,7 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
       workflow_run_id: payload.workflow_run_id,
       workflow_node_id: payload.workflow_node_id,
       workflow_node_label: payload.workflow_node_label,
+      ...Object.fromEntries(PLANNER_TRACE_KEYS.map((key) => [key, payload[key]])),
     },
   );
   return {
@@ -320,6 +346,17 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
     group_run_id: publicRunEventPayloadString(payload, 'group_run_id')
       || publicRunEventPayloadString(payload, 'run_group_id')
       || null,
+    source: plannerTraceString(payload, inputPreview, 'source'),
+    planning_reason: plannerTraceString(payload, inputPreview, 'planning_reason'),
+    decision_id: plannerTraceString(payload, inputPreview, 'decision_id'),
+    plan_id: plannerTraceString(payload, inputPreview, 'plan_id'),
+    tool_plan_id: plannerTraceString(payload, inputPreview, 'tool_plan_id'),
+    intent_kind: plannerTraceString(payload, inputPreview, 'intent_kind'),
+    step_id: plannerTraceString(payload, inputPreview, 'step_id'),
+    planner_step_id: plannerTraceString(payload, inputPreview, 'planner_step_id'),
+    capability_id: plannerTraceString(payload, inputPreview, 'capability_id'),
+    replan_request_id: plannerTraceString(payload, inputPreview, 'replan_request_id'),
+    replan_trigger: plannerTraceString(payload, inputPreview, 'replan_trigger'),
     tool_name: toolName,
     status,
     risk_level: riskLevel || null,
@@ -427,6 +464,17 @@ function mergeApprovalTrace(current: ApprovalCardSnapshot, incoming: ApprovalCar
     workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
     group_id: current.group_id || incoming.group_id || null,
     group_run_id: current.group_run_id || incoming.group_run_id || null,
+    source: current.source || incoming.source || null,
+    planning_reason: current.planning_reason || incoming.planning_reason || null,
+    decision_id: current.decision_id || incoming.decision_id || null,
+    plan_id: current.plan_id || incoming.plan_id || null,
+    tool_plan_id: current.tool_plan_id || incoming.tool_plan_id || null,
+    intent_kind: current.intent_kind || incoming.intent_kind || null,
+    step_id: current.step_id || incoming.step_id || null,
+    planner_step_id: current.planner_step_id || incoming.planner_step_id || null,
+    capability_id: current.capability_id || incoming.capability_id || null,
+    replan_request_id: current.replan_request_id || incoming.replan_request_id || null,
+    replan_trigger: current.replan_trigger || incoming.replan_trigger || null,
   };
 }
 
@@ -445,6 +493,17 @@ function mergeApprovalReplayTrace(
     workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
     group_id: current.group_id || incoming.group_id || null,
     group_run_id: current.group_run_id || incoming.group_run_id || null,
+    source: current.source || incoming.source || null,
+    planning_reason: current.planning_reason || incoming.planning_reason || null,
+    decision_id: current.decision_id || incoming.decision_id || null,
+    plan_id: current.plan_id || incoming.plan_id || null,
+    tool_plan_id: current.tool_plan_id || incoming.tool_plan_id || null,
+    intent_kind: current.intent_kind || incoming.intent_kind || null,
+    step_id: current.step_id || incoming.step_id || null,
+    planner_step_id: current.planner_step_id || incoming.planner_step_id || null,
+    capability_id: current.capability_id || incoming.capability_id || null,
+    replan_request_id: current.replan_request_id || incoming.replan_request_id || null,
+    replan_trigger: current.replan_trigger || incoming.replan_trigger || null,
     description: incoming.description || current.description || null,
     input_preview: {
       ...(current.input_preview || {}),
@@ -471,6 +530,17 @@ function mergeToolCallTrace(current: ToolCallSnapshot, incoming: ToolCallSnapsho
     workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
     group_id: current.group_id || incoming.group_id || null,
     group_run_id: current.group_run_id || incoming.group_run_id || null,
+    source: current.source || incoming.source || null,
+    planning_reason: current.planning_reason || incoming.planning_reason || null,
+    decision_id: current.decision_id || incoming.decision_id || null,
+    plan_id: current.plan_id || incoming.plan_id || null,
+    tool_plan_id: current.tool_plan_id || incoming.tool_plan_id || null,
+    intent_kind: current.intent_kind || incoming.intent_kind || null,
+    step_id: current.step_id || incoming.step_id || null,
+    planner_step_id: current.planner_step_id || incoming.planner_step_id || null,
+    capability_id: current.capability_id || incoming.capability_id || null,
+    replan_request_id: current.replan_request_id || incoming.replan_request_id || null,
+    replan_trigger: current.replan_trigger || incoming.replan_trigger || null,
   };
 }
 
@@ -490,6 +560,17 @@ function mergeToolCallReplayTrace(current: ToolCallSnapshot, incoming: ToolCallS
     workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
     group_id: current.group_id || incoming.group_id || null,
     group_run_id: current.group_run_id || incoming.group_run_id || null,
+    source: current.source || incoming.source || null,
+    planning_reason: current.planning_reason || incoming.planning_reason || null,
+    decision_id: current.decision_id || incoming.decision_id || null,
+    plan_id: current.plan_id || incoming.plan_id || null,
+    tool_plan_id: current.tool_plan_id || incoming.tool_plan_id || null,
+    intent_kind: current.intent_kind || incoming.intent_kind || null,
+    step_id: current.step_id || incoming.step_id || null,
+    planner_step_id: current.planner_step_id || incoming.planner_step_id || null,
+    capability_id: current.capability_id || incoming.capability_id || null,
+    replan_request_id: current.replan_request_id || incoming.replan_request_id || null,
+    replan_trigger: current.replan_trigger || incoming.replan_trigger || null,
     status: incoming.status || current.status,
     risk_level: current.risk_level || incoming.risk_level || null,
     input_preview: {
@@ -783,6 +864,7 @@ function toolCallCorrelationPreview(preview: Record<string, unknown>): Record<st
     'workflow_node_label',
     'workflow_run_id',
     'workflow_step_label',
+    ...PLANNER_TRACE_KEYS,
   ]);
   return Object.fromEntries(
     Object.entries(preview).filter(([key]) => !traceKeys.has(key)),
@@ -972,10 +1054,33 @@ function approvalReplayCorrelationPreview(preview: Record<string, unknown>): Rec
     'workflow_node_label',
     'workflow_run_id',
     'workflow_step_label',
+    ...PLANNER_TRACE_KEYS,
   ]);
   return Object.fromEntries(
     Object.entries(preview).filter(([key]) => !traceKeys.has(key)),
   );
+}
+
+function plannerTraceString(
+  payload: Record<string, unknown>,
+  inputPreview: Record<string, unknown>,
+  key: string,
+): string | null {
+  return publicRunEventPayloadString(payload, key)
+    || publicRunEventPayloadString(inputPreview, key)
+    || null;
+}
+
+function eventTraceString(
+  source: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  inputPreview: Record<string, unknown>,
+  key: string,
+): string | null {
+  return publicRunEventPayloadString(source, key)
+    || publicRunEventPayloadString(payload, key)
+    || publicRunEventPayloadString(inputPreview, key)
+    || null;
 }
 
 function objectPreview(value: unknown): Record<string, unknown> | null {

@@ -34,6 +34,12 @@ def test_tool_call_payload_from_event_preserves_approval_trace_context() -> None
                 "workflow_run_id": "workflow-run-1",
                 "workflow_node_id": "test",
                 "workflow_node_label": "Run Tests",
+                "source": "runtime_planner",
+                "planning_reason": "initial_plan",
+                "step_id": "run-tests",
+                "capability_id": "terminal.execution",
+                "replan_request_id": "replan-1",
+                "replan_trigger": "tool_failure",
             },
         )
     )
@@ -44,6 +50,10 @@ def test_tool_call_payload_from_event_preserves_approval_trace_context() -> None
     assert payload["risk_level"] == "high"
     assert payload["source_runnable_id"] == "agent-1"
     assert payload["source_runnable_name"] == "Planner"
+    assert payload["source"] == "runtime_planner"
+    assert payload["step_id"] == "run-tests"
+    assert payload["capability_id"] == "terminal.execution"
+    assert payload["replan_request_id"] == "replan-1"
     assert payload["input_preview"] == {
         "command": "npm test",
         "approval_id": "approval-1",
@@ -57,7 +67,59 @@ def test_tool_call_payload_from_event_preserves_approval_trace_context() -> None
         "workflow_run_id": "workflow-run-1",
         "workflow_node_id": "test",
         "workflow_node_label": "Run Tests",
+        "source": "runtime_planner",
+        "planning_reason": "initial_plan",
+        "step_id": "run-tests",
+        "capability_id": "terminal.execution",
+        "replan_request_id": "replan-1",
+        "replan_trigger": "tool_failure",
     }
+
+
+def test_tool_call_snapshots_from_events_preserve_planner_trace_context() -> None:
+    calls = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                run_id="run-planner-trace",
+                sequence=1,
+                event_type="tool.requested",
+                detail="workspace.read",
+                created_at="2026-06-17T00:00:00Z",
+                payload={
+                    "tool_call_id": "call-1",
+                    "tool": "workspace.read",
+                    "input_preview": {"path": "report.csv"},
+                    "source": "runtime_planner",
+                    "intent_kind": "data_analysis",
+                    "step_id": "inspect-data-source",
+                    "capability_id": "file.workspace_read",
+                    "replan_request_id": "replan-1",
+                },
+            ),
+            PublicRunEvent(
+                run_id="run-planner-trace",
+                sequence=2,
+                event_type="tool.completed",
+                detail="workspace.read",
+                created_at="2026-06-17T00:00:01Z",
+                payload={
+                    "tool_call_id": "call-1",
+                    "tool": "workspace.read",
+                    "input_preview": {"path": "report.csv"},
+                    "result": {"ok": True, "content": "date,value"},
+                },
+            ),
+        ]
+    )
+
+    assert len(calls) == 1
+    assert calls[0].status == "completed"
+    assert calls[0].source == "runtime_planner"
+    assert calls[0].intent_kind == "data_analysis"
+    assert calls[0].step_id == "inspect-data-source"
+    assert calls[0].capability_id == "file.workspace_read"
+    assert calls[0].replan_request_id == "replan-1"
+    assert calls[0].input_preview["path"] == "report.csv"
 
 
 def test_tool_call_payload_from_event_projects_desktop_result_status() -> None:

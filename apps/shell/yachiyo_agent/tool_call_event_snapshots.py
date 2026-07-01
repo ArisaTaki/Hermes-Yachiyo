@@ -21,6 +21,19 @@ _DAILY_DESKTOP_INTENT_TOOL_EVENTS = {
     "agent.desktop.intent_unavailable",
 }
 _TOOL_INPUT_RESOLUTION_EVENT_TYPE = "agent.tool.input_resolved"
+_PLANNER_TRACE_KEYS = (
+    "source",
+    "planning_reason",
+    "decision_id",
+    "plan_id",
+    "tool_plan_id",
+    "intent_kind",
+    "step_id",
+    "planner_step_id",
+    "capability_id",
+    "replan_request_id",
+    "replan_trigger",
+)
 
 
 def tool_call_snapshots_from_events(events: list[PublicRunEvent]) -> list[ToolCallSnapshot]:
@@ -120,6 +133,7 @@ def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
             "workflow_run_id": payload.get("workflow_run_id"),
             "workflow_node_id": payload.get("workflow_node_id"),
             "workflow_node_label": payload.get("workflow_node_label"),
+            **{key: payload.get(key) for key in _PLANNER_TRACE_KEYS},
         },
     )
     return normalized
@@ -168,6 +182,7 @@ def daily_desktop_intent_step_payloads(event: PublicRunEvent) -> list[dict[str, 
                 "agent_name",
                 "risk_level",
                 "risk",
+                *_PLANNER_TRACE_KEYS,
             }
         }
         step_payload.update(
@@ -202,6 +217,7 @@ def merge_tool_trace_context(source: dict[str, Any], payload: dict[str, Any]) ->
         "workflow_node_label",
         "group_id",
         "group_run_id",
+        *_PLANNER_TRACE_KEYS,
     ):
         if payload.get(key):
             source.setdefault(key, payload.get(key))
@@ -257,6 +273,17 @@ def merge_tool_call_snapshots(
         workflow_node_label=current.workflow_node_label or next_call.workflow_node_label,
         group_id=current.group_id or next_call.group_id,
         group_run_id=current.group_run_id or next_call.group_run_id,
+        source=current.source or next_call.source,
+        planning_reason=current.planning_reason or next_call.planning_reason,
+        decision_id=current.decision_id or next_call.decision_id,
+        plan_id=current.plan_id or next_call.plan_id,
+        tool_plan_id=current.tool_plan_id or next_call.tool_plan_id,
+        intent_kind=current.intent_kind or next_call.intent_kind,
+        step_id=current.step_id or next_call.step_id,
+        planner_step_id=current.planner_step_id or next_call.planner_step_id,
+        capability_id=current.capability_id or next_call.capability_id,
+        replan_request_id=current.replan_request_id or next_call.replan_request_id,
+        replan_trigger=current.replan_trigger or next_call.replan_trigger,
         tool_name=current.tool_name or next_call.tool_name,
         status=next_call.status or current.status,
         risk_level=current.risk_level or next_call.risk_level,
@@ -505,6 +532,7 @@ def _tool_call_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]
         "workflow_node_label",
         "workflow_run_id",
         "workflow_step_label",
+        *_PLANNER_TRACE_KEYS,
     }
     return {
         key: _canonical_preview_value(value)

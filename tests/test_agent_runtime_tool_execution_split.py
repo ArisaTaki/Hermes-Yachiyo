@@ -303,6 +303,16 @@ def test_runtime_tool_call_executor_preserves_planner_trace_on_tool_call_events(
         "replan_request_id": "replan-1",
         "replan_trigger": "tool_failure",
     }
+    lifecycle_trace = {
+        call[0]: call[2]["trace"]
+        for call in events.calls
+        if call[0] in {"requested", "started", "result"}
+    }
+    assert lifecycle_trace == {
+        "requested": agent_call[2]["trace"],
+        "started": agent_call[2]["trace"],
+        "result": agent_call[2]["trace"],
+    }
 
 
 def test_runtime_tool_call_executor_records_non_workspace_failures() -> None:

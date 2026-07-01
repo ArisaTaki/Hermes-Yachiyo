@@ -73,6 +73,8 @@ def approval_card_from_payload(
         group_id=_optional_text(payload.get("group_id") or input_preview.get("group_id")),
         group_run_id=approval_group_run_id
         or _optional_text(input_preview.get("group_run_id") or input_preview.get("run_group_id")),
+        source=_trace_text(payload, input_preview, "source"),
+        planning_reason=_trace_text(payload, input_preview, "planning_reason"),
         step_id=_trace_text(
             payload,
             input_preview,
@@ -80,6 +82,7 @@ def approval_card_from_payload(
             "planner_step_id",
             "source_step_id",
         ),
+        planner_step_id=_trace_text(payload, input_preview, "planner_step_id"),
         capability_id=_trace_text(
             payload,
             input_preview,
