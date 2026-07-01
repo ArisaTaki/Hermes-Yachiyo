@@ -1966,6 +1966,90 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         },
     }
 
+    spreadsheet_prompt = "用任意可用的表格应用创建预算表，输入 Q1 budget，然后确认"
+    spreadsheet_allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    spreadsheet_decision = RuntimePlanner().decision(
+        spreadsheet_prompt,
+        allowed_tools=spreadsheet_allowed_tools,
+    )
+    spreadsheet_requests = planner_tool_requests(
+        spreadsheet_prompt,
+        spreadsheet_allowed_tools,
+    )
+
+    assert spreadsheet_decision.selected_intent.kind == "desktop_operation"
+    assert spreadsheet_decision.selected_intent.inputs == {
+        "app_name_hint": "",
+        "operation_hint": "discover_apps",
+        "safe_shortcut_hint": {"action": "new_document"},
+        "desktop_discovery_hint": {"action": "discover_apps", "query": "spreadsheet"},
+        "app_capability_hint": {
+            "query": "spreadsheet",
+            "description": "表格",
+        },
+        "foreground_compose_text_hint": "Q1 budget",
+    }
+    assert [step.step_id for step in spreadsheet_decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "operate-foreground-ui-followup-type",
+        "submit-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(spreadsheet_decision, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "spreadsheet",
+        "action": "new_document",
+    }
+    assert _step_by_id(spreadsheet_decision, "operate-foreground-ui-followup-type").input_preview == {
+        "text": "Q1 budget",
+    }
+    submit = _step_by_id(spreadsheet_decision, "submit-foreground-ui")
+    assert submit.input_preview == {"action": "confirm"}
+    assert submit.approval_required is True
+    assert _step_by_id(spreadsheet_decision, "verify-desktop-result").depends_on == [
+        "submit-foreground-ui"
+    ]
+    assert spreadsheet_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "spreadsheet", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+    drawing_prompt = "用任意可用的画图应用新建画布并输入标题 Yachiyo"
+    drawing_decision = RuntimePlanner().decision(
+        drawing_prompt,
+        allowed_tools=allowed_tools,
+    )
+    assert drawing_decision.selected_intent.kind == "desktop_operation"
+    assert drawing_decision.selected_intent.inputs["app_name_hint"] == ""
+    assert drawing_decision.selected_intent.inputs["app_capability_hint"] == {
+        "query": "image",
+        "description": "画图",
+    }
+    assert drawing_decision.selected_intent.inputs["safe_shortcut_hint"] == {
+        "action": "new_document"
+    }
+    assert drawing_decision.selected_intent.inputs["foreground_compose_text_hint"] == (
+        "标题 Yachiyo"
+    )
+    assert _step_by_id(drawing_decision, "discover_apps-desktop-state").input_preview == {
+        "query": "image",
+        "limit": 20,
+    }
+
     presentation_prompt = (
         "find an app for presentations and create a new presentation titled project review"
     )

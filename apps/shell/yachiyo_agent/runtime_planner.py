@@ -7743,6 +7743,33 @@ def _append_selected_discovered_foreground_compose_steps(
             ),
         )
     )
+    verify_depends_on = type_step_id
+    submit_action = str(
+        intent.inputs.get("foreground_submit_action_hint")
+        or submit_action_hint(intent.user_goal)
+        or ""
+    ).strip()
+    if submit_action:
+        submit_step_id = "submit-foreground-ui"
+        steps.append(
+            _step(
+                intent,
+                submit_step_id,
+                "Submit foreground UI",
+                "desktop.ui_operation",
+                _first_allowed(("desktop.submit_foreground",), allowed),
+                input_preview={"action": submit_action},
+                depends_on=[type_step_id],
+                action="submit",
+                risk_level="high",
+                approval_required=True,
+                reason=(
+                    "Submit only after the model-selected app has been opened and the "
+                    "explicit user text has been typed."
+                ),
+            )
+        )
+        verify_depends_on = submit_step_id
     verify_tool = _first_allowed(
         ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
         allowed,
@@ -7761,7 +7788,7 @@ def _append_selected_discovered_foreground_compose_steps(
                 app_name="<selected app from desktop.list_apps>",
                 operation_preview={},
             ),
-            depends_on=[type_step_id],
+            depends_on=[verify_depends_on],
             action=_desktop_discovery_action(verify_tool),
             reason="Observe the selected app after typing the requested text.",
         )
@@ -13233,9 +13260,14 @@ def _generic_followup_compose_text_hint(text: str) -> str:
     if not value:
         return ""
     patterns = (
+        r"(?:^|[，,；;]\s*|(?:并且|并|然后|再|接着|之后|随后|后)\s*)"
+        r"(?:输入(?!框|栏)|键入|填写|填入|写入|写下|记录下|记下|写)\s*"
+        r"(?P<text_after_separator>[^。！？!?]+)$",
         r"(?:并且|并|然后|再|接着|之后|随后|后)\s*"
         r"(?:输入(?!框|栏)|键入|填写|填入|写入|写下|记录下|记下|写)\s*"
         r"(?P<text>[^。！？!?]+)$",
+        r"(?:^|[.!?,;]\s*|\b(?:and\s+then|then|and)\s*)"
+        r"(?:type|enter|fill|write)\s+(?P<text_en_after_separator>[^.!?]+)$",
         r"\b(?:and\s+then|then|and)\s*"
         r"(?:type|enter|fill|write)\s+(?P<text_en>[^.!?]+)$",
     )
@@ -13244,7 +13276,11 @@ def _generic_followup_compose_text_hint(text: str) -> str:
         if not match:
             continue
         text_value = _clean_foreground_compose_text(
-            match.groupdict().get("text") or match.groupdict().get("text_en") or ""
+            match.groupdict().get("text_after_separator")
+            or match.groupdict().get("text")
+            or match.groupdict().get("text_en_after_separator")
+            or match.groupdict().get("text_en")
+            or ""
         )
         if text_value:
             return text_value
@@ -13310,7 +13346,7 @@ def _generic_create_container_action_hint(text: str) -> str:
         r"(?:新的|新)?\s*"
         r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
         r"(?:页面|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|图片|图像|图(?!标)|"
-        r"流程图|思维导图|脑图|图表|画布|表格|工作簿|演示|演示文稿|幻灯片|"
+        r"流程图|思维导图|脑图|图表|画布|表格|工作簿|[^。！？!?，,]{0,20}?表|演示|演示文稿|幻灯片|"
         r"项目|任务|卡片|工单|事项)",
         value,
         flags=re.IGNORECASE,
@@ -13393,7 +13429,7 @@ def _looks_like_app_scoped_create_followup(text: str) -> bool:
             r"(?:新的|新)?\s*"
             r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
             r"(?:页面|页|笔记|备忘录|日志|日记|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|"
-            r"图片|图像|图(?!标)|流程图|思维导图|脑图|图表|画布|演示|演示文稿|"
+            r"图片|图像|图(?!标)|流程图|思维导图|脑图|图表|画布|表格|工作簿|[^。！？!?，,]{0,20}?表|演示|演示文稿|"
             r"幻灯片|项目|任务|卡片|工单|事项|ticket|issue|bug)",
             value,
             flags=re.IGNORECASE,
@@ -13408,7 +13444,7 @@ def _looks_like_app_scoped_create_followup(text: str) -> bool:
         or re.search(
             r"\b(?:new|create|make)\b.{0,40}\b"
             r"(?:page|note|document|file|image|picture|diagram|flowchart|mind\s*map|"
-            r"canvas|presentation|slide|project|task|card|ticket|issue|bug)\b",
+            r"canvas|spreadsheet|workbook|presentation|slide|project|task|card|ticket|issue|bug)\b",
             value,
             flags=re.IGNORECASE,
         )
@@ -13941,7 +13977,14 @@ def _clean_foreground_compose_text(value: str) -> str:
     text = re.sub(r"^[\"'`“”‘’]+|[\"'`“”‘’]+$", "", text).strip()
     text = re.sub(r"^(?:[:：]\s*)+", "", text).strip()
     text = re.sub(r"\s*(?:并|然后|再|后)?\s*(?:发送|发出|send)$", "", text, flags=re.IGNORECASE).strip()
-    text = re.sub(r"[。！？!?]+$", "", text).strip()
+    text = re.sub(
+        r"\s*(?:并|然后|再|后|之后|随后|接着)?\s*"
+        r"(?:确认|确定|提交|保存|回车|send|submit|confirm|save|press\s+enter|hit\s+enter)$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
+    text = re.sub(r"[。！？!?，,；;]+$", "", text).strip()
     return text
 
 
@@ -19328,7 +19371,7 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?:写进|写入|写到|放进|放到|保存到|导出到|输出到|整理到|总结到|发到)\s*"
         rf"{generic_prefix}"
         r"(?P<target_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
-        r"图片|图像|照片|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
+        r"图片|图像|照片|绘图|画图|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
         r"聊天|通讯|通信|消息|即时通讯|日历|项目管理|任务管理|工单|看板|"
         r"issue|ticket)"
         r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
@@ -19341,7 +19384,7 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
         rf"{generic_prefix}"
         r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
-        r"图片|图像|照片|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
+        r"图片|图像|照片|绘图|画图|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
         r"聊天|通讯|通信|消息|即时通讯|日历|项目管理|任务管理|工单|看板|"
         r"issue|ticket)"
         r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
