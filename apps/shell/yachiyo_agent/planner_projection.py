@@ -279,6 +279,9 @@ def _decision_trace_payload(decision: Any) -> dict[str, Any]:
     tool_plan = getattr(plan, "tool_plan", None)
     if tool_plan is not None and hasattr(tool_plan, "model_dump"):
         trace["tool_plan"] = tool_plan.model_dump(mode="json")
+    task_core = getattr(plan, "task_core", None)
+    if task_core is not None and hasattr(task_core, "model_dump"):
+        trace["task_core"] = task_core.model_dump(mode="json")
     return trace
 
 
@@ -749,6 +752,10 @@ def _planner_timeline_detail(event_type: str, payload: Mapping[str, Any]) -> str
     if event_type == "agent.plan.step":
         step = payload.get("step") if isinstance(payload.get("step"), Mapping) else {}
         return str(step.get("title") or step.get("step_id") or "").strip()
+    if event_type == "agent.task_core.created":
+        task_core = payload.get("task_core") if isinstance(payload.get("task_core"), Mapping) else {}
+        workspace = task_core.get("workspace") if isinstance(task_core.get("workspace"), Mapping) else {}
+        return str(workspace.get("title") or task_core.get("core_id") or "").strip()
     return event_type
 
 
@@ -781,6 +788,23 @@ def planner_run_event_payloads(
             },
         ),
     ]
+    task_core = decision.plan.task_core
+    if task_core is not None:
+        payloads.append(
+            (
+                "agent.task_core.created",
+                {
+                    "source": decision.source,
+                    "decision_id": decision.decision_id,
+                    "plan_id": decision.plan.plan_id,
+                    "core_id": task_core.core_id,
+                    "task_core": task_core.model_dump(mode="json"),
+                    "todo_count": len(task_core.todos),
+                    "checkpoint_count": len(task_core.checkpoints),
+                    "replan_signal_count": len(task_core.replan_signals),
+                },
+            )
+        )
     for step in decision.plan.tool_plan.steps:
         payloads.append(
             (

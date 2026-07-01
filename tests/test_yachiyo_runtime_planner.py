@@ -1711,9 +1711,10 @@ def test_runtime_planner_timeline_events_include_full_studio_trace_payloads() ->
 
     events = planner_timeline_events(decision)
 
-    assert [event["event"] for event in events[:3]] == [
+    assert [event["event"] for event in events[:4]] == [
         "agent.intent.selected",
         "agent.plan.created",
+        "agent.task_core.created",
         "agent.plan.step",
     ]
     assert events[0]["payload"]["intent"]["kind"] == "desktop_operation"
@@ -1723,7 +1724,10 @@ def test_runtime_planner_timeline_events_include_full_studio_trace_payloads() ->
         if step.get("tool_name")
     ]
     assert plan_tools == ["app.open", "desktop.click_ui_element"]
-    assert events[2]["payload"]["step"]["step_id"] == "discover-desktop-state"
+    assert events[2]["payload"]["core_id"] == decision.plan.task_core.core_id
+    assert events[2]["payload"]["todo_count"] == len(decision.plan.task_core.todos)
+    assert events[2]["payload"]["checkpoint_count"] == len(decision.plan.task_core.checkpoints)
+    assert events[3]["payload"]["step"]["step_id"] == "discover-desktop-state"
 
 
 def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None:
@@ -1797,6 +1801,8 @@ def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None
     assert payload["runtime_plan"]["plan_id"] == decision.plan.plan_id
     assert payload["runtime_plan"]["tool_plan"]["steps"][0]["tool_name"] == "desktop.list_apps"
     assert payload["tool_plan"]["plan_id"] == decision.plan.tool_plan.plan_id
+    assert payload["task_core"]["core_id"] == decision.plan.task_core.core_id
+    assert len(payload["task_core"]["todos"]) == len(decision.plan.task_core.todos)
     assert event["event"] == "agent.plan.selection"
     assert event["detail"] == "runtime_planner"
     assert event["payload"] == payload
