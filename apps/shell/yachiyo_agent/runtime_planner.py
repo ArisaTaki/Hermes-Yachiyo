@@ -7371,7 +7371,7 @@ def _direct_communication_discovered_app_steps(
     channel: str,
     send_action: str,
 ) -> list[ToolPlanStepSnapshot]:
-    if channel not in {"email", "message"} or not recipient or body_source:
+    if channel not in {"email", "message"} or not recipient:
         return []
     query = "mail" if channel == "email" else "messaging"
     discovery_tool = _first_allowed(("desktop.list_apps",), allowed)
@@ -7382,7 +7382,20 @@ def _direct_communication_discovered_app_steps(
     if not discovery_tool or selected_app_tool != "app.open_and_safe_shortcut":
         return []
     selected_app = "<selected app from desktop.list_apps>"
-    steps = [
+    steps: list[ToolPlanStepSnapshot] = []
+    discovery_depends_on: list[str] = []
+    if body_source:
+        context_steps = _context_source_steps(
+            intent,
+            allowed,
+            body_source,
+            step_prefix="communication",
+            capability_id="communication.compose",
+        )
+        steps.extend(context_steps)
+        if context_steps:
+            discovery_depends_on = [context_steps[-1].step_id]
+    steps.append(
         _step(
             intent,
             "discover_apps-desktop-state",
@@ -7390,11 +7403,14 @@ def _direct_communication_discovered_app_steps(
             "desktop.app_discovery",
             discovery_tool,
             input_preview={"query": query, "limit": 20},
+            depends_on=discovery_depends_on,
             reason=(
                 "Discover an installed communication app by capability before drafting "
                 "the user-requested message."
             ),
-        ),
+        )
+    )
+    steps.append(
         _step(
             intent,
             "open-selected-discovered-app",
@@ -7413,8 +7429,8 @@ def _direct_communication_discovered_app_steps(
                 "After desktop.list_apps returns candidates, the model selects the best "
                 "matching communication app before opening compose."
             ),
-        ),
-    ]
+        )
+    )
     compose_hint = {
         "send_action": send_action,
         "channel": channel,
@@ -7422,6 +7438,11 @@ def _direct_communication_discovered_app_steps(
     }
     if body:
         compose_hint["body"] = body
+    if body_source:
+        compose_hint["body_source"] = body_source
+    transform = str(intent.inputs.get("content_transform_hint") or "").strip()
+    if transform:
+        compose_hint["content_transform_hint"] = transform
     selected_intent = intent.model_copy(
         update={
             "inputs": {
@@ -7847,6 +7868,8 @@ def _append_selected_discovered_communication_compose_steps(
     channel = str(compose_hint.get("channel") or "").strip()
     recipient = str(compose_hint.get("recipient") or "").strip()
     body = str(compose_hint.get("body") or "").strip()
+    body_source = str(compose_hint.get("body_source") or "").strip()
+    transform = str(compose_hint.get("content_transform_hint") or "").strip()
     send_action = str(compose_hint.get("send_action") or "").strip()
     previous_step = depends_on
 
@@ -7894,6 +7917,13 @@ def _append_selected_discovered_communication_compose_steps(
         }
         if str(recipient_tool or "").startswith("app."):
             recipient_input = {"app_name": selected_app, **recipient_input}
+        if not recipient_tool:
+            recipient_tool, recipient_input = _safe_type_text_operation_preview(
+                app_name=selected_app,
+                mode="focus",
+                allowed=allowed,
+                payload={"text": recipient},
+            )
         steps.append(
             _step(
                 intent,
@@ -7932,19 +7962,37 @@ def _append_selected_discovered_communication_compose_steps(
             )
             previous_step = "submit-selected-communication-recipient"
 
-    if body:
+    if body or body_source:
         body_tool = _first_allowed(
             ("app.focus_and_type_into_ui_element", "desktop.type_into_ui_element"),
             allowed,
         )
-        body_input = {
-            "target": _communication_compose_body_target(channel),
-            "text": body,
-            "role_filter": "text",
-            "limit": 80,
-        }
-        if str(body_tool or "").startswith("app."):
-            body_input = {"app_name": selected_app, **body_input}
+        if body:
+            body_input = {
+                "target": _communication_compose_body_target(channel),
+                "text": body,
+                "role_filter": "text",
+                "limit": 80,
+            }
+            if str(body_tool or "").startswith("app."):
+                body_input = {"app_name": selected_app, **body_input}
+            if not body_tool:
+                body_tool, body_input = _safe_type_text_operation_preview(
+                    app_name=selected_app,
+                    mode="focus",
+                    allowed=allowed,
+                    payload={"text": body},
+                )
+        else:
+            body_input = {"body_source": body_source}
+            if transform:
+                body_input["transform"] = transform
+            body_tool, body_input = _safe_type_text_operation_preview(
+                app_name=selected_app,
+                mode="focus",
+                allowed=allowed,
+                payload=body_input,
+            )
         steps.append(
             _step(
                 intent,
@@ -7958,14 +8006,16 @@ def _append_selected_discovered_communication_compose_steps(
                 depends_on=[previous_step],
                 action="draft_message",
                 reason=(
-                    "Type only the explicit message body into the observed compose UI."
+                    "Draft the generated message body from inspected context into the observed compose UI."
+                    if body_source
+                    else "Type only the explicit message body into the observed compose UI."
                 ),
             )
         )
         if body_tool:
             previous_step = "draft-selected-communication-message"
 
-    if send_action == "send" and body:
+    if send_action == "send" and (body or body_source):
         steps.append(
             _step(
                 intent,
@@ -16077,17 +16127,17 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
         rf"(?P<app>[\w .·-]{{1,40}}?)(?:里|中|上|内)?\s*"
         rf"(?:给|发给|发送给)\s*(?P<recipient>[^：:，,。]+?)\s*"
         rf"(?:发送|发|发消息)\s*{source_pattern}$",
-        rf"^(?:把|将)?\s*(?:(?:读取|阅读|读一下|读下|查看|看看|read|inspect)\s*)?"
+        rf"^(?:把|将)?\s*(?:(?:读取|阅读|读一下|读下|查看|看看|整理|总结|概括|生成报告|做成报告|read|inspect|summarize|summarise|report)\s*)?"
         rf"{source_pattern}.{{0,50}}?"
         rf"(?:发|发送|写|撰写|起草|草拟)\s*"
         rf"(?P<channel>邮件|电子邮件|消息|短信|微信|email|e-mail|mail|message)\s*"
         rf"(?:草稿|draft)?\s*(?:给|到|向|对)\s*(?P<target>[^：:，,。]+)$",
-        rf"^(?:把|将)?\s*(?:(?:读取|阅读|读一下|读下|查看|看看|read|inspect)\s*)?"
+        rf"^(?:把|将)?\s*(?:(?:读取|阅读|读一下|读下|查看|看看|整理|总结|概括|生成报告|做成报告|read|inspect|summarize|summarise|report)\s*)?"
         rf"{source_pattern}.{{0,50}}?"
         rf"(?:发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+)$",
-        rf"^(?:把|将)?\s*(?:(?:读取|阅读|读一下|读下|查看|看看|read|inspect)\s*)?"
+        rf"^(?:把|将)?\s*(?:(?:读取|阅读|读一下|读下|查看|看看|整理|总结|概括|生成报告|做成报告|read|inspect|summarize|summarise|report)\s*)?"
         rf"{source_pattern}\s*(?:通过|用|在)\s*(?P<app>[\w .·-]{{1,40}}?)\s*(?:发给|发送给|发到|发送到)\s*(?P<recipient>[^：:，,。]+)$",
-        rf"^(?:把|将)?\s*(?:(?:读取|阅读|读一下|读下|查看|看看|read|inspect)\s*)?"
+        rf"^(?:把|将)?\s*(?:(?:读取|阅读|读一下|读下|查看|看看|整理|总结|概括|生成报告|做成报告|read|inspect|summarize|summarise|report)\s*)?"
         rf"{source_pattern}\s*(?:发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+)$",
         rf"^(?:给|发给|发送给|发到|发送到)\s*(?P<target>[^：:，,。]+?)\s*(?:发送|发|发消息)\s*{source_pattern}$",
         rf"^(?:send|message)\s+{source_pattern}\s+(?:in|with|using|through)\s+(?P<app>[A-Za-z][A-Za-z0-9 ._-]{{1,40}}?)\s+(?:to|for)\s+(?P<recipient>[^.!?,]+)$",
@@ -16104,6 +16154,9 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
         channel = _communication_delivery_channel_hint(value, groups.get("channel") or "")
         if (not app_name or not recipient) and groups.get("target"):
             target = str(groups.get("target") or "")
+            target_channel = _generic_communication_target_channel_hint(target)
+            if target_channel and not channel:
+                channel = target_channel
             split_app, split_recipient = _split_communication_surface_and_recipient(target)
             if channel == "email" and (
                 not split_app or not is_legacy_app_name_hint(split_app)
@@ -16114,7 +16167,7 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
                 recipient = recipient or split_recipient
         if not app_name and recipient:
             app_name = _communication_surface_for_recipient_hint(recipient)
-        if not recipient or (not app_name and channel != "email"):
+        if not recipient or (not app_name and channel not in {"email", "message"}):
             continue
         hint = {
             "app_name": app_name,

@@ -16699,6 +16699,91 @@ def test_runtime_planner_routes_visible_text_delivery_from_natural_phrase() -> N
     ]
 
 
+def test_runtime_planner_routes_visible_text_report_to_generic_chat_app() -> None:
+    prompt = "整理当前窗口内容生成报告，发给任意聊天应用 Alice"
+    allowed_tools = [
+        "desktop.ui_elements",
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {
+        "context_source": "visible_text",
+        "content_transform_hint": "report",
+        "direct_message_hint": {
+            "recipient": "Alice",
+            "body_source": "visible_text",
+            "mode": "focus",
+            "send_action": "send",
+            "channel": "message",
+            "content_transform_hint": "report",
+        },
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-communication-context",
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "inspect-selected-communication-compose-ui",
+        "fill-selected-communication-recipient",
+        "submit-selected-communication-recipient",
+        "draft-selected-communication-message",
+        "send-selected-communication-message",
+    ]
+    assert _step_by_id(decision, "discover_apps-desktop-state").depends_on == [
+        "read-communication-context"
+    ]
+    assert _step_by_id(decision, "fill-selected-communication-recipient").tool_name == (
+        "desktop.safe_type_text"
+    )
+    assert _step_by_id(decision, "draft-selected-communication-message").input_preview == {
+        "body_source": "visible_text",
+        "transform": "report",
+    }
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_full_plan_execution",
+    )
+    assert payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "chat",
+        "app_name_source": "desktop.list_apps",
+        "target_action": "safe_shortcut",
+        "safe_shortcut_action": "new_message",
+        "body_source": "model_generated_content",
+        "communication_compose": {
+            "recipient": "Alice",
+            "send_action": "send",
+            "channel": "message",
+        },
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
+        "content_transform_hint": "report",
+    }
+
+
 def test_runtime_planner_routes_screen_capture_delivery_to_communication() -> None:
     allowed_tools = [
         "screen.capture",
