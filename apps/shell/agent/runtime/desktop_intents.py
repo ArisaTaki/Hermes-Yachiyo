@@ -327,7 +327,10 @@ def daily_desktop_intent_tool_requests(
             return [_request("clipboard.write", {"text": direct_clipboard_text})]
         return []
     if _is_quit_current_app_request(context) and "desktop.quit_app" in allowed:
-        return [_request("desktop.quit_app", {})]
+        requests = [_request("desktop.quit_app", {})]
+        if "desktop.active_window" in allowed:
+            requests.append(_request("desktop.active_window", {}))
+        return requests
     system_hotkey = _system_desktop_hotkey_request(context)
     if system_hotkey and "desktop.hotkey" in allowed:
         return [_request("desktop.hotkey", system_hotkey)]

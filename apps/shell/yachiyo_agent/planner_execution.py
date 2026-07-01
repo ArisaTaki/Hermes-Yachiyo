@@ -80,6 +80,7 @@ def _expand_inspect_app_execution_requests(
             expanded.append(request)
             continue
         if _has_later_app_ui_approval_request(requests[index + 1 :]):
+            expanded.append(request)
             continue
         focus_tool = _first_allowed(
             ("app.focus", "desktop.focus_app", "app.open", "desktop.open_app"),
@@ -753,6 +754,16 @@ def _keep_post_mutation_verification_request(
 ) -> bool:
     tool_name = str(request.get("tool") or "").strip()
     if tool_name in {"desktop.ui_elements", "desktop.read_ui", "desktop.windows", "desktop.list_windows"}:
+        return True
+    if tool_name == "desktop.active_window" and previous_mutation_tool in {
+        "app.quit",
+        "app.hide",
+        "app.show",
+        "app.minimize",
+        "desktop.close_window",
+        "desktop.minimize_window",
+        "desktop.quit_app",
+    }:
         return True
     if tool_name in {"desktop.active_window", "desktop.running_apps"}:
         return False

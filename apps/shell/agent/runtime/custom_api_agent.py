@@ -802,6 +802,11 @@ class RuntimeCustomApiAgentLoop:
             )
             if cleaned_request:
                 cleaned.append(cleaned_request)
+        if any(
+            str(request.get("planning_reason") or "").strip() == "explicit_full_plan"
+            for request in cleaned
+        ):
+            return cleaned
         requests = planner_execution_tool_requests(cleaned, allowed_tools)
         if any(
             str(request.get("planning_reason") or "").strip() == "explicit_full_plan"
@@ -1055,7 +1060,10 @@ class RuntimeCustomApiAgentLoop:
                     allowed_tools,
                 )
                 execution_requests = _drop_trailing_daily_desktop_verify_requests(execution_requests)
-                if execution_requests and not self._has_approval_plan_tool(execution_requests):
+                if execution_requests and (
+                    not self._has_approval_plan_tool(execution_requests)
+                    or _direct_action_with_active_window_verification(execution_requests)
+                ):
                     return (
                         selection.decision,
                         execution_requests,

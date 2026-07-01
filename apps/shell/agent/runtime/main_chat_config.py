@@ -101,7 +101,6 @@ class MainChatRuntimeConfigBuilder:
             "workspace.read",
             "data.analyze",
             "file.organize",
-            "terminal.run",
             *self._desktop_tool_names,
             *self._memory_tool_names,
             *self._future_task_tool_names,
@@ -110,7 +109,9 @@ class MainChatRuntimeConfigBuilder:
         if isinstance(policy, Mapping):
             raw = dict(policy)
             raw_allowed = _raw_allowed_tools(policy)
-            raw["allowed_tools"] = _unique_tools([*base_allowed, *raw_allowed]) if raw_allowed else base_allowed
+            raw["allowed_tools"] = (
+                _unique_tools([*raw_allowed, *base_allowed]) if raw_allowed else base_allowed
+            )
         else:
             raw = {"allowed_tools": base_allowed}
         return self._compile_tool_policy("custom", raw)
