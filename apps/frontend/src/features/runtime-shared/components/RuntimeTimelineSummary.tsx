@@ -179,6 +179,12 @@ function runtimeTimelineEventTypeLabel(type: string): string {
     || type === 'workflow.run.plan.step'
   ) return '计划步骤';
   if (
+    type === 'agent.task_core.created'
+    || type === 'group.run.task_core.created'
+    || type === 'workflow.task_core.created'
+    || type === 'workflow.run.task_core.created'
+  ) return 'Task Core';
+  if (
     type === 'agent.task.todo.updated'
     || type === 'group.run.task.todo.updated'
     || type === 'workflow.task.todo.updated'

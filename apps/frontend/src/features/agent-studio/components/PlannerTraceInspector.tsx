@@ -1005,6 +1005,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   let capabilityRecovery: PlannerCapabilityRecovery[] = [];
   let routeToStudio: boolean | undefined;
   let selection: PlannerSelection | null = null;
+  let taskCoreFromEvent: TaskCoreSnapshot | null = null;
   let eventCount = 0;
   const stepById = new Map<string, ToolPlanStepSnapshot>();
   const desktopFallbackStepById = new Map<string, ToolPlanStepSnapshot>();
@@ -1089,6 +1090,11 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
       continue;
     }
 
+    if (plannerEventType === 'agent.task_core.created') {
+      taskCoreFromEvent = taskCoreSnapshot(payload.task_core) || taskCoreFromEvent;
+      continue;
+    }
+
     if (plannerEventType === 'agent.plan.step') {
       const step = toolPlanStepSnapshot(payload.step);
       if (step) addPlannerStep(stepById, step);
@@ -1126,11 +1132,24 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   const effectiveToolPlan = toolPlan || fallbackToolPlan;
   const steps = stepById.size ? Array.from(stepById.values()) : fallbackSteps;
   const effectivePlanId = planId || effectiveToolPlan?.plan_id || '';
-  const effectivePlan = applyTaskCoreUpdates(plan, todoUpdateById, checkpointUpdateById);
+  const basePlan = plan
+    ? applyTaskCoreFromEvent(plan, taskCoreFromEvent)
+    : taskCoreFromEvent && effectiveIntent && effectiveToolPlan
+      ? {
+        plan_id: effectivePlanId || taskCoreFromEvent.core_id,
+        intent: effectiveIntent,
+        tool_plan: effectiveToolPlan,
+        task_core: taskCoreFromEvent,
+        route_to_studio: routeToStudio,
+        source,
+      }
+      : null;
+  const effectivePlan = applyTaskCoreUpdates(basePlan, todoUpdateById, checkpointUpdateById);
 
   if (
     !effectiveIntent
     && !plan
+    && !taskCoreFromEvent
     && !steps.length
     && !selection
     && !replanRequests.length
@@ -1335,6 +1354,7 @@ function plannerSelectionFromSummary(
 function runtimePlannerEventType(eventType: string): string {
   if (eventType === 'agent.intent.selected') return eventType;
   if (eventType === 'agent.replan.requested') return eventType;
+  if (eventType === 'agent.task_core.created') return eventType;
   if (eventType === 'agent.task.todo.updated') return eventType;
   if (eventType === 'agent.task.checkpoint.updated') return eventType;
   if (eventType.startsWith('agent.plan.')) return eventType;
@@ -1343,6 +1363,7 @@ function runtimePlannerEventType(eventType: string): string {
   if (eventType === 'group.run.plan.created') return 'agent.plan.created';
   if (eventType === 'group.run.plan.step') return 'agent.plan.step';
   if (eventType === 'group.run.plan.selection') return 'agent.plan.selection';
+  if (eventType === 'group.run.task_core.created') return 'agent.task_core.created';
   if (eventType === 'group.run.task.todo.updated') return 'agent.task.todo.updated';
   if (eventType === 'group.run.task.checkpoint.updated') return 'agent.task.checkpoint.updated';
   if (eventType === 'workflow.intent.selected' || eventType === 'workflow.run.intent.selected') return 'agent.intent.selected';
@@ -1350,6 +1371,7 @@ function runtimePlannerEventType(eventType: string): string {
   if (eventType === 'workflow.plan.created' || eventType === 'workflow.run.plan.created') return 'agent.plan.created';
   if (eventType === 'workflow.plan.step' || eventType === 'workflow.run.plan.step') return 'agent.plan.step';
   if (eventType === 'workflow.plan.selection' || eventType === 'workflow.run.plan.selection') return 'agent.plan.selection';
+  if (eventType === 'workflow.task_core.created' || eventType === 'workflow.run.task_core.created') return 'agent.task_core.created';
   if (eventType === 'workflow.task.todo.updated' || eventType === 'workflow.run.task.todo.updated') return 'agent.task.todo.updated';
   if (eventType === 'workflow.task.checkpoint.updated' || eventType === 'workflow.run.task.checkpoint.updated') return 'agent.task.checkpoint.updated';
   return '';
@@ -1483,6 +1505,23 @@ function taskCheckpointSnapshot(value: unknown): TaskCheckpointSnapshot | null {
   const record = objectRecord(value);
   if (!stringValue(record.checkpoint_id) && !stringValue(record.after_step_id) && !stringValue(record.title)) return null;
   return record as TaskCheckpointSnapshot;
+}
+
+function taskCoreSnapshot(value: unknown): TaskCoreSnapshot | null {
+  const record = objectRecord(value);
+  if (!stringValue(record.core_id) && !objectRecord(record.workspace).workspace_id) return null;
+  return record as TaskCoreSnapshot;
+}
+
+function applyTaskCoreFromEvent(
+  plan: RuntimePlanSnapshot | null,
+  taskCore: TaskCoreSnapshot | null,
+): RuntimePlanSnapshot | null {
+  if (!plan || !taskCore) return plan;
+  return {
+    ...plan,
+    task_core: taskCore,
+  };
 }
 
 function taskReplanRequestSnapshot(value: unknown): TaskReplanRequestSnapshot | null {

@@ -31,13 +31,15 @@ def test_legacy_studio_agent_run_appends_runtime_planner_events() -> None:
         "runtime_planner_entrypoint": True,
     }
     events = runtime.events["agent-run-1"]
-    assert [event["event_type"] for event in events[:3]] == [
+    assert [event["event_type"] for event in events[:4]] == [
         "agent.intent.selected",
         "agent.plan.created",
+        "agent.task_core.created",
         "agent.plan.step",
     ]
     assert events[0]["payload"]["intent"]["kind"] == "data_analysis"
     assert events[1]["payload"]["plan"]["tool_plan"]["steps"][0]["tool_name"] == "data.analyze"
+    assert events[2]["payload"]["task_core"]["workspace"]["title"] == "Data Analysis Workspace"
 
 
 def test_legacy_studio_agent_run_does_not_duplicate_runtime_planner_events() -> None:
@@ -88,14 +90,16 @@ def test_legacy_studio_workflow_run_appends_runtime_planner_events() -> None:
         "run_group_id": None,
     }
     events = runtime.events["workflow-run-1"]
-    assert [event["event_type"] for event in events[:3]] == [
+    assert [event["event_type"] for event in events[:4]] == [
         "agent.intent.selected",
         "agent.plan.created",
+        "agent.task_core.created",
         "agent.plan.step",
     ]
     assert events[0]["payload"]["intent"]["kind"] == "desktop_operation"
     assert events[0]["payload"]["intent"]["inputs"]["app_name_hint"] == "PixelForge"
     assert events[1]["payload"]["plan"]["tool_plan"]["steps"][0]["action"] == "list_apps"
+    assert events[2]["payload"]["task_core"]["workspace"]["title"] == "Desktop Operation Workspace"
 
 
 def test_legacy_studio_group_run_records_group_run_started_event() -> None:
@@ -120,6 +124,7 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
         "group.run.plan",
         "group.run.intent.selected",
         "group.run.plan.created",
+        "group.run.task_core.created",
         "group.run.plan.step",
         "group.run.plan.step",
         "group.member.started",
@@ -130,7 +135,8 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
     assert child_event_types[first_planner_index - 1] == "group.member.started"
     assert runtime.events["run-1"][first_planner_index]["payload"]["source"] == "runtime_planner"
     assert runtime.events["run-1"][first_planner_index + 1]["event_type"] == "agent.plan.created"
-    assert runtime.events["run-1"][first_planner_index + 2]["event_type"] == "agent.plan.step"
+    assert runtime.events["run-1"][first_planner_index + 2]["event_type"] == "agent.task_core.created"
+    assert runtime.events["run-1"][first_planner_index + 3]["event_type"] == "agent.plan.step"
     started = group_run["events"][0]
     assert started["run_id"] == "run-1"
     assert started["payload"]["group_run_id"] == "group-run-1"
@@ -152,6 +158,9 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
     group_plan = group_run["events"][3]
     assert group_plan["payload"]["planner_event_type"] == "agent.plan.created"
     assert group_plan["payload"]["plan"]["tool_plan"]["title"] == "General Task Tool Plan"
+    group_task_core = group_run["events"][4]
+    assert group_task_core["payload"]["planner_event_type"] == "agent.task_core.created"
+    assert group_task_core["payload"]["task_core"]["workspace"]["title"] == "General Task Workspace"
     group_step_tools = [
         event["payload"]["step"]["tool_name"]
         for event in group_run["events"]
@@ -176,15 +185,16 @@ def test_legacy_studio_group_run_records_member_failed_and_cancelled_events() ->
     )
 
     event_types = [event["event_type"] for event in group_run["events"]]
-    assert event_types[:6] == [
+    assert event_types[:7] == [
         "group.run.started",
         "group.run.plan",
         "group.run.intent.selected",
         "group.run.plan.created",
+        "group.run.task_core.created",
         "group.run.plan.step",
         "group.run.plan.step",
     ]
-    assert event_types[6:] == [
+    assert event_types[7:] == [
         "group.member.started",
         "group.member.failed",
         "group.member.started",

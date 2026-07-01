@@ -344,6 +344,8 @@ def _group_run_planner_event_type(event_type: str) -> str:
         return "group.run.intent.selected"
     if event_type == "agent.plan.created":
         return "group.run.plan.created"
+    if event_type == "agent.task_core.created":
+        return "group.run.task_core.created"
     if event_type == "agent.plan.step":
         return "group.run.plan.step"
     if event_type == "agent.task.todo.updated":
