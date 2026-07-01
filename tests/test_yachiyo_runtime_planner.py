@@ -7329,6 +7329,85 @@ def test_planner_tool_requests_continue_after_app_search_observations() -> None:
     ]
 
 
+def test_planner_execution_tool_requests_prepends_unknown_app_discovery() -> None:
+    allowed = ["desktop.list_apps", "app.open", "desktop.active_window"]
+
+    assert planner_execution_tool_requests(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open",
+                "input": {"app_name": "PixelForge"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            }
+        ],
+        allowed,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
+def test_planner_execution_tool_requests_discovers_unknown_app_scoped_operations() -> None:
+    allowed = [
+        "desktop.list_apps",
+        "app.open_and_click_ui_element",
+        "app.open",
+        "desktop.click_ui_element",
+    ]
+
+    assert planner_execution_tool_requests(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open_and_click_ui_element",
+                "input": {
+                    "app_name": "PixelForge",
+                    "target": "Export",
+                    "role_filter": "button",
+                    "limit": 80,
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            }
+        ],
+        allowed,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "PixelForge",
+                "target": "Export",
+                "role_filter": "button",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_runtime_planner_routes_explicit_browser_url_open_actions() -> None:
     allowed = [
         "browser.open_url",

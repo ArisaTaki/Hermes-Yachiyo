@@ -61,10 +61,90 @@ def planner_execution_tool_requests(
     if not normalized_requests:
         return []
     normalized_requests = _expand_inspect_app_execution_requests(normalized_requests, allowed)
+    normalized_requests = _prepend_unknown_app_discovery_requests(normalized_requests, allowed)
     if not _has_discovered_app_foreground_verification_chain(normalized_requests):
         normalized_requests = _collapse_app_foreground_direct_requests(normalized_requests, allowed)
     normalized_requests = _drop_redundant_post_inspect_app_prepare_requests(normalized_requests)
     return _drop_redundant_execution_verification_requests(normalized_requests)
+
+
+def _prepend_unknown_app_discovery_requests(
+    requests: list[dict[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    if "desktop.list_apps" not in allowed:
+        return requests
+    discovered_queries: set[str] = set()
+    normalized: list[dict[str, Any]] = []
+    for request in requests:
+        tool_name = str(request.get("tool") or "").strip()
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        if tool_name == "desktop.list_apps":
+            query = str(payload.get("query") or "").strip()
+            if query:
+                discovered_queries.add(_discovery_query_key(query))
+            normalized.append(request)
+            continue
+        app_name = str(payload.get("app_name") or "").strip()
+        if _request_needs_app_discovery_first(tool_name, payload, request):
+            query_key = _discovery_query_key(app_name)
+            if query_key and query_key not in discovered_queries:
+                normalized.append(
+                    _request(
+                        "desktop.list_apps",
+                        {"query": app_name, "limit": 20},
+                        planning_reason=str(
+                            request.get("planning_reason")
+                            or "planner_desktop_app_discovery"
+                        ).strip()
+                        or "planner_desktop_app_discovery",
+                    )
+                )
+                discovered_queries.add(query_key)
+        normalized.append(request)
+    return normalized
+
+
+def _request_needs_app_discovery_first(
+    tool_name: str,
+    payload: Mapping[str, Any],
+    request: Mapping[str, Any],
+) -> bool:
+    if not _tool_uses_app_name_for_foreground_execution(tool_name):
+        return False
+    app_name = str(payload.get("app_name") or "").strip()
+    if not app_name or app_name == "<selected app from desktop.list_apps>":
+        return False
+    if str(payload.get("selection_source") or "").strip() == "desktop.list_apps":
+        return False
+    input_resolution = (
+        request.get("input_resolution")
+        if isinstance(request.get("input_resolution"), Mapping)
+        else {}
+    )
+    if str(input_resolution.get("source_tool") or "").strip() == "desktop.list_apps":
+        return False
+    return not is_legacy_app_name_hint(app_name)
+
+
+def _tool_uses_app_name_for_foreground_execution(tool_name: str) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    return bool(
+        clean_tool in {
+            "app.open",
+            "app.focus",
+            "desktop.open_app",
+            "desktop.focus_app",
+            "desktop.inspect_app",
+            "desktop.open_path_with_app",
+        }
+        or clean_tool.startswith("app.open_and_")
+        or clean_tool.startswith("app.focus_and_")
+    )
+
+
+def _discovery_query_key(value: str) -> str:
+    return " ".join(str(value or "").strip().casefold().split())
 
 
 def _expand_inspect_app_execution_requests(
