@@ -30,6 +30,7 @@ def public_pending_approval(value: Any) -> dict[str, Any]:
     raw = value if isinstance(value, dict) else {}
     if not raw:
         return {}
+    tool_request = raw.get("tool_request") if isinstance(raw.get("tool_request"), dict) else {}
     input_preview = raw.get("input_preview")
     if input_preview:
         public_input_preview = approval_input_preview(input_preview)
@@ -62,6 +63,19 @@ def public_pending_approval(value: Any) -> dict[str, Any]:
         "source_runnable_name",
     ):
         text = str(raw.get(key) or "").strip()
+        if text:
+            snapshot[key] = text
+    for key in (
+        "step_id",
+        "capability_id",
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "intent_kind",
+        "replan_request_id",
+        "replan_trigger",
+    ):
+        text = str(raw.get(key) or tool_request.get(key) or "").strip()
         if text:
             snapshot[key] = text
     if risk_level:

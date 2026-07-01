@@ -421,6 +421,14 @@ class ApprovalCardSnapshot(_PublicSnapshot):
     workflow_node_label: str | None = None
     group_id: str | None = None
     group_run_id: str | None = None
+    step_id: str | None = None
+    capability_id: str | None = None
+    decision_id: str | None = None
+    plan_id: str | None = None
+    tool_plan_id: str | None = None
+    intent_kind: str | None = None
+    replan_request_id: str | None = None
+    replan_trigger: str | None = None
     title: str
     description: str | None = None
     status: ApprovalStatus = "pending"

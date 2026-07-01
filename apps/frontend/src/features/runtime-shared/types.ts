@@ -347,6 +347,14 @@ export type ApprovalCardSnapshot = {
   workflow_node_label?: string | null;
   group_id?: string | null;
   group_run_id?: string | null;
+  step_id?: string | null;
+  capability_id?: string | null;
+  decision_id?: string | null;
+  plan_id?: string | null;
+  tool_plan_id?: string | null;
+  intent_kind?: string | null;
+  replan_request_id?: string | null;
+  replan_trigger?: string | null;
   title: string;
   description?: string | null;
   status?: ApprovalStatus | string;

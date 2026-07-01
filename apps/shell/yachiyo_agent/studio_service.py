@@ -78,6 +78,7 @@ def _planner_metadata_with_catalog_readiness(
     catalog: ToolCatalogSnapshot,
 ) -> dict[str, Any]:
     enriched = dict(metadata or {})
+    enriched.setdefault("runtime_planner_request_trace", True)
     missing: dict[str, list[str]] = {}
     blocking: dict[str, list[str]] = {}
     for capability_id, capability in catalog.capabilities.items():

@@ -11,22 +11,30 @@ import {
 export type RuntimeApprovalCardSnapshot = Pick<
   ApprovalCardSnapshot,
   | 'approval_id'
+  | 'capability_id'
   | 'description'
+  | 'decision_id'
   | 'group_id'
   | 'group_run_id'
   | 'input_preview'
+  | 'intent_kind'
   | 'open_in_studio_url'
+  | 'plan_id'
   | 'policy_reason'
   | 'requested_at'
   | 'resolved_at'
+  | 'replan_request_id'
+  | 'replan_trigger'
   | 'risk_level'
   | 'run_id'
   | 'source_run_id'
   | 'source_runnable_id'
   | 'source_runnable_name'
   | 'status'
+  | 'step_id'
   | 'title'
   | 'tool_name'
+  | 'tool_plan_id'
   | 'workflow_id'
   | 'workflow_node_id'
   | 'workflow_node_label'
@@ -66,14 +74,20 @@ export function RuntimeApprovalCard({
     <div
       className={className}
       data-approval-id={approval.approval_id}
+      data-approval-capability-id={approval.capability_id || ''}
+      data-approval-decision-id={approval.decision_id || ''}
       data-approval-group-id={approval.group_id || ''}
       data-approval-group-run-id={approval.group_run_id || ''}
+      data-approval-intent-kind={approval.intent_kind || ''}
+      data-approval-plan-id={approval.plan_id || ''}
       data-approval-risk-level={approval.risk_level || ''}
       data-approval-run-id={approval.run_id || ''}
       data-approval-source-runnable-id={approval.source_runnable_id || ''}
       data-approval-source-run-id={approval.source_run_id || ''}
       data-approval-status={status}
+      data-approval-step-id={approval.step_id || ''}
       data-approval-tool={toolName}
+      data-approval-tool-plan-id={approval.tool_plan_id || ''}
       data-approval-variant={variant}
       data-approval-workflow-id={approval.workflow_id || ''}
       data-approval-workflow-node-id={approval.workflow_node_id || ''}
@@ -123,7 +137,13 @@ function approvalMetadataItems(approval: RuntimeApprovalCardSnapshot, toolName: 
     { label: 'agent', value: approval.source_runnable_name || approval.source_runnable_id || '' },
     { label: 'workflow', value: approval.workflow_node_label || approval.workflow_node_id || approval.workflow_run_id || approval.workflow_id || '' },
     { label: 'group', value: approval.group_run_id || approval.group_id || '' },
+    { label: 'step', value: approval.step_id || '' },
+    { label: 'capability', value: approval.capability_id || '' },
     { label: 'tool', value: toolName },
+    { label: 'plan', value: approval.tool_plan_id || approval.plan_id || '' },
+    { label: 'decision', value: approval.decision_id || '' },
+    { label: 'intent', value: approval.intent_kind || '' },
+    { label: 'replan', value: approval.replan_request_id || approval.replan_trigger || '' },
     { label: 'risk', value: approval.risk_level || '' },
     { label: 'requested', value: approval.requested_at || '' },
     { label: 'resolved', value: approval.resolved_at || '' },

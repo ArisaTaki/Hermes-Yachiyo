@@ -167,7 +167,10 @@ def planner_decision_and_tool_requests(
         allowed_tools=allowed,
         metadata=metadata,
     )
-    return decision, _tool_requests_for_decision(decision, allowed)
+    requests = _tool_requests_for_decision(decision, allowed)
+    if _request_trace_enabled(metadata):
+        requests = _annotated_tool_requests_for_decision(requests, decision)
+    return decision, requests
 
 
 def planner_direct_decision_and_tool_requests(
@@ -184,7 +187,10 @@ def planner_direct_decision_and_tool_requests(
         allowed_tools=allowed,
         metadata=metadata,
     )
-    return decision, _direct_tool_requests_for_decision(decision, allowed)
+    requests = _direct_tool_requests_for_decision(decision, allowed)
+    if _request_trace_enabled(metadata):
+        requests = _annotated_tool_requests_for_decision(requests, decision)
+    return decision, requests
 
 
 def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
@@ -302,6 +308,84 @@ def _request(
     if isinstance(input_resolution, Mapping):
         request["input_resolution"] = dict(input_resolution)
     return request
+
+
+def _request_trace_enabled(metadata: Mapping[str, Any] | None) -> bool:
+    if not isinstance(metadata, Mapping):
+        return False
+    return bool(
+        metadata.get("runtime_planner_request_trace")
+        or metadata.get("yachiyo_runtime_request_trace")
+    )
+
+
+def _annotated_tool_requests_for_decision(
+    requests: list[dict[str, Any]],
+    decision: Any,
+) -> list[dict[str, Any]]:
+    if not requests:
+        return []
+    steps = [
+        step
+        for step in getattr(getattr(getattr(decision, "plan", None), "tool_plan", None), "steps", [])
+        if str(getattr(step, "tool_name", "") or "").strip()
+    ]
+    if not steps:
+        return [dict(request) for request in requests]
+    used_step_indexes: set[int] = set()
+    annotated: list[dict[str, Any]] = []
+    for request in requests:
+        next_request = dict(request)
+        step_index, step = _matching_trace_step(next_request, steps, used_step_indexes)
+        if step_index >= 0 and step is not None:
+            used_step_indexes.add(step_index)
+            _annotate_request_trace(next_request, decision, step)
+        annotated.append(next_request)
+    return annotated
+
+
+def _matching_trace_step(
+    request: Mapping[str, Any],
+    steps: list[Any],
+    used_step_indexes: set[int],
+) -> tuple[int, Any | None]:
+    tool_name = str(request.get("tool") or "").strip()
+    if not tool_name:
+        return -1, None
+    for index, step in enumerate(steps):
+        if index in used_step_indexes:
+            continue
+        if str(getattr(step, "tool_name", "") or "").strip() == tool_name:
+            return index, step
+    return -1, None
+
+
+def _annotate_request_trace(
+    request: dict[str, Any],
+    decision: Any,
+    step: Any,
+) -> None:
+    step_id = str(getattr(step, "step_id", "") or "").strip()
+    capability_id = str(getattr(step, "capability_id", "") or "").strip()
+    decision_id = str(getattr(decision, "decision_id", "") or "").strip()
+    plan = getattr(decision, "plan", None)
+    plan_id = str(getattr(plan, "plan_id", "") or "").strip()
+    tool_plan = getattr(plan, "tool_plan", None)
+    tool_plan_id = str(getattr(tool_plan, "plan_id", "") or "").strip()
+    intent = getattr(decision, "selected_intent", None)
+    intent_kind = str(getattr(intent, "kind", "") or "").strip()
+    if step_id:
+        request["step_id"] = step_id
+    if capability_id:
+        request["capability_id"] = capability_id
+    if decision_id:
+        request["decision_id"] = decision_id
+    if plan_id:
+        request["plan_id"] = plan_id
+    if tool_plan_id and tool_plan_id != plan_id:
+        request["tool_plan_id"] = tool_plan_id
+    if intent_kind:
+        request["intent_kind"] = intent_kind
 
 
 def _orchestration_request(decision: Any, orchestration_kind: str) -> dict[str, Any]:

@@ -52,6 +52,7 @@ def _assert_matching_pending_approval(
 
 def _planner_metadata_with_desktop_readiness(metadata: dict[str, Any]) -> dict[str, Any]:
     enriched = dict(metadata or {})
+    enriched.setdefault("runtime_planner_request_trace", True)
     if not isinstance(enriched.get("desktop_missing_permissions_by_capability"), dict):
         try:
             missing_permissions = desktop_permission_missing_by_capability()

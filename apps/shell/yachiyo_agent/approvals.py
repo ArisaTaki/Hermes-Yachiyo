@@ -73,6 +73,25 @@ def approval_card_from_payload(
         group_id=_optional_text(payload.get("group_id") or input_preview.get("group_id")),
         group_run_id=approval_group_run_id
         or _optional_text(input_preview.get("group_run_id") or input_preview.get("run_group_id")),
+        step_id=_trace_text(
+            payload,
+            input_preview,
+            "step_id",
+            "planner_step_id",
+            "source_step_id",
+        ),
+        capability_id=_trace_text(
+            payload,
+            input_preview,
+            "capability_id",
+            "target_capability_id",
+        ),
+        decision_id=_trace_text(payload, input_preview, "decision_id"),
+        plan_id=_trace_text(payload, input_preview, "plan_id", "runtime_plan_id"),
+        tool_plan_id=_trace_text(payload, input_preview, "tool_plan_id"),
+        intent_kind=_trace_text(payload, input_preview, "intent_kind", "task_intent_kind"),
+        replan_request_id=_trace_text(payload, input_preview, "replan_request_id"),
+        replan_trigger=_trace_text(payload, input_preview, "replan_trigger"),
         title=title,
         description=_optional_text(payload.get("description") or payload.get("reason")),
         status=_approval_status(payload.get("status")),
@@ -129,3 +148,18 @@ def _text(value: Any) -> str:
 def _optional_text(value: Any) -> str | None:
     text = _text(value)
     return text or None
+
+
+def _trace_text(
+    payload: Mapping[str, Any],
+    input_preview: Mapping[str, Any],
+    *keys: str,
+) -> str | None:
+    for key in keys:
+        text = _optional_text(payload.get(key))
+        if text:
+            return text
+        text = _optional_text(input_preview.get(key))
+        if text:
+            return text
+    return None

@@ -26467,6 +26467,33 @@ def test_planner_desktop_tool_requests_remains_compat_wrapper() -> None:
     )
 
 
+def test_planner_tool_requests_optionally_include_runtime_plan_trace() -> None:
+    allowed_tools = [
+        "desktop.inspect_app",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+
+    default_requests = planner_tool_requests("打开 PixelForge 并点击导出", allowed_tools)
+    traced_requests = planner_tool_requests(
+        "打开 PixelForge 并点击导出",
+        allowed_tools,
+        metadata={"runtime_planner_request_trace": True},
+    )
+
+    assert "step_id" not in default_requests[0]
+    assert [request["step_id"] for request in traced_requests] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert traced_requests[1]["capability_id"] == "desktop.ui_operation"
+    assert traced_requests[1]["intent_kind"] == "desktop_operation"
+    assert traced_requests[1]["decision_id"].startswith("decision-")
+    assert traced_requests[1]["plan_id"].startswith("runtime-plan-")
+    assert traced_requests[1]["tool_plan_id"].startswith("tool-plan-")
+
+
 def test_yachiyo_agent_service_uses_fake_runtime_planner_port() -> None:
     class FakePlannerPort:
         def plan_chat_task(

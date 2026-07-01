@@ -305,6 +305,7 @@ class LegacyChatTaskStarter:
         metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
         prompt = str(prompt or "").strip()
+        metadata = _planner_metadata_with_desktop_readiness(metadata or {})
         allowed_daily_desktop_tools = daily_desktop_allowed_tools()
         allowed_entrypoint_tools = main_chat_entrypoint_allowed_tools(
             self._runtime,

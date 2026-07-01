@@ -17,6 +17,7 @@ from apps.shell.agent.tools.plugins import (
     unregister_restricted_tool_plugin,
 )
 from apps.shell.agent.runtime.main_chat_config import MAIN_CHAT_DESKTOP_AGENT_INSTRUCTIONS
+from apps.shell.agent.runtime.approval_snapshots import public_pending_approval
 from apps.shell.yachiyo_agent import (
     AgentDefinitionSnapshot,
     AgentDeskFileEventRequest,
@@ -90,6 +91,7 @@ from apps.shell.yachiyo_agent import (
     is_high_risk_desktop_action,
     task_requires_user_action,
 )
+from apps.shell.yachiyo_agent.approvals import approval_card_from_payload
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
 from apps.shell.yachiyo_agent.group_run_snapshots import group_run_snapshot_from_payload
 from apps.shell.yachiyo_agent.planner_projection import planner_run_event_payloads
@@ -1504,6 +1506,14 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
         workflow_node_label="Review Gate",
         group_id="group-1",
         group_run_id="group-run-1",
+        step_id="review-step",
+        capability_id="workflow.approval",
+        decision_id="decision-1",
+        plan_id="runtime-plan-1",
+        tool_plan_id="tool-plan-1",
+        intent_kind="workflow_orchestration",
+        replan_request_id="replan-1",
+        replan_trigger="approval_retry",
         title="Approve Review Gate",
         description="Needs review",
         status="pending",
@@ -1530,6 +1540,14 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
         "workflow_node_label",
         "group_id",
         "group_run_id",
+        "step_id",
+        "capability_id",
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "intent_kind",
+        "replan_request_id",
+        "replan_trigger",
         "title",
         "description",
         "status",
@@ -1544,6 +1562,64 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["workflow_node_id"] == "review"
     assert payload["source_runnable_name"] == "Planner"
     assert payload["group_run_id"] == "group-run-1"
+    assert payload["step_id"] == "review-step"
+    assert payload["capability_id"] == "workflow.approval"
+    assert payload["plan_id"] == "runtime-plan-1"
+
+
+def test_public_pending_approval_projects_runtime_planner_trace_fields() -> None:
+    snapshot = public_pending_approval(
+        {
+            "approval_id": "approval-1",
+            "tool": "desktop.click_ui_element",
+            "input": {"label": "Save"},
+            "tool_request": {
+                "step_id": "save-discovered-app-creative-result",
+                "capability_id": "desktop.ui_operation",
+                "decision_id": "decision-1",
+                "plan_id": "runtime-plan-1",
+                "tool_plan_id": "tool-plan-1",
+                "intent_kind": "desktop_operation",
+                "replan_request_id": "replan-1",
+                "replan_trigger": "ui_not_found",
+            },
+        }
+    )
+
+    assert snapshot["step_id"] == "save-discovered-app-creative-result"
+    assert snapshot["capability_id"] == "desktop.ui_operation"
+    assert snapshot["decision_id"] == "decision-1"
+    assert snapshot["plan_id"] == "runtime-plan-1"
+    assert snapshot["tool_plan_id"] == "tool-plan-1"
+    assert snapshot["intent_kind"] == "desktop_operation"
+    assert snapshot["replan_request_id"] == "replan-1"
+    assert snapshot["replan_trigger"] == "ui_not_found"
+
+
+def test_approval_card_from_payload_maps_runtime_planner_trace_fields() -> None:
+    snapshot = approval_card_from_payload(
+        {
+            "approval_id": "approval-1",
+            "run_id": "run-1",
+            "tool": "desktop.click_ui_element",
+            "input_preview": {
+                "label": "Save",
+                "planner_step_id": "save-discovered-app-creative-result",
+                "target_capability_id": "desktop.ui_operation",
+                "runtime_plan_id": "runtime-plan-1",
+            },
+            "decision_id": "decision-1",
+            "tool_plan_id": "tool-plan-1",
+            "intent_kind": "desktop_operation",
+        }
+    )
+
+    assert snapshot.step_id == "save-discovered-app-creative-result"
+    assert snapshot.capability_id == "desktop.ui_operation"
+    assert snapshot.decision_id == "decision-1"
+    assert snapshot.plan_id == "runtime-plan-1"
+    assert snapshot.tool_plan_id == "tool-plan-1"
+    assert snapshot.intent_kind == "desktop_operation"
 
 
 def test_product_policy_helpers_use_public_snapshots() -> None:
