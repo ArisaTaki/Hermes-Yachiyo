@@ -166,9 +166,14 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
     patterns = (
         r"(?:找到|找|定位|选择|选中)\s*(?P<target_find>[^。！？!?，,]+?)"
         r"(?:按钮|控件|元素|菜单项|菜单|复选框|项目|条目)?\s*"
-        r"(?:并|然后|再|之后|后)?\s*(?:双击|点击|点一下|点按|单击|打开|进入)$",
+        r"(?:并|然后|再|之后|后)?\s*(?:双击|点击|点一下|点按|单击|打开|进入)"
+        r"(?:[，,。；;！!？?]?\s*(?:并|然后|再|后|之后)?\s*"
+        r"(?:确认|验证|检查|查看|看看|判断).{0,24}"
+        r"(?:成功|结果|状态|是否成功))?$",
         r"(?:find|locate|choose|select)\s+(?:the\s+)?(?P<target_find_en>[^.!?,]+?)\s*"
-        r"(?:and\s+then|then|and)?\s*(?:click|press|tap|open)\s+(?:it|that|them)?$",
+        r"(?:and\s+then|then|and)?\s*(?:click|press|tap|open)\s+(?:it|that|them)?"
+        r"(?:\s+(?:and|then)\s+(?:verify|confirm|check).{0,24}"
+        r"(?:success|result|state|status))?$",
         r"(?P<target_post>[^。！？!?，,]{1,60}?)(?:按钮|控件|元素|菜单项|菜单|复选框)?\s*(?:双击|点击|点一下|点按|单击)$",
         r"(?:双击|点击|点一下|点按|单击|按一下|按(?!钮)|点(?!击|按|一下))\s*(?P<target>[^。！？!?，,]+)",
         r"(?:double\s+click|click|press|tap)\s+(?:the\s+)?(?P<target_en>[^.!?,]+)",

@@ -16727,13 +16727,18 @@ def _looks_like_find_visible_target_action(text: str) -> bool:
         re.search(
             r"(?:找到|找|定位|选择|选中).{1,80}"
             r"(?:按钮|控件|元素|菜单项|菜单|复选框|项目|条目)?.{0,12}"
-            r"(?:点击|点一下|点按|点开|单击|打开|进入)$",
+            r"(?:点击|点一下|点按|点开|单击|打开|进入)"
+            r"(?:[，,。；;！!？?]?\s*(?:并|然后|再|后|之后)?\s*"
+            r"(?:确认|验证|检查|查看|看看|判断).{0,24}"
+            r"(?:成功|结果|状态|是否成功))?$",
             value,
             flags=re.IGNORECASE,
         )
         or re.search(
             r"\b(?:find|locate|choose|select)\b.{1,80}"
-            r"\b(?:click|press|tap|open)\b(?:\s+(?:it|that|them))?[.!?]?$",
+            r"\b(?:click|press|tap|open)\b(?:\s+(?:it|that|them))?"
+            r"(?:\s+(?:and|then)\s+(?:verify|confirm|check).{0,24}"
+            r"(?:success|result|state|status))?[.!?]?$",
             value,
             flags=re.IGNORECASE,
         )

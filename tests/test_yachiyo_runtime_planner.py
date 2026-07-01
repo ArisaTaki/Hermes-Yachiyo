@@ -18569,6 +18569,46 @@ def test_runtime_planner_keeps_current_and_global_desktop_scopes_generic() -> No
         },
     ]
 
+    current_find_click_verify = planner_tool_requests(
+        "在当前应用里找到导出按钮并点击，然后确认是否成功",
+        [
+            "desktop.running_apps",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ],
+    )
+    assert current_find_click_verify == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "导出",
+                "role_filter": "button",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
     generic_available_click_decision = RuntimePlanner().decision(
         "在任意可用的应用里点击导出按钮",
         allowed_tools=["desktop.running_apps", "desktop.click_ui_element", "desktop.ui_elements"],
