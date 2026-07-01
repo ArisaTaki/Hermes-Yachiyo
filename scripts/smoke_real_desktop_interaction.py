@@ -35,6 +35,8 @@ from scripts.smoke_real_desktop_app_open import (
 DEFAULT_INPUT_TEXT = "42"
 _AFTER_CLICK_VERIFY_MAX_POLLS = 5
 _AFTER_CLICK_VERIFY_POLL_INTERVAL_SECONDS = 0.2
+_INITIAL_FOCUS_MAX_ATTEMPTS = 5
+_INITIAL_FOCUS_RETRY_INTERVAL_SECONDS = 0.5
 _PRE_CLICK_FOCUS_MAX_ATTEMPTS = 3
 _PRE_CLICK_FOCUS_RETRY_INTERVAL_SECONDS = 0.2
 TOOL_CHAIN = [
@@ -139,17 +141,23 @@ def _focus_retryable(result: dict[str, Any]) -> bool:
     )
 
 
-def _focus_with_retries(app_name: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
+def _focus_with_retries(
+    app_name: str,
+    *,
+    max_attempts: int = _PRE_CLICK_FOCUS_MAX_ATTEMPTS,
+    retry_interval_seconds: float = _PRE_CLICK_FOCUS_RETRY_INTERVAL_SECONDS,
+) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
     attempts: list[dict[str, Any]] = []
     result: dict[str, Any] = {}
-    for attempt in range(1, _PRE_CLICK_FOCUS_MAX_ATTEMPTS + 1):
+    clean_max_attempts = max(1, int(max_attempts))
+    for attempt in range(1, clean_max_attempts + 1):
         result = desktop_tools.app_focus(app_name)
         verified = _focus_verified(result)
         attempts.append({"attempt": attempt, "result": result, "focus_verified": verified})
         if verified:
             break
-        if attempt < _PRE_CLICK_FOCUS_MAX_ATTEMPTS and _focus_retryable(result):
-            time.sleep(_PRE_CLICK_FOCUS_RETRY_INTERVAL_SECONDS)
+        if attempt < clean_max_attempts and _focus_retryable(result):
+            time.sleep(retry_interval_seconds)
             continue
         break
     return result, attempts, _focus_verified(result)
@@ -449,8 +457,11 @@ def run_smoke(
             {},
         )
 
-    focus_result = desktop_tools.app_focus(opened_app_name)
-    focus_verified = _focus_verified(focus_result)
+    focus_result, focus_attempts, focus_verified = _focus_with_retries(
+        opened_app_name,
+        max_attempts=_INITIAL_FOCUS_MAX_ATTEMPTS,
+        retry_interval_seconds=_INITIAL_FOCUS_RETRY_INTERVAL_SECONDS,
+    )
     if not focus_verified:
         return fail_stage(
             "app_focus",
@@ -462,7 +473,7 @@ def run_smoke(
                 "open_ok": True,
                 "focus_verified": False,
             },
-            {"focus_result": focus_result},
+            {"focus_result": focus_result, "focus_attempts": focus_attempts},
         )
 
     clear_result = desktop_tools.desktop_safe_key("escape", repeat_count=2)
@@ -702,6 +713,7 @@ def run_smoke(
         "before_status": before_status,
         "open_result": open_result,
         "focus_result": focus_result,
+        "focus_attempts": focus_attempts,
         "clear_result": clear_result,
         "type_result": type_result,
         "before_ui": before_ui,
