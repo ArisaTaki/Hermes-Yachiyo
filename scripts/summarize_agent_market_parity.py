@@ -20,9 +20,9 @@ MARKET_REQUIREMENTS: tuple[dict[str, Any], ...] = (
         "priority": "P0",
         "passed": [
             {
-                "path": "apps/shell/agent_runtime.py",
+                "path": "apps/shell/agent/runtime/config.py",
                 "fragments": [
-                    "_MARKET_AGENT_OPERATING_DOCTRINE",
+                    "MARKET_AGENT_OPERATING_DOCTRINE",
                     "persistent personal agent",
                     "Respect safety boundaries",
                 ],
@@ -40,7 +40,7 @@ MARKET_REQUIREMENTS: tuple[dict[str, Any], ...] = (
                 "fragments": ["nickname", "persona_prompt"],
             },
             {
-                "path": "apps/shell/agent_runtime.py",
+                "path": "apps/shell/agent/runtime/agent_context.py",
                 "fragments": ["# Persona Prompt", "Nickname:"],
             },
         ],
@@ -52,16 +52,33 @@ MARKET_REQUIREMENTS: tuple[dict[str, Any], ...] = (
         "priority": "P0",
         "passed": [
             {
-                "path": "apps/shell/agent_runtime.py",
+                "path": "apps/shell/agent/tools/broker.py",
                 "fragments": [
                     "class ToolBroker",
-                    "class ToolDescriptorRegistry",
-                    "class ApprovalCoordinator",
-                    "class ApprovalResumeCoordinator",
                     "workspace.write_patch",
                     "terminal.run",
                 ],
-            }
+            },
+            {
+                "path": "apps/shell/agent/tools/policy.py",
+                "fragments": [
+                    "class ToolDescriptorRegistry",
+                    "HIGH_RISK_AGENT_TOOLS",
+                    "approval_required",
+                ],
+            },
+            {
+                "path": "apps/shell/agent/runtime/approval_lifecycle.py",
+                "fragments": [
+                    "class ApprovalCoordinator",
+                    "agent.tool.approval_approved",
+                    "approval.timeout",
+                ],
+            },
+            {
+                "path": "apps/shell/agent/runtime/approval_resume.py",
+                "fragments": ["class ApprovalResumeCoordinator", "execute_approved_tool"],
+            },
         ],
     },
     {
@@ -71,15 +88,28 @@ MARKET_REQUIREMENTS: tuple[dict[str, Any], ...] = (
         "priority": "P0",
         "passed": [
             {
-                "path": "apps/shell/agent_runtime.py",
+                "path": "apps/shell/agent/runtime/workflow_path.py",
+                "fragments": ['"parallel"', '"workflow"', '"loop"'],
+            },
+            {
+                "path": "apps/shell/agent/runtime/workflow_continuation.py",
                 "fragments": [
-                    '"parallel"',
-                    '"workflow"',
-                    '"loop"',
                     "workflow.node.parallel",
                     "workflow.node.workflow",
                     "workflow.node.loop",
                 ],
+            },
+            {
+                "path": "apps/shell/yachiyo_agent/contracts.py",
+                "fragments": [
+                    "class AgentGroupSnapshot",
+                    "class GroupRunSnapshot",
+                    "class WorkflowSnapshot",
+                ],
+            },
+            {
+                "path": "apps/shell/yachiyo_agent/studio_service.py",
+                "fragments": ["start_group_run", "list_workflows", "get_workflow"],
             },
             {
                 "path": "apps/bridge/routes/agents.py",
@@ -94,15 +124,31 @@ MARKET_REQUIREMENTS: tuple[dict[str, Any], ...] = (
         "priority": "P1",
         "passed": [
             {
-                "path": "apps/shell/agent_runtime.py",
+                "path": "apps/shell/agent/tools/broker.py",
                 "fragments": [
                     "workspace_list",
                     "workspace_read",
                     "workspace_write_patch",
                     "artifact_write",
-                    "agent-context.md",
                 ],
-            }
+            },
+            {
+                "path": "apps/shell/agent/tools/registry.py",
+                "fragments": [
+                    '"workspace.list"',
+                    '"workspace.read"',
+                    '"workspace.write_patch"',
+                    '"artifact.write"',
+                ],
+            },
+            {
+                "path": "apps/shell/agent/runtime/agent_preparation.py",
+                "fragments": ["agent-context.md", "agent.artifact.write"],
+            },
+            {
+                "path": "apps/shell/yachiyo_agent/desk.py",
+                "fragments": ["Agent Desk", "schedule_future_task"],
+            },
         ],
     },
     {
@@ -121,8 +167,12 @@ MARKET_REQUIREMENTS: tuple[dict[str, Any], ...] = (
                 ],
             },
             {
-                "path": "apps/shell/agent_runtime.py",
-                "fragments": ["_load_agent_skills", "skill_markdown"],
+                "path": "apps/shell/agent/runtime/agent_context.py",
+                "fragments": ["# Mounted Skills", "Skill summary index"],
+            },
+            {
+                "path": "apps/shell/agent/tools/broker.py",
+                "fragments": ["def skill_read", "skill.read"],
             },
         ],
     },
@@ -133,22 +183,28 @@ MARKET_REQUIREMENTS: tuple[dict[str, Any], ...] = (
         "priority": "P0",
         "passed": [
             {
-                "path": "apps/shell/agent_runtime.py",
+                "path": "apps/shell/agent/runtime/agent_context.py",
                 "fragments": [
-                    '"skill.read"',
                     "Skill summary index (progressive disclosure)",
                     "Call skill.read with skill_id",
-                    "def skill_read",
                 ],
-            }
-        ],
-        "partial": [
+            },
             {
-                "path": "apps/shell/agent_runtime.py",
-                "fragments": ["_load_agent_skills", "skill_markdown"],
-            }
+                "path": "apps/shell/agent/tools/policy.py",
+                "fragments": [
+                    '"skill.read"',
+                    "Mounted skill id from the Skill summary index.",
+                ],
+            },
+            {
+                "path": "apps/shell/agent/tools/registry.py",
+                "fragments": ['"skill.read"', "_skill_read"],
+            },
+            {
+                "path": "apps/shell/agent/tools/broker.py",
+                "fragments": ["def skill_read", "skill.read"],
+            },
         ],
-        "next_action": "Add a Skill summary index and a model/tool path to expand full SKILL.md only after task matching.",
     },
     {
         "id": "agent_managed_long_term_memory",
@@ -157,25 +213,22 @@ MARKET_REQUIREMENTS: tuple[dict[str, Any], ...] = (
         "priority": "P0",
         "passed": [
             {
-                "path": "apps/shell/agent_runtime.py",
-                "fragments": ["memory.add", "memory.replace", "memory.remove", "memory_items", "memory_events"],
+                "path": "apps/shell/agent/tools/policy.py",
+                "fragments": ["MEMORY_TOOL_NAMES", "memory.add", "memory.replace", "memory.remove"],
+            },
+            {
+                "path": "apps/shell/agent/tools/broker.py",
+                "fragments": ["def memory_add", "def memory_replace", "def memory_remove"],
+            },
+            {
+                "path": "apps/shell/agent/runtime/custom_api_agent.py",
+                "fragments": ["Use memory.add, memory.replace, and memory.remove"],
             },
             {
                 "path": "apps/bridge/routes/agents.py",
                 "fragments": ["/memories", "create_memory", "update_memory", "delete_memory"],
             }
         ],
-        "partial": [
-            {
-                "path": "apps/core/executor.py",
-                "fragments": ["build_cross_session_memory_context", "_MEMORY_MARKERS"],
-            },
-            {
-                "path": "docs/memory-architecture.md",
-                "fragments": ["memory"],
-            },
-        ],
-        "next_action": "Promote memory from history heuristics to explicit Agent-managed memory/user stores with add/replace/remove semantics.",
     },
     {
         "id": "future_task_proactivity",
@@ -184,27 +237,31 @@ MARKET_REQUIREMENTS: tuple[dict[str, Any], ...] = (
         "priority": "P1",
         "passed": [
             {
-                "path": "apps/shell/agent_runtime.py",
+                "path": "apps/shell/agent/tools/policy.py",
                 "fragments": [
+                    "FUTURE_TASK_TOOL_NAMES",
                     "future_task.schedule",
                     "future_task.list",
                     "future_task.cancel",
-                    "future_tasks",
-                    "trigger_due_future_tasks",
                 ],
+            },
+            {
+                "path": "apps/shell/agent/tools/broker.py",
+                "fragments": [
+                    "def future_task_schedule",
+                    "def future_task_list",
+                    "def future_task_cancel",
+                ],
+            },
+            {
+                "path": "apps/shell/agent/runtime/future_task_scheduler.py",
+                "fragments": ["class FutureTaskTriggerScheduler", "trigger_due_future_tasks"],
             },
             {
                 "path": "apps/bridge/routes/agents.py",
                 "fragments": ["/future-tasks", "schedule_future_task", "trigger_due_future_tasks"],
             }
         ],
-        "partial": [
-            {
-                "path": "apps/shell/proactive.py",
-                "fragments": ["class ProactiveDesktopService", "trigger_now", "desktop_watch"],
-            }
-        ],
-        "next_action": "Extend proactive desktop observation into user-visible future tasks with editable schedules and delivery targets.",
     },
     {
         "id": "external_channel_bridge",
@@ -229,12 +286,12 @@ MARKET_REQUIREMENTS: tuple[dict[str, Any], ...] = (
         "priority": "P0",
         "passed": [
             {
-                "path": "apps/shell/agent_runtime.py",
+                "path": "apps/shell/agent/tools/policy.py",
                 "fragments": [
-                    "redact_secrets",
+                    "redact_sensitive_text",
                     "readable_scopes",
                     "writable_scopes",
-                    "_HIGH_RISK_AGENT_TOOLS",
+                    "HIGH_RISK_AGENT_TOOLS",
                     "approval_required",
                 ],
             },
@@ -251,8 +308,20 @@ MARKET_REQUIREMENTS: tuple[dict[str, Any], ...] = (
         "priority": "P1",
         "passed": [
             {
-                "path": "apps/shell/agent_runtime.py",
-                "fragments": ["append_run_event", "RunEventRepository", "timeline"],
+                "path": "apps/shell/agent/repositories/events.py",
+                "fragments": ["class RunEventRepository", "def append"],
+            },
+            {
+                "path": "apps/shell/agent/runtime/run_services.py",
+                "fragments": ["RunEventRepository", "run_events=run_events"],
+            },
+            {
+                "path": "apps/shell/agent/runtime/installation_facade.py",
+                "fragments": ["append_run_event", "self.run_events"],
+            },
+            {
+                "path": "apps/shell/yachiyo_agent/studio_service.py",
+                "fragments": ["list_run_timelines", "get_run_timeline", "run_timeline_snapshot_from_payload"],
             },
             {
                 "path": "apps/bridge/routes/agents.py",

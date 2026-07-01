@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 from scripts import summarize_agent_market_parity as market
 
@@ -84,3 +85,14 @@ def test_market_parity_summary_cli_writes_json(tmp_path, monkeypatch):
     payload = json.loads(output.read_text(encoding="utf-8"))
     assert payload["status"] == "incomplete"
     assert payload["status_counts"] == {"passed": 0, "partial": 1, "missing": 0}
+
+
+def test_market_parity_summary_current_project_passes():
+    root = Path(__file__).resolve().parents[1]
+
+    result = market.summarize_market_parity(root)
+
+    assert result["ok"] is True
+    assert result["status"] == "passed"
+    assert result["status_counts"]["partial"] == 0
+    assert result["status_counts"]["missing"] == 0
