@@ -1562,6 +1562,7 @@ def test_desktop_execution_capability_policy_marks_registered_tools_available() 
         "desktop.safe_shortcut",
         "desktop.safe_key",
         "desktop.safe_type_text",
+        "desktop.search_submit",
         "desktop.safe_click",
         "desktop.safe_scroll",
         "desktop.click_ui_element",
@@ -1799,6 +1800,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_tool_risk_level("desktop.safe_shortcut") == "low"
     assert desktop_tool_risk_level("desktop.safe_key") == "low"
     assert desktop_tool_risk_level("desktop.safe_type_text") == "low"
+    assert desktop_tool_risk_level("desktop.search_submit") == "low"
     assert desktop_tool_risk_level("desktop.safe_click") == "low"
     assert desktop_tool_risk_level("desktop.safe_scroll") == "low"
     assert desktop_tool_risk_level("desktop.close_window") == "medium"
@@ -1848,6 +1850,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
     assert desktop_action_risk_level("foreground_safe_shortcut") == "low"
     assert desktop_action_risk_level("foreground_safe_key") == "low"
     assert desktop_action_risk_level("foreground_safe_type_text") == "low"
+    assert desktop_action_risk_level("foreground_search_submit") == "low"
     assert desktop_action_risk_level("foreground_safe_click") == "low"
     assert desktop_action_risk_level("foreground_safe_scroll") == "low"
     assert desktop_action_risk_level("quit_app") == "medium"
@@ -1865,7 +1868,7 @@ def test_desktop_execution_policy_records_risk_boundaries() -> None:
 def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     catalog = {item.action_id: item for item in desktop_action_risk_snapshots()}
 
-    assert list(catalog)[:31] == [
+    assert list(catalog)[:32] == [
         "read_screen",
         "diagnose_permissions",
         "read_active_window",
@@ -1896,6 +1899,7 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
         "foreground_safe_shortcut",
         "foreground_safe_key",
         "foreground_safe_type_text",
+        "foreground_search_submit",
         "foreground_safe_click",
     ]
     assert catalog["read_screen"].risk_level == "low"
@@ -1951,6 +1955,9 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["foreground_safe_key"].tools == ["desktop.safe_key"]
     assert catalog["foreground_safe_type_text"].risk_level == "low"
     assert catalog["foreground_safe_type_text"].tools == ["desktop.safe_type_text"]
+    assert catalog["foreground_search_submit"].risk_level == "low"
+    assert catalog["foreground_search_submit"].tools == ["desktop.search_submit"]
+    assert catalog["foreground_search_submit"].requires_approval is False
     assert catalog["foreground_safe_click"].risk_level == "low"
     assert catalog["foreground_safe_click"].tools == ["desktop.safe_click"]
     assert catalog["foreground_safe_scroll"].risk_level == "low"
@@ -2115,6 +2122,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     safe_shortcut = tools["desktop.safe_shortcut"]
     safe_key = tools["desktop.safe_key"]
     safe_type_text = tools["desktop.safe_type_text"]
+    search_submit = tools["desktop.search_submit"]
     safe_click = tools["desktop.safe_click"]
     safe_scroll = tools["desktop.safe_scroll"]
     shortcut_alias = tools["desktop.shortcut"]
@@ -2318,6 +2326,11 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert safe_type_text.input_schema["required"] == ["text"]
     assert safe_type_text.blocking_conditions == ["desktop_session_locked"]
     assert any("explicitly provided by the user" in note for note in safe_type_text.fallback_notes)
+    assert search_submit.capability_id == "foreground_input"
+    assert search_submit.risk_level == "low"
+    assert search_submit.approval_required is False
+    assert search_submit.input_schema["properties"] == {}
+    assert any("search/find query" in note for note in search_submit.fallback_notes)
     assert safe_click.capability_id == "foreground_input"
     assert safe_click.risk_level == "low"
     assert safe_click.input_schema["required"] == ["x", "y"]

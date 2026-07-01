@@ -539,6 +539,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "desktop.safe_type_text": [
             "Requires Accessibility permission and only types text explicitly provided by the user.",
         ],
+        "desktop.search_submit": [
+            "Submits only an explicit foreground search/find query; message sending and form submission must use approval-gated desktop.submit_foreground.",
+        ],
         "desktop.safe_click": [
             "Requires Accessibility permission and only single-clicks coordinates explicitly provided by the user.",
         ],
