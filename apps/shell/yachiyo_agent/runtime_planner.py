@@ -17870,6 +17870,12 @@ def _app_search_field_input_submit_query(text: str) -> str:
         query = _clean_app_search_query(
             match.groupdict().get("query") or match.groupdict().get("query_en") or ""
         )
+        if re.match(
+            r"^(?:an?|any|available)?\s*(?:app|application|tool|software)\s+(?:for|to)\b",
+            query,
+            flags=re.IGNORECASE,
+        ):
+            continue
         if query:
             return query
     return ""
@@ -17914,6 +17920,12 @@ def _foreground_find_query_hint(text: str) -> str:
         query = _clean_app_search_query(
             match.groupdict().get("query") or match.groupdict().get("query_en") or ""
         )
+        if re.match(
+            r"^(?:an?|any|available)?\s*(?:app|application|tool|software)\s+(?:for|to)\b",
+            query,
+            flags=re.IGNORECASE,
+        ):
+            continue
         if query:
             return query
     return ""
@@ -17963,6 +17975,13 @@ def _leading_app_search_hint(text: str) -> dict[str, str]:
 def _invalid_leading_app_search_match(value: str, app_name: str, query: str) -> bool:
     lowered = value.lower()
     normalized_query = str(query or "").strip().lower()
+    if re.match(
+        r"^(?:find|search|look\s+up|look)\s+(?:an?|any|available)?\s*"
+        r"(?:app|application|tool|software)\s+(?:for|to)\b",
+        lowered,
+        flags=re.IGNORECASE,
+    ):
+        return True
     if re.fullmatch(r"(?:please|can\s+you|could\s+you|would\s+you)", app_name, flags=re.IGNORECASE):
         return True
     if _looks_like_task_prefix_app_name(app_name):

@@ -14254,6 +14254,117 @@ def test_auto_discovered_app_compose_followup_types_and_verifies() -> None:
     ]
 
 
+def test_auto_discovered_app_search_followup_types_submits_and_verifies() -> None:
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.list_apps",
+            input_preview={"query": "image", "limit": 20},
+            result={
+                "ok": True,
+                "action": "desktop.list_apps",
+                "summary": "Found Figma",
+                "data": {
+                    "query": "image",
+                    "apps": [
+                        {
+                            "name": "Figma",
+                            "path": "/Applications/Figma.app",
+                            "match_score": 94,
+                        }
+                    ],
+                },
+            },
+        )
+    ]
+
+    requests = custom_api_agent_module._auto_discovered_app_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "image",
+                "target_action": "app_search",
+                "safe_shortcut_action": "find",
+                "app_search": {
+                    "query": "logo 模板",
+                    "target": "搜索",
+                    "submit": True,
+                    "verify": True,
+                },
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {},
+                },
+            }
+        },
+        [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+        timeline,
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Figma", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+            "input_resolution": {
+                "tool": "app.open_and_safe_shortcut",
+                "field": "app_name",
+                "requested_app_name": "image",
+                "resolved_app_name": "Figma",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/Figma.app",
+                "app_resolution_score": "94",
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "logo 模板"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+            "input_resolution": {
+                "tool": "desktop.safe_type_text",
+                "field": "app_name",
+                "requested_app_name": "image",
+                "resolved_app_name": "Figma",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/Figma.app",
+                "app_resolution_score": "94",
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+            "input_resolution": {
+                "tool": "desktop.search_submit",
+                "field": "app_name",
+                "requested_app_name": "image",
+                "resolved_app_name": "Figma",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/Figma.app",
+                "app_resolution_score": "94",
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+        },
+    ]
+
+
 def test_auto_discovered_app_generated_write_followup_returns_to_model() -> None:
     timeline = [
         _timeline(

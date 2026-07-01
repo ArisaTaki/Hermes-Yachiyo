@@ -54,6 +54,19 @@ def discovered_app_followup_target_can_direct_execute(
     target_action = str(target.get("target_action") or "").strip()
     if target_action == "safe_shortcut":
         can_prepare = _can_prepare_safe_shortcut(target, allowed)
+    elif target_action == "app_search":
+        if not _app_search_query(target):
+            return False
+        can_prepare = _can_prepare_safe_shortcut(target, allowed)
+        if not can_prepare:
+            return False
+        if not (
+            "desktop.safe_type_text" in allowed
+            or "app.focus_and_safe_type_text" in allowed
+        ):
+            return False
+        if _app_search_submit_requested(target) and "desktop.search_submit" not in allowed:
+            return False
     elif target_action in {"open_app", "open", "focus_app", "focus"}:
         can_prepare = "app.open" in allowed or "app.focus" in allowed
     elif target_action == "open_path_with_selected_app":
@@ -85,3 +98,18 @@ def _can_prepare_safe_shortcut(target: Mapping[str, Any], allowed: set[str]) -> 
             and "desktop.safe_shortcut" in allowed
         )
     )
+
+
+def _app_search_query(target: Mapping[str, Any]) -> str:
+    raw = target.get("app_search") if isinstance(target.get("app_search"), Mapping) else {}
+    return str(raw.get("query") or target.get("app_search_query") or "").strip()
+
+
+def _app_search_submit_requested(target: Mapping[str, Any]) -> bool:
+    raw = target.get("app_search") if isinstance(target.get("app_search"), Mapping) else {}
+    submit = raw.get("submit", target.get("app_search_submit"))
+    if isinstance(submit, bool):
+        return submit
+    if str(submit or "").strip().lower() in {"1", "true", "yes", "y"}:
+        return True
+    return bool(str(raw.get("submit_action") or target.get("app_search_submit_action") or "").strip())

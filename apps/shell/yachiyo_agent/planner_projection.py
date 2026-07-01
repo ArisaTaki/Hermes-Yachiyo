@@ -299,7 +299,10 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
     media_app_target = _media_app_playback_followup_target(inputs)
     if media_app_target:
         return media_app_target
-    desktop_discovered_app_target = _desktop_discovered_app_followup_target(inputs)
+    desktop_discovered_app_target = _desktop_discovered_app_followup_target(
+        inputs,
+        decision,
+    )
     if desktop_discovered_app_target:
         return desktop_discovered_app_target
     note_write_target = _note_write_followup_target(inputs)
@@ -563,7 +566,10 @@ def _discovered_app_write_followup_target(inputs: Mapping[str, Any]) -> dict[str
     return payload
 
 
-def _desktop_discovered_app_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:
+def _desktop_discovered_app_followup_target(
+    inputs: Mapping[str, Any],
+    decision: Any | None = None,
+) -> dict[str, Any]:
     desktop_discovery = inputs.get("desktop_discovery_hint")
     if not isinstance(desktop_discovery, Mapping):
         return {}
@@ -587,6 +593,16 @@ def _desktop_discovered_app_followup_target(inputs: Mapping[str, Any]) -> dict[s
         if action:
             payload["target_action"] = "safe_shortcut"
             payload["safe_shortcut_action"] = action
+    app_search = _desktop_discovered_app_search_payload(inputs, decision)
+    if app_search:
+        payload["target_action"] = "app_search"
+        payload["safe_shortcut_action"] = "find"
+        payload["app_search"] = app_search
+        if app_search.get("verify"):
+            payload["post_action_observation"] = {
+                "tool": "desktop.ui_elements",
+                "input": {},
+            }
     target_path = str(inputs.get("selected_app_target_path_hint") or "").strip()
     if target_path:
         payload["target_action"] = "open_path_with_selected_app"
@@ -624,6 +640,47 @@ def _desktop_discovered_app_followup_target(inputs: Mapping[str, Any]) -> dict[s
             },
         }
     return payload
+
+
+def _desktop_discovered_app_search_payload(
+    inputs: Mapping[str, Any],
+    decision: Any | None,
+) -> dict[str, Any]:
+    app_search = inputs.get("app_search_hint")
+    if not isinstance(app_search, Mapping):
+        return {}
+    query = str(app_search.get("query") or "").strip()
+    if not query:
+        return {}
+    payload: dict[str, Any] = {"query": query}
+    target = str(app_search.get("target") or "").strip()
+    if target:
+        payload["target"] = target
+    scope = str(app_search.get("scope") or "").strip()
+    if scope:
+        payload["scope"] = scope
+    if _decision_plan_has_step(decision, "submit-app-search"):
+        payload["submit"] = True
+    if _decision_plan_has_step(decision, "confirm-app-search-result"):
+        payload["submit"] = True
+        payload["submit_action"] = "confirm"
+    if _decision_plan_has_step(decision, "select-app-search-result-with-key"):
+        payload["select_result"] = "arrow_down"
+    if _decision_plan_has_step(decision, "verify-desktop-result"):
+        payload["verify"] = True
+    return payload
+
+
+def _decision_plan_has_step(decision: Any | None, step_id: str) -> bool:
+    plan = getattr(decision, "plan", None)
+    tool_plan = getattr(plan, "tool_plan", None)
+    steps = getattr(tool_plan, "steps", None)
+    if not isinstance(steps, Iterable) or isinstance(steps, (str, bytes)):
+        return False
+    expected = str(step_id or "").strip()
+    if not expected:
+        return False
+    return any(str(getattr(step, "step_id", "") or "").strip() == expected for step in steps)
 
 
 def _desktop_discovery_capability_hint(inputs: Mapping[str, Any]) -> Mapping[str, Any]:

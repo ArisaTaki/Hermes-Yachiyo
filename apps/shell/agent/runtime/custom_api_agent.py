@@ -4799,6 +4799,9 @@ def _model_followup_desktop_discovered_app_target_payload(
     body_source = str(target.get("body_source") or "").strip()
     if body_source and "body_source" not in payload:
         payload["body_source"] = body_source
+    app_search = _discovered_app_search_payload(target)
+    if app_search:
+        payload["app_search"] = app_search
     communication_compose = _discovered_app_communication_compose_payload(target)
     if communication_compose:
         payload["communication_compose"] = communication_compose
@@ -5058,6 +5061,43 @@ def _auto_discovered_app_followup_requests(
         )
         if open_request:
             requests.append(open_request)
+    elif target_action == "app_search":
+        app_search = _discovered_app_search_payload(target)
+        search_query = str(app_search.get("query") or "").strip()
+        if not search_query:
+            return []
+        requests.extend(
+            _discovered_app_safe_shortcut_requests(
+                app_query,
+                app_name,
+                safe_shortcut_action or "find",
+                allowed,
+                source=source,
+                planning_reason=planning_reason,
+            )
+        )
+        if not requests:
+            return []
+        type_request = _discovered_app_type_text_request(
+            app_query,
+            app_name,
+            search_query,
+            allowed,
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if not type_request:
+            return []
+        requests.append(_with_discovered_app_resolution(type_request, app_query, app_name))
+        if _discovered_app_search_submit_requested(app_search):
+            submit_request = _media_search_submit_request(
+                allowed,
+                source=source,
+                planning_reason=planning_reason,
+            )
+            if not submit_request:
+                return []
+            requests.append(_with_discovered_app_resolution(submit_request, app_query, app_name))
     communication_compose = _discovered_app_communication_compose_payload(target)
     if communication_compose:
         compose_requests = _discovered_app_communication_compose_requests(
@@ -5451,6 +5491,38 @@ def _discovered_app_communication_compose_payload(
         return {}
     payload.setdefault("send_action", "draft")
     return payload
+
+
+def _discovered_app_search_payload(target: Mapping[str, Any]) -> dict[str, Any]:
+    raw = target.get("app_search") if isinstance(target.get("app_search"), Mapping) else {}
+    query = str(raw.get("query") or target.get("app_search_query") or "").strip()
+    if not query:
+        return {}
+    payload: dict[str, Any] = {"query": query}
+    for key in ("target", "scope", "submit_action", "select_result"):
+        value = str(raw.get(key) or target.get(f"app_search_{key}") or "").strip()
+        if value:
+            payload[key] = value
+    submit = raw.get("submit", target.get("app_search_submit"))
+    if isinstance(submit, bool):
+        payload["submit"] = submit
+    elif str(submit or "").strip().lower() in {"1", "true", "yes", "y"}:
+        payload["submit"] = True
+    verify = raw.get("verify", target.get("app_search_verify"))
+    if isinstance(verify, bool):
+        payload["verify"] = verify
+    elif str(verify or "").strip().lower() in {"1", "true", "yes", "y"}:
+        payload["verify"] = True
+    return payload
+
+
+def _discovered_app_search_submit_requested(app_search: Mapping[str, Any]) -> bool:
+    submit = app_search.get("submit")
+    if isinstance(submit, bool):
+        return submit
+    if str(submit or "").strip().lower() in {"1", "true", "yes", "y"}:
+        return True
+    return bool(str(app_search.get("submit_action") or "").strip())
 
 
 def _discovered_app_communication_compose_requests(
@@ -5895,6 +5967,22 @@ def _model_followup_desktop_discovered_app_instruction(target: Mapping[str, Any]
         if verify_tools
         else ""
     )
+    app_search = _discovered_app_search_payload(target)
+    if app_search:
+        search_query = str(app_search.get("query") or "").strip()
+        submit_text = (
+            " submit the search with desktop.search_submit,"
+            if _discovered_app_search_submit_requested(app_search)
+            else ""
+        )
+        return (
+            f"The runtime discovered an app for {app_query!r}. Continue by using desktop "
+            "tools to focus the discovered app's search field, type the explicit user "
+            f"search query {search_query!r},{submit_text} and then continue from the observed "
+            f"result. Prefer {tool_text}.{verify_text} If search-field focus or text input "
+            "tools are unavailable, explain the missing capability instead of claiming the "
+            "app search was completed. "
+        )
     communication_compose = (
         target.get("communication_compose")
         if isinstance(target.get("communication_compose"), Mapping)

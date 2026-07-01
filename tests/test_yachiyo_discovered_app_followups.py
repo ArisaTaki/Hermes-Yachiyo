@@ -57,6 +57,36 @@ def test_discovered_app_followup_allows_safe_shortcut_with_preparation_tool() ->
     )
 
 
+def test_discovered_app_followup_allows_explicit_app_search() -> None:
+    target = _target(
+        target_action="app_search",
+        safe_shortcut_action="find",
+        app_search={"query": "logo 模板", "submit": True},
+    )
+
+    assert discovered_app_followup_target_can_direct_execute(
+        target,
+        [
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ],
+    )
+    assert not discovered_app_followup_target_can_direct_execute(
+        target,
+        ["app.open", "desktop.safe_shortcut", "desktop.safe_type_text"],
+    )
+    assert not discovered_app_followup_target_can_direct_execute(
+        _target(
+            target_action="app_search",
+            safe_shortcut_action="find",
+            app_search={"query": "logo 模板"},
+        ),
+        ["app.open", "desktop.safe_shortcut"],
+    )
+
+
 def test_discovered_app_followup_rejects_model_required_or_risky_targets() -> None:
     assert not discovered_app_followup_target_can_direct_execute(
         _target(creative_canvas={"kind": "image_edit"}),

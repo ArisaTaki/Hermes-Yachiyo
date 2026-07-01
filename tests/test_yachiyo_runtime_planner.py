@@ -2137,6 +2137,51 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         },
     }
 
+    search_prompt = "帮我打开一个设计工具，搜索 logo 模板"
+    search_allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    search_decision = RuntimePlanner().decision(
+        search_prompt,
+        allowed_tools=search_allowed_tools,
+    )
+    search_requests = planner_tool_requests(search_prompt, search_allowed_tools)
+    search_payload = planner_selection_payload(
+        decision=search_decision,
+        planner_requests=search_requests,
+        legacy_requests=[],
+        selected_requests=search_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert search_payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "image",
+        "app_name_source": "desktop.list_apps",
+        "capability_description": "设计",
+        "target_action": "app_search",
+        "safe_shortcut_action": "find",
+        "app_search": {
+            "query": "logo 模板",
+            "target": "搜索",
+            "submit": True,
+            "verify": True,
+        },
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
+    }
+    assert runtime_planner_metadata(search_decision)["yachiyo_followup_target"] == (
+        search_payload["followup_target"]
+    )
+
     spreadsheet_prompt = "用任意可用的表格应用创建预算表，输入 Q1 budget，然后确认"
     spreadsheet_allowed_tools = [
         "desktop.list_apps",
