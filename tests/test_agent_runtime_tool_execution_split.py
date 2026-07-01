@@ -290,6 +290,11 @@ def test_runtime_tool_call_executor_preserves_planner_trace_on_tool_call_events(
     )
 
     assert result["ok"] is True
+    assert timeline[0]["event"] == "agent.tool.started"
+    assert timeline[0]["status"] == "running"
+    assert timeline[0]["step_id"] == "inspect-data-source"
+    assert timeline[0]["capability_id"] == "file.workspace_read"
+    assert timeline[0]["replan_request_id"] == "replan-1"
     assert timeline[-1]["event"] == "agent.tool.call"
     assert timeline[-1]["step_id"] == "inspect-data-source"
     assert timeline[-1]["capability_id"] == "file.workspace_read"

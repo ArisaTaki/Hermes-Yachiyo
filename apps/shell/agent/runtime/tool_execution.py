@@ -426,6 +426,15 @@ class RuntimeToolCallExecutor:
             approved=approved,
             trace=trace_payload,
         )
+        timeline.append(
+            self._timeline(
+                "agent.tool.started",
+                tool_name,
+                input_preview=input_preview,
+                status="running",
+                **trace_payload,
+            )
+        )
         try:
             tool_result = broker.call(tool_name, payload, approved=approved)
         except AgentRuntimeError as exc:

@@ -222,7 +222,7 @@ def _runtime_progress_from_event(
     }:
         return {
             "todo_status": "in_progress",
-            "checkpoint_status": "planned",
+            "checkpoint_status": "ready",
             "runtime_status": status or "in_progress",
             "event_type": event_name,
         }

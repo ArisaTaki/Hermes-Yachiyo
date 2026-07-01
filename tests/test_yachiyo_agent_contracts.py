@@ -753,6 +753,12 @@ def test_agent_task_snapshot_updates_task_core_progress_from_runtime_events() ->
                 "step_id": "write-report",
                 "tool_name": "artifact.write",
             },
+            {
+                "todo_id": "todo-3",
+                "title": "Format report",
+                "step_id": "format-report",
+                "tool_name": "terminal.run",
+            },
         ],
         "checkpoints": [
             {
@@ -764,6 +770,11 @@ def test_agent_task_snapshot_updates_task_core_progress_from_runtime_events() ->
                 "checkpoint_id": "checkpoint-2",
                 "title": "Verify write",
                 "after_step_id": "write-report",
+            },
+            {
+                "checkpoint_id": "checkpoint-3",
+                "title": "Verify format",
+                "after_step_id": "format-report",
             },
         ],
         "replan_signals": [],
@@ -794,6 +805,14 @@ def test_agent_task_snapshot_updates_task_core_progress_from_runtime_events() ->
                         "status": "approval_required",
                     },
                 },
+                {
+                    "event_type": "agent.tool.started",
+                    "payload": {
+                        "step_id": "format-report",
+                        "tool": "terminal.run",
+                        "status": "running",
+                    },
+                },
             ],
         }
     )
@@ -802,11 +821,16 @@ def test_agent_task_snapshot_updates_task_core_progress_from_runtime_events() ->
     assert [todo.status for todo in snapshot.task_core.todos] == [
         "completed",
         "blocked",
+        "in_progress",
     ]
     assert snapshot.task_core.todos[0].metadata["runtime_status"] == "completed"
+    assert snapshot.task_core.todos[2].metadata["runtime_event_type"] == (
+        "agent.tool.started"
+    )
     assert [checkpoint.status for checkpoint in snapshot.task_core.checkpoints] == [
         "completed",
         "waiting_approval",
+        "ready",
     ]
     assert snapshot.task_core.checkpoints[1].payload["runtime_event_type"] == (
         "agent.tool.approval_required"
