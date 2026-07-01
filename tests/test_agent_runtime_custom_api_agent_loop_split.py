@@ -1589,12 +1589,25 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
     checkpoint_events = [
         event for event in timeline if event["event"] == "agent.task.checkpoint.updated"
     ]
-    assert todo_events[0]["step_id"] == "analyze-data-file"
-    assert todo_events[0]["status"] == "blocked"
-    assert todo_events[0]["todo"]["status"] == "blocked"
-    assert checkpoint_events[0]["step_id"] == "analyze-data-file"
-    assert checkpoint_events[0]["status"] == "blocked"
-    assert "unsupported chart type" in checkpoint_events[0]["result_preview"]["error"]
+    initial_todo = [
+        event
+        for event in todo_events
+        if event["step_id"] == "analyze-data-file" and event["status"] == "pending"
+    ][0]
+    blocked_todo = [
+        event
+        for event in todo_events
+        if event["step_id"] == "analyze-data-file" and event["status"] == "blocked"
+    ][0]
+    blocked_checkpoint = [
+        event
+        for event in checkpoint_events
+        if event["step_id"] == "analyze-data-file" and event["status"] == "blocked"
+    ][0]
+    assert initial_todo["previous_status"] == ""
+    assert initial_todo["todo"]["status"] == "pending"
+    assert blocked_todo["todo"]["status"] == "blocked"
+    assert "unsupported chart type" in blocked_checkpoint["result_preview"]["error"]
     replan_context = [
         event
         for event in timeline
@@ -14573,17 +14586,25 @@ def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rul
     checkpoint_events = [
         event for event in timeline if event["event"] == "agent.task.checkpoint.updated"
     ]
-    assert [event["step_id"] for event in todo_events] == [
+    planned_todos = [event for event in todo_events if event["status"] == "pending"]
+    completed_todos = [event for event in todo_events if event["status"] == "completed"]
+    completed_checkpoints = [
+        event for event in checkpoint_events if event["status"] == "completed"
+    ]
+    assert [event["step_id"] for event in planned_todos] == [
         "open-or-focus-app",
         "operate-foreground-ui",
     ]
-    assert [event["status"] for event in todo_events] == ["completed", "completed"]
-    assert [event["status"] for event in checkpoint_events] == [
+    assert [event["step_id"] for event in completed_todos] == [
+        "open-or-focus-app",
+        "operate-foreground-ui",
+    ]
+    assert [event["status"] for event in completed_checkpoints] == [
         "completed",
         "completed",
     ]
-    assert todo_events[0]["todo"]["status"] == "completed"
-    assert checkpoint_events[1]["checkpoint"]["status"] == "completed"
+    assert completed_todos[0]["todo"]["status"] == "completed"
+    assert completed_checkpoints[1]["checkpoint"]["status"] == "completed"
     assert any(
         event_type == "agent.task.todo.updated"
         and payload["step_id"] == "operate-foreground-ui"

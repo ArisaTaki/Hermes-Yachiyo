@@ -1245,6 +1245,25 @@ class RuntimeCustomApiAgentLoop:
         if run_id and self._append_run_event is not None:
             for event_type, payload in planner_run_event_payloads(decision):
                 self._append_run_event(run_id, event_type, payload)
+        self._record_runtime_planner_initial_task_events(
+            decision,
+            timeline=timeline,
+            run_id=run_id,
+        )
+
+    def _record_runtime_planner_initial_task_events(
+        self,
+        decision: Any,
+        *,
+        timeline: list[dict[str, Any]],
+        run_id: str = "",
+    ) -> None:
+        for event_type, detail, payload in _runtime_planner_initial_task_updates(decision):
+            if _runtime_task_update_exists(timeline, event_type, payload):
+                continue
+            timeline.append(self._timeline(event_type, detail, **payload))
+            if run_id and self._append_run_event is not None:
+                self._append_run_event(run_id, event_type, payload)
 
     def _record_direct_tool_selection_event(
         self,
@@ -4208,6 +4227,155 @@ def _task_progress_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
     if stderr:
         preview["stderr"] = stderr[:500]
     return preview
+
+
+def _runtime_planner_initial_task_updates(
+    decision: Any,
+) -> list[tuple[str, str, dict[str, Any]]]:
+    plan = getattr(decision, "plan", None)
+    task_core = getattr(plan, "task_core", None)
+    tool_plan = getattr(plan, "tool_plan", None)
+    if task_core is None or tool_plan is None:
+        return []
+
+    steps_by_id = {
+        str(getattr(step, "step_id", "") or "").strip(): step
+        for step in list(getattr(tool_plan, "steps", []) or [])
+        if str(getattr(step, "step_id", "") or "").strip()
+    }
+    core_id = str(getattr(task_core, "core_id", "") or "").strip()
+    workspace = getattr(task_core, "workspace", None)
+    workspace_id = str(getattr(workspace, "workspace_id", "") or "").strip()
+    plan_id = str(getattr(plan, "plan_id", "") or "").strip()
+    decision_id = str(getattr(decision, "decision_id", "") or "").strip()
+    source_event = {"event": "agent.plan.created", "detail": "runtime_plan_created"}
+    events: list[tuple[str, str, dict[str, Any]]] = []
+
+    for todo in list(getattr(task_core, "todos", []) or []):
+        step_id = str(getattr(todo, "step_id", "") or "").strip()
+        step = steps_by_id.get(step_id)
+        tool_name = str(
+            getattr(step, "tool_name", "")
+            or getattr(todo, "tool_name", "")
+            or ""
+        ).strip()
+        status = str(getattr(todo, "status", "") or "pending").strip()
+        todo_payload = _snapshot_payload(todo)
+        todo_payload["status"] = status
+        payload = {
+            "source": "runtime_planner",
+            "core_id": core_id,
+            "workspace_id": workspace_id,
+            "decision_id": decision_id,
+            "plan_id": plan_id,
+            "step_id": step_id,
+            "tool": tool_name,
+            "todo_id": str(getattr(todo, "todo_id", "") or "").strip(),
+            "status": status,
+            "previous_status": "",
+            "source_event": source_event,
+            "result_preview": {},
+            "todo": todo_payload,
+        }
+        events.append(
+            (
+                "agent.task.todo.updated",
+                str(getattr(todo, "title", "") or step_id),
+                payload,
+            )
+        )
+
+    for checkpoint in list(getattr(task_core, "checkpoints", []) or []):
+        step_id = str(getattr(checkpoint, "after_step_id", "") or "").strip()
+        step = steps_by_id.get(step_id)
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        status = str(getattr(checkpoint, "status", "") or "planned").strip()
+        checkpoint_payload = _snapshot_payload(checkpoint)
+        checkpoint_payload["status"] = status
+        payload = {
+            "source": "runtime_planner",
+            "core_id": core_id,
+            "workspace_id": workspace_id,
+            "decision_id": decision_id,
+            "plan_id": plan_id,
+            "step_id": step_id,
+            "tool": tool_name,
+            "checkpoint_id": str(getattr(checkpoint, "checkpoint_id", "") or "").strip(),
+            "status": status,
+            "previous_status": "",
+            "source_event": source_event,
+            "result_preview": {},
+            "checkpoint": checkpoint_payload,
+        }
+        events.append(
+            (
+                "agent.task.checkpoint.updated",
+                str(getattr(checkpoint, "title", "") or step_id),
+                payload,
+            )
+        )
+    return events
+
+
+def _runtime_task_update_exists(
+    timeline: list[dict[str, Any]],
+    event_type: str,
+    payload: Mapping[str, Any],
+) -> bool:
+    identity_key = (
+        "todo_id"
+        if event_type == "agent.task.todo.updated"
+        else "checkpoint_id"
+        if event_type == "agent.task.checkpoint.updated"
+        else ""
+    )
+    identity = str(payload.get(identity_key) or "").strip() if identity_key else ""
+    status = str(payload.get("status") or "").strip()
+    decision_id = str(payload.get("decision_id") or "").strip()
+    return any(
+        isinstance(event, dict)
+        and str(event.get("event") or "").strip() == event_type
+        and (
+            not decision_id
+            or str(event.get("decision_id") or "").strip() == decision_id
+            or str(
+                (
+                    event.get("payload")
+                    if isinstance(event.get("payload"), dict)
+                    else {}
+                ).get("decision_id")
+                or ""
+            ).strip()
+            == decision_id
+        )
+        and (
+            not identity
+            or str(event.get(identity_key) or "").strip() == identity
+            or str(
+                (
+                    event.get("payload")
+                    if isinstance(event.get("payload"), dict)
+                    else {}
+                ).get(identity_key)
+                or ""
+            ).strip()
+            == identity
+        )
+        and (
+            not status
+            or str(event.get("status") or "").strip() == status
+            or str(
+                (
+                    event.get("payload")
+                    if isinstance(event.get("payload"), dict)
+                    else {}
+                ).get("status")
+                or ""
+            ).strip()
+            == status
+        )
+        for event in timeline
+    )
 
 
 def _snapshot_payload(snapshot: Any) -> dict[str, Any]:
