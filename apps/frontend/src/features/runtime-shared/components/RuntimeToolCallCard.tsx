@@ -43,6 +43,7 @@ export type RuntimeToolCallCardSnapshot = {
   risk_level?: string | null;
   input_preview?: Record<string, unknown>;
   output_preview?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   approval_id?: string | null;
 };
 
@@ -221,6 +222,9 @@ export function RuntimeToolCallCard({
 }
 
 function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ label: string; value: string }> {
+  const metadata = approvalPreviewRecord(toolCall.metadata);
+  const actionTarget = approvalPreviewRecord(metadata.action_target);
+  const observationEvidence = approvalPreviewRecord(metadata.observation_evidence);
   return [
     { label: 'run', value: toolCall.run_id || '' },
     { label: 'source', value: toolCall.source_run_id || '' },
@@ -231,7 +235,33 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
     { label: 'capability', value: toolCall.capability_id || '' },
     { label: 'step', value: toolCall.step_id || toolCall.planner_step_id || '' },
     { label: 'replan', value: toolCall.replan_request_id || toolCall.replan_trigger || '' },
+    { label: 'action', value: observedActionTargetSummary(actionTarget) },
+    { label: 'observed', value: observedActionEvidenceSummary(observationEvidence) },
   ].filter((item) => item.value);
+}
+
+function observedActionTargetSummary(value: Record<string, unknown>): string {
+  const action = stringValue(value.action);
+  const target = stringValue(value.target);
+  const roleFilter = stringValue(value.role_filter);
+  if (!action && !target) return '';
+  return [action, target, roleFilter ? `role ${roleFilter}` : '']
+    .filter(Boolean)
+    .join(' · ');
+}
+
+function observedActionEvidenceSummary(value: Record<string, unknown>): string {
+  const sourceTool = stringValue(value.source_tool);
+  const strategy = stringValue(value.strategy);
+  const center = approvalPreviewRecord(value.center);
+  const x = stringValue(center.x);
+  const y = stringValue(center.y);
+  const centerText = x && y ? `center ${x},${y}` : '';
+  return [sourceTool, strategy, centerText].filter(Boolean).join(' · ');
+}
+
+function stringValue(value: unknown): string {
+  return String(value || '').trim();
 }
 
 function formatToolPreview(value: Record<string, unknown>): string {
