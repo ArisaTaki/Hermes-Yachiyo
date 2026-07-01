@@ -14592,6 +14592,36 @@ def test_custom_api_agent_loop_preserves_discovered_app_compose_remaining_reques
     assert remaining_requests[2]["input"] == {"action": "send"}
     assert remaining_requests[1]["source"] == "runtime_planner"
     assert remaining_requests[1]["planning_reason"] == "planner_discovered_app_followup"
+    completed_todos = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["status"] == "completed"
+    ]
+    assert [event["step_id"] for event in completed_todos] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "inspect-selected-communication-compose-ui",
+    ]
+    blocked_todos = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["status"] == "blocked"
+    ]
+    assert [event["step_id"] for event in blocked_todos] == [
+        "fill-selected-communication-recipient"
+    ]
+    waiting_checkpoints = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event["status"] == "waiting_approval"
+        and event.get("source_event", {}).get("event") == "agent.tool.call"
+    ]
+    assert [event["step_id"] for event in waiting_checkpoints] == [
+        "fill-selected-communication-recipient"
+    ]
     approval_events = [
         event for event in timeline if event["event"] == "agent.desktop.intent_approval_required"
     ]

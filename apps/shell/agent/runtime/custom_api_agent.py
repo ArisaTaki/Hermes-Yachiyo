@@ -354,6 +354,12 @@ class RuntimeCustomApiAgentLoop:
                         budget=budget,
                     )
                 except AgentApprovalRequired as exc:
+                    self._record_runtime_planner_task_progress_events(
+                        runtime_planner_decision,
+                        timeline=timeline,
+                        tool_timeline_start=tool_timeline_start,
+                        run_id=run_id,
+                    )
                     pending_approval = (
                         exc.pending_approval if isinstance(exc.pending_approval, dict) else {}
                     )
@@ -457,6 +463,12 @@ class RuntimeCustomApiAgentLoop:
                                 budget=budget,
                             )
                         except AgentApprovalRequired as exc:
+                            self._record_runtime_planner_task_progress_events(
+                                runtime_planner_decision,
+                                timeline=timeline,
+                                tool_timeline_start=auto_tool_timeline_start,
+                                run_id=run_id,
+                            )
                             pending_approval = (
                                 exc.pending_approval
                                 if isinstance(exc.pending_approval, dict)
@@ -618,6 +630,12 @@ class RuntimeCustomApiAgentLoop:
                                 run_id=run_id,
                             )
                         except AgentApprovalRequired as exc:
+                            self._record_runtime_planner_task_progress_events(
+                                runtime_planner_decision,
+                                timeline=timeline,
+                                tool_timeline_start=auto_tool_timeline_start,
+                                run_id=run_id,
+                            )
                             pending_approval = (
                                 exc.pending_approval
                                 if isinstance(exc.pending_approval, dict)
