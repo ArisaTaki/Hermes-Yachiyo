@@ -15562,6 +15562,195 @@ def test_auto_discovered_app_generated_write_followup_returns_to_model() -> None
     ]
 
 
+def test_custom_api_agent_loop_auto_dispatches_creative_pending_steps(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_tool_requests",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_candidates",
+        lambda *_args, **_kwargs: [],
+    )
+    budget = FakeBudget()
+    tool_runs: list[list[dict[str, Any]]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "desktop.click_ui_element",
+        "desktop.shortcut",
+        "screen.capture",
+    ]
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append([dict(request) for request in tool_requests])
+        for request in tool_requests:
+            tool = str(request.get("tool") or "")
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if tool == "desktop.list_apps":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Found Pixelmator Pro",
+                    "data": {
+                        "query": "image",
+                        "best_match": {
+                            "name": "Pixelmator Pro",
+                            "path": "/Applications/Pixelmator Pro.app",
+                            "match_score": 96,
+                            "match_confidence": "high",
+                        },
+                    },
+                }
+            elif tool == "app.open":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Opened Pixelmator Pro",
+                    "data": {"app_name": payload.get("app_name")},
+                }
+            elif tool == "desktop.ui_elements":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "data": {
+                        "elements": [
+                            {"role": "button", "name": "Circle"},
+                            {"role": "button", "name": "Save"},
+                        ],
+                        "count": 2,
+                    },
+                }
+            elif tool == "desktop.click_ui_element":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "data": {"target": payload.get("target")},
+                }
+            elif tool == "desktop.shortcut":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "data": {
+                        "key": payload.get("key"),
+                        "modifiers": payload.get("modifiers"),
+                    },
+                }
+            elif tool == "screen.capture":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "data": {"path": "artifacts/creative-result.png"},
+                }
+            else:
+                raise AssertionError(f"unexpected tool: {tool}")
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool,
+                    input_preview=payload,
+                    result=result,
+                )
+            )
+            messages_arg.append(
+                {
+                    "role": "user",
+                    "content": f"Tool result for {tool}: {result}",
+                }
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": allowed_tools},
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda tools: [{"name": tool} for tool in tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use runtime planner for desktop actions.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": "继续执行剩余桌面计划。"},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "打开一个能画图的应用，画一个圆并保存到桌面",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-creative-followup",
+    )
+
+    assert [request["tool"] for request in tool_runs[0]] == ["desktop.list_apps"]
+    assert [request["tool"] for request in tool_runs[1]] == [
+        "app.open",
+        "desktop.ui_elements",
+    ]
+    assert [request["tool"] for request in tool_runs[2]] == [
+        "desktop.click_ui_element",
+        "desktop.shortcut",
+        "screen.capture",
+    ]
+    assert tool_runs[2][0]["input"] == {
+        "target": "circle ellipse shape",
+        "role_filter": "button",
+        "limit": 80,
+        "click_count": 1,
+    }
+    assert tool_runs[2][1]["input"] == {"key": "s", "modifiers": ["command"]}
+    assert "Command+S" in str(result)
+    assert len(model_calls) == 1
+    assert "Continue the pending Runtime Plan steps in order" in model_calls[0][-1]["content"]
+    completed_todos = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["status"] == "completed"
+    ]
+    assert [event["step_id"] for event in completed_todos] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "observe-selected-discovered-app",
+        "select-discovered-app-circle-tool",
+        "save-discovered-app-creative-result",
+        "verify-discovered-app-creative-result",
+    ]
+
+
 def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> None:
     budget = FakeBudget()
     tool_runs: list[list[dict[str, Any]]] = []

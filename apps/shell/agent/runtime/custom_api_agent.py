@@ -2457,7 +2457,7 @@ class RuntimeCustomApiAgentLoop:
                 return _click_ui_element_summary(result, planned_input) or result_summary or "已点击前台控件。"
             if tool_name == "desktop.type_into_ui_element":
                 return _type_into_ui_element_summary(result, planned_input) or result_summary or "已填写前台控件。"
-            if tool_name == "desktop.hotkey":
+            if tool_name in {"desktop.hotkey", "desktop.shortcut"}:
                 hotkey = _hotkey_text(result, planned_input)
                 return f"已发送快捷键：{hotkey}。" if hotkey else (result_summary or "已发送快捷键。")
             if tool_name == "desktop.submit_foreground":
