@@ -33,6 +33,7 @@ from apps.shell.agent.tools.policy import (
     DAILY_BROWSER_TOOL_NAMES,
     DAILY_DESKTOP_TOOL_NAMES,
 )
+from apps.shell.yachiyo_agent.app_name_hints import compact_app_name_hint
 from apps.shell.yachiyo_agent.desktop_plan_hints import hotkey_hint
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     DirectToolSelection,
@@ -4986,6 +4987,16 @@ def _runtime_planner_completed_discovered_app_direct_action(
     if not completed_action_indexes:
         return False
     first_completed_action_index = min(completed_action_indexes)
+    completed_action_request = next(
+        request
+        for index, request in indexed_action_requests
+        if index == first_completed_action_index
+    )
+    expected_app_name = _expected_app_name_for_discovered_app_direct_action(
+        completed_action_request,
+        timeline,
+        tool_timeline_start=tool_timeline_start,
+    )
     verification_requests = [
         request
         for index, request in enumerate(requests)
@@ -4996,8 +5007,9 @@ def _runtime_planner_completed_discovered_app_direct_action(
     if not verification_requests:
         return True
     return all(
-        _runtime_planner_tool_request_completed(
+        _runtime_planner_verification_request_completed(
             request,
+            expected_app_name,
             timeline,
             tool_timeline_start=tool_timeline_start,
         )
@@ -5051,6 +5063,80 @@ def _runtime_planner_tool_request_completed(
             continue
         result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
         if result.get("ok") is True and not result.get("approval_required"):
+            return True
+    return False
+
+
+def _expected_app_name_for_discovered_app_direct_action(
+    request: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> str:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    resolution = (
+        request.get("input_resolution")
+        if isinstance(request.get("input_resolution"), Mapping)
+        else {}
+    )
+    resolved_app = str(resolution.get("resolved_app_name") or "").strip()
+    if resolved_app:
+        return resolved_app
+    raw_app = str(payload.get("app_name") or "").strip()
+    selection_source = str(payload.get("selection_source") or "").strip()
+    query = str(payload.get("query") or "").strip()
+    if selection_source == "desktop.list_apps" and query:
+        discovered = _discovered_app_name_for_query(timeline[tool_timeline_start:], query)
+        if discovered:
+            return discovered
+    if raw_app and raw_app != "<selected app from desktop.list_apps>":
+        return raw_app
+    tool_name = str(request.get("tool") or "").strip()
+    for event in timeline[tool_timeline_start:]:
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        if str(event.get("detail") or "").strip() != tool_name:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+        event_app = str(data.get("app_name") or "").strip()
+        if event_app:
+            return event_app
+    return ""
+
+
+def _runtime_planner_verification_request_completed(
+    request: Mapping[str, Any],
+    expected_app_name: str,
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name != "desktop.active_window" or not str(expected_app_name or "").strip():
+        return _runtime_planner_tool_request_completed(
+            request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        )
+    expected_compact = compact_app_name_hint(expected_app_name)
+    if not expected_compact:
+        return _runtime_planner_tool_request_completed(
+            request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        )
+    for event in timeline[tool_timeline_start:]:
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        if str(event.get("detail") or "").strip() != tool_name:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is not True or result.get("approval_required"):
+            continue
+        data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+        active_app = str(data.get("app_name") or "").strip()
+        if active_app and compact_app_name_hint(active_app) == expected_compact:
             return True
     return False
 

@@ -15454,7 +15454,26 @@ def test_discovered_app_direct_completion_requires_planned_verification() -> Non
             "agent.tool.call",
             "desktop.list_apps",
             input_preview={"query": "browser", "limit": 20},
-            result={"ok": True},
+            result={
+                "ok": True,
+                "data": {
+                    "query": "browser",
+                    "apps": [
+                        {
+                            "name": "Safari",
+                            "path": "/Applications/Safari.app",
+                            "match_score": 93,
+                            "match_confidence": "high",
+                        }
+                    ],
+                    "best_match": {
+                        "name": "Safari",
+                        "path": "/Applications/Safari.app",
+                        "match_score": 93,
+                        "match_confidence": "high",
+                    },
+                },
+            },
         ),
         _timeline(
             "agent.tool.call",
@@ -15466,7 +15485,7 @@ def test_discovered_app_direct_completion_requires_planned_verification() -> Non
             "agent.tool.call",
             "desktop.active_window",
             input_preview={},
-            result={"ok": False, "error": "Safari is not foreground"},
+            result={"ok": True, "data": {"app_name": "Chrome", "title": "Search"}},
         ),
     ]
 
@@ -15484,7 +15503,7 @@ def test_discovered_app_direct_completion_requires_planned_verification() -> Non
         "agent.tool.call",
         "desktop.active_window",
         input_preview={},
-        result={"ok": True},
+        result={"ok": True, "data": {"app_name": "Safari", "title": "Start Page"}},
     )
     assert (
         custom_api_agent_module._runtime_planner_completed_discovered_app_direct_action(
