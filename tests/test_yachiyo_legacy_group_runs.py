@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from apps.shell.yachiyo_agent.legacy_group_runs import (
+    _group_run_planner_event_type,
     group_member_orchestration_context,
     group_orchestration_plan,
     group_run_orchestration_context,
@@ -94,3 +95,15 @@ def test_legacy_group_run_status_and_summary_project_from_child_runs() -> None:
     assert group_run_status_from_child_runs(
         [{"status": "waiting_approval"}, {"status": "completed"}]
     ) == "approval_required"
+
+
+def test_legacy_group_run_scopes_replan_planner_events() -> None:
+    assert _group_run_planner_event_type("agent.replan.requested") == (
+        "group.run.replan.requested"
+    )
+    assert _group_run_planner_event_type("agent.task.todo.updated") == (
+        "group.run.task.todo.updated"
+    )
+    assert _group_run_planner_event_type("agent.task.checkpoint.updated") == (
+        "group.run.task.checkpoint.updated"
+    )
