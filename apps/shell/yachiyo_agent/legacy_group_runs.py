@@ -346,6 +346,10 @@ def _group_run_planner_event_type(event_type: str) -> str:
         return "group.run.plan.created"
     if event_type == "agent.plan.step":
         return "group.run.plan.step"
+    if event_type == "agent.task.todo.updated":
+        return "group.run.task.todo.updated"
+    if event_type == "agent.task.checkpoint.updated":
+        return "group.run.task.checkpoint.updated"
     return "group.run.planner_event"
 
 

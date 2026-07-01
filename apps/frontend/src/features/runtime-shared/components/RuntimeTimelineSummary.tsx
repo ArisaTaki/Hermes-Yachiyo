@@ -152,8 +152,8 @@ function runtimeTimelineEventTypeLabel(type: string): string {
   if (type === 'agent.intent.selected' || type === 'group.run.intent.selected') return 'Intent 识别';
   if (type === 'agent.plan.created' || type === 'group.run.plan.created') return 'Planner 计划';
   if (type === 'agent.plan.step' || type === 'group.run.plan.step') return '计划步骤';
-  if (type === 'agent.task.todo.updated') return 'Task Todo';
-  if (type === 'agent.task.checkpoint.updated') return 'Task Checkpoint';
+  if (type === 'agent.task.todo.updated' || type === 'group.run.task.todo.updated') return 'Task Todo';
+  if (type === 'agent.task.checkpoint.updated' || type === 'group.run.task.checkpoint.updated') return 'Task Checkpoint';
   if (type === 'tool.requested') return '工具请求';
   if (type === 'agent.tool.policy_decision' || type === 'tool.policy_decision') return '工具策略决策';
   if (type === 'agent.tool.input_resolved') return '工具输入解析';

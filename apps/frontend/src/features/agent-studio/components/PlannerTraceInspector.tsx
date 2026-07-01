@@ -1053,6 +1053,8 @@ function runtimePlannerEventType(eventType: string): string {
   if (eventType === 'group.run.plan.created') return 'agent.plan.created';
   if (eventType === 'group.run.plan.step') return 'agent.plan.step';
   if (eventType === 'group.run.plan.selection') return 'agent.plan.selection';
+  if (eventType === 'group.run.task.todo.updated') return 'agent.task.todo.updated';
+  if (eventType === 'group.run.task.checkpoint.updated') return 'agent.task.checkpoint.updated';
   return '';
 }
 
