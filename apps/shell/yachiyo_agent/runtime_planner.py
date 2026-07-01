@@ -1172,13 +1172,9 @@ class TaskIntentRouter:
             return _empty_intent("media_playback", text)
         target_app_capability = _media_playback_target_app_capability_hint(text)
         if target_app_capability and hint.get("action") == "play" and hint.get("query"):
-            capability_query = _media_playback_capability_query_hint(text)
-            if not capability_query:
-                return _empty_intent("media_playback", text)
             hint = {
                 **hint,
                 "app_name": "",
-                "query": capability_query,
                 "target_app_capability_hint": target_app_capability,
             }
         return TaskIntentSnapshot(
@@ -4566,6 +4562,16 @@ class RuntimePlanner:
                         "Open or focus the requested media app before searching because "
                         "the generic media playback tool cannot search for a specific query."
                     )
+                elif tool_name in {
+                    "app.open_and_click_ui_element",
+                    "app.focus_and_click_ui_element",
+                    "desktop.click_ui_element",
+                }:
+                    step_id = "play-media-search-result"
+                    title = "Play media search result"
+                    capability_id = "desktop.ui_operation"
+                    action = "click"
+                    reason = "Click the first visible media search result when no dedicated playback tool is available."
                 elif tool_name.startswith("app."):
                     step_id = "focus-media-app-search"
                     title = "Focus media app search"
@@ -7476,6 +7482,14 @@ def _default_communication_app_for_channel(
     return "Mail"
 
 
+def _generic_communication_app_query_for_channel(channel: str) -> str:
+    if channel == "email":
+        return "email"
+    if channel in {"message", "chat"}:
+        return "chat"
+    return ""
+
+
 def _communication_desktop_compose_tools_available(
     mode: str,
     allowed: set[str] | None,
@@ -9019,8 +9033,37 @@ def _append_analysis_communication_steps(
     channel = str(target.get("channel") or "").strip()
     transform = str(target.get("content_transform_hint") or "").strip()
     mode = str(target.get("mode") or "focus").strip() or "focus"
+    selected_app_payload: dict[str, Any] = {}
+    communication_steps: list[ToolPlanStepSnapshot] = []
     if not app_name:
         app_name = _default_communication_app_for_channel(channel, mode, allowed)
+    if not app_name:
+        app_query = _generic_communication_app_query_for_channel(channel)
+        discover_tool = _first_allowed(("desktop.list_apps",), allowed)
+        if app_query and discover_tool and _communication_desktop_compose_tools_available(
+            mode,
+            allowed,
+            require_send=str(target.get("send_action") or "").strip() == "send",
+        ):
+            app_name = "<selected app from desktop.list_apps>"
+            selected_app_payload = {
+                "selection_source": "desktop.list_apps",
+                "query": app_query,
+            }
+            mode = "open"
+            communication_steps.append(
+                _step(
+                    intent,
+                    "discover-analysis-communication-app",
+                    "Discover communication app",
+                    "desktop.app_discovery",
+                    discover_tool,
+                    input_preview={"query": app_query, "limit": 20},
+                    depends_on=[depends_on],
+                    action="list_apps",
+                    reason="Discover an installed communication app before sending the generated analysis artifact.",
+                )
+            )
     if not app_name:
         draft_input = {
             "recipient": recipient,
@@ -9060,10 +9103,14 @@ def _append_analysis_communication_steps(
         allowed=allowed,
         payload={"text": recipient},
     )
+    recipient_type_input = _with_selected_app_payload(
+        type_tool,
+        recipient_type_input,
+        selected_app_payload,
+    )
     search_submit_tool = _first_allowed(("desktop.search_submit",), allowed)
     send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
-    communication_steps: list[ToolPlanStepSnapshot] = []
-    focus_depends_on = [depends_on]
+    focus_depends_on = ["discover-analysis-communication-app"] if selected_app_payload else [depends_on]
     if app_tool and shortcut_tool:
         communication_steps.append(
             _step(
@@ -9072,7 +9119,7 @@ def _append_analysis_communication_steps(
                 "Open or focus app",
                 "desktop.app_control",
                 app_tool,
-                input_preview={"app_name": app_name},
+                input_preview={"app_name": app_name, **selected_app_payload},
                 depends_on=focus_depends_on,
                 reason="Prepare the requested communication app after the analysis artifact is available.",
             )
@@ -9086,6 +9133,7 @@ def _append_analysis_communication_steps(
         focus_tool = app_shortcut_tool
         focus_input = {
             "app_name": app_name,
+            **selected_app_payload,
             "action": _communication_recipient_focus_action(channel),
         }
         focus_capability = "communication.compose"
@@ -9103,6 +9151,7 @@ def _append_analysis_communication_steps(
         allowed=allowed,
         payload=draft_input,
     )
+    draft_input = _with_selected_app_payload(draft_tool, draft_input, selected_app_payload)
     communication_steps.extend(
         [
             _step(
@@ -9307,8 +9356,38 @@ def _append_web_research_communication_steps(
     if not recipient or not artifact_path:
         return steps
     app_name = str(target.get("app_name") or "").strip()
+    channel = str(target.get("channel") or "").strip()
     transform = str(target.get("content_transform_hint") or "").strip()
     mode = str(target.get("mode") or "focus").strip() or "focus"
+    selected_app_payload: dict[str, Any] = {}
+    communication_steps: list[ToolPlanStepSnapshot] = []
+    if not app_name:
+        app_query = _generic_communication_app_query_for_channel(channel)
+        discover_tool = _first_allowed(("desktop.list_apps",), allowed)
+        if app_query and discover_tool and _communication_desktop_compose_tools_available(
+            mode,
+            allowed,
+            require_send=str(target.get("send_action") or "").strip() == "send",
+        ):
+            app_name = "<selected app from desktop.list_apps>"
+            selected_app_payload = {
+                "selection_source": "desktop.list_apps",
+                "query": app_query,
+            }
+            mode = "open"
+            communication_steps.append(
+                _step(
+                    intent,
+                    "discover-research-communication-app",
+                    "Discover communication app",
+                    "desktop.app_discovery",
+                    discover_tool,
+                    input_preview={"query": app_query, "limit": 20},
+                    depends_on=[depends_on],
+                    action="list_apps",
+                    reason="Discover an installed communication app before sending the generated research artifact.",
+                )
+            )
     if not app_name:
         draft_input = {
             "recipient": recipient,
@@ -9348,10 +9427,14 @@ def _append_web_research_communication_steps(
         allowed=allowed,
         payload={"text": recipient},
     )
+    recipient_type_input = _with_selected_app_payload(
+        type_tool,
+        recipient_type_input,
+        selected_app_payload,
+    )
     search_submit_tool = _first_allowed(("desktop.search_submit",), allowed)
     send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
-    communication_steps: list[ToolPlanStepSnapshot] = []
-    focus_depends_on = [depends_on]
+    focus_depends_on = ["discover-research-communication-app"] if selected_app_payload else [depends_on]
     if app_tool and shortcut_tool:
         communication_steps.append(
             _step(
@@ -9360,7 +9443,7 @@ def _append_web_research_communication_steps(
                 "Open or focus communication app",
                 "desktop.app_control",
                 app_tool,
-                input_preview={"app_name": app_name},
+                input_preview={"app_name": app_name, **selected_app_payload},
                 depends_on=focus_depends_on,
                 reason="Prepare the requested communication app after the research artifact is available.",
             )
@@ -9372,7 +9455,7 @@ def _append_web_research_communication_steps(
         focus_reason = "Open foreground recipient search with a generic safe shortcut."
     else:
         focus_tool = app_shortcut_tool
-        focus_input = {"app_name": app_name, "action": "find"}
+        focus_input = {"app_name": app_name, **selected_app_payload, "action": "find"}
         focus_capability = "communication.compose"
         focus_reason = "Open the app's recipient search after the research artifact is available."
 
@@ -9388,6 +9471,7 @@ def _append_web_research_communication_steps(
         allowed=allowed,
         payload=draft_input,
     )
+    draft_input = _with_selected_app_payload(draft_tool, draft_input, selected_app_payload)
     communication_steps.extend(
         [
             _step(
@@ -11027,7 +11111,7 @@ def _web_research_communication_target_hint(text: str) -> dict[str, str]:
     }
     if app_name:
         hint["app_name"] = app_name
-    channel = _data_analysis_delivery_channel_hint(value)
+    channel = _data_analysis_delivery_channel_hint(value) or _generic_communication_target_channel_hint(target)
     if channel:
         hint["channel"] = channel
     transform = _communication_content_transform_hint(value)
@@ -11079,7 +11163,7 @@ def _data_analysis_communication_target_hint(text: str) -> dict[str, str]:
     }
     if app_name:
         hint["app_name"] = app_name
-    channel = _data_analysis_delivery_channel_hint(value)
+    channel = _data_analysis_delivery_channel_hint(value) or _generic_communication_target_channel_hint(target)
     if channel:
         hint["channel"] = channel
     transform = _communication_content_transform_hint(value)
@@ -16047,6 +16131,9 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
 
 def _split_communication_surface_and_recipient(target: str) -> tuple[str, str]:
     value = _clean_communication_hint_text(target)
+    generic_recipient = _generic_communication_surface_recipient(value)
+    if generic_recipient:
+        return "", generic_recipient
     known_surfaces = (
         "Microsoft Teams",
         "Google Chat",
@@ -16085,6 +16172,44 @@ def _split_communication_surface_and_recipient(target: str) -> tuple[str, str]:
         return _canonical_app_name_hint(parts[0]), _clean_communication_hint_text(parts[1])
     app_name = _communication_surface_for_recipient_hint(value)
     return (app_name, value) if app_name else ("", "")
+
+
+def _generic_communication_surface_recipient(target: str) -> str:
+    value = _clean_communication_hint_text(target)
+    if not value or not _generic_communication_target_channel_hint(value):
+        return ""
+    match = re.search(
+        r"^(?:(?:任意|任何|默认|可用|合适|适合|推荐|已安装)(?:的)?\s*)?"
+        r"(?:聊天|通讯|通信|消息|即时通讯|短信|邮件|电子邮件|邮箱|"
+        r"chat|messaging|message|messenger|mail|email|e-mail)"
+        r"(?:\s*(?:应用(?:程序)?|app|软件|客户端|工具|程序|client|tool|program))?"
+        r"\s*(?:给|发给|发送给|转发给|to|for)?\s*(?P<recipient>.+)$",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    recipient = _clean_communication_recipient_text(match.group("recipient") or "")
+    if not recipient or _is_generic_communication_app_label(recipient):
+        return ""
+    return recipient
+
+
+def _generic_communication_target_channel_hint(value: str) -> str:
+    text = _clean_communication_hint_text(value)
+    if re.search(
+        r"(?:邮件|电子邮件|邮箱|邮件客户端|mail|email|e-mail)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return "email"
+    if re.search(
+        r"(?:聊天|通讯|通信|消息|即时通讯|短信|chat|messaging|message|messenger)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return "message"
+    return ""
 
 
 def _strip_communication_surface_connector(value: str) -> str:
@@ -17810,6 +17935,16 @@ def _safe_type_text_operation_preview(
     if str(tool_name or "").startswith("app."):
         input_preview = {"app_name": app_name, **input_preview}
     return tool_name, input_preview
+
+
+def _with_selected_app_payload(
+    tool_name: str | None,
+    input_preview: dict[str, Any],
+    selected_app_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not selected_app_payload or not str(tool_name or "").startswith("app."):
+        return input_preview
+    return {**input_preview, **dict(selected_app_payload)}
 
 
 def _type_into_ui_element_tool_available(
@@ -19833,45 +19968,6 @@ def _media_playback_target_app_capability_hint(text: str) -> dict[str, str]:
     ):
         return {}
     return {"query": "music", "description": "音乐"}
-
-
-def _media_playback_capability_query_hint(text: str) -> str:
-    value = _clean_prompt(text)
-    if not value:
-        return ""
-    patterns = (
-        r"(?:应用(?:程序)?|app|软件|工具|程序|播放器)"
-        r"(?:里|中|上|内|里面)?\s*(?:，|,|然后|并|再|接着|之后|\s)*"
-        r"(?:搜索|搜一下|搜|查找|找|检索|播放|播|放)\s*"
-        r"(?P<query>[^。！？!?，,]{1,80})",
-        r"\b(?:app|application|tool|program|music\s+player).{0,80}"
-        r"\b(?:search|find|play)\s+(?P<query_en>[^.!?,]{1,80})",
-    )
-    for pattern in patterns:
-        match = re.search(pattern, value, flags=re.IGNORECASE)
-        if not match:
-            continue
-        query = (
-            match.groupdict().get("query")
-            or match.groupdict().get("query_en")
-            or ""
-        )
-        query = re.sub(
-            r"\s*(?:然后|并|再|接着|之后)?\s*(?:播放|播|放)?\s*"
-            r"(?:第一个结果|第一首|首个结果)\s*$",
-            "",
-            query.strip(),
-            flags=re.IGNORECASE,
-        )
-        query = re.sub(
-            r"\s+(?:and\s+)?(?:play|start\s+playing)(?:\s+it)?\s*$",
-            "",
-            query,
-            flags=re.IGNORECASE,
-        ).strip()
-        if query:
-            return query
-    return ""
 
 
 def _app_file_open_discovery_hint(

@@ -2671,6 +2671,55 @@ def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -
         }
     ]
 
+    communication_prompt = "输出一份 sales.csv 的数据分析报告，并把图表发到任意聊天应用给 Alice"
+    communication_decision = RuntimePlanner().decision(
+        communication_prompt,
+        allowed_tools=[
+            "workspace.read",
+            "python.run",
+            "artifact.write",
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+    assert communication_decision.selected_intent.kind == "data_analysis"
+    assert communication_decision.selected_intent.inputs["communication_target_hint"] == {
+        "recipient": "Alice",
+        "body_source": "analysis_artifact",
+        "mode": "focus",
+        "send_action": "send",
+        "channel": "message",
+        "content_transform_hint": "report",
+    }
+    assert "app_name" not in communication_decision.selected_intent.inputs["communication_target_hint"]
+    assert [
+        step.step_id
+        for step in communication_decision.plan.tool_plan.steps[-7:]
+    ] == [
+        "discover-analysis-communication-app",
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-analysis-communication-message",
+        "send-analysis-communication-message",
+    ]
+    assert _step_by_id(communication_decision, "discover-analysis-communication-app").input_preview == {
+        "query": "chat",
+        "limit": 20,
+    }
+    assert _step_by_id(communication_decision, "open-or-focus-app").tool_name == "app.open"
+    assert _step_by_id(communication_decision, "open-or-focus-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "chat",
+    }
+    assert _step_by_id(communication_decision, "send-analysis-communication-message").approval_required is True
+
     visible_prompt = "分析当前窗口里的表格并把报告写进任意文档应用"
     visible_decision = RuntimePlanner().decision(
         visible_prompt,
@@ -6147,6 +6196,40 @@ def test_runtime_planner_cleans_web_research_query_and_tracks_delivery_target() 
         "transform": "report",
     }
     assert _step_by_id(generic_target, "draft-research-communication").approval_required is True
+
+    generic_app_target = RuntimePlanner().decision(
+        "调研 OpenAI 最新价格，整理成报告，然后发到任意聊天应用给 Alice",
+        allowed_tools=[*allowed, "desktop.list_apps", "app.open"],
+    )
+    assert generic_app_target.selected_intent.inputs["communication_target_hint"] == {
+        "recipient": "Alice",
+        "body_source": "research_artifact",
+        "mode": "focus",
+        "send_action": "send",
+        "channel": "message",
+        "content_transform_hint": "report",
+    }
+    assert [
+        step.step_id
+        for step in generic_app_target.plan.tool_plan.steps[-7:]
+    ] == [
+        "discover-research-communication-app",
+        "open-or-focus-research-communication-app",
+        "focus-research-communication-recipient-search",
+        "type-research-communication-recipient",
+        "submit-research-communication-recipient-search",
+        "draft-research-communication-message",
+        "send-research-communication-message",
+    ]
+    assert _step_by_id(generic_app_target, "discover-research-communication-app").input_preview == {
+        "query": "chat",
+        "limit": 20,
+    }
+    assert _step_by_id(generic_app_target, "open-or-focus-research-communication-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "chat",
+    }
     assert planner_tool_requests(
         "调研 OpenAI 最新价格，整理成表格和报告，然后发给 Alice",
         allowed_tools=allowed,
@@ -20945,6 +21028,43 @@ def test_planner_desktop_tool_requests_discovers_generic_music_app_before_playba
             "continue_to_model": True,
         },
     ]
+
+
+def test_runtime_planner_clicks_generic_media_search_result_when_playback_tool_is_missing() -> None:
+    decision = RuntimePlanner().decision(
+        "打开一个能播放音乐的应用，搜索超时空辉夜姬并播放",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert decision.selected_intent.inputs["query"] == "超时空辉夜姬"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-media-app",
+        "focus-media-app-search",
+        "type-media-search-query",
+        "submit-media-search",
+        "play-media-search-result",
+        "verify-media-search",
+    ]
+    play_step = _step_by_id(decision, "play-media-search-result")
+    assert play_step.tool_name == "app.focus_and_click_ui_element"
+    assert play_step.capability_id == "desktop.ui_operation"
+    assert play_step.input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "music",
+        "target": "first result",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
 
 
 def test_planner_desktop_tool_requests_normalizes_named_music_app_control() -> None:

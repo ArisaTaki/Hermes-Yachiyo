@@ -925,17 +925,12 @@ def media_app_query_search_plan(
             (type_tool, {"text": query}),
             (submit_tool, submit_payload),
         ]
-        play_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
-        if play_tool:
-            plan.append(
-                (
-                    play_tool,
-                    {
-                        "app_name": app_name,
-                        **selected_app_payload,
-                    },
-                )
-            )
+        _append_media_search_result_play_step(
+            plan,
+            app_name=app_name,
+            selected_app_payload=selected_app_payload,
+            allowed=allowed,
+        )
         _append_media_app_verify_step(plan, allowed)
         return plan
 
@@ -950,11 +945,46 @@ def media_app_query_search_plan(
         (type_tool, {"text": query}),
         (submit_tool, submit_payload),
     ]
-    play_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
-    if play_tool:
-        plan.append((play_tool, {"app_name": app_name, **selected_app_payload}))
+    _append_media_search_result_play_step(
+        plan,
+        app_name=app_name,
+        selected_app_payload=selected_app_payload,
+        allowed=allowed,
+    )
     _append_media_app_verify_step(plan, allowed)
     return plan
+
+
+def _append_media_search_result_play_step(
+    plan: list[tuple[str, dict[str, Any]]],
+    *,
+    app_name: str,
+    selected_app_payload: Mapping[str, Any],
+    allowed: set[str] | None,
+) -> None:
+    play_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
+    if play_tool:
+        plan.append((play_tool, {"app_name": app_name, **dict(selected_app_payload)}))
+        return
+    click_tool = _first_allowed(
+        ("app.focus_and_click_ui_element", "desktop.click_ui_element"),
+        allowed,
+    )
+    if not click_tool:
+        return
+    click_payload = {
+        "target": "first result",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+    if click_tool.startswith("app."):
+        click_payload = {
+            "app_name": app_name,
+            **dict(selected_app_payload),
+            **click_payload,
+        }
+    plan.append((click_tool, click_payload))
 
 
 def media_app_prepare_plan(
@@ -1247,6 +1277,15 @@ def _clean_media_query(value: str) -> str:
     query = re.sub(
         r"^(?:打开|启动|找一个|找个|用|在|通过)?\s*"
         r"(?:任意|任何|默认|一个|个|可用)?\s*(?:音乐\s*(?:应用|app|软件|播放器)?|播放器|music\s+app|music\s+player)"
+        r"(?:里|中|上|内|里面)?\s*(?:[，,]\s*)?"
+        r"(?:搜索|搜一下|搜|查找|找|检索|播放|播|放)(?:一下|下)?\s*",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    )
+    query = re.sub(
+        r"^(?:能|可以|可用于|用来|用于)?\s*(?:播放|播|放)?\s*音乐(?:的)?"
+        r"(?:应用(?:程序)?|app|软件|播放器|工具|程序)"
         r"(?:里|中|上|内|里面)?\s*(?:[，,]\s*)?"
         r"(?:搜索|搜一下|搜|查找|找|检索|播放|播|放)(?:一下|下)?\s*",
         "",
