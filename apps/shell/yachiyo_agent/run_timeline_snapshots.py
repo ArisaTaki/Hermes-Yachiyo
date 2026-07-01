@@ -25,6 +25,7 @@ from .contracts import (
 )
 from .task_snapshots import run_events_from_payload, task_status_from_value
 from .task_core_snapshots import task_core_snapshot_from_payload
+from .replan_event_projection import run_events_with_replan_requests
 from .timeline_metadata_snapshots import (
     merge_timeline_child_snapshots,
     planner_trace_summary_from_payload,
@@ -49,6 +50,12 @@ def run_timeline_snapshot_from_payload(
         payload,
         run_id=run_id,
         keys=("events", "run_events", "timeline"),
+    )
+    events = run_events_with_replan_requests(
+        payload,
+        events,
+        run_id=run_id,
+        task_id=_text(payload.get("task_id")),
     )
     legacy_run_group_id = _optional_text(payload.get("run_group_id"))
     group_run_id = _optional_text(payload.get("group_run_id")) or legacy_run_group_id

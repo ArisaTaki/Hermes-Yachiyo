@@ -92,7 +92,9 @@ from apps.shell.yachiyo_agent import (
 )
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
 from apps.shell.yachiyo_agent.group_run_snapshots import group_run_snapshot_from_payload
+from apps.shell.yachiyo_agent.planner_projection import planner_run_event_payloads
 from apps.shell.yachiyo_agent.run_snapshots import run_timeline_snapshot_from_payload
+from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 from apps.shell.yachiyo_agent.task_cards import (
     agent_task_light_snapshot_from_task,
     agent_task_snapshot_from_payload,
@@ -865,6 +867,115 @@ def test_run_timeline_snapshot_projects_task_core_from_plan_event() -> None:
     assert snapshot.task_core.core_id == "task-core-1"
     assert snapshot.task_core.workspace.items[0].kind == "artifact"
     assert snapshot.task_core.todos[0].tool_name == "artifact.write"
+
+
+def test_run_timeline_snapshot_synthesizes_replan_event_from_failed_tool() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+    events = [
+        {"event_type": event_type, "payload": payload}
+        for event_type, payload in planner_run_event_payloads(decision)
+    ]
+    events.append(
+        {
+            "event_type": "agent.tool.call",
+            "payload": {
+                "step_id": "run-analysis",
+                "tool_name": "data.analyze",
+                "status": "failed",
+                "result": {"ok": False, "error": "unsupported chart type"},
+            },
+        }
+    )
+
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "status": "failed",
+            "events": events,
+        }
+    )
+    task = agent_task_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "status": "failed",
+            "events": events,
+        }
+    )
+
+    replan_event = snapshot.events[-1]
+    assert replan_event.event_type == "agent.replan.requested"
+    assert replan_event.payload["trigger"] == "tool_failure"
+    assert replan_event.payload["run_id"] == "run-1"
+    assert replan_event.payload["task_id"] == "task-1"
+    assert replan_event.payload["decision_id"] == decision.decision_id
+    assert replan_event.payload["plan_id"] == decision.plan.plan_id
+    assert replan_event.payload["core_id"] == decision.plan.task_core.core_id
+    assert replan_event.payload["source_step_id"] == "run-analysis"
+    assert replan_event.payload["source_tool_name"] == "data.analyze"
+    assert replan_event.payload["target_capability_id"] == "data.analysis"
+    assert replan_event.payload["fallback_tools"] == ["terminal.run"]
+    assert "unsupported chart type" in replan_event.payload["failure_detail"]
+    assert task.recent_events[-1].event_type == "agent.replan.requested"
+    assert task.task_core is not None
+    failed_todo = next(
+        todo for todo in task.task_core.todos if todo.tool_name == "data.analyze"
+    )
+    assert failed_todo.status == "blocked"
+
+
+def test_run_timeline_snapshot_synthesizes_scoped_workflow_replan_event() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+    scoped_events = []
+    for event_type, payload in planner_run_event_payloads(decision):
+        scoped_type = {
+            "agent.intent.selected": "workflow.run.intent.selected",
+            "agent.plan.created": "workflow.run.plan.created",
+            "agent.task_core.created": "workflow.run.task_core.created",
+            "agent.plan.step": "workflow.run.plan.step",
+        }.get(event_type, event_type)
+        scoped_events.append(
+            {
+                "event_type": scoped_type,
+                "payload": {
+                    **payload,
+                    "planner_event_type": event_type,
+                    "planner_scope": "workflow_run",
+                },
+            }
+        )
+    scoped_events.append(
+        {
+            "event_type": "agent.tool.call",
+            "payload": {
+                "step_id": "run-analysis",
+                "tool_name": "data.analyze",
+                "status": "failed",
+                "result": {"ok": False, "error": "empty result"},
+            },
+        }
+    )
+
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "workflow_run_id": "workflow-run-1",
+            "status": "failed",
+            "events": scoped_events,
+        }
+    )
+
+    replan_event = snapshot.events[-1]
+    assert replan_event.event_type == "workflow.run.replan.requested"
+    assert replan_event.payload["planner_event_type"] == "agent.replan.requested"
+    assert replan_event.payload["planner_scope"] == "workflow_run"
+    assert replan_event.payload["source_step_id"] == "run-analysis"
 
 
 def test_workflow_run_snapshot_scopes_agent_planner_events_to_workflow_run() -> None:

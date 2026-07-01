@@ -24,6 +24,7 @@ from .contracts import AgentTaskSnapshot, PublicRunEvent, ToolCallSnapshot
 from .events import public_run_event_from_payload
 from .links import studio_run_url
 from .recovery_actions import RECOVERY_RETRY_CONTEXT_EVENT_TYPE
+from .replan_event_projection import run_events_with_replan_requests
 from .timeline_metadata_snapshots import planner_trace_summary_from_payload
 from .tool_call_snapshots import tool_call_snapshots_from_payloads
 from .task_core_snapshots import task_core_snapshot_from_payload
@@ -78,6 +79,12 @@ def agent_task_snapshot_from_payload(
         payload,
         run_id=run_id,
         keys=("recent_events", "events", "timeline"),
+    )
+    all_events = run_events_with_replan_requests(
+        payload,
+        all_events,
+        run_id=run_id,
+        task_id=task_id,
     )
     recent_events = _chat_visible_events(all_events)
     approvals = [
