@@ -38,6 +38,7 @@ from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     DirectToolSelection,
     planner_first_direct_tool_selection,
 )
+from apps.shell.yachiyo_agent.capability_registry import capability_snapshots
 from apps.shell.yachiyo_agent.planner_execution import (
     planner_execution_tool_requests,
     planner_tool_requests,
@@ -1495,10 +1496,16 @@ class RuntimeCustomApiAgentLoop:
         failure_payloads.extend(_runtime_planner_unavailable_failure_payloads(decision))
         payloads: list[dict[str, Any]] = []
         for failure_payload in failure_payloads:
+            replan_metadata = (
+                failure_payload.get("metadata")
+                if isinstance(failure_payload.get("metadata"), Mapping)
+                else {}
+            )
             replan_event = planner_replan_timeline_event(
                 decision,
                 failure_payload,
                 run_id=run_id,
+                metadata=replan_metadata,
             )
             if not replan_event:
                 continue
@@ -4223,6 +4230,11 @@ def _model_replan_followup_context_payload(
             "failure_detail": str(payload.get("failure_detail") or "").strip(),
             "fallback_tools": _string_list(payload.get("fallback_tools")),
             "replan_prompt": str(payload.get("replan_prompt") or "").strip(),
+            "metadata": (
+                dict(payload.get("metadata"))
+                if isinstance(payload.get("metadata"), Mapping)
+                else {}
+            ),
         }
         requests.append(request)
         failed_tools.append(request["source_tool_name"])
@@ -4261,6 +4273,12 @@ def _model_replan_followup_context_payload(
     )
     if task_progress:
         payload["task_progress"] = task_progress
+    capability_recovery = _runtime_replan_capability_recovery(
+        requests,
+        allowed_tools=allowed_tools,
+    )
+    if capability_recovery:
+        payload["capability_recovery"] = capability_recovery
     return payload
 
 
@@ -4273,6 +4291,90 @@ def _runtime_replan_planning_reason(triggers: list[str]) -> str:
     if "verification_failed" in clean:
         return "planner_replan_after_mixed_runtime_failure"
     return "planner_replan_after_tool_failure"
+
+
+def _runtime_replan_capability_recovery(
+    requests: list[dict[str, Any]],
+    *,
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    capability_ids = _ordered_text_list(
+        [
+            str(request.get("target_capability_id") or "").strip()
+            for request in requests
+            if str(request.get("trigger") or "").strip() == "tool_unavailable"
+            and str(request.get("target_capability_id") or "").strip()
+        ]
+    )
+    if not capability_ids:
+        return []
+    snapshots = {
+        str(snapshot.capability_id or "").strip(): snapshot
+        for snapshot in capability_snapshots(
+            allowed_tools=allowed_tools,
+            capability_ids=capability_ids,
+        )
+    }
+    recoveries: dict[str, dict[str, Any]] = {}
+    for request in requests:
+        if str(request.get("trigger") or "").strip() != "tool_unavailable":
+            continue
+        capability_id = str(request.get("target_capability_id") or "").strip()
+        if not capability_id:
+            continue
+        snapshot = snapshots.get(capability_id)
+        recovery = recoveries.setdefault(
+            capability_id,
+            {
+                "capability_id": capability_id,
+                "title": str(getattr(snapshot, "title", "") or "").strip(),
+                "category": str(getattr(snapshot, "category", "") or "").strip(),
+                "description": str(getattr(snapshot, "description", "") or "").strip(),
+                "risk_level": str(getattr(snapshot, "risk_level", "") or "").strip(),
+                "approval_required": bool(getattr(snapshot, "approval_required", False)),
+                "tools": list(getattr(snapshot, "tools", []) or []),
+                "available_tools": list(getattr(snapshot, "available_tools", []) or []),
+                "missing_tools": list(getattr(snapshot, "missing_tools", []) or []),
+                "fallback_tools": [],
+                "source_step_ids": [],
+                "missing_permissions": [],
+                "blocking_conditions": [],
+            },
+        )
+        step_id = str(request.get("source_step_id") or "").strip()
+        if step_id and step_id not in recovery["source_step_ids"]:
+            recovery["source_step_ids"].append(step_id)
+        for key in ("fallback_tools",):
+            recovery[key] = _ordered_text_list(
+                [*recovery.get(key, []), *_string_list(request.get(key))]
+            )
+        metadata = request.get("metadata") if isinstance(request.get("metadata"), Mapping) else {}
+        for key in ("missing_permissions", "blocking_conditions"):
+            recovery[key] = _ordered_text_list(
+                [*recovery.get(key, []), *_string_list(metadata.get(key))]
+            )
+    result: list[dict[str, Any]] = []
+    for capability_id in capability_ids:
+        recovery = recoveries.get(capability_id)
+        if not recovery:
+            continue
+        missing_tools = _string_list(recovery.get("missing_tools"))
+        missing_permissions = _string_list(recovery.get("missing_permissions"))
+        blocking_conditions = _string_list(recovery.get("blocking_conditions"))
+        if missing_permissions:
+            suggested_action = "resolve_permissions"
+        elif blocking_conditions:
+            suggested_action = "clear_runtime_blockers"
+        elif missing_tools:
+            suggested_action = "enable_tools"
+        else:
+            suggested_action = "inspect_capability"
+        recovery["suggested_action"] = suggested_action
+        recovery["recommended_enable_tools"] = missing_tools[:6]
+        result.append(
+            {key: value for key, value in recovery.items() if value not in ("", [], {})}
+        )
+    return result
 
 
 def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
@@ -4289,6 +4391,30 @@ def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
         lines.append(f"Failed tools: {', '.join(failed_tools)}.")
     if fallback_tools:
         lines.append(f"Preferred fallback tools: {', '.join(fallback_tools)}.")
+    capability_recovery = [
+        item
+        for item in payload.get("capability_recovery", [])
+        if isinstance(item, dict)
+    ]
+    if capability_recovery:
+        lines.append("Capability recovery:")
+        for item in capability_recovery[:5]:
+            capability_id = str(item.get("capability_id") or "").strip()
+            missing_tools = _string_list(item.get("missing_tools"))
+            available_tools = _string_list(item.get("available_tools"))
+            missing_permissions = _string_list(item.get("missing_permissions"))
+            blocking_conditions = _string_list(item.get("blocking_conditions"))
+            parts = [capability_id] if capability_id else []
+            if missing_tools:
+                parts.append(f"enable_tools={', '.join(missing_tools[:6])}")
+            if available_tools:
+                parts.append(f"available_tools={', '.join(available_tools[:6])}")
+            if missing_permissions:
+                parts.append(f"permissions={', '.join(missing_permissions[:6])}")
+            if blocking_conditions:
+                parts.append(f"blockers={', '.join(blocking_conditions[:6])}")
+            if parts:
+                lines.append(f"- {'; '.join(parts)}")
     task_progress = (
         payload.get("task_progress")
         if isinstance(payload.get("task_progress"), dict)
@@ -4626,6 +4752,24 @@ def _runtime_planner_unavailable_failure_payloads(decision: Any) -> list[dict[st
             continue
         reason = str(getattr(step, "reason", "") or "").strip()
         title = str(getattr(step, "title", "") or "").strip()
+        input_preview = (
+            dict(getattr(step, "input_preview", {}) or {})
+            if isinstance(getattr(step, "input_preview", {}), Mapping)
+            else {}
+        )
+        metadata = {
+            "capability_id": capability_id,
+            "planned_tool_name": tool_name,
+            "step_title": title,
+            "step_status": status or "unavailable",
+            "input_preview": input_preview,
+        }
+        missing_permissions = _string_list(input_preview.get("missing_permissions"))
+        if missing_permissions:
+            metadata["missing_permissions"] = missing_permissions
+        blocking_conditions = _string_list(input_preview.get("blocking_conditions"))
+        if blocking_conditions:
+            metadata["blocking_conditions"] = blocking_conditions
         detail_parts = [
             "planned tool is missing or unavailable",
             f"step={step_id}" if step_id else "",
@@ -4642,11 +4786,7 @@ def _runtime_planner_unavailable_failure_payloads(decision: Any) -> list[dict[st
                 "tool_name": tool_name,
                 "capability_id": capability_id,
                 "title": title,
-                "input_preview": (
-                    dict(getattr(step, "input_preview", {}) or {})
-                    if isinstance(getattr(step, "input_preview", {}), Mapping)
-                    else {}
-                ),
+                "input_preview": input_preview,
                 "detail": "; ".join(part for part in detail_parts if part),
                 "result": {
                     "ok": False,
@@ -4654,6 +4794,7 @@ def _runtime_planner_unavailable_failure_payloads(decision: Any) -> list[dict[st
                     "step_status": status or "unavailable",
                     "capability_id": capability_id,
                 },
+                "metadata": metadata,
             }
         )
     return payloads

@@ -1905,6 +1905,11 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_unavai
     assert all(payload["run_id"] == "run-unavailable-replan" for payload in payloads)
     assert all(payload["failure_event_type"] == "agent.plan.step" for payload in payloads)
     assert any("desktop.ui_operation" in payload["failure_detail"] for payload in payloads)
+    assert any(
+        payload["metadata"]["capability_id"] == "desktop.ui_operation"
+        and payload["metadata"]["step_status"] == "unavailable"
+        for payload in payloads
+    )
     messages: list[dict[str, Any]] = []
     loop._append_replan_followup_context(
         payloads,
@@ -1921,6 +1926,11 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_unavai
     ][0]
     assert followup_context["planning_reason"] == "planner_replan_after_tool_unavailable"
     assert followup_context["triggers"] == ["tool_unavailable"]
+    assert any(
+        item["capability_id"] == "desktop.ui_operation"
+        and "desktop.safe_type_text" in item["missing_tools"]
+        for item in followup_context["capability_recovery"]
+    )
     assert [
         event["payload"]["request_id"]
         for event in run_events
@@ -2015,6 +2025,19 @@ def test_custom_api_agent_loop_preserves_unavailable_runtime_plan_without_tool_r
     ][0]
     assert followup_context["planning_reason"] == "planner_replan_after_tool_unavailable"
     assert followup_context["triggers"] == ["tool_unavailable"]
+    recovery_by_capability = {
+        item["capability_id"]: item
+        for item in followup_context["capability_recovery"]
+    }
+    data_recovery = recovery_by_capability["data.analysis"]
+    assert data_recovery["missing_tools"] == ["data.analyze", "terminal.run", "python.run"]
+    assert data_recovery["recommended_enable_tools"] == [
+        "data.analyze",
+        "terminal.run",
+        "python.run",
+    ]
+    assert data_recovery["suggested_action"] == "enable_tools"
+    assert recovery_by_capability["artifact.write"]["missing_tools"] == ["artifact.write"]
     assert not any(
         event["event"] == "agent.desktop.intent_unavailable" for event in timeline
     )
@@ -2023,6 +2046,7 @@ def test_custom_api_agent_loop_preserves_unavailable_runtime_plan_without_tool_r
         message["role"] == "user"
         and "Runtime replan context" in message["content"]
         and "planned tool is unavailable" in message["content"]
+        and "enable_tools=data.analyze" in message["content"]
         and "failed_step: run-analysis" in message["content"]
         for message in model_calls[0]
     )
