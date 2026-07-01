@@ -301,6 +301,93 @@ def test_release_smoke_summary_projects_rc_capabilities_into_public_demo(
     assert "--include-real-desktop-interaction" not in action["command"]
 
 
+def test_release_smoke_summary_projects_electron_ui_smokes_into_public_demo(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    required_flow_ids = release_smoke._canonical_public_demo_flow_ids()
+    missing_from_demo = {
+        "real_desktop_app_open",
+        "real_desktop_ui_inspection",
+        "real_desktop_interaction",
+        "workflow_provider",
+        "studio_replay_ui",
+        "workflow_ui",
+    }
+    public_demo_path = tmp_path / "tmp" / "public-demo.json"
+    rc_report_path = tmp_path / "tmp" / "full-local-rc.json"
+    electron_report_path = tmp_path / "tmp" / "electron-ui-smoke.json"
+    public_demo_path.parent.mkdir(parents=True, exist_ok=True)
+    public_demo_path.write_text(
+        json.dumps(
+            _public_demo_report_with_passed_flows(set(required_flow_ids) - missing_from_demo)
+        ),
+        encoding="utf-8",
+    )
+    rc_report_path.write_text(
+        json.dumps(
+            _matrix_report(
+                "source_real_desktop_app_open",
+                "source_real_desktop_ui_inspection",
+                "source_real_desktop_interaction",
+            )
+        ),
+        encoding="utf-8",
+    )
+    electron_report_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "script_count": 3,
+                "scripts": [
+                    {
+                        "script": "./scripts/smoke_agent_run_detail_ui.mjs",
+                        "exit_code": 0,
+                    },
+                    {
+                        "script": "scripts/smoke_workflow_save_run_ui.mjs",
+                        "exit_code": 0,
+                    },
+                    {
+                        "script": "scripts/smoke_chat_cancel_ui.mjs",
+                        "exit_code": 0,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke(
+        [public_demo_path, rc_report_path, electron_report_path]
+    )
+
+    public_demo = next(item for item in summary["items"] if item["id"] == "public_demo")
+    assert public_demo["status"] == "missing"
+    details = public_demo["related_evidence"]["public_demo_assessment"][-1]
+    assert details["kind"] == "public_demo_aggregate"
+    assert details["missing_required_flow_ids"] == ["workflow_provider"]
+    projection = next(
+        item
+        for item in public_demo["related_evidence"]["public_demo_assessment"]
+        if item["kind"] == "electron_ui_public_demo_projection"
+    )
+    assert projection["script_flow_map"] == {
+        "scripts/smoke_agent_run_detail_ui.mjs": "studio_replay_ui",
+        "scripts/smoke_workflow_save_run_ui.mjs": "workflow_ui",
+    }
+    action = next(item for item in summary["next_actions"] if item["id"] == "public_demo")
+    assert action["missing_required_flow_ids"] == ["workflow_provider"]
+    assert action["command"] == (
+        "python scripts/run_public_demo_smokes.py --include-provider-workflow "
+        "--output-json tmp/public-demo-smokes-missing.json "
+        "--output-markdown tmp/public-demo-smokes-missing.md"
+    )
+    assert "--include-ui" not in action["command"]
+    assert "--include-real-desktop" not in action["command"]
+
+
 def test_release_smoke_summary_rejects_inconsistent_public_demo_level(
     tmp_path,
     monkeypatch,

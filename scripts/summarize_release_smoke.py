@@ -62,6 +62,10 @@ PUBLIC_DEMO_FLOW_FLAGS: dict[str, str] = {
     "studio_replay_ui": "--include-ui",
     "workflow_ui": "--include-ui",
 }
+ELECTRON_UI_PUBLIC_DEMO_FLOW_MAP: dict[str, str] = {
+    "scripts/smoke_agent_run_detail_ui.mjs": "studio_replay_ui",
+    "scripts/smoke_workflow_save_run_ui.mjs": "workflow_ui",
+}
 SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
     {
         "id": "packaged_launch",
@@ -279,6 +283,14 @@ def _collect_report_evidence(
         evidence=evidence,
         visited_reports=visited_reports,
     )
+    _collect_electron_ui_public_demo_evidence(report, source=source, evidence=evidence)
+    electron_ui_smoke = report.get("electron_ui_smoke")
+    if isinstance(electron_ui_smoke, dict):
+        _collect_electron_ui_public_demo_evidence(
+            electron_ui_smoke,
+            source=source,
+            evidence=evidence,
+        )
     for section_id in sorted(SECTION_IDS):
         section = report.get(section_id)
         if isinstance(section, dict) and _section_passed(section):
@@ -705,6 +717,63 @@ def _collect_public_demo_capability_projection(
         evidence.setdefault("public_demo_complete", []).append(projection)
 
 
+def _collect_electron_ui_public_demo_evidence(
+    report: Mapping[str, Any],
+    *,
+    source: str,
+    evidence: dict[str, list[dict[str, Any]]],
+) -> None:
+    if report.get("ok") is not True and report.get("status") != "passed":
+        return
+    passed_flow_ids: list[str] = []
+    script_flow_map: dict[str, str] = {}
+    for script in _dict_list(report.get("scripts")):
+        script_path = _normalized_script_path(script.get("script"))
+        if not script_path or script.get("exit_code") not in (0, "0"):
+            continue
+        flow_id = ELECTRON_UI_PUBLIC_DEMO_FLOW_MAP.get(script_path)
+        if not flow_id:
+            continue
+        if flow_id not in passed_flow_ids:
+            passed_flow_ids.append(flow_id)
+        script_flow_map[script_path] = flow_id
+    if not passed_flow_ids:
+        return
+    required_flow_ids = _canonical_public_demo_flow_ids()
+    missing_flow_ids = [
+        flow_id for flow_id in required_flow_ids if flow_id not in passed_flow_ids
+    ]
+    complete = not missing_flow_ids
+    projection = {
+        "source": source,
+        "kind": "electron_ui_public_demo_projection",
+        "status": "passed" if complete else "partial",
+        "release_level": "full_public_demo_ready" if complete else "partial_demo_ready",
+        "complete": complete,
+        "selected_count": len(passed_flow_ids),
+        "passed_count": len(passed_flow_ids),
+        "required_flow_count": len(required_flow_ids),
+        "passed_required_flow_count": len(passed_flow_ids),
+        "required_flow_ids": required_flow_ids,
+        "passed_required_flow_ids": passed_flow_ids,
+        "missing_required_flow_ids": missing_flow_ids,
+        "release_blockers": [
+            {
+                "id": flow_id,
+                "status": "missing",
+                "reason": "public demo flow is not covered by passed Electron UI smoke evidence",
+            }
+            for flow_id in missing_flow_ids
+        ],
+        "full_demo_command": FULL_PUBLIC_DEMO_COMMAND,
+        "script_flow_map": script_flow_map,
+    }
+    evidence.setdefault("public_demo_assessment", []).append(projection)
+    evidence.setdefault("public_demo_selected", []).append(projection)
+    if complete:
+        evidence.setdefault("public_demo_complete", []).append(projection)
+
+
 def _canonical_public_demo_flow_ids() -> list[str]:
     return [flow.id for flow in demo_flows(Path("tmp/public-demo-flow-catalog"))]
 
@@ -758,6 +827,13 @@ def _string_list(value: Any) -> list[str]:
     else:
         return []
     return [str(item) for item in values if str(item)]
+
+
+def _normalized_script_path(value: Any) -> str:
+    text = str(value or "").strip().replace("\\", "/")
+    while text.startswith("./"):
+        text = text[2:]
+    return text
 
 
 def _resolve_path(path: Path) -> Path:

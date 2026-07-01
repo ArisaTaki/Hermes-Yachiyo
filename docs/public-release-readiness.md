@@ -130,7 +130,12 @@ missing flow IDs, and blocker details so release notes do not have to infer
 what evidence is still absent. Equivalent RC capability evidence is also
 projected into public-demo coverage for flows such as real app open, real UI
 inspection, and real app interaction; provider and UI flows still need their own
-smoke evidence.
+smoke evidence. The archived `release/electron-ui-smoke.json` report is
+projected only when the exact Run Detail / Workflow UI smoke scripts pass:
+`scripts/smoke_agent_run_detail_ui.mjs` can cover `studio_replay_ui`, and
+`scripts/smoke_workflow_save_run_ui.mjs` can cover `workflow_ui`. Generic
+packaged UI sampling does not replace those behavior-level UI flows, and
+provider workflow still needs provider smoke evidence.
 
 ## Local Release Gates
 

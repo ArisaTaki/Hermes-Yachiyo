@@ -211,6 +211,11 @@ USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
     ),
     (
         Path("docs/public-release-readiness.md"),
+        "exact Run Detail / Workflow UI smoke scripts",
+        "public release readiness guide must document Electron UI smoke public-demo projection scope",
+    ),
+    (
+        Path("docs/public-release-readiness.md"),
         "desktop_planner_discovery_smoke",
         "public release readiness guide must document desktop planner public demo evidence",
     ),
@@ -1029,6 +1034,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "release/electron-ui-smoke.json` 作为额外 `--manual-checks-json`",
         "release packaging docs must document standalone Electron UI smoke signoff evidence merging",
+    ),
+    (
+        "Run Detail / Workflow UI smoke scripts",
+        "release packaging docs must document Electron UI smoke public-demo projection scope",
     ),
     (
         "python scripts/verify_release_candidate.py --source-only --report-json tmp/source-only-rc.json",
