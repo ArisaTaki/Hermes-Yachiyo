@@ -71,6 +71,7 @@ def build_runtime_approval_services(
             claim_pending_approval=claim_pending_approval,
             approve_tool_run=approvals.approve_tool_run,
             continue_custom_api_agent=continue_custom_api_agent,
+            append_run_event=append_run_event,
         ),
     )
 
