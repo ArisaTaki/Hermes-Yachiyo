@@ -1916,7 +1916,16 @@ class TaskIntentRouter:
     def _communication_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         if ui_control_presence_hint(text):
             return _empty_intent("communication", text)
-        if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
+        app_capability_discovery = _app_capability_discovery_hint(text)
+        app_capability_query = str(app_capability_discovery.get("query") or "").strip()
+        if (
+            _explicit_app_open_request(text)
+            and app_capability_discovery
+            and not (
+                app_capability_query in {"mail", "messaging"}
+                and _contains_any(text, _COMMUNICATION_ACTION_TERMS)
+            )
+        ):
             return _empty_intent("communication", text)
         if _release_notes_report_request(text):
             return _empty_intent("communication", text)
@@ -16196,16 +16205,26 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
         "current_page_content": (
             r"(?:当前网页|当前页面|当前页|这个网页|这个页面|"
             r"current\s+page|current\s+webpage|this\s+page|this\s+webpage)"
-            r"(?:的|里的)?(?:内容|正文|文本|文字|摘要|总结|报告|content|text|summary|report)?"
+            r"(?:的|里的)?(?:(?:内容|正文|文本|文字)(?:摘要|总结|报告)?|"
+            r"摘要|总结|报告|content|text|summary|report)?"
         ),
         "visible_text": (
             r"(?:当前窗口|当前应用|当前界面|当前屏幕|前台窗口|前台应用|"
             r"当前可见文字|当前可见文本|当前可见内容|可见文字|可见文本|可见内容|"
             r"current\s+window|current\s+app|foreground\s+window|foreground\s+app)"
-            r"(?:的|里的)?(?:内容|文本|文字|摘要|总结|报告|content|text|summary|report)?"
+            r"(?:的|里的)?(?:(?:内容|文本|文字)(?:摘要|总结|报告)?|"
+            r"摘要|总结|报告|content|text|summary|report)?"
         ),
     }[source]
     patterns = (
+        rf"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?:打开|启动|开启|open|launch|start)\s*"
+        rf"(?P<app>(?:(?:一个|一款|任意|任何|默认|可用|合适|适合|推荐|已安装)(?:的)?\s*)*"
+        rf"(?:聊天|通讯|通信|消息|即时通讯|短信|邮件|电子邮件|邮箱|"
+        rf"chat|messaging|message|messenger|mail|email|e-mail)\s*"
+        rf"(?:应用(?:程序)?|app|软件|客户端|工具|程序|client|tool|program)?)\s*"
+        rf"(?:给|发给|发送给|向|对|to|for)\s*(?P<recipient>[^：:，,。.!?]+?)\s*"
+        rf"(?:发送|发|发消息|send|message)\s*{source_pattern}$",
         rf"^(?:打开|启动|开启)?\s*(?:在|用|通过)?\s*"
         rf"(?P<app>[\w .·-]{{1,40}}?)(?:里|中|上|内)?\s*"
         rf"(?:给|发给|发送给)\s*(?P<recipient>[^：:，,。]+?)\s*"
@@ -16232,9 +16251,13 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
         if not match:
             continue
         groups = match.groupdict()
-        app_name = _canonical_app_name_hint(groups.get("app") or "")
+        raw_app = str(groups.get("app") or "")
+        generic_app_channel = _generic_communication_app_label_channel(raw_app)
+        app_name = "" if generic_app_channel else _canonical_app_name_hint(raw_app)
         recipient = _clean_communication_hint_text(groups.get("recipient") or "")
         channel = _communication_delivery_channel_hint(value, groups.get("channel") or "")
+        if generic_app_channel and not channel:
+            channel = generic_app_channel
         if (not app_name or not recipient) and groups.get("target"):
             target = str(groups.get("target") or "")
             target_channel = _generic_communication_target_channel_hint(target)
@@ -16600,7 +16623,7 @@ def _is_generic_communication_app_label(value: str) -> bool:
     if normalized in generic_labels:
         return True
     normalized_without_qualifiers = re.sub(
-        r"^(?:一个|一款)?(?:(?:任意|任何|默认|可用|合适|适合|推荐|能用|可使用|已安装)(?:的)?)+",
+        r"^(?:(?:一个|一款)(?:的)?|(?:(?:任意|任何|默认|可用|合适|适合|推荐|能用|可使用|已安装)(?:的)?)+)",
         "",
         normalized,
     )
