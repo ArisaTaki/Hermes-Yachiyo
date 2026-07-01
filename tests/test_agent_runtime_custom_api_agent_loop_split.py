@@ -2491,6 +2491,95 @@ def test_model_followup_context_payload_preserves_multiple_content_snapshots() -
     assert "Data analysis result for data/sales.csv (csv)." in message
 
 
+def test_model_followup_context_instructs_pending_report_plan_steps() -> None:
+    payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "workspace.list",
+                "planning_reason": "planner_prefetch_report_context",
+                "continue_to_model": True,
+            }
+        ],
+        {
+            "intent_kind": "report_generation",
+            "artifacts_expected": ["report.md"],
+            "tool_plan": {
+                "steps": [
+                    {
+                        "step_id": "inspect-report-file-scope",
+                        "title": "Inspect report file scope",
+                        "capability_id": "file.workspace_read",
+                        "tool_name": "workspace.list",
+                        "input_preview": {
+                            "path": "~/Downloads/report.pdf",
+                            "file_type": "pdf",
+                            "pattern": "*.pdf",
+                        },
+                        "risk_level": "low",
+                        "approval_required": False,
+                        "status": "planned",
+                    },
+                    {
+                        "step_id": "extract-report-file-context",
+                        "title": "Extract report file context",
+                        "capability_id": "terminal.execution",
+                        "tool_name": "terminal.run",
+                        "input_preview": {
+                            "path": "~/Downloads/report.pdf",
+                            "file_type": "pdf",
+                            "pattern": "*.pdf",
+                            "operation": "extract_text_for_report",
+                        },
+                        "risk_level": "medium",
+                        "approval_required": True,
+                        "depends_on": ["inspect-report-file-scope"],
+                        "status": "planned",
+                    },
+                    {
+                        "step_id": "write-report-artifact",
+                        "title": "Write report artifact",
+                        "capability_id": "artifact.write",
+                        "tool_name": "artifact.write",
+                        "input_preview": {
+                            "path": "report.md",
+                            "body_source": "local_file_context",
+                        },
+                        "risk_level": "low",
+                        "approval_required": False,
+                        "depends_on": ["extract-report-file-context"],
+                        "status": "planned",
+                    },
+                ]
+            },
+        },
+        allowed_tools=[
+            "workspace.list",
+            "terminal.run",
+            "artifact.write",
+        ],
+        timeline=[
+            _timeline(
+                "agent.tool.call",
+                "workspace.list",
+                input_preview={"path": "~/Downloads/report.pdf"},
+                result={"ok": True, "files": [{"path": "~/Downloads/report.pdf"}]},
+            )
+        ],
+    )
+    message = custom_api_agent_module._model_followup_context_message(payload)
+
+    assert [step["step_id"] for step in payload["pending_plan_steps"]] == [
+        "extract-report-file-context",
+        "write-report-artifact",
+    ]
+    assert "Continue the pending Runtime Plan steps in order" in message
+    assert "extract-report-file-context via terminal.run" in message
+    assert "write-report-artifact via artifact.write" in message
+    assert "medium risk approval required" in message
+    assert "synthesize a concrete, safe command" in message
+    assert "Call artifact.write next" not in message
+
+
 def test_model_followup_context_instructs_generated_app_write() -> None:
     payload = custom_api_agent_module._model_followup_context_payload(
         [

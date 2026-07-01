@@ -3915,6 +3915,12 @@ def _model_followup_context_payload(
         payload["followup_target"] = followup_target
     if artifacts_expected:
         payload["artifacts_expected"] = artifacts_expected
+    pending_plan_steps = _model_followup_pending_plan_steps(
+        selection_payload,
+        content_requests,
+    )
+    if pending_plan_steps:
+        payload["pending_plan_steps"] = pending_plan_steps
     content_snapshots = followup_content_snapshots(timeline, observation_tools)
     content_snapshot = content_snapshots[-1] if content_snapshots else latest_followup_content_snapshot(timeline, observation_tools)
     if content_snapshot:
@@ -3926,6 +3932,93 @@ def _model_followup_context_payload(
         if value:
             payload[key] = value
     return payload
+
+
+def _model_followup_pending_plan_steps(
+    selection_payload: Mapping[str, Any],
+    content_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    steps = _selection_tool_plan_steps(selection_payload)
+    observation_tools = [
+        str(request.get("tool") or "").strip()
+        for request in content_requests
+        if str(request.get("tool") or "").strip()
+    ]
+    if not steps or not observation_tools:
+        return []
+
+    start_index = _pending_plan_step_start_index(steps, observation_tools)
+    if start_index <= 0:
+        return []
+
+    pending_steps: list[dict[str, Any]] = []
+    for step in steps[start_index:]:
+        step_payload = _model_followup_plan_step_payload(step)
+        if not step_payload:
+            continue
+        pending_steps.append(step_payload)
+        if len(pending_steps) >= 5:
+            break
+    return pending_steps
+
+
+def _selection_tool_plan_steps(selection_payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    tool_plan = (
+        selection_payload.get("tool_plan")
+        if isinstance(selection_payload.get("tool_plan"), Mapping)
+        else {}
+    )
+    steps = tool_plan.get("steps") if isinstance(tool_plan, Mapping) else []
+    if not isinstance(steps, list):
+        return []
+    return [step for step in steps if isinstance(step, Mapping)]
+
+
+def _pending_plan_step_start_index(
+    steps: list[Mapping[str, Any]],
+    observation_tools: list[str],
+) -> int:
+    cursor = 0
+    last_match = -1
+    for observed_tool in observation_tools:
+        for index in range(cursor, len(steps)):
+            tool_name = str(steps[index].get("tool_name") or "").strip()
+            if tool_name != observed_tool:
+                continue
+            last_match = index
+            cursor = index + 1
+            break
+    return last_match + 1 if last_match >= 0 else 0
+
+
+def _model_followup_plan_step_payload(step: Mapping[str, Any]) -> dict[str, Any]:
+    if str(step.get("status") or "planned").strip() not in {"", "planned"}:
+        return {}
+    step_id = str(step.get("step_id") or "").strip()
+    tool_name = str(step.get("tool_name") or "").strip()
+    if not step_id and not tool_name:
+        return {}
+    payload: dict[str, Any] = {
+        "step_id": step_id,
+        "title": str(step.get("title") or "").strip(),
+        "tool_name": tool_name,
+        "capability_id": str(step.get("capability_id") or "").strip(),
+        "action": str(step.get("action") or "").strip(),
+        "input_preview": (
+            dict(step.get("input_preview"))
+            if isinstance(step.get("input_preview"), Mapping)
+            else {}
+        ),
+    }
+    risk_level = str(step.get("risk_level") or "").strip()
+    if risk_level:
+        payload["risk_level"] = risk_level
+    if bool(step.get("approval_required")):
+        payload["approval_required"] = True
+    depends_on = _string_list(step.get("depends_on"))
+    if depends_on:
+        payload["depends_on"] = depends_on
+    return {key: value for key, value in payload.items() if value not in ("", [], {})}
 
 
 def _model_replan_followup_context_payload(
@@ -4132,11 +4225,14 @@ def _model_followup_context_message(payload: dict[str, Any]) -> str:
     observation_text = ", ".join(observation_tools) or "runtime observation tools"
     followup_target = payload.get("followup_target") if isinstance(payload.get("followup_target"), dict) else {}
     target_instruction = _model_followup_target_instruction(followup_target)
+    pending_plan_instruction = _model_followup_pending_plan_instruction(payload)
     if target_instruction:
         artifact_instruction = (
             f"{_model_followup_chained_artifact_instruction(followup_target)}"
             f"{target_instruction}"
         )
+    elif pending_plan_instruction:
+        artifact_instruction = pending_plan_instruction
     elif artifact_write_allowed and artifacts:
         artifact_instruction = (
             "The user requested a durable output. Call artifact.write next with "
@@ -4161,6 +4257,60 @@ def _model_followup_context_message(payload: dict[str, Any]) -> str:
         "missing permission, capability, or fallback without asking the user to manually repeat a "
         "tool-capable action."
     )
+
+
+def _model_followup_pending_plan_instruction(payload: Mapping[str, Any]) -> str:
+    steps = payload.get("pending_plan_steps")
+    if not isinstance(steps, list):
+        return ""
+    normalized_steps = [
+        step
+        for step in steps
+        if isinstance(step, Mapping)
+        and (
+            str(step.get("step_id") or "").strip()
+            or str(step.get("tool_name") or "").strip()
+        )
+    ]
+    if not normalized_steps:
+        return ""
+    items = []
+    for index, step in enumerate(normalized_steps, start=1):
+        tool_name = str(step.get("tool_name") or "").strip() or "available tool"
+        step_id = str(step.get("step_id") or "").strip() or f"step-{index}"
+        action = str(step.get("action") or "").strip()
+        risk_level = str(step.get("risk_level") or "").strip()
+        approval = " approval required" if bool(step.get("approval_required")) else ""
+        preview = (
+            step.get("input_preview")
+            if isinstance(step.get("input_preview"), Mapping)
+            else {}
+        )
+        preview_text = _model_followup_input_preview_text(preview)
+        detail = f"[{index}] {step_id} via {tool_name}"
+        if action:
+            detail = f"{detail} action={action!r}"
+        if risk_level or approval:
+            detail = f"{detail} ({risk_level or 'low'} risk{approval})"
+        if preview_text:
+            detail = f"{detail} input_preview={preview_text}"
+        items.append(detail)
+    return (
+        "Continue the pending Runtime Plan steps in order before giving a final answer: "
+        + "; ".join(items)
+        + ". If a pending terminal.execution step only has an abstract operation, synthesize a concrete, "
+        "safe command from the observed files and request approval through the normal tool/policy gate. "
+        "Do not skip directly to final prose while an available tool step is still pending."
+    )
+
+
+def _model_followup_input_preview_text(preview: Mapping[str, Any]) -> str:
+    if not preview:
+        return ""
+    text = repr(dict(preview))
+    if len(text) > 360:
+        return f"{text[:357]}..."
+    return text
 
 
 def _model_followup_target_payload(
