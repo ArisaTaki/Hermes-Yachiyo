@@ -116,6 +116,7 @@ export function AgentTaskCard({
       </header>
       {task.summary ? <p className="yachiyo-agent-task-summary">{task.summary}</p> : null}
       {plannerSummary ? <TaskPlannerSummary summary={plannerSummary} /> : null}
+      <TaskCoreProgress task={task} />
       {timelineEvents.length || toolCallFacts.length ? (
         <ToolCallSummary events={timelineEvents} toolCalls={toolCallFacts} />
       ) : null}
@@ -337,6 +338,59 @@ type TaskPlannerSummarySnapshot = {
   tools: string[];
 };
 
+type TaskCoreTodo = NonNullable<NonNullable<AgentTaskSnapshot['task_core']>['todos']>[number];
+
+function TaskCoreProgress({ task }: { task: AgentTaskSnapshot }) {
+  const todos = (task.task_core?.todos || [])
+    .filter((todo) => todo.todo_id || todo.title);
+  if (!todos.length) return null;
+
+  const visibleTodos = todos.slice(0, 4);
+  const completedCount = todos.filter((todo) => todo.status === 'completed').length;
+  const blockedCount = todos.filter((todo) => todo.status === 'blocked').length;
+  const activeTodo = todos.find((todo) => todo.status === 'in_progress' || todo.status === 'blocked')
+    || todos.find((todo) => todo.status === 'pending')
+    || todos[todos.length - 1];
+
+  return (
+    <div
+      className="yachiyo-agent-task-core"
+      data-blocked-count={blockedCount}
+      data-completed-count={completedCount}
+      data-testid="yachiyo-agent-task-core"
+      data-todo-count={todos.length}
+    >
+      <UiIcon name="activity" title="Task Core" />
+      <div className="yachiyo-agent-task-core-body">
+        <div className="yachiyo-agent-task-core-head">
+          <strong>Task Core</strong>
+          <span>
+            {completedCount}/{todos.length}
+            {activeTodo ? ` · ${activeTodo.title || activeTodo.step_id || 'ready'}` : ''}
+          </span>
+        </div>
+        <div className="yachiyo-agent-task-core-todos">
+          {visibleTodos.map((todo) => (
+            <span
+              className={`yachiyo-agent-task-core-todo ${taskCoreTodoTone(todo.status)}`}
+              data-task-todo-id={todo.todo_id}
+              data-task-todo-status={todo.status || 'pending'}
+              key={todo.todo_id || todo.step_id || todo.title}
+              title={taskCoreTodoTitle(todo)}
+            >
+              <i aria-hidden="true" />
+              <span>{todo.title || todo.step_id || todo.tool_name || 'Task step'}</span>
+            </span>
+          ))}
+          {todos.length > visibleTodos.length ? (
+            <span className="yachiyo-agent-task-core-more">+{todos.length - visibleTodos.length}</span>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TaskPlannerSummary({ summary }: { summary: TaskPlannerSummarySnapshot }) {
   const chips = plannerSummaryChips(summary);
   return (
@@ -409,6 +463,23 @@ function plannerSummaryFromStructuredTrace(
     tools,
   };
   return emptyPlannerSummary(summary) ? null : summary;
+}
+
+function taskCoreTodoTone(status: unknown): string {
+  const value = String(status || 'pending').trim();
+  if (value === 'completed' || value === 'blocked' || value === 'skipped' || value === 'in_progress') {
+    return value;
+  }
+  return 'pending';
+}
+
+function taskCoreTodoTitle(todo: TaskCoreTodo): string {
+  return [
+    todo.title,
+    todo.tool_name,
+    todo.capability_id,
+    todo.reason,
+  ].filter(Boolean).join(' · ');
 }
 
 function plannerSummaryFromTaskMetadata(value: unknown): TaskPlannerSummarySnapshot | null {

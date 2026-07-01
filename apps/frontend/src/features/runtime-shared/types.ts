@@ -509,6 +509,7 @@ export type AgentTaskSnapshot = {
   artifacts?: ArtifactSnapshot[];
   metadata?: Record<string, unknown>;
   planner_summary?: PlannerTraceSummarySnapshot | null;
+  task_core?: TaskCoreSnapshot | null;
   open_in_studio_url?: string | null;
   created_at?: string;
   updated_at?: string;
