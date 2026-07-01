@@ -225,6 +225,7 @@ def run_smoke(
     app_name: str = DEFAULT_APP_NAME,
     input_text: str = DEFAULT_INPUT_TEXT,
     cleanup: bool = True,
+    allow_existing_app: bool = False,
 ) -> dict[str, Any]:
     current_platform = platform.system()
     clean_app_name = str(app_name or "").strip() or DEFAULT_APP_NAME
@@ -302,11 +303,12 @@ def run_smoke(
     )
     before_status = desktop_tools.app_status(discovered_app_name)
     before_running = _status_running(before_status)
-    if before_running is not False:
+    if before_running is None or (before_running is True and not allow_existing_app):
         status_error = "app_already_running" if before_running is True else "app_status_unknown"
         checks = {
             "desktop_session_ready": preflight.get("ok") is True,
             "app_not_already_running": False,
+            "existing_app_allowed": bool(allow_existing_app),
         }
         return {
             "ok": False,
@@ -314,6 +316,7 @@ def run_smoke(
             "skipped": False,
             "platform": current_platform,
             "app_name": clean_app_name,
+            "allow_existing_app": bool(allow_existing_app),
             "tool_chain": TOOL_CHAIN,
             "case_count": 1,
             "cases": [
@@ -630,7 +633,8 @@ def run_smoke(
     checks = {
         "desktop_session_ready": preflight.get("ok") is True,
         "discovered_app": discovery.get("ok") is True and bool(discovered_names),
-        "app_not_already_running": before_running is False,
+        "app_not_already_running": before_running is False or bool(allow_existing_app),
+        "existing_app_allowed": before_running is not True or bool(allow_existing_app),
         "open_ok": open_result.get("ok") is True,
         "focus_verified": focus_verified,
         "clear_ok": clear_result.get("ok") is True,
@@ -653,6 +657,7 @@ def run_smoke(
         "platform": current_platform,
         "app_name": clean_app_name,
         "opened_app_name": opened_app_name,
+        "allow_existing_app": bool(allow_existing_app),
         "tool_chain": TOOL_CHAIN,
         "case_count": 1,
         "cases": [
@@ -698,6 +703,14 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--input-text", default=DEFAULT_INPUT_TEXT)
     parser.add_argument("--no-cleanup", action="store_true")
     parser.add_argument(
+        "--allow-existing-app",
+        action="store_true",
+        help=(
+            "Allow the smoke to use an already running target app. "
+            "By default the smoke refuses to modify existing app state."
+        ),
+    )
+    parser.add_argument(
         "--report-json",
         type=Path,
         help="Optional JSON evidence report path.",
@@ -721,6 +734,7 @@ def _console_summary(evidence: dict[str, Any], report_json: Path) -> dict[str, A
         "platform",
         "app_name",
         "opened_app_name",
+        "allow_existing_app",
         "tool_chain",
         "case_count",
         "stage",
@@ -763,6 +777,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         app_name=args.app_name,
         input_text=args.input_text,
         cleanup=not args.no_cleanup,
+        allow_existing_app=args.allow_existing_app,
     )
     if args.report_json is not None:
         _write_report(args.report_json, evidence)

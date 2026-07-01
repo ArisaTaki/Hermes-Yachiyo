@@ -647,12 +647,15 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "evidence": {},
         "findings": [],
         "run_requested": False,
+        "app_name": "",
+        "allow_existing_app": False,
     }
     assert report["real_desktop_ui_inspection_smoke"] == {
         "status": "skipped",
         "evidence": {},
         "findings": [],
         "run_requested": False,
+        "app_name": "",
     }
     assert report["planner_runtime_tool_parity_smoke"]["status"] == "passed"
     assert report["planner_runtime_tool_parity_smoke"]["evidence"]["ok"] is True
@@ -1254,6 +1257,41 @@ def test_release_candidate_verifier_reports_real_desktop_ui_inspection_smoke_whe
     assert section["evidence"]["focus_verified"] is False
 
 
+def test_release_candidate_verifier_passes_real_desktop_ui_inspection_app_name(
+    tmp_path, monkeypatch, capsys
+):
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    def fake_run(*, app_name: str):
+        captured["app_name"] = app_name
+        return {
+            "ok": True,
+            "mode": "real_desktop_ui_inspection_smoke",
+            "app_name": app_name,
+            "opened_app_name": app_name,
+            "checks": {"named_ui_elements_ok": True},
+        }
+
+    monkeypatch.setattr(rc, "run_real_desktop_ui_inspection_smoke", fake_run)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        run_real_desktop_ui_inspection_smoke=True,
+        real_desktop_ui_inspection_app_name="TextEdit",
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "real desktop UI inspection smoke: passed" in output
+    assert captured == {"app_name": "TextEdit"}
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["real_desktop_ui_inspection_smoke"]
+    assert section["app_name"] == "TextEdit"
+    assert section["evidence"]["app_name"] == "TextEdit"
+
+
 def test_release_candidate_verifier_fails_when_real_desktop_ui_inspection_smoke_fails(
     tmp_path, monkeypatch, capsys
 ):
@@ -1484,6 +1522,81 @@ def test_release_candidate_verifier_reports_real_desktop_interaction_smoke_when_
     assert section["evidence"]["tool_chain"] == ["desktop.active_window", "desktop.safe_type_text"]
     assert section["evidence"]["after_values"] == ["-42"]
     assert section["findings"] == []
+
+
+def test_release_candidate_verifier_passes_real_desktop_interaction_app_name(
+    tmp_path, monkeypatch, capsys
+):
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    def fake_run(*, app_name: str):
+        captured["app_name"] = app_name
+        return {
+            "ok": True,
+            "mode": "real_desktop_interaction_smoke",
+            "app_name": app_name,
+            "tool_chain": ["desktop.safe_type_text"],
+            "checks": {"type_ok": True, "click_ok": True},
+        }
+
+    monkeypatch.setattr(rc, "run_real_desktop_interaction_smoke", fake_run)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        run_real_desktop_interaction_smoke=True,
+        real_desktop_interaction_app_name="TextEdit",
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "real desktop interaction smoke: passed" in output
+    assert captured == {"app_name": "TextEdit"}
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["real_desktop_interaction_smoke"]
+    assert section["app_name"] == "TextEdit"
+    assert section["evidence"]["app_name"] == "TextEdit"
+
+
+def test_release_candidate_verifier_allows_existing_real_desktop_interaction_app(
+    tmp_path, monkeypatch, capsys
+):
+    captured: dict[str, object] = {}
+    monkeypatch.setattr(rc, "verify_release_artifacts", lambda **_kwargs: [])
+
+    def fake_run(*, allow_existing_app: bool):
+        captured["allow_existing_app"] = allow_existing_app
+        return {
+            "ok": True,
+            "mode": "real_desktop_interaction_smoke",
+            "app_name": "Calculator",
+            "allow_existing_app": allow_existing_app,
+            "checks": {
+                "app_not_already_running": True,
+                "existing_app_allowed": True,
+                "type_ok": True,
+                "click_ok": True,
+            },
+        }
+
+    monkeypatch.setattr(rc, "run_real_desktop_interaction_smoke", fake_run)
+
+    assert rc.verify_release_candidate(
+        root=tmp_path,
+        source_only=True,
+        run_real_desktop_interaction_smoke=True,
+        allow_real_desktop_interaction_existing_app=True,
+        report_json=Path("tmp/source-only-rc.json"),
+    ) == 0
+
+    output = capsys.readouterr().out
+    assert "real desktop interaction smoke: passed" in output
+    assert captured == {"allow_existing_app": True}
+    report = json.loads((tmp_path / "tmp" / "source-only-rc.json").read_text(encoding="utf-8"))
+    section = report["real_desktop_interaction_smoke"]
+    assert section["allow_existing_app"] is True
+    assert section["evidence"]["allow_existing_app"] is True
 
 
 def test_release_candidate_verifier_reports_locked_real_desktop_interaction(

@@ -2341,9 +2341,17 @@ def verify_real_desktop_app_open_smoke(
     ], evidence
 
 
-def verify_real_desktop_ui_inspection_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+def verify_real_desktop_ui_inspection_smoke(
+    root: Path,
+    *,
+    app_name: str = "",
+) -> tuple[list[Finding], dict[str, Any]]:
     try:
-        raw_evidence = run_real_desktop_ui_inspection_smoke()
+        kwargs: dict[str, Any] = {}
+        clean_app_name = str(app_name or "").strip()
+        if clean_app_name:
+            kwargs["app_name"] = clean_app_name
+        raw_evidence = run_real_desktop_ui_inspection_smoke(**kwargs)
     except Exception as exc:
         return [
             Finding(
@@ -2378,9 +2386,20 @@ def verify_real_desktop_ui_inspection_smoke(root: Path) -> tuple[list[Finding], 
     ], evidence
 
 
-def verify_real_desktop_interaction_smoke(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+def verify_real_desktop_interaction_smoke(
+    root: Path,
+    *,
+    app_name: str = "",
+    allow_existing_app: bool = False,
+) -> tuple[list[Finding], dict[str, Any]]:
     try:
-        raw_evidence = run_real_desktop_interaction_smoke()
+        kwargs: dict[str, Any] = {}
+        clean_app_name = str(app_name or "").strip()
+        if clean_app_name:
+            kwargs["app_name"] = clean_app_name
+        if allow_existing_app:
+            kwargs["allow_existing_app"] = True
+        raw_evidence = run_real_desktop_interaction_smoke(**kwargs)
     except Exception as exc:
         return [
             Finding(
@@ -4674,7 +4693,10 @@ def verify_release_candidate(
     real_desktop_app_open_capability_query: str = "",
     require_real_desktop_app_foreground_ready: bool = False,
     run_real_desktop_interaction_smoke: bool = False,
+    real_desktop_interaction_app_name: str = "",
+    allow_real_desktop_interaction_existing_app: bool = False,
     run_real_desktop_ui_inspection_smoke: bool = False,
+    real_desktop_ui_inspection_app_name: str = "",
     run_electron_native_bridge_smoke: bool = False,
     smoke_scripts: Sequence[Path] | None = None,
     manual_checks_json: ManualChecksJsonInput = None,
@@ -4751,12 +4773,15 @@ def verify_release_candidate(
             "evidence": {},
             "findings": [],
             "run_requested": run_real_desktop_interaction_smoke,
+            "app_name": real_desktop_interaction_app_name,
+            "allow_existing_app": allow_real_desktop_interaction_existing_app,
         },
         "real_desktop_ui_inspection_smoke": {
             "status": "pending",
             "evidence": {},
             "findings": [],
             "run_requested": run_real_desktop_ui_inspection_smoke,
+            "app_name": real_desktop_ui_inspection_app_name,
         },
         "electron_native_bridge_smoke": {
             "status": "pending",
@@ -4999,12 +5024,15 @@ def verify_release_candidate(
             "evidence": {},
             "findings": [],
             "run_requested": run_real_desktop_interaction_smoke,
+            "app_name": real_desktop_interaction_app_name,
+            "allow_existing_app": allow_real_desktop_interaction_existing_app,
         }
         report["real_desktop_ui_inspection_smoke"] = {
             "status": "skipped",
             "evidence": {},
             "findings": [],
             "run_requested": run_real_desktop_ui_inspection_smoke,
+            "app_name": real_desktop_ui_inspection_app_name,
         }
         report["electron_native_bridge_smoke"] = {
             "status": "skipped",
@@ -5240,7 +5268,8 @@ def verify_release_candidate(
 
     if run_real_desktop_ui_inspection_smoke:
         real_ui_findings, real_ui_evidence = verify_real_desktop_ui_inspection_smoke(
-            root
+            root,
+            app_name=real_desktop_ui_inspection_app_name,
         )
         _print_findings("real desktop UI inspection smoke", real_ui_findings)
         failed = failed or bool(real_ui_findings)
@@ -5249,6 +5278,7 @@ def verify_release_candidate(
             "evidence": real_ui_evidence,
             "findings": _finding_report(real_ui_findings),
             "run_requested": run_real_desktop_ui_inspection_smoke,
+            "app_name": real_desktop_ui_inspection_app_name,
         }
     else:
         print(
@@ -5260,11 +5290,16 @@ def verify_release_candidate(
             "evidence": {},
             "findings": [],
             "run_requested": run_real_desktop_ui_inspection_smoke,
+            "app_name": real_desktop_ui_inspection_app_name,
         }
 
     if run_real_desktop_interaction_smoke:
         real_interaction_findings, real_interaction_evidence = (
-            verify_real_desktop_interaction_smoke(root)
+            verify_real_desktop_interaction_smoke(
+                root,
+                app_name=real_desktop_interaction_app_name,
+                allow_existing_app=allow_real_desktop_interaction_existing_app,
+            )
         )
         _print_findings("real desktop interaction smoke", real_interaction_findings)
         failed = failed or bool(real_interaction_findings)
@@ -5273,6 +5308,8 @@ def verify_release_candidate(
             "evidence": real_interaction_evidence,
             "findings": _finding_report(real_interaction_findings),
             "run_requested": run_real_desktop_interaction_smoke,
+            "app_name": real_desktop_interaction_app_name,
+            "allow_existing_app": allow_real_desktop_interaction_existing_app,
         }
     else:
         print(
@@ -5284,6 +5321,8 @@ def verify_release_candidate(
             "evidence": {},
             "findings": [],
             "run_requested": run_real_desktop_interaction_smoke,
+            "app_name": real_desktop_interaction_app_name,
+            "allow_existing_app": allow_real_desktop_interaction_existing_app,
         }
 
     if run_electron_native_bridge_smoke:
@@ -6063,9 +6102,33 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Run opt-in real macOS desktop type -> inspect -> click -> verify smoke.",
     )
     parser.add_argument(
+        "--real-desktop-interaction-app-name",
+        default="",
+        help=(
+            "Optional app name for --run-real-desktop-interaction-smoke. "
+            "Defaults to the smoke script's safe target."
+        ),
+    )
+    parser.add_argument(
+        "--allow-real-desktop-interaction-existing-app",
+        action="store_true",
+        help=(
+            "Allow --run-real-desktop-interaction-smoke to use an already running "
+            "target app. By default the smoke refuses to modify existing app state."
+        ),
+    )
+    parser.add_argument(
         "--run-real-desktop-ui-inspection-smoke",
         action="store_true",
         help="Run opt-in real macOS named-app UI tree inspection smoke.",
+    )
+    parser.add_argument(
+        "--real-desktop-ui-inspection-app-name",
+        default="",
+        help=(
+            "Optional app name for --run-real-desktop-ui-inspection-smoke. "
+            "Defaults to the smoke script's safe target."
+        ),
     )
     parser.add_argument(
         "--run-electron-native-bridge-smoke",
@@ -6241,9 +6304,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         run_real_desktop_interaction_smoke=(
             args.run_real_desktop_interaction_smoke
         ),
+        real_desktop_interaction_app_name=args.real_desktop_interaction_app_name,
+        allow_real_desktop_interaction_existing_app=(
+            args.allow_real_desktop_interaction_existing_app
+        ),
         run_real_desktop_ui_inspection_smoke=(
             args.run_real_desktop_ui_inspection_smoke
         ),
+        real_desktop_ui_inspection_app_name=args.real_desktop_ui_inspection_app_name,
         run_electron_native_bridge_smoke=args.run_electron_native_bridge_smoke,
         manual_checks_json=args.manual_checks_json,
         manual_checks_markdown=args.manual_checks_markdown,

@@ -267,6 +267,133 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
     ]
 
 
+def test_real_desktop_interaction_smoke_refuses_existing_app_by_default(monkeypatch):
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "active_window",
+        lambda: {"ok": True, "data": {"app_name": "Codex"}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "list_apps",
+        lambda **_kwargs: {"ok": True, "data": {"apps": [{"name": "Calculator"}]}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_status",
+        lambda app_name: {"ok": True, "data": {"app_name": app_name, "running": True}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_open",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("must not mutate an existing app by default")
+        ),
+    )
+
+    evidence = smoke.run_smoke()
+
+    assert evidence["ok"] is False
+    assert evidence["stage"] == "app_preflight"
+    assert evidence["error"] == "app_already_running"
+    assert evidence["allow_existing_app"] is False
+    assert evidence["checks"] == {
+        "desktop_session_ready": True,
+        "app_not_already_running": False,
+        "existing_app_allowed": False,
+    }
+
+
+def test_real_desktop_interaction_smoke_allows_existing_app_when_requested(monkeypatch):
+    statuses = iter([True, True])
+    active_windows = iter(
+        [
+            {"ok": True, "data": {"app_name": "Codex"}},
+            {"ok": True, "data": {"app_name": "Calculator"}},
+        ]
+    )
+    ui_results = iter(
+        [
+            {
+                "ok": True,
+                "data": {
+                    "app_name": "Calculator",
+                    "elements": [
+                        {"role": "AXStaticText", "name": "42", "value": "42"},
+                        {"role": "AXButton", "name": "更改数值符号", "description": "按钮"},
+                    ],
+                },
+            },
+            {
+                "ok": True,
+                "data": {
+                    "app_name": "Calculator",
+                    "elements": [
+                        {"role": "AXStaticText", "name": "-42", "value": "-42"},
+                    ],
+                },
+            },
+        ]
+    )
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(smoke.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(smoke.desktop_tools, "active_window", lambda: next(active_windows))
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "list_apps",
+        lambda **_kwargs: {"ok": True, "data": {"apps": [{"name": "Calculator"}]}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_status",
+        lambda app_name: {"ok": True, "data": {"app_name": app_name, "running": next(statuses)}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_open",
+        lambda app_name: {"ok": True, "data": {"app_name": app_name}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_focus",
+        lambda app_name: {"ok": True, "data": {"app_name": app_name, "focus_verified": True}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "desktop_safe_key",
+        lambda *_args, **_kwargs: {"ok": True},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "desktop_safe_type_text",
+        lambda _text: {"ok": True},
+    )
+    monkeypatch.setattr(smoke.desktop_tools, "ui_elements", lambda **_kwargs: next(ui_results))
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "click_ui_element",
+        lambda *_args, **_kwargs: {"ok": True},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_quit",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("must not quit an app that was already running")
+        ),
+    )
+
+    evidence = smoke.run_smoke(allow_existing_app=True)
+
+    assert evidence["ok"] is True
+    assert evidence["allow_existing_app"] is True
+    assert evidence["checks"]["app_not_already_running"] is True
+    assert evidence["checks"]["existing_app_allowed"] is True
+    assert evidence["cleanup"]["attempted"] is False
+    assert evidence["cleanup"]["reason"] == "app was already running before smoke"
+    assert evidence["after_values"] == ["-42"]
+
+
 def test_real_desktop_interaction_smoke_stops_if_active_app_changes_before_click(
     monkeypatch,
 ):
