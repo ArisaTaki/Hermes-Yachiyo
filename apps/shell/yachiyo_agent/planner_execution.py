@@ -596,10 +596,9 @@ def _model_selected_desktop_step_ids(steps: list[Any]) -> set[str]:
                 if str(item or "").strip()
             ]
             if (
-                step_id == "open-selected-discovered-app"
+                _selected_discovered_app_step_requires_model(step_id, payload)
                 or step_id == "open-discovered-file-with-app"
-                or str(payload.get("app_name") or "").strip()
-                == "<selected app from desktop.list_apps>"
+                or _selected_discovered_app_payload_requires_model(payload)
                 or str(payload.get("target_path") or "").strip()
                 == "<selected file from workspace.list>"
                 or any(item in selected_step_ids for item in depends_on)
@@ -607,6 +606,25 @@ def _model_selected_desktop_step_ids(steps: list[Any]) -> set[str]:
                 selected_step_ids.add(step_id)
                 changed = True
     return selected_step_ids
+
+
+def _selected_discovered_app_step_requires_model(step_id: str, payload: Mapping[str, Any]) -> bool:
+    if step_id != "open-selected-discovered-app":
+        return False
+    return _selected_discovered_app_payload_requires_model(payload)
+
+
+def _selected_discovered_app_payload_requires_model(payload: Mapping[str, Any]) -> bool:
+    if str(payload.get("app_name") or "").strip() != "<selected app from desktop.list_apps>":
+        return False
+    return not _runtime_resolvable_selected_app_payload(payload)
+
+
+def _runtime_resolvable_selected_app_payload(payload: Mapping[str, Any]) -> bool:
+    return (
+        str(payload.get("selection_source") or "").strip() == "desktop.list_apps"
+        and bool(str(payload.get("query") or "").strip())
+    )
 
 
 def _has_unavailable_required_desktop_step(decision: Any) -> bool:

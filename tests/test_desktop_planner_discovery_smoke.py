@@ -42,8 +42,14 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
     ] == "PixelForge"
     assert [request["tool"] for request in cases["capability_app_discovery_open"]["requests"]] == [
         "desktop.list_apps",
+        "app.open",
     ]
     assert cases["capability_app_discovery_open"]["requests"][0]["continue_to_model"] is True
+    assert cases["capability_app_discovery_open"]["requests"][1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "pdf",
+    }
     assert [step["id"] for step in cases["capability_app_discovery_open"]["steps"]] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",

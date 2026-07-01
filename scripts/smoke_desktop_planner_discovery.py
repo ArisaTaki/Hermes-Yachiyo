@@ -84,6 +84,7 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
         ],
         "expected_request_tools": [
             "desktop.list_apps",
+            "app.open",
         ],
         "expected_model_followup": True,
     },
@@ -253,7 +254,7 @@ def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
             or (isinstance(operation_input, dict) and operation_input.get("app_name") == expected_app)
         ),
         "model_followup_matches": (
-            bool(requests and requests[-1].get("continue_to_model"))
+            any(bool(request.get("continue_to_model")) for request in requests)
             == expected_model_followup
         ),
         "uses_no_browser_tool": not any(tool.startswith("browser.") for tool in request_tools),
