@@ -3180,6 +3180,10 @@ def test_runtime_planner_prefers_structured_file_organize_tool() -> None:
         "把下载里的发票整理到一个文件夹",
         allowed_tools=["workspace.list", "artifact.write", "file.organize", "terminal.run"],
     )
+    desktop_invoice_decision = RuntimePlanner().decision(
+        "帮我把桌面上的发票整理到一个文件夹并生成清单",
+        allowed_tools=["workspace.list", "artifact.write", "file.organize", "terminal.run"],
+    )
 
     assert decision.selected_intent.kind == "file_organization"
     assert decision.selected_intent.inputs == {
@@ -3196,6 +3200,29 @@ def test_runtime_planner_prefers_structured_file_organize_tool() -> None:
     }
     assert apply_step.approval_required is True
     assert decision.plan.tool_plan.missing_capabilities == []
+    assert desktop_invoice_decision.selected_intent.kind == "file_organization"
+    assert desktop_invoice_decision.selected_intent.inputs == {
+        "location_hint": "Desktop",
+        "operation_hint": "organize",
+        "file_type_hint": "invoice",
+    }
+    assert desktop_invoice_decision.plan.tool_plan.artifacts_expected == [
+        "file-organization-plan.md"
+    ]
+    assert desktop_invoice_decision.plan.tool_plan.approvals_required == [
+        "apply-file-organization"
+    ]
+    desktop_apply_step = _step_by_id(
+        desktop_invoice_decision,
+        "apply-file-organization",
+    )
+    assert desktop_apply_step.tool_name == "file.organize"
+    assert desktop_apply_step.input_preview == {
+        "path": "Desktop",
+        "operation": "organize",
+        "file_type": "invoice",
+    }
+    assert desktop_apply_step.approval_required is True
 
 
 def test_runtime_planner_routes_duplicate_file_cleanup_through_approval() -> None:

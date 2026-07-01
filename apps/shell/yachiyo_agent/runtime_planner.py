@@ -11765,6 +11765,14 @@ def _file_destination_hint(text: str, *, source_hint: str = "") -> str:
 def _normalize_file_destination(target: str) -> str:
     value = str(target or "").strip().strip("\"'`“”‘’")
     value = re.sub(
+        r"\s*(?:并|然后|再|后|之后|and|then)\s*"
+        r"(?:生成|输出|创建|写|列出|produce|generate|create|write|list)\s*"
+        r"(?:清单|列表|报告|inventory|list|report).*$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(
         r"\s*(?:folder|directory|dir|文件夹|目录|中|里|内|下)\s*$",
         "",
         value,
@@ -12373,6 +12381,19 @@ def _file_operation_hint(text: str) -> str:
         return "archive"
     if _contains_any(text, ["move", "移动"]):
         return "move"
+    if re.search(
+        r"(?:移到|移入|移动到|移动至|\bmove\b.+\b(?:to|into)\b)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return "move"
+    if re.search(
+        r"(?:整理|分类|放入|放进|放到).{0,32}(?:到|至|进|入).{0,32}"
+        r"(?:文件夹|目录|folder|directory|dir)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return "organize"
     if _contains_any(
         text,
         [
