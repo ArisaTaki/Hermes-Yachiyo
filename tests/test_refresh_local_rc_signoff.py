@@ -53,6 +53,51 @@ def test_refresh_local_rc_signoff_build_uses_project_venv_python(
     ]
 
 
+def test_refresh_local_rc_signoff_build_uses_venv_entrypoint_when_it_is_symlink(
+    monkeypatch,
+    tmp_path,
+):
+    commands: list[tuple[list[str], bool]] = []
+    build_calls: list[dict[str, object]] = []
+    base_python = tmp_path / "base" / "python"
+    base_python.parent.mkdir(parents=True)
+    base_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    venv_python = tmp_path / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.symlink_to(base_python)
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+    monkeypatch.setattr(refresh.sys, "executable", str(base_python))
+    monkeypatch.setattr(
+        refresh,
+        "build_release_candidate_artifacts",
+        lambda **kwargs: build_calls.append(kwargs),
+    )
+
+    def fake_run(command: list[str], *, allow_failure: bool = False) -> int:
+        commands.append((command, allow_failure))
+        return 0
+
+    monkeypatch.setattr(refresh, "_run", fake_run)
+
+    refresh._build_release_candidate_artifacts(
+        channel="experimental",
+        repository=None,
+    )
+
+    assert build_calls == []
+    assert commands == [
+        (
+            [
+                str(venv_python),
+                "scripts/build_release_candidate_artifacts.py",
+                "--channel",
+                "experimental",
+            ],
+            False,
+        )
+    ]
+
+
 def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
     monkeypatch,
     tmp_path,

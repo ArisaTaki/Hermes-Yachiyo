@@ -42,10 +42,7 @@ def _project_venv_python() -> Path:
 
 
 def _same_python(left: Path, right: Path) -> bool:
-    try:
-        return left.resolve(strict=False) == right.resolve(strict=False)
-    except OSError:
-        return str(left) == str(right)
+    return left.expanduser().absolute() == right.expanduser().absolute()
 
 
 def _run(command: list[str], *, allow_failure: bool = False) -> int:
