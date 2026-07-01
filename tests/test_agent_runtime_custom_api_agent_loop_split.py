@@ -1616,10 +1616,16 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
     ][0]
     assert replan_context["replan_requests"][0]["request_id"] == payload["request_id"]
     assert replan_context["fallback_tools"] == ["terminal.run"]
+    assert replan_context["task_progress"]["blocked_steps"] == ["analyze-data-file"]
+    assert any(
+        item.get("path") == "data/sales.csv"
+        for item in replan_context["task_progress"]["workspace_items"]
+    )
     assert any(
         message["role"] == "user"
         and "Runtime replan context" in message["content"]
         and "terminal.run" in message["content"]
+        and "blocked_steps: analyze-data-file" in message["content"]
         for message in model_calls[0]
     )
     assert any(
@@ -14565,9 +14571,10 @@ def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rul
         if step.get("tool_name")
     ]
     assert planner_tools == ["app.open", "desktop.click_ui_element"]
-    assert [event_type for _run_id, event_type, _payload in appended_events[:3]] == [
+    assert [event_type for _run_id, event_type, _payload in appended_events[:4]] == [
         "agent.intent.selected",
         "agent.plan.created",
+        "agent.task_core.created",
         "agent.plan.step",
     ]
     appended_plan_tools = [

@@ -941,6 +941,7 @@ class RuntimeCustomApiAgentLoop:
         payload = _model_replan_followup_context_payload(
             replan_payloads,
             allowed_tools=allowed_tools,
+            timeline=timeline,
         )
         if not payload:
             return
@@ -4045,6 +4046,7 @@ def _model_replan_followup_context_payload(
     replan_payloads: list[dict[str, Any]],
     *,
     allowed_tools: list[str],
+    timeline: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
     requests: list[dict[str, Any]] = []
@@ -4094,6 +4096,12 @@ def _model_replan_followup_context_payload(
         value = str((replan_payloads[0] if replan_payloads else {}).get(key) or "").strip()
         if value:
             payload[key] = value
+    task_progress = _runtime_replan_task_progress_summary(
+        replan_payloads,
+        timeline or [],
+    )
+    if task_progress:
+        payload["task_progress"] = task_progress
     return payload
 
 
@@ -4120,6 +4128,36 @@ def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
         lines.append(f"Failed tools: {', '.join(failed_tools)}.")
     if fallback_tools:
         lines.append(f"Preferred fallback tools: {', '.join(fallback_tools)}.")
+    task_progress = (
+        payload.get("task_progress")
+        if isinstance(payload.get("task_progress"), dict)
+        else {}
+    )
+    if task_progress:
+        lines.append("Task progress:")
+        for key, label in (
+            ("completed_steps", "completed_steps"),
+            ("blocked_steps", "blocked_steps"),
+            ("pending_steps", "pending_steps"),
+            ("waiting_approval_steps", "waiting_approval_steps"),
+        ):
+            values = _string_list(task_progress.get(key))
+            if values:
+                lines.append(f"- {label}: {', '.join(values)}")
+        workspace_items = [
+            item
+            for item in task_progress.get("workspace_items", [])
+            if isinstance(item, dict)
+        ]
+        if workspace_items:
+            rendered_items = []
+            for item in workspace_items[:8]:
+                kind = str(item.get("kind") or "").strip()
+                path = str(item.get("path") or item.get("title") or "").strip()
+                if path:
+                    rendered_items.append(f"{kind}:{path}" if kind else path)
+            if rendered_items:
+                lines.append(f"- workspace_items: {', '.join(rendered_items)}")
     for index, request in enumerate(requests[:3], start=1):
         detail = str(request.get("failure_detail") or "").strip()
         reason = str(request.get("reason") or "").strip()
@@ -4140,6 +4178,133 @@ def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
         if prompt:
             lines.append(f"- planner_replan_prompt: {prompt}")
     return "\n".join(lines)
+
+
+def _runtime_replan_task_progress_summary(
+    replan_payloads: list[dict[str, Any]],
+    timeline: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not timeline:
+        return {}
+    core_ids = {
+        str(payload.get("core_id") or "").strip()
+        for payload in replan_payloads
+        if isinstance(payload, Mapping) and str(payload.get("core_id") or "").strip()
+    }
+    plan_ids = {
+        str(payload.get("plan_id") or "").strip()
+        for payload in replan_payloads
+        if isinstance(payload, Mapping) and str(payload.get("plan_id") or "").strip()
+    }
+    todos_by_step: dict[str, dict[str, Any]] = {}
+    checkpoints_by_step: dict[str, dict[str, Any]] = {}
+    workspace_items: list[dict[str, Any]] = []
+    for event in timeline:
+        if not isinstance(event, Mapping):
+            continue
+        event_name = str(event.get("event") or "").strip()
+        event_payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+        core_id = str(event.get("core_id") or event_payload.get("core_id") or "").strip()
+        plan_id = str(event.get("plan_id") or event_payload.get("plan_id") or "").strip()
+        if core_ids and core_id and core_id not in core_ids:
+            continue
+        if plan_ids and plan_id and plan_id not in plan_ids:
+            continue
+        if event_name == "agent.task_core.created":
+            task_core = (
+                event_payload.get("task_core")
+                if isinstance(event_payload.get("task_core"), Mapping)
+                else {}
+            )
+            workspace = (
+                task_core.get("workspace")
+                if isinstance(task_core.get("workspace"), Mapping)
+                else {}
+            )
+            workspace_items = _runtime_workspace_item_summaries(workspace.get("items"))
+            continue
+        if event_name == "agent.task.todo.updated":
+            step_id = str(event.get("step_id") or "").strip()
+            if not step_id:
+                continue
+            todo = event.get("todo") if isinstance(event.get("todo"), Mapping) else {}
+            todos_by_step[step_id] = {
+                "step_id": step_id,
+                "title": str(todo.get("title") or event.get("detail") or step_id).strip(),
+                "status": str(event.get("status") or todo.get("status") or "").strip(),
+                "tool": str(event.get("tool") or todo.get("tool_name") or "").strip(),
+                "approval_required": bool(todo.get("approval_required")),
+            }
+            continue
+        if event_name == "agent.task.checkpoint.updated":
+            step_id = str(event.get("step_id") or "").strip()
+            if not step_id:
+                continue
+            checkpoint = (
+                event.get("checkpoint")
+                if isinstance(event.get("checkpoint"), Mapping)
+                else {}
+            )
+            checkpoints_by_step[step_id] = {
+                "step_id": step_id,
+                "title": str(checkpoint.get("title") or event.get("detail") or step_id).strip(),
+                "status": str(event.get("status") or checkpoint.get("status") or "").strip(),
+                "checkpoint_id": str(
+                    event.get("checkpoint_id") or checkpoint.get("checkpoint_id") or ""
+                ).strip(),
+            }
+
+    todos = list(todos_by_step.values())
+    checkpoints = list(checkpoints_by_step.values())
+    if not todos and not checkpoints and not workspace_items:
+        return {}
+    summary: dict[str, Any] = {
+        "todo_count": len(todos),
+        "checkpoint_count": len(checkpoints),
+        "todos": todos[:20],
+        "checkpoints": checkpoints[:20],
+    }
+    for status, key in (
+        ("completed", "completed_steps"),
+        ("blocked", "blocked_steps"),
+        ("pending", "pending_steps"),
+        ("waiting_approval", "waiting_approval_steps"),
+        ("skipped", "skipped_steps"),
+    ):
+        values = [
+            str(todo.get("step_id") or "").strip()
+            for todo in todos
+            if str(todo.get("status") or "").strip() == status
+            and str(todo.get("step_id") or "").strip()
+        ]
+        if values:
+            summary[key] = values
+    if workspace_items:
+        summary["workspace_items"] = workspace_items
+    return summary
+
+
+def _runtime_workspace_item_summaries(items: Any) -> list[dict[str, Any]]:
+    if not isinstance(items, list):
+        return []
+    summaries: list[dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, Mapping):
+            continue
+        summary = {
+            "kind": str(item.get("kind") or "").strip(),
+            "path": str(item.get("path") or "").strip(),
+            "title": str(item.get("title") or "").strip(),
+            "status": str(item.get("status") or "").strip(),
+        }
+        clean_summary = {
+            key: value
+            for key, value in summary.items()
+            if value
+        }
+        if clean_summary:
+            summaries.append(clean_summary)
+    return summaries[:20]
 
 
 def _selection_payload_with_timeline_fallback(
