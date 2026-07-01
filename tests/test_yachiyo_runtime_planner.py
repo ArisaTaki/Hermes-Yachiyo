@@ -14903,6 +14903,8 @@ def test_runtime_planner_routes_media_playback_to_media_capability() -> None:
         "能否帮我播放 Apple Music?",
         "能不能直接播个 Apple Music",
         "给我来点音乐",
+        "打开音乐听听",
+        "音乐听听",
         "can you play some music?",
     ):
         decision = RuntimePlanner().decision(

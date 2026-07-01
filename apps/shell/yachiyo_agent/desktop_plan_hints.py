@@ -1138,6 +1138,13 @@ def media_action_hint(text: str) -> str:
         return "pause"
     if _media_resume_play_hint(str(text or "")):
         return "play"
+    if re.search(
+        r"(?:音乐|歌|歌曲).{0,4}(?:听听|听一下|听下)|"
+        r"(?:听听|听一下|听下).{0,4}(?:音乐|歌|歌曲)",
+        lowered,
+        flags=re.IGNORECASE,
+    ):
+        return "play"
     if re.search(r"\bput\s+.+\s+on\s+(?:apple\s*music|music)\b", lowered):
         return "play"
     if contains_any(
