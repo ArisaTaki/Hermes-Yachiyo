@@ -417,14 +417,17 @@ async function waitForDocumentReady(client, timeoutMs) {
   `);
 }
 
-async function navigateToChat(client) {
-  await evaluate(client, `
+async function navigateToChat(client, timeoutMs) {
+  await waitFor(client, `
     (() => {
-      if (window.location.hash !== '#/chat') window.location.hash = '#/chat';
-      window.dispatchEvent(new Event('hashchange'));
-      return window.location.href;
+      if (window.location.hash !== '#/chat') {
+        window.history.pushState(null, '', '#/chat');
+        window.dispatchEvent(new Event('oha-route-change'));
+        window.dispatchEvent(new HashChangeEvent('hashchange'));
+      }
+      return window.location.hash === '#/chat' || Boolean(document.querySelector('textarea.chat-input'));
     })()
-  `);
+  `, 'packaged chat route navigation', timeoutMs);
 }
 
 async function waitFor(client, predicateExpression, label, timeoutMs) {
@@ -446,6 +449,7 @@ async function waitFor(client, predicateExpression, label, timeoutMs) {
         previews: document.querySelectorAll('[data-testid="chat-composer-attachment-preview"]').length,
         messageAttachments: document.querySelectorAll('[data-testid="chat-message-attachment-item"]').length,
         hash: window.location.hash,
+        navButtons: Array.from(document.querySelectorAll('.hy-nav button')).map((button) => button.textContent.trim()).filter(Boolean).slice(0, 12),
         bodyText: document.body.textContent.slice(-1000),
       })
     `);
@@ -463,7 +467,7 @@ function terminateProcess(child) {
 
 async function runPackagedChatSmoke(client, timeoutMs) {
   await waitForDocumentReady(client, timeoutMs);
-  await navigateToChat(client);
+  await navigateToChat(client, timeoutMs);
   await waitFor(client, `
     (() => (
       document.querySelector('textarea.chat-input')

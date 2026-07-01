@@ -320,6 +320,10 @@ PACKAGED_CHAT_NATIVE_FILE_SMOKE_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "packaged Chat native file smoke must click the Chat attach button",
     ),
     (
+        "oha-route-change",
+        "packaged Chat native file smoke must use the app route-change event when navigating to Chat",
+    ),
+    (
         "chat-message-attachment-item",
         "packaged Chat native file smoke must verify sent message attachments",
     ),
