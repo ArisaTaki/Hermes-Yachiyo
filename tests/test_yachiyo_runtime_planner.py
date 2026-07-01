@@ -2628,6 +2628,30 @@ def test_planner_binds_discovered_app_hotkey_to_selected_app_without_dangling_ob
     ).depends_on == ["hotkey-selected-discovered-app"]
 
 
+def test_planner_does_not_duplicate_selected_app_open_shortcut_followup() -> None:
+    prompt = "打开一个能写文档的应用，然后新建文档"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+    ]
+    selected_app = _step_by_id(decision, "open-selected-discovered-app")
+    assert selected_app.tool_name == "app.open_and_safe_shortcut"
+    assert selected_app.input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "document",
+        "action": "new_document",
+    }
+
+
 def test_planner_selection_payload_surfaces_discovered_app_open_path_target() -> None:
     prompt = "找一个代码编辑器打开 README.md"
     allowed_tools = [

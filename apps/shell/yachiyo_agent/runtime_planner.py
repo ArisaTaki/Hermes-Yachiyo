@@ -8244,6 +8244,11 @@ def _append_selected_discovered_generic_action_steps(
     safe_shortcut = safe_shortcut_hint(pending_action)
     hotkey = None if safe_shortcut else hotkey_hint(pending_action)
     submit_action = submit_action_hint(pending_action)
+    if safe_shortcut and _selected_discovered_open_step_already_runs_shortcut(
+        steps,
+        safe_shortcut,
+    ):
+        return
     previous_step = depends_on
     planned_action = False
 
@@ -8477,6 +8482,24 @@ def _append_selected_discovered_generic_action_steps(
             ),
         )
     )
+
+
+def _selected_discovered_open_step_already_runs_shortcut(
+    steps: list[ToolPlanStepSnapshot],
+    safe_shortcut: Mapping[str, str],
+) -> bool:
+    action = str(safe_shortcut.get("action") or "").strip()
+    if not action:
+        return False
+    for step in steps:
+        if step.step_id != "open-selected-discovered-app":
+            continue
+        if step.tool_name not in {"app.open_and_safe_shortcut", "desktop.safe_shortcut"}:
+            continue
+        input_preview = step.input_preview if isinstance(step.input_preview, Mapping) else {}
+        if str(input_preview.get("action") or "").strip() == action:
+            return True
+    return False
 
 
 def _append_selected_discovered_creative_action_steps(
