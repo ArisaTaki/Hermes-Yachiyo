@@ -2487,6 +2487,20 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
             "continue_to_model": True,
         }
     ]
+    assert [step.step_id for step in draw_circle_decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "observe-selected-discovered-app",
+    ]
+    assert _step_by_id(
+        draw_circle_decision,
+        "observe-selected-discovered-app",
+    ).input_preview == {"limit": 80}
+    assert [
+        todo.step_id
+        for todo in draw_circle_decision.plan.task_core.todos
+        if todo.step_id == "observe-selected-discovered-app"
+    ] == ["observe-selected-discovered-app"]
     assert draw_circle_payload["followup_target"] == {
         "kind": "desktop_discovered_app_action",
         "app_query": "image",
