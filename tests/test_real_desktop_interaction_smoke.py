@@ -215,6 +215,7 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
             "after_ui_matches_app": True,
             "signed_value_visible": False,
             "visible_value_changed": False,
+            "click_effect_visible": False,
             "values": ["42"],
         },
         {
@@ -222,6 +223,7 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
             "after_ui_matches_app": True,
             "signed_value_visible": True,
             "visible_value_changed": True,
+            "click_effect_visible": True,
             "values": ["(-42)"],
         }
     ]
@@ -241,7 +243,8 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
     assert evidence["click_attempts"][1]["result"]["ok"] is True
     assert evidence["retry_active_app_matches"] is True
     assert len(evidence["pre_click_focus_attempts"]) == 1
-    assert evidence["checks"]["signed_value_visible"] is True
+    assert evidence["signed_value_visible"] is True
+    assert evidence["checks"]["click_effect_visible"] is True
     assert evidence["sign_target"] == "更改数值符号"
     assert all(evidence["checks"].values())
     assert calls == [
@@ -390,6 +393,7 @@ def test_real_desktop_interaction_smoke_allows_existing_app_when_requested(monke
     assert evidence["allow_existing_app"] is True
     assert evidence["checks"]["app_not_already_running"] is True
     assert evidence["checks"]["existing_app_allowed"] is True
+    assert evidence["checks"]["click_effect_visible"] is True
     assert evidence["cleanup"]["attempted"] is False
     assert evidence["cleanup"]["reason"] == "app was already running before smoke"
     assert evidence["after_values"] == ["-42"]
@@ -480,6 +484,7 @@ def test_real_desktop_interaction_smoke_retries_pre_click_focus(monkeypatch):
         True,
     ]
     assert evidence["checks"]["pre_click_focus_verified"] is True
+    assert evidence["checks"]["click_effect_visible"] is True
     assert evidence["after_values"] == ["-42"]
 
 

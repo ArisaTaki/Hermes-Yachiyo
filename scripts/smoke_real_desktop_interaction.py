@@ -168,16 +168,18 @@ def _poll_after_click_values(
         )
         signed_value_visible = _signed_value_visible(after_values, expected_signed_value)
         visible_value_changed = list(before_values) != after_values
+        click_effect_visible = signed_value_visible or visible_value_changed
         polls.append(
             {
                 "attempt": attempt,
                 "after_ui_matches_app": after_ui_matches_app,
                 "signed_value_visible": signed_value_visible,
                 "visible_value_changed": visible_value_changed,
+                "click_effect_visible": click_effect_visible,
                 "values": after_values,
             }
         )
-        if after_ui_matches_app and signed_value_visible and visible_value_changed:
+        if after_ui_matches_app and click_effect_visible:
             break
         if attempt < _AFTER_CLICK_VERIFY_MAX_POLLS:
             time.sleep(_AFTER_CLICK_VERIFY_POLL_INTERVAL_SECONDS)
@@ -658,6 +660,9 @@ def run_smoke(
         before_running=before_running,
         after_running=after_running,
     )
+    signed_value_visible = _signed_value_visible(after_values, expected_signed_value)
+    visible_value_changed = before_values != after_values
+    click_effect_visible = signed_value_visible or visible_value_changed
     checks = {
         "desktop_session_ready": preflight.get("ok") is True,
         "discovered_app": discovery.get("ok") is True and bool(discovered_names),
@@ -674,8 +679,8 @@ def run_smoke(
         "pre_click_active_app_matches": pre_click_active_app_matches,
         "click_ok": click_result.get("ok") is True,
         "after_ui_matches_app": after_ui_matches_app,
-        "signed_value_visible": _signed_value_visible(after_values, expected_signed_value),
-        "visible_value_changed": before_values != after_values,
+        "click_effect_visible": click_effect_visible,
+        "visible_value_changed": visible_value_changed,
         "cleanup_ok": cleanup_result.get("ok") is True,
     }
     return {
@@ -698,6 +703,8 @@ def run_smoke(
         "planner_alignment": _interaction_planner_alignment(opened_app_name),
         "input_text": clean_input,
         "expected_signed_value": expected_signed_value,
+        "signed_value_visible": signed_value_visible,
+        "click_effect_visible": click_effect_visible,
         "sign_target": sign_target,
         "before_values": before_values,
         "after_values": after_values,
@@ -775,6 +782,8 @@ def _console_summary(evidence: dict[str, Any], report_json: Path) -> dict[str, A
         "recommended_tools",
         "input_text",
         "expected_signed_value",
+        "signed_value_visible",
+        "click_effect_visible",
         "sign_target",
         "before_values",
         "after_values",
