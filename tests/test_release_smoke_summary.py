@@ -388,6 +388,148 @@ def test_release_smoke_summary_projects_electron_ui_smokes_into_public_demo(
     assert "--include-real-desktop" not in action["command"]
 
 
+def test_release_smoke_summary_projects_provider_workflow_smoke_into_public_demo(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    required_flow_ids = release_smoke._canonical_public_demo_flow_ids()
+    missing_from_demo = {
+        "real_desktop_app_open",
+        "real_desktop_ui_inspection",
+        "real_desktop_interaction",
+        "workflow_provider",
+        "studio_replay_ui",
+        "workflow_ui",
+    }
+    public_demo_path = tmp_path / "tmp" / "public-demo.json"
+    rc_report_path = tmp_path / "tmp" / "full-local-rc.json"
+    electron_report_path = tmp_path / "tmp" / "electron-ui-smoke.json"
+    provider_report_path = tmp_path / "tmp" / "provider-smoke.json"
+    public_demo_path.parent.mkdir(parents=True, exist_ok=True)
+    public_demo_path.write_text(
+        json.dumps(
+            _public_demo_report_with_passed_flows(set(required_flow_ids) - missing_from_demo)
+        ),
+        encoding="utf-8",
+    )
+    rc_report_path.write_text(
+        json.dumps(
+            _matrix_report(
+                "source_real_desktop_app_open",
+                "source_real_desktop_ui_inspection",
+                "source_real_desktop_interaction",
+            )
+        ),
+        encoding="utf-8",
+    )
+    electron_report_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "script_count": 2,
+                "scripts": [
+                    {
+                        "script": "scripts/smoke_agent_run_detail_ui.mjs",
+                        "exit_code": 0,
+                    },
+                    {
+                        "script": "scripts/smoke_workflow_save_run_ui.mjs",
+                        "exit_code": 0,
+                    },
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    provider_report_path.write_text(
+        json.dumps(
+            {
+                "provider_smoke": {
+                    "status": "passed",
+                    "checks": [
+                        {
+                            "label": "native_workflow_full_chain",
+                            "exit_code": 0,
+                            "summary": {
+                                "ok": True,
+                                "checks": [
+                                    {
+                                        "name": "advanced_workflow_orchestration",
+                                        "ok": True,
+                                    },
+                                    {"name": "workflow_budget_boundary", "ok": True},
+                                ],
+                            },
+                        },
+                    ],
+                    "findings": [],
+                    "run_requested": True,
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke(
+        [public_demo_path, rc_report_path, electron_report_path, provider_report_path]
+    )
+
+    public_demo = next(item for item in summary["items"] if item["id"] == "public_demo")
+    assert public_demo["status"] == "passed"
+    aggregate = public_demo["evidence"]["public_demo_complete"][0]
+    assert aggregate["kind"] == "public_demo_aggregate"
+    assert aggregate["missing_required_flow_ids"] == []
+    projection = next(
+        item
+        for item in public_demo["related_evidence"]["public_demo_assessment"]
+        if item["kind"] == "provider_workflow_public_demo_projection"
+    )
+    assert projection["provider_workflow_evidence"] == {
+        "source_kind": "provider_smoke",
+        "check_label": "native_workflow_full_chain",
+        "exit_code": 0,
+        "summary_ok": True,
+    }
+    assert "workflow_provider" in projection["passed_required_flow_ids"]
+    assert all(item["id"] != "public_demo" for item in summary["next_actions"])
+
+
+def test_release_smoke_summary_does_not_project_provider_workflow_from_capability_matrix(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    required_flow_ids = release_smoke._canonical_public_demo_flow_ids()
+    public_demo_path = tmp_path / "tmp" / "public-demo.json"
+    rc_report_path = tmp_path / "tmp" / "capability-matrix.json"
+    public_demo_path.parent.mkdir(parents=True, exist_ok=True)
+    public_demo_path.write_text(
+        json.dumps(
+            _public_demo_report_with_passed_flows(
+                set(required_flow_ids) - {"workflow_provider"}
+            )
+        ),
+        encoding="utf-8",
+    )
+    rc_report_path.write_text(
+        json.dumps(_matrix_report("advanced_workflow_orchestration")),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke([public_demo_path, rc_report_path])
+
+    public_demo = next(item for item in summary["items"] if item["id"] == "public_demo")
+    assert public_demo["status"] == "missing"
+    assert "provider_workflow_public_demo_projection" not in {
+        item["kind"]
+        for item in public_demo["related_evidence"]["public_demo_assessment"]
+    }
+    action = next(item for item in summary["next_actions"] if item["id"] == "public_demo")
+    assert action["missing_required_flow_ids"] == ["workflow_provider"]
+    assert "--include-provider-workflow" in action["command"]
+
+
 def test_release_smoke_summary_rejects_inconsistent_public_demo_level(
     tmp_path,
     monkeypatch,

@@ -135,7 +135,11 @@ projected only when the exact Run Detail / Workflow UI smoke scripts pass:
 `scripts/smoke_agent_run_detail_ui.mjs` can cover `studio_replay_ui`, and
 `scripts/smoke_workflow_save_run_ui.mjs` can cover `workflow_ui`. Generic
 packaged UI sampling does not replace those behavior-level UI flows, and
-provider workflow still needs provider smoke evidence.
+provider workflow is projected only from live provider evidence: a passed
+`provider_smoke` section whose `native_workflow_full_chain` check exited cleanly
+with `summary.ok=true`, or the standalone
+`scripts/smoke_native_workflow_full_chain.py` report. Local fake provider
+contract evidence does not replace this release-facing provider flow.
 
 ## Local Release Gates
 

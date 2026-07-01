@@ -66,6 +66,9 @@ ELECTRON_UI_PUBLIC_DEMO_FLOW_MAP: dict[str, str] = {
     "scripts/smoke_agent_run_detail_ui.mjs": "studio_replay_ui",
     "scripts/smoke_workflow_save_run_ui.mjs": "workflow_ui",
 }
+PROVIDER_WORKFLOW_PUBLIC_DEMO_FLOW_ID = "workflow_provider"
+PROVIDER_WORKFLOW_PROVIDER_CHECK_LABEL = "native_workflow_full_chain"
+PROVIDER_WORKFLOW_SMOKE_MODE = "native_workflow_full_chain_smoke"
 SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
     {
         "id": "packaged_launch",
@@ -284,6 +287,11 @@ def _collect_report_evidence(
         visited_reports=visited_reports,
     )
     _collect_electron_ui_public_demo_evidence(report, source=source, evidence=evidence)
+    _collect_provider_workflow_public_demo_evidence(
+        report,
+        source=source,
+        evidence=evidence,
+    )
     electron_ui_smoke = report.get("electron_ui_smoke")
     if isinstance(electron_ui_smoke, dict):
         _collect_electron_ui_public_demo_evidence(
@@ -772,6 +780,82 @@ def _collect_electron_ui_public_demo_evidence(
     evidence.setdefault("public_demo_selected", []).append(projection)
     if complete:
         evidence.setdefault("public_demo_complete", []).append(projection)
+
+
+def _collect_provider_workflow_public_demo_evidence(
+    report: Mapping[str, Any],
+    *,
+    source: str,
+    evidence: dict[str, list[dict[str, Any]]],
+) -> None:
+    provider_evidence = _provider_workflow_public_demo_evidence(report)
+    if not provider_evidence:
+        return
+    required_flow_ids = _canonical_public_demo_flow_ids()
+    passed_flow_ids = [PROVIDER_WORKFLOW_PUBLIC_DEMO_FLOW_ID]
+    missing_flow_ids = [
+        flow_id for flow_id in required_flow_ids if flow_id not in passed_flow_ids
+    ]
+    complete = not missing_flow_ids
+    projection = {
+        "source": source,
+        "kind": "provider_workflow_public_demo_projection",
+        "status": "passed" if complete else "partial",
+        "release_level": "full_public_demo_ready" if complete else "partial_demo_ready",
+        "complete": complete,
+        "selected_count": len(passed_flow_ids),
+        "passed_count": len(passed_flow_ids),
+        "required_flow_count": len(required_flow_ids),
+        "passed_required_flow_count": len(passed_flow_ids),
+        "required_flow_ids": required_flow_ids,
+        "passed_required_flow_ids": passed_flow_ids,
+        "missing_required_flow_ids": missing_flow_ids,
+        "release_blockers": [
+            {
+                "id": flow_id,
+                "status": "missing",
+                "reason": "public demo flow is not covered by passed provider Workflow evidence",
+            }
+            for flow_id in missing_flow_ids
+        ],
+        "full_demo_command": FULL_PUBLIC_DEMO_COMMAND,
+        "provider_workflow_evidence": provider_evidence,
+    }
+    evidence.setdefault("public_demo_assessment", []).append(projection)
+    evidence.setdefault("public_demo_selected", []).append(projection)
+    if complete:
+        evidence.setdefault("public_demo_complete", []).append(projection)
+
+
+def _provider_workflow_public_demo_evidence(report: Mapping[str, Any]) -> dict[str, Any]:
+    provider_smoke = report.get("provider_smoke")
+    if isinstance(provider_smoke, dict) and provider_smoke.get("status") == "passed":
+        for check in _dict_list(provider_smoke.get("checks")):
+            label = str(check.get("label") or "").strip()
+            if label != PROVIDER_WORKFLOW_PROVIDER_CHECK_LABEL:
+                continue
+            if check.get("exit_code") not in (0, "0"):
+                continue
+            summary = check.get("summary")
+            if not isinstance(summary, dict) or summary.get("ok") is not True:
+                continue
+            return {
+                "source_kind": "provider_smoke",
+                "check_label": label,
+                "exit_code": check.get("exit_code"),
+                "summary_ok": True,
+            }
+    if (
+        report.get("mode") == PROVIDER_WORKFLOW_SMOKE_MODE
+        and report.get("ok") is True
+        and report.get("skipped") is not True
+    ):
+        return {
+            "source_kind": PROVIDER_WORKFLOW_SMOKE_MODE,
+            "mode": PROVIDER_WORKFLOW_SMOKE_MODE,
+            "summary_ok": True,
+        }
+    return {}
 
 
 def _canonical_public_demo_flow_ids() -> list[str]:
