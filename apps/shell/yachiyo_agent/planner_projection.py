@@ -467,6 +467,12 @@ def _media_app_playback_followup_target(inputs: Mapping[str, Any]) -> dict[str, 
         "target_action": "safe_shortcut",
         "safe_shortcut_action": "find",
         "media_playback_query": media_query,
+        "result_selection": {
+            "target": "first result",
+            "role_filter": "",
+            "limit": 80,
+            "click_count": 1,
+        },
         "post_action_observation": {
             "tool": "desktop.ui_elements",
             "input": {},

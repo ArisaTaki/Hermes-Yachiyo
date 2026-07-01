@@ -456,7 +456,7 @@ class RuntimeCustomApiAgentLoop:
                             )
                             if direct_result:
                                 return direct_result
-                    auto_discovered_app_requests = _auto_discovered_app_followup_requests(
+                    auto_discovered_app_requests = _auto_discovered_followup_requests(
                         followup_selection_payload,
                         allowed_tools,
                         timeline,
@@ -4175,6 +4175,8 @@ def _model_followup_target_payload(
         return _model_followup_communication_target_payload(target, allowed)
     if kind == "desktop_discovered_app_action":
         return _model_followup_desktop_discovered_app_target_payload(target, allowed)
+    if kind == "desktop_discovered_media_playback":
+        return _model_followup_discovered_media_playback_target_payload(target, allowed)
     if kind == "artifact_write":
         return _model_followup_artifact_write_target_payload(target, allowed)
     if kind == "note_write":
@@ -4324,6 +4326,50 @@ def _model_followup_desktop_discovered_app_target_payload(
     return payload
 
 
+def _model_followup_discovered_media_playback_target_payload(
+    target: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    app_query = str(target.get("app_query") or "").strip()
+    media_query = str(target.get("media_playback_query") or "").strip()
+    if not app_query or not media_query:
+        return {}
+    recommended_tools = [
+        tool
+        for tool in (
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "media.music_app_open_and_play",
+            "app.focus_and_click_ui_element",
+            "app.open_and_click_ui_element",
+            "desktop.click_ui_element",
+        )
+        if tool in allowed
+    ]
+    verify_tools = [
+        tool
+        for tool in ("desktop.ui_elements", "desktop.active_window", "screen.capture")
+        if tool in allowed
+    ]
+    return {
+        "kind": "desktop_discovered_media_playback",
+        "app_query": app_query,
+        "app_name_source": str(target.get("app_name_source") or "desktop.list_apps").strip(),
+        "target_action": str(target.get("target_action") or "safe_shortcut").strip(),
+        "safe_shortcut_action": str(target.get("safe_shortcut_action") or "find").strip(),
+        "media_playback_query": media_query,
+        "recommended_tools": recommended_tools,
+        "verify_tools": verify_tools,
+    }
+
+
 def _model_followup_communication_target_payload(
     target: Mapping[str, Any],
     allowed: set[str],
@@ -4401,7 +4447,24 @@ def _selection_payload_has_model_followup_target(
         return True
     if kind == "desktop_discovered_app_action":
         return bool(str(target.get("app_query") or "").strip())
+    if kind == "desktop_discovered_media_playback":
+        return bool(str(target.get("app_query") or "").strip())
     return False
+
+
+def _auto_discovered_followup_requests(
+    selection_payload: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    for factory in (
+        _auto_discovered_app_followup_requests,
+        _auto_discovered_media_playback_followup_requests,
+    ):
+        requests = factory(selection_payload, allowed_tools, timeline)
+        if requests:
+            return requests
+    return []
 
 
 def _auto_discovered_app_followup_requests(
@@ -4512,6 +4575,197 @@ def _auto_discovered_app_followup_requests(
     ):
         requests[-1]["continue_to_model"] = True
     return requests
+
+
+def _auto_discovered_media_playback_followup_requests(
+    selection_payload: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    planning_reason: str = "planner_discovered_media_playback_followup",
+) -> list[dict[str, Any]]:
+    target = (
+        selection_payload.get("followup_target")
+        if isinstance(selection_payload.get("followup_target"), Mapping)
+        else {}
+    )
+    if str(target.get("kind") or "").strip() != "desktop_discovered_media_playback":
+        return []
+    app_query = str(target.get("app_query") or "").strip()
+    media_query = str(target.get("media_playback_query") or "").strip()
+    if not app_query or not media_query:
+        return []
+    app_name = _discovered_app_name_for_query(timeline, app_query)
+    if not app_name:
+        return []
+    resolution_evidence = _discovered_app_resolution_evidence(timeline, app_query, app_name)
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    source = "runtime_planner"
+    planning_reason = str(planning_reason or "planner_discovered_media_playback_followup").strip()
+    if not planning_reason:
+        planning_reason = "planner_discovered_media_playback_followup"
+    requests: list[dict[str, Any]] = []
+    if str(target.get("target_action") or "").strip() == "safe_shortcut":
+        safe_shortcut_action = str(target.get("safe_shortcut_action") or "").strip()
+        if not safe_shortcut_action:
+            return []
+        requests.extend(
+            _discovered_app_safe_shortcut_requests(
+                app_query,
+                app_name,
+                safe_shortcut_action,
+                allowed,
+                source=source,
+                planning_reason=planning_reason,
+            )
+        )
+    else:
+        open_request = _discovered_app_open_request(
+            app_query,
+            app_name,
+            allowed,
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if open_request:
+            requests.append(open_request)
+    if not requests or "desktop.safe_type_text" not in allowed:
+        return []
+    requests.append(
+        _request_like(
+            "desktop.safe_type_text",
+            {"text": media_query},
+            source=source,
+            planning_reason=planning_reason,
+        )
+    )
+    submit_request = _media_search_submit_request(
+        allowed,
+        source=source,
+        planning_reason=planning_reason,
+    )
+    if not submit_request:
+        return []
+    requests.append(submit_request)
+    playback_request = _discovered_media_playback_request(
+        app_query,
+        app_name,
+        target,
+        allowed,
+        source=source,
+        planning_reason=planning_reason,
+    )
+    if not playback_request:
+        return []
+    requests.append(playback_request)
+    observation_request = _discovered_app_observation_request(
+        target,
+        allowed,
+        source=source,
+        planning_reason=planning_reason,
+    )
+    if observation_request:
+        requests.append(observation_request)
+    if resolution_evidence:
+        requests = [
+            _with_discovered_app_resolution_evidence(request, resolution_evidence)
+            for request in requests
+        ]
+    return requests
+
+
+def _media_search_submit_request(
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> dict[str, Any]:
+    if "desktop.search_submit" in allowed:
+        return _request_like(
+            "desktop.search_submit",
+            {},
+            source=source,
+            planning_reason=planning_reason,
+        )
+    if "desktop.submit_foreground" in allowed:
+        return _request_like(
+            "desktop.submit_foreground",
+            {"action": "confirm"},
+            source=source,
+            planning_reason=planning_reason,
+        )
+    return {}
+
+
+def _positive_int(value: Any, *, default: int) -> int:
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return parsed if parsed > 0 else default
+
+
+def _discovered_media_playback_request(
+    app_query: str,
+    app_name: str,
+    target: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> dict[str, Any]:
+    if "media.music_app_open_and_play" in allowed:
+        return _with_discovered_app_resolution(
+            _request_like(
+                "media.music_app_open_and_play",
+                {"app_name": app_name},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            app_query,
+            app_name,
+        )
+    result_selection = (
+        target.get("result_selection")
+        if isinstance(target.get("result_selection"), Mapping)
+        else {}
+    )
+    result_payload = {
+        "target": str(result_selection.get("target") or "first result").strip(),
+        "role_filter": str(result_selection.get("role_filter") or "").strip(),
+        "limit": _positive_int(result_selection.get("limit"), default=80),
+        "click_count": _positive_int(result_selection.get("click_count"), default=1),
+    }
+    if "app.focus_and_click_ui_element" in allowed:
+        return _with_discovered_app_resolution(
+            _request_like(
+                "app.focus_and_click_ui_element",
+                {"app_name": app_name, **result_payload},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            app_query,
+            app_name,
+        )
+    if "app.open_and_click_ui_element" in allowed:
+        return _with_discovered_app_resolution(
+            _request_like(
+                "app.open_and_click_ui_element",
+                {"app_name": app_name, **result_payload},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            app_query,
+            app_name,
+        )
+    if "desktop.click_ui_element" in allowed:
+        return _request_like(
+            "desktop.click_ui_element",
+            result_payload,
+            source=source,
+            planning_reason=planning_reason,
+        )
+    return {}
 
 
 def _discovered_app_safe_shortcut_requests(
@@ -4991,6 +5245,8 @@ def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
         return _model_followup_communication_instruction(target)
     if kind == "desktop_discovered_app_action":
         return _model_followup_desktop_discovered_app_instruction(target)
+    if kind == "desktop_discovered_media_playback":
+        return _model_followup_discovered_media_playback_instruction(target)
     if kind == "artifact_write":
         return _model_followup_artifact_write_instruction(target)
     if kind == "note_write":
@@ -5157,6 +5413,28 @@ def _model_followup_desktop_discovered_app_instruction(target: Mapping[str, Any]
     return (
         f"The runtime discovered an app for {app_query!r}. Continue the requested desktop action "
         f"with safe app or foreground tools next. Prefer {tool_text}.{verify_text} "
+    )
+
+
+def _model_followup_discovered_media_playback_instruction(target: Mapping[str, Any]) -> str:
+    app_query = str(target.get("app_query") or "").strip()
+    media_query = str(target.get("media_playback_query") or "").strip()
+    if not app_query or not media_query:
+        return ""
+    tools = _string_list(target.get("recommended_tools"))
+    verify_tools = _string_list(target.get("verify_tools"))
+    tool_text = ", ".join(tools) or "the allowed desktop media operation tools"
+    verify_text = (
+        f" Verify with {', '.join(verify_tools)} after attempting playback."
+        if verify_tools
+        else ""
+    )
+    return (
+        f"The runtime discovered an app for {app_query!r}. Continue by selecting the best "
+        f"discovered app, opening its search UI, typing the media query {media_query!r}, "
+        "submitting the search, and playing the first result with an allowed playback or UI "
+        f"click tool. Prefer {tool_text}.{verify_text} If these tools are unavailable, explain "
+        "the missing capability instead of asking the user to open the app manually. "
     )
 
 

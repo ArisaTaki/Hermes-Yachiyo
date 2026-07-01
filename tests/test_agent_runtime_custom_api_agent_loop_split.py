@@ -14601,6 +14601,256 @@ def test_custom_api_agent_loop_executes_runtime_planner_media_app_search_verify(
     assert completed_event["planning_reason"] == "planner_fallback_media_playback"
 
 
+def test_auto_discovered_media_playback_followup_searches_clicks_and_verifies() -> None:
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.list_apps",
+            input_preview={"query": "music", "limit": 20},
+            result={
+                "ok": True,
+                "action": "desktop.list_apps",
+                "summary": "Found VLC",
+                "data": {
+                    "query": "music",
+                    "best_match": {
+                        "name": "VLC",
+                        "path": "/Applications/VLC.app",
+                        "match_score": 94,
+                        "match_confidence": "high",
+                        "match_reason": "category:music",
+                    },
+                },
+            },
+        )
+    ]
+
+    requests = custom_api_agent_module._auto_discovered_media_playback_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_media_playback",
+                "app_query": "music",
+                "app_name_source": "desktop.list_apps",
+                "target_action": "safe_shortcut",
+                "safe_shortcut_action": "find",
+                "media_playback_query": "超时空辉夜姬",
+                "result_selection": {
+                    "target": "first result",
+                    "role_filter": "",
+                    "limit": 80,
+                    "click_count": 1,
+                },
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {},
+                },
+            }
+        },
+        [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+        timeline,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["input"] == {"app_name": "VLC", "action": "find"}
+    assert requests[3]["input"] == {
+        "app_name": "VLC",
+        "target": "first result",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+    assert requests[0]["input_resolution"] == {
+        "tool": "app.open_and_safe_shortcut",
+        "field": "app_name",
+        "requested_app_name": "music",
+        "resolved_app_name": "VLC",
+        "source_tool": "desktop.list_apps",
+        "app_resolution_score": "94",
+        "app_resolution_confidence": "high",
+        "app_resolution_reason": "category:music",
+        "resolved_app_path": "/Applications/VLC.app",
+    }
+    assert requests[3]["input_resolution"]["resolved_app_name"] == "VLC"
+
+
+def test_custom_api_agent_loop_continues_discovered_media_app_without_model(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
+        lambda *_args, **_kwargs: [],
+    )
+    budget = FakeBudget()
+    tool_runs: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append(tool_requests)
+        for tool_request in tool_requests:
+            tool = str(tool_request.get("tool") or "")
+            payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+            if tool == "desktop.list_apps":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Found installed app: VLC",
+                    "data": {
+                        "query": payload["query"],
+                        "best_match": {
+                            "name": "VLC",
+                            "path": "/Applications/VLC.app",
+                            "match_score": 94,
+                            "match_confidence": "high",
+                            "match_reason": "category:music",
+                        },
+                    },
+                }
+            elif tool == "app.open_and_safe_shortcut":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Opened VLC search",
+                    "data": {
+                        "app_name": payload["app_name"],
+                        "shortcut_action": payload["action"],
+                    },
+                }
+            elif tool == "desktop.safe_type_text":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Typed media query",
+                    "data": {"character_count": len(payload["text"])},
+                }
+            elif tool == "desktop.search_submit":
+                result = {"ok": True, "action": tool, "summary": "Submitted search", "data": {}}
+            elif tool == "app.focus_and_click_ui_element":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Clicked first result",
+                    "data": {
+                        "app_name": payload["app_name"],
+                        "target": payload["target"],
+                    },
+                }
+            elif tool == "desktop.ui_elements":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Read foreground UI",
+                    "data": {"app_name": "VLC", "elements": []},
+                }
+            else:
+                raise AssertionError(f"unexpected tool: {tool}")
+            timeline_arg.append(
+                _timeline("agent.tool.call", tool, input_preview=payload, result=result)
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "desktop.list_apps",
+                    "app.open_and_safe_shortcut",
+                    "desktop.safe_type_text",
+                    "desktop.search_submit",
+                    "app.focus_and_click_ui_element",
+                    "desktop.ui_elements",
+                ]
+            },
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use desktop tools for discoverable media playback.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("discovered media playback should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "打开一个能播放音乐的应用，搜索超时空辉夜姬并播放",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-discovered-media-playback",
+    )
+
+    assert str(result)
+    assert [request["tool"] for request in tool_runs[0]] == ["desktop.list_apps"]
+    assert [request["tool"] for request in tool_runs[1]] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert tool_runs[1][0]["input"] == {"app_name": "VLC", "action": "find"}
+    assert tool_runs[1][3]["input"] == {
+        "app_name": "VLC",
+        "target": "first result",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+    selection_events = _planner_selection_events(timeline)
+    assert selection_events[0]["followup_target"]["kind"] == "desktop_discovered_media_playback"
+    assert selection_events[0]["followup_target"]["media_playback_query"] == "超时空辉夜姬"
+    completed_event = [
+        event for event in timeline if event["event"] == "agent.desktop.intent_completed"
+    ][-1]
+    assert completed_event["source"] == "runtime_planner"
+    assert completed_event["planning_reason"] == "planner_discovered_media_playback_followup"
+    assert completed_event["tools"] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+
+
 def test_daily_desktop_recovery_prompt_accepts_low_risk_open_actions() -> None:
     assert daily_desktop_recovery_prompt(
         {

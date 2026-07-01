@@ -14364,6 +14364,12 @@ def test_runtime_planner_routes_generic_music_app_query_to_search_play_plan() ->
             "target_action": "safe_shortcut",
             "safe_shortcut_action": "find",
             "media_playback_query": query,
+            "result_selection": {
+                "target": "first result",
+                "role_filter": "",
+                "limit": 80,
+                "click_count": 1,
+            },
             "post_action_observation": {
                 "tool": "desktop.ui_elements",
                 "input": {},
