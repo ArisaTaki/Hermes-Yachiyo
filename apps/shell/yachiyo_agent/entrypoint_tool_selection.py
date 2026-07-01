@@ -238,6 +238,16 @@ def _runtime_planner_media_playback_owns_selection(requests: list[dict[str, Any]
     return bool(tools) and tools <= _RUNTIME_PLANNER_MEDIA_PLAYBACK_TOOLS
 
 
+_RUNTIME_PLANNER_APP_OPEN_FOCUS_TOOLS = frozenset(
+    {
+        "app.open",
+        "desktop.open_app",
+        "app.focus",
+        "desktop.focus_app",
+    }
+)
+
+
 _RUNTIME_PLANNER_MEDIA_PLAYBACK_TOOLS = frozenset(
     {
         "media.apple_music_play",
@@ -248,7 +258,9 @@ _RUNTIME_PLANNER_MEDIA_PLAYBACK_TOOLS = frozenset(
         "media.music_app_control",
         "media.system_control",
         "app.open",
+        "desktop.open_app",
         "app.focus",
+        "desktop.focus_app",
         "app.open_and_safe_shortcut",
         "app.focus_and_safe_shortcut",
         "desktop.safe_shortcut",
@@ -284,7 +296,9 @@ def _runtime_planner_web_research_owns_selection(requests: list[dict[str, Any]])
     tools = _request_tool_set(requests)
     return bool(tools) and tools <= {
         "app.open",
+        "desktop.open_app",
         "app.focus",
+        "desktop.focus_app",
         "browser.current_page",
         "browser.click",
         "browser.extract_text",
@@ -409,7 +423,7 @@ def _runtime_planner_app_launch_owns_selection(
     if reasons not in _RUNTIME_PLANNER_DESKTOP_OPERATION_REASON_SETS:
         return False
     tools = _request_tool_set(requests)
-    if not tools or not tools <= {"app.open", "app.focus"}:
+    if not tools or not tools <= _RUNTIME_PLANNER_APP_OPEN_FOCUS_TOOLS:
         return False
     for request in requests:
         request_input = request.get("input") if isinstance(request, dict) else {}
@@ -465,7 +479,10 @@ def _runtime_planner_desktop_observation_owns_selection(requests: list[dict[str,
     tools = _request_tools(requests)
     if len(tools) != 2 or tools[1] not in {"desktop.ui_elements", "screen.capture"}:
         return False
-    if tools[0] not in {"app.open", "app.focus", "app.focus_window"}:
+    if tools[0] not in {
+        *_RUNTIME_PLANNER_APP_OPEN_FOCUS_TOOLS,
+        "app.focus_window",
+    }:
         return False
     first_request = requests[0] if isinstance(requests[0], dict) else {}
     first_input = first_request.get("input")
@@ -478,7 +495,9 @@ def _runtime_planner_desktop_observation_owns_selection(requests: list[dict[str,
 _RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS = frozenset(
     {
         "app.open",
+        "desktop.open_app",
         "app.focus",
+        "desktop.focus_app",
         "app.focus_window",
         "app.status",
         "app.show",
@@ -571,11 +590,16 @@ def _runtime_planner_desktop_followup_is_verification_only(
 def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> bool:
     tool_name = str(request.get("tool") or "").strip()
     request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
-    if tool_name.startswith("app.") and not _runtime_app_name_is_specific(
-        str(request_input.get("app_name") or "")
-    ):
+    app_scoped_tool = tool_name.startswith("app.") or tool_name in {
+        "desktop.open_app",
+        "desktop.focus_app",
+    }
+    if app_scoped_tool and not _runtime_app_name_is_specific(str(request_input.get("app_name") or "")):
         return False
-    if tool_name in {"app.open", "app.focus", "app.focus_window"}:
+    if tool_name in {
+        *_RUNTIME_PLANNER_APP_OPEN_FOCUS_TOOLS,
+        "app.focus_window",
+    }:
         return True
     if tool_name in {"app.status", "app.show", "app.hide", "app.minimize", "app.quit"}:
         return True

@@ -944,7 +944,10 @@ def media_app_query_search_plan(
         _append_media_app_verify_step(plan, allowed)
         return plan
 
-    app_tool = _first_allowed(("app.open", "app.focus"), allowed)
+    app_tool = _first_allowed(
+        ("app.open", "desktop.open_app", "app.focus", "desktop.focus_app"),
+        allowed,
+    )
     shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
     if not app_tool or not shortcut_tool:
         return []
@@ -1024,7 +1027,10 @@ def media_app_prepare_plan(
     if discover_tool:
         plan.append((discover_tool, {"query": capability_query or app_name, "limit": 20}))
 
-    app_tool = _first_allowed(("app.open", "app.focus"), allowed)
+    app_tool = _first_allowed(
+        ("app.open", "desktop.open_app", "app.focus", "desktop.focus_app"),
+        allowed,
+    )
     if not app_tool:
         return []
     plan.append((app_tool, {"app_name": app_name, **selected_app_payload}))

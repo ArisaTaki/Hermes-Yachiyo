@@ -20537,6 +20537,30 @@ def test_entrypoint_selection_keeps_runtime_planner_for_media_app_search_fallbac
     ]
     assert legacy_calls == []
 
+    alias_legacy_calls: list[dict[str, Any]] = []
+    alias_selection = planner_first_direct_tool_selection(
+        "打开 Apple Music 搜索超时空辉夜姬并播放",
+        [
+            "desktop.open_app",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+        legacy_tool_requests=_recording_legacy_requests(alias_legacy_calls),
+    )
+
+    assert alias_selection.selected_source == "runtime_planner"
+    assert alias_selection.event_payload["legacy_request_count"] == 0
+    assert [request["tool"] for request in alias_selection.requests] == [
+        "desktop.open_app",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    assert alias_legacy_calls == []
+
 
 def test_entrypoint_selection_keeps_runtime_planner_for_current_page_find() -> None:
     legacy_calls: list[dict[str, Any]] = []
@@ -25740,6 +25764,11 @@ def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> 
         ["desktop.list_apps", "app.focus", "screen.capture"],
         legacy_tool_requests=_recording_legacy_requests(legacy_calls),
     )
+    alias_app_ui = planner_first_direct_tool_selection(
+        "Slack 有哪些按钮",
+        ["desktop.list_apps", "desktop.focus_app", "desktop.ui_elements"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
 
     assert app_ui.selected_source == "runtime_planner"
     assert app_ui.event_payload["legacy_request_count"] == 0
@@ -25775,6 +25804,25 @@ def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> 
             "protocol": "json_fallback",
             "tool": "screen.capture",
             "input": {"reason": "user asked to capture the screen"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+    assert alias_app_ui.selected_source == "runtime_planner"
+    assert alias_app_ui.event_payload["legacy_request_count"] == 0
+    assert alias_app_ui.requests == [
+        _app_discovery_request("Slack"),
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.focus_app",
+            "input": {"app_name": "Slack"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
