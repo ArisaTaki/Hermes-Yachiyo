@@ -191,6 +191,12 @@ function runtimeTimelineEventTypeLabel(type: string): string {
     || type === 'workflow.run.task.todo.updated'
   ) return 'Task Todo';
   if (
+    type === 'agent.task.workspace_item.updated'
+    || type === 'group.run.task.workspace_item.updated'
+    || type === 'workflow.task.workspace_item.updated'
+    || type === 'workflow.run.task.workspace_item.updated'
+  ) return 'Task Workspace';
+  if (
     type === 'agent.task.checkpoint.updated'
     || type === 'group.run.task.checkpoint.updated'
     || type === 'workflow.task.checkpoint.updated'

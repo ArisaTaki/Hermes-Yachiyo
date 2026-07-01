@@ -350,6 +350,8 @@ def _group_run_planner_event_type(event_type: str) -> str:
         return "group.run.plan.step"
     if event_type == "agent.replan.requested":
         return "group.run.replan.requested"
+    if event_type == "agent.task.workspace_item.updated":
+        return "group.run.task.workspace_item.updated"
     if event_type == "agent.task.todo.updated":
         return "group.run.task.todo.updated"
     if event_type == "agent.task.checkpoint.updated":

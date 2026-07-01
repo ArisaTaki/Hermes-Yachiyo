@@ -1738,6 +1738,7 @@ class RuntimeCustomApiAgentLoop:
         steps = list(getattr(tool_plan, "steps", []) or [])
         if not steps:
             return
+        workspace = getattr(task_core, "workspace", None)
         todo_by_step = {
             str(getattr(todo, "step_id", "") or "").strip(): todo
             for todo in list(getattr(task_core, "todos", []) or [])
@@ -1749,6 +1750,12 @@ class RuntimeCustomApiAgentLoop:
             if not step_id:
                 continue
             checkpoints_by_step.setdefault(step_id, []).append(checkpoint)
+        workspace_items_by_step: dict[str, list[Any]] = {}
+        for item in list(getattr(workspace, "items", []) if workspace is not None else []):
+            step_id = str(getattr(item, "source_step_id", "") or "").strip()
+            if not step_id:
+                continue
+            workspace_items_by_step.setdefault(step_id, []).append(item)
         tool_events = [
             event
             for event in timeline[tool_timeline_start:]
@@ -1758,7 +1765,6 @@ class RuntimeCustomApiAgentLoop:
         ]
         event_index = 0
         core_id = str(getattr(task_core, "core_id", "") or "").strip()
-        workspace = getattr(task_core, "workspace", None)
         workspace_id = str(getattr(workspace, "workspace_id", "") or "").strip()
         plan_id = str(getattr(plan, "plan_id", "") or "").strip()
         decision_id = str(getattr(decision, "decision_id", "") or "").strip()
@@ -1818,6 +1824,33 @@ class RuntimeCustomApiAgentLoop:
                 "source_event": source_event,
                 "result_preview": _task_progress_result_preview(result),
             }
+            for workspace_item in workspace_items_by_step.get(step_id, []):
+                item_payload = _snapshot_payload(workspace_item)
+                item_payload["status"] = todo_status
+                payload = {
+                    **base_payload,
+                    "workspace_item_id": str(
+                        getattr(workspace_item, "item_id", "") or ""
+                    ).strip(),
+                    "status": todo_status,
+                    "previous_status": str(
+                        getattr(workspace_item, "status", "") or "planned"
+                    ),
+                    "workspace_item": item_payload,
+                }
+                timeline.append(
+                    self._timeline(
+                        "agent.task.workspace_item.updated",
+                        str(getattr(workspace_item, "title", "") or step_id),
+                        **payload,
+                    )
+                )
+                if run_id and self._append_run_event is not None:
+                    self._append_run_event(
+                        run_id,
+                        "agent.task.workspace_item.updated",
+                        payload,
+                    )
             todo = todo_by_step.get(step_id)
             if todo is not None:
                 todo_payload = _snapshot_payload(todo)
@@ -4738,7 +4771,7 @@ def _runtime_replan_task_progress_summary(
     }
     todos_by_step: dict[str, dict[str, Any]] = {}
     checkpoints_by_step: dict[str, dict[str, Any]] = {}
-    workspace_items: list[dict[str, Any]] = []
+    workspace_items_by_id: dict[str, dict[str, Any]] = {}
     for event in timeline:
         if not isinstance(event, Mapping):
             continue
@@ -4761,7 +4794,29 @@ def _runtime_replan_task_progress_summary(
                 if isinstance(task_core.get("workspace"), Mapping)
                 else {}
             )
-            workspace_items = _runtime_workspace_item_summaries(workspace.get("items"))
+            workspace_items_by_id = {
+                _runtime_workspace_item_key(item): item
+                for item in _runtime_workspace_item_summaries(workspace.get("items"))
+                if _runtime_workspace_item_key(item)
+            }
+            continue
+        if event_name == "agent.task.workspace_item.updated":
+            item = (
+                event.get("workspace_item")
+                if isinstance(event.get("workspace_item"), Mapping)
+                else {}
+            )
+            summaries = _runtime_workspace_item_summaries([item])
+            if summaries:
+                summary = {
+                    **summaries[0],
+                    "status": str(
+                        event.get("status") or summaries[0].get("status") or ""
+                    ).strip(),
+                }
+                key = _runtime_workspace_item_key(summary)
+                if key:
+                    workspace_items_by_id[key] = summary
             continue
         if event_name == "agent.task.todo.updated":
             step_id = str(event.get("step_id") or "").strip()
@@ -4796,6 +4851,7 @@ def _runtime_replan_task_progress_summary(
 
     todos = list(todos_by_step.values())
     checkpoints = list(checkpoints_by_step.values())
+    workspace_items = list(workspace_items_by_id.values())
     if not todos and not checkpoints and not workspace_items:
         return {}
     summary: dict[str, Any] = {
@@ -4832,6 +4888,7 @@ def _runtime_workspace_item_summaries(items: Any) -> list[dict[str, Any]]:
         if not isinstance(item, Mapping):
             continue
         summary = {
+            "item_id": str(item.get("item_id") or "").strip(),
             "kind": str(item.get("kind") or "").strip(),
             "path": str(item.get("path") or "").strip(),
             "title": str(item.get("title") or "").strip(),
@@ -4845,6 +4902,14 @@ def _runtime_workspace_item_summaries(items: Any) -> list[dict[str, Any]]:
         if clean_summary:
             summaries.append(clean_summary)
     return summaries[:20]
+
+
+def _runtime_workspace_item_key(item: Mapping[str, Any]) -> str:
+    for key in ("item_id", "path", "title"):
+        value = str(item.get(key) or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _selection_payload_with_timeline_fallback(
@@ -5521,6 +5586,36 @@ def _runtime_planner_initial_task_updates(
     source_event = {"event": "agent.plan.created", "detail": "runtime_plan_created"}
     events: list[tuple[str, str, dict[str, Any]]] = []
 
+    for item in list(getattr(workspace, "items", []) if workspace is not None else []):
+        step_id = str(getattr(item, "source_step_id", "") or "").strip()
+        step = steps_by_id.get(step_id)
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        status = str(getattr(item, "status", "") or "planned").strip()
+        item_payload = _snapshot_payload(item)
+        item_payload["status"] = status
+        payload = {
+            "source": "runtime_planner",
+            "core_id": core_id,
+            "workspace_id": workspace_id,
+            "decision_id": decision_id,
+            "plan_id": plan_id,
+            "step_id": step_id,
+            "tool": tool_name,
+            "workspace_item_id": str(getattr(item, "item_id", "") or "").strip(),
+            "status": status,
+            "previous_status": "",
+            "source_event": source_event,
+            "result_preview": {},
+            "workspace_item": item_payload,
+        }
+        events.append(
+            (
+                "agent.task.workspace_item.updated",
+                str(getattr(item, "title", "") or step_id or "workspace item"),
+                payload,
+            )
+        )
+
     for todo in list(getattr(task_core, "todos", []) or []):
         step_id = str(getattr(todo, "step_id", "") or "").strip()
         step = steps_by_id.get(step_id)
@@ -5595,6 +5690,8 @@ def _runtime_task_update_exists(
     identity_key = (
         "todo_id"
         if event_type == "agent.task.todo.updated"
+        else "workspace_item_id"
+        if event_type == "agent.task.workspace_item.updated"
         else "checkpoint_id"
         if event_type == "agent.task.checkpoint.updated"
         else ""

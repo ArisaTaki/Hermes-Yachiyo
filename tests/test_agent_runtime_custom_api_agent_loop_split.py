@@ -103,6 +103,7 @@ _PLANNER_EVENT_TYPES = {
     "agent.plan.step",
     "agent.plan.selection",
     "agent.replan.requested",
+    "agent.task.workspace_item.updated",
     "agent.task.todo.updated",
     "agent.task.checkpoint.updated",
 }
@@ -1667,11 +1668,24 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
     assert str(result) == "analysis fallback noted"
     assert len(model_calls) == 2
     assert tool_runs[0]["tool_requests"][0]["tool"] == "data.analyze"
-    assert tool_runs[1]["tool_requests"][0] == {
-        "tool": "terminal.run",
-        "input": {"command": "python analyze_sales.py data/sales.csv"},
-        "protocol": "json_fallback",
-    }
+    auto_recovery_request = tool_runs[1]["tool_requests"][0]
+    assert auto_recovery_request["tool"] == "terminal.run"
+    assert auto_recovery_request["planning_reason"] == "planner_replan_fallback_recovery"
+    assert auto_recovery_request["replan_trigger"] == "tool_failure"
+    assert auto_recovery_request["step_id"] == "analyze-data-file"
+    assert auto_recovery_request["capability_id"] == "data.analysis"
+    assert auto_recovery_request["continue_to_model"] is True
+    assert auto_recovery_request["input"]["shell"] is True
+    assert "data/sales.csv" in auto_recovery_request["input"]["command"]
+    assert any(
+        run["tool_requests"][0]
+        == {
+            "tool": "terminal.run",
+            "input": {"command": "python analyze_sales.py data/sales.csv"},
+            "protocol": "json_fallback",
+        }
+        for run in tool_runs[2:]
+    )
     replan_events = [
         event for event in timeline if event["event"] == "agent.replan.requested"
     ]
@@ -1707,10 +1721,21 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
         for event in checkpoint_events
         if event["step_id"] == "analyze-data-file" and event["status"] == "blocked"
     ][0]
+    workspace_item_events = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.workspace_item.updated"
+        and event.get("workspace_item", {}).get("path") == "analysis-report.md"
+    ]
     assert initial_todo["previous_status"] == ""
     assert initial_todo["todo"]["status"] == "pending"
     assert blocked_todo["todo"]["status"] == "blocked"
     assert "unsupported chart type" in blocked_checkpoint["result_preview"]["error"]
+    assert [event["status"] for event in workspace_item_events] == ["planned", "blocked"]
+    assert workspace_item_events[-1]["source_event"] == {
+        "event": "agent.tool.call",
+        "detail": "data.analyze",
+    }
     replan_context = [
         event
         for event in timeline
@@ -1744,6 +1769,12 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
     assert any(
         event["event_type"] == "agent.task.todo.updated"
         and event["payload"]["step_id"] == "analyze-data-file"
+        and event["payload"]["status"] == "blocked"
+        for event in run_events
+    )
+    assert any(
+        event["event_type"] == "agent.task.workspace_item.updated"
+        and event["payload"]["workspace_item"]["path"] == "analysis-report.md"
         and event["payload"]["status"] == "blocked"
         for event in run_events
     )

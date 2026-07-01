@@ -11,6 +11,7 @@ import type {
   TaskIntentSnapshot,
   TaskReplanRequestSnapshot,
   TaskTodoItemSnapshot,
+  TaskWorkspaceItemSnapshot,
   ToolPlanSnapshot,
   ToolPlanStepSnapshot,
 } from '../../yachiyo-studio/types';
@@ -1014,6 +1015,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   let eventCount = 0;
   const stepById = new Map<string, ToolPlanStepSnapshot>();
   const desktopFallbackStepById = new Map<string, ToolPlanStepSnapshot>();
+  const workspaceItemUpdateById = new Map<string, TaskWorkspaceItemSnapshot>();
   const todoUpdateById = new Map<string, TaskTodoItemSnapshot>();
   const checkpointUpdateById = new Map<string, TaskCheckpointSnapshot>();
 
@@ -1112,6 +1114,12 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
       continue;
     }
 
+    if (plannerEventType === 'agent.task.workspace_item.updated') {
+      const item = taskWorkspaceItemSnapshot(payload.workspace_item);
+      if (item) workspaceItemUpdateById.set(item.item_id, item);
+      continue;
+    }
+
     if (plannerEventType === 'agent.task.checkpoint.updated') {
       const checkpoint = taskCheckpointSnapshot(payload.checkpoint);
       if (checkpoint) checkpointUpdateById.set(checkpoint.checkpoint_id, checkpoint);
@@ -1149,7 +1157,12 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
         source,
       }
       : null;
-  const effectivePlan = applyTaskCoreUpdates(basePlan, todoUpdateById, checkpointUpdateById);
+  const effectivePlan = applyTaskCoreUpdates(
+    basePlan,
+    workspaceItemUpdateById,
+    todoUpdateById,
+    checkpointUpdateById,
+  );
 
   if (
     !effectiveIntent
@@ -1381,6 +1394,7 @@ function runtimePlannerEventType(eventType: string): string {
   if (eventType === 'agent.intent.selected') return eventType;
   if (eventType === 'agent.replan.requested') return eventType;
   if (eventType === 'agent.task_core.created') return eventType;
+  if (eventType === 'agent.task.workspace_item.updated') return eventType;
   if (eventType === 'agent.task.todo.updated') return eventType;
   if (eventType === 'agent.task.checkpoint.updated') return eventType;
   if (eventType.startsWith('agent.plan.')) return eventType;
@@ -1390,6 +1404,7 @@ function runtimePlannerEventType(eventType: string): string {
   if (eventType === 'group.run.plan.step') return 'agent.plan.step';
   if (eventType === 'group.run.plan.selection') return 'agent.plan.selection';
   if (eventType === 'group.run.task_core.created') return 'agent.task_core.created';
+  if (eventType === 'group.run.task.workspace_item.updated') return 'agent.task.workspace_item.updated';
   if (eventType === 'group.run.task.todo.updated') return 'agent.task.todo.updated';
   if (eventType === 'group.run.task.checkpoint.updated') return 'agent.task.checkpoint.updated';
   if (eventType === 'workflow.intent.selected' || eventType === 'workflow.run.intent.selected') return 'agent.intent.selected';
@@ -1398,6 +1413,7 @@ function runtimePlannerEventType(eventType: string): string {
   if (eventType === 'workflow.plan.step' || eventType === 'workflow.run.plan.step') return 'agent.plan.step';
   if (eventType === 'workflow.plan.selection' || eventType === 'workflow.run.plan.selection') return 'agent.plan.selection';
   if (eventType === 'workflow.task_core.created' || eventType === 'workflow.run.task_core.created') return 'agent.task_core.created';
+  if (eventType === 'workflow.task.workspace_item.updated' || eventType === 'workflow.run.task.workspace_item.updated') return 'agent.task.workspace_item.updated';
   if (eventType === 'workflow.task.todo.updated' || eventType === 'workflow.run.task.todo.updated') return 'agent.task.todo.updated';
   if (eventType === 'workflow.task.checkpoint.updated' || eventType === 'workflow.run.task.checkpoint.updated') return 'agent.task.checkpoint.updated';
   return '';
@@ -1533,6 +1549,12 @@ function taskCheckpointSnapshot(value: unknown): TaskCheckpointSnapshot | null {
   return record as TaskCheckpointSnapshot;
 }
 
+function taskWorkspaceItemSnapshot(value: unknown): TaskWorkspaceItemSnapshot | null {
+  const record = objectRecord(value);
+  if (!stringValue(record.item_id) && !stringValue(record.path) && !stringValue(record.title)) return null;
+  return record as TaskWorkspaceItemSnapshot;
+}
+
 function taskCoreSnapshot(value: unknown): TaskCoreSnapshot | null {
   const record = objectRecord(value);
   if (!stringValue(record.core_id) && !objectRecord(record.workspace).workspace_id) return null;
@@ -1560,11 +1582,18 @@ function taskReplanRequestSnapshot(value: unknown): TaskReplanRequestSnapshot | 
 
 function applyTaskCoreUpdates(
   plan: RuntimePlanSnapshot | null,
+  workspaceItemUpdateById: Map<string, TaskWorkspaceItemSnapshot>,
   todoUpdateById: Map<string, TaskTodoItemSnapshot>,
   checkpointUpdateById: Map<string, TaskCheckpointSnapshot>,
 ): RuntimePlanSnapshot | null {
   const taskCore = plan?.task_core;
-  if (!plan || !taskCore || (!todoUpdateById.size && !checkpointUpdateById.size)) return plan;
+  if (!plan || !taskCore || (!workspaceItemUpdateById.size && !todoUpdateById.size && !checkpointUpdateById.size)) {
+    return plan;
+  }
+  const workspaceItems = (taskCore.workspace?.items || []).map((item) => {
+    const update = workspaceItemUpdateById.get(item.item_id);
+    return update ? { ...item, ...update } : item;
+  });
   const todos = (taskCore.todos || []).map((todo) => {
     const update = todoUpdateById.get(todo.todo_id);
     return update ? { ...todo, ...update } : todo;
@@ -1577,6 +1606,10 @@ function applyTaskCoreUpdates(
     ...plan,
     task_core: {
       ...taskCore,
+      workspace: {
+        ...taskCore.workspace,
+        items: workspaceItems,
+      },
       todos,
       checkpoints,
     },

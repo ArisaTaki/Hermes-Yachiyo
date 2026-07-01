@@ -76,6 +76,12 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
     || name === 'workflow.run.task.todo.updated'
   ) return detail ? `Task Todo · ${detail}` : 'Task Todo';
   if (
+    name === 'agent.task.workspace_item.updated'
+    || name === 'group.run.task.workspace_item.updated'
+    || name === 'workflow.task.workspace_item.updated'
+    || name === 'workflow.run.task.workspace_item.updated'
+  ) return detail ? `Task Workspace · ${detail}` : 'Task Workspace';
+  if (
     name === 'agent.task.checkpoint.updated'
     || name === 'group.run.task.checkpoint.updated'
     || name === 'workflow.task.checkpoint.updated'
@@ -226,6 +232,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
     || name === 'agent.plan.selection'
     || name === 'agent.replan.requested'
     || name === 'agent.task_core.created'
+    || name === 'agent.task.workspace_item.updated'
     || name === 'agent.task.todo.updated'
     || name === 'agent.task.checkpoint.updated'
     || name === 'group.run.intent.selected'
@@ -234,6 +241,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
     || name === 'group.run.plan.step'
     || name === 'group.run.plan.selection'
     || name === 'group.run.task_core.created'
+    || name === 'group.run.task.workspace_item.updated'
     || name === 'group.run.task.todo.updated'
     || name === 'group.run.task.checkpoint.updated'
     || name === 'workflow.intent.selected'
@@ -248,6 +256,8 @@ export function timelineEventTone(event: Record<string, unknown>): string {
     || name === 'workflow.run.plan.selection'
     || name === 'workflow.task_core.created'
     || name === 'workflow.run.task_core.created'
+    || name === 'workflow.task.workspace_item.updated'
+    || name === 'workflow.run.task.workspace_item.updated'
     || name === 'workflow.task.todo.updated'
     || name === 'workflow.run.task.todo.updated'
     || name === 'workflow.task.checkpoint.updated'
