@@ -738,7 +738,29 @@ def test_agent_task_snapshot_updates_task_core_progress_from_runtime_events() ->
         "workspace": {
             "workspace_id": "task-workspace-1",
             "title": "Report Workspace",
-            "items": [],
+            "items": [
+                {
+                    "item_id": "input-1",
+                    "title": "sales.csv",
+                    "kind": "input",
+                    "path": "sales.csv",
+                    "source_step_id": "read-source",
+                },
+                {
+                    "item_id": "artifact-1",
+                    "title": "report.md",
+                    "kind": "artifact",
+                    "path": "report.md",
+                    "source_step_id": "write-report",
+                },
+                {
+                    "item_id": "todo-file-1",
+                    "title": "tool-plan.todo.md",
+                    "kind": "todo",
+                    "path": "tool-plan.todo.md",
+                    "source_step_id": "format-report",
+                },
+            ],
         },
         "todos": [
             {
@@ -818,6 +840,14 @@ def test_agent_task_snapshot_updates_task_core_progress_from_runtime_events() ->
     )
 
     assert snapshot.task_core is not None
+    assert [item.status for item in snapshot.task_core.workspace.items] == [
+        "completed",
+        "blocked",
+        "in_progress",
+    ]
+    assert snapshot.task_core.workspace.items[1].metadata["runtime_event_type"] == (
+        "agent.tool.approval_required"
+    )
     assert [todo.status for todo in snapshot.task_core.todos] == [
         "completed",
         "blocked",

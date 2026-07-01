@@ -9938,6 +9938,44 @@ def _artifact_write_paths_from_steps(steps: Iterable[ToolPlanStepSnapshot]) -> l
     return []
 
 
+def _artifact_source_step_id(
+    artifact: str,
+    steps: Iterable[ToolPlanStepSnapshot],
+) -> str | None:
+    target = str(artifact or "").strip()
+    candidates = list(steps)
+    if target:
+        for step in candidates:
+            if target in _artifact_paths_from_step(step):
+                return step.step_id
+    for step in candidates:
+        if step.tool_name in {"artifact.write", "data.analyze"} or step.action == "write_artifact":
+            return step.step_id
+    return None
+
+
+def _artifact_paths_from_step(step: ToolPlanStepSnapshot) -> list[str]:
+    paths = step.input_preview.get("paths")
+    if isinstance(paths, list):
+        return [
+            str(path or "").strip()
+            for path in paths
+            if str(path or "").strip()
+        ]
+    artifact_paths = step.input_preview.get("artifact_paths")
+    if isinstance(artifact_paths, list):
+        return [
+            str(path or "").strip()
+            for path in artifact_paths
+            if str(path or "").strip()
+        ]
+    values = (
+        step.input_preview.get("artifact_path"),
+        step.input_preview.get("path") if step.tool_name == "artifact.write" else "",
+    )
+    return [str(path or "").strip() for path in values if str(path or "").strip()]
+
+
 def _append_artifact_reveal_step(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
@@ -11045,6 +11083,7 @@ def _task_workspace_items(
                 title=artifact,
                 kind="artifact",
                 path=artifact if _looks_like_workspace_path(artifact) else None,
+                source_step_id=_artifact_source_step_id(artifact, steps),
                 description="Expected durable output from the task plan.",
                 metadata={"planned_artifact": artifact},
             )

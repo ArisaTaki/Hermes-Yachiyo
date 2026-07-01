@@ -1699,7 +1699,9 @@ def test_runtime_planner_emits_deepagent_style_task_core() -> None:
     assert task_core.todos[1].approval_required is True
     assert any(item.kind == "input" and item.path == "sales.csv" for item in task_core.workspace.items)
     assert any(
-        item.kind == "artifact" and item.path == "analysis-report.md"
+        item.kind == "artifact"
+        and item.path == "analysis-report.md"
+        and item.source_step_id == "write-analysis-artifact"
         for item in task_core.workspace.items
     )
     assert [checkpoint.after_step_id for checkpoint in task_core.checkpoints[:3]] == [

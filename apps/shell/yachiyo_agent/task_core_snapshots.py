@@ -7,7 +7,14 @@ from typing import Any
 
 from apps.shell.agent.runtime.events import redact_json_value
 
-from .contracts import PublicRunEvent, TaskCheckpointSnapshot, TaskCoreSnapshot, TaskTodoItemSnapshot
+from .contracts import (
+    PublicRunEvent,
+    TaskCheckpointSnapshot,
+    TaskCoreSnapshot,
+    TaskTodoItemSnapshot,
+    TaskWorkspaceItemSnapshot,
+    TaskWorkspaceSnapshot,
+)
 
 
 def task_core_snapshot_from_payload(
@@ -126,9 +133,16 @@ def _task_core_with_event_progress(
     if not event_list:
         return snapshot
     progress_by_step, progress_by_tool = _runtime_progress_by_step(event_list)
-    if not progress_by_step and not progress_by_tool:
+    progress_by_artifact_path = _runtime_progress_by_artifact_path(event_list)
+    if not progress_by_step and not progress_by_tool and not progress_by_artifact_path:
         return snapshot
 
+    updated_workspace = _workspace_with_progress(
+        snapshot.workspace,
+        progress_by_step,
+        progress_by_tool,
+        progress_by_artifact_path,
+    )
     updated_todos = [
         _todo_with_progress(todo, progress_by_step, progress_by_tool)
         for todo in snapshot.todos
@@ -144,6 +158,7 @@ def _task_core_with_event_progress(
     ]
     return snapshot.model_copy(
         update={
+            "workspace": updated_workspace,
             "todos": updated_todos,
             "checkpoints": updated_checkpoints,
         }
@@ -169,6 +184,24 @@ def _runtime_progress_by_step(
         if tool_name:
             by_tool[tool_name] = progress
     return by_step, by_tool
+
+
+def _runtime_progress_by_artifact_path(
+    events: Iterable[PublicRunEvent],
+) -> dict[str, dict[str, Any]]:
+    by_path: dict[str, dict[str, Any]] = {}
+    for event in events:
+        if event.visibility != "user" or event.sensitivity != "public":
+            continue
+        payload = event.payload if isinstance(event.payload, Mapping) else {}
+        progress = _runtime_progress_from_event(event.event_type, payload)
+        if not progress:
+            continue
+        if not _event_can_update_artifact_path(event.event_type, payload):
+            continue
+        for path in _event_artifact_paths(payload):
+            by_path[path] = progress
+    return by_path
 
 
 def _runtime_progress_from_event(
@@ -229,6 +262,92 @@ def _runtime_progress_from_event(
     return {}
 
 
+def _workspace_with_progress(
+    workspace: TaskWorkspaceSnapshot,
+    progress_by_step: Mapping[str, Mapping[str, Any]],
+    progress_by_tool: Mapping[str, Mapping[str, Any]],
+    progress_by_artifact_path: Mapping[str, Mapping[str, Any]],
+) -> TaskWorkspaceSnapshot:
+    updated_items = [
+        _workspace_item_with_progress(
+            item,
+            progress_by_step,
+            progress_by_tool,
+            progress_by_artifact_path,
+        )
+        for item in workspace.items
+    ]
+    return workspace.model_copy(update={"items": updated_items})
+
+
+def _workspace_item_with_progress(
+    item: TaskWorkspaceItemSnapshot,
+    progress_by_step: Mapping[str, Mapping[str, Any]],
+    progress_by_tool: Mapping[str, Mapping[str, Any]],
+    progress_by_artifact_path: Mapping[str, Mapping[str, Any]],
+) -> TaskWorkspaceItemSnapshot:
+    progress = _workspace_item_progress(
+        item,
+        progress_by_step,
+        progress_by_tool,
+        progress_by_artifact_path,
+    )
+    if not progress:
+        return item
+    metadata = {
+        **dict(item.metadata or {}),
+        "runtime_status": str(progress.get("runtime_status") or ""),
+        "runtime_event_type": str(progress.get("event_type") or ""),
+    }
+    return item.model_copy(
+        update={
+            "status": _workspace_item_status_from_progress(progress, item.status),
+            "metadata": metadata,
+        }
+    )
+
+
+def _workspace_item_progress(
+    item: TaskWorkspaceItemSnapshot,
+    progress_by_step: Mapping[str, Mapping[str, Any]],
+    progress_by_tool: Mapping[str, Mapping[str, Any]],
+    progress_by_artifact_path: Mapping[str, Mapping[str, Any]],
+) -> Mapping[str, Any]:
+    source_step_id = str(
+        item.source_step_id or (item.metadata or {}).get("source_step_id") or ""
+    ).strip()
+    if source_step_id and source_step_id in progress_by_step:
+        return progress_by_step[source_step_id]
+
+    if str(item.kind or "").strip() == "artifact":
+        for path in _workspace_item_path_candidates(item):
+            progress = progress_by_artifact_path.get(path)
+            if progress:
+                return progress
+
+    tool_name = str((item.metadata or {}).get("tool_name") or "").strip()
+    if tool_name and tool_name in progress_by_tool:
+        return progress_by_tool[tool_name]
+    return {}
+
+
+def _workspace_item_status_from_progress(
+    progress: Mapping[str, Any],
+    fallback: Any,
+) -> str:
+    status = str(progress.get("todo_status") or "").strip()
+    if status in {"completed", "blocked", "in_progress", "pending", "skipped"}:
+        return status
+    checkpoint_status = str(progress.get("checkpoint_status") or "").strip()
+    if checkpoint_status == "completed":
+        return "completed"
+    if checkpoint_status in {"blocked", "waiting_approval"}:
+        return "blocked"
+    if checkpoint_status == "ready":
+        return "in_progress"
+    return str(fallback or "planned")
+
+
 def _todo_with_progress(
     todo: TaskTodoItemSnapshot,
     progress_by_step: Mapping[str, Mapping[str, Any]],
@@ -282,6 +401,75 @@ def _checkpoint_with_progress(
             "payload": payload,
         }
     )
+
+
+def _workspace_item_path_candidates(item: TaskWorkspaceItemSnapshot) -> list[str]:
+    candidates: list[str] = []
+    for value in (
+        item.path,
+        item.title,
+        (item.metadata or {}).get("planned_artifact"),
+        (item.metadata or {}).get("artifact_path"),
+    ):
+        clean = str(value or "").strip()
+        if clean and clean not in candidates:
+            candidates.append(clean)
+    return candidates
+
+
+def _event_artifact_paths(payload: Mapping[str, Any]) -> list[str]:
+    values: list[str] = []
+    _extend_artifact_paths(values, payload)
+    result = payload.get("result")
+    if isinstance(result, Mapping):
+        _extend_artifact_paths(values, result)
+        data = result.get("data")
+        if isinstance(data, Mapping):
+            _extend_artifact_paths(values, data)
+    return values
+
+
+def _event_can_update_artifact_path(event_type: str, payload: Mapping[str, Any]) -> bool:
+    event_name = str(event_type or "").strip()
+    if "artifact" in event_name:
+        return True
+    tool_name = _event_tool_name(payload)
+    if tool_name == "artifact.write":
+        return True
+    result = payload.get("result")
+    payloads: list[Mapping[str, Any]] = [payload]
+    if isinstance(result, Mapping):
+        payloads.append(result)
+        data = result.get("data")
+        if isinstance(data, Mapping):
+            payloads.append(data)
+    return any(
+        any(key in item for key in ("artifact_path", "artifact_paths", "artifact_manifest"))
+        for item in payloads
+    )
+
+
+def _extend_artifact_paths(values: list[str], payload: Mapping[str, Any]) -> None:
+    for key in ("artifact_path", "path"):
+        clean = str(payload.get(key) or "").strip()
+        if clean and clean not in values:
+            values.append(clean)
+    for key in ("artifact_paths", "paths"):
+        raw_paths = payload.get(key)
+        if not isinstance(raw_paths, list):
+            continue
+        for path in raw_paths:
+            clean = str(path or "").strip()
+            if clean and clean not in values:
+                values.append(clean)
+    artifact_manifest = payload.get("artifact_manifest")
+    if isinstance(artifact_manifest, list):
+        for item in artifact_manifest:
+            if not isinstance(item, Mapping):
+                continue
+            clean = str(item.get("path") or "").strip()
+            if clean and clean not in values:
+                values.append(clean)
 
 
 def _event_step_ids(payload: Mapping[str, Any]) -> list[str]:
