@@ -6156,12 +6156,28 @@ def _model_followup_pending_plan_instruction(payload: Mapping[str, Any]) -> str:
         if preview_text:
             detail = f"{detail} input_preview={preview_text}"
         items.append(detail)
+    patch_instruction = ""
+    if any(
+        str(step.get("tool_name") or "").strip() == "workspace.write_patch"
+        or (
+            str(step.get("capability_id") or "").strip() == "file.workspace_write"
+            and str(step.get("action") or "").strip() == "apply_patch"
+        )
+        for step in normalized_steps
+    ):
+        patch_instruction = (
+            " For workspace.write_patch steps, generate a concrete single-file UTF-8 "
+            "unified diff from the observed workspace and diagnostic results, then call "
+            "workspace.write_patch with path and patch. The tool remains approval-gated; "
+            "do not replace this pending patch step with a prose-only summary."
+        )
     return (
         "Continue the pending Runtime Plan steps in order before giving a final answer: "
         + "; ".join(items)
         + ". If a pending terminal.execution step only has an abstract operation, synthesize a concrete, "
         "safe command from the observed files and request approval through the normal tool/policy gate. "
         "Do not skip directly to final prose while an available tool step is still pending."
+        + patch_instruction
     )
 
 
