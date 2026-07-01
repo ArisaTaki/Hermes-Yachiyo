@@ -8375,6 +8375,57 @@ def test_runtime_planner_discovers_generic_design_tool_before_searching() -> Non
     ]
 
 
+def test_runtime_planner_keeps_unknown_app_descriptor_as_named_app() -> None:
+    decision = RuntimePlanner().decision(
+        "打开一个我没提过的新应用 PixelForge",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs == {
+        "app_name_hint": "PixelForge",
+        "operation_hint": "open",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+        "query": "PixelForge",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+        "app_name": "PixelForge"
+    }
+    assert planner_direct_tool_requests(
+        "打开一个我没提过的新应用 PixelForge",
+        ["desktop.list_apps", "app.open", "desktop.active_window"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_runtime_planner_discovers_prefixed_generic_tool_categories() -> None:
     allowed_tools = [
         "desktop.list_apps",

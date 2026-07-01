@@ -20341,6 +20341,8 @@ def _app_capability_discovery_query(value: str) -> str:
     lowered = description.lower()
     if not description:
         return ""
+    if _generic_unknown_app_descriptor(description):
+        return ""
     if _contains_any(
         description,
         (
@@ -20474,6 +20476,65 @@ def _app_capability_discovery_query(value: str) -> str:
     if _contains_any(description, ("文档", "文本", "文章", "document", "text", "writing", "write")):
         return "document"
     return description[:40].strip()
+
+
+def _generic_unknown_app_descriptor(description: str) -> bool:
+    value = _clean_prompt(description)
+    if not value:
+        return True
+    lowered = value.lower()
+    generic_values = {
+        "任意",
+        "任何",
+        "可用",
+        "合适",
+        "适合",
+        "推荐",
+        "已安装",
+        "本机",
+        "本地",
+        "未知",
+        "新的",
+        "新",
+        "没提过",
+        "没有提过",
+        "我没提过",
+        "我没有提过",
+        "没提过的新",
+        "没有提过的新",
+        "我没提过的新",
+        "我没有提过的新",
+        "any",
+        "some",
+        "available",
+        "default",
+        "suitable",
+        "best",
+        "usable",
+        "installed",
+        "unknown",
+        "new",
+        "unmentioned",
+        "unfamiliar",
+    }
+    if value in generic_values or lowered in generic_values:
+        return True
+    return bool(
+        re.fullmatch(
+            r"(?:(?:我)?(?:没|没有)提过(?:的)?|从未提过(?:的)?|"
+            r"没见过(?:的)?|未知(?:的)?|陌生(?:的)?|新(?:的)?|"
+            r"(?:我)?(?:刚|新)?装(?:的)?|刚安装(?:的)?|新安装(?:的)?|安装(?:的)?)"
+            r"(?:\s*新)?",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.fullmatch(
+            r"(?:(?:any|some|available|default|suitable|best|usable|installed|"
+            r"unknown|new|unmentioned|unfamiliar)\s*)+",
+            lowered,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _media_playback_target_app_capability_hint(text: str) -> dict[str, str]:
