@@ -4681,6 +4681,14 @@ def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> 
         "打开终端运行 ls",
         allowed_tools=["app.open", "desktop.list_apps", "terminal.run"],
     )
+    terminal_app_command = RuntimePlanner().decision(
+        "帮我打开一个终端应用运行 ls",
+        allowed_tools=["app.open", "desktop.list_apps", "terminal.run"],
+    )
+    bare_command = RuntimePlanner().decision(
+        "运行 ls 看一下当前目录",
+        allowed_tools=["terminal.run", "workspace.list", "artifact.write"],
+    )
 
     assert decision.selected_intent.kind == "code_task"
     assert decision.selected_intent.title == "Terminal Command"
@@ -4697,6 +4705,15 @@ def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> 
     assert step.tool_name == "terminal.run"
     assert step.input_preview == {"command": "ls"}
     assert step.approval_required is True
+    for extra_decision in (terminal_app_command, bare_command):
+        assert extra_decision.selected_intent.kind == "code_task"
+        assert extra_decision.selected_intent.title == "Terminal Command"
+        assert extra_decision.selected_intent.inputs == {
+            "terminal_command_hint": {"command": "ls"}
+        }
+        assert _step_by_id(extra_decision, "run-terminal-command").tool_name == (
+            "terminal.run"
+        )
     assert planner_direct_tool_requests(
         "run npm test in terminal",
         ["terminal.run"],
@@ -4705,6 +4722,15 @@ def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> 
             "protocol": "json_fallback",
             "tool": "terminal.run",
             "input": {"command": "npm test"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_terminal_command",
+        }
+    ]
+    assert planner_tool_requests("运行 ls 看一下当前目录", ["terminal.run"]) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "terminal.run",
+            "input": {"command": "ls"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_terminal_command",
         }

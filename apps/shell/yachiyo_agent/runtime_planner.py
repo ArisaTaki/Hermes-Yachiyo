@@ -1696,7 +1696,12 @@ class TaskIntentRouter:
         )
 
     def _code_task_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
-        if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
+        terminal_hint = terminal_command_hint(text)
+        if (
+            not terminal_hint
+            and _explicit_app_open_request(text)
+            and _app_capability_discovery_hint(text)
+        ):
             return _empty_intent("code_task", text)
         if _looks_like_document_report_analysis_request(text, metadata):
             return _empty_intent("code_task", text)
@@ -1720,7 +1725,6 @@ class TaskIntentRouter:
             return _empty_intent("code_task", text)
         if _looks_like_app_scoped_ticket_or_creation_request(text):
             return _empty_intent("code_task", text)
-        terminal_hint = terminal_command_hint(text)
         if terminal_hint:
             return TaskIntentSnapshot(
                 intent_id=_stable_id("intent", "code_task", text),
