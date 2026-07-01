@@ -862,6 +862,10 @@ class RuntimeCustomApiAgentLoop:
             )
             content = self._message_visible_content_text(message)
             tool_requests = self._tool_requests_from_message(message, content)
+            tool_requests = _tool_requests_with_pending_plan_metadata(
+                tool_requests,
+                timeline,
+            )
             detail = content[:500] if content else ", ".join(
                 request["tool"] for request in tool_requests
             )[:500]
@@ -9259,6 +9263,56 @@ def _model_followup_pending_plan_request(
     if capability_id:
         request["capability_id"] = capability_id
     return request
+
+
+def _tool_requests_with_pending_plan_metadata(
+    tool_requests: list[dict[str, Any]],
+    timeline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not tool_requests:
+        return tool_requests
+    followup_context = _latest_model_followup_context(timeline)
+    steps = followup_context.get("pending_plan_steps")
+    if not isinstance(steps, list) or not steps:
+        return tool_requests
+    first_step = steps[0] if isinstance(steps[0], Mapping) else {}
+    if not first_step:
+        return tool_requests
+    pending_tool = str(first_step.get("tool_name") or "").strip()
+    if not pending_tool:
+        return tool_requests
+    enriched: list[dict[str, Any]] = []
+    consumed = False
+    for request in tool_requests:
+        if not isinstance(request, dict):
+            continue
+        item = dict(request)
+        if not consumed and str(item.get("tool") or "").strip() == pending_tool:
+            for key in (
+                "step_id",
+                "capability_id",
+                "decision_id",
+                "plan_id",
+                "intent_kind",
+            ):
+                value = str(
+                    item.get(key)
+                    or first_step.get(key)
+                    or followup_context.get(key)
+                    or ""
+                ).strip()
+                if value:
+                    item[key] = value
+            if not str(item.get("planning_reason") or "").strip():
+                planning_reason = str(
+                    followup_context.get("planning_reason")
+                    or "planner_followup_pending_plan"
+                ).strip()
+                if planning_reason:
+                    item["planning_reason"] = planning_reason
+            consumed = True
+        enriched.append(item)
+    return enriched
 
 
 def _model_followup_artifact_pending_input(

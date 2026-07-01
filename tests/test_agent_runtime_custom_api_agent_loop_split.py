@@ -6,6 +6,8 @@ import subprocess
 from datetime import date, timedelta
 from typing import Any
 
+import pytest
+
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime import custom_api_agent as custom_api_agent_module
 from apps.shell.agent.runtime.budget import RunBudgetLimits
@@ -1490,6 +1492,142 @@ def test_custom_api_agent_loop_guides_code_patch_after_diagnostic_when_write_too
     assert "approval-gated" in followup_message
     assert "do not replace this pending patch step with a prose-only summary" in followup_message
     assert "verify-code-changes via terminal.run" in followup_message
+
+
+def test_custom_api_agent_loop_attaches_pending_patch_step_metadata_to_model_tool_call() -> None:
+    budget = FakeBudget()
+    captured_requests: list[dict[str, Any]] = []
+    messages = [{"role": "user", "content": "修复这个仓库里的 failing tests"}]
+    timeline: list[dict[str, Any]] = [
+        _timeline(
+            "agent.model.followup_context",
+            "planner_fallback_code_diagnostic",
+            source="runtime_planner",
+            planning_reason="planner_fallback_code_diagnostic",
+            decision_id="decision-code",
+            plan_id="plan-code",
+            intent_kind="code_task",
+            content_snapshot={
+                "source_tool": "terminal.run",
+                "ok": True,
+                "text": "FAILED tests/test_app.py::test_total",
+            },
+            pending_plan_steps=[
+                {
+                    "step_id": "apply-code-changes",
+                    "title": "Apply code changes",
+                    "tool_name": "workspace.write_patch",
+                    "capability_id": "file.workspace_write",
+                    "action": "apply_patch",
+                    "depends_on": ["run-code-diagnostic"],
+                },
+                {
+                    "step_id": "verify-code-changes",
+                    "title": "Verify code changes",
+                    "tool_name": "terminal.run",
+                    "capability_id": "terminal.execution",
+                    "input_preview": {"command": "python -m pytest"},
+                    "depends_on": ["apply-code-changes"],
+                },
+            ],
+        )
+    ]
+
+    def fake_run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        _timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ) -> None:
+        captured_requests.extend(dict(request) for request in tool_requests)
+        raise AgentApprovalRequired(
+            {
+                "tool": "workspace.write_patch",
+                "tool_request": dict(tool_requests[0]),
+                "input_preview": {"path": "app.py"},
+            }
+        )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {"base_url": "https://model.local", "model": "m", "api_key": "k"},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "workspace.write_patch",
+                    "terminal.run",
+                ]
+            }
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner for code diagnostics.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, _model_messages, **_kwargs: {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_patch",
+                    "type": "function",
+                    "function": {
+                        "name": "workspace_write_patch",
+                        "arguments": "{}",
+                    },
+                }
+            ],
+        },
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [
+            {
+                "protocol": "tool_calls",
+                "tool": "workspace.write_patch",
+                "input": {"path": "app.py", "patch": "--- app.py\n+++ app.py\n"},
+                "source": "model_tool_call",
+            }
+        ],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=fake_run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    with pytest.raises(AgentApprovalRequired):
+        loop.run(
+            {"name": "Coder"},
+            "ignored context",
+            broker={"broker": True},
+            timeline=timeline,
+            artifacts=[],
+            messages=messages,
+            start_iteration=1,
+            run_id="run-code-patch-metadata",
+        )
+
+    assert captured_requests == [
+        {
+            "protocol": "tool_calls",
+            "tool": "workspace.write_patch",
+            "input": {"path": "app.py", "patch": "--- app.py\n+++ app.py\n"},
+            "source": "model_tool_call",
+            "step_id": "apply-code-changes",
+            "capability_id": "file.workspace_write",
+            "decision_id": "decision-code",
+            "plan_id": "plan-code",
+            "intent_kind": "code_task",
+            "planning_reason": "planner_fallback_code_diagnostic",
+        }
+    ]
 
 
 def test_custom_api_agent_loop_runs_plain_test_command_without_model_followup() -> None:
