@@ -15142,6 +15142,149 @@ def test_custom_api_agent_loop_preserves_discovered_app_compose_remaining_reques
     assert appended_events[-1]["payload"]["planning_reason"] == "planner_discovered_app_followup"
 
 
+def test_custom_api_agent_loop_completes_resolved_discovered_app_open_without_model_followup(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_tool_requests",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_candidates",
+        lambda *_args, **_kwargs: [],
+    )
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = []
+    appended_events: list[dict[str, Any]] = []
+    tool_calls: list[tuple[str, dict[str, Any]]] = []
+    model_calls: list[Any] = []
+
+    def append_run_event(run_id: str, event_type: str, payload: dict[str, Any]) -> None:
+        appended_events.append({"run_id": run_id, "event_type": event_type, "payload": payload})
+
+    def call_agent_tool(
+        tool_request,
+        _allowed_tools,
+        _broker,
+        timeline_arg,
+        *,
+        artifacts=None,
+        run_id="",
+        budget=None,
+    ):
+        tool = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        tool_calls.append((tool, payload))
+        if tool == "desktop.list_apps":
+            result = {
+                "ok": True,
+                "action": tool,
+                "summary": "Found installed app: Safari",
+                "data": {
+                    "query": payload["query"],
+                    "best_match": {
+                        "name": "Safari",
+                        "path": "/Applications/Safari.app",
+                        "match_score": 93,
+                        "match_confidence": "high",
+                    },
+                    "apps": [
+                        {
+                            "name": "Safari",
+                            "path": "/Applications/Safari.app",
+                            "match_score": 93,
+                            "match_confidence": "high",
+                        }
+                    ],
+                },
+            }
+        elif tool == "app.open":
+            result = {
+                "ok": True,
+                "action": tool,
+                "summary": f"Opened {payload['app_name']}",
+                "data": {"app_name": payload["app_name"], "launch_verified": True},
+            }
+        else:
+            raise AssertionError(f"unexpected tool: {tool}")
+        timeline_arg.append(_timeline("agent.tool.call", tool, input_preview=payload, result=result))
+        if run_id:
+            append_run_event(
+                run_id,
+                "agent.tool.call",
+                {"tool": tool, "input_preview": payload, "result": result},
+            )
+        return result
+
+    request_runner = RuntimeToolRequestRunner(
+        normalize_tool_name=lambda value: str(value or "").strip(),
+        input_preview=tool_input_preview,
+        run_budget=lambda _run_id, _timeline_value: budget,
+        user_goal_from_messages=lambda messages: str(messages[0].get("content") or ""),
+        goal_disallows_tool=lambda _user_goal, _tool_name: "",
+        timeline_factory=_timeline,
+        append_run_event=append_run_event,
+        tool_loop_projection=RuntimeToolLoopProjectionBuilder(),
+        pending_approval_builder=ToolPendingApprovalBuilder(
+            approval_id_factory=lambda: "approval-1",
+            now=lambda: "2026-06-30T00:00:00Z",
+        ),
+        call_agent_tool=call_agent_tool,
+    )
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["desktop.list_apps", "app.open"]},
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use desktop tools for desktop intents.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: model_calls.append(_args) or (_ for _ in ()).throw(
+            AssertionError("resolved discovered app open should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=RuntimeToolLoopProjectionBuilder(),
+        run_tool_requests=request_runner.run,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=append_run_event,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "找一个能编辑 PDF 的本机应用并打开它",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-discovered-open",
+    )
+
+    assert "Safari" in str(result)
+    assert tool_calls == [
+        ("desktop.list_apps", {"query": "pdf", "limit": 20}),
+        ("app.open", {"app_name": "Safari"}),
+    ]
+    assert model_calls == []
+    assert not any(event["event"] == "agent.model.followup_context" for event in timeline)
+    assert not any(event["event_type"] == "agent.model.followup_context" for event in appended_events)
+    completed = [
+        event for event in timeline if event["event"] == "agent.desktop.intent_completed"
+    ]
+    assert completed[-1]["tools"] == ["desktop.list_apps", "app.open"]
+
+
 def test_auto_discovered_app_open_followup_verifies_active_window() -> None:
     timeline = [
         _timeline(

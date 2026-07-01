@@ -99,6 +99,13 @@ _APP_FOREGROUND_ACTION_TOOLS = {
     "app.focus_and_type_into_ui_element",
 }
 
+_DISCOVERED_APP_DIRECT_COMPLETION_TOOLS = {
+    "app.open",
+    "desktop.open_app",
+    "app.focus",
+    "desktop.focus_app",
+}
+
 class RuntimeCustomApiAgentLoop:
     """Runs the model/tool loop for native-profile and custom API Agents."""
 
@@ -408,6 +415,17 @@ class RuntimeCustomApiAgentLoop:
                     if isinstance(request, dict)
                 )
                 if (
+                    explicit_model_followup
+                    and not replan_payloads
+                    and _runtime_planner_completed_discovered_app_direct_action(
+                        execution_tool_requests,
+                        direct_tool_selection_payload,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    )
+                ):
+                    explicit_model_followup = False
+                if (
                     replan_payloads
                     and not explicit_model_followup
                     and _runtime_planner_completed_direct_requests_with_unavailable_replan(
@@ -613,6 +631,11 @@ class RuntimeCustomApiAgentLoop:
                         followup_selection_payload,
                         allowed_tools,
                         timeline,
+                    )
+                    auto_discovered_app_requests = _drop_completed_auto_followup_prefix(
+                        auto_discovered_app_requests,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
                     )
                     if auto_discovered_app_requests:
                         self._record_auto_model_followup_app_write_plan(
@@ -4905,6 +4928,106 @@ def _runtime_planner_completed_direct_requests_with_unavailable_replan(
     return True
 
 
+def _runtime_planner_completed_discovered_app_direct_action(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    selection_payload: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    target = (
+        selection_payload.get("followup_target")
+        if isinstance(selection_payload.get("followup_target"), Mapping)
+        else {}
+    )
+    if str(target.get("kind") or "").strip() != "desktop_discovered_app_action":
+        return False
+    if str(target.get("target_action") or "").strip() not in {"open_app", "open", "focus_app", "focus"}:
+        return False
+    if _discovered_app_target_requires_model_followup(target):
+        return False
+
+    requests = [
+        request
+        for request in planned_tool_requests
+        if isinstance(request, Mapping)
+    ]
+    followup_requests = [
+        request
+        for request in requests
+        if bool(request.get("continue_to_model"))
+    ]
+    if not followup_requests:
+        return False
+    if any(str(request.get("tool") or "").strip() != "desktop.list_apps" for request in followup_requests):
+        return False
+
+    action_requests = [
+        request
+        for request in requests
+        if str(request.get("tool") or "").strip() in _DISCOVERED_APP_DIRECT_COMPLETION_TOOLS
+        and _request_uses_discovered_app_resolution(request)
+    ]
+    return any(
+        _runtime_planner_tool_request_completed(
+            request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        )
+        for request in action_requests
+    )
+
+
+def _discovered_app_target_requires_model_followup(target: Mapping[str, Any]) -> bool:
+    if isinstance(target.get("post_action_observation"), Mapping):
+        return True
+    if isinstance(target.get("creative_canvas"), Mapping):
+        return True
+    if isinstance(target.get("communication_compose"), Mapping):
+        return True
+    if isinstance(target.get("app_search"), Mapping):
+        return True
+    if str(target.get("compose_text") or "").strip():
+        return True
+    if str(target.get("pending_user_action") or "").strip():
+        return True
+    return str(target.get("body_source") or "").strip() == "model_generated_content"
+
+
+def _request_uses_discovered_app_resolution(request: Mapping[str, Any]) -> bool:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    resolution = (
+        request.get("input_resolution")
+        if isinstance(request.get("input_resolution"), Mapping)
+        else {}
+    )
+    return (
+        str(payload.get("app_name") or "").strip() == "<selected app from desktop.list_apps>"
+        or str(payload.get("selection_source") or "").strip() == "desktop.list_apps"
+        or str(resolution.get("source_tool") or "").strip() == "desktop.list_apps"
+    )
+
+
+def _runtime_planner_tool_request_completed(
+    request: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if not tool_name:
+        return False
+    for event in timeline[tool_timeline_start:]:
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        if str(event.get("detail") or "").strip() != tool_name:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is True and not result.get("approval_required"):
+            return True
+    return False
+
+
 def _runtime_planner_replan_payloads_only_tool_unavailable(
     replan_payloads: Iterable[Mapping[str, Any]],
 ) -> bool:
@@ -5910,6 +6033,63 @@ def _auto_discovered_followup_requests(
         if requests:
             return requests
     return []
+
+
+def _drop_completed_auto_followup_prefix(
+    requests: list[dict[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> list[dict[str, Any]]:
+    remaining = list(requests)
+    while remaining and _auto_followup_request_completed(
+        remaining[0],
+        timeline,
+        tool_timeline_start=tool_timeline_start,
+    ):
+        remaining = remaining[1:]
+    return remaining
+
+
+def _auto_followup_request_completed(
+    request: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if not tool_name:
+        return False
+    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    for event in timeline[tool_timeline_start:]:
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        if str(event.get("detail") or "").strip() != tool_name:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is not True or result.get("approval_required"):
+            continue
+        event_input = event.get("input_preview") if isinstance(event.get("input_preview"), Mapping) else {}
+        if _auto_followup_input_matches_event(request_input, event_input):
+            return True
+    return False
+
+
+def _auto_followup_input_matches_event(
+    request_input: Mapping[str, Any],
+    event_input: Mapping[str, Any],
+) -> bool:
+    comparable = {
+        str(key): value
+        for key, value in request_input.items()
+        if str(key) not in {"selection_source", "query"}
+    }
+    if not comparable:
+        return True
+    return all(
+        str(event_input.get(key) or "") == str(value or "")
+        for key, value in comparable.items()
+    )
 
 
 def _auto_replan_verification_recovery_requests(
