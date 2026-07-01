@@ -29,6 +29,8 @@ from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES, PolicyGate
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
+from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
+from apps.shell.yachiyo_agent.planner_projection import planner_selection_payload
 
 
 class FakeBudget:
@@ -3720,6 +3722,81 @@ def test_model_followup_pending_plan_dispatches_short_multi_step_workflow() -> N
         request["planning_reason"] == "planner_discovered_app_followup"
         for request in requests
     )
+
+
+def test_model_followup_context_dispatches_discovered_app_operation_plan() -> None:
+    prompt = "找一个 PDF 阅读器，向下滚动两页"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus_and_safe_scroll",
+        "screen.capture",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    planner_requests = planner_tool_requests(prompt, allowed_tools)
+    selection_payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=planner_requests,
+        legacy_requests=[],
+        selected_requests=planner_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    followup_context = custom_api_agent_module._model_followup_context_payload(
+        planner_requests,
+        selection_payload,
+        allowed_tools=allowed_tools,
+        timeline=[
+            _timeline(
+                "agent.tool.call",
+                "desktop.list_apps",
+                input_preview={"query": "pdf", "limit": 20},
+                result={
+                    "ok": True,
+                    "action": "desktop.list_apps",
+                    "data": {
+                        "query": "pdf",
+                        "apps": [
+                            {
+                                "name": "Preview",
+                                "path": "/System/Applications/Preview.app",
+                                "match_score": 90,
+                            }
+                        ],
+                    },
+                },
+            )
+        ],
+    )
+    requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        followup_context,
+        allowed_tools,
+    )
+
+    assert [step["step_id"] for step in followup_context["pending_plan_steps"]] == [
+        "open-selected-discovered-app",
+        "scroll-selected-discovered-app",
+        "verify-selected-discovered-app-action",
+    ]
+    assert [request["tool"] for request in requests] == [
+        "app.open",
+        "app.focus_and_safe_scroll",
+        "screen.capture",
+    ]
+    assert requests[0]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "pdf",
+    }
+    assert requests[1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "pdf",
+        "direction": "down",
+        "pages": 2,
+    }
+    assert requests[2]["input"] == {"reason": "verify selected discovered app action"}
 
 
 def test_model_followup_context_discovers_generic_communication_app_after_analysis() -> None:
