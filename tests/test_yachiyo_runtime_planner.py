@@ -3907,6 +3907,37 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
     assert _step_by_id(browser_surface_decision, "open-web-search").tool_name == (
         "browser.open_url"
     )
+    for prompt in (
+        "用默认浏览器搜索 Oha Yachiyo desktop agent",
+        "用任意可用的浏览器搜索 Oha Yachiyo desktop agent",
+    ):
+        generic_browser_search = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["browser.open_url", "desktop.list_apps", "app.open"],
+        )
+        assert generic_browser_search.selected_intent.kind == "web_research"
+        assert generic_browser_search.selected_intent.inputs == {
+            "url_hint": "https://www.google.com/search?q=Oha+Yachiyo+desktop+agent",
+            "browser_action": "open_search",
+            "query": "Oha Yachiyo desktop agent",
+        }
+        assert _step_by_id(generic_browser_search, "open-web-search").tool_name == (
+            "browser.open_url"
+        )
+        assert planner_tool_requests(
+            prompt,
+            ["browser.open_url", "desktop.list_apps", "app.open"],
+        ) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.open_url",
+                "input": {
+                    "url": "https://www.google.com/search?q=Oha+Yachiyo+desktop+agent"
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_web_research",
+            }
+        ]
 
     english_decision = RuntimePlanner().decision(
         "research OpenAI latest news and write a report",

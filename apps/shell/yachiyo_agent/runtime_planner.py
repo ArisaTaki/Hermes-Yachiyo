@@ -1327,6 +1327,8 @@ class TaskIntentRouter:
                 "新闻",
             ],
         )
+        if web_search_action == "open_search" and str(web_search.get("query") or "").strip():
+            score = max(score, 0.18)
         if (
             score <= 0
             and dynamic_source
@@ -14292,7 +14294,8 @@ def _browser_internal_surface_kind(value: str) -> str:
 
 
 def _is_generic_browser_app_label(app_name: str) -> bool:
-    normalized = re.sub(r"\s+", " ", str(app_name or "").strip().lower())
+    raw = str(app_name or "").strip().lower()
+    normalized = re.sub(r"\s+", " ", raw)
     return normalized in {
         "browser",
         "any browser",
@@ -14308,7 +14311,39 @@ def _is_generic_browser_app_label(app_name: str) -> bool:
         "current page",
         "current webpage",
         "web page",
-    }
+    } or _normalized_generic_browser_label(raw)
+
+
+def _normalized_generic_browser_label(value: str) -> bool:
+    compact = re.sub(r"[\s._·-]+", "", str(value or "").strip().lower())
+    if compact in {"browser", "webbrowser", "浏览器", "网页", "页面"}:
+        return True
+    compact_without_qualifiers = re.sub(
+        r"^(?:一个|一款)?(?:(?:任意|任何|默认|当前|可用|可使用|能用|已安装|本地|"
+        r"系统自带|内置|合适|适合|推荐)(?:的)?)+",
+        "",
+        compact,
+    )
+    compact_without_suffix = re.sub(
+        r"(?:应用程序|应用|软件|客户端|工具|程序|app)$",
+        "",
+        compact_without_qualifiers,
+    )
+    if compact_without_suffix in {"browser", "webbrowser", "浏览器", "网页", "页面"}:
+        return True
+    english = re.sub(r"[^a-z0-9]+", " ", str(value or "").strip().lower()).strip()
+    english = re.sub(
+        r"^(?:(?:a|an|the|any|some|available|default|current|suitable|best|"
+        r"usable|installed|local|system)\s+)+",
+        "",
+        english,
+    ).strip()
+    english = re.sub(
+        r"\s+(?:app|application|client|tool|program|software)$",
+        "",
+        english,
+    ).strip()
+    return english in {"browser", "web browser", "web"}
 
 
 def _generic_browser_app_target_requested(text: str) -> bool:
@@ -17916,7 +17951,10 @@ def _web_search_query(text: str) -> str:
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:研究|调研|了解|查找|查询|检索|搜索|找一下|找下|查一下|查查|查(?!看)|看一下|看看)"
         r"(?:一下|下|查)?\s*(.+)$",
-        r"(?:在|用|通过)?\s*(?:任意|任何|默认|当前)?(?:浏览器|Google|谷歌)\s*(?:搜索|查找)\s*(.+)$",
+        r"(?:在|用|通过)?\s*"
+        r"(?:(?:一个|一款|任意|任何|默认|当前|可用|可使用|能用|已安装|本地|"
+        r"系统自带|内置|合适|适合|推荐)(?:的)?\s*){0,8}"
+        r"(?:浏览器|Google|谷歌)\s*(?:搜索|查找)\s*(.+)$",
         r"(?:搜索|查找|检索)\s*(.+)$",
     )
     for pattern in chinese_patterns:
@@ -18179,6 +18217,8 @@ def _clean_web_search_surface_hint(surface: str) -> str:
 
 
 def _is_browser_or_search_app_name(app_name: str) -> bool:
+    if _is_generic_browser_app_label(app_name):
+        return True
     normalized = re.sub(r"\s+", " ", str(app_name or "").strip().lower())
     return normalized in {
         "browser",

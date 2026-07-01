@@ -347,6 +347,27 @@ def test_planner_first_daily_desktop_entrypoint_routes_browser_url_click_sequenc
     ]
 
 
+def test_planner_first_daily_desktop_entrypoint_routes_generic_browser_search() -> None:
+    for prompt in (
+        "用默认浏览器搜索 Oha Yachiyo desktop agent",
+        "用任意可用的浏览器搜索 Oha Yachiyo desktop agent",
+    ):
+        assert planner_first_daily_desktop_entrypoint_requests(
+            prompt,
+            allowed_tools=["browser.open_url", "desktop.list_apps", "app.open"],
+        ) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.open_url",
+                "input": {
+                    "url": "https://www.google.com/search?q=Oha+Yachiyo+desktop+agent"
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_web_research",
+            }
+        ]
+
+
 def test_planner_first_daily_desktop_entrypoint_reads_page_for_ambiguous_click() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(
         "在当前网页点击最像登录的按钮",
