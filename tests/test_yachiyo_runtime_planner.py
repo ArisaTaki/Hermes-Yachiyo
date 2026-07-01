@@ -3423,6 +3423,30 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
         "workflow_action_hint": "run"
     }
 
+    role_workflow_prompt = "启动一个工作流，让研究员和写作者一起产出竞品分析报告"
+    role_workflow_group = RuntimePlanner().decision(
+        role_workflow_prompt,
+        allowed_tools=["workflow.run", "group.run", "artifact.write"],
+    )
+    assert role_workflow_group.selected_intent.kind == "multi_agent"
+    assert role_workflow_group.selected_intent.inputs == {}
+    assert planner_tool_requests(
+        role_workflow_prompt,
+        ["workflow.run", "group.run", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "group.run",
+            "input": {
+                "objective": role_workflow_prompt,
+                "title": "Multi-Agent Coordination",
+                "target_name": "",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_group_run",
+        }
+    ]
+
     group = RuntimePlanner().decision(
         "让两个 agent 分别调研 Hanako 和 Hermes 然后汇总",
         allowed_tools=["group.run", "browser.open_url_and_extract_text", "artifact.write"],
@@ -3489,6 +3513,29 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
         division_group_prompt,
         ["agent.group_run", "browser.search", "artifact.write"],
     )[0]["tool"] == "agent.group_run"
+
+    role_only_group_prompt = "让研究员和写作者一起产出竞品分析报告"
+    role_only_group = RuntimePlanner().decision(
+        role_only_group_prompt,
+        allowed_tools=["group.run", "artifact.write"],
+    )
+    assert role_only_group.selected_intent.kind == "multi_agent"
+    assert planner_tool_requests(
+        role_only_group_prompt,
+        ["group.run", "artifact.write"],
+    )[0]["tool"] == "group.run"
+
+    generic_multi_agent_group = RuntimePlanner().decision(
+        "开一个多 Agent 小组做竞品分析报告",
+        allowed_tools=["group.run", "artifact.write"],
+    )
+    assert generic_multi_agent_group.selected_intent.kind == "multi_agent"
+
+    role_meeting = RuntimePlanner().decision(
+        "安排明天研究员和写作者一起开会",
+        allowed_tools=["calendar.create_event", "group.run"],
+    )
+    assert role_meeting.selected_intent.kind == "schedule"
 
     named_group = RuntimePlanner().decision(
         "运行 Research Team group",
@@ -3587,8 +3634,31 @@ def test_planner_orchestration_requests_project_workflow_and_group_handoffs() ->
     )
     assert len(division_group_request) == 1
     assert division_group_request[0]["orchestration_kind"] == "group_run"
+    role_only_group_request = planner_orchestration_requests(
+        "让研究员和写作者一起产出竞品分析报告"
+    )
+    assert len(role_only_group_request) == 1
+    assert role_only_group_request[0]["orchestration_kind"] == "group_run"
+    assert role_only_group_request[0]["input"]["target_name"] == ""
+    workflow_role_group_request = planner_orchestration_requests(
+        "启动一个工作流，让研究员和写作者一起产出竞品分析报告"
+    )
+    assert len(workflow_role_group_request) == 1
+    assert workflow_role_group_request[0]["orchestration_kind"] == "group_run"
+    assert workflow_role_group_request[0]["input"]["target_name"] == ""
+    generic_multi_agent_group_request = planner_orchestration_requests(
+        "开一个多 Agent 小组做竞品分析报告"
+    )
+    assert len(generic_multi_agent_group_request) == 1
+    assert generic_multi_agent_group_request[0]["orchestration_kind"] == "group_run"
+    agent_count_group_request = planner_orchestration_requests(
+        "用两个 agent 分析市场并写报告"
+    )
+    assert len(agent_count_group_request) == 1
+    assert agent_count_group_request[0]["orchestration_kind"] == "group_run"
     assert planner_orchestration_requests("什么是 Workflow？") == []
     assert planner_orchestration_requests("介绍一下 multi-agent 架构") == []
+    assert planner_orchestration_requests("安排明天研究员和写作者一起开会") == []
 
 
 def test_planner_orchestration_requests_use_discovered_targets_without_keywords() -> None:

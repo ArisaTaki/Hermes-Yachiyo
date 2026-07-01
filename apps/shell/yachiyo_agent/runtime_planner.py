@@ -12070,8 +12070,9 @@ def _looks_like_multi_agent_request(text: str) -> bool:
         value,
         flags=re.IGNORECASE,
     ) and re.search(
-        r"(?:让|安排|派发|派活|委派|分配|指派|运行|启动|执行|协作|"
-        r"coordinate|delegate|dispatch|assign|run|start|execute)",
+        r"(?:让|安排|派发|派活|委派|分配|指派|运行|启动|开启|开|创建|新建|"
+        r"组建|组成|执行|协作|做|产出|"
+        r"coordinate|delegate|dispatch|assign|run|start|open|create|execute)",
         value,
         flags=re.IGNORECASE,
     ):
@@ -12081,6 +12082,32 @@ def _looks_like_multi_agent_request(text: str) -> bool:
             flags=re.IGNORECASE,
         ):
             return False
+        return True
+    role_terms = re.search(
+        r"(?:研究员|调研员|写作者|作者|分析师|设计师|开发者|工程师|审阅者|审核员|"
+        r"researcher|writer|analyst|designer|developer|engineer|reviewer)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    role_task_terms = re.search(
+        r"(?:协作|合作|分别|各自|并行|分工|汇总|产出|生成|输出|报告|分析(?!师)|研究(?!员)|调研|"
+        r"总结|比较|评审|撰写|写作(?!者)|"
+        r"collaborate|coordinate|parallel|separately|divide|report|analy[sz]e|"
+        r"research|summari[sz]e|compare|review|write|produce|deliver)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    role_together_task = re.search(
+        r"(?:一起|together)",
+        value,
+        flags=re.IGNORECASE,
+    ) and re.search(
+        r"(?:产出|生成|输出|报告|分析(?!师)|研究(?!员)|调研|总结|比较|评审|撰写|写作(?!者)|"
+        r"produce|deliver|report|analy[sz]e|research|summari[sz]e|compare|review|write)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if role_terms and (role_task_terms or role_together_task):
         return True
     if re.search(
         r"(?:two|three|multiple|several)\s+(?:agents?|ai\s+agents?)",
@@ -12293,13 +12320,31 @@ def _clean_orchestration_target_hint(
         return ""
     lowered = target.lower()
     generic = {
+        "a",
+        "an",
+        "one",
+        "new",
         "workflow",
         "flow",
+        "a workflow",
+        "new workflow",
         "工作流",
         "流程",
+        "一个",
+        "一 个",
+        "一个工作流",
+        "新工作流",
         "group",
+        "a group",
+        "new group",
+        "team",
+        "a team",
         "群组",
         "小组",
+        "团队",
+        "一个群组",
+        "一个小组",
+        "一个团队",
     }
     if lowered in generic or target in generic:
         return ""

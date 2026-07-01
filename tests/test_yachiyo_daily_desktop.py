@@ -293,6 +293,38 @@ def test_planner_first_daily_desktop_entrypoint_routes_orchestration_tools() -> 
             "planning_reason": "planner_fallback_group_run",
         }
     ]
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "启动一个工作流，让研究员和写作者一起产出竞品分析报告",
+        allowed_tools=["workflow.run", "group.run", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "group.run",
+            "input": {
+                "objective": "启动一个工作流，让研究员和写作者一起产出竞品分析报告",
+                "title": "Multi-Agent Coordination",
+                "target_name": "",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_group_run",
+        }
+    ]
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "开一个多 Agent 小组做竞品分析报告",
+        allowed_tools=["group.run", "agent.group_run", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "group.run",
+            "input": {
+                "objective": "开一个多 Agent 小组做竞品分析报告",
+                "title": "Multi-Agent Coordination",
+                "target_name": "",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_group_run",
+        }
+    ]
 
 
 def test_planner_first_daily_desktop_entrypoint_discovers_generic_communication_apps() -> None:

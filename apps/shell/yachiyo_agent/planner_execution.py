@@ -404,19 +404,43 @@ def _looks_like_orchestration_action(prompt: str, orchestration_kind: str) -> bo
                 flags=re.IGNORECASE,
             )
         )
-    return bool(
-        re.search(
-            r"(?:multi-agent|group|agents?|群组|小组|团队|多\s*agent|多Agent|协作|智能体|代理)",
-            text,
-            flags=re.IGNORECASE,
-        )
-        and re.search(
-            r"(?:让|安排|派发|派活|委派|分配|指派|分别|各自|并行|协作|汇总|运行|启动|执行|"
-            r"assign|dispatch|delegate|parallel|coordinate|run|start|execute)",
-            text,
-            flags=re.IGNORECASE,
-        )
+    explicit_group = re.search(
+        r"(?:multi-agent|group|agents?|群组|小组|团队|多\s*agent|多Agent|协作|智能体|代理)",
+        text,
+        flags=re.IGNORECASE,
+    ) and re.search(
+        r"(?:让|安排|派发|派活|委派|分配|指派|分别|各自|并行|协作|汇总|"
+        r"运行|启动|开启|开|创建|新建|组建|组成|执行|做|产出|用|使用|通过|"
+        r"assign|dispatch|delegate|parallel|coordinate|run|start|open|create|execute|with|using)",
+        text,
+        flags=re.IGNORECASE,
     )
+    role_terms = re.search(
+        r"(?:研究员|调研员|写作者|作者|分析师|设计师|开发者|工程师|审阅者|审核员|"
+        r"researcher|writer|analyst|designer|developer|engineer|reviewer)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    role_task_terms = re.search(
+        r"(?:协作|合作|分别|各自|并行|分工|汇总|产出|生成|输出|报告|分析(?!师)|研究(?!员)|调研|"
+        r"总结|比较|评审|撰写|写作(?!者)|"
+        r"collaborate|coordinate|parallel|separately|divide|report|analy[sz]e|"
+        r"research|summari[sz]e|compare|review|write|produce|deliver)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    role_together_task = re.search(
+        r"(?:一起|together)",
+        text,
+        flags=re.IGNORECASE,
+    ) and re.search(
+        r"(?:产出|生成|输出|报告|分析(?!师)|研究(?!员)|调研|总结|比较|评审|撰写|写作(?!者)|"
+        r"produce|deliver|report|analy[sz]e|research|summari[sz]e|compare|review|write)",
+        text,
+        flags=re.IGNORECASE,
+    )
+    role_collaboration = role_terms and (role_task_terms or role_together_task)
+    return bool(explicit_group or role_collaboration)
 
 
 def _first_allowed(candidates: Iterable[str], allowed: set[str]) -> str:
