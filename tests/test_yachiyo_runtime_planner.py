@@ -7358,6 +7358,13 @@ def test_planner_execution_tool_requests_prepends_unknown_app_discovery() -> Non
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
 
@@ -7367,6 +7374,7 @@ def test_planner_execution_tool_requests_discovers_unknown_app_scoped_operations
         "app.open_and_click_ui_element",
         "app.open",
         "desktop.click_ui_element",
+        "desktop.ui_elements",
     ]
 
     assert planner_execution_tool_requests(
@@ -7402,6 +7410,66 @@ def test_planner_execution_tool_requests_discovers_unknown_app_scoped_operations
                 "role_filter": "button",
                 "limit": 80,
             },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
+def test_planner_execution_tool_requests_verifies_after_unknown_app_foreground_chain() -> None:
+    allowed = ["desktop.list_apps", "app.open", "desktop.safe_shortcut", "desktop.ui_elements"]
+
+    assert planner_execution_tool_requests(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open",
+                "input": {"app_name": "PixelForge"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": "find"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+        ],
+        allowed,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },

@@ -62,6 +62,10 @@ def planner_execution_tool_requests(
         return []
     normalized_requests = _expand_inspect_app_execution_requests(normalized_requests, allowed)
     normalized_requests = _prepend_unknown_app_discovery_requests(normalized_requests, allowed)
+    normalized_requests = _append_unknown_app_post_execution_verification(
+        normalized_requests,
+        allowed,
+    )
     if not _has_discovered_app_foreground_verification_chain(normalized_requests):
         normalized_requests = _collapse_app_foreground_direct_requests(normalized_requests, allowed)
     normalized_requests = _drop_redundant_post_inspect_app_prepare_requests(normalized_requests)
@@ -145,6 +149,162 @@ def _tool_uses_app_name_for_foreground_execution(tool_name: str) -> bool:
 
 def _discovery_query_key(value: str) -> str:
     return " ".join(str(value or "").strip().casefold().split())
+
+
+def _append_unknown_app_post_execution_verification(
+    requests: list[dict[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    if not _has_unknown_discovered_app_query(requests):
+        return requests
+    normalized: list[dict[str, Any]] = []
+    pending_unknown_app_chain = False
+    for index, request in enumerate(requests):
+        normalized.append(request)
+        tool_name = str(request.get("tool") or "").strip()
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        starts_unknown_app_chain = _request_targets_unknown_discovered_app(
+            tool_name,
+            payload,
+            request,
+        )
+        if starts_unknown_app_chain:
+            pending_unknown_app_chain = True
+        elif tool_name in _EXECUTION_VERIFICATION_TOOLS:
+            pending_unknown_app_chain = False
+            continue
+        elif not pending_unknown_app_chain or not _tool_continues_foreground_operation_chain(tool_name):
+            continue
+        if _has_later_execution_verification_before_mutation(requests, index):
+            pending_unknown_app_chain = False
+            continue
+        if _has_later_foreground_operation_before_verification(requests, index):
+            continue
+        verification = _unknown_app_execution_verification_request(
+            tool_name,
+            request,
+            allowed,
+        )
+        if verification:
+            normalized.append(verification)
+            pending_unknown_app_chain = False
+    return normalized
+
+
+def _request_targets_unknown_discovered_app(
+    tool_name: str,
+    payload: Mapping[str, Any],
+    request: Mapping[str, Any],
+) -> bool:
+    if not _tool_changes_unknown_app_foreground_state(tool_name):
+        return False
+    app_name = str(payload.get("app_name") or "").strip()
+    if not app_name or app_name == "<selected app from desktop.list_apps>":
+        return False
+    if str(payload.get("selection_source") or "").strip() == "desktop.list_apps":
+        return True
+    input_resolution = (
+        request.get("input_resolution")
+        if isinstance(request.get("input_resolution"), Mapping)
+        else {}
+    )
+    if str(input_resolution.get("source_tool") or "").strip() == "desktop.list_apps":
+        return True
+    return not is_legacy_app_name_hint(app_name)
+
+
+def _tool_changes_unknown_app_foreground_state(tool_name: str) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    return bool(
+        clean_tool in {
+            "app.open",
+            "app.focus",
+            "desktop.open_app",
+            "desktop.focus_app",
+            "desktop.open_path_with_app",
+        }
+        or clean_tool.startswith("app.open_and_")
+        or clean_tool.startswith("app.focus_and_")
+    )
+
+
+def _has_later_execution_verification_before_mutation(
+    requests: list[dict[str, Any]],
+    index: int,
+) -> bool:
+    for later_request in requests[index + 1 :]:
+        later_tool = str(later_request.get("tool") or "").strip()
+        if later_tool in _EXECUTION_VERIFICATION_TOOLS:
+            return True
+        if later_tool in _EXECUTION_MUTATION_TOOLS:
+            return False
+    return False
+
+
+def _has_later_foreground_operation_before_verification(
+    requests: list[dict[str, Any]],
+    index: int,
+) -> bool:
+    for later_request in requests[index + 1 :]:
+        later_tool = str(later_request.get("tool") or "").strip()
+        if later_tool in _EXECUTION_VERIFICATION_TOOLS:
+            return False
+        if later_tool in _EXECUTION_MUTATION_TOOLS or _tool_continues_foreground_operation_chain(later_tool):
+            return True
+    return False
+
+
+def _unknown_app_execution_verification_request(
+    tool_name: str,
+    request: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    planning_reason = str(
+        request.get("planning_reason") or "planner_desktop_operation"
+    ).strip() or "planner_desktop_operation"
+    if _tool_performs_foreground_ui_operation(tool_name):
+        verification_tool = _first_allowed(
+            ("desktop.ui_elements", "desktop.read_ui", "desktop.active_window", "screen.capture"),
+            allowed,
+        )
+    else:
+        verification_tool = _first_allowed(
+            ("desktop.active_window", "desktop.ui_elements", "desktop.read_ui", "screen.capture"),
+            allowed,
+        )
+    if not verification_tool:
+        return {}
+    if verification_tool in {"desktop.ui_elements", "desktop.read_ui"}:
+        return _request(
+            verification_tool,
+            {"limit": 80},
+            planning_reason=planning_reason,
+        )
+    if verification_tool == "screen.capture":
+        return _request(
+            "screen.capture",
+            {"reason": "verify desktop app operation"},
+            planning_reason=planning_reason,
+        )
+    return _request(verification_tool, {}, planning_reason=planning_reason)
+
+
+def _tool_performs_foreground_ui_operation(tool_name: str) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    return bool(
+        clean_tool.startswith("app.open_and_")
+        or clean_tool.startswith("app.focus_and_")
+        or clean_tool in _APP_FOREGROUND_DIRECT_OPERATION_SUFFIX
+        or clean_tool in {"desktop.submit_foreground", "desktop.search_submit"}
+    )
+
+
+def _tool_continues_foreground_operation_chain(tool_name: str) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    return bool(
+        clean_tool in _APP_FOREGROUND_DIRECT_OPERATION_SUFFIX
+        or clean_tool in {"desktop.submit_foreground", "desktop.search_submit"}
+    )
 
 
 def _expand_inspect_app_execution_requests(
@@ -1038,19 +1198,23 @@ def _keep_post_mutation_verification_request(
     tool_name = str(request.get("tool") or "").strip()
     if tool_name in {"desktop.ui_elements", "desktop.read_ui", "desktop.windows", "desktop.list_windows"}:
         return True
-    if tool_name == "desktop.active_window" and previous_mutation_tool in {
-        "app.open",
-        "app.focus",
-        "desktop.open_app",
-        "desktop.focus_app",
-        "app.quit",
-        "app.hide",
-        "app.show",
-        "app.minimize",
-        "desktop.close_window",
-        "desktop.minimize_window",
-        "desktop.quit_app",
-    }:
+    if tool_name == "desktop.active_window" and (
+        previous_mutation_tool in {
+            "app.open",
+            "app.focus",
+            "desktop.open_app",
+            "desktop.focus_app",
+            "app.quit",
+            "app.hide",
+            "app.show",
+            "app.minimize",
+            "desktop.close_window",
+            "desktop.minimize_window",
+            "desktop.quit_app",
+        }
+        or previous_mutation_tool.startswith("app.open_and_")
+        or previous_mutation_tool.startswith("app.focus_and_")
+    ):
         return True
     if tool_name in {"desktop.active_window", "desktop.running_apps"}:
         return False
