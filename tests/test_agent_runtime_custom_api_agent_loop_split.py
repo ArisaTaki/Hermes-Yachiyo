@@ -4427,7 +4427,7 @@ def test_model_followup_pending_plan_dispatches_short_multi_step_workflow() -> N
     )
 
 
-def test_model_followup_context_dispatches_discovered_app_operation_plan() -> None:
+def test_model_followup_context_skips_runtime_resolvable_discovered_app_operation_plan() -> None:
     prompt = "找一个 PDF 阅读器，向下滚动两页"
     allowed_tools = [
         "desktop.list_apps",
@@ -4477,29 +4477,34 @@ def test_model_followup_context_dispatches_discovered_app_operation_plan() -> No
         allowed_tools,
     )
 
-    assert [step["step_id"] for step in followup_context["pending_plan_steps"]] == [
+    assert "pending_plan_steps" not in followup_context
+    assert requests == []
+    assert [request["step_id"] for request in planner_requests] == [
+        "discover_apps-desktop-state",
         "open-selected-discovered-app",
         "scroll-selected-discovered-app",
         "verify-selected-discovered-app-action",
     ]
-    assert [request["tool"] for request in requests] == [
+    assert [request["tool"] for request in planner_requests] == [
+        "desktop.list_apps",
         "app.open",
         "app.focus_and_safe_scroll",
         "screen.capture",
     ]
-    assert requests[0]["input"] == {
+    assert "continue_to_model" not in planner_requests[0]
+    assert planner_requests[1]["input"] == {
         "app_name": "<selected app from desktop.list_apps>",
         "selection_source": "desktop.list_apps",
         "query": "pdf",
     }
-    assert requests[1]["input"] == {
+    assert planner_requests[2]["input"] == {
         "app_name": "<selected app from desktop.list_apps>",
         "selection_source": "desktop.list_apps",
         "query": "pdf",
         "direction": "down",
         "pages": 2,
     }
-    assert requests[2]["input"] == {"reason": "verify selected discovered app action"}
+    assert planner_requests[3]["input"] == {"reason": "verify selected discovered app action"}
 
 
 def test_model_followup_context_discovers_generic_communication_app_after_analysis() -> None:
@@ -17170,24 +17175,28 @@ def test_custom_api_agent_loop_auto_dispatches_creative_pending_steps(
         run_id="run-creative-followup",
     )
 
-    assert [request["tool"] for request in tool_runs[0]] == ["desktop.list_apps"]
-    assert [request["tool"] for request in tool_runs[1]] == [
-        "app.open",
-        "desktop.ui_elements",
+    assert [[request["tool"] for request in run] for run in tool_runs] == [
+        [
+            "app.open",
+            "desktop.ui_elements",
+            "desktop.click_ui_element",
+            "desktop.shortcut",
+            "screen.capture",
+        ]
     ]
-    assert [request["tool"] for request in tool_runs[2]] == [
+    assert [request["tool"] for request in tool_runs[0][2:]] == [
         "desktop.click_ui_element",
         "desktop.shortcut",
         "screen.capture",
     ]
-    assert tool_runs[2][0]["input"] == {
+    assert tool_runs[0][2]["input"] == {
         "target": "circle ellipse shape",
         "role_filter": "button",
         "limit": 80,
         "click_count": 1,
     }
-    assert tool_runs[2][1]["input"] == {"key": "s", "modifiers": ["command"]}
-    assert "Command+S" in str(result)
+    assert tool_runs[0][3]["input"] == {"key": "s", "modifiers": ["command"]}
+    assert result == "继续执行剩余桌面计划。"
     assert len(model_calls) == 1
     assert "Continue the pending Runtime Plan steps in order" in model_calls[0][-1]["content"]
     completed_todos = [
@@ -17197,7 +17206,6 @@ def test_custom_api_agent_loop_auto_dispatches_creative_pending_steps(
         and event["status"] == "completed"
     ]
     assert [event["step_id"] for event in completed_todos] == [
-        "discover_apps-desktop-state",
         "open-selected-discovered-app",
         "observe-selected-discovered-app",
         "select-discovered-app-circle-tool",
@@ -17224,16 +17232,25 @@ def test_runtime_planner_keeps_generic_app_discovery_when_later_ui_tools_unavail
         allowed_tools,
     )
 
-    assert full_requests == [
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.list_apps",
-            "input": {"query": "image", "limit": 20},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
+    assert [request["tool"] for request in full_requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "desktop.ui_elements",
     ]
+    assert full_requests[0] == {
+        "protocol": "json_fallback",
+        "tool": "desktop.list_apps",
+        "input": {"query": "image", "limit": 20},
+        "source": "runtime_planner",
+        "planning_reason": "planner_desktop_operation",
+        "continue_to_model": True,
+        "step_id": "discover_apps-desktop-state",
+        "capability_id": "desktop.app_discovery",
+    }
+    assert full_requests[1]["step_id"] == "open-selected-discovered-app"
+    assert full_requests[2]["step_id"] == "observe-selected-discovered-app"
+    assert full_requests[3]["step_id"] == "verify-discovered-app-creative-result"
     assert direct_requests == full_requests
 
 
@@ -17404,8 +17421,8 @@ def test_custom_api_agent_loop_auto_dispatches_generic_discovered_app_pending_st
         "desktop.click_ui_element",
         "screen.capture",
     ]
-    assert len(model_calls) == 1
-    assert "Continue the pending Runtime Plan steps in order" in model_calls[0][-1]["content"]
+    assert model_calls == []
+    assert not any(event["event"] == "agent.model.followup_context" for event in timeline)
     completed_todos = [
         event
         for event in timeline

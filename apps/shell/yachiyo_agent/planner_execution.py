@@ -884,6 +884,47 @@ def _runtime_resolvable_selected_app_payload(payload: Mapping[str, Any]) -> bool
     )
 
 
+def _runtime_resolvable_discovered_app_plan(decision: Any) -> bool:
+    steps = list(getattr(getattr(getattr(decision, "plan", None), "tool_plan", None), "steps", []) or [])
+    if not steps or _discovered_app_plan_needs_model_reasoning(decision, steps):
+        return False
+    has_resolvable_open_step = False
+    for step in steps:
+        if not _step_available(step):
+            continue
+        input_preview = getattr(step, "input_preview", None)
+        payload = input_preview if isinstance(input_preview, Mapping) else {}
+        step_id = str(getattr(step, "step_id", "") or "").strip()
+        if step_id == "open-selected-discovered-app":
+            has_resolvable_open_step = _runtime_resolvable_selected_app_payload(payload)
+        if _selected_discovered_app_payload_requires_model(payload):
+            return False
+    return has_resolvable_open_step
+
+
+def _discovered_app_plan_needs_model_reasoning(
+    decision: Any,
+    steps: list[Any],
+) -> bool:
+    inputs = getattr(getattr(decision, "selected_intent", None), "inputs", None)
+    if isinstance(inputs, Mapping) and (
+        isinstance(inputs.get("creative_canvas_hint"), Mapping)
+        or isinstance(inputs.get("desktop_content_artifact_hint"), Mapping)
+    ):
+        return True
+    for step in steps:
+        step_id = str(getattr(step, "step_id", "") or "").strip()
+        if step_id in {
+            "read-desktop-content",
+            "write-desktop-content-artifact",
+            "open-discovered-file-with-app",
+        }:
+            return True
+        if "creative" in step_id:
+            return True
+    return False
+
+
 def _has_unavailable_required_desktop_step(decision: Any) -> bool:
     plan = getattr(decision, "plan", None)
     tool_plan = getattr(plan, "tool_plan", None)
@@ -1617,6 +1658,8 @@ def _desktop_discovery_step_needs_model_followup(
         return False
     inputs = getattr(getattr(decision, "selected_intent", None), "inputs", None)
     if not isinstance(inputs, Mapping):
+        return False
+    if _runtime_resolvable_discovered_app_plan(decision):
         return False
     if isinstance(inputs.get("app_capability_hint"), Mapping):
         return True
