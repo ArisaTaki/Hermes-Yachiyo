@@ -871,11 +871,17 @@ class TaskIntentRouter:
         if foreground_app_search:
             app_name_hint = ""
             app_search = foreground_app_search
-        elif not app_capability and not (
+        elif not (
             app_click_scope
             or (app_type_scope and not _app_search_field_input_allows_safe_search(text))
         ):
             app_search = _app_search_hint(text, app_name_hint)
+            if app_capability and app_search:
+                app_search = {
+                    key: value
+                    for key, value in app_search.items()
+                    if key != "app_name"
+                }
         if control_presence_inspection:
             app_search = {}
         app_search_app_name = str(app_search.get("app_name") or "").strip()
@@ -2656,13 +2662,17 @@ class RuntimePlanner:
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
             desktop_discovery = {}
         app_search = intent.inputs.get("app_search_hint")
-        if app_capability:
-            app_search = {}
-        elif not isinstance(app_search, Mapping):
+        if not isinstance(app_search, Mapping):
             app_search = _app_search_hint(
                 intent.user_goal,
                 str(intent.inputs.get("app_name_hint") or ""),
             )
+            if app_capability and app_search:
+                app_search = {
+                    key: value
+                    for key, value in app_search.items()
+                    if key != "app_name"
+                }
         if control_presence_current_scope:
             app_search = {}
         app_type_scope_hint = _app_first_type_scope_hint(intent.user_goal)
@@ -3200,38 +3210,98 @@ class RuntimePlanner:
                     reason="Capture visible desktop state for visual inspection before any action.",
                 )
             ]
-        discovery_tool = _first_allowed(
-            (
-                "desktop.list_apps",
-                "desktop.running_apps",
-                "desktop.active_window",
-                "screen.capture",
+        desktop_discovery_step_id = "discover-desktop-state"
+        selected_discovered_app_step_id = ""
+        if desktop_discovery and not app_name and app_search:
+            action = str(desktop_discovery.get("action") or "").strip()
+            tool_name, input_preview = _desktop_discovery_tool_preview(action, desktop_discovery)
+            desktop_discovery_step_id = (
+                f"{action}-desktop-state" if action else "discover-desktop-state"
             )
-            if app_name
-            else ("desktop.running_apps", "desktop.active_window", "screen.capture"),
-            allowed,
-        )
-        discovery_preview = (
-            {"query": app_name, "limit": 20}
-            if discovery_tool == "desktop.list_apps" and app_name
-            else {}
-        )
-        discovery_reason = (
-            "Discover installed apps matching the requested name before opening or operating."
-            if discovery_tool == "desktop.list_apps"
-            else "Inspect the current app/window state before acting."
-        )
-        steps = [
-            _step(
-                intent,
-                "discover-desktop-state",
-                "Discover desktop state",
-                "desktop.app_discovery",
-                discovery_tool,
-                input_preview=discovery_preview,
-                reason=discovery_reason,
+            steps = [
+                _step(
+                    intent,
+                    desktop_discovery_step_id,
+                    "Discover desktop state",
+                    "desktop.app_discovery",
+                    _first_allowed((tool_name,), allowed) if tool_name else None,
+                    input_preview=input_preview,
+                    reason="Discover an installed app by capability before operating inside it.",
+                )
+            ]
+            selected_app_tool = _selected_discovered_app_tool(
+                allowed,
+                safe_shortcut=safe_shortcut,
             )
-        ]
+            if action == "discover_apps" and _discovered_app_open_requested(intent) and selected_app_tool:
+                selected_app_capability = (
+                    "desktop.app_control"
+                    if selected_app_tool in {"app.open", "desktop.open_app"}
+                    else "desktop.ui_operation"
+                )
+                selected_app_action = (
+                    "safe_shortcut"
+                    if selected_app_tool == "app.open_and_safe_shortcut"
+                    else "open_app"
+                )
+                steps.append(
+                    _step(
+                        intent,
+                        "open-selected-discovered-app",
+                        "Open selected discovered app",
+                        selected_app_capability,
+                        selected_app_tool,
+                        input_preview={
+                            "app_name": "<selected app from desktop.list_apps>",
+                            "selection_source": "desktop.list_apps",
+                            "query": str(input_preview.get("query") or "").strip(),
+                            **_selected_discovered_app_operation_preview(
+                                selected_app_tool,
+                                safe_shortcut=safe_shortcut,
+                            ),
+                        },
+                        depends_on=[desktop_discovery_step_id],
+                        action=selected_app_action,
+                        reason=(
+                            "After desktop.list_apps returns candidates, the model selects the "
+                            "best matching app before continuing with the in-app operation."
+                        ),
+                    )
+                )
+                selected_discovered_app_step_id = "open-selected-discovered-app"
+        else:
+            discovery_tool = _first_allowed(
+                (
+                    "desktop.list_apps",
+                    "desktop.running_apps",
+                    "desktop.active_window",
+                    "screen.capture",
+                )
+                if app_name
+                else ("desktop.running_apps", "desktop.active_window", "screen.capture"),
+                allowed,
+            )
+            discovery_preview = (
+                {"query": app_name, "limit": 20}
+                if discovery_tool == "desktop.list_apps" and app_name
+                else {}
+            )
+            discovery_reason = (
+                "Discover installed apps matching the requested name before opening or operating."
+                if discovery_tool == "desktop.list_apps"
+                else "Inspect the current app/window state before acting."
+            )
+            steps = [
+                _step(
+                    intent,
+                    "discover-desktop-state",
+                    "Discover desktop state",
+                    "desktop.app_discovery",
+                    discovery_tool,
+                    input_preview=discovery_preview,
+                    reason=discovery_reason,
+                )
+            ]
         if dynamic_context_transfer:
             return _dynamic_context_ui_transfer_steps(
                 intent,
@@ -4022,7 +4092,7 @@ class RuntimePlanner:
             app_search_needs_verify = False
             app_search_context_source = _app_search_query_context_source(app_search)
             context_shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
-            app_search_prepare_step_id = "open-or-focus-app"
+            app_search_prepare_step_id = selected_discovered_app_step_id or "open-or-focus-app"
             if app_search_context_source == "selection":
                 if not context_shortcut_tool:
                     return steps
@@ -4034,7 +4104,7 @@ class RuntimePlanner:
                         "desktop.ui_operation",
                         context_shortcut_tool,
                         input_preview={"action": "copy"},
-                        depends_on=["discover-desktop-state"],
+                        depends_on=[desktop_discovery_step_id],
                         action="shortcut",
                         reason="Copy the current selection before focusing the app search field.",
                     )
@@ -4088,7 +4158,11 @@ class RuntimePlanner:
                 search_focus_preview = {"app_name": app_name, "action": "find"}
             else:
                 search_focus_preview = {"action": "find"}
-            search_depends_on = ["discover-desktop-state"]
+            search_depends_on = [
+                selected_discovered_app_step_id
+                or desktop_discovery_step_id
+                or "discover-desktop-state"
+            ]
             if focus_step_added:
                 search_depends_on = ["focus-app-window"]
             elif app_name:
@@ -19994,26 +20068,26 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?:写进|写入|写到|放进|放到|保存到|导出到|输出到|整理到|总结到|发到)\s*"
         rf"{generic_prefix}"
         r"(?P<target_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
-        r"图片|图像|照片|绘图|画图|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
+        r"图片|图像|照片|绘图|画图|设计|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
         r"聊天|通讯|通信|消息|即时通讯|日历|项目管理|任务管理|工单|看板|"
         r"issue|ticket)"
         r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
         r"\b(?:write|save|export|output|put|send|copy|paste)\b.{0,80}?"
         rf"\b(?:to|into|in)\s+{generic_prefix_en}"
-        r"(?P<target_capability_en>markdown|code|image|photo|document|text|spreadsheet|"
+        r"(?P<target_capability_en>markdown|code|image|photo|design|document|text|spreadsheet|"
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
         r"(?:app|application|client|tool|program|editor)\b",
         r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
         rf"{generic_prefix}"
         r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
-        r"图片|图像|照片|绘图|画图|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
+        r"图片|图像|照片|绘图|画图|设计|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
         r"聊天|通讯|通信|消息|即时通讯|日历|项目管理|任务管理|工单|看板|"
         r"issue|ticket)"
         r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
         r"\b(?:open|launch|start|find|use)\s+"
         rf"{generic_prefix_en}"
-        r"(?P<direct_capability_en>markdown|code|image|photo|document|text|spreadsheet|"
+        r"(?P<direct_capability_en>markdown|code|image|photo|design|document|text|spreadsheet|"
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
         r"(?:app|application|client|tool|program|editor)\b",

@@ -8159,6 +8159,69 @@ def test_runtime_planner_discovers_chinese_generic_editor_apps_before_acting() -
     ).selected_intent.kind == "data_analysis"
 
 
+def test_runtime_planner_discovers_generic_design_tool_before_searching() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.ui_elements",
+        "desktop.click_ui_element",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+    ]
+
+    prompt = "帮我打开一个设计工具，搜索 logo 模板"
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == ""
+    assert decision.selected_intent.inputs["operation_hint"] == "discover_apps"
+    assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "image",
+    }
+    assert decision.selected_intent.inputs["app_capability_hint"] == {
+        "query": "image",
+        "description": "设计",
+    }
+    assert decision.selected_intent.inputs["app_search_hint"] == {
+        "query": "logo 模板",
+        "target": "搜索",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+    ]
+    assert _step_by_id(decision, "discover_apps-desktop-state").input_preview == {
+        "query": "image",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "image",
+    }
+    assert _step_by_id(decision, "focus-app-search-field").depends_on == [
+        "open-selected-discovered-app"
+    ]
+    assert _step_by_id(decision, "type-app-search-query").input_preview == {
+        "text": "logo 模板"
+    }
+    assert planner_tool_requests(prompt, allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "image", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_runtime_planner_carries_target_file_when_discovering_app_capabilities() -> None:
     allowed_tools = [
         "desktop.list_apps",
