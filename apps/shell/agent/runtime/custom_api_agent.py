@@ -9170,6 +9170,7 @@ _MODEL_FOLLOWUP_AUTO_PENDING_TOOLS = {
     "desktop.type_text",
     "desktop.type_into_ui_element",
     "desktop.ui_elements",
+    "clipboard.write",
     "screen.capture",
     "terminal.run",
 }
@@ -9234,6 +9235,13 @@ def _model_followup_pending_plan_request(
             return {}
     elif tool_name == "artifact.write":
         input_payload = _model_followup_artifact_pending_input(
+            raw_input,
+            generated_content,
+        )
+        if not input_payload:
+            return {}
+    elif tool_name == "clipboard.write":
+        input_payload = _model_followup_clipboard_pending_input(
             raw_input,
             generated_content,
         )
@@ -9313,6 +9321,23 @@ def _tool_requests_with_pending_plan_metadata(
             consumed = True
         enriched.append(item)
     return enriched
+
+
+def _model_followup_clipboard_pending_input(
+    raw_input: Mapping[str, Any],
+    generated_content: str,
+) -> dict[str, Any]:
+    if not isinstance(raw_input, Mapping):
+        raw_input = {}
+    text = str(
+        raw_input.get("text")
+        or raw_input.get("content")
+        or generated_content
+        or ""
+    ).strip()
+    if not text:
+        return {}
+    return {"text": text}
 
 
 def _model_followup_artifact_pending_input(

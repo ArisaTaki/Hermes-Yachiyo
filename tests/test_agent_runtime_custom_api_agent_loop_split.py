@@ -4146,6 +4146,144 @@ def test_model_followup_pending_plan_promotes_model_artifact_content() -> None:
     ]
 
 
+def test_model_followup_pending_plan_promotes_model_clipboard_content() -> None:
+    requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            "planning_reason": "planner_prefetch_data_source",
+            "pending_plan_steps": [
+                {
+                    "step_id": "write-clipboard-output",
+                    "tool_name": "clipboard.write",
+                    "capability_id": "clipboard.read_write",
+                    "input_preview": {
+                        "body_source": "model_generated_content",
+                    },
+                }
+            ],
+        },
+        ["clipboard.write"],
+        generated_content="分析结论：East 收入最高。",
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.write",
+            "input": {
+                "text": "分析结论：East 收入最高。",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "step_id": "write-clipboard-output",
+            "capability_id": "clipboard.read_write",
+        }
+    ]
+
+
+def test_custom_api_agent_loop_auto_dispatches_pending_clipboard_write_after_model_output() -> None:
+    budget = FakeBudget()
+    captured_requests: list[dict[str, Any]] = []
+    generated = "分析结论：East 收入最高。"
+    timeline: list[dict[str, Any]] = [
+        _timeline(
+            "agent.model.followup_context",
+            "planner_prefetch_data_source",
+            source="runtime_planner",
+            planning_reason="planner_prefetch_data_source",
+            content_snapshot={
+                "source_tool": "data.analyze",
+                "ok": True,
+                "text": "region,revenue\nEast,10\nWest,5",
+            },
+            pending_plan_steps=[
+                {
+                    "step_id": "write-clipboard-output",
+                    "tool_name": "clipboard.write",
+                    "capability_id": "clipboard.read_write",
+                    "input_preview": {"body_source": "model_generated_content"},
+                }
+            ],
+        )
+    ]
+
+    def fake_run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ) -> None:
+        captured_requests.extend(dict(request) for request in tool_requests)
+        for request in tool_requests:
+            input_preview = request.get("input") if isinstance(request.get("input"), dict) else {}
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    str(request.get("tool") or ""),
+                    input_preview=input_preview,
+                    result={
+                        "ok": True,
+                        "data": {"text_length": len(str(input_preview.get("text") or ""))},
+                    },
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {"base_url": "https://model.local", "model": "m", "api_key": "k"},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["clipboard.write"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner follow-up context.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, _model_messages, **_kwargs: {
+            "role": "assistant",
+            "content": generated,
+        },
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=fake_run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Analyst"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=[{"role": "user", "content": "分析这段数据并复制结论"}],
+        start_iteration=1,
+        run_id="run-pending-clipboard-write",
+    )
+
+    assert str(result) == "已复制 15 个字符到剪贴板。"
+    assert captured_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.write",
+            "input": {"text": generated},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "step_id": "write-clipboard-output",
+            "capability_id": "clipboard.read_write",
+        }
+    ]
+
+
 def test_custom_api_agent_loop_auto_dispatches_pending_terminal_command_from_model_text() -> None:
     budget = FakeBudget()
     timeline = [
