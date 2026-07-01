@@ -15399,6 +15399,71 @@ def test_runtime_planner_replan_maps_tool_failure_to_plan_step_without_request_t
     assert "failed_step: analyze-data-file" in payload["replan_prompt"]
 
 
+def test_auto_replan_fallback_recovery_reuses_safe_file_inputs() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 legacy-report.xls 并输出报告",
+        allowed_tools=[
+            "workspace.read",
+            "desktop.open_path",
+            "browser.current_page",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+    loop = _private_runtime_loop()
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "workspace.read",
+            input_preview={"path": "legacy-report.xls"},
+            result={"ok": False, "error": "unsupported file encoding"},
+        )
+    ]
+
+    payloads = loop._record_runtime_planner_replan_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-file-replan",
+    )
+    fallback_requests = custom_api_agent_module._auto_replan_fallback_recovery_requests(
+        payloads,
+        ["desktop.open_path", "browser.current_page", "terminal.run"],
+    )
+
+    assert [request["tool"] for request in fallback_requests] == [
+        "desktop.open_path",
+        "browser.current_page",
+    ]
+    assert fallback_requests[0]["input"] == {"path": "legacy-report.xls"}
+    assert fallback_requests[1]["input"] == {}
+    assert {request["continue_to_model"] for request in fallback_requests} == {True}
+    assert {request["planning_reason"] for request in fallback_requests} == {
+        "planner_replan_fallback_recovery"
+    }
+    assert {request["replan_trigger"] for request in fallback_requests} == {"tool_failure"}
+    assert {request["step_id"] for request in fallback_requests} == {"inspect-data-source"}
+    assert all(request.get("replan_request_id") for request in fallback_requests)
+
+    data_failure = [
+        {
+            "request_id": "replan-terminal",
+            "trigger": "tool_failure",
+            "source_step_id": "analyze-data-file",
+            "target_capability_id": "data.analysis",
+            "fallback_tools": ["terminal.run"],
+            "metadata": {"input_preview": {"path": "sales.csv"}},
+        }
+    ]
+    assert (
+        custom_api_agent_module._auto_replan_fallback_recovery_requests(
+            data_failure,
+            ["terminal.run"],
+        )
+        == []
+    )
+
+
 def test_auto_discovered_app_compose_followup_types_and_verifies() -> None:
     timeline = [
         _timeline(

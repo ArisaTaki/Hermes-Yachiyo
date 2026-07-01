@@ -427,7 +427,7 @@ class RuntimeCustomApiAgentLoop:
                             run_id=run_id,
                         )
                     auto_replan_recovery_requests = (
-                        _auto_replan_verification_recovery_requests(
+                        _auto_replan_recovery_requests(
                             replan_payloads,
                             allowed_tools,
                         )
@@ -450,6 +450,7 @@ class RuntimeCustomApiAgentLoop:
                             agent=agent,
                             run_id=run_id,
                         )
+                        auto_tool_timeline_start = len(timeline)
                         try:
                             self._run_tool_requests(
                                 auto_replan_recovery_requests,
@@ -1614,14 +1615,15 @@ class RuntimeCustomApiAgentLoop:
                 if isinstance(step_payload.get("metadata"), Mapping)
                 else {}
             )
+            input_preview = (
+                event.get("input_preview")
+                if isinstance(event.get("input_preview"), dict)
+                else {}
+            )
             failure_payload = {
                 "event_type": "agent.tool.call",
                 "tool_name": tool_name,
-                "input_preview": (
-                    event.get("input_preview")
-                    if isinstance(event.get("input_preview"), dict)
-                    else {}
-                ),
+                "input_preview": input_preview,
                 "result": result,
                 **{
                     key: value
@@ -1629,8 +1631,11 @@ class RuntimeCustomApiAgentLoop:
                     if key != "metadata"
                 },
             }
-            if step_metadata:
-                failure_payload["metadata"] = dict(step_metadata)
+            if step_metadata or input_preview:
+                metadata = dict(step_metadata)
+                if input_preview:
+                    metadata.setdefault("input_preview", dict(input_preview))
+                failure_payload["metadata"] = metadata
             failure_payloads.append(failure_payload)
         failure_payloads.extend(
             _runtime_planner_verification_failure_payloads(
@@ -5864,6 +5869,131 @@ def _auto_replan_verification_recovery_requests(
         request["continue_to_model"] = True
         requests.append(request)
     return requests
+
+
+def _auto_replan_recovery_requests(
+    replan_payloads: list[dict[str, Any]],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    return _dedupe_replan_recovery_requests(
+        [
+            *_auto_replan_verification_recovery_requests(
+                replan_payloads,
+                allowed_tools,
+            ),
+            *_auto_replan_fallback_recovery_requests(
+                replan_payloads,
+                allowed_tools,
+            ),
+        ]
+    )
+
+
+def _auto_replan_fallback_recovery_requests(
+    replan_payloads: list[dict[str, Any]],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return []
+    requests: list[dict[str, Any]] = []
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        trigger = str(payload.get("trigger") or "").strip()
+        if trigger not in {"tool_failure", "tool_unavailable"}:
+            continue
+        request_id = str(payload.get("request_id") or "").strip()
+        step_id = str(payload.get("source_step_id") or payload.get("planner_step_id") or "").strip()
+        capability_id = str(payload.get("target_capability_id") or payload.get("capability_id") or "").strip()
+        for tool_name in _string_list(payload.get("fallback_tools")):
+            if tool_name not in allowed:
+                continue
+            request_input = _replan_fallback_tool_input(tool_name, payload)
+            if request_input is None:
+                continue
+            request = _request_like(
+                tool_name,
+                request_input,
+                source="runtime_planner",
+                planning_reason="planner_replan_fallback_recovery",
+            )
+            if request_id:
+                request["replan_request_id"] = request_id
+            request["replan_trigger"] = trigger
+            if step_id:
+                request["step_id"] = step_id
+            if capability_id:
+                request["capability_id"] = capability_id
+            request["continue_to_model"] = True
+            requests.append(request)
+    return _dedupe_replan_recovery_requests(requests)
+
+
+def _replan_fallback_tool_input(
+    tool_name: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    clean_tool = str(tool_name or "").strip()
+    input_preview = payload.get("input_preview") if isinstance(payload.get("input_preview"), Mapping) else {}
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    metadata_input = (
+        metadata.get("input_preview")
+        if isinstance(metadata.get("input_preview"), Mapping)
+        else {}
+    )
+    source_input = {
+        **dict(metadata_input),
+        **dict(input_preview),
+    }
+    if clean_tool in {"browser.current_page", "desktop.active_window"}:
+        return {}
+    if clean_tool in {"desktop.open_path", "workspace.read", "fs.read_file", "file.read"}:
+        path = _first_replan_fallback_path(source_input, payload, metadata)
+        if not path:
+            return None
+        return {"path": path}
+    return None
+
+
+def _first_replan_fallback_path(
+    *sources: Mapping[str, Any],
+) -> str:
+    for source in sources:
+        for key in (
+            "path",
+            "file_path",
+            "data_source_hint",
+            "source_path",
+            "display_path",
+        ):
+            value = str(source.get(key) or "").strip()
+            if value and not value.startswith("captured:"):
+                return value
+    return ""
+
+
+def _dedupe_replan_recovery_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[str, tuple[tuple[str, str], ...], str]] = set()
+    for request in requests:
+        if not isinstance(request, dict):
+            continue
+        tool_name = str(request.get("tool") or "").strip()
+        request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        request_id = str(request.get("replan_request_id") or "").strip()
+        signature = (
+            tool_name,
+            tuple(sorted((str(key), str(value)) for key, value in request_input.items())),
+            request_id,
+        )
+        if not tool_name or signature in seen:
+            continue
+        seen.add(signature)
+        result.append(request)
+    return result
 
 
 def _verification_recovery_tool_order(allowed: set[str]) -> list[str]:
