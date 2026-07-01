@@ -5149,6 +5149,37 @@ class RuntimePlanner:
                     else "Use the explicit current-page browser tool instead of desktop screen automation."
                 ),
             )
+            if browser_action == "open_url_screenshot" and url:
+                followup = _web_open_followup_text(intent.user_goal, url)
+                if (
+                    _web_open_followup_safe_scroll_hint(followup)
+                    and _first_allowed(("browser.open_url",), allowed)
+                    and _first_allowed(("desktop.safe_scroll",), allowed)
+                    and _first_allowed(("screen.capture",), allowed)
+                ):
+                    open_url_step = _step(
+                        intent,
+                        "open-web-url",
+                        "Open web URL",
+                        "browser.research",
+                        _first_allowed(("browser.open_url",), allowed),
+                        input_preview={"url": url},
+                        risk_level="low",
+                        approval_required=False,
+                        depends_on=[prepare_step_id] if prepare_step_id else [],
+                        reason="Open the explicit URL before running the requested browser follow-up.",
+                    )
+                    steps = [
+                        *([discover_step] if discover_step is not None else []),
+                        *([prepare_step] if prepare_step is not None else []),
+                        open_url_step,
+                    ]
+                    return _append_web_open_followup_steps(
+                        intent,
+                        allowed,
+                        steps,
+                        depends_on=open_url_step.step_id,
+                    )
             if (
                 browser_action == "open_search"
                 and str(intent.inputs.get("followup_action") or "").strip()

@@ -2344,7 +2344,7 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     ):
         request["continue_to_model"] = True
     requests = [*prepare_requests, request]
-    if browser_action in {"open_search", "open_url"}:
+    if browser_action in {"open_search", "open_url", "open_url_screenshot"}:
         requests.extend(_web_open_followup_tool_requests(decision, allowed))
     return requests
 
