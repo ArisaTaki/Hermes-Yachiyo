@@ -205,6 +205,39 @@ def _tool_request_with_verification_target(
     }
 
 
+_FOREGROUND_APP_CONTEXT_TOOLS = {
+    "desktop.inspect_app",
+    "desktop.ui_elements",
+    "desktop.read_ui",
+    "desktop.verify",
+    "desktop.windows",
+    "desktop.list_windows",
+}
+
+
+def _tool_request_with_foreground_app_context(
+    tool_request: dict[str, Any],
+    target: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not target:
+        return tool_request
+    tool_name = str(tool_request.get("tool") or "").strip()
+    if tool_name not in _FOREGROUND_APP_CONTEXT_TOOLS:
+        return tool_request
+    raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+    if str(raw_input.get("app_name") or "").strip():
+        return tool_request
+    if str(raw_input.get("selection_source") or "").strip() == "desktop.list_apps":
+        return tool_request
+    app_name = str(target.get("app_name") or "").strip()
+    if not app_name:
+        return tool_request
+    return {
+        **tool_request,
+        "input": {**raw_input, "app_name": app_name},
+    }
+
+
 def _tool_request_app_name_resolution(
     tool_request: dict[str, Any],
     timeline: list[dict[str, Any]],
@@ -633,6 +666,10 @@ class RuntimeToolRequestRunner:
             )
             tool_name = self._normalize_tool_name(tool_request.get("tool"))
             tool_request = _tool_request_with_verification_target(
+                tool_request,
+                active_window_verification_target,
+            )
+            tool_request = _tool_request_with_foreground_app_context(
                 tool_request,
                 active_window_verification_target,
             )
