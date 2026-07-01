@@ -345,13 +345,13 @@ class RuntimeCustomApiAgentLoop:
                         ),
                     )
                     raise
-                self._record_runtime_planner_replan_events(
+                replan_payloads = self._record_runtime_planner_replan_events(
                     runtime_planner_decision,
                     timeline=timeline,
                     tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
-                continue_to_model = any(
+                continue_to_model = bool(replan_payloads) or any(
                     bool(request.get("continue_to_model"))
                     for request in planned_tool_requests
                     if isinstance(request, dict)
@@ -367,6 +367,14 @@ class RuntimeCustomApiAgentLoop:
                         followup_selection_payload,
                         timeline,
                     )
+                    if replan_payloads:
+                        self._append_replan_followup_context(
+                            replan_payloads,
+                            allowed_tools=allowed_tools,
+                            messages=messages,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
                     if auto_followup_request:
                         auto_payload = {
                             "tool": str(auto_followup_request.get("tool") or ""),
@@ -915,6 +923,37 @@ class RuntimeCustomApiAgentLoop:
         if run_id and self._append_run_event is not None:
             self._append_run_event(run_id, "agent.model.followup_context", payload)
 
+    def _append_replan_followup_context(
+        self,
+        replan_payloads: list[dict[str, Any]],
+        *,
+        allowed_tools: list[str],
+        messages: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        run_id: str = "",
+    ) -> None:
+        payload = _model_replan_followup_context_payload(
+            replan_payloads,
+            allowed_tools=allowed_tools,
+        )
+        if not payload:
+            return
+        messages.append(
+            {
+                "role": "user",
+                "content": _model_replan_followup_context_message(payload),
+            }
+        )
+        timeline.append(
+            self._timeline(
+                "agent.model.followup_context",
+                str(payload.get("planning_reason") or "planner_replan_after_tool_failure"),
+                **payload,
+            )
+        )
+        if run_id and self._append_run_event is not None:
+            self._append_run_event(run_id, "agent.model.followup_context", payload)
+
     def _record_auto_model_followup_app_write_plan(
         self,
         tool_requests: list[dict[str, Any]],
@@ -1233,15 +1272,15 @@ class RuntimeCustomApiAgentLoop:
         timeline: list[dict[str, Any]],
         tool_timeline_start: int,
         run_id: str = "",
-    ) -> None:
+    ) -> list[dict[str, Any]]:
         if decision is None:
-            return
+            return []
         try:
             from apps.shell.yachiyo_agent.planner_projection import (
                 planner_replan_timeline_event,
             )
         except Exception:
-            return
+            return []
         existing_request_ids = {
             str(
                 (
@@ -1255,6 +1294,7 @@ class RuntimeCustomApiAgentLoop:
             if isinstance(event, dict)
             and str(event.get("event") or "").strip() == "agent.replan.requested"
         }
+        payloads: list[dict[str, Any]] = []
         for event in list(timeline[tool_timeline_start:]):
             if not isinstance(event, dict):
                 continue
@@ -1292,8 +1332,11 @@ class RuntimeCustomApiAgentLoop:
             if request_id:
                 existing_request_ids.add(request_id)
             timeline.append(replan_event)
+            payload_dict = dict(payload)
+            payloads.append(payload_dict)
             if run_id and self._append_run_event is not None:
-                self._append_run_event(run_id, "agent.replan.requested", dict(payload))
+                self._append_run_event(run_id, "agent.replan.requested", payload_dict)
+        return payloads
 
     def _record_unavailable_desktop_intent(
         self,
@@ -3752,6 +3795,107 @@ def _model_followup_context_payload(
         if value:
             payload[key] = value
     return payload
+
+
+def _model_replan_followup_context_payload(
+    replan_payloads: list[dict[str, Any]],
+    *,
+    allowed_tools: list[str],
+) -> dict[str, Any]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    requests: list[dict[str, Any]] = []
+    fallback_candidates: list[str] = []
+    failed_tools: list[str] = []
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        request = {
+            "request_id": str(payload.get("request_id") or "").strip(),
+            "trigger": str(payload.get("trigger") or "").strip(),
+            "source_step_id": str(payload.get("source_step_id") or "").strip(),
+            "source_tool_name": str(payload.get("source_tool_name") or "").strip(),
+            "target_capability_id": str(payload.get("target_capability_id") or "").strip(),
+            "condition": str(payload.get("condition") or "").strip(),
+            "reason": str(payload.get("reason") or "").strip(),
+            "failure_event_type": str(payload.get("failure_event_type") or "").strip(),
+            "failure_detail": str(payload.get("failure_detail") or "").strip(),
+            "fallback_tools": _string_list(payload.get("fallback_tools")),
+            "replan_prompt": str(payload.get("replan_prompt") or "").strip(),
+        }
+        requests.append(request)
+        failed_tools.append(request["source_tool_name"])
+        fallback_candidates.extend(request["fallback_tools"])
+    if not requests:
+        return {}
+    fallback_candidates = _ordered_text_list(fallback_candidates)
+    allowed_fallback_tools = [
+        tool for tool in fallback_candidates if not allowed or tool in allowed
+    ]
+    first = requests[0]
+    payload = {
+        "source": "runtime_planner",
+        "status": "ready",
+        "planning_reason": "planner_replan_after_tool_failure",
+        "replan_request_count": len(requests),
+        "replan_requests": requests,
+        "fallback_tools": allowed_fallback_tools,
+        "fallback_tool_candidates": fallback_candidates,
+        "failed_tools": _ordered_text_list(failed_tools),
+        "trigger": first.get("trigger", ""),
+        "failure_detail": first.get("failure_detail", ""),
+        "source_tool_name": first.get("source_tool_name", ""),
+        "target_capability_id": first.get("target_capability_id", ""),
+    }
+    for key in ("request_id", "decision_id", "plan_id", "core_id", "run_id", "task_id"):
+        value = str((replan_payloads[0] if replan_payloads else {}).get(key) or "").strip()
+        if value:
+            payload[key] = value
+    return payload
+
+
+def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
+    requests = [
+        request
+        for request in payload.get("replan_requests", [])
+        if isinstance(request, dict)
+    ]
+    fallback_tools = _string_list(payload.get("fallback_tools"))
+    failed_tools = _string_list(payload.get("failed_tools"))
+    lines = [
+        "Runtime replan context: a planned tool failed or could not be verified.",
+        (
+            "Continue the existing task workspace. Do not ask the user to perform the "
+            "tool-capable action manually."
+        ),
+        (
+            "Inspect the failure, choose the next safe observable action, and keep all "
+            "approval and policy gates."
+        ),
+    ]
+    if failed_tools:
+        lines.append(f"Failed tools: {', '.join(failed_tools)}.")
+    if fallback_tools:
+        lines.append(f"Preferred fallback tools: {', '.join(fallback_tools)}.")
+    for index, request in enumerate(requests[:3], start=1):
+        detail = str(request.get("failure_detail") or "").strip()
+        reason = str(request.get("reason") or "").strip()
+        prompt = str(request.get("replan_prompt") or "").strip()
+        lines.append(f"Replan request {index}:")
+        if request.get("request_id"):
+            lines.append(f"- request_id: {request['request_id']}")
+        if request.get("source_step_id"):
+            lines.append(f"- failed_step: {request['source_step_id']}")
+        if request.get("source_tool_name"):
+            lines.append(f"- failed_tool: {request['source_tool_name']}")
+        if request.get("target_capability_id"):
+            lines.append(f"- target_capability: {request['target_capability_id']}")
+        if detail:
+            lines.append(f"- failure_detail: {detail}")
+        if reason:
+            lines.append(f"- replan_reason: {reason}")
+        if prompt:
+            lines.append(f"- planner_replan_prompt: {prompt}")
+    return "\n".join(lines)
 
 
 def _selection_payload_with_timeline_fallback(

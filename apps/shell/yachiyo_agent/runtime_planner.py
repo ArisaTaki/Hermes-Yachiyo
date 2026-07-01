@@ -9812,6 +9812,11 @@ def _workspace_item_description(value: Any) -> str:
     return _tool_input_preview(value, limit=300)
 
 
+def _tool_input_preview(value: Any, *, limit: int = 300) -> str:
+    text = repr(value)
+    return text if len(text) <= limit else f"{text[:limit]}..."
+
+
 def _looks_like_workspace_path(value: str) -> bool:
     text = str(value or "").strip()
     if not text or len(text) > 260:

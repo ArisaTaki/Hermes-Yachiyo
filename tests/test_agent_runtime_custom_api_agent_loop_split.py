@@ -1451,6 +1451,10 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
     run_events: list[dict[str, Any]] = []
     timeline: list[dict[str, Any]] = []
     messages = [{"role": "user", "content": "请分析 data/sales.csv 并输出报告"}]
+    model_responses = [
+        {"role": "assistant", "content": "run fallback"},
+        {"role": "assistant", "content": "analysis fallback noted"},
+    ]
 
     def fake_run_tool_requests(
         tool_requests,
@@ -1472,20 +1476,46 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
                 "kwargs": kwargs,
             }
         )
-        request = tool_requests[0]
-        input_preview = request.get("input") if isinstance(request.get("input"), dict) else {}
-        timeline_arg.append(
-            _timeline(
-                "agent.tool.call",
-                str(request.get("tool") or ""),
-                input_preview=input_preview,
-                result={
+        for request in tool_requests:
+            tool_name = str(request.get("tool") or "")
+            input_preview = request.get("input") if isinstance(request.get("input"), dict) else {}
+            result = (
+                {
                     "ok": False,
                     "error": "unsupported chart type",
                     "hint": "fall back to python analysis",
-                },
+                }
+                if tool_name == "data.analyze"
+                else {
+                    "ok": True,
+                    "command": input_preview.get("command", ""),
+                    "stdout": "fallback analysis complete\n",
+                    "stderr": "",
+                    "returncode": 0,
+                }
             )
-        )
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool_name,
+                    input_preview=input_preview,
+                    result=result,
+                )
+            )
+
+    def fake_tool_requests_from_message(
+        _message: dict[str, Any],
+        content: str,
+    ) -> list[dict[str, Any]]:
+        if content == "run fallback":
+            return [
+                {
+                    "tool": "terminal.run",
+                    "input": {"command": "python analyze_sales.py data/sales.csv"},
+                    "protocol": "json_fallback",
+                }
+            ]
+        return []
 
     loop = RuntimeCustomApiAgentLoop(
         agent_model_config_private=lambda _agent: {"base_url": "https://model.local", "model": "m", "api_key": "k"},
@@ -1503,11 +1533,11 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
         call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
             list(model_messages)
         )
-        or {"role": "assistant", "content": "analysis fallback noted"},
+        or model_responses.pop(0),
         coalesce_model_message=lambda value: value,
         message_visible_content_text=lambda message: str(message.get("content") or ""),
         model_message_metadata=lambda _message: {},
-        tool_requests_from_message=lambda _message, _content: [],
+        tool_requests_from_message=fake_tool_requests_from_message,
         timeline_factory=_timeline,
         limit_model_output=lambda value: (str(value), False),
         model_output_text_factory=agent_runtime._ModelOutputText,
@@ -1529,9 +1559,14 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
         run_id="run-data-replan",
     )
 
-    assert str(result) == "桌面操作未完成：unsupported chart type。"
-    assert model_calls == []
+    assert str(result) == "analysis fallback noted"
+    assert len(model_calls) == 2
     assert tool_runs[0]["tool_requests"][0]["tool"] == "data.analyze"
+    assert tool_runs[1]["tool_requests"][0] == {
+        "tool": "terminal.run",
+        "input": {"command": "python analyze_sales.py data/sales.csv"},
+        "protocol": "json_fallback",
+    }
     replan_events = [
         event for event in timeline if event["event"] == "agent.replan.requested"
     ]
@@ -1546,9 +1581,28 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
     assert payload["failure_event_type"] == "agent.tool.call"
     assert "unsupported chart type" in payload["failure_detail"]
     assert "terminal.run" in payload["replan_prompt"]
+    replan_context = [
+        event
+        for event in timeline
+        if event["event"] == "agent.model.followup_context"
+        and event.get("planning_reason") == "planner_replan_after_tool_failure"
+    ][0]
+    assert replan_context["replan_requests"][0]["request_id"] == payload["request_id"]
+    assert replan_context["fallback_tools"] == ["terminal.run"]
+    assert any(
+        message["role"] == "user"
+        and "Runtime replan context" in message["content"]
+        and "terminal.run" in message["content"]
+        for message in model_calls[0]
+    )
     assert any(
         event["event_type"] == "agent.replan.requested"
         and event["payload"]["request_id"] == payload["request_id"]
+        for event in run_events
+    )
+    assert any(
+        event["event_type"] == "agent.model.followup_context"
+        and event["payload"]["planning_reason"] == "planner_replan_after_tool_failure"
         for event in run_events
     )
 
