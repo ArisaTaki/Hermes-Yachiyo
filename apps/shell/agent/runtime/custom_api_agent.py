@@ -6324,7 +6324,126 @@ def _replan_fallback_tool_input(
         if not path:
             return None
         return {"path": path}
+    if clean_tool == "terminal.run":
+        return _terminal_data_analysis_replan_input(source_input, payload, metadata)
     return None
+
+
+def _terminal_data_analysis_replan_input(
+    source_input: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    capability_id = str(
+        payload.get("target_capability_id") or payload.get("capability_id") or ""
+    ).strip()
+    source_tool = str(
+        payload.get("source_tool_name") or payload.get("tool_name") or ""
+    ).strip()
+    step_id = str(
+        payload.get("source_step_id") or payload.get("planner_step_id") or ""
+    ).strip()
+    if (
+        capability_id != "data.analysis"
+        and source_tool != "data.analyze"
+        and "analysis" not in step_id
+    ):
+        return None
+    path = _first_replan_fallback_path(source_input, payload, metadata)
+    if not path:
+        return None
+    artifact_paths = _string_list(source_input.get("artifact_paths"))
+    artifact_path = (
+        str(source_input.get("artifact_path") or "").strip()
+        or (artifact_paths[0] if artifact_paths else "")
+        or "analysis-report.md"
+    )
+    command = _terminal_data_analysis_replan_command(
+        path,
+        artifact_path=artifact_path,
+        source_kind=str(source_input.get("source_kind") or "").strip(),
+    )
+    return {"command": command, "shell": True, "timeout_seconds": 60}
+
+
+def _terminal_data_analysis_replan_command(
+    path: str,
+    *,
+    artifact_path: str,
+    source_kind: str = "",
+) -> str:
+    source_literal = repr(str(path or "").strip())
+    artifact_literal = repr(str(artifact_path or "analysis-report.md").strip())
+    kind_literal = repr(str(source_kind or "").strip())
+    return f"""python3 - <<'PY'
+from pathlib import Path
+import csv
+import json
+
+source = Path({source_literal})
+artifact_path = Path({artifact_literal})
+source_kind = {kind_literal}
+
+def text_preview(path):
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+    except Exception as exc:
+        return [], [], [f"read_error: {{exc}}"]
+    lines = text.splitlines()
+    return [], lines[:20], [f"line_count: {{len(lines)}}", f"char_count: {{len(text)}}"]
+
+def tabular_preview(path):
+    delimiter = "\\t" if path.suffix.lower() == ".tsv" or source_kind == "tsv" else ","
+    try:
+        with path.open("r", encoding="utf-8", errors="replace", newline="") as handle:
+            rows = list(csv.reader(handle, delimiter=delimiter))
+    except Exception as exc:
+        return [], [], [f"csv_error: {{exc}}"]
+    headers = rows[0] if rows else []
+    data_rows = rows[1:] if headers else rows
+    return headers, data_rows[:10], [f"row_count: {{len(data_rows)}}", f"column_count: {{len(headers)}}"]
+
+def json_preview(path):
+    try:
+        text = path.read_text(encoding="utf-8", errors="replace")
+        if path.suffix.lower() == ".jsonl" or source_kind == "jsonl":
+            rows = [json.loads(line) for line in text.splitlines() if line.strip()]
+        else:
+            data = json.loads(text)
+            rows = data if isinstance(data, list) else [data]
+    except Exception as exc:
+        return [], [], [f"json_error: {{exc}}"]
+    headers = sorted({{key for row in rows[:50] if isinstance(row, dict) for key in row.keys()}})
+    sample = rows[:10]
+    return headers, sample, [f"row_count: {{len(rows)}}", f"field_count: {{len(headers)}}"]
+
+suffix = source.suffix.lower()
+if suffix in {{".csv", ".tsv"}} or source_kind in {{"csv", "tsv"}}:
+    headers, sample, notes = tabular_preview(source)
+elif suffix in {{".json", ".jsonl"}} or source_kind in {{"json", "jsonl"}}:
+    headers, sample, notes = json_preview(source)
+else:
+    headers, sample, notes = text_preview(source)
+
+report = [
+    "# Analysis fallback report",
+    "",
+    f"- source: {{source}}",
+    *[f"- {{note}}" for note in notes],
+]
+if headers:
+    report.extend(["", "## Columns", ", ".join(str(item) for item in headers)])
+if sample:
+    report.extend(["", "## Sample", "```"])
+    for row in sample[:10]:
+        report.append(json.dumps(row, ensure_ascii=False) if not isinstance(row, str) else row)
+    report.append("```")
+
+artifact_path.parent.mkdir(parents=True, exist_ok=True)
+artifact_path.write_text("\\n".join(report) + "\\n", encoding="utf-8")
+print("\\n".join(report))
+print(f"\\n[artifact_written] {{artifact_path}}")
+PY"""
 
 
 def _first_replan_fallback_path(

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import subprocess
 from datetime import date, timedelta
 from typing import Any
 
@@ -15790,16 +15791,59 @@ def test_auto_replan_fallback_recovery_reuses_safe_file_inputs() -> None:
             "source_step_id": "analyze-data-file",
             "target_capability_id": "data.analysis",
             "fallback_tools": ["terminal.run"],
-            "metadata": {"input_preview": {"path": "sales.csv"}},
+            "metadata": {
+                "input_preview": {
+                    "path": "sales.csv",
+                    "source_kind": "csv",
+                    "artifact_path": "analysis-report.md",
+                }
+            },
         }
     ]
-    assert (
-        custom_api_agent_module._auto_replan_fallback_recovery_requests(
-            data_failure,
-            ["terminal.run"],
-        )
-        == []
+    terminal_requests = custom_api_agent_module._auto_replan_fallback_recovery_requests(
+        data_failure,
+        ["terminal.run"],
     )
+    assert len(terminal_requests) == 1
+    assert terminal_requests[0]["tool"] == "terminal.run"
+    assert terminal_requests[0]["input"]["shell"] is True
+    assert terminal_requests[0]["input"]["timeout_seconds"] == 60
+    assert "sales.csv" in terminal_requests[0]["input"]["command"]
+    assert "analysis-report.md" in terminal_requests[0]["input"]["command"]
+    assert terminal_requests[0]["planning_reason"] == "planner_replan_fallback_recovery"
+    assert terminal_requests[0]["replan_request_id"] == "replan-terminal"
+    assert terminal_requests[0]["replan_trigger"] == "tool_failure"
+    assert terminal_requests[0]["step_id"] == "analyze-data-file"
+    assert terminal_requests[0]["capability_id"] == "data.analysis"
+    assert terminal_requests[0]["continue_to_model"] is True
+
+
+def test_auto_replan_terminal_data_analysis_command_writes_report(tmp_path) -> None:
+    source = tmp_path / "sales.csv"
+    source.write_text("month,revenue\nJan,10\nFeb,20\n", encoding="utf-8")
+    command = custom_api_agent_module._terminal_data_analysis_replan_command(
+        "sales.csv",
+        artifact_path="analysis-report.md",
+        source_kind="csv",
+    )
+
+    result = subprocess.run(
+        command,
+        cwd=tmp_path,
+        shell=True,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        timeout=10,
+        check=False,
+    )
+
+    assert result.returncode == 0
+    report = (tmp_path / "analysis-report.md").read_text(encoding="utf-8")
+    assert "row_count: 2" in report
+    assert "column_count: 2" in report
+    assert "month, revenue" in report
+    assert "[artifact_written] analysis-report.md" in result.stdout
 
 
 def test_runtime_planner_progress_completes_blocked_step_after_replan_recovery() -> None:
