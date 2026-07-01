@@ -1320,7 +1320,7 @@ class RuntimeCustomApiAgentLoop:
             if isinstance(event, dict)
             and str(event.get("event") or "").strip() == "agent.replan.requested"
         }
-        payloads: list[dict[str, Any]] = []
+        failure_payloads: list[dict[str, Any]] = []
         for event in list(timeline[tool_timeline_start:]):
             if not isinstance(event, dict):
                 continue
@@ -1340,6 +1340,15 @@ class RuntimeCustomApiAgentLoop:
                 ),
                 "result": result,
             }
+            failure_payloads.append(failure_payload)
+        failure_payloads.extend(
+            _runtime_planner_verification_failure_payloads(
+                decision,
+                list(timeline[tool_timeline_start:]),
+            )
+        )
+        payloads: list[dict[str, Any]] = []
+        for failure_payload in failure_payloads:
             replan_event = planner_replan_timeline_event(
                 decision,
                 failure_payload,
@@ -4349,6 +4358,154 @@ def _tool_result_requests_replan(result: Mapping[str, Any]) -> bool:
     if exit_code not in (None, "", 0, "0"):
         return True
     return False
+
+
+def _runtime_planner_verification_failure_payloads(
+    decision: Any,
+    events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    plan = getattr(decision, "plan", None)
+    tool_plan = getattr(plan, "tool_plan", None)
+    steps = list(getattr(tool_plan, "steps", []) or [])
+    if not steps:
+        return []
+    tool_events = [
+        event
+        for event in events
+        if isinstance(event, dict)
+        and str(event.get("event") or "").strip() == "agent.tool.call"
+    ]
+    event_index = 0
+    payloads: list[dict[str, Any]] = []
+    for step in steps:
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        step_id = str(getattr(step, "step_id", "") or "").strip()
+        if not tool_name or not step_id:
+            continue
+        tool_event: dict[str, Any] | None = None
+        while event_index < len(tool_events):
+            candidate = tool_events[event_index]
+            event_index += 1
+            if str(candidate.get("detail") or "").strip() == tool_name:
+                tool_event = candidate
+                break
+        if tool_event is None:
+            continue
+        if not _runtime_planner_step_is_ui_verification(step_id, tool_name):
+            continue
+        result = (
+            tool_event.get("result")
+            if isinstance(tool_event.get("result"), Mapping)
+            else {}
+        )
+        if not _tool_result_verification_weak(tool_name, result):
+            continue
+        payloads.append(
+            {
+                "event_type": "agent.tool.call",
+                "trigger": "verification_failed",
+                "status": "verification_failed",
+                "source_step_id": step_id,
+                "planner_step_id": step_id,
+                "tool_name": tool_name,
+                "input_preview": (
+                    tool_event.get("input_preview")
+                    if isinstance(tool_event.get("input_preview"), Mapping)
+                    else {}
+                ),
+                "detail": "verification observation returned no UI elements or readable text",
+                "result": result,
+            }
+        )
+    return payloads
+
+
+def _runtime_planner_step_is_ui_verification(step_id: str, tool_name: str) -> bool:
+    return (
+        str(step_id or "").strip() == "verify-desktop-result"
+        and str(tool_name or "").strip() in {"desktop.ui_elements", "desktop.read_ui"}
+    )
+
+
+def _tool_result_verification_weak(tool_name: str, result: Mapping[str, Any]) -> bool:
+    if str(tool_name or "").strip() not in {"desktop.ui_elements", "desktop.read_ui"}:
+        return False
+    if not isinstance(result, Mapping):
+        return False
+    if result.get("ok") is not True:
+        return False
+    if result.get("approval_required") or result.get("blocked_by_user_goal"):
+        return False
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    elements = _ui_elements_from_result(result, data)
+    if _ui_element_count(result, data, elements) > 0:
+        return False
+    return not _ui_observation_has_readable_text(result, data, elements)
+
+
+def _ui_elements_from_result(
+    result: Mapping[str, Any],
+    data: Mapping[str, Any],
+) -> list[Any]:
+    for source in (data, result):
+        elements = source.get("elements")
+        if isinstance(elements, list):
+            return list(elements)
+    return []
+
+
+def _ui_element_count(
+    result: Mapping[str, Any],
+    data: Mapping[str, Any],
+    elements: list[Any],
+) -> int:
+    counts: list[int] = []
+    for source in (data, result):
+        for key in ("element_count", "text_item_count", "count"):
+            count = _non_negative_int(source.get(key))
+            if count is not None:
+                counts.append(count)
+    if elements:
+        counts.append(len(elements))
+    return max(counts) if counts else 0
+
+
+def _ui_observation_has_readable_text(
+    result: Mapping[str, Any],
+    data: Mapping[str, Any],
+    elements: list[Any],
+) -> bool:
+    for source in (data, result):
+        for key in (
+            "text",
+            "content",
+            "ocr_text",
+            "selected_text",
+            "value",
+            "title",
+            "window_title",
+            "active_app",
+            "app_name",
+        ):
+            if str(source.get(key) or "").strip():
+                return True
+    for element in elements:
+        if not isinstance(element, Mapping):
+            continue
+        for key in ("name", "value", "title", "label", "description", "text"):
+            if str(element.get(key) or "").strip():
+                return True
+    return False
+
+
+def _non_negative_int(value: Any) -> int | None:
+    if isinstance(value, bool):
+        return None
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return None
+    return parsed if parsed >= 0 else None
 
 
 def _task_todo_status_for_tool_result(event_type: str, result: Mapping[str, Any]) -> str:

@@ -28,6 +28,7 @@ from apps.shell.agent.runtime.tool_requests import normalize_tool_name
 from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES, PolicyGate
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
+from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 
 
 class FakeBudget:
@@ -1644,6 +1645,135 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
         and event["payload"]["status"] == "blocked"
         for event in run_events
     )
+
+
+def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verification_gap() -> None:
+    run_events: list[dict[str, Any]] = []
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "帮我打开一个设计工具，搜索 logo 模板",
+        allowed_tools=allowed_tools,
+    )
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": allowed_tools}},
+        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda _allowed_tools: [],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner for desktop actions.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: {"role": "assistant", "content": ""},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda *_args, **_kwargs: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda *_args, **_kwargs: None,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+
+    def build_timeline(verification_result: dict[str, Any]) -> list[dict[str, Any]]:
+        return [
+            _timeline(
+                "agent.tool.call",
+                "desktop.list_apps",
+                input_preview={"query": "design", "limit": 20},
+                result={"ok": True, "data": {"apps": [{"name": "Figma"}]}},
+            ),
+            _timeline(
+                "agent.tool.call",
+                "app.open",
+                input_preview={"app_name": "Figma"},
+                result={"ok": True, "data": {"app_name": "Figma"}},
+            ),
+            _timeline(
+                "agent.tool.call",
+                "desktop.safe_shortcut",
+                input_preview={"action": "find"},
+                result={"ok": True},
+            ),
+            _timeline(
+                "agent.tool.call",
+                "desktop.safe_type_text",
+                input_preview={"text": "logo 模板"},
+                result={"ok": True},
+            ),
+            _timeline(
+                "agent.tool.call",
+                "desktop.search_submit",
+                input_preview={},
+                result={"ok": True},
+            ),
+            _timeline(
+                "agent.tool.call",
+                "desktop.ui_elements",
+                input_preview={},
+                result=verification_result,
+            ),
+        ]
+
+    empty_timeline = build_timeline(
+        {"ok": True, "data": {"elements": [], "count": 0, "text_item_count": 0}}
+    )
+    payloads = loop._record_runtime_planner_replan_events(
+        decision,
+        timeline=empty_timeline,
+        tool_timeline_start=0,
+        run_id="run-verify-replan",
+    )
+
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload["trigger"] == "verification_failed"
+    assert payload["run_id"] == "run-verify-replan"
+    assert payload["source_step_id"] == "verify-desktop-result"
+    assert payload["source_tool_name"] == "desktop.ui_elements"
+    assert "no UI elements or readable text" in payload["failure_detail"]
+    assert any(event["event"] == "agent.replan.requested" for event in empty_timeline)
+    assert any(
+        event["event_type"] == "agent.replan.requested"
+        and event["payload"]["request_id"] == payload["request_id"]
+        for event in run_events
+    )
+
+    run_events.clear()
+    readable_timeline = build_timeline(
+        {
+            "ok": True,
+            "data": {
+                "elements": [{"role": "AXStaticText", "value": "Logo templates"}],
+                "count": 1,
+                "text_item_count": 1,
+            },
+        }
+    )
+    assert (
+        loop._record_runtime_planner_replan_events(
+            decision,
+            timeline=readable_timeline,
+            tool_timeline_start=0,
+            run_id="run-readable-verify",
+        )
+        == []
+    )
+    assert not any(event["event"] == "agent.replan.requested" for event in readable_timeline)
+    assert run_events == []
 
 
 def test_custom_api_agent_loop_writes_data_analysis_report_to_target_app() -> None:
