@@ -14799,6 +14799,109 @@ def test_auto_discovered_app_open_followup_verifies_active_window() -> None:
     assert continuing_requests[1]["continue_to_model"] is True
 
 
+def test_runtime_planner_progress_records_auto_discovered_app_observation() -> None:
+    decision = RuntimePlanner().decision(
+        "打开一个能画图的应用，画一个圆并保存到桌面",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.ui_elements"],
+    )
+    appended_events: list[dict[str, Any]] = []
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": []}},
+        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda _allowed_tools: [],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=1,
+        operating_doctrine="",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: {},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda _message: "",
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda *_args, **_kwargs: None,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+    timeline = [
+        _timeline(
+            "agent.task.todo.updated",
+            "Discover desktop state",
+            source="runtime_planner",
+            decision_id=decision.decision_id,
+            step_id="discover_apps-desktop-state",
+            status="completed",
+        )
+    ]
+    tool_timeline_start = len(timeline)
+    timeline.extend(
+        [
+            _timeline(
+                "agent.tool.call",
+                "app.open",
+                input_preview={"app_name": "Pixelmator Pro"},
+                result={
+                    "ok": True,
+                    "action": "app.open",
+                    "data": {"app_name": "Pixelmator Pro"},
+                },
+            ),
+            _timeline(
+                "agent.tool.call",
+                "desktop.ui_elements",
+                input_preview={"limit": 80},
+                result={
+                    "ok": True,
+                    "action": "desktop.ui_elements",
+                    "data": {"elements": [{"role": "button", "name": "Shape"}]},
+                },
+            ),
+        ]
+    )
+
+    loop._record_runtime_planner_task_progress_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=tool_timeline_start,
+        run_id="run-discovered-observe",
+    )
+
+    completed_todos = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["status"] == "completed"
+    ]
+    assert [event["step_id"] for event in completed_todos] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "observe-selected-discovered-app",
+    ]
+    completed_checkpoints = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event["status"] == "completed"
+    ]
+    assert [event["step_id"] for event in completed_checkpoints] == [
+        "open-selected-discovered-app",
+        "observe-selected-discovered-app",
+    ]
+    assert [
+        event["payload"]["step_id"]
+        for event in appended_events
+        if event["event_type"] == "agent.task.todo.updated"
+    ] == ["open-selected-discovered-app", "observe-selected-discovered-app"]
+
+
 def test_auto_discovered_app_compose_followup_types_and_verifies() -> None:
     timeline = [
         _timeline(

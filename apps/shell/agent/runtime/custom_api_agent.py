@@ -1614,12 +1614,14 @@ class RuntimeCustomApiAgentLoop:
             ):
                 continue
             tool_event: dict[str, Any] | None = None
-            while event_index < len(tool_events):
-                candidate = tool_events[event_index]
-                event_index += 1
+            scan_index = event_index
+            while scan_index < len(tool_events):
+                candidate = tool_events[scan_index]
                 if str(candidate.get("detail") or "").strip() == tool_name:
                     tool_event = candidate
+                    event_index = scan_index + 1
                     break
+                scan_index += 1
             if tool_event is None:
                 continue
             result = tool_event.get("result") if isinstance(tool_event.get("result"), dict) else {}
