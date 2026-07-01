@@ -46,6 +46,12 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
     || name === 'workflow.run.intent.selected'
   ) return detail ? `Intent 识别 · ${detail}` : 'Intent 识别';
   if (
+    name === 'agent.replan.requested'
+    || name === 'group.run.replan.requested'
+    || name === 'workflow.replan.requested'
+    || name === 'workflow.run.replan.requested'
+  ) return detail ? `Planner 重规划 · ${detail}` : 'Planner 重规划';
+  if (
     name === 'agent.plan.created'
     || name === 'group.run.plan.created'
     || name === 'workflow.plan.created'
@@ -212,9 +218,11 @@ export function timelineEventTone(event: Record<string, unknown>): string {
     || name === 'agent.plan.created'
     || name === 'agent.plan.step'
     || name === 'agent.plan.selection'
+    || name === 'agent.replan.requested'
     || name === 'agent.task.todo.updated'
     || name === 'agent.task.checkpoint.updated'
     || name === 'group.run.intent.selected'
+    || name === 'group.run.replan.requested'
     || name === 'group.run.plan.created'
     || name === 'group.run.plan.step'
     || name === 'group.run.plan.selection'
@@ -222,6 +230,8 @@ export function timelineEventTone(event: Record<string, unknown>): string {
     || name === 'group.run.task.checkpoint.updated'
     || name === 'workflow.intent.selected'
     || name === 'workflow.run.intent.selected'
+    || name === 'workflow.replan.requested'
+    || name === 'workflow.run.replan.requested'
     || name === 'workflow.plan.created'
     || name === 'workflow.run.plan.created'
     || name === 'workflow.plan.step'

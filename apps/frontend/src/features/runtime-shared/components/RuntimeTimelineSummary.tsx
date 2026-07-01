@@ -161,6 +161,12 @@ function runtimeTimelineEventTypeLabel(type: string): string {
     || type === 'workflow.run.intent.selected'
   ) return 'Intent 识别';
   if (
+    type === 'agent.replan.requested'
+    || type === 'group.run.replan.requested'
+    || type === 'workflow.replan.requested'
+    || type === 'workflow.run.replan.requested'
+  ) return 'Planner 重规划';
+  if (
     type === 'agent.plan.created'
     || type === 'group.run.plan.created'
     || type === 'workflow.plan.created'

@@ -1339,12 +1339,14 @@ function runtimePlannerEventType(eventType: string): string {
   if (eventType === 'agent.task.checkpoint.updated') return eventType;
   if (eventType.startsWith('agent.plan.')) return eventType;
   if (eventType === 'group.run.intent.selected') return 'agent.intent.selected';
+  if (eventType === 'group.run.replan.requested') return 'agent.replan.requested';
   if (eventType === 'group.run.plan.created') return 'agent.plan.created';
   if (eventType === 'group.run.plan.step') return 'agent.plan.step';
   if (eventType === 'group.run.plan.selection') return 'agent.plan.selection';
   if (eventType === 'group.run.task.todo.updated') return 'agent.task.todo.updated';
   if (eventType === 'group.run.task.checkpoint.updated') return 'agent.task.checkpoint.updated';
   if (eventType === 'workflow.intent.selected' || eventType === 'workflow.run.intent.selected') return 'agent.intent.selected';
+  if (eventType === 'workflow.replan.requested' || eventType === 'workflow.run.replan.requested') return 'agent.replan.requested';
   if (eventType === 'workflow.plan.created' || eventType === 'workflow.run.plan.created') return 'agent.plan.created';
   if (eventType === 'workflow.plan.step' || eventType === 'workflow.run.plan.step') return 'agent.plan.step';
   if (eventType === 'workflow.plan.selection' || eventType === 'workflow.run.plan.selection') return 'agent.plan.selection';
