@@ -70,6 +70,8 @@ def planner_first_direct_tool_selection(
             selected_source = "daily_desktop_intent"
             selected_reason = _legacy_selection_reason(planner_requests)
             selected_requests = legacy_requests
+    if selected_source == "runtime_planner":
+        selected_requests = _entrypoint_model_followup_requests(selected_requests)
     if planner_requests:
         return DirectToolSelection(
             decision=decision,
@@ -114,6 +116,33 @@ def planner_first_direct_tool_selection(
         ),
         selected_source="none",
     )
+
+
+def _entrypoint_model_followup_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for request in requests:
+        if not isinstance(request, dict):
+            result.append(request)
+            continue
+        if _entrypoint_web_summary_request_needs_model(request):
+            result.append({**request, "continue_to_model": True})
+            continue
+        result.append(request)
+    return result
+
+
+def _entrypoint_web_summary_request_needs_model(request: Mapping[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in {
+        "browser.current_page",
+        "browser.extract_text",
+        "browser.extract",
+        "browser.open_url_and_extract_text",
+    }:
+        return False
+    return str(request.get("presentation") or "").strip() == "summary"
 
 
 def _should_consult_legacy(prompt: str, requests: list[dict[str, Any]]) -> bool:

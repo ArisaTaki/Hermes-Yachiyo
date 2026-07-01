@@ -18710,6 +18710,7 @@ def test_entrypoint_selection_keeps_runtime_planner_for_matching_url_extract() -
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "presentation": "summary",
+            "continue_to_model": True,
         }
     ]
     assert legacy_calls == []
