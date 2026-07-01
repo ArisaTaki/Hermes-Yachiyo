@@ -15349,6 +15349,32 @@ def test_runtime_planner_routes_generic_music_app_query_to_search_play_plan() ->
         ]
 
 
+def test_runtime_planner_does_not_treat_generic_music_player_words_as_query() -> None:
+    for prompt in (
+        "打开任意音乐播放器播放点音乐",
+        "音乐播放器播放点音乐",
+        "打开音乐播放器播放一首歌",
+    ):
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.open",
+                "app.focus_and_click_ui_element",
+                "desktop.ui_elements",
+            ],
+        )
+
+        assert decision.selected_intent.kind == "media_playback"
+        assert decision.selected_intent.inputs["query"] == ""
+        assert "type-media-search-query" not in [
+            step.step_id for step in decision.plan.tool_plan.steps
+        ]
+        assert _step_by_id(decision, "control-media-playback").tool_name == (
+            "app.focus_and_click_ui_element"
+        )
+
+
 def test_runtime_planner_falls_back_to_app_search_for_apple_music_query() -> None:
     decision = RuntimePlanner().decision(
         "打开 Apple Music 搜索超时空辉夜姬并播放",

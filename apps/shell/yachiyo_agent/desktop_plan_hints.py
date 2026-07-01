@@ -30,6 +30,11 @@ _GENERIC_MUSIC_QUERIES = {
     "东西",
     "听听",
     "音乐听听",
+    "点音乐",
+    "一点音乐",
+    "点歌",
+    "一首歌",
+    "首歌",
     "一下",
     "一首",
     "首",
@@ -1238,6 +1243,8 @@ def media_query_hint(text: str) -> str:
         return ""
     if re.fullmatch(r"(?:play|start playing)", value, flags=re.IGNORECASE):
         return ""
+    if _generic_music_playback_without_query(value):
+        return ""
     patterns = (
         r"(?:put|play)\s+(?P<query_put>.+?)\s+(?:on|in|with)\s+(?:apple\s*music|music)",
         r"(?:搜索|搜一下|搜|查找|找|检索)\s*(?:apple\s*music|苹果音乐|音乐(?:应用|app)?)\s+"
@@ -1319,6 +1326,38 @@ def media_query_hint(text: str) -> str:
         if query:
             return query
     return ""
+
+
+def _generic_music_playback_without_query(value: str) -> bool:
+    text = clean(value)
+    if not text:
+        return False
+    if re.search(r"(?:搜索|搜一下|搜|查找|找|检索|search|find|look\s+up)", text, flags=re.IGNORECASE):
+        return False
+    generic_play_tail = re.search(
+        r"(?:播放|播|放|听)(?:一下|下|一首|首|个|点|一点)?\s*"
+        r"(?:音乐|歌|歌曲)?\s*$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not generic_play_tail:
+        return False
+    if re.search(
+        r"(?:任意|任何|默认|一个|个|可用)?\s*"
+        r"(?:音乐\s*(?:应用|app|软件|播放器)?|播放器|music\s+app|music\s+player)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return bool(
+        re.fullmatch(
+            r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?\s*"
+            r"(?:播放|播|放|听)(?:一下|下|一首|首|个|点|一点)?\s*"
+            r"(?:音乐|歌|歌曲)?",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _clean_media_app_scope(value: str) -> str:
