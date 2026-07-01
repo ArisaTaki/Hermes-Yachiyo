@@ -4772,24 +4772,26 @@ def test_runtime_planner_plans_code_changes_after_workspace_inspection() -> None
     assert decision.plan.tool_plan.required_capabilities == [
         "file.workspace_read",
         "file.workspace_write",
-        "artifact.write",
     ]
     assert decision.plan.tool_plan.missing_capabilities == ["file.workspace_write"]
     assert decision.plan.tool_plan.approvals_required == ["apply-code-changes"]
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "inspect-workspace",
         "apply-code-changes",
-        "write-code-report",
     ]
     assert _step_by_id(decision, "inspect-workspace").tool_name == "workspace.list"
     assert _step_by_id(decision, "apply-code-changes").tool_name is None
     assert _step_by_id(decision, "apply-code-changes").status == "unavailable"
-    assert _step_by_id(decision, "write-code-report").tool_name == "artifact.write"
     assert all(step.tool_name != "terminal.run" for step in decision.plan.tool_plan.steps)
+    assert all(step.step_id != "write-code-report" for step in decision.plan.tool_plan.steps)
     assert _step_by_id(writable_decision, "apply-code-changes").tool_name == (
         "workspace.write_patch"
     )
     assert _step_by_id(writable_decision, "apply-code-changes").approval_required is True
+    assert [step.step_id for step in writable_decision.plan.tool_plan.steps] == [
+        "inspect-workspace",
+        "apply-code-changes",
+    ]
 
 
 def test_runtime_planner_routes_code_test_diagnostics_to_approval_terminal_plan() -> None:
@@ -4823,7 +4825,6 @@ def test_runtime_planner_routes_code_test_diagnostics_to_approval_terminal_plan(
         "file.workspace_read",
         "terminal.execution",
         "file.workspace_write",
-        "artifact.write",
     ]
     assert decision.plan.tool_plan.approvals_required == [
         "run-code-diagnostic",
@@ -4833,7 +4834,6 @@ def test_runtime_planner_routes_code_test_diagnostics_to_approval_terminal_plan(
         "inspect-workspace",
         "run-code-diagnostic",
         "apply-code-changes",
-        "write-code-report",
     ]
     run_step = _step_by_id(decision, "run-code-diagnostic")
     assert run_step.tool_name == "terminal.run"
@@ -4848,12 +4848,16 @@ def test_runtime_planner_routes_code_test_diagnostics_to_approval_terminal_plan(
     }
     assert apply_step.depends_on == ["run-code-diagnostic"]
     assert apply_step.approval_required is True
-    assert _step_by_id(decision, "write-code-report").depends_on == [
-        "apply-code-changes"
-    ]
+    assert all(step.step_id != "write-code-report" for step in decision.plan.tool_plan.steps)
     assert run_tests.selected_intent.inputs == {
         "code_diagnostic_command_hint": {"command": "python -m pytest"}
     }
+    assert [step.step_id for step in run_tests.plan.tool_plan.steps] == [
+        "inspect-workspace",
+        "run-code-diagnostic",
+        "write-code-report",
+    ]
+    assert _step_by_id(run_tests, "write-code-report").tool_name == "artifact.write"
     assert planner_tool_requests(
         "修复这个仓库里的 failing tests",
         [
@@ -4870,6 +4874,8 @@ def test_runtime_planner_routes_code_test_diagnostics_to_approval_terminal_plan(
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_code_context",
+            "step_id": "inspect-workspace",
+            "capability_id": "file.workspace_read",
         },
         {
             "protocol": "json_fallback",
@@ -4878,6 +4884,8 @@ def test_runtime_planner_routes_code_test_diagnostics_to_approval_terminal_plan(
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_code_diagnostic",
             "continue_to_model": True,
+            "step_id": "run-code-diagnostic",
+            "capability_id": "terminal.execution",
         }
     ]
 
