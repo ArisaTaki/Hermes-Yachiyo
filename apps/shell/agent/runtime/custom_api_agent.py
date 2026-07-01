@@ -381,6 +381,86 @@ class RuntimeCustomApiAgentLoop:
                             timeline=timeline,
                             run_id=run_id,
                         )
+                    auto_replan_recovery_requests = (
+                        _auto_replan_verification_recovery_requests(
+                            replan_payloads,
+                            allowed_tools,
+                        )
+                    )
+                    if auto_replan_recovery_requests:
+                        self._record_auto_model_followup_app_write_plan(
+                            auto_replan_recovery_requests,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
+                        self._record_desktop_permission_preflight(
+                            auto_replan_recovery_requests,
+                            broker,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
+                        self._record_desktop_tool_policy_decisions(
+                            auto_replan_recovery_requests,
+                            allowed_tools=allowed_tools,
+                            agent=agent,
+                            run_id=run_id,
+                        )
+                        try:
+                            self._run_tool_requests(
+                                auto_replan_recovery_requests,
+                                allowed_tools,
+                                broker,
+                                messages,
+                                timeline,
+                                artifacts,
+                                next_iteration=start_iteration,
+                                run_id=run_id,
+                                budget=budget,
+                            )
+                        except AgentApprovalRequired as exc:
+                            pending_approval = (
+                                exc.pending_approval
+                                if isinstance(exc.pending_approval, dict)
+                                else {}
+                            )
+                            planned_tool = str(
+                                pending_approval.get("tool")
+                                or auto_replan_recovery_requests[0].get("tool")
+                                or ""
+                            )
+                            approval_request = self._planned_request_for_tool(
+                                auto_replan_recovery_requests,
+                                planned_tool,
+                            )
+                            planned_input = self._pending_approval_input_preview(
+                                pending_approval,
+                                approval_request,
+                                (
+                                    auto_replan_recovery_requests[0]
+                                    if auto_replan_recovery_requests
+                                    else {}
+                                ),
+                            )
+                            self._record_desktop_intent_approval_required(
+                                planned_tool,
+                                planned_input,
+                                pending_approval=exc.pending_approval,
+                                timeline=timeline,
+                                run_id=run_id,
+                                source=self._approval_event_source(
+                                    approval_request,
+                                    planned_tool,
+                                ),
+                                planning_reason=self._approval_event_planning_reason(
+                                    approval_request,
+                                    planned_tool,
+                                ),
+                            )
+                            raise
+                        planned_tool_requests = [
+                            *planned_tool_requests,
+                            *auto_replan_recovery_requests,
+                        ]
                     if auto_followup_request:
                         auto_payload = {
                             "tool": str(auto_followup_request.get("tool") or ""),
@@ -983,6 +1063,12 @@ class RuntimeCustomApiAgentLoop:
                     request.get("input") if isinstance(request.get("input"), dict) else {}
                 ),
             }
+            if request.get("continue_to_model"):
+                payload["continue_to_model"] = True
+            for key in ("replan_request_id", "replan_trigger"):
+                value = str(request.get(key) or "").strip()
+                if value:
+                    payload[key] = value
             timeline.append(
                 self._timeline(
                     "agent.desktop.intent_planned",
@@ -5199,6 +5285,68 @@ def _auto_discovered_followup_requests(
         if requests:
             return requests
     return []
+
+
+def _auto_replan_verification_recovery_requests(
+    replan_payloads: list[dict[str, Any]],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    verification_payloads = [
+        payload
+        for payload in replan_payloads
+        if isinstance(payload, Mapping)
+        and str(payload.get("trigger") or "").strip() == "verification_failed"
+        and str(payload.get("source_step_id") or "").strip() == "verify-desktop-result"
+    ]
+    if not verification_payloads:
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return []
+    first = verification_payloads[0]
+    request_id = str(first.get("request_id") or "").strip()
+    source = "runtime_planner"
+    planning_reason = "planner_verification_recovery_observation"
+    requests: list[dict[str, Any]] = []
+    for tool_name in _verification_recovery_tool_order(allowed):
+        request = _request_like(
+            tool_name,
+            {},
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if request_id:
+            request["replan_request_id"] = request_id
+        request["replan_trigger"] = "verification_failed"
+        request["continue_to_model"] = True
+        requests.append(request)
+    return requests
+
+
+def _verification_recovery_tool_order(allowed: set[str]) -> list[str]:
+    tools: list[str] = []
+    for tool_name in (
+        "desktop.active_window",
+        _first_allowed_tool(("desktop.list_windows", "desktop.windows"), allowed),
+        "screen.capture",
+    ):
+        if tool_name and tool_name in allowed and tool_name not in tools:
+            tools.append(tool_name)
+    if tools:
+        return tools
+    for tool_name in (
+        _first_allowed_tool(("desktop.read_ui", "desktop.ui_elements"), allowed),
+    ):
+        if tool_name and tool_name in allowed and tool_name not in tools:
+            tools.append(tool_name)
+    return tools
+
+
+def _first_allowed_tool(candidates: tuple[str, ...], allowed: set[str]) -> str:
+    for candidate in candidates:
+        if candidate in allowed:
+            return candidate
+    return ""
 
 
 def _auto_discovered_app_followup_requests(

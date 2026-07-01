@@ -1772,6 +1772,47 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
     )
     assert followup_context["trigger"] == "verification_failed"
     assert followup_context["triggers"] == ["verification_failed"]
+    recovery_requests = custom_api_agent_module._auto_replan_verification_recovery_requests(
+        payloads,
+        [
+            *allowed_tools,
+            "desktop.active_window",
+            "desktop.list_windows",
+            "screen.capture",
+        ],
+    )
+    assert [request["tool"] for request in recovery_requests] == [
+        "desktop.active_window",
+        "desktop.list_windows",
+        "screen.capture",
+    ]
+    assert all(request["continue_to_model"] is True for request in recovery_requests)
+    assert {
+        request["replan_request_id"] for request in recovery_requests
+    } == {payload["request_id"]}
+    assert {
+        request["replan_trigger"] for request in recovery_requests
+    } == {"verification_failed"}
+    loop._record_auto_model_followup_app_write_plan(
+        recovery_requests,
+        timeline=empty_timeline,
+        run_id="run-verify-replan",
+    )
+    recovery_plan_events = [
+        event
+        for event in empty_timeline
+        if event["event"] == "agent.desktop.intent_planned"
+        and event.get("planning_reason") == "planner_verification_recovery_observation"
+    ]
+    assert [event["tool"] for event in recovery_plan_events] == [
+        "desktop.active_window",
+        "desktop.list_windows",
+        "screen.capture",
+    ]
+    assert all(event["continue_to_model"] is True for event in recovery_plan_events)
+    assert {
+        event["replan_request_id"] for event in recovery_plan_events
+    } == {payload["request_id"]}
 
     run_events.clear()
     readable_timeline = build_timeline(
