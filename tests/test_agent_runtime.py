@@ -1234,6 +1234,151 @@ def test_tool_approval_execution_followup_appends_result_and_runs_remaining_requ
     assert followup.artifacts is artifacts
 
 
+def test_approval_resume_schedules_code_verification_after_approved_patch():
+    calls: list[tuple[str, dict[str, object]]] = []
+    broker = SimpleNamespace(name="broker")
+    budget = SimpleNamespace(name="budget")
+    timeline: list[dict[str, object]] = [
+        {
+            "event": "agent.model.followup_context",
+            "planning_reason": "planner_fallback_code_diagnostic",
+            "pending_plan_steps": [
+                {
+                    "step_id": "apply-code-changes",
+                    "tool_name": "workspace.write_patch",
+                    "capability_id": "file.workspace_write",
+                    "action": "apply_patch",
+                    "depends_on": ["run-code-diagnostic"],
+                },
+                {
+                    "step_id": "verify-code-changes",
+                    "tool_name": "terminal.run",
+                    "capability_id": "terminal.execution",
+                    "input_preview": {"command": "python -m pytest"},
+                    "depends_on": ["apply-code-changes"],
+                },
+            ],
+        }
+    ]
+    artifacts: list[dict[str, object]] = []
+    messages: list[dict[str, object]] = [{"role": "assistant", "content": "Need approval"}]
+    tool_request = {
+        "tool": "workspace.write_patch",
+        "input": {"path": "app.py", "patch": "--- app.py\n+++ app.py\n"},
+        "step_id": "apply-code-changes",
+        "capability_id": "file.workspace_write",
+    }
+
+    def call_agent_tool(
+        request,
+        allowed_tools,
+        tool_broker,
+        run_timeline,
+        *,
+        artifacts,
+        approved,
+        run_id,
+        budget,
+    ):
+        calls.append(
+            (
+                "call_agent_tool",
+                {
+                    "request": request,
+                    "allowed_tools": allowed_tools,
+                    "broker": tool_broker,
+                    "timeline": run_timeline,
+                    "artifacts": artifacts,
+                    "approved": approved,
+                    "run_id": run_id,
+                    "budget": budget,
+                },
+            )
+        )
+        return {"ok": True, "mode": "patch", "path": "app.py"}
+
+    def append_tool_result_message(run_messages, request, result):
+        calls.append(("append_tool_result_message", {"request": request, "result": result}))
+        run_messages.append({"role": "tool", "content": json.dumps(result)})
+
+    def run_tool_requests(
+        requests,
+        allowed_tools,
+        tool_broker,
+        run_messages,
+        run_timeline,
+        run_artifacts,
+        *,
+        next_iteration,
+        run_id,
+        budget,
+    ):
+        calls.append(
+            (
+                "run_tool_requests",
+                {
+                    "requests": requests,
+                    "allowed_tools": allowed_tools,
+                    "broker": tool_broker,
+                    "messages": run_messages,
+                    "timeline": run_timeline,
+                    "artifacts": run_artifacts,
+                    "next_iteration": next_iteration,
+                    "run_id": run_id,
+                    "budget": budget,
+                },
+            )
+        )
+
+    coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=call_agent_tool,
+        fatal_tool_failure_detail=lambda *_args: "",
+        append_tool_result_message=append_tool_result_message,
+        run_tool_requests=run_tool_requests,
+        timeline_factory=lambda event, detail, **payload: {"event": event, "detail": detail, **payload},
+    )
+
+    coordinator.execute_approved_tool(
+        ToolApprovalResumeContext(
+            run_id="run_patch",
+            timeline=timeline,
+            artifacts=artifacts,
+            broker=broker,
+            allowed_tools=["workspace.write_patch", "terminal.run"],
+            budget=budget,
+            messages=messages,
+            tool_request=tool_request,
+            tool_name="workspace.write_patch",
+            input_preview={"path": "app.py"},
+            remaining_requests=[],
+            next_iteration=4,
+        )
+    )
+
+    assert [name for name, _payload in calls] == [
+        "call_agent_tool",
+        "append_tool_result_message",
+        "run_tool_requests",
+    ]
+    assert calls[2][1]["requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "terminal.run",
+            "input": {"command": "python -m pytest"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_verify_code_changes",
+            "continue_to_model": True,
+            "step_id": "verify-code-changes",
+            "capability_id": "terminal.execution",
+        }
+    ]
+    assert calls[2][1]["next_iteration"] == 4
+    assert messages[-1] == {
+        "role": "tool",
+        "content": '{"ok": true, "mode": "patch", "path": "app.py"}',
+    }
+
+
 def test_approval_resume_coordinator_claims_and_projects_approved_tool_once():
     calls: list[tuple[str, dict[str, object]]] = []
     timeline: list[dict[str, object]] = [{"event": "agent.tool.approval_required"}]

@@ -86,6 +86,10 @@ class ApprovalResumeCoordinator:
             )
             context.timeline.append(failure.timeline_event(self._timeline))
             raise AgentRuntimeError(failure.detail)
+        context.remaining_requests = _approval_resume_remaining_requests_after_tool(
+            context,
+            tool_result,
+        )
         followup = ToolApprovalExecutionFollowup.from_context(
             context,
             tool_result,
@@ -312,6 +316,92 @@ def _approval_resume_task_progress_events(
                 )
             )
     return events
+
+
+def _approval_resume_remaining_requests_after_tool(
+    context: ToolApprovalResumeContext,
+    tool_result: Any,
+) -> list[dict[str, Any]]:
+    existing = [
+        dict(request)
+        for request in context.remaining_requests
+        if isinstance(request, Mapping)
+    ]
+    if existing:
+        return existing
+    if not _approved_workspace_patch_step(context, tool_result):
+        return []
+    verification = _pending_verification_request_after_patch(
+        context.timeline,
+        allowed_tools=context.allowed_tools,
+    )
+    return [verification] if verification else []
+
+
+def _approved_workspace_patch_step(
+    context: ToolApprovalResumeContext,
+    tool_result: Any,
+) -> bool:
+    if str(context.tool_name or "").strip() != "workspace.write_patch":
+        return False
+    result = tool_result if isinstance(tool_result, Mapping) else {}
+    if result.get("ok") is not True:
+        return False
+    step_id = str(context.tool_request.get("step_id") or "").strip()
+    capability_id = str(context.tool_request.get("capability_id") or "").strip()
+    return step_id == "apply-code-changes" or capability_id == "file.workspace_write"
+
+
+def _pending_verification_request_after_patch(
+    timeline: list[dict[str, Any]],
+    *,
+    allowed_tools: list[str],
+) -> dict[str, Any]:
+    if "terminal.run" not in {str(tool or "").strip() for tool in allowed_tools}:
+        return {}
+    for event in reversed(timeline):
+        if not isinstance(event, Mapping):
+            continue
+        if str(event.get("event") or "").strip() != "agent.model.followup_context":
+            continue
+        payload = _timeline_payload(event)
+        steps = payload.get("pending_plan_steps")
+        if not isinstance(steps, list):
+            continue
+        for step in steps:
+            if not isinstance(step, Mapping):
+                continue
+            if str(step.get("step_id") or "").strip() != "verify-code-changes":
+                continue
+            if str(step.get("tool_name") or "").strip() != "terminal.run":
+                continue
+            depends_on = [
+                str(item or "").strip()
+                for item in step.get("depends_on", [])
+                if str(item or "").strip()
+            ] if isinstance(step.get("depends_on"), list) else []
+            if "apply-code-changes" not in depends_on:
+                continue
+            raw_input = (
+                step.get("input_preview")
+                if isinstance(step.get("input_preview"), Mapping)
+                else {}
+            )
+            command = str(raw_input.get("command") or "").strip()
+            if not command:
+                continue
+            request = {
+                "protocol": "json_fallback",
+                "tool": "terminal.run",
+                "input": {"command": command},
+                "source": "runtime_planner",
+                "planning_reason": "planner_followup_verify_code_changes",
+                "continue_to_model": True,
+                "step_id": "verify-code-changes",
+                "capability_id": "terminal.execution",
+            }
+            return request
+    return {}
 
 
 def _latest_task_core_context(timeline: list[dict[str, Any]]) -> dict[str, Any]:
