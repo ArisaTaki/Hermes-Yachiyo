@@ -3539,7 +3539,7 @@ def discovered_app_open_needs_model_followup(
         return False
     return bool(
         re.search(
-            r"(?:应用(?:程序)?|app|软件|工具|程序)"
+            r"(?:应用(?:程序)?|app|软件|工具|程序|编辑器|阅读器|查看器|浏览器|客户端)"
             r".{0,24}?(?:，|,|并|然后|再|接着|之后|后|\band\b|\bthen\b)"
             r".{0,80}(?:画|绘制|创建|制作|生成|编辑|处理|保存|导出|写入|输入|填入|"
             r"标注|设计|点击|点一下|点按|单击|双击|按下|按一下|发送|触发|"
@@ -3566,6 +3566,13 @@ def _strip_pending_action_prefix(action: str) -> str:
             value,
             flags=re.IGNORECASE,
         ).strip()
+        value = re.sub(
+            r"^(?:打开|启动|开启|运行|使用|用|open|launch|start|run|use)\s*"
+            r"(?:它|这个|该|应用|app|application|tool|program)?\s*",
+            "",
+            value,
+            flags=re.IGNORECASE,
+        ).strip()
         if value == previous:
             break
     return value
@@ -3576,18 +3583,34 @@ def discovered_app_pending_user_action(user_goal: str) -> str:
     if not text:
         return ""
     match = re.search(
-        r"(?:应用(?:程序)?|app|软件|工具|程序)"
-        r".{0,24}?(?:，|,|并|然后|再|接着|之后|后|\band\b|\bthen\b)"
-        r"(?P<action>.+)$",
+        r"(?:应用(?:程序)?|app|软件|工具|程序|编辑器|阅读器|查看器|浏览器|客户端)"
+        r"\s*(?P<direct_action>"
+        r"(?:点击|点一下|点按|单击|双击|按下|按一下|按|发送|触发|"
+        r"滚动|滑动|翻页|下滑|上滑|下滚|上滚|输入|写入|保存|导出|"
+        r"click|tap|press|hit|send|trigger|scroll|page|type|save|export)"
+        r".+)$",
         text,
         flags=re.IGNORECASE,
     )
     if not match:
+        match = re.search(
+            r"(?:应用(?:程序)?|app|软件|工具|程序|编辑器|阅读器|查看器|浏览器|客户端)"
+            r".{0,24}?(?:，|,|并|然后|再|接着|之后|后|\band\b|\bthen\b)"
+            r"(?P<action>.+)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+    if not match:
         return _strip_pending_action_prefix(text)[:160]
+    raw_action = (
+        match.groupdict().get("action")
+        or match.groupdict().get("direct_action")
+        or ""
+    )
     action = re.sub(
         r"\s+",
         " ",
-        _strip_pending_action_prefix(str(match.group("action") or "")),
+        _strip_pending_action_prefix(str(raw_action)),
     )
     return action[:160]
 

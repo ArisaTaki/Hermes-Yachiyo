@@ -2768,6 +2768,54 @@ def test_planner_binds_discovered_app_safe_point_click_to_selected_app() -> None
     ).depends_on == ["click-selected-discovered-app-point"]
 
 
+def test_planner_runs_followups_after_noun_style_app_discovery() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus_and_safe_scroll",
+        "app.focus_and_safe_click",
+        "screen.capture",
+    ]
+    scroll = RuntimePlanner().decision(
+        "找一个 PDF 阅读器，向下滚动两页",
+        allowed_tools=allowed_tools,
+    )
+    click = RuntimePlanner().decision(
+        "找个看图软件点击坐标 120, 240",
+        allowed_tools=allowed_tools,
+    )
+
+    assert [step.step_id for step in scroll.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "scroll-selected-discovered-app",
+        "verify-selected-discovered-app-action",
+    ]
+    assert _step_by_id(scroll, "open-selected-discovered-app").input_preview["query"] == "pdf"
+    assert _step_by_id(scroll, "scroll-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "pdf",
+        "direction": "down",
+        "pages": 2,
+    }
+
+    assert [step.step_id for step in click.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "click-selected-discovered-app-point",
+        "verify-selected-discovered-app-action",
+    ]
+    assert _step_by_id(click, "open-selected-discovered-app").input_preview["query"] == "image"
+    assert _step_by_id(click, "click-selected-discovered-app-point").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "image",
+        "x": 120,
+        "y": 240,
+    }
+
+
 def test_planner_does_not_duplicate_selected_app_open_shortcut_followup() -> None:
     prompt = "打开一个能写文档的应用，然后新建文档"
     allowed_tools = [
@@ -8837,7 +8885,10 @@ def test_runtime_planner_discovers_chinese_generic_editor_apps_before_acting() -
         ("打开表格应用", "spreadsheet", "表格"),
         ("打开电子表格软件", "spreadsheet", "电子表格"),
         ("打开图片编辑器", "image", "图片"),
+        ("打开图片查看器", "image", "图片"),
+        ("打开看图软件", "image", "看图"),
         ("打开 PDF 编辑器", "pdf", "PDF"),
+        ("打开 PDF 阅读器", "pdf", "PDF"),
     )
 
     for prompt, query, description in cases:

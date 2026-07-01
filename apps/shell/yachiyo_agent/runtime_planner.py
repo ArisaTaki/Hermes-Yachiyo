@@ -8247,14 +8247,57 @@ def _append_selected_discovered_generic_action_steps(
     if not pending_action or _looks_like_discovered_creative_action(intent, pending_action):
         return
 
-    click_target = click_target_hint(pending_action)
-    type_target = type_into_ui_hint(pending_action)
-    safe_type_text = "" if type_target else safe_type_text_hint(pending_action)
-    safe_shortcut = safe_shortcut_hint(pending_action)
-    safe_key = None if safe_shortcut else safe_key_hint(pending_action)
-    safe_scroll = safe_scroll_hint(pending_action)
-    safe_click = safe_click_hint(pending_action)
-    hotkey = None if safe_shortcut or safe_key else hotkey_hint(pending_action)
+    inputs = intent.inputs if isinstance(intent.inputs, Mapping) else {}
+    raw_click_target = inputs.get("click_target_hint")
+    raw_type_target = inputs.get("type_into_ui_hint")
+    raw_safe_shortcut = inputs.get("safe_shortcut_hint")
+    raw_safe_key = inputs.get("safe_key_hint")
+    raw_safe_scroll = inputs.get("safe_scroll_hint")
+    raw_safe_click = inputs.get("safe_click_hint")
+    raw_hotkey = inputs.get("hotkey_hint")
+
+    click_target = (
+        dict(raw_click_target)
+        if isinstance(raw_click_target, Mapping) and raw_click_target
+        else click_target_hint(pending_action)
+    )
+    type_target = (
+        dict(raw_type_target)
+        if isinstance(raw_type_target, Mapping) and raw_type_target
+        else type_into_ui_hint(pending_action)
+    )
+    safe_type_text = "" if type_target else str(inputs.get("safe_type_text_hint") or "").strip()
+    if not safe_type_text and not type_target:
+        safe_type_text = safe_type_text_hint(pending_action)
+    safe_shortcut = (
+        dict(raw_safe_shortcut)
+        if isinstance(raw_safe_shortcut, Mapping) and raw_safe_shortcut
+        else safe_shortcut_hint(pending_action)
+    )
+    safe_key = (
+        dict(raw_safe_key)
+        if isinstance(raw_safe_key, Mapping) and raw_safe_key
+        else None
+        if safe_shortcut
+        else safe_key_hint(pending_action)
+    )
+    safe_scroll = (
+        dict(raw_safe_scroll)
+        if isinstance(raw_safe_scroll, Mapping) and raw_safe_scroll
+        else safe_scroll_hint(pending_action)
+    )
+    safe_click = (
+        dict(raw_safe_click)
+        if isinstance(raw_safe_click, Mapping) and raw_safe_click
+        else safe_click_hint(pending_action)
+    )
+    hotkey = (
+        dict(raw_hotkey)
+        if isinstance(raw_hotkey, Mapping) and raw_hotkey
+        else None
+        if safe_shortcut or safe_key
+        else hotkey_hint(pending_action)
+    )
     submit_action = submit_action_hint(pending_action)
     if safe_shortcut and _selected_discovered_open_step_already_runs_shortcut(
         steps,
@@ -21165,7 +21208,7 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?:mac|computer|machine|desktop|system|local\s+machine))?"
     )
     patterns = (
-        r"(?:打开|启动|找|找一个|找一款|使用|在|用|通过)\s*"
+        r"(?:打开|启动|找|找个|找一个|找一款|使用|在|用|通过)\s*"
         rf"{local_scope_prefix}"
         rf"{generic_prefix}"
         r"(?:能|可以|适合|适用于|可用于|用来|用于)\s*(?P<capability>[^。！？!?，,]{1,40}?)"
@@ -21187,12 +21230,12 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?:写进|写入|写到|放进|放到|保存到|导出到|输出到|整理到|总结到|发到)\s*"
         rf"{generic_prefix}"
         r"(?P<target_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
-        r"图片|图像|照片|绘图|画图|设计|视频|视频剪辑|视频编辑|音频|音频编辑|"
+        r"图片|图像|照片|看图|绘图|画图|设计|视频|视频剪辑|视频编辑|音频|音频编辑|"
         r"压缩|解压|归档|白板|数据库|截图|截屏|流程图|思维导图|脑图|pdf|PDF|"
         r"演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
         r"聊天|通讯|通信|消息|即时通讯|日历|项目管理|任务管理|工单|看板|"
         r"issue|ticket)"
-        r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
+        r"(?:\s*)?(?:编辑器|阅读器|查看器|浏览器|应用(?:程序)?|app|软件|客户端|工具|程序)",
         r"\b(?:write|save|export|output|put|send|copy|paste)\b.{0,80}?"
         rf"\b(?:to|into|in)\s+{generic_prefix_en}"
         r"(?P<target_capability_en>markdown|code|image|photo|design|video|audio|archive|"
@@ -21200,16 +21243,16 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
         r"(?:app|application|client|tool|program|editor)\b",
-        r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
+        r"(?:打开|启动|找|找个|找一个|找一款|使用|用|通过)\s*"
         rf"{local_scope_prefix}"
         rf"{generic_prefix}"
         r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
-        r"图片|图像|照片|绘图|画图|设计|视频|视频剪辑|视频编辑|音频|音频编辑|"
+        r"图片|图像|照片|看图|绘图|画图|设计|视频|视频剪辑|视频编辑|音频|音频编辑|"
         r"压缩|解压|归档|白板|数据库|截图|截屏|流程图|思维导图|脑图|pdf|PDF|"
         r"演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
         r"聊天|通讯|通信|消息|即时通讯|日历|项目管理|任务管理|工单|看板|"
         r"issue|ticket)"
-        r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
+        r"(?:\s*)?(?:编辑器|阅读器|查看器|浏览器|应用(?:程序)?|app|软件|客户端|工具|程序)",
         r"\b(?:open|launch|start|find|use)\s+"
         rf"{generic_prefix_en}"
         r"(?P<direct_capability_en>markdown|code|image|photo|design|video|audio|archive|"
@@ -21217,11 +21260,11 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
         r"(?:app|application|client|tool|program|editor)\b",
-        r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
+        r"(?:打开|启动|找|找个|找一个|找一款|使用|用|通过)\s*"
         rf"{local_scope_prefix}"
         rf"{required_generic_prefix}"
         r"(?P<generic_prefixed_capability_cn>[^。！？!?，,]{1,24}?)"
-        r"(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
+        r"(?:编辑器|阅读器|查看器|浏览器|应用(?:程序)?|app|软件|客户端|工具|程序)",
         r"\b(?:open|launch|start|find|use)\s+"
         rf"{required_generic_prefix_en}"
         r"(?P<generic_prefixed_capability_en>[\w\s-]{2,40}?)\s*"
@@ -21277,7 +21320,7 @@ def _app_capability_discovery_query(value: str) -> str:
         return "pdf"
     if _contains_any(description, ("代码", "编程", "开发", "code", "coding", "programming")):
         return "code"
-    if _contains_any(description, ("图片", "图像", "照片", "绘图", "画图", "设计", "image", "photo", "picture", "design")):
+    if _contains_any(description, ("图片", "图像", "照片", "看图", "绘图", "画图", "设计", "image", "photo", "picture", "design")):
         return "image"
     if _contains_any(
         description,
@@ -21667,6 +21710,34 @@ def _discovered_app_open_requested(intent: TaskIntentSnapshot) -> bool:
         if (
             isinstance(safe_shortcut, Mapping)
             and str(safe_shortcut.get("action") or "").strip()
+        ):
+            return True
+        for hint_key in (
+            "safe_key_hint",
+            "safe_scroll_hint",
+            "safe_click_hint",
+            "hotkey_hint",
+            "click_target_hint",
+            "type_into_ui_hint",
+        ):
+            raw_hint = intent.inputs.get(hint_key)
+            if isinstance(raw_hint, Mapping) and raw_hint:
+                return True
+        if str(intent.inputs.get("safe_type_text_hint") or "").strip():
+            return True
+        operation_hint = str(intent.inputs.get("operation_hint") or "").strip()
+        if operation_hint in {"safe_key", "safe_scroll", "safe_click", "hotkey"}:
+            return True
+        pending_action = discovered_app_pending_user_action(text)
+        if (
+            safe_key_hint(pending_action)
+            or safe_scroll_hint(pending_action)
+            or safe_click_hint(pending_action)
+            or hotkey_hint(pending_action)
+            or click_target_hint(pending_action)
+            or type_into_ui_hint(pending_action)
+            or safe_type_text_hint(pending_action)
+            or submit_action_hint(pending_action)
         ):
             return True
         if _looks_like_app_scoped_create_followup(text):
