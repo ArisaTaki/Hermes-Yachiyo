@@ -244,6 +244,57 @@ def test_planner_first_daily_desktop_entrypoint_routes_generic_schedule_apps() -
         ]
 
 
+def test_planner_first_daily_desktop_entrypoint_routes_orchestration_tools() -> None:
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "启动 Daily Summary workflow",
+        allowed_tools=["workflow.start", "workflow.run", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workflow.start",
+            "input": {
+                "objective": "启动 Daily Summary workflow",
+                "title": "Workflow Orchestration",
+                "target_name": "Daily Summary",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_workflow_orchestration",
+        }
+    ]
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "创建一个工作流：每天上午搜索 AI 新闻并生成摘要",
+        allowed_tools=["workflow.create", "workflow.run", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workflow.create",
+            "input": {
+                "objective": "创建一个工作流：每天上午搜索 AI 新闻并生成摘要",
+                "title": "Workflow Orchestration",
+                "target_name": "",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_workflow_orchestration",
+        }
+    ]
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "运行 Research Team group 调研今天的 AI 新闻",
+        allowed_tools=["group.run", "agent.group_run", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "group.run",
+            "input": {
+                "objective": "运行 Research Team group 调研今天的 AI 新闻",
+                "title": "Multi-Agent Coordination",
+                "target_name": "Research Team",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_group_run",
+        }
+    ]
+
+
 def test_planner_first_daily_desktop_entrypoint_routes_browser_url_click_sequence() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(
         "打开 https://example.com 然后点击 More information 链接",

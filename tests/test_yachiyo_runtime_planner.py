@@ -3381,6 +3381,38 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     named_workflow_step = _step_by_id(named_workflow, "workflow-orchestration")
     assert named_workflow_step.tool_name == "workflow.start"
     assert named_workflow_step.input_preview == {"target_name": "Daily Summary"}
+    assert planner_tool_requests(
+        "运行 Daily Summary workflow",
+        ["workflow.run", "group.run", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workflow.run",
+            "input": {
+                "objective": "运行 Daily Summary workflow",
+                "title": "Workflow Orchestration",
+                "target_name": "Daily Summary",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_workflow_orchestration",
+        }
+    ]
+    assert planner_tool_requests(
+        "创建一个工作流：每天上午搜索 AI 新闻并生成摘要",
+        ["workflow.create", "workflow.run", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workflow.create",
+            "input": {
+                "objective": "创建一个工作流：每天上午搜索 AI 新闻并生成摘要",
+                "title": "Workflow Orchestration",
+                "target_name": "",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_workflow_orchestration",
+        }
+    ]
 
     workflow_with_data_words = RuntimePlanner().decision(
         "启动工作流分析 sales.csv",
@@ -3406,7 +3438,19 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     assert planner_tool_requests(
         "让两个 agent 分别调研 Hanako 和 Hermes 然后汇总",
         ["group.run", "artifact.write"],
-    ) == []
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "group.run",
+            "input": {
+                "objective": "让两个 agent 分别调研 Hanako 和 Hermes 然后汇总",
+                "title": "Multi-Agent Coordination",
+                "target_name": "",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_group_run",
+        }
+    ]
 
     ad_hoc_group_prompt = "让研究员和写作者两个 Agent 协作，研究 Hermes 和 Hanako 的差异并产出报告"
     ad_hoc_group = RuntimePlanner().decision(

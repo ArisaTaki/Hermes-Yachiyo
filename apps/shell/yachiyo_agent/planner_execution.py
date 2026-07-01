@@ -251,6 +251,8 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
         return _schedule_tool_requests(decision, allowed)
     if decision.selected_intent.kind == "clipboard_operation":
         return _clipboard_tool_requests(decision.selected_intent.inputs, allowed)
+    if decision.selected_intent.kind == "workflow_orchestration":
+        return _workflow_tool_requests(decision, allowed)
     if decision.selected_intent.kind == "multi_agent":
         return _multi_agent_tool_requests(decision, allowed)
     if decision.selected_intent.kind != "desktop_operation":
@@ -324,14 +326,21 @@ def _orchestration_request(decision: Any, orchestration_kind: str) -> dict[str, 
 
 
 def _multi_agent_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
-    if "agent.group_run" not in allowed:
+    step = _planned_step_by_id(decision, "group-multi_agent")
+    if step is None or not _step_available(step):
+        return []
+    tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if tool_name not in {"group.run", "agent.group_run"} or tool_name not in allowed:
         return []
     intent = decision.selected_intent
     inputs = intent.inputs if isinstance(intent.inputs, Mapping) else {}
     target_name = str(inputs.get("target_name_hint") or "").strip()
+    input_preview = getattr(step, "input_preview", None)
+    payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+    target_name = str(payload.get("target_name") or target_name).strip()
     return [
         _request(
-            "agent.group_run",
+            tool_name,
             {
                 "objective": str(intent.user_goal or "").strip(),
                 "title": str(intent.title or "").strip(),
@@ -340,6 +349,39 @@ def _multi_agent_tool_requests(decision: Any, allowed: set[str]) -> list[dict[st
             planning_reason="planner_fallback_group_run",
         )
     ]
+
+
+def _workflow_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    step = _planned_step_by_id(decision, "workflow-orchestration")
+    if step is None or not _step_available(step):
+        return []
+    tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if tool_name not in allowed:
+        return []
+    intent = decision.selected_intent
+    inputs = intent.inputs if isinstance(intent.inputs, Mapping) else {}
+    target_name = str(inputs.get("target_name_hint") or "").strip()
+    input_preview = getattr(step, "input_preview", None)
+    payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+    target_name = str(payload.get("target_name") or target_name).strip()
+    return [
+        _request(
+            tool_name,
+            {
+                "objective": str(intent.user_goal or "").strip(),
+                "title": str(intent.title or "").strip(),
+                "target_name": target_name,
+            },
+            planning_reason="planner_fallback_workflow_orchestration",
+        )
+    ]
+
+
+def _planned_step_by_id(decision: Any, step_id: str) -> Any | None:
+    for step in getattr(getattr(decision.plan, "tool_plan", None), "steps", []) or []:
+        if str(getattr(step, "step_id", "") or "").strip() == step_id:
+            return step
+    return None
 
 
 def _looks_like_orchestration_action(prompt: str, orchestration_kind: str) -> bool:
