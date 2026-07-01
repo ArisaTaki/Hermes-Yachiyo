@@ -1,3 +1,5 @@
+import { Fragment } from 'react';
+
 import { publicRunEventIsSecret } from '../../runtime-shared/runEvents';
 import type {
   CapabilitySnapshot,
@@ -15,6 +17,7 @@ import type {
 
 type PlannerTrace = {
   candidateIntents: TaskIntentSnapshot[];
+  capabilityRecovery: PlannerCapabilityRecovery[];
   decisionId: string;
   eventCount: number;
   intent: TaskIntentSnapshot | null;
@@ -27,6 +30,24 @@ type PlannerTrace = {
   steps: ToolPlanStepSnapshot[];
   summaryFallback?: boolean;
   toolPlan: ToolPlanSnapshot | null;
+};
+
+type PlannerCapabilityRecovery = {
+  approvalRequired: boolean | undefined;
+  availableTools: string[];
+  blockingConditions: string[];
+  capabilityId: string;
+  category: string;
+  description: string;
+  fallbackTools: string[];
+  missingPermissions: string[];
+  missingTools: string[];
+  recommendedEnableTools: string[];
+  riskLevel: string;
+  sourceStepIds: string[];
+  suggestedAction: string;
+  title: string;
+  tools: string[];
 };
 
 type PlannerSelection = {
@@ -133,6 +154,7 @@ export function PlannerTraceInspector({
   const confidence = confidenceLabel(intent?.confidence);
   const taskCore = trace.plan?.task_core || null;
   const replanRequests = trace.replanRequests || [];
+  const capabilityRecovery = trace.capabilityRecovery || [];
 
   return (
     <details
@@ -224,6 +246,9 @@ export function PlannerTraceInspector({
         {taskCore ? <TaskCoreInspector taskCore={taskCore} /> : null}
 
         {replanRequests.length ? <ReplanRequestInspector requests={replanRequests} /> : null}
+        {capabilityRecovery.length ? (
+          <PlannerCapabilityRecoveryInspector recoveries={capabilityRecovery} />
+        ) : null}
 
         {trace.selection ? (
           <section
@@ -614,22 +639,206 @@ function ReplanRequestInspector({ requests }: { requests: TaskReplanRequestSnaps
       <div className="studio-tool-pill-row">
         {requests.map((request) => {
           const fallbackTools = uniqueStrings(request.fallback_tools || []);
+          const metadata = objectRecord(request.metadata);
+          const metadataCapabilityId = stringValue(metadata.capability_id);
+          const targetCapabilityId = request.target_capability_id || metadataCapabilityId;
+          const plannedToolName = stringValue(metadata.planned_tool_name) || request.source_tool_name || '';
+          const stepStatus = stringValue(metadata.step_status);
+          const stepTitle = stringValue(metadata.step_title);
+          const inputPreview = plannerValuePreview(metadata.input_preview);
+          const missingPermissions = uniqueStrings(
+            Array.isArray(metadata.missing_permissions) ? metadata.missing_permissions : [],
+          );
+          const blockingConditions = uniqueStrings(
+            Array.isArray(metadata.blocking_conditions) ? metadata.blocking_conditions : [],
+          );
           return (
-            <span
-              className="studio-tool-permission"
-              data-replan-request-id={request.request_id}
-              data-replan-source-step={request.source_step_id || ''}
-              data-replan-status={request.status || 'requested'}
-              data-replan-trigger={request.trigger}
-              key={request.request_id}
-              title={request.failure_detail || request.reason || request.condition}
-            >
-              replan · {request.trigger}
-              {request.source_step_id ? ` · ${request.source_step_id}` : ''}
-              {fallbackTools.length ? ` · fallback: ${fallbackTools.join(', ')}` : ''}
-            </span>
+            <Fragment key={request.request_id}>
+              <span
+                className="studio-tool-permission"
+                data-replan-metadata-capability={metadataCapabilityId}
+                data-replan-planned-tool={plannedToolName}
+                data-replan-request-id={request.request_id}
+                data-replan-source-step={request.source_step_id || ''}
+                data-replan-status={request.status || 'requested'}
+                data-replan-step-status={stepStatus}
+                data-replan-target-capability={targetCapabilityId}
+                data-replan-trigger={request.trigger}
+                key={request.request_id}
+                title={request.failure_detail || request.reason || request.condition}
+              >
+                replan · {request.trigger}
+                {request.source_step_id ? ` · ${request.source_step_id}` : ''}
+                {fallbackTools.length ? ` · fallback: ${fallbackTools.join(', ')}` : ''}
+              </span>
+              {targetCapabilityId ? (
+                <span
+                  className="studio-tool-permission"
+                  data-replan-target-capability={targetCapabilityId}
+                  key={`${request.request_id}:capability`}
+                >
+                  capability · {targetCapabilityId}
+                </span>
+              ) : null}
+              {plannedToolName ? (
+                <span
+                  className="studio-tool-permission"
+                  data-replan-planned-tool={plannedToolName}
+                  key={`${request.request_id}:tool`}
+                >
+                  tool · {plannedToolName}
+                </span>
+              ) : null}
+              {stepTitle ? (
+                <span
+                  className="studio-tool-permission"
+                  data-replan-step-title={stepTitle}
+                  key={`${request.request_id}:step-title`}
+                >
+                  step · {stepTitle}
+                </span>
+              ) : null}
+              {stepStatus ? (
+                <span
+                  className="studio-tool-permission"
+                  data-replan-step-status={stepStatus}
+                  key={`${request.request_id}:step-status`}
+                >
+                  status · {stepStatus}
+                </span>
+              ) : null}
+              {inputPreview ? (
+                <span
+                  className="studio-tool-permission"
+                  data-replan-input-preview={inputPreview}
+                  key={`${request.request_id}:input`}
+                  title={inputPreview}
+                >
+                  input · {inputPreview}
+                </span>
+              ) : null}
+              {missingPermissions.map((permission) => (
+                <span
+                  className="studio-tool-permission missing"
+                  data-replan-missing-permission={permission}
+                  key={`${request.request_id}:permission:${permission}`}
+                >
+                  permission · {permission}
+                </span>
+              ))}
+              {blockingConditions.map((condition) => (
+                <span
+                  className="studio-tool-permission missing"
+                  data-replan-blocking-condition={condition}
+                  key={`${request.request_id}:blocker:${condition}`}
+                >
+                  blocker · {condition}
+                </span>
+              ))}
+            </Fragment>
           );
         })}
+      </div>
+    </section>
+  );
+}
+
+function PlannerCapabilityRecoveryInspector({
+  recoveries,
+}: {
+  recoveries: PlannerCapabilityRecovery[];
+}) {
+  return (
+    <section
+      data-capability-recovery-count={recoveries.length}
+      data-testid="agent-run-detail-planner-capability-recovery"
+    >
+      <div className="studio-tool-inspector-heading">
+        <h3>Capability Recovery</h3>
+        <span>{recoveries.length}</span>
+      </div>
+      <div className="studio-tool-pill-row">
+        {recoveries.map((recovery) => (
+          <Fragment key={recovery.capabilityId}>
+            <span
+              className="studio-tool-permission"
+              data-capability-recovery-action={recovery.suggestedAction}
+              data-capability-recovery-approval-required={
+                recovery.approvalRequired === undefined ? '' : String(recovery.approvalRequired)
+              }
+              data-capability-recovery-category={recovery.category}
+              data-capability-recovery-id={recovery.capabilityId}
+              data-capability-recovery-risk={recovery.riskLevel}
+              title={recovery.description}
+            >
+              recovery · {recovery.capabilityId}
+              {recovery.suggestedAction ? ` · ${recovery.suggestedAction}` : ''}
+            </span>
+            {recovery.recommendedEnableTools.slice(0, 6).map((tool) => (
+              <span
+                className="studio-tool-permission missing"
+                data-capability-recovery-enable-tool={tool}
+                key={`${recovery.capabilityId}:enable:${tool}`}
+              >
+                enable · {tool}
+              </span>
+            ))}
+            {recovery.missingTools.slice(0, 6).map((tool) => (
+              <span
+                className="studio-tool-permission missing"
+                data-capability-recovery-missing-tool={tool}
+                key={`${recovery.capabilityId}:missing-tool:${tool}`}
+              >
+                missing tool · {tool}
+              </span>
+            ))}
+            {recovery.availableTools.slice(0, 6).map((tool) => (
+              <span
+                className="studio-tool-permission"
+                data-capability-recovery-available-tool={tool}
+                key={`${recovery.capabilityId}:available-tool:${tool}`}
+              >
+                available · {tool}
+              </span>
+            ))}
+            {recovery.fallbackTools.slice(0, 6).map((tool) => (
+              <span
+                className="studio-tool-permission"
+                data-capability-recovery-fallback-tool={tool}
+                key={`${recovery.capabilityId}:fallback:${tool}`}
+              >
+                fallback · {tool}
+              </span>
+            ))}
+            {recovery.sourceStepIds.slice(0, 6).map((stepId) => (
+              <span
+                className="studio-tool-permission"
+                data-capability-recovery-source-step={stepId}
+                key={`${recovery.capabilityId}:step:${stepId}`}
+              >
+                step · {stepId}
+              </span>
+            ))}
+            {recovery.missingPermissions.slice(0, 6).map((permission) => (
+              <span
+                className="studio-tool-permission missing"
+                data-capability-recovery-missing-permission={permission}
+                key={`${recovery.capabilityId}:permission:${permission}`}
+              >
+                permission · {permission}
+              </span>
+            ))}
+            {recovery.blockingConditions.slice(0, 6).map((condition) => (
+              <span
+                className="studio-tool-permission missing"
+                data-capability-recovery-blocking-condition={condition}
+                key={`${recovery.capabilityId}:blocker:${condition}`}
+              >
+                blocker · {condition}
+              </span>
+            ))}
+          </Fragment>
+        ))}
       </div>
     </section>
   );
@@ -716,6 +925,74 @@ function truncatePlannerPreview(value: string): string {
   return clean.length > 160 ? `${clean.slice(0, 157)}...` : clean;
 }
 
+function plannerCapabilityRecoveriesFromPayload(payload: Record<string, unknown>): PlannerCapabilityRecovery[] {
+  return arrayRecords(payload.capability_recovery)
+    .map((record) => {
+      const capabilityId = stringValue(record.capability_id);
+      if (!capabilityId) return null;
+      return {
+        approvalRequired: booleanValue(record.approval_required, undefined),
+        availableTools: uniqueStrings(Array.isArray(record.available_tools) ? record.available_tools : []),
+        blockingConditions: uniqueStrings(
+          Array.isArray(record.blocking_conditions) ? record.blocking_conditions : [],
+        ),
+        capabilityId,
+        category: stringValue(record.category),
+        description: stringValue(record.description),
+        fallbackTools: uniqueStrings(Array.isArray(record.fallback_tools) ? record.fallback_tools : []),
+        missingPermissions: uniqueStrings(
+          Array.isArray(record.missing_permissions) ? record.missing_permissions : [],
+        ),
+        missingTools: uniqueStrings(Array.isArray(record.missing_tools) ? record.missing_tools : []),
+        recommendedEnableTools: uniqueStrings(
+          Array.isArray(record.recommended_enable_tools) ? record.recommended_enable_tools : [],
+        ),
+        riskLevel: stringValue(record.risk_level),
+        sourceStepIds: uniqueStrings(Array.isArray(record.source_step_ids) ? record.source_step_ids : []),
+        suggestedAction: stringValue(record.suggested_action),
+        title: stringValue(record.title),
+        tools: uniqueStrings(Array.isArray(record.tools) ? record.tools : []),
+      };
+    })
+    .filter((recovery): recovery is PlannerCapabilityRecovery => Boolean(recovery));
+}
+
+function mergePlannerCapabilityRecoveries(
+  current: PlannerCapabilityRecovery[],
+  incoming: PlannerCapabilityRecovery[],
+): PlannerCapabilityRecovery[] {
+  if (!incoming.length) return current;
+  const byCapabilityId = new Map(current.map((recovery) => [recovery.capabilityId, recovery]));
+  for (const recovery of incoming) {
+    const existing = byCapabilityId.get(recovery.capabilityId);
+    if (!existing) {
+      byCapabilityId.set(recovery.capabilityId, recovery);
+      continue;
+    }
+    byCapabilityId.set(recovery.capabilityId, {
+      ...existing,
+      approvalRequired: recovery.approvalRequired ?? existing.approvalRequired,
+      availableTools: uniqueStrings([...existing.availableTools, ...recovery.availableTools]),
+      blockingConditions: uniqueStrings([...existing.blockingConditions, ...recovery.blockingConditions]),
+      category: recovery.category || existing.category,
+      description: recovery.description || existing.description,
+      fallbackTools: uniqueStrings([...existing.fallbackTools, ...recovery.fallbackTools]),
+      missingPermissions: uniqueStrings([...existing.missingPermissions, ...recovery.missingPermissions]),
+      missingTools: uniqueStrings([...existing.missingTools, ...recovery.missingTools]),
+      recommendedEnableTools: uniqueStrings([
+        ...existing.recommendedEnableTools,
+        ...recovery.recommendedEnableTools,
+      ]),
+      riskLevel: recovery.riskLevel || existing.riskLevel,
+      sourceStepIds: uniqueStrings([...existing.sourceStepIds, ...recovery.sourceStepIds]),
+      suggestedAction: recovery.suggestedAction || existing.suggestedAction,
+      title: recovery.title || existing.title,
+      tools: uniqueStrings([...existing.tools, ...recovery.tools]),
+    });
+  }
+  return Array.from(byCapabilityId.values());
+}
+
 function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   let intent: TaskIntentSnapshot | null = null;
   let plan: RuntimePlanSnapshot | null = null;
@@ -725,6 +1002,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   let decisionId = '';
   let planId = '';
   let replanRequests: TaskReplanRequestSnapshot[] = [];
+  let capabilityRecovery: PlannerCapabilityRecovery[] = [];
   let routeToStudio: boolean | undefined;
   let selection: PlannerSelection | null = null;
   let eventCount = 0;
@@ -738,10 +1016,12 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     const eventType = String(event.event_type || '').trim();
     const plannerEventType = runtimePlannerEventType(eventType);
     const payload = objectRecord(event.payload);
+    const eventCapabilityRecovery = plannerCapabilityRecoveriesFromPayload(payload);
     const isRuntimePlannerDesktopIntentEvent = eventType === 'agent.desktop.intent_planned'
       && runtimePlannerDesktopIntentPayload(payload);
-    if (!plannerEventType && !isRuntimePlannerDesktopIntentEvent) continue;
+    if (!plannerEventType && !isRuntimePlannerDesktopIntentEvent && !eventCapabilityRecovery.length) continue;
     eventCount += 1;
+    capabilityRecovery = mergePlannerCapabilityRecoveries(capabilityRecovery, eventCapabilityRecovery);
     source = stringValue(payload.source) || source || (isRuntimePlannerDesktopIntentEvent ? 'runtime_planner' : '');
     decisionId = stringValue(payload.decision_id) || decisionId;
     planId = stringValue(payload.plan_id) || planId;
@@ -848,9 +1128,17 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   const effectivePlanId = planId || effectiveToolPlan?.plan_id || '';
   const effectivePlan = applyTaskCoreUpdates(plan, todoUpdateById, checkpointUpdateById);
 
-  if (!effectiveIntent && !plan && !steps.length && !selection && !replanRequests.length) return null;
+  if (
+    !effectiveIntent
+    && !plan
+    && !steps.length
+    && !selection
+    && !replanRequests.length
+    && !capabilityRecovery.length
+  ) return null;
   return {
     candidateIntents,
+    capabilityRecovery,
     decisionId,
     eventCount,
     intent: effectiveIntent,
@@ -929,6 +1217,7 @@ function plannerTraceFromSummary(summary: PlannerTraceSummarySnapshot | null | u
   if (!intent && !toolPlan && !selection) return null;
   return {
     candidateIntents: [],
+    capabilityRecovery: [],
     decisionId,
     eventCount,
     intent,
