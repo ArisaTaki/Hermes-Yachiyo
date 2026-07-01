@@ -15413,6 +15413,90 @@ def test_auto_discovered_app_open_followup_verifies_active_window() -> None:
     assert continuing_requests[1]["continue_to_model"] is True
 
 
+def test_discovered_app_direct_completion_requires_planned_verification() -> None:
+    planned_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "browser", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "browser",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+    selection_payload = {
+        "followup_target": {
+            "kind": "desktop_discovered_app_action",
+            "app_query": "browser",
+            "target_action": "open_app",
+        }
+    }
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.list_apps",
+            input_preview={"query": "browser", "limit": 20},
+            result={"ok": True},
+        ),
+        _timeline(
+            "agent.tool.call",
+            "app.open",
+            input_preview={"app_name": "Safari"},
+            result={"ok": True},
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.active_window",
+            input_preview={},
+            result={"ok": False, "error": "Safari is not foreground"},
+        ),
+    ]
+
+    assert (
+        custom_api_agent_module._runtime_planner_completed_discovered_app_direct_action(
+            planned_requests,
+            selection_payload,
+            timeline,
+            tool_timeline_start=0,
+        )
+        is False
+    )
+
+    timeline[-1] = _timeline(
+        "agent.tool.call",
+        "desktop.active_window",
+        input_preview={},
+        result={"ok": True},
+    )
+    assert (
+        custom_api_agent_module._runtime_planner_completed_discovered_app_direct_action(
+            planned_requests,
+            selection_payload,
+            timeline,
+            tool_timeline_start=0,
+        )
+        is True
+    )
+
+
 def test_runtime_planner_progress_records_auto_discovered_app_observation() -> None:
     decision = RuntimePlanner().decision(
         "打开一个能画图的应用，画一个圆并保存到桌面",

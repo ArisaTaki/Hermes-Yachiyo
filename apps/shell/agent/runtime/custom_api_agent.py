@@ -106,6 +106,12 @@ _DISCOVERED_APP_DIRECT_COMPLETION_TOOLS = {
     "desktop.focus_app",
 }
 
+_DISCOVERED_APP_DIRECT_VERIFICATION_TOOLS = {
+    *_DAILY_DESKTOP_VERIFY_TOOLS,
+    "screen.capture",
+}
+
+
 class RuntimeCustomApiAgentLoop:
     """Runs the model/tool loop for native-profile and custom API Agents."""
 
@@ -4962,19 +4968,40 @@ def _runtime_planner_completed_discovered_app_direct_action(
     if any(str(request.get("tool") or "").strip() != "desktop.list_apps" for request in followup_requests):
         return False
 
-    action_requests = [
-        request
-        for request in requests
+    indexed_action_requests = [
+        (index, request)
+        for index, request in enumerate(requests)
         if str(request.get("tool") or "").strip() in _DISCOVERED_APP_DIRECT_COMPLETION_TOOLS
         and _request_uses_discovered_app_resolution(request)
     ]
-    return any(
+    completed_action_indexes = [
+        index
+        for index, request in indexed_action_requests
+        if _runtime_planner_tool_request_completed(
+            request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        )
+    ]
+    if not completed_action_indexes:
+        return False
+    first_completed_action_index = min(completed_action_indexes)
+    verification_requests = [
+        request
+        for index, request in enumerate(requests)
+        if index > first_completed_action_index
+        and str(request.get("tool") or "").strip()
+        in _DISCOVERED_APP_DIRECT_VERIFICATION_TOOLS
+    ]
+    if not verification_requests:
+        return True
+    return all(
         _runtime_planner_tool_request_completed(
             request,
             timeline,
             tool_timeline_start=tool_timeline_start,
         )
-        for request in action_requests
+        for request in verification_requests
     )
 
 
