@@ -26,6 +26,31 @@ REQUIRED_CHECK_IDS: tuple[str, ...] = (
     "gpt_sovits_tts",
     "astrbot_plugin_bridge",
 )
+FULL_EXTERNAL_SMOKE_COMMAND = (
+    "python scripts/smoke_external_integrations.py "
+    "--bridge-url http://127.0.0.1:18420 "
+    "--live2d-archive /path/to/yachiyo-live2d.zip "
+    "--tts-voice-archive /path/to/yachiyo-gpt-sovits.zip "
+    "--gpt-sovits-base-url http://127.0.0.1:9880 "
+    "--astrbot "
+    "--report-json tmp/external-integrations-smoke.json"
+)
+REQUIRED_CHECK_NEXT_ACTIONS: dict[str, str] = {
+    "live2d_resource": (
+        "Prepare the real Yachiyo Live2D ZIP and rerun with "
+        "--live2d-archive /path/to/yachiyo-live2d.zip."
+    ),
+    "gpt_sovits_tts": (
+        "Prepare the real GPT-SoVITS voice ZIP, start the GPT-SoVITS API, "
+        "and rerun with --tts-voice-archive plus --gpt-sovits-base-url "
+        "without --skip-tts-test."
+    ),
+    "astrbot_plugin_bridge": (
+        "Run the AstrBot plugin bridge check with --astrbot; use "
+        "--astrbot-task-mode require when final signoff must prove Native "
+        "Agent task commands."
+    ),
+}
 
 
 class SmokeError(RuntimeError):
@@ -167,21 +192,117 @@ def _external_report(
         args,
         selected_required_check_ids=selected_required_check_ids,
     )
+    readiness = _readiness_summary(
+        args,
+        checks=checks,
+        mode=mode,
+        ok=ok,
+        missing_required_check_ids=metadata["missing_required_check_ids"],
+    )
     report: dict[str, Any] = {
         "ok": ok,
-        "complete": (
-            ok
-            and mode == "external_integrations"
-            and not metadata["missing_required_check_ids"]
-        ),
+        "complete": readiness["signoff_ready"],
         "mode": mode,
         "bridge_url": args.bridge_url.rstrip("/"),
         **metadata,
+        "readiness": readiness,
         "checks": checks,
     }
     if error:
         report["error"] = redact_api_error_text(error)
     return report
+
+
+def _check_ids_by_status(checks: Sequence[dict[str, Any]], status: str) -> list[str]:
+    return [
+        str(check.get("id") or "").strip()
+        for check in checks
+        if str(check.get("id") or "").strip()
+        and str(check.get("status") or "").strip() == status
+    ]
+
+
+def _readiness_summary(
+    args: argparse.Namespace,
+    *,
+    checks: Sequence[dict[str, Any]],
+    mode: str,
+    ok: bool,
+    missing_required_check_ids: Sequence[str],
+) -> dict[str, Any]:
+    passed_check_ids = _check_ids_by_status(checks, "passed")
+    failed_check_ids = [
+        str(check.get("id") or "").strip()
+        for check in checks
+        if str(check.get("id") or "").strip()
+        and str(check.get("status") or "").strip() != "passed"
+    ]
+    passed_required_check_ids = [
+        check_id for check_id in REQUIRED_CHECK_IDS if check_id in passed_check_ids
+    ]
+    failed_required_check_ids = [
+        check_id for check_id in REQUIRED_CHECK_IDS if check_id in failed_check_ids
+    ]
+    missing_required = [
+        check_id for check_id in missing_required_check_ids if check_id in REQUIRED_CHECK_IDS
+    ]
+    completion_blockers: list[str] = []
+    if missing_required:
+        completion_blockers.append("missing_required_checks")
+    if failed_check_ids or not ok:
+        completion_blockers.append("failed_checks")
+    if args.tts_voice_archive and args.skip_tts_test:
+        completion_blockers.append("gpt_sovits_tts_test_skipped")
+
+    signoff_ready = (
+        ok
+        and mode == "external_integrations"
+        and not completion_blockers
+        and passed_required_check_ids == list(REQUIRED_CHECK_IDS)
+    )
+    if signoff_ready:
+        status = "complete"
+    elif failed_check_ids or not ok:
+        status = "failed"
+    elif mode == "bridge_only":
+        status = "bridge_only"
+    elif passed_required_check_ids:
+        status = "partial"
+    else:
+        status = "incomplete"
+
+    next_actions: list[str] = []
+    if failed_check_ids:
+        next_actions.append(
+            "Fix failed checks before using this report as release signoff evidence: "
+            + ", ".join(failed_check_ids)
+            + "."
+        )
+    for check_id in missing_required:
+        action = REQUIRED_CHECK_NEXT_ACTIONS.get(check_id)
+        if action:
+            next_actions.append(action)
+    if "gpt_sovits_tts_test_skipped" in completion_blockers:
+        next_actions.append(
+            "Rerun without --skip-tts-test so the report proves a real GPT-SoVITS /ui/tts/test request."
+        )
+    if not next_actions and not signoff_ready:
+        next_actions.append(
+            "Rerun the full external integration smoke with real Live2D, GPT-SoVITS, and AstrBot resources."
+        )
+
+    return {
+        "status": status,
+        "signoff_ready": signoff_ready,
+        "passed_check_ids": passed_check_ids,
+        "failed_check_ids": failed_check_ids,
+        "passed_required_check_ids": passed_required_check_ids,
+        "failed_required_check_ids": failed_required_check_ids,
+        "missing_required_check_ids": missing_required,
+        "completion_blockers": completion_blockers,
+        "next_actions": next_actions,
+        "recommended_full_command": FULL_EXTERNAL_SMOKE_COMMAND,
+    }
 
 
 def _require_oha_bridge(status: dict[str, Any]) -> None:
@@ -534,6 +655,24 @@ def main(argv: Sequence[str] | None = None) -> int:
             "external integration smoke missing required checks: "
             + ", ".join(str(check_id) for check_id in missing_required)
         )
+    readiness = report.get("readiness")
+    if isinstance(readiness, dict):
+        print(f"external integration smoke readiness: {readiness.get('status')}")
+        completion_blockers = readiness.get("completion_blockers")
+        if isinstance(completion_blockers, list) and completion_blockers:
+            print(
+                "external integration smoke completion blockers: "
+                + ", ".join(str(item) for item in completion_blockers)
+            )
+        next_actions = readiness.get("next_actions")
+        if isinstance(next_actions, list) and next_actions:
+            print("external integration smoke next actions:")
+            for action in next_actions:
+                print(f"- {action}")
+        recommended = str(readiness.get("recommended_full_command") or "").strip()
+        if recommended and readiness.get("signoff_ready") is not True:
+            print("external integration smoke recommended full command:")
+            print(recommended)
     if not report.get("checks") and report.get("error"):
         print(f"external integration smoke: failed\n- {report['error']}")
     return 0 if report.get("ok") is True else 1

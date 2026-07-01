@@ -990,6 +990,18 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document external smoke full-signoff completion metadata",
     ),
     (
+        "`readiness.status` / `readiness.signoff_ready`",
+        "release packaging docs must document external smoke readiness metadata",
+    ),
+    (
+        "`readiness.completion_blockers`",
+        "release packaging docs must document external smoke completion blockers",
+    ),
+    (
+        "`--skip-tts-test` 只适合预检导入/保存链路",
+        "release packaging docs must state skip-tts-test is not final signoff evidence",
+    ),
+    (
         "--manual-checks-json tmp/external-integrations-smoke.json",
         "release packaging docs must document external smoke report manual evidence merging",
     ),

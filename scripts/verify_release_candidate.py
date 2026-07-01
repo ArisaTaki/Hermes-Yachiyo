@@ -1180,6 +1180,7 @@ def _external_integrations_smoke_manual_check(
         raw_payload.get("ok") is True
         and not missing_required_ids
         and passed_required_ids == list(EXTERNAL_INTEGRATION_SMOKE_REQUIRED_CHECK_IDS)
+        and raw_payload.get("complete") is not False
     )
     bridge_label = f" against {bridge_url}" if bridge_url else ""
     if all_required_passed:
@@ -1215,12 +1216,35 @@ def _external_integrations_smoke_manual_check(
             }
         ]
 
+    readiness = raw_payload.get("readiness") if isinstance(raw_payload, dict) else None
+    completion_blockers = (
+        [
+            str(item)
+            for item in readiness.get("completion_blockers", [])
+            if str(item).strip()
+        ]
+        if isinstance(readiness, dict)
+        and isinstance(readiness.get("completion_blockers"), list)
+        else []
+    )
+    next_actions = (
+        [
+            str(item)
+            for item in readiness.get("next_actions", [])
+            if str(item).strip()
+        ]
+        if isinstance(readiness, dict) and isinstance(readiness.get("next_actions"), list)
+        else []
+    )
+    still_needs = missing_required_ids if missing_required_ids else completion_blockers
     notes = (
         "Supporting automated evidence: external integration smoke passed selected "
         f"checks: {', '.join(passed_required_ids) if passed_required_ids else 'none'}. "
         "Full release signoff still needs: "
-        f"{', '.join(missing_required_ids) if missing_required_ids else 'none'}."
+        f"{', '.join(still_needs) if still_needs else 'none'}."
     )
+    if next_actions:
+        notes += " Next actions: " + " ".join(next_actions)
     return [
         {
             "id": "external_integrations_smoke",

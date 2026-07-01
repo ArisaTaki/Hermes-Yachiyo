@@ -202,6 +202,26 @@ def test_external_smoke_bridge_only_checks_oha_identity(monkeypatch):
             "astrbot_task_mode": "auto",
             "bridge_token_configured": False,
         },
+        "readiness": {
+            "status": "bridge_only",
+            "signoff_ready": False,
+            "passed_check_ids": ["bridge_status"],
+            "failed_check_ids": [],
+            "passed_required_check_ids": [],
+            "failed_required_check_ids": [],
+            "missing_required_check_ids": [
+                "live2d_resource",
+                "gpt_sovits_tts",
+                "astrbot_plugin_bridge",
+            ],
+            "completion_blockers": ["missing_required_checks"],
+            "next_actions": [
+                smoke.REQUIRED_CHECK_NEXT_ACTIONS["live2d_resource"],
+                smoke.REQUIRED_CHECK_NEXT_ACTIONS["gpt_sovits_tts"],
+                smoke.REQUIRED_CHECK_NEXT_ACTIONS["astrbot_plugin_bridge"],
+            ],
+            "recommended_full_command": smoke.FULL_EXTERNAL_SMOKE_COMMAND,
+        },
         "checks": [
             {
                 "id": "bridge_status",
@@ -322,10 +342,97 @@ def test_external_smoke_reports_selected_and_missing_required_checks(monkeypatch
     assert report["resource_inputs"]["tts_voice_archive"] == {"provided": False}
     assert report["resource_inputs"]["astrbot_task_mode"] == "auto"
     assert report["resource_inputs"]["bridge_token_configured"] is False
+    assert report["readiness"]["status"] == "partial"
+    assert report["readiness"]["signoff_ready"] is False
+    assert report["readiness"]["passed_required_check_ids"] == ["live2d_resource"]
+    assert report["readiness"]["missing_required_check_ids"] == [
+        "gpt_sovits_tts",
+        "astrbot_plugin_bridge",
+    ]
+    assert report["readiness"]["completion_blockers"] == ["missing_required_checks"]
+    assert report["readiness"]["next_actions"] == [
+        smoke.REQUIRED_CHECK_NEXT_ACTIONS["gpt_sovits_tts"],
+        smoke.REQUIRED_CHECK_NEXT_ACTIONS["astrbot_plugin_bridge"],
+    ]
     assert [check["id"] for check in report["checks"]] == [
         "bridge_status",
         "live2d_resource",
     ]
+
+
+def test_external_smoke_requires_real_tts_test_for_complete_signoff(
+    monkeypatch,
+    tmp_path,
+):
+    client = _FakeClient()
+    live2d = _zip_file(tmp_path / "yachiyo-live2d.zip")
+    voice = _zip_file(tmp_path / "yachiyo-voice.zip")
+
+    class ClientFactory:
+        def __init__(self, *args, **kwargs) -> None:
+            self.args = args
+            self.kwargs = kwargs
+
+        def __enter__(self):
+            return client
+
+        def __exit__(self, *_args):
+            return False
+
+    async def fake_astrbot(**_kwargs):
+        return {
+            "bridge_url": "http://127.0.0.1:18420",
+            "native_agent_ready": True,
+            "task_command_mode": "full",
+            "commands": ["status", "do", "tasks", "check", "ask", "screen", "window", "cancel"],
+            "response_lengths": {},
+        }
+
+    monkeypatch.setattr(smoke.httpx, "Client", ClientFactory)
+    monkeypatch.setattr(smoke, "run_astrbot_plugin_bridge_check", fake_astrbot)
+
+    report = smoke.run_smoke(
+        argparse.Namespace(
+            bridge_url="http://127.0.0.1:18420",
+            timeout=1.0,
+            bridge_only=False,
+            live2d_archive=live2d,
+            tts_voice_archive=voice,
+            gpt_sovits_base_url="http://127.0.0.1:9880",
+            tts_text="外部验收",
+            skip_tts_test=True,
+            astrbot=True,
+            astrbot_sender="external-smoke",
+            astrbot_skip_screen=False,
+            astrbot_skip_window=False,
+            astrbot_task_mode="require",
+        )
+    )
+
+    assert report["ok"] is True
+    assert report["complete"] is False
+    assert report["selected_required_check_ids"] == [
+        "live2d_resource",
+        "gpt_sovits_tts",
+        "astrbot_plugin_bridge",
+    ]
+    assert report["missing_required_check_ids"] == []
+    assert report["readiness"]["status"] == "partial"
+    assert report["readiness"]["signoff_ready"] is False
+    assert report["readiness"]["passed_required_check_ids"] == [
+        "live2d_resource",
+        "gpt_sovits_tts",
+        "astrbot_plugin_bridge",
+    ]
+    assert report["readiness"]["completion_blockers"] == [
+        "gpt_sovits_tts_test_skipped"
+    ]
+    assert "Rerun without --skip-tts-test" in report["readiness"]["next_actions"][0]
+    assert any(
+        check["id"] == "gpt_sovits_tts"
+        and check["evidence"]["tts_test_skipped"] is True
+        for check in report["checks"]
+    )
 
 
 def test_external_smoke_sends_bridge_token_without_archiving_secret(monkeypatch):

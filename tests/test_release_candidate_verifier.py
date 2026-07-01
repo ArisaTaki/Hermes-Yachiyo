@@ -3363,6 +3363,58 @@ def test_release_candidate_verifier_merges_external_integration_smoke_report(
     assert summary["automated_evidence_check_ids"] == ["external_integrations_smoke"]
 
 
+def test_release_candidate_verifier_keeps_incomplete_external_smoke_manual(
+    tmp_path,
+):
+    smoke_report_path = tmp_path / "tmp" / "external-integrations-smoke.json"
+    smoke_report_path.parent.mkdir(parents=True)
+    smoke_report_path.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "complete": False,
+                "bridge_url": "http://127.0.0.1:18420",
+                "readiness": {
+                    "status": "partial",
+                    "signoff_ready": False,
+                    "completion_blockers": ["gpt_sovits_tts_test_skipped"],
+                    "next_actions": [
+                        "Rerun without --skip-tts-test so the report proves a real GPT-SoVITS /ui/tts/test request."
+                    ],
+                },
+                "checks": [
+                    {"id": "bridge_status", "status": "passed"},
+                    {"id": "live2d_resource", "status": "passed"},
+                    {
+                        "id": "gpt_sovits_tts",
+                        "status": "passed",
+                        "evidence": {"tts_test_skipped": True},
+                    },
+                    {"id": "astrbot_plugin_bridge", "status": "passed"},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    checks, findings = rc._load_manual_release_candidate_checks(
+        tmp_path,
+        Path("tmp/external-integrations-smoke.json"),
+    )
+
+    assert findings == []
+    statuses = {check["id"]: check for check in checks}
+    external = statuses["external_integrations_smoke"]
+    assert external["status"] == "manual_required"
+    assert "gpt_sovits_tts_test_skipped" in external["notes"]
+    assert "Rerun without --skip-tts-test" in external["notes"]
+    summary = rc._manual_release_candidate_check_summary(checks)
+    assert summary["remaining_count"] == 7
+    assert summary["remaining_notes"] == [
+        {"id": "external_integrations_smoke", "notes": external["notes"]}
+    ]
+
+
 def test_release_candidate_verifier_marks_failed_external_integration_smoke_report(
     tmp_path,
 ):
