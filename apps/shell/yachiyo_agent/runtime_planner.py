@@ -1312,9 +1312,19 @@ class TaskIntentRouter:
             and not _is_browser_or_search_app_name(app_search_app_name)
         ):
             return _empty_intent("web_research", text)
-        if app_scoped_safe_operation and not _looks_like_external_info_lookup(text) and not browser_interaction:
+        if (
+            app_scoped_safe_operation
+            and not _url_hint(text)
+            and not _looks_like_external_info_lookup(text)
+            and not browser_interaction
+        ):
             return _empty_intent("web_research", text)
-        if app_scoped_desktop_operation and not web_search and not browser_interaction:
+        if (
+            app_scoped_desktop_operation
+            and not _url_hint(text)
+            and not web_search
+            and not browser_interaction
+        ):
             return _empty_intent("web_research", text)
         web_search_action = str(web_search.get("browser_action") or "").strip()
         browser_action = (
@@ -5254,6 +5264,13 @@ class RuntimePlanner:
                 *([prepare_step] if prepare_step is not None else []),
                 main_step,
             ]
+            if browser_action in {"open_search", "open_url"}:
+                steps = _append_web_open_followup_steps(
+                    intent,
+                    allowed,
+                    steps,
+                    depends_on=main_step.step_id,
+                )
             artifact_path = ""
             if (
                 not target_app
@@ -16922,6 +16939,123 @@ def _browser_url_action_hint(text: str, context_source: str) -> dict[str, Any]:
     if not _looks_like_plain_url_open(value):
         return {}
     return {"browser_action": "open_url", "url_hint": url}
+
+
+def _append_web_open_followup_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    depends_on: str,
+) -> list[ToolPlanStepSnapshot]:
+    followup = _web_open_followup_text(intent.user_goal, str(intent.inputs.get("url_hint") or ""))
+    if not followup:
+        return steps
+    safe_scroll = _web_open_followup_safe_scroll_hint(followup)
+    if not safe_scroll:
+        return steps
+    scroll_tool = _first_allowed(("desktop.safe_scroll",), allowed)
+    if not scroll_tool:
+        return steps
+    scroll_step = _step(
+        intent,
+        "scroll-opened-web-page",
+        "Scroll opened web page",
+        "desktop.ui_operation",
+        scroll_tool,
+        input_preview=safe_scroll,
+        depends_on=[depends_on],
+        action="scroll",
+        risk_level="low",
+        approval_required=False,
+        reason=(
+            "After opening the requested URL, run the explicit safe foreground scroll "
+            "instead of stopping at page launch."
+        ),
+    )
+    steps.append(scroll_step)
+    verify_tool = _first_allowed(("screen.capture", "browser.current_page"), allowed)
+    if verify_tool:
+        steps.append(
+            _step(
+                intent,
+                "verify-opened-web-page",
+                "Verify opened web page",
+                "browser.research" if verify_tool == "browser.current_page" else "desktop.visual_verification",
+                verify_tool,
+                input_preview=(
+                    {"reason": "verify opened web page after scroll"}
+                    if verify_tool == "screen.capture"
+                    else {}
+                ),
+                depends_on=[scroll_step.step_id],
+                action="capture_screen" if verify_tool == "screen.capture" else "read_page",
+                reason="Observe the browser state after the requested web-page follow-up action.",
+            )
+        )
+    return steps
+
+
+def _web_open_followup_safe_scroll_hint(text: str) -> dict[str, Any] | None:
+    followup = _clean_prompt(text)
+    if not followup:
+        return None
+    direct = safe_scroll_hint(followup)
+    if direct:
+        return direct
+    scroll_part = re.split(
+        r"(?:并且|并|然后|再|接着|之后|后|\band\s+then\b|\bthen\b|\band\b)"
+        r".{0,12}(?:截图|截屏|screenshot|screen\s+capture)",
+        followup,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip(" .，,。")
+    if scroll_part and scroll_part != followup:
+        return safe_scroll_hint(scroll_part)
+    return None
+
+
+def _web_open_followup_text(user_goal: str, url_hint: str) -> str:
+    value = _clean_prompt(user_goal)
+    if not value:
+        return ""
+    for variant in _web_url_text_variants(url_hint):
+        match = re.search(re.escape(variant), value, flags=re.IGNORECASE)
+        if match:
+            return _strip_web_followup_prefix(value[match.end():])
+    match = re.search(
+        r"(?:并且|并|然后|再|接着|之后|后|\band\s+then\b|\bthen\b|\band\b)\s*(?P<tail>.+)$",
+        value,
+        flags=re.IGNORECASE,
+    )
+    return _strip_web_followup_prefix(match.group("tail")) if match else ""
+
+
+def _web_url_text_variants(url_hint: str) -> list[str]:
+    url = str(url_hint or "").strip()
+    if not url:
+        return []
+    variants = [url]
+    without_scheme = re.sub(r"^https?://", "", url, flags=re.IGNORECASE).rstrip("/")
+    if without_scheme and without_scheme not in variants:
+        variants.append(without_scheme)
+    return variants
+
+
+def _strip_web_followup_prefix(value: str) -> str:
+    text = _clean_prompt(value)
+    for _ in range(4):
+        previous = text
+        text = re.sub(r"^[\s，,。；;:：]+", "", text).strip()
+        text = re.sub(
+            r"^(?:并且|并|然后|再|接着|之后|后|and\s+then|then|and)\s*",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        ).strip()
+        if text == previous:
+            break
+    return text
 
 
 def _direct_communication_candidate_hint(

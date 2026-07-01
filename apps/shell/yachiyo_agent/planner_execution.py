@@ -2343,7 +2343,43 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
         )
     ):
         request["continue_to_model"] = True
-    return [*prepare_requests, request]
+    requests = [*prepare_requests, request]
+    if browser_action in {"open_search", "open_url"}:
+        requests.extend(_web_open_followup_tool_requests(decision, allowed))
+    return requests
+
+
+def _web_open_followup_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    for step_id in ("scroll-opened-web-page", "verify-opened-web-page"):
+        step = _tool_plan_step(decision, step_id)
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if not tool_name or tool_name not in allowed or not _step_available(step):
+            continue
+        raw_input = getattr(step, "input_preview", {})
+        payload = dict(raw_input) if isinstance(raw_input, Mapping) else {}
+        requests.append(
+            _request(
+                tool_name,
+                payload,
+                planning_reason="planner_fallback_web_research",
+            )
+        )
+    return requests
+
+
+def _tool_plan_step(decision: Any, step_id: str) -> Any | None:
+    clean_step_id = str(step_id or "").strip()
+    if not clean_step_id:
+        return None
+    return next(
+        (
+            item
+            for item in getattr(getattr(decision.plan, "tool_plan", None), "steps", [])
+            if str(getattr(item, "step_id", "") or "").strip() == clean_step_id
+        ),
+        None,
+    )
 
 
 def _web_read_request_needs_model_followup(

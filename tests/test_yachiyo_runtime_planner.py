@@ -7145,6 +7145,31 @@ def test_runtime_planner_routes_explicit_browser_url_open_actions() -> None:
         "browser_action": "open_url",
     }
 
+    scroll = RuntimePlanner().decision(
+        "打开 example.com，然后滚动到底部",
+        allowed_tools=[*allowed, "desktop.safe_scroll", "screen.capture"],
+    )
+
+    assert scroll.selected_intent.kind == "web_research"
+    assert scroll.selected_intent.inputs == {
+        "url_hint": "https://example.com",
+        "browser_action": "open_url",
+    }
+    assert [step.step_id for step in scroll.plan.tool_plan.steps] == [
+        "open-web-url",
+        "scroll-opened-web-page",
+        "verify-opened-web-page",
+    ]
+    assert _step_by_id(scroll, "scroll-opened-web-page").tool_name == "desktop.safe_scroll"
+    assert _step_by_id(scroll, "scroll-opened-web-page").input_preview == {
+        "direction": "down",
+        "pages": 10,
+    }
+    assert _step_by_id(scroll, "verify-opened-web-page").tool_name == "screen.capture"
+    assert _step_by_id(scroll, "verify-opened-web-page").depends_on == [
+        "scroll-opened-web-page"
+    ]
+
     extract = RuntimePlanner().decision("打开 github.com 读一下内容", allowed_tools=allowed)
 
     assert extract.selected_intent.inputs == {
@@ -23905,6 +23930,35 @@ def test_planner_tool_requests_maps_explicit_browser_url_plan() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
         }
+    ]
+
+    scroll_requests = planner_desktop_tool_requests(
+        "打开 example.com，然后滚动到底部",
+        allowed_tools=["browser.open_url", "desktop.safe_scroll", "screen.capture"],
+    )
+
+    assert scroll_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_scroll",
+            "input": {"direction": "down", "pages": 10},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "verify opened web page after scroll"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
     ]
 
 
