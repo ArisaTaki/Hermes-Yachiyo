@@ -132,7 +132,7 @@ def test_main_chat_config_builder_projects_daily_entrypoint_runtime(tmp_path) ->
     assert config["workspace_policy"] == {
         "default_workdir": str(projects_dir),
         "readable_scopes": ["."],
-        "writable_scopes": [],
+        "writable_scopes": ["."],
     }
     assert projects_dir.exists()
     assert trusted == [(config["workspace_policy"], "main_chat", True)]
@@ -234,6 +234,8 @@ def test_main_chat_config_builder_projects_virtual_agent_without_trusting_worksp
     assert agent["workspace_policy"]["default_workdir"] == str(
         tmp_path / "agent-workspaces" / "builtin-yachiyo-main"
     )
+    assert agent["workspace_policy"]["readable_scopes"] == ["."]
+    assert agent["workspace_policy"]["writable_scopes"] == ["."]
     assert trusted == []
 
 
@@ -312,6 +314,7 @@ def test_native_runtime_installs_main_chat_config_builder(tmp_path) -> None:
 
         assert config["agent_id"] == "builtin:yachiyo-main"
         assert config["workspace_policy"]["readable_scopes"] == ["."]
+        assert config["workspace_policy"]["writable_scopes"] == []
         assert config["tool_policy"] == service._main_chat_tool_policy()
     finally:
         service.close()

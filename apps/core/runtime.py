@@ -232,6 +232,7 @@ class AppRuntime:
         approval_required = {
             "workspace.write_patch": True,
             "terminal.run": True,
+            "file.organize": True,
             **{
                 tool: True
                 for tool in (
@@ -247,6 +248,7 @@ class AppRuntime:
                 "workspace.read",
                 "data.analyze",
                 "workspace.write_patch",
+                "file.organize",
                 "terminal.run",
                 *DAILY_DESKTOP_TOOL_NAMES,
                 "memory.add",

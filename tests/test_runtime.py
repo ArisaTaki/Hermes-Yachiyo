@@ -161,7 +161,9 @@ def test_main_chat_runtime_policies_enable_native_tools_with_approval(tmp_path, 
     assert set(tool_policy["allowed_tools"]) == {
         "workspace.list",
         "workspace.read",
+        "data.analyze",
         "workspace.write_patch",
+        "file.organize",
         "terminal.run",
         *DAILY_DESKTOP_TOOL_NAMES,
         "memory.add",
@@ -173,6 +175,7 @@ def test_main_chat_runtime_policies_enable_native_tools_with_approval(tmp_path, 
         "artifact.write",
     }
     assert tool_policy["approval_required"]["workspace.write_patch"] is True
+    assert tool_policy["approval_required"]["file.organize"] is True
     assert tool_policy["approval_required"]["terminal.run"] is True
     for tool in (
         *MEDIUM_RISK_DESKTOP_TOOL_NAMES,

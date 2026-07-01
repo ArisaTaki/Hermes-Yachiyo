@@ -76,7 +76,7 @@ class MainChatRuntimeConfigBuilder:
                 {
                     "default_workdir": str(workdir),
                     "readable_scopes": ["."],
-                    "writable_scopes": [],
+                    "writable_scopes": ["."],
                 }
             )
         if not str(compiled.get("default_workdir") or "").strip():
@@ -91,7 +91,7 @@ class MainChatRuntimeConfigBuilder:
             {
                 "default_workdir": str(self._default_workspace_dir()),
                 "readable_scopes": ["."],
-                "writable_scopes": [],
+                "writable_scopes": ["."],
             }
         )
 
