@@ -611,6 +611,12 @@ class RuntimeCustomApiAgentLoop:
                                 run_id=run_id,
                                 budget=budget,
                             )
+                            self._record_runtime_planner_task_progress_events(
+                                runtime_planner_decision,
+                                timeline=timeline,
+                                tool_timeline_start=auto_tool_timeline_start,
+                                run_id=run_id,
+                            )
                         except AgentApprovalRequired as exc:
                             pending_approval = (
                                 exc.pending_approval
@@ -1572,6 +1578,13 @@ class RuntimeCustomApiAgentLoop:
             tool_name = str(getattr(step, "tool_name", "") or "").strip()
             step_id = str(getattr(step, "step_id", "") or "").strip()
             if not tool_name or not step_id:
+                continue
+            if _runtime_planner_step_has_status(
+                timeline,
+                decision_id=decision_id,
+                step_id=step_id,
+                statuses={"completed", "blocked", "skipped", "waiting_approval"},
+            ):
                 continue
             tool_event: dict[str, Any] | None = None
             while event_index < len(tool_events):
@@ -5079,6 +5092,38 @@ def _runtime_task_update_exists(
         )
         for event in timeline
     )
+
+
+def _runtime_planner_step_has_status(
+    timeline: list[dict[str, Any]],
+    *,
+    decision_id: str,
+    step_id: str,
+    statuses: set[str],
+) -> bool:
+    clean_step_id = str(step_id or "").strip()
+    if not clean_step_id:
+        return False
+    clean_decision_id = str(decision_id or "").strip()
+    expected_statuses = {
+        str(status or "").strip()
+        for status in statuses
+        if str(status or "").strip()
+    }
+    if not expected_statuses:
+        return False
+    for event in timeline:
+        if not isinstance(event, Mapping):
+            continue
+        if str(event.get("event") or "").strip() != "agent.task.todo.updated":
+            continue
+        if str(event.get("step_id") or "").strip() != clean_step_id:
+            continue
+        if clean_decision_id and str(event.get("decision_id") or "").strip() != clean_decision_id:
+            continue
+        if str(event.get("status") or "").strip() in expected_statuses:
+            return True
+    return False
 
 
 def _snapshot_payload(snapshot: Any) -> dict[str, Any]:

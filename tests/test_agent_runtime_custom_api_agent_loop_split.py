@@ -16043,6 +16043,34 @@ def test_custom_api_agent_loop_continues_discovered_media_app_without_model(
         "app.focus_and_click_ui_element",
         "desktop.ui_elements",
     ]
+    completed_todos = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["status"] == "completed"
+    ]
+    assert [event["step_id"] for event in completed_todos] == [
+        "discover-media-app",
+        "focus-media-app-search",
+        "type-media-search-query",
+        "submit-media-search",
+        "play-media-search-result",
+        "verify-media-search",
+    ]
+    completed_checkpoints = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event["status"] == "completed"
+    ]
+    assert [event["step_id"] for event in completed_checkpoints] == [
+        "discover-media-app",
+        "focus-media-app-search",
+        "type-media-search-query",
+        "submit-media-search",
+        "play-media-search-result",
+        "verify-media-search",
+    ]
 
 
 def test_daily_desktop_recovery_prompt_accepts_low_risk_open_actions() -> None:
