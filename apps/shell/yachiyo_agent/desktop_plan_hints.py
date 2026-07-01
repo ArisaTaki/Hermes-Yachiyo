@@ -3542,12 +3542,33 @@ def discovered_app_open_needs_model_followup(
             r"(?:应用(?:程序)?|app|软件|工具|程序)"
             r".{0,24}?(?:，|,|并|然后|再|接着|之后|后|\band\b|\bthen\b)"
             r".{0,80}(?:画|绘制|创建|制作|生成|编辑|处理|保存|导出|写入|输入|填入|"
-            r"标注|设计|draw|paint|create|make|edit|process|save|export|write|"
-            r"type|fill|annotate|design)",
+            r"标注|设计|点击|点一下|点按|单击|双击|按下|按一下|发送|触发|"
+            r"滚动|滑动|翻页|下滑|上滑|下滚|上滚|draw|paint|create|make|"
+            r"edit|process|save|export|write|type|fill|annotate|design|click|"
+            r"tap|press|hit|send|trigger|scroll|page)",
             text,
             flags=re.IGNORECASE,
         )
     )
+
+
+def _strip_pending_action_prefix(action: str) -> str:
+    value = clean(action)
+    if not value:
+        return ""
+    for _ in range(4):
+        previous = value
+        value = re.sub(r"^[\s，,。；;:：]+", "", value).strip()
+        value = re.sub(r"^(?:并且|并|然后|再|接着|之后)\s*", "", value).strip()
+        value = re.sub(
+            r"^(?:and\s+then|then|and)\s+",
+            "",
+            value,
+            flags=re.IGNORECASE,
+        ).strip()
+        if value == previous:
+            break
+    return value
 
 
 def discovered_app_pending_user_action(user_goal: str) -> str:
@@ -3562,8 +3583,12 @@ def discovered_app_pending_user_action(user_goal: str) -> str:
         flags=re.IGNORECASE,
     )
     if not match:
-        return text[:160]
-    action = re.sub(r"\s+", " ", str(match.group("action") or "").strip())
+        return _strip_pending_action_prefix(text)[:160]
+    action = re.sub(
+        r"\s+",
+        " ",
+        _strip_pending_action_prefix(str(match.group("action") or "")),
+    )
     return action[:160]
 
 

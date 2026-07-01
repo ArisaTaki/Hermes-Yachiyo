@@ -2667,6 +2667,107 @@ def test_planner_binds_discovered_app_hotkey_to_selected_app_without_dangling_ob
     ).depends_on == ["hotkey-selected-discovered-app"]
 
 
+def test_planner_binds_discovered_app_safe_key_to_selected_app() -> None:
+    prompt = "打开一个能读PDF的应用，然后按一下 Escape"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "app.focus_and_safe_key",
+        "desktop.safe_key",
+        "screen.capture",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "key-selected-discovered-app",
+        "verify-selected-discovered-app-action",
+    ]
+    safe_key = _step_by_id(decision, "key-selected-discovered-app")
+    assert safe_key.tool_name == "app.focus_and_safe_key"
+    assert safe_key.depends_on == ["open-selected-discovered-app"]
+    assert safe_key.input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "pdf",
+        "action": "escape",
+        "repeat_count": 1,
+    }
+    assert _step_by_id(
+        decision,
+        "verify-selected-discovered-app-action",
+    ).depends_on == ["key-selected-discovered-app"]
+
+
+def test_planner_binds_discovered_app_safe_scroll_to_selected_app() -> None:
+    prompt = "打开一个能读PDF的应用，然后向下滚动两页"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "app.focus_and_safe_scroll",
+        "desktop.safe_scroll",
+        "screen.capture",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "scroll-selected-discovered-app",
+        "verify-selected-discovered-app-action",
+    ]
+    scroll = _step_by_id(decision, "scroll-selected-discovered-app")
+    assert scroll.tool_name == "app.focus_and_safe_scroll"
+    assert scroll.depends_on == ["open-selected-discovered-app"]
+    assert scroll.input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "pdf",
+        "direction": "down",
+        "pages": 2,
+    }
+    assert _step_by_id(
+        decision,
+        "verify-selected-discovered-app-action",
+    ).depends_on == ["scroll-selected-discovered-app"]
+
+
+def test_planner_binds_discovered_app_safe_point_click_to_selected_app() -> None:
+    prompt = "打开一个能看图片的应用，然后点击坐标 120, 240"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "screen.capture",
+        "app.focus_and_safe_click",
+        "desktop.safe_click",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "click-selected-discovered-app-point",
+        "verify-selected-discovered-app-action",
+    ]
+    click = _step_by_id(decision, "click-selected-discovered-app-point")
+    assert click.tool_name == "app.focus_and_safe_click"
+    assert click.depends_on == ["open-selected-discovered-app"]
+    assert click.input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "image",
+        "x": 120,
+        "y": 240,
+    }
+    assert _step_by_id(
+        decision,
+        "verify-selected-discovered-app-action",
+    ).depends_on == ["click-selected-discovered-app-point"]
+
+
 def test_planner_does_not_duplicate_selected_app_open_shortcut_followup() -> None:
     prompt = "打开一个能写文档的应用，然后新建文档"
     allowed_tools = [

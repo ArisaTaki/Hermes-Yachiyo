@@ -8163,6 +8163,15 @@ def _append_selected_discovered_app_observation_step(
     inputs = intent.inputs if isinstance(intent.inputs, Mapping) else {}
     if not discovered_app_open_needs_model_followup(inputs, intent.user_goal):
         return
+    pending_action = discovered_app_pending_user_action(intent.user_goal)
+    if (
+        safe_shortcut_hint(pending_action)
+        or safe_key_hint(pending_action)
+        or safe_scroll_hint(pending_action)
+        or safe_click_hint(pending_action)
+        or hotkey_hint(pending_action)
+    ):
+        return
     if any(step.step_id == "observe-selected-discovered-app" for step in steps):
         return
     tool_name = _first_allowed(
@@ -8242,7 +8251,10 @@ def _append_selected_discovered_generic_action_steps(
     type_target = type_into_ui_hint(pending_action)
     safe_type_text = "" if type_target else safe_type_text_hint(pending_action)
     safe_shortcut = safe_shortcut_hint(pending_action)
-    hotkey = None if safe_shortcut else hotkey_hint(pending_action)
+    safe_key = None if safe_shortcut else safe_key_hint(pending_action)
+    safe_scroll = safe_scroll_hint(pending_action)
+    safe_click = safe_click_hint(pending_action)
+    hotkey = None if safe_shortcut or safe_key else hotkey_hint(pending_action)
     submit_action = submit_action_hint(pending_action)
     if safe_shortcut and _selected_discovered_open_step_already_runs_shortcut(
         steps,
@@ -8323,6 +8335,76 @@ def _append_selected_discovered_generic_action_steps(
             previous_step = "hotkey-selected-discovered-app"
             planned_action = True
 
+    if safe_key:
+        key_tool = _first_allowed(
+            (
+                "app.focus_and_safe_key",
+                "app.open_and_safe_key",
+                "desktop.safe_key",
+            ),
+            allowed,
+        )
+        if key_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "key-selected-discovered-app",
+                    "Press key in selected app",
+                    "desktop.ui_operation",
+                    key_tool,
+                    input_preview=_selected_discovered_app_operation_input(
+                        intent,
+                        key_tool,
+                        safe_key,
+                    ),
+                    depends_on=[previous_step],
+                    action="key",
+                    risk_level="medium",
+                    approval_required=True,
+                    reason=(
+                        "Press the requested safe key in the model-selected app through "
+                        "the generic foreground operation path."
+                    ),
+                )
+            )
+            previous_step = "key-selected-discovered-app"
+            planned_action = True
+
+    if safe_scroll:
+        scroll_tool = _first_allowed(
+            (
+                "app.focus_and_safe_scroll",
+                "app.open_and_safe_scroll",
+                "desktop.safe_scroll",
+            ),
+            allowed,
+        )
+        if scroll_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "scroll-selected-discovered-app",
+                    "Scroll selected app",
+                    "desktop.ui_operation",
+                    scroll_tool,
+                    input_preview=_selected_discovered_app_operation_input(
+                        intent,
+                        scroll_tool,
+                        safe_scroll,
+                    ),
+                    depends_on=[previous_step],
+                    action="scroll",
+                    risk_level="medium",
+                    approval_required=True,
+                    reason=(
+                        "Scroll the model-selected app after discovery instead of falling "
+                        "back to app-specific rules."
+                    ),
+                )
+            )
+            previous_step = "scroll-selected-discovered-app"
+            planned_action = True
+
     if type_target:
         type_tool = _first_allowed(
             (
@@ -8393,7 +8475,43 @@ def _append_selected_discovered_generic_action_steps(
             previous_step = "type-selected-discovered-app-text"
             planned_action = True
 
-    if click_target and not type_target:
+    if safe_click and not type_target:
+        click_tool = _first_allowed(
+            (
+                "app.focus_and_safe_click",
+                "app.open_and_safe_click",
+                "desktop.safe_click",
+                "desktop.click",
+            ),
+            allowed,
+        )
+        if click_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "click-selected-discovered-app-point",
+                    "Click selected app point",
+                    "desktop.ui_operation",
+                    click_tool,
+                    input_preview=_selected_discovered_app_operation_input(
+                        intent,
+                        click_tool,
+                        safe_click,
+                    ),
+                    depends_on=[previous_step],
+                    action="click",
+                    risk_level="medium",
+                    approval_required=True,
+                    reason=(
+                        "Use the requested safe point click after opening the discovered "
+                        "app, without relying on an app-specific branch."
+                    ),
+                )
+            )
+            previous_step = "click-selected-discovered-app-point"
+            planned_action = True
+
+    elif click_target and not type_target:
         click_tool = _first_allowed(
             (
                 "app.focus_and_click_ui_element",
