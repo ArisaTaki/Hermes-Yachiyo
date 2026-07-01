@@ -4741,12 +4741,14 @@ def _runtime_planner_verification_failure_payloads(
         if not tool_name or not step_id:
             continue
         tool_event: dict[str, Any] | None = None
-        while event_index < len(tool_events):
-            candidate = tool_events[event_index]
-            event_index += 1
+        scan_index = event_index
+        while scan_index < len(tool_events):
+            candidate = tool_events[scan_index]
             if str(candidate.get("detail") or "").strip() == tool_name:
                 tool_event = candidate
+                event_index = scan_index + 1
                 break
+            scan_index += 1
         if tool_event is None:
             continue
         if not _runtime_planner_step_is_ui_verification(step_id, tool_name):
@@ -4844,7 +4846,8 @@ def _runtime_planner_unavailable_failure_payloads(decision: Any) -> list[dict[st
 
 def _runtime_planner_step_is_ui_verification(step_id: str, tool_name: str) -> bool:
     return (
-        str(step_id or "").strip() == "verify-desktop-result"
+        str(step_id or "").strip()
+        in {"verify-desktop-result", "observe-selected-discovered-app"}
         and str(tool_name or "").strip() in {"desktop.ui_elements", "desktop.read_ui"}
     )
 
@@ -5630,7 +5633,8 @@ def _auto_replan_verification_recovery_requests(
         for payload in replan_payloads
         if isinstance(payload, Mapping)
         and str(payload.get("trigger") or "").strip() == "verification_failed"
-        and str(payload.get("source_step_id") or "").strip() == "verify-desktop-result"
+        and str(payload.get("source_step_id") or "").strip()
+        in {"verify-desktop-result", "observe-selected-discovered-app"}
     ]
     if not verification_payloads:
         return []

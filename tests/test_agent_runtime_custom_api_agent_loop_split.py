@@ -61,6 +61,36 @@ def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
     return {"event": event, "detail": detail, **extra}
 
 
+def _private_runtime_loop(
+    *,
+    append_run_event=None,
+) -> RuntimeCustomApiAgentLoop:
+    return RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": []}},
+        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda _allowed_tools: [],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=1,
+        operating_doctrine="",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: {},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda _message: "",
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda *_args, **_kwargs: None,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=append_run_event,
+    )
+
+
 _PLANNER_EVENT_TYPES = {
     "agent.intent.selected",
     "agent.plan.created",
@@ -14805,28 +14835,7 @@ def test_runtime_planner_progress_records_auto_discovered_app_observation() -> N
         allowed_tools=["desktop.list_apps", "app.open", "desktop.ui_elements"],
     )
     appended_events: list[dict[str, Any]] = []
-    loop = RuntimeCustomApiAgentLoop(
-        agent_model_config_private=lambda _agent: {},
-        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": []}},
-        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
-        check_context_budget=lambda _budget, _messages: None,
-        tool_schemas=lambda _allowed_tools: [],
-        normalize_tool_iteration=lambda value: int(value or 0),
-        max_tool_iterations=1,
-        operating_doctrine="",
-        memory_tool_names=set(),
-        future_task_tool_names=set(),
-        call_model=lambda *_args, **_kwargs: {},
-        coalesce_model_message=lambda value: value,
-        message_visible_content_text=lambda _message: "",
-        model_message_metadata=lambda _message: {},
-        tool_requests_from_message=lambda _message, _content: [],
-        timeline_factory=_timeline,
-        limit_model_output=lambda value: (str(value), False),
-        model_output_text_factory=agent_runtime._ModelOutputText,
-        tool_loop_projection=FakeToolLoopProjection(),
-        run_tool_requests=lambda *_args, **_kwargs: None,
-        error_type=agent_runtime.AgentRuntimeError,
+    loop = _private_runtime_loop(
         append_run_event=lambda run_id, event_type, payload: appended_events.append(
             {"run_id": run_id, "event_type": event_type, "payload": payload}
         ),
@@ -14900,6 +14909,66 @@ def test_runtime_planner_progress_records_auto_discovered_app_observation() -> N
         for event in appended_events
         if event["event_type"] == "agent.task.todo.updated"
     ] == ["open-selected-discovered-app", "observe-selected-discovered-app"]
+
+
+def test_runtime_planner_replans_empty_auto_discovered_app_observation() -> None:
+    decision = RuntimePlanner().decision(
+        "打开一个能画图的应用，画一个圆并保存到桌面",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.ui_elements"],
+    )
+    run_events: list[dict[str, Any]] = []
+    loop = _private_runtime_loop(
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.open",
+            input_preview={"app_name": "Pixelmator Pro"},
+            result={"ok": True, "data": {"app_name": "Pixelmator Pro"}},
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            input_preview={"limit": 80},
+            result={"ok": True, "data": {"elements": [], "count": 0}},
+        ),
+    ]
+
+    payloads = loop._record_runtime_planner_replan_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-discovered-observe-replan",
+    )
+
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload["trigger"] == "verification_failed"
+    assert payload["source_step_id"] == "observe-selected-discovered-app"
+    assert payload["source_tool_name"] == "desktop.ui_elements"
+    assert "no UI elements or readable text" in payload["failure_detail"]
+    assert [
+        event["payload"]["request_id"]
+        for event in run_events
+        if event["event_type"] == "agent.replan.requested"
+    ] == [payload["request_id"]]
+
+    recovery_requests = custom_api_agent_module._auto_replan_verification_recovery_requests(
+        payloads,
+        ["desktop.active_window", "desktop.list_windows", "screen.capture"],
+    )
+    assert [request["tool"] for request in recovery_requests] == [
+        "desktop.active_window",
+        "desktop.list_windows",
+        "screen.capture",
+    ]
+    assert all(request["continue_to_model"] is True for request in recovery_requests)
+    assert {
+        request["replan_request_id"] for request in recovery_requests
+    } == {payload["request_id"]}
 
 
 def test_auto_discovered_app_compose_followup_types_and_verifies() -> None:
