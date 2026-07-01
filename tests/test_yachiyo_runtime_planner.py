@@ -2898,6 +2898,16 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
         "分析 inputs 里的销售 CSV 并输出报告",
         allowed_tools=["file.search", "file.read", "python.run", "artifact.write"],
     )
+    generic_data_file_prompt = "找一个可用的数据文件，分析销售数据并输出图表和报告"
+    generic_data_file_decision = RuntimePlanner().decision(
+        generic_data_file_prompt,
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
+    english_data_file_prompt = "find an available data file and analyze sales data into a chart and report"
+    english_data_file_decision = RuntimePlanner().decision(
+        english_data_file_prompt,
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
 
     assert scoped_decision.selected_intent.kind == "data_analysis"
     assert scoped_decision.selected_intent.inputs["data_source_scope_hint"] == "Downloads"
@@ -2990,6 +3000,35 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
     assert _step_by_id(generic_decision, "inspect-data-source").tool_name == "workspace.list"
     assert _step_by_id(generic_decision, "inspect-data-source").input_preview == {}
     assert generic_decision.plan.tool_plan.open_questions == ["data_source"]
+    assert generic_data_file_decision.selected_intent.kind == "data_analysis"
+    assert generic_data_file_decision.selected_intent.inputs["data_source_kind"] == "text_table"
+    assert generic_data_file_decision.selected_intent.missing_inputs == ["data_source"]
+    assert _step_by_id(generic_data_file_decision, "inspect-data-source").input_preview == {
+        "pattern": "*.{csv,tsv,xls,xlsx,json,jsonl,txt,md,markdown}",
+        "file_type": "text_table",
+    }
+    assert planner_tool_requests(
+        generic_data_file_prompt,
+        ["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {
+                "pattern": "*.{csv,tsv,xls,xlsx,json,jsonl,txt,md,markdown}",
+                "file_type": "text_table",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+    assert english_data_file_decision.selected_intent.kind == "data_analysis"
+    assert english_data_file_decision.selected_intent.inputs["data_source_kind"] == "text_table"
+    assert _step_by_id(english_data_file_decision, "inspect-data-source").input_preview == {
+        "pattern": "*.{csv,tsv,xls,xlsx,json,jsonl,txt,md,markdown}",
+        "file_type": "text_table",
+    }
     assert broad_decision.selected_intent.kind == "data_analysis"
     assert broad_decision.selected_intent.missing_inputs == ["data_source"]
     assert _step_by_id(broad_decision, "inspect-data-source").tool_name == "workspace.list"

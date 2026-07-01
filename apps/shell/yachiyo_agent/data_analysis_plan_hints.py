@@ -180,6 +180,11 @@ def data_source_kind_hint(source_hint: str, text: str = "") -> str:
     named_source = named_data_source_hint(text)
     if named_source.get("kind"):
         return str(named_source["kind"])
+    generic_structured_source_kind = _generic_structured_data_source_kind_hint(
+        lowered_text
+    )
+    if generic_structured_source_kind:
+        return generic_structured_source_kind
     if any(
         marker in lowered_text
         for marker in ("价格表", "销售表", "数据表", "明细表", "报表", "price table", "pricing table")
@@ -191,6 +196,22 @@ def data_source_kind_hint(source_hint: str, text: str = "") -> str:
     ):
         return "text_table"
     return "unknown"
+
+
+def _generic_structured_data_source_kind_hint(lowered_text: str) -> str:
+    patterns = (
+        r"数据文件",
+        r"数据源",
+        r"\bdatasets?\b",
+        r"\bdata\s+files?\b",
+        r"\bdata\s+sources?\b",
+    )
+    for pattern in patterns:
+        for match in re.finditer(pattern, lowered_text, flags=re.IGNORECASE):
+            if _format_token_is_output_target(lowered_text, match.start()):
+                continue
+            return "text_table"
+    return ""
 
 
 def _normalize_data_source_kind(kind: str) -> str:

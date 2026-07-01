@@ -366,6 +366,8 @@ class TaskIntentRouter:
             return _empty_intent("desktop_operation", text)
         if named_data_source_hint(text) and _data_analysis_action_requested(text):
             return _empty_intent("desktop_operation", text)
+        if _looks_like_generic_data_source_analysis_request(text):
+            return _empty_intent("desktop_operation", text)
         app_capability = _app_capability_discovery_hint(text)
         file_open_discovery = _app_file_open_discovery_hint(text, metadata)
         app_search_app_hint = "" if app_capability else _app_name_hint(text)
@@ -1630,6 +1632,8 @@ class TaskIntentRouter:
 
     def _code_task_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
+            return _empty_intent("code_task", text)
+        if _looks_like_generic_data_source_analysis_request(text):
             return _empty_intent("code_task", text)
         if _app_command_palette_hint(text):
             return _empty_intent("code_task", text)
@@ -11510,6 +11514,19 @@ def _looks_like_scoped_data_analysis_request(text: str) -> bool:
             "图表",
             "可视化",
         ],
+    )
+
+
+def _looks_like_generic_data_source_analysis_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value or not _data_analysis_action_requested(value):
+        return False
+    return bool(
+        re.search(
+            r"(?:数据文件|数据源|\bdatasets?\b|\bdata\s+files?\b|\bdata\s+sources?\b)",
+            value,
+            flags=re.IGNORECASE,
+        )
     )
 
 
