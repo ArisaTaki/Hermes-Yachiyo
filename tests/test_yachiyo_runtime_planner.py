@@ -4859,6 +4859,15 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
 
     assert decision.selected_intent.kind == "web_research"
     assert _step_by_id(decision, "open-or-read-web").tool_name == "browser.current_page"
+    ui_pattern_research = RuntimePlanner().decision(
+        "研究一下当前应用里有哪些按钮的设计模式",
+        allowed_tools=["browser.open_url", "artifact.write", "desktop.ui_elements"],
+    )
+    assert ui_pattern_research.selected_intent.kind == "web_research"
+    assert ui_pattern_research.selected_intent.inputs["browser_action"] == "open_search"
+    assert ui_pattern_research.selected_intent.inputs["query"] == (
+        "当前应用里有哪些按钮的设计模式"
+    )
 
     search_decision = RuntimePlanner().decision(
         "研究一下 OpenAI 最新新闻并输出报告",
@@ -10704,6 +10713,10 @@ def test_runtime_planner_routes_current_ui_inspection_to_ui_elements() -> None:
         "读取当前窗口内容",
         allowed_tools=["desktop.active_window", "desktop.windows", "desktop.ui_elements"],
     )
+    current_app_buttons = RuntimePlanner().decision(
+        "看看当前应用里有哪些按钮",
+        allowed_tools=["desktop.active_window", "desktop.ui_elements", "browser.open_url"],
+    )
 
     assert decision.selected_intent.kind == "desktop_operation"
     assert decision.selected_intent.risk_level == "low"
@@ -10745,6 +10758,15 @@ def test_runtime_planner_routes_current_ui_inspection_to_ui_elements() -> None:
         "discover-desktop-state",
         "read-foreground-ui",
     ]
+    assert current_app_buttons.selected_intent.kind == "desktop_operation"
+    assert current_app_buttons.selected_intent.inputs["operation_hint"] == "read_ui"
+    assert current_app_buttons.selected_intent.inputs["ui_inspection_hint"] == {
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert _step_by_id(current_app_buttons, "read-foreground-ui").tool_name == (
+        "desktop.ui_elements"
+    )
 
 
 def test_runtime_planner_treats_control_presence_as_observation() -> None:

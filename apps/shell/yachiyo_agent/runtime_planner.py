@@ -1269,6 +1269,8 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         if type_into_ui_hint(text) and not _has_browser_page_context(text):
             return _empty_intent("web_research", text)
+        if ui_inspection_hint(text) is not None and _looks_like_local_ui_inspection_request(text):
+            return _empty_intent("web_research", text)
         if _desktop_window_text_context_hint(text):
             return _empty_intent("web_research", text)
         if (
@@ -22344,6 +22346,71 @@ def _looks_like_ui_operation(text: str) -> bool:
     return _contains_any(
         text,
         ["click", "type", "press", "shortcut", "scroll", "点击", "输入", "按", "快捷键", "滚动", "发送"],
+    )
+
+
+def _looks_like_local_ui_inspection_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if _contains_any(
+        value,
+        (
+            "研究",
+            "调研",
+            "设计模式",
+            "原理",
+            "最新",
+            "新闻",
+            "价格",
+            "定价",
+            "research",
+            "latest",
+            "news",
+            "pricing",
+            "price",
+            "pattern",
+            "patterns",
+        ),
+    ):
+        return False
+    if not _contains_any(
+        value,
+        (
+            "当前应用",
+            "前台应用",
+            "当前窗口",
+            "前台窗口",
+            "当前界面",
+            "前台界面",
+            "当前屏幕",
+            "这个屏幕",
+            "屏幕",
+            "current app",
+            "foreground app",
+            "current window",
+            "foreground window",
+            "current screen",
+            "screen",
+        ),
+    ):
+        return False
+    return bool(
+        re.search(
+            r"(?:看看|查看|检查|列出|列一下|读一下|识别|有哪些|有什么|有啥|"
+            r"inspect|show|list|read|check).{0,24}"
+            r"(?:按钮|控件|元素|菜单|输入框|文本框|button|buttons|control|controls|"
+            r"element|elements|menu|field|fields|input)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:按钮|控件|元素|菜单|输入框|文本框|button|buttons|control|controls|"
+            r"element|elements|menu|field|fields|input).{0,24}"
+            r"(?:有哪些|有什么|有啥|显示|可见|visible|available)",
+            value,
+            flags=re.IGNORECASE,
+        )
     )
 
 
