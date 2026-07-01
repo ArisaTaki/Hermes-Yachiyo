@@ -1048,7 +1048,11 @@ def _append_media_app_verify_step(
     )
     if not tool_name:
         return
-    payload = {"role_filter": "", "limit": 80} if tool_name == "desktop.ui_elements" else {}
+    payload = (
+        {"role_filter": "", "limit": 80}
+        if tool_name in {"desktop.ui_elements", "desktop.read_ui"}
+        else {}
+    )
     plan.append((tool_name, payload))
 
 
@@ -3427,8 +3431,21 @@ def _allowed_tool_set(allowed_tools: Iterable[str] | None) -> set[str] | None:
     return {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
 
 
+_DESKTOP_HINT_TOOL_ALIASES = {
+    "app.open": "desktop.open_app",
+    "app.focus": "desktop.focus_app",
+    "desktop.windows": "desktop.list_windows",
+    "desktop.ui_elements": "desktop.read_ui",
+    "desktop.hotkey": "desktop.shortcut",
+    "desktop.type_text": "desktop.type",
+}
+
+
 def _first_allowed(tools: Iterable[str], allowed: set[str] | None) -> str | None:
     for tool in tools:
         if allowed is None or tool in allowed:
             return tool
+        alias = _DESKTOP_HINT_TOOL_ALIASES.get(tool)
+        if allowed is not None and alias in allowed:
+            return alias
     return None

@@ -15011,7 +15011,7 @@ def test_runtime_planner_treats_desktop_media_app_aliases_as_app_control() -> No
         allowed_tools=[
             "desktop.list_apps",
             "desktop.open_app",
-            "desktop.ui_elements",
+            "desktop.read_ui",
         ],
     )
 
@@ -15031,6 +15031,10 @@ def test_runtime_planner_treats_desktop_media_app_aliases_as_app_control() -> No
     assert _step_by_id(prepare, "verify-media-playback").depends_on == [
         "open-media-app"
     ]
+    prepare_verify = _step_by_id(prepare, "verify-media-playback")
+    assert prepare_verify.tool_name == "desktop.read_ui"
+    assert prepare_verify.action == "read_ui"
+    assert prepare_verify.input_preview == {"role_filter": "", "limit": 80}
 
     search = RuntimePlanner().decision(
         "打开 Apple Music 搜索超时空辉夜姬并播放",
@@ -15039,7 +15043,7 @@ def test_runtime_planner_treats_desktop_media_app_aliases_as_app_control() -> No
             "desktop.safe_shortcut",
             "desktop.safe_type_text",
             "desktop.search_submit",
-            "desktop.ui_elements",
+            "desktop.read_ui",
         ],
     )
 
@@ -15057,6 +15061,10 @@ def test_runtime_planner_treats_desktop_media_app_aliases_as_app_control() -> No
     assert _step_by_id(search, "focus-media-app-search").depends_on == [
         "open-media-app"
     ]
+    search_verify = _step_by_id(search, "verify-media-search")
+    assert search_verify.tool_name == "desktop.read_ui"
+    assert search_verify.action == "read_ui"
+    assert search_verify.input_preview == {"role_filter": "", "limit": 80}
 
 
 def test_runtime_planner_discovers_generic_media_app_when_query_playback_tool_is_missing() -> None:

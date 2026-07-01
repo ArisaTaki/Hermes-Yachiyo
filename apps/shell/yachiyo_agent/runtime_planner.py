@@ -4729,7 +4729,12 @@ class RuntimePlanner:
                     capability_id = "media.playback"
                     action = "play"
                     reason = "Start playback from the media app results after submitting the explicit search."
-                elif tool_name in {"desktop.ui_elements", "desktop.active_window", "screen.capture"}:
+                elif tool_name in {
+                    "desktop.ui_elements",
+                    "desktop.read_ui",
+                    "desktop.active_window",
+                    "screen.capture",
+                }:
                     step_id = "verify-media-search"
                     title = "Verify media search"
                     capability_id = "desktop.app_discovery"
@@ -4788,6 +4793,7 @@ class RuntimePlanner:
                         )
                     elif prepare_tool_name in {
                         "desktop.ui_elements",
+                        "desktop.read_ui",
                         "desktop.active_window",
                         "screen.capture",
                     }:
