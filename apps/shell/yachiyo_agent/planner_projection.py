@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
-import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .contracts import PlannerDecisionSnapshot
+from .desktop_plan_hints import (
+    discovered_app_open_needs_model_followup,
+    discovered_app_pending_user_action,
+)
 from .planner_execution import planner_orchestration_requests
 from .replans import (
     task_replan_request_from_failure,
@@ -655,70 +658,18 @@ def _desktop_discovered_app_followup_target(
                 if key in ui_inspection and ui_inspection[key] not in (None, "")
             },
         }
-    elif _desktop_discovered_app_open_needs_model_followup(inputs, decision):
+    user_goal = str(
+        getattr(getattr(decision, "selected_intent", None), "user_goal", "") or ""
+    )
+    needs_open_followup = discovered_app_open_needs_model_followup(inputs, user_goal)
+    if "post_action_observation" not in payload and needs_open_followup:
         payload["post_action_observation"] = {
             "tool": "desktop.ui_elements",
             "input": {"limit": 80},
             "continue_to_model": True,
         }
-        payload["pending_user_action"] = _desktop_discovered_app_pending_action(
-            inputs,
-            decision,
-        )
+        payload["pending_user_action"] = discovered_app_pending_user_action(user_goal)
     return payload
-
-
-def _desktop_discovered_app_open_needs_model_followup(
-    inputs: Mapping[str, Any],
-    decision: Any | None,
-) -> bool:
-    app_capability = _desktop_discovery_capability_hint(inputs)
-    if not app_capability:
-        return False
-    if isinstance(inputs.get("safe_shortcut_hint"), Mapping):
-        return False
-    if isinstance(inputs.get("app_search_hint"), Mapping):
-        return False
-    if isinstance(inputs.get("communication_compose_hint"), Mapping):
-        return False
-    if str(inputs.get("foreground_compose_text_hint") or "").strip():
-        return False
-    if str(inputs.get("selected_app_target_path_hint") or "").strip():
-        return False
-    text = str(getattr(getattr(decision, "selected_intent", None), "user_goal", "") or "")
-    if not text:
-        return False
-    return bool(
-        re.search(
-            r"(?:应用(?:程序)?|app|软件|工具|程序)"
-            r".{0,24}?(?:，|,|并|然后|再|接着|之后|后|\band\b|\bthen\b)"
-            r".{0,80}(?:画|绘制|创建|制作|生成|编辑|处理|保存|导出|写入|输入|填入|"
-            r"标注|设计|draw|paint|create|make|edit|process|save|export|write|"
-            r"type|fill|annotate|design)",
-            text,
-            flags=re.IGNORECASE,
-        )
-    )
-
-
-def _desktop_discovered_app_pending_action(
-    inputs: Mapping[str, Any],
-    decision: Any | None,
-) -> str:
-    text = str(getattr(getattr(decision, "selected_intent", None), "user_goal", "") or "").strip()
-    if not text:
-        return ""
-    match = re.search(
-        r"(?:应用(?:程序)?|app|软件|工具|程序)"
-        r".{0,24}?(?:，|,|并|然后|再|接着|之后|后|\band\b|\bthen\b)"
-        r"(?P<action>.+)$",
-        text,
-        flags=re.IGNORECASE,
-    )
-    if not match:
-        return text[:160]
-    action = re.sub(r"\s+", " ", str(match.group("action") or "").strip())
-    return action[:160]
 
 
 def _desktop_discovered_app_search_payload(

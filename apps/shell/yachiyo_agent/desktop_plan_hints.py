@@ -3517,6 +3517,56 @@ def contains_any(text: str, needles: list[str] | tuple[str, ...]) -> bool:
     return any(str(needle).lower() in lowered for needle in needles)
 
 
+def discovered_app_open_needs_model_followup(
+    inputs: Mapping[str, Any],
+    user_goal: str,
+) -> bool:
+    app_capability = inputs.get("app_capability_hint")
+    if not isinstance(app_capability, Mapping) or not app_capability:
+        return False
+    if isinstance(inputs.get("safe_shortcut_hint"), Mapping):
+        return False
+    if isinstance(inputs.get("app_search_hint"), Mapping):
+        return False
+    if isinstance(inputs.get("communication_compose_hint"), Mapping):
+        return False
+    if str(inputs.get("foreground_compose_text_hint") or "").strip():
+        return False
+    if str(inputs.get("selected_app_target_path_hint") or "").strip():
+        return False
+    text = clean(user_goal)
+    if not text:
+        return False
+    return bool(
+        re.search(
+            r"(?:应用(?:程序)?|app|软件|工具|程序)"
+            r".{0,24}?(?:，|,|并|然后|再|接着|之后|后|\band\b|\bthen\b)"
+            r".{0,80}(?:画|绘制|创建|制作|生成|编辑|处理|保存|导出|写入|输入|填入|"
+            r"标注|设计|draw|paint|create|make|edit|process|save|export|write|"
+            r"type|fill|annotate|design)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def discovered_app_pending_user_action(user_goal: str) -> str:
+    text = clean(user_goal)
+    if not text:
+        return ""
+    match = re.search(
+        r"(?:应用(?:程序)?|app|软件|工具|程序)"
+        r".{0,24}?(?:，|,|并|然后|再|接着|之后|后|\band\b|\bthen\b)"
+        r"(?P<action>.+)$",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return text[:160]
+    action = re.sub(r"\s+", " ", str(match.group("action") or "").strip())
+    return action[:160]
+
+
 def _allowed_tool_set(allowed_tools: Iterable[str] | None) -> set[str] | None:
     if allowed_tools is None:
         return None

@@ -50,6 +50,7 @@ from .desktop_plan_hints import (
     app_control_tool_candidates,
     app_foreground_tool_candidates,
     click_target_hint,
+    discovered_app_open_needs_model_followup,
     focus_window_hint,
     foreground_management_hint,
     hotkey_hint,
@@ -8138,11 +8139,15 @@ def _append_selected_discovered_app_observation_step(
     *,
     depends_on: str,
 ) -> None:
-    if not _selected_discovered_app_open_needs_model_followup(intent):
+    inputs = intent.inputs if isinstance(intent.inputs, Mapping) else {}
+    if not discovered_app_open_needs_model_followup(inputs, intent.user_goal):
         return
     if any(step.step_id == "observe-selected-discovered-app" for step in steps):
         return
-    tool_name = _first_allowed(("desktop.ui_elements", "desktop.read_ui", "screen.capture"), allowed)
+    tool_name = _first_allowed(
+        ("desktop.ui_elements", "desktop.read_ui", "screen.capture"),
+        allowed,
+    )
     input_preview = (
         {"limit": 80}
         if tool_name in {"desktop.ui_elements", "desktop.read_ui"}
@@ -8164,39 +8169,6 @@ def _append_selected_discovered_app_observation_step(
                 "Observe the model-selected app after opening it because the user asked "
                 "for a follow-up desktop action, not just app launch."
             ),
-        )
-    )
-
-
-def _selected_discovered_app_open_needs_model_followup(
-    intent: TaskIntentSnapshot,
-) -> bool:
-    inputs = intent.inputs if isinstance(intent.inputs, Mapping) else {}
-    app_capability = inputs.get("app_capability_hint")
-    if not isinstance(app_capability, Mapping) or not app_capability:
-        return False
-    if isinstance(inputs.get("safe_shortcut_hint"), Mapping):
-        return False
-    if isinstance(inputs.get("app_search_hint"), Mapping):
-        return False
-    if isinstance(inputs.get("communication_compose_hint"), Mapping):
-        return False
-    if str(inputs.get("foreground_compose_text_hint") or "").strip():
-        return False
-    if str(inputs.get("selected_app_target_path_hint") or "").strip():
-        return False
-    text = _clean_prompt(intent.user_goal)
-    if not text:
-        return False
-    return bool(
-        re.search(
-            r"(?:应用(?:程序)?|app|软件|工具|程序)"
-            r".{0,24}?(?:，|,|并|然后|再|接着|之后|后|\band\b|\bthen\b)"
-            r".{0,80}(?:画|绘制|创建|制作|生成|编辑|处理|保存|导出|写入|输入|填入|"
-            r"标注|设计|draw|paint|create|make|edit|process|save|export|write|"
-            r"type|fill|annotate|design)",
-            text,
-            flags=re.IGNORECASE,
         )
     )
 
