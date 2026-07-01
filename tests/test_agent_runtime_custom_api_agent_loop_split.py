@@ -3552,6 +3552,42 @@ def test_model_followup_pending_plan_promotes_model_terminal_command() -> None:
     )
 
 
+def test_model_followup_pending_plan_promotes_model_artifact_content() -> None:
+    requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            "planning_reason": "planner_prefetch_report_context",
+            "pending_plan_steps": [
+                {
+                    "step_id": "write-report-artifact",
+                    "tool_name": "artifact.write",
+                    "capability_id": "artifact.write",
+                    "input_preview": {
+                        "path": "reports/summary.md",
+                        "body_source": "model_generated_content",
+                    },
+                }
+            ],
+        },
+        ["artifact.write"],
+        generated_content="# Summary\n\nExtracted findings.",
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "artifact.write",
+            "input": {
+                "path": "reports/summary.md",
+                "content": "# Summary\n\nExtracted findings.",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "step_id": "write-report-artifact",
+            "capability_id": "artifact.write",
+        }
+    ]
+
+
 def test_custom_api_agent_loop_auto_dispatches_pending_terminal_command_from_model_text() -> None:
     budget = FakeBudget()
     timeline = [

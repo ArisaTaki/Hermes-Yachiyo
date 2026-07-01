@@ -8758,6 +8758,7 @@ def _followup_event_has_readable_source(event: Mapping[str, Any]) -> bool:
 
 _MODEL_FOLLOWUP_AUTO_PENDING_TOOLS = {
     "app.open",
+    "artifact.write",
     "app.focus",
     "app.focus_and_click_ui_element",
     "app.focus_and_hotkey",
@@ -8854,6 +8855,13 @@ def _model_followup_pending_plan_request(
         )
         if not input_payload:
             return {}
+    elif tool_name == "artifact.write":
+        input_payload = _model_followup_artifact_pending_input(
+            raw_input,
+            generated_content,
+        )
+        if not input_payload:
+            return {}
     else:
         if not raw_input and tool_name not in {
             "desktop.active_window",
@@ -8878,6 +8886,23 @@ def _model_followup_pending_plan_request(
     if capability_id:
         request["capability_id"] = capability_id
     return request
+
+
+def _model_followup_artifact_pending_input(
+    raw_input: Mapping[str, Any],
+    generated_content: str,
+) -> dict[str, Any]:
+    if not isinstance(raw_input, Mapping):
+        return {}
+    path = str(raw_input.get("path") or "").strip()
+    if not path:
+        return {}
+    content = str(raw_input.get("content") or "").strip()
+    if not content:
+        content = str(generated_content or "").strip()
+    if not content:
+        return {}
+    return {"path": path, "content": content}
 
 
 def _model_followup_terminal_pending_input(
