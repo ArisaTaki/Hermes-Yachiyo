@@ -969,6 +969,7 @@ class RuntimeCustomApiAgentLoop:
                     auto_pending_plan_requests = _model_followup_pending_plan_requests(
                         followup_context,
                         allowed_tools,
+                        generated_content=content,
                     )
                     if auto_pending_plan_requests:
                         messages.append({"role": "assistant", "content": content})
@@ -8790,6 +8791,7 @@ _MODEL_FOLLOWUP_AUTO_PENDING_TOOLS = {
     "desktop.type_into_ui_element",
     "desktop.ui_elements",
     "screen.capture",
+    "terminal.run",
 }
 
 _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS = 6
@@ -8798,6 +8800,8 @@ _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS = 6
 def _model_followup_pending_plan_requests(
     followup_context: Mapping[str, Any] | None,
     allowed_tools: Iterable[str],
+    *,
+    generated_content: str = "",
 ) -> list[dict[str, Any]]:
     if not isinstance(followup_context, Mapping):
         return []
@@ -8816,6 +8820,7 @@ def _model_followup_pending_plan_requests(
             raw_step,
             allowed,
             planning_reason=planning_reason,
+            generated_content=generated_content,
         )
         if not request:
             if requests:
@@ -8832,6 +8837,7 @@ def _model_followup_pending_plan_request(
     allowed: set[str],
     *,
     planning_reason: str,
+    generated_content: str = "",
 ) -> dict[str, Any]:
     tool_name = str(step.get("tool_name") or "").strip()
     if (
@@ -8841,18 +8847,27 @@ def _model_followup_pending_plan_request(
     ):
         return {}
     raw_input = step.get("input_preview") if isinstance(step.get("input_preview"), Mapping) else {}
-    if not raw_input and tool_name not in {
-        "desktop.active_window",
-        "desktop.read_ui",
-        "desktop.search_submit",
-        "desktop.submit_foreground",
-        "desktop.ui_elements",
-        "screen.capture",
-    }:
-        return {}
+    if tool_name == "terminal.run":
+        input_payload = _model_followup_terminal_pending_input(
+            raw_input,
+            generated_content,
+        )
+        if not input_payload:
+            return {}
+    else:
+        if not raw_input and tool_name not in {
+            "desktop.active_window",
+            "desktop.read_ui",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+            "screen.capture",
+        }:
+            return {}
+        input_payload = dict(raw_input)
     request = _request_like(
         tool_name,
-        dict(raw_input),
+        input_payload,
         source="runtime_planner",
         planning_reason=planning_reason or "planner_followup_pending_plan",
     )
@@ -8863,6 +8878,122 @@ def _model_followup_pending_plan_request(
     if capability_id:
         request["capability_id"] = capability_id
     return request
+
+
+def _model_followup_terminal_pending_input(
+    raw_input: Mapping[str, Any],
+    generated_content: str,
+) -> dict[str, Any]:
+    if isinstance(raw_input, Mapping):
+        command = str(raw_input.get("command") or "").strip()
+        if command:
+            return _terminal_run_input_payload(raw_input, command)
+    command = _terminal_command_from_model_followup_content(generated_content)
+    if not command:
+        return {}
+    payload: dict[str, Any] = {"command": command, "shell": True}
+    timeout = raw_input.get("timeout_seconds") if isinstance(raw_input, Mapping) else None
+    if isinstance(timeout, int) and not isinstance(timeout, bool) and 1 <= timeout <= 120:
+        payload["timeout_seconds"] = timeout
+    else:
+        payload["timeout_seconds"] = 60
+    return payload
+
+
+def _terminal_run_input_payload(
+    raw_input: Mapping[str, Any],
+    command: str,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"command": command}
+    timeout = raw_input.get("timeout_seconds")
+    if isinstance(timeout, int) and not isinstance(timeout, bool) and 1 <= timeout <= 120:
+        payload["timeout_seconds"] = timeout
+    shell = raw_input.get("shell")
+    if isinstance(shell, bool):
+        payload["shell"] = shell
+    return payload
+
+
+_MODEL_FOLLOWUP_TERMINAL_LANGS = {
+    "bash",
+    "console",
+    "fish",
+    "sh",
+    "shell",
+    "shell-session",
+    "terminal",
+    "zsh",
+}
+
+
+def _terminal_command_from_model_followup_content(content: str) -> str:
+    text = str(content or "").strip()
+    if not text:
+        return ""
+    for match in re.finditer(r"```(?P<lang>[^\n`]*)\n(?P<body>.*?)```", text, flags=re.DOTALL):
+        lang = str(match.group("lang") or "").strip().lower()
+        lang = re.split(r"\s+", lang, maxsplit=1)[0] if lang else ""
+        if lang not in _MODEL_FOLLOWUP_TERMINAL_LANGS:
+            continue
+        command = _clean_terminal_command_block(match.group("body") or "")
+        if _terminal_followup_command_allowed(command):
+            return command
+    for line in text.splitlines():
+        prompt_match = re.match(r"^\s*(?:\$|%)\s+(?P<command>.+?)\s*$", line)
+        if not prompt_match:
+            continue
+        command = str(prompt_match.group("command") or "").strip()
+        if _terminal_followup_command_allowed(command):
+            return command
+    inline_match = re.search(
+        r"(?:command|cmd|run|execute|执行|运行|命令)\s*[:：]?\s*`(?P<command>[^`\n]{1,800})`",
+        text,
+        flags=re.IGNORECASE,
+    )
+    if inline_match:
+        command = str(inline_match.group("command") or "").strip()
+        if _terminal_followup_command_allowed(command):
+            return command
+    return ""
+
+
+def _clean_terminal_command_block(body: str) -> str:
+    lines = str(body or "").strip().splitlines()
+    prompt_lines: list[str] = []
+    plain_lines: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        prompt_match = re.match(r"^(?:\$|%)\s+(?P<command>.+?)\s*$", stripped)
+        if prompt_match:
+            prompt_lines.append(str(prompt_match.group("command") or "").strip())
+            continue
+        if prompt_lines:
+            continue
+        plain_lines.append(line.rstrip())
+    return "\n".join(prompt_lines or plain_lines).strip()
+
+
+def _terminal_followup_command_allowed(command: str) -> bool:
+    clean = str(command or "").strip()
+    if not clean or len(clean) > 4000 or "\x00" in clean or "```" in clean:
+        return False
+    unsafe_patterns = (
+        r"(^|[\s;&|])sudo(\s|$)",
+        r"(^|[\s;&|])su(\s|$)",
+        r"\brm\s+-[^\n]*[rf]",
+        r"\brm\s+[^\n]*(?:/\s*$|/\s|~|\*)",
+        r"\bdd\s+",
+        r"\bmkfs(?:\.|[\s])",
+        r"\bdiskutil\s+erase",
+        r"\bshutdown\b",
+        r"\breboot\b",
+        r"\bkillall\b",
+        r"\bcurl\b[^\n|]*\|\s*(?:sh|bash|zsh)\b",
+        r"\bwget\b[^\n|]*\|\s*(?:sh|bash|zsh)\b",
+    )
+    return not any(re.search(pattern, clean, flags=re.IGNORECASE) for pattern in unsafe_patterns)
 
 
 def _model_followup_app_write_requests(

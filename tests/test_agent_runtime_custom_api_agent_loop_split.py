@@ -3493,6 +3493,173 @@ def test_model_followup_context_instructs_pending_report_plan_steps() -> None:
     assert "Call artifact.write next" not in message
 
 
+def test_model_followup_pending_plan_promotes_model_terminal_command() -> None:
+    requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            "planning_reason": "planner_prefetch_report_context",
+            "pending_plan_steps": [
+                {
+                    "step_id": "extract-report-file-context",
+                    "tool_name": "terminal.run",
+                    "capability_id": "terminal.execution",
+                    "input_preview": {
+                        "path": "~/Downloads/report.pdf",
+                        "operation": "extract_text_for_report",
+                    },
+                }
+            ],
+        },
+        ["terminal.run"],
+        generated_content=(
+            "I will run the concrete extraction command:\n"
+            "```bash\n"
+            "python scripts/extract_report.py ~/Downloads/report.pdf\n"
+            "```"
+        ),
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "terminal.run",
+            "input": {
+                "command": "python scripts/extract_report.py ~/Downloads/report.pdf",
+                "shell": True,
+                "timeout_seconds": 60,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "step_id": "extract-report-file-context",
+            "capability_id": "terminal.execution",
+        }
+    ]
+    assert (
+        custom_api_agent_module._model_followup_pending_plan_requests(
+            {
+                "pending_plan_steps": [
+                    {
+                        "step_id": "delete-files",
+                        "tool_name": "terminal.run",
+                        "capability_id": "terminal.execution",
+                        "input_preview": {"operation": "cleanup"},
+                    }
+                ],
+            },
+            ["terminal.run"],
+            generated_content="```bash\nrm -rf ~/Downloads\n```",
+        )
+        == []
+    )
+
+
+def test_custom_api_agent_loop_auto_dispatches_pending_terminal_command_from_model_text() -> None:
+    budget = FakeBudget()
+    timeline = [
+        _timeline(
+            "agent.model.followup_context",
+            "planner_prefetch_report_context",
+            source="runtime_planner",
+            planning_reason="planner_prefetch_report_context",
+            content_snapshot={"ok": True, "text": "Found report.pdf"},
+            pending_plan_steps=[
+                {
+                    "step_id": "extract-report-file-context",
+                    "tool_name": "terminal.run",
+                    "capability_id": "terminal.execution",
+                    "input_preview": {
+                        "path": "~/Downloads/report.pdf",
+                        "operation": "extract_text_for_report",
+                    },
+                    "approval_required": True,
+                }
+            ],
+        )
+    ]
+    tool_runs: list[list[dict[str, Any]]] = []
+
+    def run_tool_requests(
+        requests,
+        _allowed_tools,
+        _broker,
+        _messages,
+        timeline_value,
+        _artifacts,
+        **_kwargs,
+    ) -> None:
+        tool_runs.append(requests)
+        timeline_value.append(
+            _timeline(
+                "agent.tool.call",
+                "terminal.run",
+                input_preview=requests[0]["input"],
+                result={"ok": True, "stdout": "extracted text"},
+            )
+        )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": ["terminal.run"]}},
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use tools for pending runtime plans.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: {
+            "role": "assistant",
+            "content": (
+                "The concrete command is:\n"
+                "```bash\n"
+                "python scripts/extract_report.py ~/Downloads/report.pdf\n"
+                "```"
+            ),
+        },
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "continue report extraction",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=[
+            {"role": "system", "content": "Use tools."},
+            {"role": "user", "content": "继续提取报告文本"},
+        ],
+        start_iteration=1,
+        budget=budget,
+    )
+
+    assert "已运行命令：python scripts/extract_report.py ~/Downloads/report.pdf" in str(result)
+    assert tool_runs[0][0]["tool"] == "terminal.run"
+    assert tool_runs[0][0]["input"] == {
+        "command": "python scripts/extract_report.py ~/Downloads/report.pdf",
+        "shell": True,
+        "timeout_seconds": 60,
+    }
+    planned_event = next(
+        event for event in timeline if event["event"] == "agent.desktop.intent_planned"
+    )
+    assert planned_event["step_id"] == "extract-report-file-context"
+    assert planned_event["capability_id"] == "terminal.execution"
+
+
 def test_model_followup_context_instructs_generated_app_write() -> None:
     payload = custom_api_agent_module._model_followup_context_payload(
         [
