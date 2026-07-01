@@ -168,8 +168,11 @@ def planner_decision_and_tool_requests(
         metadata=metadata,
     )
     requests = _tool_requests_for_decision(decision, allowed)
-    if _request_trace_enabled(metadata):
-        requests = _annotated_tool_requests_for_decision(requests, decision)
+    requests = _annotated_tool_requests_for_decision(
+        requests,
+        decision,
+        include_trace=_request_trace_enabled(metadata),
+    )
     return decision, requests
 
 
@@ -188,8 +191,11 @@ def planner_direct_decision_and_tool_requests(
         metadata=metadata,
     )
     requests = _direct_tool_requests_for_decision(decision, allowed)
-    if _request_trace_enabled(metadata):
-        requests = _annotated_tool_requests_for_decision(requests, decision)
+    requests = _annotated_tool_requests_for_decision(
+        requests,
+        decision,
+        include_trace=_request_trace_enabled(metadata),
+    )
     return decision, requests
 
 
@@ -322,6 +328,8 @@ def _request_trace_enabled(metadata: Mapping[str, Any] | None) -> bool:
 def _annotated_tool_requests_for_decision(
     requests: list[dict[str, Any]],
     decision: Any,
+    *,
+    include_trace: bool = False,
 ) -> list[dict[str, Any]]:
     if not requests:
         return []
@@ -339,7 +347,12 @@ def _annotated_tool_requests_for_decision(
         step_index, step = _matching_trace_step(next_request, steps, used_step_indexes)
         if step_index >= 0 and step is not None:
             used_step_indexes.add(step_index)
-            _annotate_request_trace(next_request, decision, step)
+            _annotate_request_trace(
+                next_request,
+                decision,
+                step,
+                include_trace=include_trace,
+            )
         annotated.append(next_request)
     return annotated
 
@@ -364,9 +377,17 @@ def _annotate_request_trace(
     request: dict[str, Any],
     decision: Any,
     step: Any,
+    *,
+    include_trace: bool = True,
 ) -> None:
     step_id = str(getattr(step, "step_id", "") or "").strip()
     capability_id = str(getattr(step, "capability_id", "") or "").strip()
+    if step_id:
+        request["step_id"] = step_id
+    if capability_id:
+        request["capability_id"] = capability_id
+    if not include_trace:
+        return
     decision_id = str(getattr(decision, "decision_id", "") or "").strip()
     plan = getattr(decision, "plan", None)
     plan_id = str(getattr(plan, "plan_id", "") or "").strip()
@@ -374,10 +395,6 @@ def _annotate_request_trace(
     tool_plan_id = str(getattr(tool_plan, "plan_id", "") or "").strip()
     intent = getattr(decision, "selected_intent", None)
     intent_kind = str(getattr(intent, "kind", "") or "").strip()
-    if step_id:
-        request["step_id"] = step_id
-    if capability_id:
-        request["capability_id"] = capability_id
     if decision_id:
         request["decision_id"] = decision_id
     if plan_id:

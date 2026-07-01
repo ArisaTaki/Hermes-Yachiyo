@@ -323,6 +323,18 @@ class RuntimeCustomApiAgentLoop:
                         planned_payload["presentation"] = presentation
                     if planned_tool_request.get("continue_to_model"):
                         planned_payload["continue_to_model"] = True
+                    for key in (
+                        "step_id",
+                        "capability_id",
+                        "replan_request_id",
+                        "replan_trigger",
+                    ):
+                        value = str(planned_tool_request.get(key) or "").strip()
+                        if value:
+                            planned_payload[key] = value
+                    planned_payload.update(
+                        _request_observability_metadata(planned_tool_request)
+                    )
                     timeline.append(
                         self._timeline(
                             "agent.desktop.intent_planned",
@@ -566,6 +578,18 @@ class RuntimeCustomApiAgentLoop:
                                 else {}
                             ),
                         }
+                        for key in (
+                            "step_id",
+                            "capability_id",
+                            "replan_request_id",
+                            "replan_trigger",
+                        ):
+                            value = str(auto_followup_request.get(key) or "").strip()
+                            if value:
+                                auto_payload[key] = value
+                        auto_payload.update(
+                            _request_observability_metadata(auto_followup_request)
+                        )
                         timeline.append(
                             self._timeline(
                                 "agent.desktop.intent_planned",

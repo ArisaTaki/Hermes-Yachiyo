@@ -157,6 +157,7 @@ _PLANNER_EVENT_TYPES = {
     "agent.plan.step",
     "agent.plan.selection",
     "agent.replan.requested",
+    "agent.task_core.created",
     "agent.task.workspace_item.updated",
     "agent.task.todo.updated",
     "agent.task.checkpoint.updated",
@@ -18570,12 +18571,18 @@ def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_bef
     non_planner_timeline = _non_planner_timeline_events(timeline)
     assert [event["event"] for event in non_planner_timeline] == [
         "agent.desktop.intent_planned",
+        "agent.tool.started",
         "agent.tool.call",
         "agent.desktop.intent_completed",
     ]
-    assert non_planner_timeline[1]["detail"] == "media.apple_music_play"
-    assert non_planner_timeline[1]["result"]["ok"] is True
+    tool_call_event = next(
+        event for event in non_planner_timeline if event["event"] == "agent.tool.call"
+    )
+    assert tool_call_event["detail"] == "media.apple_music_play"
+    assert tool_call_event["result"]["ok"] is True
     assert non_planner_timeline[-1]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
+    assert non_planner_timeline[0]["capability_id"] == "media.playback"
+    assert non_planner_timeline[0]["step_id"]
     non_planner_run_events = _non_planner_run_events(run_events)
     assert [event["event_type"] for event in non_planner_run_events] == [
         "agent.desktop.intent_planned",
