@@ -546,17 +546,26 @@ class RuntimeCustomApiAgentLoop:
                             agent=agent,
                             run_id=run_id,
                         )
-                        self._run_tool_requests(
-                            [auto_followup_request],
-                            allowed_tools,
-                            broker,
-                            messages,
-                            timeline,
-                            artifacts,
-                            next_iteration=start_iteration,
-                            run_id=run_id,
-                            budget=budget,
-                        )
+                        auto_tool_timeline_start = len(timeline)
+                        try:
+                            self._run_tool_requests(
+                                [auto_followup_request],
+                                allowed_tools,
+                                broker,
+                                messages,
+                                timeline,
+                                artifacts,
+                                next_iteration=start_iteration,
+                                run_id=run_id,
+                                budget=budget,
+                            )
+                        finally:
+                            self._record_runtime_planner_task_progress_events(
+                                runtime_planner_decision,
+                                timeline=timeline,
+                                tool_timeline_start=auto_tool_timeline_start,
+                                run_id=run_id,
+                            )
                         if _selection_payload_has_model_followup_target(
                             followup_selection_payload
                         ):

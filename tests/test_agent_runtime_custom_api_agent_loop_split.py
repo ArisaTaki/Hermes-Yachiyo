@@ -1326,6 +1326,28 @@ def test_custom_api_agent_loop_auto_analyzes_captured_visible_table() -> None:
         and event["detail"] == "data.analyze"
     ][0]
     assert auto_plan_event["planning_reason"] == "planner_builtin_data_analysis"
+    completed_todos = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["status"] == "completed"
+    ]
+    assert [event["step_id"] for event in completed_todos] == [
+        "read-data-context",
+        "analyze-data-context",
+    ]
+    completed_checkpoints = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event["status"] == "completed"
+    ]
+    assert {
+        event["step_id"] for event in completed_checkpoints
+    } >= {
+        "read-data-context",
+        "analyze-data-context",
+    }
     assert not any(event["event"] == "agent.model.followup_context" for event in timeline)
 
 
