@@ -90,6 +90,7 @@ from scripts.summarize_native_agent_capabilities import (
     capability_matrix_status_summary,
     summarize_capabilities,
 )
+from scripts.summarize_agent_market_parity import summarize_market_parity
 from scripts.verify_release_artifacts import Finding, verify_release_artifacts
 from packages.security import contains_sensitive_text, redact_api_error_text, sanitize_sensitive_value
 
@@ -550,6 +551,7 @@ def _payload_can_rebuild_native_agent_capability_matrix(payload: dict[str, Any])
         "data_analysis_artifact_smoke",
         "browser_planner_artifact_smoke",
         "desktop_planner_discovery_smoke",
+        "agent_market_parity_summary",
         "real_desktop_discovery_smoke",
         "real_desktop_app_open_smoke",
         "real_desktop_ui_inspection_smoke",
@@ -2015,6 +2017,49 @@ def verify_desktop_planner_discovery_smoke(root: Path) -> tuple[list[Finding], d
     return [
         Finding(
             root / "scripts/smoke_desktop_planner_discovery.py",
+            redact_api_error_text(message),
+        )
+    ], evidence
+
+
+def verify_agent_market_parity_summary(root: Path) -> tuple[list[Finding], dict[str, Any]]:
+    try:
+        raw_evidence = summarize_market_parity(root)
+    except Exception as exc:
+        return [
+            Finding(
+                root / "scripts/summarize_agent_market_parity.py",
+                f"agent market parity summary failed: {redact_api_error_text(str(exc))}",
+            )
+        ], {
+            "ok": False,
+            "status": "failed",
+            "error": redact_api_error_text(str(exc)),
+        }
+    evidence = sanitize_sensitive_value(raw_evidence, max_depth=8)
+    if not isinstance(evidence, dict):
+        return [
+            Finding(
+                root / "scripts/summarize_agent_market_parity.py",
+                "agent market parity summary returned non-object evidence",
+            )
+        ], {
+            "ok": False,
+            "status": "failed",
+            "error": "non-object evidence",
+        }
+    if evidence.get("ok") is True:
+        return [], evidence
+    missing = evidence.get("incomplete_capability_ids")
+    if isinstance(missing, list) and missing:
+        message = "incomplete market capabilities: " + ", ".join(
+            str(item) for item in missing if str(item)
+        )
+    else:
+        message = "agent market parity summary did not pass"
+    return [
+        Finding(
+            root / "scripts/summarize_agent_market_parity.py",
             redact_api_error_text(message),
         )
     ], evidence
@@ -4681,6 +4726,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         },
+        "agent_market_parity_summary": {
+            "status": "pending",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        },
         "real_desktop_discovery_smoke": {
             "status": "pending",
             "evidence": {},
@@ -4925,6 +4976,12 @@ def verify_release_candidate(
             "findings": [],
             "run_requested": True,
         }
+        report["agent_market_parity_summary"] = {
+            "status": "skipped",
+            "evidence": {},
+            "findings": [],
+            "run_requested": True,
+        }
         report["real_desktop_discovery_smoke"] = {
             "status": "skipped",
             "evidence": {},
@@ -5122,6 +5179,18 @@ def verify_release_candidate(
         "status": "failed" if desktop_smoke_findings else "passed",
         "evidence": desktop_smoke_evidence,
         "findings": _finding_report(desktop_smoke_findings),
+        "run_requested": True,
+    }
+
+    market_parity_findings, market_parity_evidence = verify_agent_market_parity_summary(
+        root
+    )
+    _print_findings("agent market parity summary", market_parity_findings)
+    failed = failed or bool(market_parity_findings)
+    report["agent_market_parity_summary"] = {
+        "status": "failed" if market_parity_findings else "passed",
+        "evidence": market_parity_evidence,
+        "findings": _finding_report(market_parity_findings),
         "run_requested": True,
     }
 

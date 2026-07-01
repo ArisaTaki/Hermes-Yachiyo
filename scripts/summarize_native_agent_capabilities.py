@@ -33,6 +33,11 @@ CAPABILITY_DEFINITIONS: tuple[dict[str, str], ...] = (
         "evidence": "desktop_planner_discovery_smoke",
     },
     {
+        "id": "source_agent_market_parity",
+        "label": "Hermes/Hanako-style Agent market parity",
+        "evidence": "agent_market_parity_summary",
+    },
+    {
         "id": "source_real_desktop_discovery",
         "label": "Real macOS desktop app discovery",
         "evidence": "real_desktop_discovery_smoke",
@@ -173,6 +178,7 @@ SOURCE_SECTION_CAPABILITIES: dict[str, str] = {
     "source_data_analysis_artifact": "data_analysis_artifact_smoke",
     "source_browser_research_artifact": "browser_planner_artifact_smoke",
     "source_desktop_planner_discovery": "desktop_planner_discovery_smoke",
+    "source_agent_market_parity": "agent_market_parity_summary",
     "source_real_desktop_discovery": "real_desktop_discovery_smoke",
     "source_real_desktop_app_open": "real_desktop_app_open_smoke",
     "source_real_desktop_ui_inspection": "real_desktop_ui_inspection_smoke",

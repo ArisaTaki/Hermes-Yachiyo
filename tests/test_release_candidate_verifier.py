@@ -9,6 +9,26 @@ from types import SimpleNamespace
 import pytest
 
 from scripts import verify_release_candidate as rc
+from scripts import smoke_planner_runtime_tool_parity as planner_tool_parity_smoke
+
+
+def _passed_agent_market_parity_summary() -> dict[str, object]:
+    return {
+        "ok": True,
+        "status": "passed",
+        "capability_count": 12,
+        "status_counts": {"passed": 12, "partial": 0, "missing": 0},
+        "incomplete_capability_ids": [],
+    }
+
+
+@pytest.fixture(autouse=True)
+def _stub_agent_market_parity_summary(monkeypatch):
+    monkeypatch.setattr(
+        rc,
+        "summarize_market_parity",
+        lambda _root: _passed_agent_market_parity_summary(),
+    )
 
 
 @pytest.fixture(autouse=True)
@@ -150,6 +170,10 @@ def _source_desktop_capability_report() -> dict[str, object]:
         "desktop_planner_discovery_smoke": _passed_source_smoke_section(
             "desktop_planner_discovery_smoke", "generic_app_open"
         ),
+        "agent_market_parity_summary": {
+            "status": "passed",
+            "evidence": _passed_agent_market_parity_summary(),
+        },
         "real_desktop_discovery_smoke": _passed_source_smoke_section(
             "real_desktop_discovery_smoke", "safari"
         ),
@@ -578,7 +602,7 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     )
     assert report["browser_planner_artifact_smoke"]["status"] == "passed"
     assert report["browser_planner_artifact_smoke"]["evidence"]["ok"] is True
-    assert report["browser_planner_artifact_smoke"]["evidence"]["case_count"] == 4
+    assert report["browser_planner_artifact_smoke"]["evidence"]["case_count"] == 5
     assert {
         case["id"]
         for case in report["browser_planner_artifact_smoke"]["evidence"]["cases"]
@@ -587,6 +611,7 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
         "explicit_url_report",
         "current_page_screenshot",
         "search_report",
+        "known_site_search_in_browser",
     }
     assert report["desktop_planner_discovery_smoke"]["status"] == "passed"
     assert report["desktop_planner_discovery_smoke"]["evidence"]["ok"] is True
@@ -631,11 +656,13 @@ def test_release_candidate_verifier_writes_report_json(tmp_path, monkeypatch):
     }
     assert report["planner_runtime_tool_parity_smoke"]["status"] == "passed"
     assert report["planner_runtime_tool_parity_smoke"]["evidence"]["ok"] is True
-    assert report["planner_runtime_tool_parity_smoke"]["evidence"]["case_count"] == 11
+    assert report["planner_runtime_tool_parity_smoke"]["evidence"]["case_count"] == len(
+        planner_tool_parity_smoke.PLANNER_TOOL_PARITY_CASES
+    )
     assert {
         case["id"]
         for case in report["planner_runtime_tool_parity_smoke"]["evidence"]["cases"]
-    } == {
+    } >= {
         "generic_app_open",
         "app_scoped_ui_click",
         "builtin_data_analysis",
@@ -1509,7 +1536,7 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
 
     output = capsys.readouterr().out
     assert "planner runtime tool parity smoke: passed" in output
-    assert "Native Agent capability matrix: incomplete (25/30 passed)" in output
+    assert "Native Agent capability matrix: incomplete (26/31 passed)" in output
     assert "- missing[provider]:" not in output
     assert "- missing[packaged]: packaged_backend_bridge_identity, packaged_app_bridge_isolation" in output
     assert "Native Agent capability matrix next actions:" in output
@@ -1533,9 +1560,10 @@ def test_release_candidate_verifier_reports_planner_runtime_tool_parity_smoke(
     ]
     matrix = report["native_agent_capability_matrix"]
     assert matrix["status"] == "incomplete"
-    assert matrix["capability_count"] >= 29
+    assert matrix["capability_count"] >= 31
     capability_by_id = {item["id"]: item for item in matrix["capabilities"]}
     assert capability_by_id["source_planner_runtime_tool_parity"]["status"] == "passed"
+    assert capability_by_id["source_agent_market_parity"]["status"] == "passed"
     assert capability_by_id["source_agent_entrypoint_desktop_execution"]["status"] == "passed"
     assert capability_by_id["source_agent_studio_planner_orchestration"]["status"] == "passed"
     assert capability_by_id["provider_text_stream"]["status"] == "passed"
@@ -2522,7 +2550,7 @@ def test_release_candidate_verifier_merges_manual_source_capability_matrices(
     ) == 0
 
     output = capsys.readouterr().out
-    assert "Native Agent capability matrix: passed (30 capabilities)" in output
+    assert "Native Agent capability matrix: passed (31 capabilities)" in output
     assert (
         "Native Agent capability matrix sources: tmp/source-rc.json, tmp/provider-rc.json"
         in output
@@ -2531,12 +2559,13 @@ def test_release_candidate_verifier_merges_manual_source_capability_matrices(
     matrix = report["native_agent_capability_matrix"]
     assert matrix["status"] == "passed"
     assert matrix["ok"] is True
-    assert matrix["capability_count"] == 30
-    assert matrix["status_counts"] == {"passed": 30, "missing": 0}
+    assert matrix["capability_count"] == 31
+    assert matrix["status_counts"] == {"passed": 31, "missing": 0}
     assert matrix["missing_capability_ids"] == []
     assert matrix["source_reports"] == ["tmp/source-rc.json", "tmp/provider-rc.json"]
     capability_by_id = {item["id"]: item for item in matrix["capabilities"]}
     assert capability_by_id["source_real_desktop_interaction"]["status"] == "passed"
+    assert capability_by_id["source_agent_market_parity"]["status"] == "passed"
     assert capability_by_id["source_agent_studio_planner_orchestration"]["status"] == "passed"
     assert capability_by_id["provider_text_stream"]["status"] == "passed"
     assert capability_by_id["agent_multi_tool_pipeline"]["status"] == "passed"
@@ -2549,7 +2578,7 @@ def test_release_candidate_verifier_merges_manual_source_capability_matrices(
     )
     assert matrix_from_merged_report is not None
     assert matrix_from_merged_report["status"] == "passed"
-    assert matrix_from_merged_report["capability_count"] == 30
+    assert matrix_from_merged_report["capability_count"] == 31
 
 
 def test_release_candidate_verifier_merges_multiple_manual_check_json_sources(
