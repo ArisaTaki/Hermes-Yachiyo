@@ -379,6 +379,9 @@ class TaskIntentRouter:
         if _looks_like_generic_data_source_analysis_request(text):
             return _empty_intent("desktop_operation", text)
         app_capability = _app_capability_discovery_hint(text)
+        generic_browser_search = _generic_browser_app_search_hint(text)
+        if generic_browser_search and not app_capability:
+            app_capability = {"query": "browser", "description": "browser"}
         file_open_discovery = _app_file_open_discovery_hint(text, metadata)
         app_search_app_hint = "" if app_capability else _app_name_hint(text)
         if (
@@ -482,6 +485,12 @@ class TaskIntentRouter:
         if foreground_paste and safe_shortcut is None:
             safe_shortcut = {"action": "paste"}
         desktop_discovery = _desktop_discovery_hint(text)
+        if generic_browser_search:
+            desktop_discovery = {
+                "action": "discover_apps",
+                "query": "browser",
+            }
+            app_management = None
         if (
             desktop_discovery is not None
             and str((desktop_discovery or {}).get("action") or "").strip() == "discover_apps"
@@ -761,8 +770,8 @@ class TaskIntentRouter:
             and _contains_any(app_name_hint, ("搜索", "查找", "检索", "search", "find", "look up"))
         ):
             app_name_hint = direct_app_name_hint
-        generic_browser_discovery = False
-        if desktop_discovery is None and (
+        generic_browser_discovery = bool(generic_browser_search)
+        if not generic_browser_discovery and desktop_discovery is None and (
             _is_generic_browser_app_label(app_name_hint)
             or _generic_browser_app_target_requested(text)
         ):
@@ -873,6 +882,9 @@ class TaskIntentRouter:
         if foreground_app_search:
             app_name_hint = ""
             app_search = foreground_app_search
+        elif generic_browser_search:
+            app_name_hint = ""
+            app_search = generic_browser_search
         elif not (
             app_click_scope
             or (app_type_scope and not _app_search_field_input_allows_safe_search(text))
@@ -5042,6 +5054,16 @@ class RuntimePlanner:
             and not url
         ):
             return _dynamic_context_browser_steps(intent, allowed)
+        if (
+            browser_action == "open_search"
+            and not _first_allowed(("browser.open_url", "browser.search", "browser.open"), allowed)
+        ):
+            browser_action = ""
+        if (
+            browser_action == "open_url"
+            and not _first_allowed(("browser.open_url", "browser.open"), allowed)
+        ):
+            browser_action = ""
         if browser_action:
             app_name = str(intent.inputs.get("app_name") or "").strip()
             app_mode = str(intent.inputs.get("app_mode") or "focus").strip() or "focus"
@@ -16237,6 +16259,74 @@ def _normalized_generic_browser_label(value: str) -> bool:
     return english in {"browser", "web browser", "web"}
 
 
+def _generic_browser_app_search_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value:
+        return {}
+    if _looks_like_external_info_lookup(value):
+        return {}
+    if _explicit_browser_url_hint(value) or _known_web_destination_request_url_hint(value):
+        return {}
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:找|找个|找一个|找一款|打开|启动|开启)\s*"
+        r"(?:一个|一款|任意|任何|默认|可用|合适|适合)?\s*浏览器"
+        r"(?:\s*(?:打开|访问|进入|搜索|搜|查找|检索))?\s*(?P<query>.+)$",
+        r"\b(?:find|open|launch|start)\s+"
+        r"(?:an?\s+|the\s+|any\s+|default\s+|available\s+|suitable\s+)?"
+        r"(?:browser|web\s+browser)\b"
+        r"(?:\s+(?:and|then|to|for))?"
+        r"(?:\s+(?:open|visit|go\s+to|search|find|look\s+up))?"
+        r"\s+(?P<query_en>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = _clean_generic_browser_app_search_query(
+            match.groupdict().get("query")
+            or match.groupdict().get("query_en")
+            or ""
+        )
+        if query:
+            return {
+                "query": query,
+                "target": "搜索" if _contains_any(value, ("搜索", "搜", "查找", "检索")) else "Search",
+            }
+    return {}
+
+
+def _clean_generic_browser_app_search_query(query: str) -> str:
+    value = _clean_app_search_query(query).strip(" .，,。?？!！")
+    if not value:
+        return ""
+    value = re.sub(
+        r"^(?:打开|开启|访问|进入|搜索|搜一下|搜|查找|检索)\s*",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(
+        r"\s*(?:上|里|中|内)?\s*(?:搜索|搜一下|搜|查找|检索)\s*",
+        " ",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(
+        r"^(?:open|visit|go\s+to|search|find|look\s+up)\s+",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    )
+    value = re.sub(
+        r"\s+(?:and|then|to)?\s*(?:search|find|look\s+up)\s+",
+        " ",
+        value,
+        flags=re.IGNORECASE,
+    )
+    return re.sub(r"\s+", " ", value).strip(" .，,。?？!！")
+
+
 def _generic_browser_app_target_requested(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
@@ -21608,6 +21698,14 @@ def _app_capability_discovery_query(value: str) -> str:
     description = _clean_app_capability_description(value)
     lowered = description.lower()
     if not description:
+        return ""
+    if description in {"的", "地", "得"} or lowered in {
+        "app",
+        "application",
+        "tool",
+        "program",
+        "software",
+    }:
         return ""
     if _explicit_named_app_descriptor(description):
         return ""

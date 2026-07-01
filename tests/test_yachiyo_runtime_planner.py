@@ -2551,6 +2551,70 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
     }
 
 
+def test_runtime_planner_discovers_generic_browser_before_specific_search() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.click_ui_element",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "找一个浏览器打开 github 搜索 yachiyo",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == ""
+    assert decision.selected_intent.inputs["operation_hint"] == "discover_apps"
+    assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "browser",
+    }
+    assert decision.selected_intent.inputs["app_capability_hint"] == {
+        "query": "browser",
+        "description": "browser",
+    }
+    assert decision.selected_intent.inputs["app_search_hint"] == {
+        "query": "github yachiyo",
+        "target": "搜索",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "browser",
+    }
+    assert _step_by_id(decision, "type-app-search-query").input_preview == {
+        "text": "github yachiyo"
+    }
+    requests = planner_tool_requests("找一个浏览器打开 github 搜索 yachiyo", allowed_tools)
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.click_ui_element",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+
+    web_decision = RuntimePlanner().decision(
+        "用浏览器搜索 OpenAI 最新新闻",
+        allowed_tools=["browser.open_url", "desktop.list_apps", "app.open"],
+    )
+    assert web_decision.selected_intent.kind == "web_research"
+    assert web_decision.selected_intent.inputs["browser_action"] == "open_search"
+    assert web_decision.selected_intent.inputs["query"] == "OpenAI 最新新闻"
+
+
 def test_planner_binds_discovered_creative_actions_to_selected_app_when_available() -> None:
     prompt = "打开一个能画图的应用，画一个圆并保存到桌面"
     allowed_tools = [
