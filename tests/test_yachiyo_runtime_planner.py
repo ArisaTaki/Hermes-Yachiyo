@@ -5379,6 +5379,31 @@ def test_runtime_planner_reads_page_before_ambiguous_browser_click() -> None:
     ]
 
 
+def test_planner_tool_requests_observes_desktop_before_raw_current_page_actions() -> None:
+    allowed_tools = ["desktop.click", "desktop.type", "desktop.read_ui"]
+
+    assert planner_tool_requests("点击当前页面的登录按钮", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.read_ui",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+    assert planner_desktop_tool_requests("在当前页面输入 hello", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.read_ui",
+            "input": {"role_filter": "text field", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_runtime_planner_prefers_desktop_ui_for_non_browser_app_scoped_click() -> None:
     allowed_tools = [
         "desktop.list_apps",

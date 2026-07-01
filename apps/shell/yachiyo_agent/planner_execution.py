@@ -2653,6 +2653,17 @@ def _browser_click_desktop_fallback_requests(
                 planning_reason="planner_desktop_operation",
             )
         )
+    elif "desktop.click" in allowed:
+        observation_request = _browser_desktop_observation_request(
+            allowed,
+            role_filter=_desktop_role_filter_from_browser_selector(
+                selector,
+                default="button",
+            ),
+            reason="Inspect the foreground page before resolving the requested click target.",
+        )
+        if observation_request:
+            return [observation_request]
     if requests and "desktop.ui_elements" in allowed:
         requests.append(
             _request(
@@ -2668,13 +2679,23 @@ def _browser_type_desktop_fallback_requests(
     decision: Any,
     allowed: set[str],
 ) -> list[dict[str, Any]]:
-    if "desktop.type_into_ui_element" not in allowed:
-        return []
     inputs = decision.selected_intent.inputs
     selector = str(inputs.get("selector") or "").strip()
     text = str(inputs.get("text") or "")
     if not text:
         return []
+    if "desktop.type_into_ui_element" not in allowed:
+        if "desktop.type" not in allowed and "desktop.type_text" not in allowed:
+            return []
+        observation_request = _browser_desktop_observation_request(
+            allowed,
+            role_filter=_desktop_role_filter_from_browser_selector(
+                selector,
+                default="text field",
+            ),
+            reason="Inspect the foreground page before resolving where to type.",
+        )
+        return [observation_request] if observation_request else []
     target = _desktop_target_from_browser_selector(selector) or "text input"
     payload = {
         "target": target,
@@ -2701,6 +2722,34 @@ def _browser_type_desktop_fallback_requests(
             )
         )
     return requests
+
+
+def _browser_desktop_observation_request(
+    allowed: set[str],
+    *,
+    role_filter: str,
+    reason: str,
+) -> dict[str, Any] | None:
+    tool_name = _first_allowed(
+        ("desktop.ui_elements", "desktop.read_ui", "screen.capture"),
+        allowed,
+    )
+    if not tool_name:
+        return None
+    if tool_name == "screen.capture":
+        payload = {"reason": reason}
+    else:
+        payload = {
+            "role_filter": role_filter,
+            "limit": 80,
+        }
+    request = _request(
+        tool_name,
+        _desktop_request_payload(tool_name, payload),
+        planning_reason="planner_desktop_operation",
+    )
+    request["continue_to_model"] = True
+    return request
 
 
 def _browser_point_desktop_payload(inputs: Mapping[str, Any]) -> dict[str, Any]:
