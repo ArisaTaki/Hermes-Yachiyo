@@ -5404,6 +5404,58 @@ def test_planner_tool_requests_observes_desktop_before_raw_current_page_actions(
     ]
 
 
+def test_planner_selection_payload_surfaces_observed_desktop_action_target() -> None:
+    allowed_tools = ["desktop.click", "desktop.type", "desktop.read_ui"]
+
+    click_prompt = "点击当前页面的登录按钮"
+    click_decision = RuntimePlanner().decision(click_prompt, allowed_tools=allowed_tools)
+    click_requests = planner_tool_requests(click_prompt, allowed_tools)
+    click_payload = planner_selection_payload(
+        decision=click_decision,
+        planner_requests=click_requests,
+        legacy_requests=[],
+        selected_requests=click_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert click_payload["followup_target"] == {
+        "kind": "desktop_observed_action",
+        "target_action": "click",
+        "target": "登录",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+        "observation_source": "desktop.read_ui",
+    }
+    assert runtime_planner_metadata(click_decision)["yachiyo_followup_target"] == (
+        click_payload["followup_target"]
+    )
+
+    type_prompt = "在当前页面输入 hello"
+    type_decision = RuntimePlanner().decision(type_prompt, allowed_tools=allowed_tools)
+    type_requests = planner_desktop_tool_requests(type_prompt, allowed_tools)
+    type_payload = planner_selection_payload(
+        decision=type_decision,
+        planner_requests=type_requests,
+        legacy_requests=[],
+        selected_requests=type_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert type_payload["followup_target"] == {
+        "kind": "desktop_observed_action",
+        "target_action": "type_text",
+        "target": "text input",
+        "text": "hello",
+        "role_filter": "text field",
+        "limit": 80,
+        "body_source": "explicit_user_text",
+        "observation_source": "desktop.read_ui",
+    }
+
+
 def test_runtime_planner_prefers_desktop_ui_for_non_browser_app_scoped_click() -> None:
     allowed_tools = [
         "desktop.list_apps",

@@ -309,6 +309,9 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
     )
     if desktop_discovered_app_target:
         return desktop_discovered_app_target
+    desktop_observed_action_target = _desktop_observed_action_followup_target(inputs)
+    if desktop_observed_action_target:
+        return desktop_observed_action_target
     note_write_target = _note_write_followup_target(inputs)
     if note_write_target:
         return note_write_target
@@ -441,6 +444,81 @@ def _note_write_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:
         "tool": "notes.create",
     }
     return payload
+
+
+def _desktop_observed_action_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:
+    browser_action = str(inputs.get("browser_action") or "").strip()
+    if browser_action not in {"click", "type_text"}:
+        return {}
+    selector = str(inputs.get("selector") or "").strip()
+    role_filter = _desktop_role_filter_from_observed_selector(
+        selector,
+        default="text field" if browser_action == "type_text" else "button",
+    )
+    target = _desktop_target_from_observed_selector(selector)
+    if browser_action == "click":
+        target = target or "requested element"
+        payload: dict[str, Any] = {
+            "kind": "desktop_observed_action",
+            "target_action": "click",
+            "target": target,
+            "role_filter": role_filter,
+            "click_count": _safe_int(inputs.get("click_count"), default=1),
+            "limit": 80,
+            "observation_source": "desktop.read_ui",
+        }
+        return payload
+    text = str(inputs.get("text") or "")
+    if not text:
+        return {}
+    return {
+        "kind": "desktop_observed_action",
+        "target_action": "type_text",
+        "target": target or "text input",
+        "text": text,
+        "role_filter": role_filter,
+        "limit": 80,
+        "body_source": "explicit_user_text",
+        "observation_source": "desktop.read_ui",
+    }
+
+
+def _desktop_target_from_observed_selector(selector: str) -> str:
+    clean = str(selector or "").strip()
+    if clean.startswith("text="):
+        return clean.removeprefix("text=").strip()
+    lowered = clean.lower()
+    if "textarea" in lowered or "contenteditable" in lowered:
+        return "text input"
+    if "," in lowered and "input" in lowered:
+        return "text input"
+    if "search" in lowered:
+        return "search field"
+    if "input" in lowered:
+        return "text input"
+    return ""
+
+
+def _desktop_role_filter_from_observed_selector(selector: str, *, default: str) -> str:
+    clean = str(selector or "").strip().lower()
+    if not clean:
+        return default
+    if "textarea" in clean or "contenteditable" in clean:
+        return "text field"
+    if "input" in clean:
+        return "text field"
+    if "button" in clean or clean.startswith("text="):
+        return "button"
+    if "a[" in clean or clean == "a":
+        return "link"
+    return default
+
+
+def _safe_int(value: Any, *, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _selection_orchestration_payload(decision: Any | None) -> dict[str, Any]:

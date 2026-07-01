@@ -5908,6 +5908,8 @@ def _model_followup_target_payload(
         return _model_followup_artifact_write_target_payload(target, allowed)
     if kind == "note_write":
         return _model_followup_note_write_target_payload(target, allowed)
+    if kind == "desktop_observed_action":
+        return _model_followup_desktop_observed_action_target_payload(target, allowed)
     if kind != "app_write" or not app_name:
         return {}
     container_action = _model_followup_container_action(target)
@@ -5984,6 +5986,85 @@ def _model_followup_note_write_target_payload(
     if folder_name:
         payload["folder_name"] = folder_name
     return payload
+
+
+def _model_followup_desktop_observed_action_target_payload(
+    target: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    target_action = str(target.get("target_action") or "").strip()
+    if target_action not in {"click", "type_text"}:
+        return {}
+    target_label = str(target.get("target") or "").strip()
+    if not target_label:
+        return {}
+    recommended_tools = _model_followup_desktop_observed_action_tools(
+        target_action,
+        allowed,
+    )
+    verify_tools = [
+        tool
+        for tool in (
+            "desktop.ui_elements",
+            "desktop.read_ui",
+            "desktop.active_window",
+            "screen.capture",
+        )
+        if tool in allowed
+    ]
+    payload: dict[str, Any] = {
+        "kind": "desktop_observed_action",
+        "target_action": target_action,
+        "target": target_label,
+        "role_filter": str(target.get("role_filter") or "").strip(),
+        "limit": _clean_model_followup_int(target.get("limit"), default=80),
+        "action_allowed": bool(recommended_tools),
+        "recommended_tools": recommended_tools,
+        "verify_tools": verify_tools,
+        "observation_source": str(
+            target.get("observation_source") or "desktop.read_ui"
+        ).strip(),
+    }
+    if target_action == "click":
+        payload["click_count"] = _clean_model_followup_int(
+            target.get("click_count"),
+            default=1,
+        )
+    else:
+        text = str(target.get("text") or "")
+        if not text:
+            return {}
+        payload["text"] = text
+        payload["body_source"] = str(target.get("body_source") or "explicit_user_text").strip()
+    return payload
+
+
+def _model_followup_desktop_observed_action_tools(
+    target_action: str,
+    allowed: set[str],
+) -> list[str]:
+    candidates = (
+        (
+            "desktop.click_ui_element",
+            "desktop.click",
+        )
+        if target_action == "click"
+        else (
+            "desktop.type_into_ui_element",
+            "desktop.click_ui_element",
+            "desktop.click",
+            "desktop.type_text",
+            "desktop.type",
+        )
+    )
+    return [tool for tool in candidates if tool in allowed]
+
+
+def _clean_model_followup_int(value: Any, *, default: int) -> int:
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return default
 
 
 def _model_followup_desktop_discovered_app_target_payload(
@@ -6228,6 +6309,8 @@ def _selection_payload_has_model_followup_target(
         return bool(str(target.get("path") or "").strip())
     if kind == "note_write":
         return True
+    if kind == "desktop_observed_action":
+        return bool(str(target.get("target") or "").strip())
     if kind == "desktop_discovered_app_action":
         return bool(str(target.get("app_query") or "").strip())
     if kind == "desktop_discovered_media_playback":
@@ -7769,6 +7852,8 @@ def _model_followup_target_instruction(target: Mapping[str, Any]) -> str:
         return _model_followup_artifact_write_instruction(target)
     if kind == "note_write":
         return _model_followup_note_write_instruction(target)
+    if kind == "desktop_observed_action":
+        return _model_followup_desktop_observed_action_instruction(target)
     app_name = str(target.get("app_name") or "").strip()
     if kind != "app_write" or not app_name:
         return ""
@@ -7855,6 +7940,48 @@ def _model_followup_note_write_instruction(target: Mapping[str, Any]) -> str:
         f"replying inline. Prefer {tool_text}; use the generated transformed content as "
         "the body input. Do not write the raw observed source when the user asked for "
         "summary, cleanup, translation, or todo conversion. "
+    )
+
+
+def _model_followup_desktop_observed_action_instruction(target: Mapping[str, Any]) -> str:
+    target_action = str(target.get("target_action") or "").strip()
+    target_label = str(target.get("target") or "").strip()
+    if target_action not in {"click", "type_text"} or not target_label:
+        return ""
+    if not bool(target.get("action_allowed")):
+        return (
+            f"The user requested a foreground desktop {target_action} on {target_label!r}, "
+            "but no allowed desktop action tool can complete it after the UI observation. "
+            "Explain the missing capability instead of claiming the action was performed."
+        )
+    tools = _string_list(target.get("recommended_tools"))
+    verify_tools = _string_list(target.get("verify_tools"))
+    tool_text = ", ".join(tools) or "the allowed desktop action tools"
+    verify_text = (
+        f" Verify with {', '.join(verify_tools)} after the action."
+        if verify_tools
+        else ""
+    )
+    role_filter = str(target.get("role_filter") or "").strip()
+    role_text = f" with role/filter {role_filter!r}" if role_filter else ""
+    if target_action == "click":
+        click_count = _clean_model_followup_int(target.get("click_count"), default=1)
+        return (
+            "The user requested a foreground UI click after the runtime observed the current "
+            f"page/window. Use the latest observed UI snapshot to find {target_label!r}"
+            f"{role_text}, then call a desktop action tool next instead of only replying inline. "
+            f"Prefer {tool_text}; use click_count={click_count}. If only coordinate clicking is "
+            "available, infer coordinates from the observed element or screenshot before calling "
+            f"desktop.click; do not ask the user to click manually.{verify_text} "
+        )
+    text = str(target.get("text") or "")
+    return (
+        "The user requested foreground UI typing after the runtime observed the current "
+        f"page/window. Use the latest observed UI snapshot to find {target_label!r}"
+        f"{role_text}, then call a desktop action tool next instead of only replying inline. "
+        f"Prefer {tool_text}; type the explicit user text {text!r}. If only low-level tools "
+        "are available, focus the matching field with desktop.click when needed and then call "
+        f"desktop.type_text or desktop.type. Do not ask the user to type manually.{verify_text} "
     )
 
 
