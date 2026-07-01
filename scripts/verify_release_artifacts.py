@@ -206,6 +206,11 @@ USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
     ),
     (
         Path("docs/public-release-readiness.md"),
+        "Equivalent RC capability evidence is also",
+        "public release readiness guide must document release-smoke RC capability projection",
+    ),
+    (
+        Path("docs/public-release-readiness.md"),
         "desktop_planner_discovery_smoke",
         "public release readiness guide must document desktop planner public demo evidence",
     ),
@@ -948,6 +953,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "partial_demo_ready` 或 `blocked`",
         "release packaging docs must document partial or blocked public demo release smoke behavior",
+    ),
+    (
+        "RC capability matrix 里已通过且与 public-demo flow 等价的能力投影为 supporting evidence",
+        "release packaging docs must document release-smoke RC capability projection into public demo evidence",
     ),
     (
         "python scripts/verify_release_candidate.py --require-artifacts --run-ui-smoke",

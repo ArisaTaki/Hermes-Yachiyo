@@ -127,7 +127,10 @@ python scripts/summarize_release_smoke.py \
 When the public demo report is partial or blocked, release-smoke keeps the
 `public_demo` item incomplete and carries through the demo `release_level`,
 missing flow IDs, and blocker details so release notes do not have to infer
-what evidence is still absent.
+what evidence is still absent. Equivalent RC capability evidence is also
+projected into public-demo coverage for flows such as real app open, real UI
+inspection, and real app interaction; provider and UI flows still need their own
+smoke evidence.
 
 ## Local Release Gates
 

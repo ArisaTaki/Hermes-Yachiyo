@@ -39,6 +39,29 @@ FULL_PUBLIC_DEMO_COMMAND = (
     "--output-json tmp/public-demo-smokes-full.json "
     "--output-markdown tmp/public-demo-smokes-full.md"
 )
+PUBLIC_DEMO_CAPABILITY_FLOW_MAP: dict[str, str] = {
+    "source_data_analysis_artifact": "data_analysis_artifact",
+    "source_browser_research_artifact": "browser_research_artifact",
+    "source_desktop_planner_discovery": "desktop_planner_discovery",
+    "source_agent_entrypoint_desktop_execution": "agent_entrypoint_desktop_execution",
+    "source_agent_entrypoint_data_analysis": "agent_entrypoint_data_analysis",
+    "source_agent_studio_planner_orchestration": "agent_studio_planner_orchestration",
+    "source_real_desktop_discovery": "real_desktop_discovery",
+    "source_approval_resume_timeline": "approval_resume",
+    "source_yachiyo_route_approval": "yachiyo_route_approval",
+    "source_group_run_timeline": "group_run",
+    "source_real_desktop_app_open": "real_desktop_app_open",
+    "source_real_desktop_ui_inspection": "real_desktop_ui_inspection",
+    "source_real_desktop_interaction": "real_desktop_interaction",
+}
+PUBLIC_DEMO_FLOW_FLAGS: dict[str, str] = {
+    "real_desktop_app_open": "--include-real-desktop-open",
+    "real_desktop_ui_inspection": "--include-real-desktop-ui-inspection",
+    "real_desktop_interaction": "--include-real-desktop-interaction",
+    "workflow_provider": "--include-provider-workflow",
+    "studio_replay_ui": "--include-ui",
+    "workflow_ui": "--include-ui",
+}
 SMOKE_ITEMS: tuple[dict[str, Any], ...] = (
     {
         "id": "packaged_launch",
@@ -155,6 +178,7 @@ def summarize_release_smoke(
         path = _resolve_path(Path(archive_path))
         diagnostics_sources.append(_display_path(path))
         _collect_diagnostics_evidence(path, evidence=evidence)
+    _collect_public_demo_capability_projection(evidence)
     _collect_aggregate_public_demo_evidence(evidence)
 
     items = [_item_status(item, evidence) for item in SMOKE_ITEMS]
@@ -348,6 +372,10 @@ def _next_actions(missing_items: Sequence[Mapping[str, Any]]) -> list[dict[str, 
         if item.get("id") == "public_demo":
             demo_details = _public_demo_item_details(item)
             if demo_details:
+                command = _public_demo_command_for_missing_flows(
+                    _string_list(demo_details.get("missing_required_flow_ids")),
+                    _dict_list(demo_details.get("release_blockers")),
+                )
                 action.update(
                     {
                         key: value
@@ -355,9 +383,8 @@ def _next_actions(missing_items: Sequence[Mapping[str, Any]]) -> list[dict[str, 
                         if key in {"release_level", "missing_required_flow_ids", "release_blockers"}
                     }
                 )
-                full_demo_command = str(demo_details.get("full_demo_command") or "").strip()
-                if full_demo_command:
-                    action["command"] = full_demo_command
+                if command:
+                    action["command"] = command
         actions.append(action)
     return actions
 
@@ -514,6 +541,38 @@ def _public_demo_item_details(item: Mapping[str, Any]) -> dict[str, Any]:
     return {}
 
 
+def _public_demo_command_for_missing_flows(
+    missing_flow_ids: Sequence[str],
+    release_blockers: Sequence[Mapping[str, Any]],
+) -> str:
+    flags: list[str] = []
+    missing = [flow_id for flow_id in missing_flow_ids if flow_id]
+    blocker_by_id = {
+        str(blocker.get("id") or "").strip(): blocker
+        for blocker in release_blockers
+        if str(blocker.get("id") or "").strip()
+    }
+    unknown_missing = False
+    for flow_id in missing:
+        blocker = blocker_by_id.get(flow_id, {})
+        flag = str(blocker.get("opt_in_flag") or "").strip()
+        if not flag:
+            flag = PUBLIC_DEMO_FLOW_FLAGS.get(flow_id, "")
+        if not flag:
+            unknown_missing = True
+            continue
+        if flag not in flags:
+            flags.append(flag)
+    if not flags or unknown_missing:
+        return FULL_PUBLIC_DEMO_COMMAND
+    return (
+        "python scripts/run_public_demo_smokes.py "
+        + " ".join(flags)
+        + " --output-json tmp/public-demo-smokes-missing.json "
+        + "--output-markdown tmp/public-demo-smokes-missing.md"
+    )
+
+
 def _collect_aggregate_public_demo_evidence(
     evidence: dict[str, list[dict[str, Any]]],
 ) -> None:
@@ -586,6 +645,64 @@ def _collect_aggregate_public_demo_evidence(
         evidence.setdefault("public_demo_selected", []).append(aggregate)
     if complete:
         evidence.setdefault("public_demo_complete", []).append(aggregate)
+
+
+def _collect_public_demo_capability_projection(
+    evidence: dict[str, list[dict[str, Any]]],
+) -> None:
+    required_flow_ids = _canonical_public_demo_flow_ids()
+    passed_flow_ids: list[str] = []
+    sources: list[str] = []
+    for capability_id, flow_id in PUBLIC_DEMO_CAPABILITY_FLOW_MAP.items():
+        entries = evidence.get(capability_id)
+        if not entries:
+            continue
+        if flow_id not in passed_flow_ids:
+            passed_flow_ids.append(flow_id)
+        for entry in entries:
+            if not isinstance(entry, dict):
+                continue
+            source = str(entry.get("source") or "").strip()
+            if source and source not in sources:
+                sources.append(source)
+    if not passed_flow_ids:
+        return
+    missing_flow_ids = [
+        flow_id for flow_id in required_flow_ids if flow_id not in passed_flow_ids
+    ]
+    complete = not missing_flow_ids
+    projection = {
+        "source": ", ".join(sources),
+        "kind": "rc_capability_public_demo_projection",
+        "status": "passed" if complete else "partial",
+        "release_level": "full_public_demo_ready" if complete else "partial_demo_ready",
+        "complete": complete,
+        "selected_count": len(passed_flow_ids),
+        "passed_count": len(passed_flow_ids),
+        "required_flow_count": len(required_flow_ids),
+        "passed_required_flow_count": len(passed_flow_ids),
+        "required_flow_ids": required_flow_ids,
+        "passed_required_flow_ids": passed_flow_ids,
+        "missing_required_flow_ids": missing_flow_ids,
+        "release_blockers": [
+            {
+                "id": flow_id,
+                "status": "missing",
+                "reason": "public demo flow is not covered by passed RC capability evidence",
+            }
+            for flow_id in missing_flow_ids
+        ],
+        "full_demo_command": FULL_PUBLIC_DEMO_COMMAND,
+        "capability_flow_map": {
+            capability_id: flow_id
+            for capability_id, flow_id in PUBLIC_DEMO_CAPABILITY_FLOW_MAP.items()
+            if flow_id in passed_flow_ids
+        },
+    }
+    evidence.setdefault("public_demo_assessment", []).append(projection)
+    evidence.setdefault("public_demo_selected", []).append(projection)
+    if complete:
+        evidence.setdefault("public_demo_complete", []).append(projection)
 
 
 def _canonical_public_demo_flow_ids() -> list[str]:
