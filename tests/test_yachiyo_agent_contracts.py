@@ -726,6 +726,87 @@ def test_agent_task_snapshot_projects_task_core_from_planner_metadata() -> None:
     assert snapshot.task_core.replan_signals[0].target == "data.analysis"
 
 
+def test_agent_task_snapshot_updates_task_core_progress_from_runtime_events() -> None:
+    core_payload = {
+        "core_id": "task-core-1",
+        "workspace": {
+            "workspace_id": "task-workspace-1",
+            "title": "Report Workspace",
+            "items": [],
+        },
+        "todos": [
+            {
+                "todo_id": "todo-1",
+                "title": "Read source",
+                "step_id": "read-source",
+                "tool_name": "workspace.read",
+            },
+            {
+                "todo_id": "todo-2",
+                "title": "Write report",
+                "step_id": "write-report",
+                "tool_name": "artifact.write",
+            },
+        ],
+        "checkpoints": [
+            {
+                "checkpoint_id": "checkpoint-1",
+                "title": "Verify read",
+                "after_step_id": "read-source",
+            },
+            {
+                "checkpoint_id": "checkpoint-2",
+                "title": "Verify write",
+                "after_step_id": "write-report",
+            },
+        ],
+        "replan_signals": [],
+    }
+
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-1",
+            "run_id": "run-1",
+            "title": "Write report",
+            "status": "approval_required",
+            "metadata": {"yachiyo_task_core": core_payload},
+            "events": [
+                {
+                    "event_type": "agent.tool.call",
+                    "payload": {
+                        "step_id": "read-source",
+                        "tool": "workspace.read",
+                        "status": "completed",
+                        "result": {"ok": True},
+                    },
+                },
+                {
+                    "event_type": "agent.tool.approval_required",
+                    "payload": {
+                        "step_id": "write-report",
+                        "tool": "artifact.write",
+                        "status": "approval_required",
+                    },
+                },
+            ],
+        }
+    )
+
+    assert snapshot.task_core is not None
+    assert [todo.status for todo in snapshot.task_core.todos] == [
+        "completed",
+        "blocked",
+    ]
+    assert snapshot.task_core.todos[0].metadata["runtime_status"] == "completed"
+    assert [checkpoint.status for checkpoint in snapshot.task_core.checkpoints] == [
+        "completed",
+        "waiting_approval",
+    ]
+    assert snapshot.task_core.checkpoints[1].payload["runtime_event_type"] == (
+        "agent.tool.approval_required"
+    )
+
+
 def test_run_timeline_snapshot_projects_task_core_from_plan_event() -> None:
     core_payload = {
         "core_id": "task-core-1",
