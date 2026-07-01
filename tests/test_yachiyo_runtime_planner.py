@@ -22073,6 +22073,86 @@ def test_entrypoint_selection_preserves_browser_field_input_approval() -> None:
     ]
 
 
+def test_runtime_planner_falls_back_to_desktop_ui_for_current_page_actions() -> None:
+    click_allowed = ["desktop.click_ui_element", "desktop.ui_elements"]
+    click = RuntimePlanner().decision("点击当前页面的登录按钮", allowed_tools=click_allowed)
+
+    assert click.selected_intent.kind == "web_research"
+    assert click.selected_intent.inputs == {
+        "url_hint": "",
+        "browser_action": "click",
+        "selector": "text=登录",
+        "click_count": 1,
+    }
+    click_step = _step_by_id(click, "click-current-page-element")
+    assert click_step.tool_name == "desktop.click_ui_element"
+    assert click_step.input_preview == {
+        "target": "登录",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert click_step.approval_required is True
+    assert planner_tool_requests("点击当前页面的登录按钮", click_allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "登录",
+                "role_filter": "button",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+    type_allowed = ["desktop.type_into_ui_element", "desktop.ui_elements"]
+    typed = RuntimePlanner().decision("把当前页面输入 hello 并提交", allowed_tools=type_allowed)
+
+    assert typed.selected_intent.kind == "web_research"
+    assert typed.selected_intent.inputs["browser_action"] == "type_text"
+    assert typed.selected_intent.inputs["text"] == "hello"
+    type_step = _step_by_id(typed, "type-current-page-input")
+    assert type_step.tool_name == "desktop.type_into_ui_element"
+    assert type_step.input_preview == {
+        "target": "text input",
+        "text": "hello",
+        "role_filter": "text field",
+        "limit": 80,
+    }
+    assert type_step.approval_required is True
+    assert planner_tool_requests("把当前页面输入 hello 并提交", type_allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_into_ui_element",
+            "input": {
+                "target": "text input",
+                "text": "hello",
+                "role_filter": "text field",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text field", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_entrypoint_selection_routes_browser_click_to_planner() -> None:
     def legacy_requests(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
         return [

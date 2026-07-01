@@ -2243,6 +2243,9 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
         return requests
     if browser_action == "type_text":
         if "browser.type_text" not in allowed:
+            fallback_requests = _browser_type_desktop_fallback_requests(decision, allowed)
+            if fallback_requests:
+                return [*prepare_requests, *fallback_requests]
             return []
         selector = str(decision.selected_intent.inputs.get("selector") or "").strip()
         text = str(decision.selected_intent.inputs.get("text") or "")
@@ -2577,7 +2580,16 @@ def _browser_click_desktop_fallback_requests(
     inputs = decision.selected_intent.inputs
     app_name = str(inputs.get("app_name") or "").strip()
     selector = str(inputs.get("selector") or "").strip()
-    if not app_name or not selector.startswith("text="):
+    point_payload = _browser_point_desktop_payload(inputs)
+    if point_payload and "desktop.click" in allowed:
+        return [
+            _request(
+                "desktop.click",
+                point_payload,
+                planning_reason="planner_desktop_operation",
+            )
+        ]
+    if not selector.startswith("text="):
         return []
     target = selector.removeprefix("text=").strip()
     if not target:
@@ -2625,6 +2637,22 @@ def _browser_click_desktop_fallback_requests(
                 ),
             ]
         )
+    elif "desktop.click_ui_element" in allowed:
+        requests.append(
+            _request(
+                "desktop.click_ui_element",
+                _desktop_request_payload(
+                    "desktop.click_ui_element",
+                    {
+                        "target": target,
+                        "role_filter": "button",
+                        "click_count": _safe_click_count(inputs.get("click_count")),
+                        "limit": 80,
+                    },
+                ),
+                planning_reason="planner_desktop_operation",
+            )
+        )
     if requests and "desktop.ui_elements" in allowed:
         requests.append(
             _request(
@@ -2634,6 +2662,113 @@ def _browser_click_desktop_fallback_requests(
             )
         )
     return requests
+
+
+def _browser_type_desktop_fallback_requests(
+    decision: Any,
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    if "desktop.type_into_ui_element" not in allowed:
+        return []
+    inputs = decision.selected_intent.inputs
+    selector = str(inputs.get("selector") or "").strip()
+    text = str(inputs.get("text") or "")
+    if not text:
+        return []
+    target = _desktop_target_from_browser_selector(selector) or "text input"
+    payload = {
+        "target": target,
+        "text": text,
+        "role_filter": _desktop_role_filter_from_browser_selector(
+            selector,
+            default="text field",
+        ),
+        "limit": 80,
+    }
+    requests = [
+        _request(
+            "desktop.type_into_ui_element",
+            _desktop_request_payload("desktop.type_into_ui_element", payload),
+            planning_reason="planner_desktop_operation",
+        )
+    ]
+    if "desktop.ui_elements" in allowed:
+        requests.append(
+            _request(
+                "desktop.ui_elements",
+                {"role_filter": "text field", "limit": 80},
+                planning_reason="planner_desktop_operation",
+            )
+        )
+    return requests
+
+
+def _browser_point_desktop_payload(inputs: Mapping[str, Any]) -> dict[str, Any]:
+    x = inputs.get("fallback_x")
+    y = inputs.get("fallback_y")
+    if x in (None, "") or y in (None, ""):
+        return {}
+    return {
+        "x": x,
+        "y": y,
+        "click_count": _safe_click_count(inputs.get("click_count")),
+    }
+
+
+def _desktop_target_from_browser_selector(selector: str) -> str:
+    value = str(selector or "").strip()
+    if value.startswith("text="):
+        return value.removeprefix("text=").strip()
+    lowered = value.lower()
+    if value.startswith("input:not") or (
+        "textarea" in lowered and "contenteditable" in lowered
+    ):
+        return "text input"
+    if "search" in lowered or "搜索" in lowered:
+        return "search"
+    if "password" in lowered or "密码" in lowered:
+        return "password"
+    if "email" in lowered or "邮箱" in lowered or "邮件" in lowered:
+        return "email"
+    if (
+        "user" in lowered
+        or "username" in lowered
+        or "login" in lowered
+        or "用户名" in lowered
+        or "账号" in lowered
+    ):
+        return "username"
+    if (
+        value.startswith("input")
+        or value.startswith("textarea")
+        or "contenteditable" in lowered
+    ):
+        return "text input"
+    return value
+
+
+def _desktop_role_filter_from_browser_selector(selector: str, *, default: str) -> str:
+    value = str(selector or "").strip().lower()
+    if value.startswith("text="):
+        return default
+    if (
+        value.startswith("input")
+        or value.startswith("textarea")
+        or "contenteditable" in value
+        or "search" in value
+        or "password" in value
+        or "email" in value
+    ):
+        return "text field"
+    return default
+
+
+def _safe_click_count(value: Any) -> int:
+    try:
+        count = int(value or 1)
+    except (TypeError, ValueError):
+        return 1
+    return count if count > 0 else 1
 
 
 def _current_page_find_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:

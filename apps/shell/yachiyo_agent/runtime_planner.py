@@ -5111,38 +5111,36 @@ class RuntimePlanner:
                     reason="Prepare the requested browser before running the browser tool.",
                 )
             tool_name = _first_allowed(
-                {
-                    "current_page": ("browser.current_page",),
-                    "extract_text": ("browser.extract_text", "browser.extract"),
-                    "screenshot": ("browser.screenshot",),
-                    "click": ("browser.click",),
-                    "type_text": ("browser.type_text",),
-                    "open_search": ("browser.open_url", "browser.search", "browser.open"),
-                    "open_url": ("browser.open_url", "browser.open"),
-                    "open_url_extract": ("browser.open_url_and_extract_text",),
-                    "open_url_screenshot": ("browser.open_url_and_screenshot",),
-                }.get(browser_action, ()),
+                _browser_action_tool_candidates(browser_action, intent.inputs),
                 allowed,
             )
             input_preview: dict[str, Any] = {}
             if browser_action == "click":
                 selector = str(intent.inputs.get("selector") or "").strip()
                 click_count = intent.inputs.get("click_count")
-                if selector:
-                    input_preview["selector"] = selector
-                if click_count not in (None, ""):
-                    input_preview["click_count"] = click_count
+                if tool_name == "desktop.click_ui_element":
+                    input_preview = _browser_click_desktop_preview(selector, click_count)
+                elif tool_name == "desktop.click":
+                    input_preview = _browser_click_point_preview(intent.inputs, click_count)
+                else:
+                    if selector:
+                        input_preview["selector"] = selector
+                    if click_count not in (None, ""):
+                        input_preview["click_count"] = click_count
             if browser_action == "type_text":
                 selector = str(intent.inputs.get("selector") or "").strip()
                 text = str(intent.inputs.get("text") or "")
-                if selector:
-                    input_preview["selector"] = selector
-                if text:
-                    input_preview["text"] = text
-                for key in ("fallback_x", "fallback_y"):
-                    value = intent.inputs.get(key)
-                    if value not in (None, ""):
-                        input_preview[key] = value
+                if tool_name == "desktop.type_into_ui_element":
+                    input_preview = _browser_type_desktop_preview(selector, text)
+                else:
+                    if selector:
+                        input_preview["selector"] = selector
+                    if text:
+                        input_preview["text"] = text
+                    for key in ("fallback_x", "fallback_y"):
+                        value = intent.inputs.get(key)
+                        if value not in (None, ""):
+                            input_preview[key] = value
             reason = str(intent.inputs.get("reason") or "").strip()
             if browser_action in {"screenshot", "open_url_screenshot"} and reason:
                 input_preview["reason"] = reason
@@ -5181,14 +5179,30 @@ class RuntimePlanner:
                     "open_url_extract": "Open and extract web URL",
                     "open_url_screenshot": "Open and capture web URL",
                 }.get(browser_action, "Read current page"),
-                "browser.research",
+                (
+                    "desktop.ui_operation"
+                    if tool_name in {
+                        "desktop.click",
+                        "desktop.click_ui_element",
+                        "desktop.type_into_ui_element",
+                    }
+                    else "browser.research"
+                ),
                 _first_allowed((tool_name,), allowed) if tool_name else None,
                 input_preview=input_preview,
                 risk_level="medium" if browser_action in {"click", "type_text"} else "low",
                 approval_required=browser_action in {"click", "type_text"},
                 depends_on=[prepare_step_id] if prepare_step_id else [],
                 reason=(
-                    "Use the browser interaction tool so the runtime can enforce browser approval."
+                    (
+                        "Use desktop UI automation as a browser interaction fallback when browser tools are unavailable."
+                        if tool_name in {
+                            "desktop.click",
+                            "desktop.click_ui_element",
+                            "desktop.type_into_ui_element",
+                        }
+                        else "Use the browser interaction tool so the runtime can enforce browser approval."
+                    )
                     if browser_action in {"click", "type_text"}
                     else "Use the explicit current-page browser tool instead of desktop screen automation."
                 ),
@@ -21407,6 +21421,13 @@ def _clean_browser_typed_text(value: str) -> str:
     text = str(value or "").strip()
     text = re.sub(r"^[\"'`“”‘’]+|[\"'`“”‘’]+$", "", text).strip()
     text = re.sub(r"^(?:text|内容)\s*[:：]\s*", "", text, flags=re.IGNORECASE).strip()
+    text = re.sub(
+        r"\s*(?:并|然后|and\s+then|then)\s*"
+        r"(?:提交|发送|确认|submit|send|confirm)$",
+        "",
+        text,
+        flags=re.IGNORECASE,
+    ).strip()
     text = re.sub(r"\s+(?:please|pls)$", "", text, flags=re.IGNORECASE).strip()
     return re.sub(r"[。！？!?]+$", "", text).strip()
 
@@ -21441,6 +21462,124 @@ def _browser_input_selector_from_target(target: str) -> str:
     if re.search(r"(?:用户名|账号|账户|user|username|login)", lowered):
         return 'input[name*="user" i], input[autocomplete="username"], input[type="text"]'
     return _BROWSER_TEXT_INPUT_SELECTOR
+
+
+def _browser_action_tool_candidates(
+    browser_action: str,
+    inputs: Mapping[str, Any],
+) -> tuple[str, ...]:
+    if browser_action == "click":
+        selector = str(inputs.get("selector") or "").strip()
+        if selector.startswith("point="):
+            return ("browser.click", "desktop.click")
+        return ("browser.click", "desktop.click_ui_element")
+    if browser_action == "type_text":
+        return ("browser.type_text", "desktop.type_into_ui_element")
+    return {
+        "current_page": ("browser.current_page",),
+        "extract_text": ("browser.extract_text", "browser.extract"),
+        "screenshot": ("browser.screenshot",),
+        "open_search": ("browser.open_url", "browser.search", "browser.open"),
+        "open_url": ("browser.open_url", "browser.open"),
+        "open_url_extract": ("browser.open_url_and_extract_text",),
+        "open_url_screenshot": ("browser.open_url_and_screenshot",),
+    }.get(browser_action, ())
+
+
+def _browser_click_desktop_preview(selector: str, click_count: Any) -> dict[str, Any]:
+    target = _desktop_target_from_browser_selector(selector)
+    if not target:
+        return {}
+    return {
+        "target": target,
+        "role_filter": _desktop_role_filter_from_browser_selector(
+            selector,
+            default="button",
+        ),
+        "click_count": _safe_click_count(click_count),
+        "limit": 80,
+    }
+
+
+def _browser_click_point_preview(
+    inputs: Mapping[str, Any],
+    click_count: Any,
+) -> dict[str, Any]:
+    x = inputs.get("fallback_x")
+    y = inputs.get("fallback_y")
+    if x in (None, "") or y in (None, ""):
+        return {}
+    return {"x": x, "y": y, "click_count": _safe_click_count(click_count)}
+
+
+def _browser_type_desktop_preview(selector: str, text: str) -> dict[str, Any]:
+    target = _desktop_target_from_browser_selector(selector) or "text input"
+    payload = {
+        "target": target,
+        "text": text,
+        "role_filter": _desktop_role_filter_from_browser_selector(
+            selector,
+            default="text field",
+        ),
+        "limit": 80,
+    }
+    return {key: value for key, value in payload.items() if value not in (None, "")}
+
+
+def _desktop_target_from_browser_selector(selector: str) -> str:
+    value = str(selector or "").strip()
+    if value.startswith("text="):
+        return value.removeprefix("text=").strip()
+    lowered = value.lower()
+    if value.startswith("input:not") or (
+        "textarea" in lowered and "contenteditable" in lowered
+    ):
+        return "text input"
+    if "search" in lowered or "搜索" in lowered:
+        return "search"
+    if "password" in lowered or "密码" in lowered:
+        return "password"
+    if "email" in lowered or "邮箱" in lowered or "邮件" in lowered:
+        return "email"
+    if (
+        "user" in lowered
+        or "username" in lowered
+        or "login" in lowered
+        or "用户名" in lowered
+        or "账号" in lowered
+    ):
+        return "username"
+    if (
+        value.startswith("input")
+        or value.startswith("textarea")
+        or "contenteditable" in lowered
+    ):
+        return "text input"
+    return value
+
+
+def _desktop_role_filter_from_browser_selector(selector: str, *, default: str) -> str:
+    value = str(selector or "").strip().lower()
+    if value.startswith("text="):
+        return default
+    if (
+        value.startswith("input")
+        or value.startswith("textarea")
+        or "contenteditable" in value
+        or "search" in value
+        or "password" in value
+        or "email" in value
+    ):
+        return "text field"
+    return default
+
+
+def _safe_click_count(value: Any) -> int:
+    try:
+        count = int(value or 1)
+    except (TypeError, ValueError):
+        return 1
+    return count if count > 0 else 1
 
 
 def _looks_like_css_selector(value: str) -> bool:
