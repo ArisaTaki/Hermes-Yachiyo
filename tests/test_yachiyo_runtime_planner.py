@@ -8130,6 +8130,27 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "query": "document",
         "limit": 20,
     }
+    local_markdown_en = RuntimePlanner().decision(
+        "open an app on my Mac that can write markdown and create a new document",
+        allowed_tools=allowed_tools,
+    )
+    assert local_markdown_en.selected_intent.inputs["app_name_hint"] == ""
+    assert local_markdown_en.selected_intent.inputs["app_capability_hint"] == {
+        "query": "markdown",
+        "description": "markdown",
+    }
+    assert _step_by_id(local_markdown_en, "discover_apps-desktop-state").input_preview == {
+        "query": "markdown",
+        "limit": 20,
+    }
+    local_app_en = RuntimePlanner().decision(
+        "use a local app for markdown to create a note",
+        allowed_tools=allowed_tools,
+    )
+    assert local_app_en.selected_intent.inputs["app_capability_hint"] == {
+        "query": "markdown",
+        "description": "markdown to create a note",
+    }
 
     scoped_markdown = RuntimePlanner().decision(
         "帮我在一个能写 Markdown 的应用里新建文档",
@@ -8338,6 +8359,19 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "description": "PDF",
     }
     assert [step.step_id for step in local_pdf.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+    ]
+    local_pdf_en = RuntimePlanner().decision(
+        "find an app on this computer to edit PDF and open it",
+        allowed_tools=["desktop.list_apps", "app.open"],
+    )
+    assert local_pdf_en.selected_intent.inputs["app_name_hint"] == ""
+    assert local_pdf_en.selected_intent.inputs["app_capability_hint"] == {
+        "query": "pdf",
+        "description": "PDF",
+    }
+    assert [step.step_id for step in local_pdf_en.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
     ]

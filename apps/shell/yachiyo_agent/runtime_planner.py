@@ -20321,15 +20321,19 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?:的)?\s*)+"
     )
     generic_prefix_en = (
-        r"(?:(?:an?|any|some|available|default|suitable|best|usable|installed)\s+)*"
+        r"(?:(?:an?|any|some|available|default|suitable|best|usable|installed|local)\s+)*"
     )
     required_generic_prefix_en = (
-        r"(?:(?:an?|any|some|available|default|suitable|best|usable|installed)\s+)+"
+        r"(?:(?:an?|any|some|available|default|suitable|best|usable|installed|local)\s+)+"
     )
     local_scope_prefix = (
         r"(?:(?:(?:我(?:的)?|这台|这个)?(?:电脑|机器|mac|Mac|系统)"
         r"|本机|本地|桌面)"
         r"(?:里|中|上|里面|内|下)?(?:的)?\s*)*"
+    )
+    local_scope_infix_en = (
+        r"(?:(?:on|in|from)\s+(?:(?:my|this|the)\s+)?"
+        r"(?:mac|computer|machine|desktop|system|local\s+machine))?"
     )
     patterns = (
         r"(?:打开|启动|找|找一个|找一款|使用|在|用|通过)\s*"
@@ -20344,10 +20348,12 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"\b(?:open|launch|start|find|use)\s+"
         rf"{generic_prefix_en}"
         r"(?:app|application|tool|program)\s+"
+        rf"{local_scope_infix_en}\s*"
         r"(?:that\s+can|to|for)\s+(?P<capability_en>[^.!?,]{1,60})",
         r"\b(?:in|inside|within|using|with)\s+"
         rf"{generic_prefix_en}"
         r"(?:app|application|tool|program)\s+"
+        rf"{local_scope_infix_en}\s*"
         r"(?:that\s+can|to|for)\s+(?P<scoped_capability_en>[^.!?,]{1,60})",
         r"(?:写进|写入|写到|放进|放到|保存到|导出到|输出到|整理到|总结到|发到)\s*"
         rf"{generic_prefix}"
