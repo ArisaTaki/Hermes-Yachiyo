@@ -1278,6 +1278,25 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         dynamic_source = source if source in {"clipboard", "selection"} else ""
         web_search = _web_search_hint(text, dynamic_source)
+        app_scoped_search_name = str(
+            app_search_hint.get("app_name") or app_name_hint
+        ).strip()
+        if (
+            not web_search
+            and not (
+                app_search_hint
+                and app_scoped_search_name
+                and not _is_browser_or_search_app_name(app_scoped_search_name)
+            )
+        ):
+            generic_research_query = _generic_web_research_query_hint(text)
+            if generic_research_query:
+                engine = _web_search_engine_hint(text)
+                web_search = {
+                    "browser_action": "open_search",
+                    "query": generic_research_query,
+                    "url_hint": _web_search_url(engine, generic_research_query),
+                }
         browser_interaction = _browser_type_text_hint(text) or _browser_click_hint(text)
         app_scoped_safe_operation = _app_scoped_safe_operation_hint(text)
         app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
@@ -17946,6 +17965,8 @@ def _invalid_leading_app_search_match(value: str, app_name: str, query: str) -> 
     normalized_query = str(query or "").strip().lower()
     if re.fullmatch(r"(?:please|can\s+you|could\s+you|would\s+you)", app_name, flags=re.IGNORECASE):
         return True
+    if _looks_like_task_prefix_app_name(app_name):
+        return True
     if app_name in {"查", "找", "搜", "搜索", "查找", "检索"}:
         return True
     if normalized_query in {
@@ -17979,6 +18000,24 @@ def _invalid_leading_app_search_match(value: str, app_name: str, query: str) -> 
             lowered,
             ("search field", "search box", "search input", "search result", "search results"),
         )
+    )
+
+
+def _looks_like_task_prefix_app_name(app_name: str) -> bool:
+    value = _clean_prompt(app_name)
+    if not value:
+        return False
+    lowered = value.lower()
+    if re.search(
+        r"^(?:make|create|write|generate|produce|draft|summari[sz]e|research|analy[sz]e)\b",
+        lowered,
+    ):
+        return True
+    if re.search(r"(?:帮我|请|麻烦|做一份|做一个|做个|写一份)", value):
+        return True
+    return bool(
+        re.search(r"(?:做|写|生成|输出|整理|总结|调研|分析)", value)
+        and re.search(r"(?:一份|一个|报告|文档|计划|方案|总结|分析|调研|资料|数据|表格|清单)", value)
     )
 
 
@@ -18968,6 +19007,48 @@ def _web_search_query(text: str) -> str:
             if query:
                 return query
     return ""
+
+
+def _generic_web_research_query_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if not value:
+        return ""
+    if _url_hint(value):
+        return ""
+    patterns = (
+        r"(?:调研|研究|了解|查找|查询|检索|搜索)\s*(?P<query>[^，,。！？!?]+)",
+        r"(?P<query>[^，,。！？!?]{2,80})(?:，|,)?\s*(?:找资料|查资料|搜集资料|收集资料)",
+        r"\b(?:research|investigate|look\s+up|find\s+sources\s+for|gather\s+info(?:rmation)?\s+for)\s+"
+        r"(?P<query>[^.!?,]+)",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = _clean_generic_web_research_query(match.group("query"))
+        if query:
+            return query
+    return ""
+
+
+def _clean_generic_web_research_query(query: str) -> str:
+    value = _clean_web_search_query(query)
+    value = re.sub(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:做|制作|写|生成|输出|整理)?"
+        r"(?:一份|一个|一篇|个)?",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(
+        r"(?:并|然后|，|,)?\s*(?:输出|生成|写成|整理成|保存成).*$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    if value in {"资料", "信息", "内容", "sources", "information", "info"}:
+        return ""
+    return value
 
 
 def _external_research_report_query(text: str) -> str:

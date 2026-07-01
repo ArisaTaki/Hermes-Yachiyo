@@ -970,6 +970,55 @@ def test_runtime_planner_treats_app_search_results_as_data_analysis_context() ->
     }
 
 
+def test_runtime_planner_routes_research_deliverables_to_web_search_not_app_search() -> None:
+    market_research = RuntimePlanner().decision(
+        "做一份市场分析，找资料、总结重点、输出报告",
+        allowed_tools=["browser.search", "artifact.write", "desktop.list_apps"],
+    )
+    competitor_research = RuntimePlanner().decision(
+        "帮我做一份竞品分析报告，调研 Notion 和 Obsidian 的区别，输出 markdown",
+        allowed_tools=["browser.search", "artifact.write", "desktop.list_apps"],
+    )
+    app_search = RuntimePlanner().decision(
+        "Slack 搜索 revenue",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "app.focus_and_safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert market_research.selected_intent.kind == "web_research"
+    assert market_research.selected_intent.inputs["browser_action"] == "open_search"
+    assert market_research.selected_intent.inputs["query"] == "市场分析"
+    assert "app_search_result_hint" not in market_research.selected_intent.inputs
+    assert _step_by_id(market_research, "open-web-search").tool_name == "browser.search"
+    assert _step_by_id(market_research, "open-web-search").input_preview == {
+        "query": "市场分析"
+    }
+    assert market_research.plan.tool_plan.required_capabilities == [
+        "browser.research",
+        "artifact.write",
+    ]
+
+    assert competitor_research.selected_intent.kind == "web_research"
+    assert competitor_research.selected_intent.inputs["query"] == (
+        "Notion 和 Obsidian 的区别"
+    )
+    assert _step_by_id(competitor_research, "open-web-search").input_preview == {
+        "query": "Notion 和 Obsidian 的区别"
+    }
+
+    assert app_search.selected_intent.kind == "desktop_operation"
+    assert app_search.selected_intent.inputs["app_search_hint"] == {
+        "app_name": "Slack",
+        "query": "revenue",
+        "target": "搜索",
+    }
+
+
 def test_runtime_planner_prefetches_current_window_table_for_analysis() -> None:
     decision = RuntimePlanner().decision(
         "把当前窗口里的表格复制出来，分析并输出报告",
