@@ -3226,6 +3226,12 @@ class RuntimePlanner:
                     allowed,
                     depends_on="open-selected-discovered-app",
                 )
+                _append_selected_discovered_generic_action_steps(
+                    steps,
+                    intent,
+                    allowed,
+                    depends_on="observe-selected-discovered-app",
+                )
                 _append_selected_discovered_creative_action_steps(
                     steps,
                     intent,
@@ -8175,6 +8181,291 @@ def _append_selected_discovered_app_observation_step(
             reason=(
                 "Observe the model-selected app after opening it because the user asked "
                 "for a follow-up desktop action, not just app launch."
+            ),
+        )
+    )
+
+
+def _selected_discovered_app_input_context(intent: TaskIntentSnapshot) -> dict[str, str]:
+    return {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": _selected_discovered_app_query(intent),
+    }
+
+
+def _selected_discovered_app_operation_input(
+    intent: TaskIntentSnapshot,
+    tool_name: str | None,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    if str(tool_name or "").startswith("app."):
+        return {
+            **_selected_discovered_app_input_context(intent),
+            **dict(payload),
+        }
+    return dict(payload)
+
+
+def _append_selected_discovered_generic_action_steps(
+    steps: list[ToolPlanStepSnapshot],
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    *,
+    depends_on: str,
+) -> None:
+    if any(
+        step.step_id.startswith("operate-foreground-ui-followup")
+        or step.step_id
+        in {
+            "inspect-selected-communication-compose-ui",
+            "type-selected-communication-recipient",
+            "type-selected-communication-body",
+            "submit-foreground-ui",
+        }
+        for step in steps
+    ):
+        return
+    pending_action = discovered_app_pending_user_action(intent.user_goal)
+    if not pending_action or _looks_like_discovered_creative_action(intent, pending_action):
+        return
+
+    click_target = click_target_hint(pending_action)
+    type_target = type_into_ui_hint(pending_action)
+    safe_type_text = "" if type_target else safe_type_text_hint(pending_action)
+    safe_shortcut = safe_shortcut_hint(pending_action)
+    hotkey = None if safe_shortcut else hotkey_hint(pending_action)
+    submit_action = submit_action_hint(pending_action)
+    previous_step = depends_on
+    planned_action = False
+
+    if safe_shortcut:
+        shortcut_tool = _first_allowed(
+            (
+                "desktop.safe_shortcut",
+                "app.focus_and_safe_shortcut",
+                "app.open_and_safe_shortcut",
+            ),
+            allowed,
+        )
+        if shortcut_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "shortcut-selected-discovered-app",
+                    "Run selected app shortcut",
+                    "desktop.ui_operation",
+                    shortcut_tool,
+                    input_preview=_selected_discovered_app_operation_input(
+                        intent,
+                        shortcut_tool,
+                        safe_shortcut,
+                    ),
+                    depends_on=[previous_step],
+                    action="shortcut",
+                    risk_level="medium",
+                    approval_required=True,
+                    reason=(
+                        "After opening and observing the model-selected app, execute the "
+                        "requested safe foreground shortcut without adding app-specific rules."
+                    ),
+                )
+            )
+            previous_step = "shortcut-selected-discovered-app"
+            planned_action = True
+
+    if hotkey:
+        hotkey_tool = _first_allowed(
+            (
+                "desktop.hotkey",
+                "desktop.shortcut",
+                "app.focus_and_hotkey",
+                "app.open_and_hotkey",
+            ),
+            allowed,
+        )
+        if hotkey_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "hotkey-selected-discovered-app",
+                    "Run selected app hotkey",
+                    "desktop.ui_operation",
+                    hotkey_tool,
+                    input_preview=_selected_discovered_app_operation_input(
+                        intent,
+                        hotkey_tool,
+                        hotkey,
+                    ),
+                    depends_on=[previous_step],
+                    action="shortcut",
+                    risk_level="medium",
+                    approval_required=True,
+                    reason=(
+                        "Use the parsed foreground hotkey against the model-selected app "
+                        "after discovery and UI observation."
+                    ),
+                )
+            )
+            previous_step = "hotkey-selected-discovered-app"
+            planned_action = True
+
+    if type_target:
+        type_tool = _first_allowed(
+            (
+                "desktop.type_into_ui_element",
+                "app.focus_and_type_into_ui_element",
+                "app.open_and_type_into_ui_element",
+            ),
+            allowed,
+        )
+        if type_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "type-selected-discovered-app-ui",
+                    "Type into selected app UI",
+                    "desktop.ui_operation",
+                    type_tool,
+                    input_preview=_selected_discovered_app_operation_input(
+                        intent,
+                        type_tool,
+                        {**type_target, "limit": 80},
+                    ),
+                    depends_on=[previous_step],
+                    action="type",
+                    risk_level="medium",
+                    approval_required=True,
+                    reason=(
+                        "Type the requested text into a visible UI element of the model-selected "
+                        "app using the generic UI operation path."
+                    ),
+                )
+            )
+            previous_step = "type-selected-discovered-app-ui"
+            planned_action = True
+    elif safe_type_text:
+        type_text_tool = _first_allowed(
+            (
+                "desktop.safe_type_text",
+                "app.focus_and_safe_type_text",
+                "app.open_and_safe_type_text",
+                "desktop.type_text",
+            ),
+            allowed,
+        )
+        if type_text_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "type-selected-discovered-app-text",
+                    "Type text in selected app",
+                    "desktop.ui_operation",
+                    type_text_tool,
+                    input_preview=_selected_discovered_app_operation_input(
+                        intent,
+                        type_text_tool,
+                        {"text": safe_type_text},
+                    ),
+                    depends_on=[previous_step],
+                    action="type",
+                    risk_level="medium",
+                    approval_required=True,
+                    reason=(
+                        "Type explicit user-provided text into the foreground selected app "
+                        "through the normal safe typing tool."
+                    ),
+                )
+            )
+            previous_step = "type-selected-discovered-app-text"
+            planned_action = True
+
+    if click_target and not type_target:
+        click_tool = _first_allowed(
+            (
+                "desktop.click_ui_element",
+                "app.focus_and_click_ui_element",
+                "app.open_and_click_ui_element",
+            ),
+            allowed,
+        )
+        if click_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "operate-selected-discovered-app-ui",
+                    "Operate selected app UI",
+                    "desktop.ui_operation",
+                    click_tool,
+                    input_preview=_selected_discovered_app_operation_input(
+                        intent,
+                        click_tool,
+                        {**click_target, "limit": 80},
+                    ),
+                    depends_on=[previous_step],
+                    action="click",
+                    risk_level="medium",
+                    approval_required=True,
+                    reason=(
+                        "Click the requested visible control after the app was selected by "
+                        "capability discovery, not by an app-specific rule."
+                    ),
+                )
+            )
+            previous_step = "operate-selected-discovered-app-ui"
+            planned_action = True
+
+    if submit_action and (planned_action or not click_target):
+        submit_tool = _first_allowed(("desktop.submit_foreground", "desktop.search_submit"), allowed)
+        if submit_tool:
+            submit_input = (
+                {"action": submit_action}
+                if submit_tool == "desktop.submit_foreground"
+                else {}
+            )
+            steps.append(
+                _step(
+                    intent,
+                    "submit-selected-discovered-app-action",
+                    "Submit selected app action",
+                    "desktop.ui_operation",
+                    submit_tool,
+                    input_preview=submit_input,
+                    depends_on=[previous_step],
+                    action="submit",
+                    risk_level="medium",
+                    approval_required=True,
+                    reason=(
+                        "Submit or confirm the requested foreground action after the selected "
+                        "app operation."
+                    ),
+                )
+            )
+            previous_step = "submit-selected-discovered-app-action"
+            planned_action = True
+
+    if not planned_action:
+        return
+    verify_tool = _first_allowed(("screen.capture", "desktop.ui_elements"), allowed)
+    if not verify_tool:
+        return
+    steps.append(
+        _step(
+            intent,
+            "verify-selected-discovered-app-action",
+            "Verify selected app action",
+            "desktop.visual_verification",
+            verify_tool,
+            input_preview=(
+                {"reason": "verify selected discovered app action"}
+                if verify_tool == "screen.capture"
+                else {"limit": 80}
+            ),
+            depends_on=[previous_step],
+            action=_desktop_discovery_action(verify_tool),
+            reason=(
+                "Verify the selected discovered app after the generic foreground operation "
+                "before reporting completion."
             ),
         )
     )

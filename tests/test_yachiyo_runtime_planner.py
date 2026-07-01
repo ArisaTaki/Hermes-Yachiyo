@@ -2551,6 +2551,50 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
     }
 
 
+def test_planner_adds_generic_discovered_app_followup_action_steps() -> None:
+    prompt = "打开一个能编辑图片的应用，然后点击导出"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "desktop.click_ui_element",
+        "screen.capture",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "image", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "observe-selected-discovered-app",
+        "operate-selected-discovered-app-ui",
+        "verify-selected-discovered-app-action",
+    ]
+    operate_step = _step_by_id(decision, "operate-selected-discovered-app-ui")
+    assert operate_step.tool_name == "desktop.click_ui_element"
+    assert operate_step.input_preview == {
+        "target": "导出",
+        "role_filter": "",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert operate_step.approval_required is True
+    assert _step_by_id(
+        decision,
+        "verify-selected-discovered-app-action",
+    ).tool_name == "screen.capture"
+
+
 def test_planner_selection_payload_surfaces_discovered_app_open_path_target() -> None:
     prompt = "找一个代码编辑器打开 README.md"
     allowed_tools = [
