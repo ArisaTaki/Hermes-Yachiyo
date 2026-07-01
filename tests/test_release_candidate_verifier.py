@@ -4190,6 +4190,47 @@ def test_release_candidate_verifier_rejects_json_and_markdown_input_conflict(cap
     assert "choose either --manual-checks-json or --manual-checks-markdown" in output
 
 
+def test_release_candidate_verifier_full_local_native_agent_rc_cli_enables_local_gates(
+    monkeypatch,
+):
+    calls: list[dict[str, object]] = []
+
+    def fake_verify_release_candidate(**kwargs):
+        calls.append(kwargs)
+        return 0
+
+    monkeypatch.setattr(rc, "verify_release_candidate", fake_verify_release_candidate)
+
+    assert (
+        rc.main(
+            [
+                "--run-full-local-native-agent-rc",
+                "--report-json",
+                "tmp/full-local-native-agent-rc.json",
+            ]
+        )
+        == 0
+    )
+
+    assert len(calls) == 1
+    call = calls[0]
+    assert call["require_artifacts"] is True
+    assert call["check_dmg_mount"] is True
+    assert call["check_gatekeeper_readiness"] is True
+    assert call["run_packaged_backend_bridge_smoke"] is True
+    assert call["run_dmg_app_smoke"] is True
+    assert call["run_dmg_ui_sampling_smoke"] is True
+    assert call["run_dmg_chat_native_file_smoke"] is True
+    assert call["run_real_desktop_app_open_smoke"] is True
+    assert call["run_real_desktop_ui_inspection_smoke"] is True
+    assert call["run_real_desktop_interaction_smoke"] is True
+    assert call["allow_real_desktop_interaction_existing_app"] is True
+    assert call["run_dmg_screen_smoke"] is False
+    assert call["run_provider_smoke"] is False
+    assert call["run_ui_smoke"] is False
+    assert call["report_json"] == Path("tmp/full-local-native-agent-rc.json")
+
+
 def test_release_candidate_verifier_report_can_mark_provider_not_applicable_without_credentials(
     tmp_path,
     monkeypatch,

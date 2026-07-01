@@ -858,6 +858,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document the local RC DMG mount gate",
     ),
     (
+        "python scripts/verify_release_candidate.py --run-full-local-native-agent-rc",
+        "release packaging docs must document the full local Native Agent RC bundle",
+    ),
+    (
         "python scripts/verify_release_candidate.py --source-only --run-real-desktop-app-open-smoke",
         "release packaging docs must document the opt-in real desktop app open smoke",
     ),
@@ -1970,6 +1974,10 @@ RELEASE_CANDIDATE_VERIFIER_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         '"--run-dmg-chat-native-file-smoke"',
         "release candidate verifier CLI must expose packaged Chat native file smoke",
+    ),
+    (
+        '"--run-full-local-native-agent-rc"',
+        "release candidate verifier CLI must expose the full local Native Agent RC bundle",
     ),
     (
         "Screenshot image bytes were not archived",

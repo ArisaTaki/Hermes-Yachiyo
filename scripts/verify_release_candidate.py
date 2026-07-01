@@ -6033,6 +6033,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         help="Run every scripts/smoke_*_ui.mjs Electron UI smoke.",
     )
     parser.add_argument(
+        "--run-full-local-native-agent-rc",
+        action="store_true",
+        help=(
+            "Run the full local automated Native Agent RC bundle: require artifacts, "
+            "DMG mount/Gatekeeper diagnostics/app/backend gates, packaged UI and "
+            "Chat native-file smokes, plus real desktop open/inspect/interact smokes. "
+            "Excludes Screen Recording, real provider, and external integration gates."
+        ),
+    )
+    parser.add_argument(
         "--check-dmg-mount",
         action="store_true",
         help="Mount every discovered DMG and verify the packaged app inside it.",
@@ -6281,20 +6291,34 @@ def main(argv: Sequence[str] | None = None) -> int:
             ),
         )
         return 0
+    run_full_local_native_agent_rc = args.run_full_local_native_agent_rc
     return verify_release_candidate(
         artifact_paths=args.paths or None,
-        require_artifacts=args.require_artifacts,
+        require_artifacts=args.require_artifacts or run_full_local_native_agent_rc,
         source_only=args.source_only,
-        check_dmg_mount=args.check_dmg_mount,
-        check_gatekeeper_readiness=args.check_gatekeeper_readiness,
-        run_packaged_backend_bridge_smoke=args.run_packaged_backend_bridge_smoke,
-        run_dmg_app_smoke=args.run_dmg_app_smoke,
+        check_dmg_mount=args.check_dmg_mount or run_full_local_native_agent_rc,
+        check_gatekeeper_readiness=(
+            args.check_gatekeeper_readiness or run_full_local_native_agent_rc
+        ),
+        run_packaged_backend_bridge_smoke=(
+            args.run_packaged_backend_bridge_smoke
+            or run_full_local_native_agent_rc
+        ),
+        run_dmg_app_smoke=args.run_dmg_app_smoke or run_full_local_native_agent_rc,
         run_dmg_screen_smoke=args.run_dmg_screen_smoke,
-        run_dmg_ui_sampling_smoke=args.run_dmg_ui_sampling_smoke,
-        run_dmg_chat_native_file_smoke=args.run_dmg_chat_native_file_smoke,
+        run_dmg_ui_sampling_smoke=(
+            args.run_dmg_ui_sampling_smoke or run_full_local_native_agent_rc
+        ),
+        run_dmg_chat_native_file_smoke=(
+            args.run_dmg_chat_native_file_smoke
+            or run_full_local_native_agent_rc
+        ),
         run_provider_smoke=args.run_provider_smoke,
         run_ui_smoke=args.run_ui_smoke,
-        run_real_desktop_app_open_smoke=args.run_real_desktop_app_open_smoke,
+        run_real_desktop_app_open_smoke=(
+            args.run_real_desktop_app_open_smoke
+            or run_full_local_native_agent_rc
+        ),
         real_desktop_app_open_capability_query=(
             args.real_desktop_app_open_capability_query
         ),
@@ -6303,13 +6327,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         run_real_desktop_interaction_smoke=(
             args.run_real_desktop_interaction_smoke
+            or run_full_local_native_agent_rc
         ),
         real_desktop_interaction_app_name=args.real_desktop_interaction_app_name,
         allow_real_desktop_interaction_existing_app=(
             args.allow_real_desktop_interaction_existing_app
+            or run_full_local_native_agent_rc
         ),
         run_real_desktop_ui_inspection_smoke=(
             args.run_real_desktop_ui_inspection_smoke
+            or run_full_local_native_agent_rc
         ),
         real_desktop_ui_inspection_app_name=args.real_desktop_ui_inspection_app_name,
         run_electron_native_bridge_smoke=args.run_electron_native_bridge_smoke,
