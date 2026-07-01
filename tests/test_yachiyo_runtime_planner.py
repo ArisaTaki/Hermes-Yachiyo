@@ -8193,11 +8193,32 @@ def test_runtime_planner_discovers_unscoped_communication_app_before_direct_send
             "说明会议改到三点",
         ),
         (
+            "用任意可用的邮件应用给 Alice 发邮件说明项目进度",
+            "mail",
+            "To",
+            "message body",
+            "说明项目进度",
+        ),
+        (
+            "用默认邮件应用给 Alice 发邮件说明项目进度",
+            "mail",
+            "To",
+            "message body",
+            "说明项目进度",
+        ),
+        (
             "给 Alice 发消息说会议改到三点",
             "messaging",
             "recipient",
             "message",
             "会议改到三点",
+        ),
+        (
+            "用任意可用的聊天应用给 Alice 发消息说明项目进度",
+            "messaging",
+            "recipient",
+            "message",
+            "说明项目进度",
         ),
     )
 

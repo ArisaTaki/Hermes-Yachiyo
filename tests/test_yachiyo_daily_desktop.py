@@ -295,6 +295,36 @@ def test_planner_first_daily_desktop_entrypoint_routes_orchestration_tools() -> 
     ]
 
 
+def test_planner_first_daily_desktop_entrypoint_discovers_generic_communication_apps() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+
+    for prompt, query in (
+        ("用任意可用的邮件应用给 Alice 发邮件说明项目进度", "mail"),
+        ("用默认邮件应用给 Alice 发邮件说明项目进度", "mail"),
+        ("用任意可用的聊天应用给 Alice 发消息说明项目进度", "messaging"),
+    ):
+        assert planner_first_daily_desktop_entrypoint_requests(
+            prompt,
+            allowed_tools=allowed_tools,
+        ) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": query, "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_prefetch_communication_surface",
+                "continue_to_model": True,
+            }
+        ]
+
+
 def test_planner_first_daily_desktop_entrypoint_routes_browser_url_click_sequence() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(
         "打开 https://example.com 然后点击 More information 链接",

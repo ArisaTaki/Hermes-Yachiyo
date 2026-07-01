@@ -15309,7 +15309,13 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
                 continue
         else:
             recipient = _clean_communication_recipient_text(groups.get("recipient") or "")
-            body = _clean_communication_body_text(groups.get("body") or "")
+            raw_body = groups.get("body") or ""
+            if generic_app_channel:
+                raw_body = _strip_generic_communication_channel_body_prefix(
+                    raw_body,
+                    generic_app_channel,
+                )
+            body = _clean_communication_body_text(raw_body)
         if not app_name or not recipient or not body:
             if not generic_app_channel or not recipient or not body:
                 continue
@@ -15351,7 +15357,7 @@ def _generic_direct_communication_hint(text: str) -> dict[str, str]:
             r"(?:[，,。；;]\s*)?"
             r"(?:写|撰写|起草|草拟|发|发送)\s*(?:一封|封|一条|条|一则|则)?\s*"
             r"(?P<channel>邮件|电子邮件|短信|消息|email|e-mail|mail|message)\s*"
-            r"(?P<body>(?:说|说明|关于|内容是|内容为|[:：]).+)$",
+            r"(?P<body>(?:说明|说|关于|内容是|内容为|[:：]).+)$",
             "",
         ),
         (
@@ -15360,7 +15366,7 @@ def _generic_direct_communication_hint(text: str) -> dict[str, str]:
             r"(?P<channel>邮件|电子邮件|短信|消息|email|e-mail|mail|message)\s*"
             r"(?:给|发给|发送给|向|对)\s*(?P<recipient>[^：:，,。]+?)\s*"
             r"(?:[，,。；;]\s*)?"
-            r"(?P<body>(?:说|说明|关于|内容是|内容为|[:：]).+)$",
+            r"(?P<body>(?:说明|说|关于|内容是|内容为|[:：]).+)$",
             "",
         ),
         (
@@ -15636,7 +15642,7 @@ def _clean_communication_body_text(value: str) -> str:
     text = re.sub(
         r"^(?:一条|条|一则|则|一封|封)?\s*"
         r"(?:消息|短信|微信|邮件|电子邮件|message|email|e-mail|mail)\s*"
-        r"(?:说|说明|内容是|内容为|[:：]|saying|that)\s*",
+        r"(?:说明|说|内容是|内容为|[:：]|saying|that)\s*",
         "",
         text,
         flags=re.IGNORECASE,
@@ -15651,6 +15657,27 @@ def _clean_communication_body_text(value: str) -> str:
         flags=re.IGNORECASE,
     )
     return text.strip()
+
+
+def _strip_generic_communication_channel_body_prefix(value: str, channel: str) -> str:
+    text = _clean_communication_hint_text(value)
+    if channel == "email":
+        return re.sub(
+            r"^(?:邮件|电子邮件|邮箱|email|e-mail|mail)\s*"
+            r"(?=说明|说|关于|内容是|内容为|[:：]|saying|that)",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        ).strip()
+    if channel == "message":
+        return re.sub(
+            r"^(?:消息|短信|微信|message|messages?)\s*"
+            r"(?=说明|说|关于|内容是|内容为|[:：]|saying|that)",
+            "",
+            text,
+            flags=re.IGNORECASE,
+        ).strip()
+    return text
 
 
 def _communication_delivery_channel_hint(text: str, explicit: str = "") -> str:
@@ -15772,6 +15799,13 @@ def _is_generic_communication_app_label(value: str) -> bool:
         normalized,
     )
     if normalized_without_qualifiers in generic_labels:
+        return True
+    normalized_without_suffix = re.sub(
+        r"(?:应用程序|应用|软件|客户端|工具|程序|app)$",
+        "",
+        normalized_without_qualifiers,
+    )
+    if normalized_without_suffix in generic_labels:
         return True
     english = re.sub(r"[^a-z0-9]+", " ", raw.lower()).strip()
     english = re.sub(
