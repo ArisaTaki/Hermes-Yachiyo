@@ -2459,7 +2459,14 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
     }
 
     draw_circle_prompt = "打开一个能画图的应用，画一个圆并保存到桌面"
-    draw_circle_allowed_tools = ["desktop.list_apps", "app.open", "desktop.ui_elements"]
+    draw_circle_allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "desktop.click_ui_element",
+        "desktop.shortcut",
+        "screen.capture",
+    ]
     draw_circle_decision = RuntimePlanner().decision(
         draw_circle_prompt,
         allowed_tools=draw_circle_allowed_tools,
@@ -2491,11 +2498,39 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
         "observe-selected-discovered-app",
+        "select-discovered-app-circle-tool",
+        "save-discovered-app-creative-result",
+        "verify-discovered-app-creative-result",
     ]
     assert _step_by_id(
         draw_circle_decision,
         "observe-selected-discovered-app",
     ).input_preview == {"limit": 80}
+    assert _step_by_id(
+        draw_circle_decision,
+        "select-discovered-app-circle-tool",
+    ).input_preview == {
+        "target": "circle ellipse shape",
+        "role_filter": "button",
+        "limit": 80,
+        "click_count": 1,
+    }
+    assert _step_by_id(
+        draw_circle_decision,
+        "select-discovered-app-circle-tool",
+    ).approval_required is True
+    assert _step_by_id(
+        draw_circle_decision,
+        "save-discovered-app-creative-result",
+    ).input_preview == {"key": "s", "modifiers": ["command"]}
+    assert _step_by_id(
+        draw_circle_decision,
+        "save-discovered-app-creative-result",
+    ).approval_required is True
+    assert _step_by_id(
+        draw_circle_decision,
+        "verify-discovered-app-creative-result",
+    ).tool_name == "screen.capture"
     assert [
         todo.step_id
         for todo in draw_circle_decision.plan.task_core.todos

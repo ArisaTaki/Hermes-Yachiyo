@@ -7296,7 +7296,9 @@ def _followup_event_has_readable_source(event: Mapping[str, Any]) -> bool:
 _MODEL_FOLLOWUP_AUTO_PENDING_TOOLS = {
     "app.open",
     "app.focus",
+    "app.focus_and_click_ui_element",
     "app.open_and_safe_shortcut",
+    "app.open_and_click_ui_element",
     "app.focus_and_safe_shortcut",
     "desktop.active_window",
     "desktop.click_ui_element",
@@ -7305,6 +7307,7 @@ _MODEL_FOLLOWUP_AUTO_PENDING_TOOLS = {
     "desktop.safe_shortcut",
     "desktop.safe_type_text",
     "desktop.search_submit",
+    "desktop.shortcut",
     "desktop.submit_foreground",
     "desktop.type_into_ui_element",
     "desktop.ui_elements",

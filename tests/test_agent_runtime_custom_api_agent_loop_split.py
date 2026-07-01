@@ -3459,6 +3459,16 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
                         "status": "planned",
                     },
                     {
+                        "step_id": "save-image",
+                        "tool_name": "desktop.shortcut",
+                        "capability_id": "desktop.ui_operation",
+                        "action": "shortcut",
+                        "input_preview": {"key": "s", "modifiers": ["command"]},
+                        "risk_level": "medium",
+                        "approval_required": True,
+                        "status": "planned",
+                    },
+                    {
                         "step_id": "verify-saved-image",
                         "tool_name": "screen.capture",
                         "capability_id": "desktop.visual_verification",
@@ -3476,6 +3486,7 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
             "desktop.click_ui_element",
             "desktop.type_into_ui_element",
             "desktop.ui_elements",
+            "desktop.shortcut",
             "screen.capture",
         ],
         timeline=[
@@ -3497,6 +3508,7 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
     assert payload["followup_target"]["pending_user_action"] == "画一个圆并保存到桌面"
     assert [step["step_id"] for step in payload["pending_plan_steps"]] == [
         "draw-circle",
+        "save-image",
         "verify-saved-image",
     ]
     assert "The remaining user action is: '画一个圆并保存到桌面'" in message
@@ -3509,6 +3521,7 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
         [
             "desktop.click_ui_element",
             "screen.capture",
+            "desktop.shortcut",
             "terminal.run",
         ],
     )
@@ -3520,6 +3533,15 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
             "source": "runtime_planner",
             "planning_reason": "planner_discovered_app_followup",
             "step_id": "draw-circle",
+            "capability_id": "desktop.ui_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.shortcut",
+            "input": {"key": "s", "modifiers": ["command"]},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+            "step_id": "save-image",
             "capability_id": "desktop.ui_operation",
         },
         {
@@ -3544,6 +3566,7 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
         if event["event"] == "agent.desktop.intent_planned"
     ] == [
         ("desktop.click_ui_element", "draw-circle", "desktop.ui_operation"),
+        ("desktop.shortcut", "save-image", "desktop.ui_operation"),
         ("screen.capture", "verify-saved-image", "desktop.visual_verification"),
     ]
     assert custom_api_agent_module._model_followup_pending_plan_requests(

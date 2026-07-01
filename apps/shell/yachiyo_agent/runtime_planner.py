@@ -51,6 +51,7 @@ from .desktop_plan_hints import (
     app_foreground_tool_candidates,
     click_target_hint,
     discovered_app_open_needs_model_followup,
+    discovered_app_pending_user_action,
     focus_window_hint,
     foreground_management_hint,
     hotkey_hint,
@@ -3224,6 +3225,12 @@ class RuntimePlanner:
                     intent,
                     allowed,
                     depends_on="open-selected-discovered-app",
+                )
+                _append_selected_discovered_creative_action_steps(
+                    steps,
+                    intent,
+                    allowed,
+                    depends_on="observe-selected-discovered-app",
                 )
             return steps
         if (
@@ -8169,6 +8176,157 @@ def _append_selected_discovered_app_observation_step(
                 "Observe the model-selected app after opening it because the user asked "
                 "for a follow-up desktop action, not just app launch."
             ),
+        )
+    )
+
+
+def _append_selected_discovered_creative_action_steps(
+    steps: list[ToolPlanStepSnapshot],
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    *,
+    depends_on: str,
+) -> None:
+    pending_action = discovered_app_pending_user_action(intent.user_goal)
+    if not _looks_like_discovered_creative_action(intent, pending_action):
+        return
+    previous_step = depends_on
+    if _creative_action_requests_circle(pending_action):
+        select_shape_tool = _first_allowed(
+            ("desktop.click_ui_element", "app.focus_and_click_ui_element"),
+            allowed,
+        )
+        shape_input = {
+            "target": "circle ellipse shape",
+            "role_filter": "button",
+            "limit": 80,
+            "click_count": 1,
+        }
+        if str(select_shape_tool or "").startswith("app."):
+            shape_input = {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": _selected_discovered_app_query(intent),
+                **shape_input,
+            }
+        steps.append(
+            _step(
+                intent,
+                "select-discovered-app-circle-tool",
+                "Select circle shape tool",
+                "desktop.ui_operation",
+                select_shape_tool,
+                input_preview=shape_input,
+                depends_on=[previous_step],
+                action="click",
+                risk_level="medium",
+                approval_required=True,
+                reason=(
+                    "After observing the model-selected drawing app, choose the visible "
+                    "circle or ellipse shape control using the app UI rather than a hardcoded app rule."
+                ),
+            )
+        )
+        previous_step = "select-discovered-app-circle-tool"
+
+    if _creative_action_requests_save(pending_action):
+        save_tool = _first_allowed(("desktop.shortcut", "desktop.hotkey"), allowed)
+        steps.append(
+            _step(
+                intent,
+                "save-discovered-app-creative-result",
+                "Save creative result",
+                "desktop.ui_operation",
+                save_tool,
+                input_preview={"key": "s", "modifiers": ["command"]},
+                depends_on=[previous_step],
+                action="shortcut",
+                risk_level="medium",
+                approval_required=True,
+                reason=(
+                    "The user explicitly asked to save the creative result; use the standard "
+                    "foreground save shortcut through the normal approval and policy gate."
+                ),
+            )
+        )
+        previous_step = "save-discovered-app-creative-result"
+
+    verify_tool = _first_allowed(("screen.capture", "desktop.ui_elements"), allowed)
+    if not verify_tool:
+        return
+    steps.append(
+        _step(
+            intent,
+            "verify-discovered-app-creative-result",
+            "Verify creative result",
+            "desktop.visual_verification",
+            verify_tool,
+            input_preview=(
+                {"reason": "verify discovered app creative result"}
+                if verify_tool == "screen.capture"
+                else {"limit": 80}
+            ),
+            depends_on=[previous_step],
+            action=_desktop_discovery_action(verify_tool),
+            reason=(
+                "Verify the foreground creative result after the planned UI operations before "
+                "claiming the drawing task is complete."
+            ),
+        )
+    )
+
+
+def _looks_like_discovered_creative_action(
+    intent: TaskIntentSnapshot,
+    pending_action: str,
+) -> bool:
+    text = f"{intent.user_goal} {pending_action}".strip()
+    if not text:
+        return False
+    app_capability = intent.inputs.get("app_capability_hint")
+    capability_description = (
+        str(app_capability.get("description") or "")
+        if isinstance(app_capability, Mapping)
+        else ""
+    )
+    capability_query = (
+        str(app_capability.get("query") or "")
+        if isinstance(app_capability, Mapping)
+        else ""
+    )
+    creative_app = bool(
+        re.search(
+            r"(?:画图|绘图|图片|图像|image|drawing|paint|design)",
+            f"{capability_description} {capability_query}",
+            flags=re.IGNORECASE,
+        )
+    )
+    creative_action = bool(
+        re.search(
+            r"(?:画|绘制|设计|draw|paint|sketch|design)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+    return creative_app and creative_action
+
+
+def _creative_action_requests_circle(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:圆|圆形|椭圆|circle|ellipse|oval)",
+            str(text or ""),
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _creative_action_requests_save(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:保存|存到|存储|导出|save|export)",
+            str(text or ""),
+            flags=re.IGNORECASE,
         )
     )
 
