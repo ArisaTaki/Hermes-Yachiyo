@@ -14414,6 +14414,108 @@ def test_auto_discovered_app_search_followup_types_submits_and_verifies() -> Non
     }
     assert click_requests[1]["input_resolution"]["resolved_app_name"] == "Figma"
     assert click_requests[2]["input"] == {"text": "logo 模板"}
+    result_click_requests = custom_api_agent_module._auto_discovered_app_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "image",
+                "target_action": "app_search",
+                "safe_shortcut_action": "find",
+                "app_search": {
+                    "query": "logo 模板",
+                    "target": "搜索",
+                    "submit": True,
+                    "result_selection": {
+                        "action": "click",
+                        "tool": "desktop.click_ui_element",
+                        "input": {
+                            "target": "第一个结果",
+                            "role_filter": "",
+                            "limit": 80,
+                            "click_count": 1,
+                        },
+                    },
+                },
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {},
+                },
+            }
+        },
+        [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+        timeline,
+    )
+
+    assert [request["tool"] for request in result_click_requests] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert result_click_requests[3]["input"] == {
+        "target": "第一个结果",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+    assert result_click_requests[3]["input_resolution"]["resolved_app_name"] == "Figma"
+
+    key_confirm_requests = custom_api_agent_module._auto_discovered_app_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "image",
+                "target_action": "app_search",
+                "safe_shortcut_action": "find",
+                "app_search": {
+                    "query": "logo 模板",
+                    "target": "搜索",
+                    "submit": True,
+                    "submit_action": "confirm",
+                    "result_selection": {
+                        "action": "key_confirm",
+                        "key": {
+                            "tool": "desktop.safe_key",
+                            "input": {"action": "arrow_down", "repeat_count": 1},
+                        },
+                        "confirm": {
+                            "tool": "desktop.submit_foreground",
+                            "input": {"action": "confirm"},
+                        },
+                    },
+                },
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {},
+                },
+            }
+        },
+        [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.safe_key",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+        timeline,
+    )
+
+    assert [request["tool"] for request in key_confirm_requests] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.safe_key",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    assert key_confirm_requests[2]["input"] == {"action": "arrow_down", "repeat_count": 1}
+    assert key_confirm_requests[3]["input"] == {"action": "confirm"}
 
 
 def test_auto_discovered_app_generated_write_followup_returns_to_model() -> None:

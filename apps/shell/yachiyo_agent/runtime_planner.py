@@ -17944,7 +17944,7 @@ def _chat_status_meta_text_hint(text: str) -> bool:
 def _leading_app_search_hint(text: str) -> dict[str, str]:
     value = _clean_prompt(text)
     patterns = (
-        r"^(?P<app>[\w .·-]{1,40}?)[\s，,]*(?:搜索|查找|检索|找)\s*(?P<query>[^。！？!?，,]+)$",
+        r"^(?P<app>[\w .·-]{1,40}?)[\s，,]*(?:搜索|查找|检索|找)\s*(?P<query>[^。！？!?]+)$",
         r"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:search|find|look\s+up|look)\s+(?:for\s+)?(?P<query>[^.!?,]+)$",
         r"^(?:search|find|look\s+up|look)\s+(?:in|inside|within|using|with)\s+(?:the\s+)?"
         r"(?P<app_in>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+(?:for\s+)?(?P<query_in>[^.!?,]+)$",
@@ -18425,7 +18425,11 @@ def _app_search_followup_hint(text: str) -> dict[str, Any]:
         value,
         flags=re.IGNORECASE,
     ):
-        click_count = 2 if _contains_any(value, ("打开", "open")) else 1
+        click_count = (
+            2
+            if re.search(r"(?:打开).{0,8}(?:第一个|首个|第1个).{0,8}(?:结果|项)?", value)
+            else 1
+        )
         return {"action": "click_first_result", "target": "第一个结果", "click_count": click_count}
     if re.search(
         r"\b(?:choose|select|click|open)\s+(?:the\s+)?first\s+(?:result|item)\b",

@@ -5099,6 +5099,16 @@ def _auto_discovered_app_followup_requests(
             if not submit_request:
                 return []
             requests.append(_with_discovered_app_resolution(submit_request, app_query, app_name))
+        result_requests = _discovered_app_search_result_requests(
+            app_query,
+            app_name,
+            app_search,
+            allowed,
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if result_requests:
+            requests.extend(result_requests)
     communication_compose = _discovered_app_communication_compose_payload(target)
     if communication_compose:
         compose_requests = _discovered_app_communication_compose_requests(
@@ -5513,6 +5523,13 @@ def _discovered_app_search_payload(target: Mapping[str, Any]) -> dict[str, Any]:
                 "tool": tool_name,
                 "input": dict(raw_input),
             }
+    result_selection = (
+        raw.get("result_selection")
+        if isinstance(raw.get("result_selection"), Mapping)
+        else {}
+    )
+    if result_selection:
+        payload["result_selection"] = dict(result_selection)
     submit = raw.get("submit", target.get("app_search_submit"))
     if isinstance(submit, bool):
         payload["submit"] = submit
@@ -5527,12 +5544,148 @@ def _discovered_app_search_payload(target: Mapping[str, Any]) -> dict[str, Any]:
 
 
 def _discovered_app_search_submit_requested(app_search: Mapping[str, Any]) -> bool:
+    result_selection = _discovered_app_search_result_selection(app_search)
+    if str(result_selection.get("action") or "").strip() == "key_confirm":
+        return False
+    if str(app_search.get("submit_action") or "").strip() == "confirm":
+        return False
     submit = app_search.get("submit")
     if isinstance(submit, bool):
         return submit
     if str(submit or "").strip().lower() in {"1", "true", "yes", "y"}:
         return True
     return bool(str(app_search.get("submit_action") or "").strip())
+
+
+def _discovered_app_search_result_selection(app_search: Mapping[str, Any]) -> dict[str, Any]:
+    raw = (
+        app_search.get("result_selection")
+        if isinstance(app_search.get("result_selection"), Mapping)
+        else {}
+    )
+    if raw:
+        return dict(raw)
+    if str(app_search.get("select_result") or "").strip() == "arrow_down":
+        return {"action": "key_confirm"}
+    return {}
+
+
+def _discovered_app_search_result_requests(
+    app_query: str,
+    app_name: str,
+    app_search: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    result_selection = _discovered_app_search_result_selection(app_search)
+    action = str(result_selection.get("action") or "").strip()
+    if action == "click":
+        request = _discovered_app_search_result_click_request(
+            app_query,
+            app_name,
+            result_selection,
+            allowed,
+            source=source,
+            planning_reason=planning_reason,
+        )
+        return [request] if request else []
+    if action == "key_confirm":
+        return _discovered_app_search_result_key_confirm_requests(
+            app_query,
+            app_name,
+            result_selection,
+            allowed,
+            source=source,
+            planning_reason=planning_reason,
+        )
+    return []
+
+
+def _discovered_app_search_result_click_request(
+    app_query: str,
+    app_name: str,
+    result_selection: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> dict[str, Any]:
+    tool_name = str(result_selection.get("tool") or "").strip()
+    raw_input = (
+        result_selection.get("input")
+        if isinstance(result_selection.get("input"), Mapping)
+        else {}
+    )
+    input_payload = dict(raw_input)
+    if not tool_name:
+        tool_name = (
+            "app.focus_and_click_ui_element"
+            if "app.focus_and_click_ui_element" in allowed
+            else "desktop.click_ui_element"
+        )
+    if tool_name not in allowed:
+        return {}
+    if tool_name.startswith("app."):
+        input_payload.setdefault("app_name", app_name)
+    return _with_discovered_app_resolution(
+        _request_like(
+            tool_name,
+            input_payload,
+            source=source,
+            planning_reason=planning_reason,
+        ),
+        app_query,
+        app_name,
+    )
+
+
+def _discovered_app_search_result_key_confirm_requests(
+    app_query: str,
+    app_name: str,
+    result_selection: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    key = result_selection.get("key") if isinstance(result_selection.get("key"), Mapping) else {}
+    confirm = (
+        result_selection.get("confirm")
+        if isinstance(result_selection.get("confirm"), Mapping)
+        else {}
+    )
+    key_tool = str(key.get("tool") or "desktop.safe_key").strip()
+    confirm_tool = str(confirm.get("tool") or "desktop.submit_foreground").strip()
+    if key_tool not in allowed or confirm_tool not in allowed:
+        return []
+    key_input = key.get("input") if isinstance(key.get("input"), Mapping) else {}
+    confirm_input = (
+        confirm.get("input") if isinstance(confirm.get("input"), Mapping) else {}
+    )
+    return [
+        _with_discovered_app_resolution(
+            _request_like(
+                key_tool,
+                dict(key_input) or {"action": "arrow_down", "repeat_count": 1},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            app_query,
+            app_name,
+        ),
+        _with_discovered_app_resolution(
+            _request_like(
+                confirm_tool,
+                dict(confirm_input) or {"action": "confirm"},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            app_query,
+            app_name,
+        ),
+    ]
 
 
 def _discovered_app_search_focus_requests(

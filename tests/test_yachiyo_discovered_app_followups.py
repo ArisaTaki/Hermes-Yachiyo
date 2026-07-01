@@ -109,6 +109,65 @@ def test_discovered_app_followup_allows_explicit_app_search() -> None:
         click_target,
         ["desktop.click_ui_element", "desktop.safe_type_text", "desktop.search_submit"],
     )
+    result_click_target = _target(
+        target_action="app_search",
+        safe_shortcut_action="find",
+        app_search={
+            "query": "logo 模板",
+            "submit": True,
+            "result_selection": {
+                "action": "click",
+                "tool": "desktop.click_ui_element",
+                "input": {"target": "第一个结果", "click_count": 1},
+            },
+        },
+    )
+    assert discovered_app_followup_target_can_direct_execute(
+        result_click_target,
+        [
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.click_ui_element",
+        ],
+    )
+    key_confirm_target = _target(
+        target_action="app_search",
+        safe_shortcut_action="find",
+        app_search={
+            "query": "logo 模板",
+            "submit": True,
+            "submit_action": "confirm",
+            "result_selection": {
+                "action": "key_confirm",
+                "key": {"tool": "desktop.safe_key", "input": {"action": "arrow_down"}},
+                "confirm": {
+                    "tool": "desktop.submit_foreground",
+                    "input": {"action": "confirm"},
+                },
+            },
+        },
+    )
+    assert discovered_app_followup_target_can_direct_execute(
+        key_confirm_target,
+        [
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.safe_key",
+            "desktop.submit_foreground",
+        ],
+    )
+    assert not discovered_app_followup_target_can_direct_execute(
+        key_confirm_target,
+        [
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.safe_key",
+        ],
+    )
 
 
 def test_discovered_app_followup_rejects_model_required_or_risky_targets() -> None:

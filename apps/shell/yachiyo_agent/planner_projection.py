@@ -671,12 +671,29 @@ def _desktop_discovered_app_search_payload(
         payload["submit_action"] = "confirm"
     if _decision_plan_has_step(decision, "select-app-search-result-with-key"):
         payload["select_result"] = "arrow_down"
+        payload["result_selection"] = {
+            "action": "key_confirm",
+            "key": _decision_step_action_payload(
+                _decision_plan_step(decision, "select-app-search-result-with-key")
+            ),
+            "confirm": _decision_step_action_payload(
+                _decision_plan_step(decision, "confirm-app-search-result")
+            ),
+        }
+    click_selection = _decision_step_action_payload(
+        _decision_plan_step(decision, "select-app-search-result")
+    )
+    if click_selection:
+        payload["result_selection"] = {
+            "action": "click",
+            **click_selection,
+        }
     if _decision_plan_has_step(decision, "verify-desktop-result"):
         payload["verify"] = True
     return payload
 
 
-def _decision_step_focus_payload(step: Any | None) -> dict[str, Any]:
+def _decision_step_action_payload(step: Any | None) -> dict[str, Any]:
     tool_name = str(getattr(step, "tool_name", "") or "").strip()
     if not tool_name:
         return {}
@@ -686,6 +703,10 @@ def _decision_step_focus_payload(step: Any | None) -> dict[str, Any]:
         "tool": tool_name,
         "input": input_preview,
     }
+
+
+def _decision_step_focus_payload(step: Any | None) -> dict[str, Any]:
+    return _decision_step_action_payload(step)
 
 
 def _decision_plan_step(decision: Any | None, step_id: str) -> Any | None:

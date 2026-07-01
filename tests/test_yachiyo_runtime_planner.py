@@ -8439,6 +8439,82 @@ def test_runtime_planner_discovers_generic_design_tool_before_searching() -> Non
             "limit": 80,
         },
     }
+    click_result_prompt = "帮我打开一个设计工具，搜索 logo 模板并点击第一个结果"
+    click_result_decision = RuntimePlanner().decision(
+        click_result_prompt,
+        allowed_tools=[
+            *allowed_tools,
+            "desktop.safe_shortcut",
+            "desktop.safe_key",
+            "desktop.submit_foreground",
+        ],
+    )
+    click_result_requests = planner_tool_requests(
+        click_result_prompt,
+        [
+            *allowed_tools,
+            "desktop.safe_shortcut",
+            "desktop.safe_key",
+            "desktop.submit_foreground",
+        ],
+    )
+    click_result_payload = planner_selection_payload(
+        decision=click_result_decision,
+        planner_requests=click_result_requests,
+        legacy_requests=[],
+        selected_requests=click_result_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+    assert click_result_payload["followup_target"]["app_search"]["result_selection"] == {
+        "action": "click",
+        "tool": "desktop.click_ui_element",
+        "input": {
+            "target": "第一个结果",
+            "role_filter": "",
+            "limit": 80,
+            "click_count": 1,
+        },
+    }
+
+    key_confirm_prompt = "帮我打开一个设计工具，搜索 logo 模板，按下箭头确认"
+    key_confirm_decision = RuntimePlanner().decision(
+        key_confirm_prompt,
+        allowed_tools=[
+            *allowed_tools,
+            "desktop.safe_shortcut",
+            "desktop.safe_key",
+            "desktop.submit_foreground",
+        ],
+    )
+    key_confirm_requests = planner_tool_requests(
+        key_confirm_prompt,
+        [
+            *allowed_tools,
+            "desktop.safe_shortcut",
+            "desktop.safe_key",
+            "desktop.submit_foreground",
+        ],
+    )
+    key_confirm_payload = planner_selection_payload(
+        decision=key_confirm_decision,
+        planner_requests=key_confirm_requests,
+        legacy_requests=[],
+        selected_requests=key_confirm_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+    assert key_confirm_payload["followup_target"]["app_search"]["result_selection"] == {
+        "action": "key_confirm",
+        "key": {
+            "tool": "desktop.safe_key",
+            "input": {"action": "arrow_down", "repeat_count": 1},
+        },
+        "confirm": {
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+        },
+    }
 
 
 def test_runtime_planner_keeps_unknown_app_descriptor_as_named_app() -> None:

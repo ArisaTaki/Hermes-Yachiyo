@@ -67,6 +67,8 @@ def discovered_app_followup_target_can_direct_execute(
             return False
         if _app_search_submit_requested(target) and "desktop.search_submit" not in allowed:
             return False
+        if not _can_select_app_search_result(target, allowed):
+            return False
     elif target_action in {"open_app", "open", "focus_app", "focus"}:
         can_prepare = "app.open" in allowed or "app.focus" in allowed
     elif target_action == "open_path_with_selected_app":
@@ -123,9 +125,57 @@ def _app_search_query(target: Mapping[str, Any]) -> str:
 
 def _app_search_submit_requested(target: Mapping[str, Any]) -> bool:
     raw = target.get("app_search") if isinstance(target.get("app_search"), Mapping) else {}
+    result_selection = _app_search_result_selection(target)
+    if str(result_selection.get("action") or "").strip() == "key_confirm":
+        return False
+    if (
+        str(raw.get("submit_action") or target.get("app_search_submit_action") or "").strip()
+        == "confirm"
+    ):
+        return False
     submit = raw.get("submit", target.get("app_search_submit"))
     if isinstance(submit, bool):
         return submit
     if str(submit or "").strip().lower() in {"1", "true", "yes", "y"}:
         return True
     return bool(str(raw.get("submit_action") or target.get("app_search_submit_action") or "").strip())
+
+
+def _can_select_app_search_result(target: Mapping[str, Any], allowed: set[str]) -> bool:
+    result_selection = _app_search_result_selection(target)
+    action = str(result_selection.get("action") or "").strip()
+    if not action:
+        return True
+    if action == "click":
+        tool_name = str(result_selection.get("tool") or "").strip()
+        if tool_name:
+            return tool_name in allowed
+        return (
+            "desktop.click_ui_element" in allowed
+            or "app.focus_and_click_ui_element" in allowed
+        )
+    if action == "key_confirm":
+        key = result_selection.get("key") if isinstance(result_selection.get("key"), Mapping) else {}
+        confirm = (
+            result_selection.get("confirm")
+            if isinstance(result_selection.get("confirm"), Mapping)
+            else {}
+        )
+        key_tool = str(key.get("tool") or "desktop.safe_key").strip()
+        confirm_tool = str(confirm.get("tool") or "desktop.submit_foreground").strip()
+        return key_tool in allowed and confirm_tool in allowed
+    return False
+
+
+def _app_search_result_selection(target: Mapping[str, Any]) -> Mapping[str, Any]:
+    raw = target.get("app_search") if isinstance(target.get("app_search"), Mapping) else {}
+    result_selection = (
+        raw.get("result_selection")
+        if isinstance(raw.get("result_selection"), Mapping)
+        else {}
+    )
+    if result_selection:
+        return result_selection
+    if str(raw.get("select_result") or target.get("app_search_select_result") or "").strip() == "arrow_down":
+        return {"action": "key_confirm"}
+    return {}
