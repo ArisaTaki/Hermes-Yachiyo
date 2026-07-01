@@ -177,6 +177,9 @@ def data_source_kind_hint(source_hint: str, text: str = "") -> str:
     scoped_format_kind = _scoped_data_source_kind_hint(lowered_text)
     if scoped_format_kind:
         return scoped_format_kind
+    bare_format_kind = _bare_data_source_kind_hint(lowered_text)
+    if bare_format_kind:
+        return bare_format_kind
     named_source = named_data_source_hint(text)
     if named_source.get("kind"):
         return str(named_source["kind"])
@@ -296,6 +299,28 @@ def _scoped_data_source_kind_hint(lowered_text: str) -> str:
                 return kind
             if re.search(source_scope, after[:80], flags=re.IGNORECASE):
                 return kind
+    return ""
+
+
+def _bare_data_source_kind_hint(lowered_text: str) -> str:
+    format_map = (
+        ("jsonl", "jsonl"),
+        ("parquet", "parquet"),
+        ("markdown", "text_table"),
+        ("json", "json"),
+        ("csv", "csv"),
+        ("tsv", "tsv"),
+        ("xlsx", "xlsx"),
+        ("xls", "xls"),
+        ("txt", "text"),
+        ("md", "text_table"),
+    )
+    for token, kind in format_map:
+        token_pattern = rf"(?<![a-z0-9_.-]){re.escape(token)}(?![a-z0-9_.-])"
+        for match in re.finditer(token_pattern, lowered_text, flags=re.IGNORECASE):
+            if _format_token_is_output_target(lowered_text, match.start()):
+                continue
+            return kind
     return ""
 
 

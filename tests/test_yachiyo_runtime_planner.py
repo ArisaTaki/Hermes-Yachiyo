@@ -3761,6 +3761,10 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
         "分析 Downloads 里的 csv 并输出图表和报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
     )
+    bare_csv_decision = RuntimePlanner().decision(
+        "分析最近的csv并生成图表",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
     xlsx_scoped_decision = RuntimePlanner().decision(
         "分析桌面上的 xlsx 并输出报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
@@ -3848,6 +3852,12 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
     assert csv_scoped_decision.selected_intent.inputs["data_source_scope_hint"] == "Downloads"
     assert _step_by_id(csv_scoped_decision, "inspect-data-source").input_preview == {
         "path": "Downloads",
+        "pattern": "*.csv",
+        "file_type": "csv",
+    }
+    assert bare_csv_decision.selected_intent.kind == "data_analysis"
+    assert bare_csv_decision.selected_intent.inputs["data_source_kind"] == "csv"
+    assert _step_by_id(bare_csv_decision, "inspect-data-source").input_preview == {
         "pattern": "*.csv",
         "file_type": "csv",
     }
@@ -23610,6 +23620,10 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
         "找一下 Downloads 里最新的 csv，分析趋势并输出 markdown 报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
     )
+    bare_csv_requests = planner_tool_requests(
+        "分析最近的csv并生成图表",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
     xlsx_requests = planner_tool_requests(
         "分析桌面上的 xlsx 并输出报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
@@ -23690,6 +23704,16 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
             "protocol": "json_fallback",
             "tool": "workspace.list",
             "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+    assert bare_csv_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"pattern": "*.csv", "file_type": "csv"},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_data_source",
             "continue_to_model": True,
