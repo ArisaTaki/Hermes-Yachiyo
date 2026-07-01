@@ -4585,6 +4585,52 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "desktop.ui_elements",
     ]
 
+    current_app_find_then_click = RuntimePlanner().decision(
+        "在当前应用里读取界面，找到导出按钮并点击，然后确认是否成功",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+            "screen.capture",
+        ],
+    )
+    assert current_app_find_then_click.selected_intent.kind == "desktop_operation"
+    assert current_app_find_then_click.selected_intent.inputs == {
+        "app_name_hint": "",
+        "operation_hint": "click",
+    }
+    assert [step.step_id for step in current_app_find_then_click.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(current_app_find_then_click, "operate-foreground-ui").tool_name == (
+        "desktop.click_ui_element"
+    )
+    assert _step_by_id(current_app_find_then_click, "operate-foreground-ui").input_preview == {
+        "target": "导出",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert _step_by_id(current_app_find_then_click, "verify-desktop-result").input_preview == {
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert [request["tool"] for request in planner_tool_requests(
+        "在当前应用里读取界面，找到导出按钮并点击，然后确认是否成功",
+        [
+            "desktop.running_apps",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+            "screen.capture",
+        ],
+    )] == [
+        "desktop.running_apps",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+
     ambiguous_find_then_click = RuntimePlanner().decision(
         "打开 SuperData Studio，先看看界面，然后点击最像导出的按钮",
         allowed_tools=[

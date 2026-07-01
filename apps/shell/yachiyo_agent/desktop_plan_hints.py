@@ -429,6 +429,12 @@ def screen_capture_hint(text: str) -> dict[str, Any] | None:
     lowered = value.lower()
     if re.search(r"(?:截图工具|截图面板|屏幕截图工具|screenshot\s*(?:tool|toolbar|panel))", value, flags=re.IGNORECASE):
         return None
+    if (
+        click_target_hint(value) is not None
+        and _explicit_find_click_target_requested(value)
+        and not _explicit_screen_capture_requested(value, lowered)
+    ):
+        return None
     if not _looks_like_screen_capture_request(value, lowered):
         return None
     payload: dict[str, Any] = {"reason": "user asked to capture the screen"}
@@ -2027,6 +2033,37 @@ def _looks_like_screen_capture_request(value: str, lowered: str) -> bool:
             lowered,
         )
         or re.search(r"\bwhat(?:'s| is)?\s+on\s+(?:my|the|this|current)?\s*(?:screen|desktop)\b", lowered)
+    )
+
+
+def _explicit_screen_capture_requested(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:截(?:一下|下)图|截个?图|截个?屏|截图|截屏|屏幕截图|抓屏|拍屏)",
+            value,
+        )
+        or "take a screenshot" in lowered
+        or "capture the screen" in lowered
+        or "screen capture" in lowered
+        or re.search(r"\bscreenshot\b", lowered)
+    )
+
+
+def _explicit_find_click_target_requested(value: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:找到|找|定位|选择|选中)\s*[^。！？!?，,]+?"
+            r"(?:按钮|控件|元素|菜单项|菜单|复选框|项目|条目)?\s*"
+            r"(?:并|然后|再|之后|后)?\s*(?:双击|点击|点一下|点按|单击|打开|进入)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:find|locate|choose|select)\s+(?:the\s+)?[^.!?,]+?\s*"
+            r"(?:and\s+then|then|and)?\s*(?:click|press|tap|open)",
+            value,
+            flags=re.IGNORECASE,
+        )
     )
 
 
