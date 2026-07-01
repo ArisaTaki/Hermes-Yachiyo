@@ -563,36 +563,6 @@ def run_smoke(
         pre_click_window.get("ok") is True
         and _app_names_match(opened_app_name, pre_click_active_app)
     )
-    if not pre_click_active_app_matches:
-        return fail_stage(
-            "pre_click_active_window",
-            (
-                str(pre_click_window.get("error") or "")
-                or "foreground_app_mismatch_before_click"
-            ),
-            {
-                "open_ok": True,
-                "focus_verified": focus_verified,
-                "clear_ok": True,
-                "type_ok": True,
-                "before_ui_matches_app": before_ui_matches_app,
-                "typed_value_visible": clean_input in before_values,
-                "sign_control_found": bool(sign_target),
-                "pre_click_focus_verified": pre_click_focus_verified,
-                "pre_click_active_app_matches": False,
-            },
-            {
-                "focus_result": focus_result,
-                "clear_result": clear_result,
-                "type_result": type_result,
-                "before_ui": before_ui,
-                "before_values": before_values,
-                "sign_target": sign_target,
-                "pre_click_focus_result": pre_click_focus_result,
-                "pre_click_window": pre_click_window,
-                "pre_click_active_app": pre_click_active_app,
-            },
-        )
 
     click_result = desktop_tools.click_ui_element(
         sign_target,
@@ -691,7 +661,7 @@ def run_smoke(
         or type_result.get("ok") is True,
         "sign_control_found": bool(sign_target),
         "pre_click_focus_verified": pre_click_focus_verified,
-        "pre_click_active_app_matches": pre_click_active_app_matches,
+        "pre_click_active_window_checked": pre_click_window.get("ok") is True,
         "click_ok": click_result.get("ok") is True,
         "after_ui_matches_app": after_ui_matches_app,
         "click_completed_in_target_app": click_result.get("ok") is True
@@ -738,6 +708,8 @@ def run_smoke(
         "pre_click_focus_result": pre_click_focus_result,
         "pre_click_focus_attempts": pre_click_focus_attempts,
         "pre_click_window": pre_click_window,
+        "pre_click_active_app": pre_click_active_app,
+        "pre_click_active_app_matches": pre_click_active_app_matches,
         "click_result": click_result,
         "click_attempts": click_attempts,
         "retry_focus_result": retry_focus_result,

@@ -506,7 +506,7 @@ def test_real_desktop_interaction_smoke_retries_pre_click_focus(monkeypatch):
     assert evidence["after_values"] == ["-42"]
 
 
-def test_real_desktop_interaction_smoke_stops_if_active_app_changes_before_click(
+def test_real_desktop_interaction_smoke_retries_when_click_guard_detects_foreground_change(
     monkeypatch,
 ):
     statuses = iter([False, True, False])
@@ -514,6 +514,30 @@ def test_real_desktop_interaction_smoke_stops_if_active_app_changes_before_click
         [
             {"ok": True, "data": {"app_name": "Codex"}},
             {"ok": True, "data": {"app_name": "QQ"}},
+            {"ok": True, "data": {"app_name": "Calculator"}},
+        ]
+    )
+    ui_results = iter(
+        [
+            {
+                "ok": True,
+                "data": {
+                    "app_name": "Calculator",
+                    "elements": [
+                        {"role": "AXStaticText", "name": "\u200e42", "value": "\u200e42"},
+                        {"role": "AXButton", "name": "更改数值符号", "description": "按钮"},
+                    ],
+                },
+            },
+            {
+                "ok": True,
+                "data": {
+                    "app_name": "Calculator",
+                    "elements": [
+                        {"role": "AXStaticText", "name": "-42", "value": "-42"},
+                    ],
+                },
+            },
         ]
     )
     monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
@@ -568,23 +592,22 @@ def test_real_desktop_interaction_smoke_stops_if_active_app_changes_before_click
     monkeypatch.setattr(
         smoke.desktop_tools,
         "ui_elements",
-        lambda **_kwargs: {
-            "ok": True,
-            "data": {
-                "app_name": "Calculator",
-                "elements": [
-                    {"role": "AXStaticText", "name": "\u200e42", "value": "\u200e42"},
-                    {"role": "AXButton", "name": "更改数值符号", "description": "按钮"},
-                ],
+        lambda **_kwargs: next(ui_results),
+    )
+    click_results = iter(
+        [
+            {
+                "ok": False,
+                "error": "foreground_app_mismatch",
+                "data": {"expected_app_name": "Calculator", "observed_app_name": "QQ"},
             },
-        },
+            {"ok": True},
+        ]
     )
     monkeypatch.setattr(
         smoke.desktop_tools,
         "click_ui_element",
-        lambda *_args, **_kwargs: (_ for _ in ()).throw(
-            AssertionError("must not click after foreground app changed")
-        ),
+        lambda *_args, **_kwargs: next(click_results),
     )
     monkeypatch.setattr(
         smoke.desktop_tools,
@@ -594,13 +617,14 @@ def test_real_desktop_interaction_smoke_stops_if_active_app_changes_before_click
 
     evidence = smoke.run_smoke()
 
-    assert evidence["ok"] is False
-    assert evidence["stage"] == "pre_click_active_window"
-    assert evidence["error"] == "foreground_app_mismatch_before_click"
+    assert evidence["ok"] is True
     assert evidence["tool_chain"] == smoke.TOOL_CHAIN
     assert evidence["pre_click_active_app"] == "QQ"
     assert evidence["checks"]["pre_click_focus_verified"] is True
-    assert evidence["checks"]["pre_click_active_app_matches"] is False
+    assert evidence["pre_click_active_app_matches"] is False
+    assert len(evidence["click_attempts"]) == 2
+    assert evidence["click_attempts"][0]["result"]["error"] == "foreground_app_mismatch"
+    assert evidence["retry_active_app_matches"] is True
     assert evidence["cleanup"]["attempted"] is True
 
 
