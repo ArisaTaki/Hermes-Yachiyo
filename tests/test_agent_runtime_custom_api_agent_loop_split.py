@@ -15509,6 +15509,84 @@ def test_auto_replan_fallback_recovery_reuses_safe_file_inputs() -> None:
     )
 
 
+def test_runtime_planner_progress_completes_blocked_step_after_replan_recovery() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 legacy-report.xls 并输出报告",
+        allowed_tools=[
+            "workspace.read",
+            "desktop.open_path",
+            "browser.current_page",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+    loop = _private_runtime_loop()
+    timeline = [
+        _timeline(
+            "agent.task.todo.updated",
+            "Inspect data source",
+            source="runtime_planner",
+            decision_id=decision.decision_id,
+            plan_id=decision.plan.plan_id,
+            step_id="inspect-data-source",
+            tool="workspace.read",
+            status="blocked",
+            todo={"status": "blocked", "title": "Inspect data source"},
+        ),
+        _timeline(
+            "agent.task.checkpoint.updated",
+            "Verify Inspect data source",
+            source="runtime_planner",
+            decision_id=decision.decision_id,
+            plan_id=decision.plan.plan_id,
+            step_id="inspect-data-source",
+            tool="workspace.read",
+            status="blocked",
+            checkpoint={"status": "blocked", "title": "Verify Inspect data source"},
+        ),
+    ]
+    tool_timeline_start = len(timeline)
+    timeline.append(
+        _timeline(
+            "agent.tool.call",
+            "desktop.open_path",
+            input_preview={"path": "legacy-report.xls"},
+            result={"ok": True, "data": {"path": "legacy-report.xls"}},
+            step_id="inspect-data-source",
+            capability_id="file.workspace_read",
+            replan_request_id="replan-file",
+            replan_trigger="tool_failure",
+        )
+    )
+
+    loop._record_runtime_planner_task_progress_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=tool_timeline_start,
+        run_id="run-file-recovery",
+    )
+
+    completed_todo = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["step_id"] == "inspect-data-source"
+        and event["status"] == "completed"
+    ][0]
+    completed_checkpoint = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event["step_id"] == "inspect-data-source"
+        and event["status"] == "completed"
+    ][0]
+    assert completed_todo["source_event"] == {
+        "event": "agent.tool.call",
+        "detail": "desktop.open_path",
+    }
+    assert completed_checkpoint["source_event"] == completed_todo["source_event"]
+
+
 def test_auto_discovered_app_compose_followup_types_and_verifies() -> None:
     timeline = [
         _timeline(

@@ -265,6 +265,46 @@ def test_runtime_tool_call_executor_projects_workspace_failure_as_tool_result() 
     ]
 
 
+def test_runtime_tool_call_executor_preserves_planner_trace_on_tool_call_events() -> None:
+    events = FakeToolCallEvents()
+    executor = _executor(tool_call_events=events)
+    timeline: list[dict[str, Any]] = []
+    broker = FakeBroker({"ok": True, "data": {"app_name": "PixelForge"}})
+
+    result = executor.execute(
+        {
+            "tool": "desktop.open_path",
+            "input": {"path": "legacy-report.xls"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_replan_fallback_recovery",
+            "step_id": "inspect-data-source",
+            "capability_id": "file.workspace_read",
+            "replan_request_id": "replan-1",
+            "replan_trigger": "tool_failure",
+        },
+        ["desktop.open_path"],
+        broker,
+        timeline,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert result["ok"] is True
+    assert timeline[-1]["event"] == "agent.tool.call"
+    assert timeline[-1]["step_id"] == "inspect-data-source"
+    assert timeline[-1]["capability_id"] == "file.workspace_read"
+    assert timeline[-1]["replan_request_id"] == "replan-1"
+    agent_call = [call for call in events.calls if call[0] == "agent_tool_call"][0]
+    assert agent_call[2]["trace"] == {
+        "source": "runtime_planner",
+        "planning_reason": "planner_replan_fallback_recovery",
+        "step_id": "inspect-data-source",
+        "capability_id": "file.workspace_read",
+        "replan_request_id": "replan-1",
+        "replan_trigger": "tool_failure",
+    }
+
+
 def test_runtime_tool_call_executor_records_non_workspace_failures() -> None:
     events = FakeToolCallEvents()
     executor = _executor(tool_call_events=events)

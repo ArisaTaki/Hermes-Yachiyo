@@ -8,9 +8,32 @@ from typing import Any
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
 from packages.security import redact_api_error_text
 
+_TOOL_REQUEST_TRACE_KEYS = (
+    "source",
+    "planning_reason",
+    "decision_id",
+    "plan_id",
+    "tool_plan_id",
+    "intent_kind",
+    "step_id",
+    "planner_step_id",
+    "capability_id",
+    "replan_request_id",
+    "replan_trigger",
+)
+
 
 def _default_allows_tool(tool_name: str, allowed_tools: list[str]) -> bool:
     return tool_name in set(str(tool or "").strip() for tool in allowed_tools)
+
+
+def _tool_request_trace_payload(tool_request: dict[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key in _TOOL_REQUEST_TRACE_KEYS:
+        value = str(tool_request.get(key) or "").strip()
+        if value:
+            payload[key] = value
+    return payload
 
 
 def _normalized_app_lookup(value: Any) -> str:
@@ -352,11 +375,19 @@ class RuntimeToolCallExecutor:
             if isinstance(tool_request.get("input_resolution"), dict)
             else {}
         )
+        trace_payload = _tool_request_trace_payload(tool_request)
         input_preview = _input_preview_with_app_name_resolution(input_preview, input_resolution)
         budget = budget or self._run_budget(run_id, timeline)
         if not self._allows_tool(tool_name, allowed_tools):
             budget.claim_tool_call(tool_name)
-            timeline.append(self._timeline("agent.tool.denied", tool_name, input_preview=input_preview))
+            timeline.append(
+                self._timeline(
+                    "agent.tool.denied",
+                    tool_name,
+                    input_preview=input_preview,
+                    **trace_payload,
+                )
+            )
             self._tool_call_events.denied(run_id, tool_name, input_preview)
             raise AgentRuntimeError(f"Agent 试图调用未授权工具：{tool_name}")
         self._tool_call_events.requested(
@@ -434,6 +465,7 @@ class RuntimeToolCallExecutor:
                 tool_name,
                 input_preview=input_preview,
                 result=tool_result,
+                **trace_payload,
             )
         )
         if run_id:
@@ -443,6 +475,7 @@ class RuntimeToolCallExecutor:
                 input_preview,
                 tool_result,
                 approved=approved,
+                trace=trace_payload,
             )
             trace_event = self._trace_events.memory_skill_trace_event(
                 tool_name,
@@ -568,6 +601,7 @@ class RuntimeToolRequestRunner:
                 self._input_preview(raw_input),
                 app_name_resolution,
             )
+            trace_payload = _tool_request_trace_payload(tool_request)
             runtime_skip = None
             if not _broker_requires_approval(broker, tool_name):
                 runtime_skip = _runtime_readiness_skip_result(
@@ -583,6 +617,7 @@ class RuntimeToolRequestRunner:
                         tool_name,
                         input_preview=input_preview,
                         result=runtime_skip,
+                        **trace_payload,
                     )
                 )
                 if run_id:
@@ -593,6 +628,7 @@ class RuntimeToolRequestRunner:
                             "tool": tool_name,
                             "input_preview": input_preview,
                             "result": runtime_skip,
+                            **trace_payload,
                         },
                     )
                 self._tool_loop_projection.append_tool_result_message(
@@ -620,6 +656,7 @@ class RuntimeToolRequestRunner:
                         tool_name,
                         input_preview=input_preview,
                         result=tool_result,
+                        **trace_payload,
                     )
                 )
                 if run_id:
@@ -630,6 +667,7 @@ class RuntimeToolRequestRunner:
                             "tool": tool_name,
                             "input_preview": input_preview,
                             "result": tool_result,
+                            **trace_payload,
                         },
                     )
                 self._tool_loop_projection.append_tool_result_message(
@@ -672,6 +710,7 @@ class RuntimeToolRequestRunner:
                         input_preview=input_preview,
                         result=tool_result,
                         status="failed",
+                        **trace_payload,
                     )
                 )
                 raise AgentRuntimeError(fatal_failure)

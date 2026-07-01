@@ -601,16 +601,20 @@ class RuntimeToolCallEventRecorder:
         tool_result: dict[str, Any],
         *,
         approved: bool = False,
+        trace: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
+        payload = {
+            "tool": tool_name,
+            "input_preview": input_preview,
+            "result": tool_result,
+            "approved": bool(approved),
+        }
+        if trace:
+            payload.update(trace)
         return self._append(
             run_id,
             "agent.tool.call",
-            {
-                "tool": tool_name,
-                "input_preview": input_preview,
-                "result": tool_result,
-                "approved": bool(approved),
-            },
+            payload,
         )
 
 

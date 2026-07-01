@@ -1725,18 +1725,20 @@ class RuntimeCustomApiAgentLoop:
             step_id = str(getattr(step, "step_id", "") or "").strip()
             if not tool_name or not step_id:
                 continue
-            if _runtime_planner_step_has_status(
-                timeline,
-                decision_id=decision_id,
-                step_id=step_id,
-                statuses={"completed", "blocked", "skipped", "waiting_approval"},
-            ):
-                continue
             tool_event: dict[str, Any] | None = None
             scan_index = event_index
             while scan_index < len(tool_events):
                 candidate = tool_events[scan_index]
-                if str(candidate.get("detail") or "").strip() == tool_name:
+                candidate_step_id = str(
+                    candidate.get("step_id") or candidate.get("planner_step_id") or ""
+                ).strip()
+                if (
+                    candidate_step_id == step_id
+                    or (
+                        not candidate_step_id
+                        and str(candidate.get("detail") or "").strip() == tool_name
+                    )
+                ):
                     tool_event = candidate
                     event_index = scan_index + 1
                     break
@@ -1749,6 +1751,16 @@ class RuntimeCustomApiAgentLoop:
                 result,
             )
             checkpoint_status = _task_checkpoint_status_for_todo_status(todo_status, result)
+            skip_statuses = {todo_status}
+            if todo_status != "completed":
+                skip_statuses.add("completed")
+            if _runtime_planner_step_has_status(
+                timeline,
+                decision_id=decision_id,
+                step_id=step_id,
+                statuses=skip_statuses,
+            ):
+                continue
             source_event = {
                 "event": str(tool_event.get("event") or ""),
                 "detail": str(tool_event.get("detail") or ""),
