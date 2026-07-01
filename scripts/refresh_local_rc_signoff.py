@@ -162,6 +162,75 @@ def _report_matches_current_source(
     return source_revision.get("short_commit") == short_commit
 
 
+def _latest_tmp_report(pattern: str) -> Path | None:
+    tmp_dir = ROOT / "tmp"
+    if not tmp_dir.is_dir():
+        return None
+    candidates: list[tuple[float, Path]] = []
+    for path in tmp_dir.glob(pattern):
+        if not path.is_file():
+            continue
+        try:
+            candidates.append((path.stat().st_mtime, path))
+        except OSError:
+            continue
+    if not candidates:
+        return None
+    return max(candidates, key=lambda item: item[0])[1]
+
+
+def _print_missing_current_signoff_guidance(
+    *,
+    label: str,
+    signoff_draft: Path,
+) -> None:
+    print(
+        f"local RC signoff draft not found: {signoff_draft.relative_to(ROOT)}",
+        file=sys.stderr,
+    )
+    latest_reports = [
+        ("latest signoff draft", _latest_tmp_report("rc-signoff-*-current.json")),
+        (
+            "latest release readiness",
+            _latest_tmp_report("rc-verification-*-release-readiness.json"),
+        ),
+        (
+            "latest release smoke",
+            _latest_tmp_report("rc-verification-*-release-smoke.json"),
+        ),
+        (
+            "latest public demo",
+            _latest_tmp_report("rc-verification-*-public-demo.json"),
+        ),
+    ]
+    existing_reports = [
+        (label_text, path)
+        for label_text, path in latest_reports
+        if path is not None and path != signoff_draft
+    ]
+    if existing_reports:
+        print("latest available local RC evidence:", file=sys.stderr)
+        for label_text, path in existing_reports:
+            print(f"- {label_text}: {path.relative_to(ROOT)}", file=sys.stderr)
+    print("refresh current local RC signoff draft:", file=sys.stderr)
+    print(
+        f"  {sys.executable} scripts/refresh_local_rc_signoff.py "
+        f"--short-commit {label} --reuse-current-reports",
+        file=sys.stderr,
+    )
+    print("then rerun status:", file=sys.stderr)
+    print(
+        f"  {sys.executable} scripts/refresh_local_rc_signoff.py "
+        f"--short-commit {label} --print-status",
+        file=sys.stderr,
+    )
+    print(
+        "add --run-real-desktop-smokes or --run-provider-smoke when collecting "
+        "opt-in release evidence for this commit.",
+        file=sys.stderr,
+    )
+
+
 def _preview_failure_is_only_manual_incomplete(report_path: Path) -> bool:
     report = _load_report(report_path)
     summary = report.get("manual_release_candidate_check_summary")
@@ -657,10 +726,7 @@ def print_local_rc_signoff_status(*, short_commit: str | None = None) -> bool:
     label = short_commit or _git_short_commit()
     signoff_draft = ROOT / "tmp" / f"rc-signoff-{label}-current.json"
     if not signoff_draft.exists():
-        print(
-            f"local RC signoff draft not found: {signoff_draft.relative_to(ROOT)}",
-            file=sys.stderr,
-        )
+        _print_missing_current_signoff_guidance(label=label, signoff_draft=signoff_draft)
         return False
 
     from scripts import verify_release_candidate as rc

@@ -189,7 +189,10 @@ diagnostics, exports a redacted diagnostics bundle, summarizes release-smoke
 user paths, writes `tmp/rc-verification-${SHORT_COMMIT}-public-demo.json` and
 `tmp/rc-verification-${SHORT_COMMIT}-public-demo.md`, and writes signoff drafts.
 `--print-status` also prints the public-demo release level, missing required
-demo flows, and blocker hints when those reports exist.
+demo flows, and blocker hints when those reports exist. If the current commit's
+signoff draft is missing, `--print-status` lists the latest available signoff,
+readiness, release-smoke, and public-demo evidence before printing the
+`--reuse-current-reports` refresh command for the current commit.
 If the final signoff is still blocked by manual Gatekeeper or Screen Recording
 checks, that is a remaining release task, not a failure to hide.
 

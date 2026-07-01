@@ -145,7 +145,7 @@ python scripts/refresh_local_rc_signoff.py --channel experimental --repository k
 python scripts/refresh_local_rc_signoff.py --print-status
 ```
 
-该命令只读取 `tmp/rc-signoff-<short-commit>-current.json` 并打印剩余项，不运行 build、DMG 或 UI gate；如果同一 commit 的 `tmp/rc-verification-<short-commit>-release-readiness.json` 存在，也会同步打印 30 项能力矩阵通过数、缺失 capability 和 blocker 摘要；如果 `tmp/rc-verification-<short-commit>-release-smoke.json` 存在，也会打印 9 项发布用户路径通过数和缺失项，并带出 public demo 的 `release_level`、缺失 demo flow 和 blocker；如果 `tmp/rc-verification-<short-commit>-public-demo.json` 存在，也会直接打印 public-demo release level、required demo 覆盖率、缺失 flow 和 opt-in blocker。
+该命令只读取 `tmp/rc-signoff-<short-commit>-current.json` 并打印剩余项，不运行 build、DMG 或 UI gate；如果当前 commit 的 draft 还不存在，它会失败但列出最近可用的 signoff / readiness / release-smoke / public-demo evidence，并打印刷新当前 draft 的 `--reuse-current-reports` 命令和随后要 rerun 的 `--print-status` 命令；如果同一 commit 的 `tmp/rc-verification-<short-commit>-release-readiness.json` 存在，也会同步打印 30 项能力矩阵通过数、缺失 capability 和 blocker 摘要；如果 `tmp/rc-verification-<short-commit>-release-smoke.json` 存在，也会打印 9 项发布用户路径通过数和缺失项，并带出 public demo 的 `release_level`、缺失 demo flow 和 blocker；如果 `tmp/rc-verification-<short-commit>-public-demo.json` 存在，也会直接打印 public-demo release level、required demo 覆盖率、缺失 flow 和 opt-in blocker。
 
 需要按当前 draft 完成最后的 Gatekeeper / Screen Recording 收证时，可以先打印聚合操作指南；该命令只读已有 draft / screen report，不会写入 evidence，也不会把人工项标为通过：
 

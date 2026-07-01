@@ -221,6 +221,11 @@ USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
     ),
     (
         Path("docs/public-release-readiness.md"),
+        "latest available signoff",
+        "public release readiness guide must document print-status missing-draft recovery",
+    ),
+    (
+        Path("docs/public-release-readiness.md"),
         "desktop_planner_discovery_smoke",
         "public release readiness guide must document desktop planner public demo evidence",
     ),
@@ -851,6 +856,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "public-demo release level、required demo 覆盖率、缺失 flow 和 opt-in blocker",
         "release packaging docs must document print-status public demo blocker output",
+    ),
+    (
+        "刷新当前 draft 的 `--reuse-current-reports` 命令",
+        "release packaging docs must document print-status missing-draft recovery",
     ),
     (
         "python scripts/refresh_local_rc_signoff.py --print-os-signoff-guide",

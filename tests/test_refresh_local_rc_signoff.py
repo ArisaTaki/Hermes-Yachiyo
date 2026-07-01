@@ -1038,10 +1038,44 @@ def test_refresh_local_rc_signoff_print_status_uses_current_draft(
 def test_refresh_local_rc_signoff_print_status_fails_when_draft_missing(
     monkeypatch,
     tmp_path,
+    capsys,
 ):
     monkeypatch.setattr(refresh, "ROOT", tmp_path)
+    tmp = tmp_path / "tmp"
+    tmp.mkdir(parents=True, exist_ok=True)
+    (tmp / "rc-signoff-old12345-current.json").write_text("{}", encoding="utf-8")
+    (tmp / "rc-verification-old12345-release-readiness.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    (tmp / "rc-verification-old12345-release-smoke.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
+    (tmp / "rc-verification-old12345-public-demo.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
 
     assert refresh.main(["--short-commit", "abc12345", "--print-status"]) == 1
+    stderr = capsys.readouterr().err
+    assert "local RC signoff draft not found: tmp/rc-signoff-abc12345-current.json" in stderr
+    assert "latest available local RC evidence:" in stderr
+    assert "latest signoff draft: tmp/rc-signoff-old12345-current.json" in stderr
+    assert "latest release readiness: tmp/rc-verification-old12345-release-readiness.json" in stderr
+    assert "latest release smoke: tmp/rc-verification-old12345-release-smoke.json" in stderr
+    assert "latest public demo: tmp/rc-verification-old12345-public-demo.json" in stderr
+    assert "refresh current local RC signoff draft:" in stderr
+    assert (
+        f"{sys.executable} scripts/refresh_local_rc_signoff.py "
+        "--short-commit abc12345 --reuse-current-reports"
+    ) in stderr
+    assert (
+        f"{sys.executable} scripts/refresh_local_rc_signoff.py "
+        "--short-commit abc12345 --print-status"
+    ) in stderr
+    assert "--run-real-desktop-smokes" in stderr
+    assert "--run-provider-smoke" in stderr
 
 
 def test_refresh_local_rc_signoff_cli_passes_public_demo_reports(
