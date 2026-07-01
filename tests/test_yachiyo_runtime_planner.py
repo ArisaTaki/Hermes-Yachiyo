@@ -257,6 +257,36 @@ def test_runtime_planner_routes_data_analysis_to_file_terminal_artifact_plan() -
     }
 
 
+def test_runtime_planner_outputs_data_analysis_presentation_artifact() -> None:
+    decision = RuntimePlanner().decision(
+        "帮我分析桌面上的销售数据并做成 PPT",
+        allowed_tools=["workspace.list", "terminal.run", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["data_source_scope_hint"] == "Desktop"
+    assert decision.selected_intent.expected_outputs == ["presentation"]
+    assert decision.plan.tool_plan.artifacts_expected == [
+        "analysis-report.md",
+        "analysis-presentation.pptx",
+    ]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-data-source",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(decision, "inspect-data-source").input_preview == {
+        "path": "Desktop"
+    }
+    assert _step_by_id(decision, "write-analysis-artifact").input_preview == {
+        "paths": ["analysis-report.md", "analysis-presentation.pptx"]
+    }
+    assert any(
+        item.kind == "artifact" and item.path == "analysis-presentation.pptx"
+        for item in (decision.plan.task_core.workspace.items if decision.plan.task_core else [])
+    )
+
+
 def test_runtime_planner_accepts_portable_capability_tool_aliases() -> None:
     data_prompt = "分析下载目录里的销售 CSV，生成一份带图表的报告"
     data_allowed = ["fs.find_files", "fs.read_file", "python.run", "artifact.write"]

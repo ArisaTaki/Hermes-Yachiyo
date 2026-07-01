@@ -320,6 +320,21 @@ def data_analysis_artifacts_expected(
     artifacts = ["analysis-report.md"]
     if "chart" in outputs:
         artifacts.append("analysis-chart.png")
+    if "presentation" in outputs or any(
+        marker in lowered
+        for marker in (
+            "ppt",
+            "pptx",
+            "slide deck",
+            "slides",
+            "presentation",
+            "keynote",
+            "演示",
+            "演示文稿",
+            "幻灯片",
+        )
+    ):
+        artifacts.append("analysis-presentation.pptx")
     if "table" in outputs or any(
         marker in lowered
         for marker in (
@@ -362,6 +377,8 @@ def data_analysis_artifact_kind(path: str) -> str:
         return "html"
     if lowered.endswith(".png"):
         return "chart"
+    if lowered.endswith((".ppt", ".pptx", ".key")):
+        return "presentation"
     if lowered.endswith(".json"):
         return "json"
     return "markdown"

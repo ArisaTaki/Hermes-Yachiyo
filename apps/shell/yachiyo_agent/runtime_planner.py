@@ -10047,7 +10047,11 @@ def _looks_like_workspace_path(value: str) -> bool:
     return bool(
         "/" in text
         or "\\" in text
-        or re.search(r"\.(?:csv|tsv|json|jsonl|xlsx|txt|md|html|png|jpg|jpeg|pdf)$", text, re.IGNORECASE)
+        or re.search(
+            r"\.(?:csv|tsv|json|jsonl|xlsx|txt|md|html|png|jpg|jpeg|pdf|ppt|pptx|key)$",
+            text,
+            re.IGNORECASE,
+        )
     )
 
 
@@ -20950,6 +20954,24 @@ def _expected_outputs(text: str, *, default: list[str]) -> list[str]:
         outputs.append("chart")
     if _contains_any(text, ["report", "报告"]):
         outputs.append("report")
+    if _contains_any(
+        text,
+        [
+            "ppt",
+            "pptx",
+            "slide deck",
+            "slides",
+            "presentation",
+            "keynote",
+            "演示",
+            "演示文稿",
+            "幻灯片",
+            "PPT",
+            "做成 PPT",
+            "做成PPT",
+        ],
+    ):
+        outputs.append("presentation")
     if _contains_any(
         text,
         [
