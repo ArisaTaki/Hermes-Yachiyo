@@ -15840,6 +15840,45 @@ def test_runtime_planner_discovers_generic_communication_app_before_sending() ->
         "draft-selected-communication-message",
     ).input_preview["target"] == "message body"
 
+    email_draft_decision = RuntimePlanner().decision(
+        "用任意可用的邮件应用给 Alice 写封邮件说明项目延期",
+        allowed_tools=allowed_tools,
+    )
+
+    assert email_draft_decision.selected_intent.inputs["direct_message_hint"] == {
+        "recipient": "Alice",
+        "body": "说明项目延期",
+        "mode": "focus",
+        "send_action": "draft",
+        "channel": "email",
+    }
+    assert [step.step_id for step in email_draft_decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "inspect-selected-communication-compose-ui",
+        "fill-selected-communication-recipient",
+        "submit-selected-communication-recipient",
+        "draft-selected-communication-message",
+    ]
+    assert _step_by_id(
+        email_draft_decision,
+        "fill-selected-communication-recipient",
+    ).input_preview == {
+        "target": "To",
+        "text": "Alice",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert _step_by_id(
+        email_draft_decision,
+        "draft-selected-communication-message",
+    ).input_preview == {
+        "target": "message body",
+        "text": "说明项目延期",
+        "role_filter": "text",
+        "limit": 80,
+    }
+
     english_decision = RuntimePlanner().decision(
         "use any available messaging app to send Alice hello",
         allowed_tools=allowed_tools,

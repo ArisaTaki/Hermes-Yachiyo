@@ -15292,6 +15292,15 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
             r"(?:打开|启动|开启)?\s*(?:在|用|通过)?\s*"
             r"(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内)?\s*"
             r"(?:给|向|对|发给|发送给|发到|发送到)\s*(?P<recipient>[^：:，,。]+?)\s*"
+            r"(?:写|撰写|起草|草拟)\s*(?:一封|封|一条|条|一则|则)?\s*"
+            r"(?P<channel>邮件|电子邮件|短信|消息|email|e-mail|mail|message)\s*"
+            r"(?P<body>(?:说明|说|关于|内容是|内容为|[:：]).+)$"
+        ),
+        (
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:打开|启动|开启)?\s*(?:在|用|通过)?\s*"
+            r"(?P<app>[\w .·-]{1,40}?)(?:里|中|上|内)?\s*"
+            r"(?:给|向|对|发给|发送给|发到|发送到)\s*(?P<recipient>[^：:，,。]+?)\s*"
             r"(?:发送|发出|发消息|发|说|message|send)\s*(?P<body>.+)$"
         ),
         (
@@ -15372,6 +15381,8 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
         if _looks_like_recipient_scoped_communication_app_capture(raw_app):
             continue
         generic_app_channel = _generic_communication_app_label_channel(raw_app)
+        group_channel = _canonical_communication_channel(groups.get("channel") or "")
+        communication_channel = generic_app_channel or group_channel
         app_name = "" if generic_app_channel else _canonical_app_name_hint(raw_app)
         recipient_tail = str(groups.get("recipient_message_tail") or "").strip()
         if recipient_tail:
@@ -15406,8 +15417,8 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
         }
         if app_name:
             hint["app_name"] = app_name
-        if generic_app_channel:
-            hint["channel"] = generic_app_channel
+        if communication_channel:
+            hint["channel"] = communication_channel
         return hint
     return _generic_direct_communication_hint(value)
 
