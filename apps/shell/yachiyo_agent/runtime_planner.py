@@ -4769,6 +4769,7 @@ class RuntimePlanner:
                 steps = []
                 previous_step_id = ""
                 playback_depends_on: list[str] = []
+                playback_control_added = False
                 verify_items: list[tuple[str, dict[str, Any]]] = []
                 for prepare_tool_name, prepare_input in prepare_plan:
                     if prepare_tool_name == "desktop.list_apps":
@@ -4791,6 +4792,20 @@ class RuntimePlanner:
                             "Open or focus the requested media app as a low-risk fallback "
                             "when no dedicated media playback tool is available."
                         )
+                    elif prepare_tool_name in {
+                        "app.open_and_click_ui_element",
+                        "app.focus_and_click_ui_element",
+                        "desktop.click_ui_element",
+                    }:
+                        step_id = "control-media-playback"
+                        title = "Control media playback"
+                        capability_id = "desktop.ui_operation"
+                        action = "click"
+                        reason = (
+                            "Click a visible play control through the generic desktop UI "
+                            "fallback when no dedicated media playback tool is available."
+                        )
+                        playback_control_added = True
                     elif prepare_tool_name in {
                         "desktop.ui_elements",
                         "desktop.read_ui",
@@ -4817,6 +4832,24 @@ class RuntimePlanner:
                     previous_step_id = step_id
                     if _is_media_app_open_or_focus_tool(prepare_tool_name):
                         playback_depends_on = [step_id]
+                    elif step_id == "control-media-playback":
+                        playback_depends_on = [step_id]
+                if playback_control_added:
+                    for verify_tool_name, verify_input in verify_items:
+                        steps.append(
+                            _step(
+                                intent,
+                                "verify-media-playback",
+                                "Verify media playback",
+                                "desktop.app_discovery",
+                                verify_tool_name,
+                                input_preview=verify_input,
+                                depends_on=playback_depends_on,
+                                action=_desktop_discovery_action(verify_tool_name),
+                                reason="Observe the media app after preparing it for playback.",
+                            )
+                        )
+                    return steps
                 steps.append(
                     _step(
                         intent,

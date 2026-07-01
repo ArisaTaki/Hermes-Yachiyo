@@ -1034,8 +1034,46 @@ def media_app_prepare_plan(
     if not app_tool:
         return []
     plan.append((app_tool, {"app_name": app_name, **selected_app_payload}))
+    _append_media_generic_play_step(
+        plan,
+        app_name=app_name,
+        selected_app_payload=selected_app_payload,
+        allowed=allowed,
+    )
     _append_media_app_verify_step(plan, allowed)
     return plan
+
+
+def _append_media_generic_play_step(
+    plan: list[tuple[str, dict[str, Any]]],
+    *,
+    app_name: str,
+    selected_app_payload: Mapping[str, Any],
+    allowed: set[str] | None,
+) -> None:
+    click_tool = _first_allowed(
+        (
+            "app.focus_and_click_ui_element",
+            "app.open_and_click_ui_element",
+            "desktop.click_ui_element",
+        ),
+        allowed,
+    )
+    if not click_tool:
+        return
+    click_payload = {
+        "target": "play 播放",
+        "role_filter": "button",
+        "limit": 80,
+        "click_count": 1,
+    }
+    if click_tool.startswith("app."):
+        click_payload = {
+            "app_name": app_name,
+            **dict(selected_app_payload),
+            **click_payload,
+        }
+    plan.append((click_tool, click_payload))
 
 
 def _append_media_app_verify_step(

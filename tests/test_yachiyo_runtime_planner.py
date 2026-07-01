@@ -15005,6 +15005,41 @@ def test_runtime_planner_prepares_media_app_when_playback_tool_is_missing() -> N
     assert decision.plan.tool_plan.missing_capabilities == ["media.playback"]
 
 
+def test_runtime_planner_uses_desktop_ui_fallback_for_media_playback() -> None:
+    decision = RuntimePlanner().decision(
+        "帮我打开 Apple Music 并播放一首歌",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-media-app",
+        "open-media-app",
+        "control-media-playback",
+        "verify-media-playback",
+    ]
+    playback = _step_by_id(decision, "control-media-playback")
+    assert playback.tool_name == "app.focus_and_click_ui_element"
+    assert playback.capability_id == "desktop.ui_operation"
+    assert playback.depends_on == ["open-media-app"]
+    assert playback.input_preview == {
+        "app_name": "Music",
+        "target": "play 播放",
+        "role_filter": "button",
+        "limit": 80,
+        "click_count": 1,
+    }
+    assert _step_by_id(decision, "verify-media-playback").depends_on == [
+        "control-media-playback"
+    ]
+    assert decision.plan.tool_plan.missing_capabilities == []
+
+
 def test_runtime_planner_treats_desktop_media_app_aliases_as_app_control() -> None:
     prepare = RuntimePlanner().decision(
         "帮我播放 Apple Music",
@@ -22029,6 +22064,55 @@ def test_planner_desktop_tool_requests_prepares_media_app_when_playback_tool_is_
             "protocol": "json_fallback",
             "tool": "app.open",
             "input": {"app_name": "Music"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_uses_ui_fallback_for_media_playback() -> None:
+    requests = planner_desktop_tool_requests(
+        "帮我打开 Apple Music 并播放一首歌",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Music", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Music"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Music",
+                "target": "play 播放",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },
