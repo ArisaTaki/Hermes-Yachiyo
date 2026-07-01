@@ -2351,7 +2351,12 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
 
 def _web_open_followup_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
     requests: list[dict[str, Any]] = []
-    for step_id in ("scroll-opened-web-page", "verify-opened-web-page"):
+    for step_id in (
+        "click-opened-web-page",
+        "key-opened-web-page",
+        "scroll-opened-web-page",
+        "verify-opened-web-page",
+    ):
         step = _tool_plan_step(decision, step_id)
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if not tool_name or tool_name not in allowed or not _step_available(step):

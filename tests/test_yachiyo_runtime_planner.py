@@ -7170,6 +7170,45 @@ def test_runtime_planner_routes_explicit_browser_url_open_actions() -> None:
         "scroll-opened-web-page"
     ]
 
+    key = RuntimePlanner().decision(
+        "打开 example.com，然后按 Escape",
+        allowed_tools=[*allowed, "desktop.safe_key", "screen.capture"],
+    )
+
+    assert [step.step_id for step in key.plan.tool_plan.steps] == [
+        "open-web-url",
+        "key-opened-web-page",
+        "verify-opened-web-page",
+    ]
+    assert _step_by_id(key, "key-opened-web-page").tool_name == "desktop.safe_key"
+    assert _step_by_id(key, "key-opened-web-page").input_preview == {
+        "action": "escape",
+        "repeat_count": 1,
+    }
+    assert _step_by_id(key, "verify-opened-web-page").depends_on == [
+        "key-opened-web-page"
+    ]
+
+    click = RuntimePlanner().decision(
+        "打开 example.com，然后点击 More information",
+        allowed_tools=[*allowed, "browser.click", "screen.capture"],
+    )
+
+    assert [step.step_id for step in click.plan.tool_plan.steps] == [
+        "open-web-url",
+        "click-opened-web-page",
+        "verify-opened-web-page",
+    ]
+    assert _step_by_id(click, "click-opened-web-page").tool_name == "browser.click"
+    assert _step_by_id(click, "click-opened-web-page").input_preview == {
+        "selector": "text=More information",
+        "click_count": 1,
+    }
+    assert _step_by_id(click, "click-opened-web-page").approval_required is True
+    assert _step_by_id(click, "verify-opened-web-page").depends_on == [
+        "click-opened-web-page"
+    ]
+
     extract = RuntimePlanner().decision("打开 github.com 读一下内容", allowed_tools=allowed)
 
     assert extract.selected_intent.inputs == {
@@ -23976,6 +24015,64 @@ def test_planner_tool_requests_maps_explicit_browser_url_plan() -> None:
             "protocol": "json_fallback",
             "tool": "screen.capture",
             "input": {"reason": "verify opened web page after scroll"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+    ]
+
+    key_requests = planner_desktop_tool_requests(
+        "打开 example.com，然后按 Escape",
+        allowed_tools=["browser.open_url", "desktop.safe_key", "screen.capture"],
+    )
+
+    assert key_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_key",
+            "input": {"action": "escape", "repeat_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "verify opened web page after key press"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+    ]
+
+    click_requests = planner_desktop_tool_requests(
+        "打开 example.com，然后点击 More information",
+        allowed_tools=["browser.open_url", "browser.click", "screen.capture"],
+    )
+
+    assert click_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.click",
+            "input": {"selector": "text=More information", "click_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "verify opened web page after click"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
         },

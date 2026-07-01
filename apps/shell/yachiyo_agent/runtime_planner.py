@@ -16982,6 +16982,66 @@ def _append_web_open_followup_steps(
     followup = _web_open_followup_text(intent.user_goal, str(intent.inputs.get("url_hint") or ""))
     if not followup:
         return steps
+    click_hint = _web_open_followup_browser_click_hint(followup)
+    if click_hint:
+        click_tool = _first_allowed(("browser.click",), allowed)
+        if not click_tool:
+            return steps
+        click_step = _step(
+            intent,
+            "click-opened-web-page",
+            "Click opened web page",
+            "browser.research",
+            click_tool,
+            input_preview=click_hint,
+            depends_on=[depends_on],
+            action="click",
+            risk_level="medium",
+            approval_required=True,
+            reason=(
+                "After opening the requested URL, click the explicit page target through "
+                "the browser interaction tool."
+            ),
+        )
+        steps.append(click_step)
+        return _append_web_open_followup_verify_step(
+            intent,
+            allowed,
+            steps,
+            depends_on=click_step.step_id,
+            reason="verify opened web page after click",
+        )
+
+    safe_key = _web_open_followup_safe_key_hint(followup)
+    if safe_key:
+        key_tool = _first_allowed(("desktop.safe_key",), allowed)
+        if not key_tool:
+            return steps
+        key_step = _step(
+            intent,
+            "key-opened-web-page",
+            "Press key in opened web page",
+            "desktop.ui_operation",
+            key_tool,
+            input_preview=safe_key,
+            depends_on=[depends_on],
+            action="key",
+            risk_level="low",
+            approval_required=False,
+            reason=(
+                "After opening the requested URL, send the explicit safe foreground key "
+                "instead of stopping at page launch."
+            ),
+        )
+        steps.append(key_step)
+        return _append_web_open_followup_verify_step(
+            intent,
+            allowed,
+            steps,
+            depends_on=key_step.step_id,
+            reason="verify opened web page after key press",
+        )
+
     safe_scroll = _web_open_followup_safe_scroll_hint(followup)
     if not safe_scroll:
         return steps
@@ -17005,6 +17065,23 @@ def _append_web_open_followup_steps(
         ),
     )
     steps.append(scroll_step)
+    return _append_web_open_followup_verify_step(
+        intent,
+        allowed,
+        steps,
+        depends_on=scroll_step.step_id,
+        reason="verify opened web page after scroll",
+    )
+
+
+def _append_web_open_followup_verify_step(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    depends_on: str,
+    reason: str,
+) -> list[ToolPlanStepSnapshot]:
     verify_tool = _first_allowed(("screen.capture", "browser.current_page"), allowed)
     if verify_tool:
         steps.append(
@@ -17015,16 +17092,47 @@ def _append_web_open_followup_steps(
                 "browser.research" if verify_tool == "browser.current_page" else "desktop.visual_verification",
                 verify_tool,
                 input_preview=(
-                    {"reason": "verify opened web page after scroll"}
+                    {"reason": reason}
                     if verify_tool == "screen.capture"
                     else {}
                 ),
-                depends_on=[scroll_step.step_id],
+                depends_on=[depends_on],
                 action="capture_screen" if verify_tool == "screen.capture" else "read_page",
                 reason="Observe the browser state after the requested web-page follow-up action.",
             )
         )
     return steps
+
+
+def _web_open_followup_browser_click_hint(text: str) -> dict[str, Any] | None:
+    followup = _clean_prompt(text)
+    if not followup:
+        return None
+    hint = _browser_click_hint(followup) or _browser_click_hint(f"当前网页{followup}")
+    if not hint:
+        return None
+    payload = dict(hint)
+    payload.pop("browser_action", None)
+    return payload if payload.get("selector") else None
+
+
+def _web_open_followup_safe_key_hint(text: str) -> dict[str, Any] | None:
+    followup = _clean_prompt(text)
+    if not followup:
+        return None
+    direct = safe_key_hint(followup)
+    if direct:
+        return direct
+    key_part = re.split(
+        r"(?:并且|并|然后|再|接着|之后|后|\band\s+then\b|\bthen\b|\band\b)"
+        r".{0,12}(?:截图|截屏|screenshot|screen\s+capture)",
+        followup,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip(" .，,。")
+    if key_part and key_part != followup:
+        return safe_key_hint(key_part)
+    return None
 
 
 def _web_open_followup_safe_scroll_hint(text: str) -> dict[str, Any] | None:
