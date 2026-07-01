@@ -6324,6 +6324,7 @@ def _auto_discovered_followup_requests(
     timeline: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     for factory in (
+        _auto_desktop_observed_action_followup_requests,
         _auto_discovered_app_followup_requests,
         _auto_discovered_media_playback_followup_requests,
     ):
@@ -6331,6 +6332,130 @@ def _auto_discovered_followup_requests(
         if requests:
             return requests
     return []
+
+
+def _auto_desktop_observed_action_followup_requests(
+    selection_payload: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    planning_reason: str = "planner_followup_desktop_observed_action",
+) -> list[dict[str, Any]]:
+    target = (
+        selection_payload.get("followup_target")
+        if isinstance(selection_payload.get("followup_target"), Mapping)
+        else {}
+    )
+    if str(target.get("kind") or "").strip() != "desktop_observed_action":
+        return []
+    if not _latest_desktop_observation_succeeded(timeline):
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    target_action = str(target.get("target_action") or "").strip()
+    if target_action == "click":
+        return _auto_desktop_observed_click_requests(
+            target,
+            allowed,
+            planning_reason=planning_reason,
+        )
+    if target_action == "type_text":
+        return _auto_desktop_observed_type_requests(
+            target,
+            allowed,
+            planning_reason=planning_reason,
+        )
+    return []
+
+
+def _auto_desktop_observed_click_requests(
+    target: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    if "desktop.click_ui_element" not in allowed:
+        return []
+    target_label = str(target.get("target") or "").strip()
+    if not target_label:
+        return []
+    return [
+        _request_like(
+            "desktop.click_ui_element",
+            {
+                "target": target_label,
+                "role_filter": str(target.get("role_filter") or "").strip(),
+                "click_count": _clean_model_followup_int(
+                    target.get("click_count"),
+                    default=1,
+                ),
+                "limit": _clean_model_followup_int(target.get("limit"), default=80),
+            },
+            source="runtime_planner",
+            planning_reason=planning_reason,
+        )
+    ]
+
+
+def _auto_desktop_observed_type_requests(
+    target: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    target_label = str(target.get("target") or "").strip()
+    text = str(target.get("text") or "")
+    if not target_label or not text:
+        return []
+    base_input = {
+        "target": target_label,
+        "text": text,
+        "role_filter": str(target.get("role_filter") or "").strip(),
+        "limit": _clean_model_followup_int(target.get("limit"), default=80),
+    }
+    if "desktop.type_into_ui_element" in allowed:
+        return [
+            _request_like(
+                "desktop.type_into_ui_element",
+                base_input,
+                source="runtime_planner",
+                planning_reason=planning_reason,
+            )
+        ]
+    type_tool = _first_allowed_tool(("desktop.type_text", "desktop.type"), allowed)
+    if "desktop.click_ui_element" not in allowed or not type_tool:
+        return []
+    click_input = {
+        "target": target_label,
+        "role_filter": str(target.get("role_filter") or "").strip(),
+        "click_count": 1,
+        "limit": _clean_model_followup_int(target.get("limit"), default=80),
+    }
+    return [
+        _request_like(
+            "desktop.click_ui_element",
+            click_input,
+            source="runtime_planner",
+            planning_reason=planning_reason,
+        ),
+        _request_like(
+            type_tool,
+            {"text": text},
+            source="runtime_planner",
+            planning_reason=planning_reason,
+        ),
+    ]
+
+
+def _latest_desktop_observation_succeeded(timeline: list[dict[str, Any]]) -> bool:
+    for event in reversed(timeline):
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        tool_name = str(event.get("detail") or "").strip()
+        if tool_name not in {"desktop.read_ui", "desktop.ui_elements"}:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        return result.get("ok") is True
+    return False
 
 
 def _drop_completed_auto_followup_prefix(

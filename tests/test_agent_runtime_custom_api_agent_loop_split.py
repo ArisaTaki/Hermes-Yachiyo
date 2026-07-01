@@ -3108,6 +3108,116 @@ def test_model_followup_context_payload_preserves_multiple_content_snapshots() -
     assert "Data analysis result for data/sales.csv (csv)." in message
 
 
+def test_auto_followup_dispatches_observed_desktop_click_action() -> None:
+    selection_payload = {
+        "followup_target": {
+            "kind": "desktop_observed_action",
+            "target_action": "click",
+            "target": "登录",
+            "role_filter": "button",
+            "click_count": 1,
+            "limit": 80,
+        }
+    }
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.read_ui",
+            input_preview={"role_filter": "button", "limit": 80},
+            result={"ok": True, "data": {"elements": [{"label": "登录"}]}},
+        )
+    ]
+
+    assert custom_api_agent_module._auto_discovered_followup_requests(
+        selection_payload,
+        ["desktop.read_ui", "desktop.click_ui_element"],
+        timeline,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "登录",
+                "role_filter": "button",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_desktop_observed_action",
+        }
+    ]
+    assert custom_api_agent_module._auto_discovered_followup_requests(
+        selection_payload,
+        ["desktop.read_ui", "desktop.click"],
+        timeline,
+    ) == []
+
+
+def test_auto_followup_dispatches_observed_desktop_type_action() -> None:
+    selection_payload = {
+        "followup_target": {
+            "kind": "desktop_observed_action",
+            "target_action": "type_text",
+            "target": "text input",
+            "text": "hello",
+            "role_filter": "text field",
+            "limit": 80,
+        }
+    }
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.read_ui",
+            input_preview={"role_filter": "text field", "limit": 80},
+            result={"ok": True, "data": {"elements": [{"role": "text field"}]}},
+        )
+    ]
+
+    assert custom_api_agent_module._auto_discovered_followup_requests(
+        selection_payload,
+        ["desktop.read_ui", "desktop.type_into_ui_element"],
+        timeline,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_into_ui_element",
+            "input": {
+                "target": "text input",
+                "text": "hello",
+                "role_filter": "text field",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_desktop_observed_action",
+        }
+    ]
+    assert custom_api_agent_module._auto_discovered_followup_requests(
+        selection_payload,
+        ["desktop.read_ui", "desktop.click_ui_element", "desktop.type_text"],
+        timeline,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "text input",
+                "role_filter": "text field",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_desktop_observed_action",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_text",
+            "input": {"text": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_desktop_observed_action",
+        },
+    ]
+
+
 def test_model_followup_context_instructs_pending_report_plan_steps() -> None:
     payload = custom_api_agent_module._model_followup_context_payload(
         [
