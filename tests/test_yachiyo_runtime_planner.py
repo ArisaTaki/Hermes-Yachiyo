@@ -9010,6 +9010,60 @@ def test_runtime_planner_discovers_chinese_generic_editor_apps_before_acting() -
     ).selected_intent.kind == "data_analysis"
 
 
+def test_runtime_planner_routes_capability_app_search_to_desktop_operation() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.ui_elements",
+        "desktop.click_ui_element",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+    ]
+
+    cases = (
+        ("找一个图片设计应用搜索 logo 模板", "logo 模板", "搜索"),
+        ("find an image design app and search logo templates", "logo templates", "Search"),
+    )
+
+    for prompt, query, target in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == ""
+        assert decision.selected_intent.inputs["operation_hint"] == "discover_apps"
+        assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+            "action": "discover_apps",
+            "query": "image",
+        }
+        assert decision.selected_intent.inputs["app_capability_hint"]["query"] == "image"
+        assert decision.selected_intent.inputs["app_search_hint"] == {
+            "query": query,
+            "target": target,
+        }
+        assert [step.step_id for step in decision.plan.tool_plan.steps[:4]] == [
+            "discover_apps-desktop-state",
+            "open-selected-discovered-app",
+            "focus-app-search-field",
+            "type-app-search-query",
+        ]
+        assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": "image",
+        }
+        assert _step_by_id(decision, "type-app-search-query").input_preview == {
+            "text": query
+        }
+        requests = planner_tool_requests(prompt, allowed_tools)
+        assert [request["tool"] for request in requests[:4]] == [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.click_ui_element",
+            "desktop.safe_type_text",
+        ]
+
+
 def test_runtime_planner_discovers_generic_design_tool_before_searching() -> None:
     allowed_tools = [
         "desktop.list_apps",
@@ -9066,7 +9120,7 @@ def test_runtime_planner_discovers_generic_design_tool_before_searching() -> Non
     assert _step_by_id(decision, "verify-desktop-result").depends_on == [
         "submit-app-search"
     ]
-    assert planner_tool_requests(prompt, allowed_tools) == [
+    expected_requests = [
         {
             "protocol": "json_fallback",
             "tool": "desktop.list_apps",
@@ -9074,18 +9128,54 @@ def test_runtime_planner_discovers_generic_design_tool_before_searching() -> Non
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
             "continue_to_model": True,
-        }
-    ]
-    assert planner_direct_tool_requests(prompt, allowed_tools) == [
+        },
         {
             "protocol": "json_fallback",
-            "tool": "desktop.list_apps",
-            "input": {"query": "image", "limit": 20},
+            "tool": "app.open",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "image",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "搜索",
+                "role_filter": "text",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "logo 模板"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
+    assert planner_tool_requests(prompt, allowed_tools) == expected_requests
+    assert planner_direct_tool_requests(prompt, allowed_tools) == expected_requests
     payload = planner_selection_payload(
         decision=decision,
         planner_requests=planner_tool_requests(prompt, allowed_tools),

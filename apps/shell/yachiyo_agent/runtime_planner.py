@@ -877,7 +877,10 @@ class TaskIntentRouter:
             app_click_scope
             or (app_type_scope and not _app_search_field_input_allows_safe_search(text))
         ):
-            app_search = _app_search_hint(text, app_name_hint)
+            app_search = _app_capability_search_hint(text, app_capability) or _app_search_hint(
+                text,
+                app_name_hint,
+            )
             if app_capability and app_search:
                 app_search = {
                     key: value
@@ -1273,6 +1276,9 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         communication_target = _web_research_communication_target_hint(text)
         if _direct_communication_hint(text) and not communication_target:
+            return _empty_intent("web_research", text)
+        app_capability_hint = _app_capability_discovery_hint(text)
+        if app_capability_hint and _app_capability_search_hint(text, app_capability_hint):
             return _empty_intent("web_research", text)
         app_name_hint = _app_name_hint(text)
         app_search_hint = _app_search_hint(text, app_name_hint)
@@ -18849,6 +18855,40 @@ def _app_search_hint(text: str, app_name: str) -> dict[str, str]:
     if app and _app_search_query_needs_app_scope(query, text):
         result["app_name"] = app
     return result
+
+
+def _app_capability_search_hint(text: str, app_capability: Mapping[str, str]) -> dict[str, str]:
+    if not isinstance(app_capability, Mapping):
+        return {}
+    if not str(app_capability.get("query") or "").strip():
+        return {}
+    value = _clean_prompt(text)
+    if not value:
+        return {}
+    patterns = (
+        r"(?:应用(?:程序)?|app|软件|工具|程序|客户端|编辑器|阅读器|查看器|浏览器)"
+        r"(?:里|中|内|上)?\s*(?:并|然后|再|去|来|用于|用来)?\s*"
+        r"(?:搜索|查找|检索|找)(?:一下|下)?\s*(?P<query>.+)$",
+        r"\b(?:app|application|tool|program|client|editor|reader|viewer)\b"
+        r"(?:\s+(?:and|then|to|for))?\s*"
+        r"(?:search|find|look\s+up)(?:\s+for)?\s+(?P<query_en>.+)$",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        query = _clean_app_search_query(
+            match.groupdict().get("query")
+            or match.groupdict().get("query_en")
+            or ""
+        ).strip(" .，,。?？!！")
+        if not query:
+            continue
+        return {
+            "query": query,
+            "target": "搜索" if _contains_any(value, ("搜索", "查找", "检索", "找")) else "Search",
+        }
+    return {}
 
 
 def _app_search_query_needs_app_scope(query: str, text: str) -> bool:
