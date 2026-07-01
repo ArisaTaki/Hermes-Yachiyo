@@ -67,6 +67,60 @@ def _timeline(event: str, detail: str = "", **extra: Any) -> dict[str, Any]:
     return {"event": event, "detail": detail, **extra}
 
 
+def test_auto_data_analysis_from_workspace_discovery_preserves_expected_artifacts() -> None:
+    request = RuntimeCustomApiAgentLoop._auto_data_analysis_request_from_discovery(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "workspace.list",
+                "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_prefetch_data_source",
+                "continue_to_model": True,
+            }
+        ],
+        ["workspace.list", "data.analyze", "artifact.write"],
+        {
+            "artifacts_expected": [
+                "analysis-report.md",
+                "analysis-chart.png",
+            ],
+        },
+        [
+            _timeline(
+                "agent.tool.call",
+                "workspace.list",
+                input_preview={"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+                result={
+                    "ok": True,
+                    "path": "Downloads",
+                    "entries": [
+                        {"name": "sales.csv", "type": "file"},
+                    ],
+                },
+            )
+        ],
+    )
+
+    assert request == {
+        "protocol": "json_fallback",
+        "tool": "data.analyze",
+        "input": {
+            "path": "Downloads/sales.csv",
+            "artifact_path": "analysis-report.md",
+            "source_kind": "csv",
+            "requested_outputs": ["report", "chart"],
+            "artifact_manifest": [
+                {"path": "analysis-report.md", "kind": "markdown"},
+                {"path": "analysis-chart.png", "kind": "chart"},
+            ],
+            "artifact_paths": ["analysis-report.md", "analysis-chart.png"],
+        },
+        "source": "runtime_planner",
+        "planning_reason": "planner_builtin_data_analysis",
+    }
+
+
 def _private_runtime_loop(
     *,
     append_run_event=None,

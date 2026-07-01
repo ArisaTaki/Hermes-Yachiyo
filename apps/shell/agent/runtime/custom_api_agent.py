@@ -1171,17 +1171,22 @@ class RuntimeCustomApiAgentLoop:
         list_input = latest_list.get("input_preview") if isinstance(latest_list.get("input_preview"), dict) else {}
         base_path = str(list_input.get("path") or result.get("path") or "").strip()
         path = _join_workspace_list_path(base_path, data_files[0])
-        artifact_paths = ["analysis-report.md"]
+        artifact_paths = _string_list(selection_payload.get("artifacts_expected"))
+        if not artifact_paths:
+            artifact_paths = ["analysis-report.md"]
+        input_payload: dict[str, Any] = {
+            "path": path,
+            "artifact_path": artifact_paths[0],
+            "source_kind": _data_analysis_file_kind(path),
+            "requested_outputs": _requested_outputs_from_artifact_paths(artifact_paths),
+            "artifact_manifest": _artifact_manifest_from_paths(artifact_paths),
+        }
+        if len(artifact_paths) > 1:
+            input_payload["artifact_paths"] = artifact_paths
         return {
             "protocol": "json_fallback",
             "tool": "data.analyze",
-            "input": {
-                "path": path,
-                "artifact_path": artifact_paths[0],
-                "source_kind": _data_analysis_file_kind(path),
-                "requested_outputs": ["report"],
-                "artifact_manifest": [{"path": artifact_paths[0], "kind": "markdown"}],
-            },
+            "input": input_payload,
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
         }
