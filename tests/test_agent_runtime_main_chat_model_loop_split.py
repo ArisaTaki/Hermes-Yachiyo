@@ -286,7 +286,11 @@ def test_main_chat_model_loop_runner_treats_discovered_app_followup_as_direct() 
     runner._default_profile_id = lambda: ""
     runner._compile_agent_runtime = lambda _agent: {
         "tool_policy": {
-            "allowed_tools": ["desktop.list_apps", "app.open", "desktop.active_window"],
+            "allowed_tools": [
+                "desktop.list_apps",
+                "desktop.open_app",
+                "desktop.active_window",
+            ],
         },
         "workspace_policy": {"default_workdir": "/tmp/project"},
     }

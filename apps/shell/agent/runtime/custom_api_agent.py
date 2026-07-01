@@ -5983,7 +5983,10 @@ def _discovered_app_safe_shortcut_requests(
                 app_name,
             )
         ]
-    focus_tool = "app.open" if "app.open" in allowed else ("app.focus" if "app.focus" in allowed else "")
+    focus_tool = _first_allowed_tool(
+        ("app.open", "desktop.open_app", "app.focus", "desktop.focus_app"),
+        allowed,
+    )
     if focus_tool and "desktop.safe_shortcut" in allowed:
         return [
             _with_discovered_app_resolution(
@@ -6037,7 +6040,10 @@ def _discovered_app_open_request(
     source: str,
     planning_reason: str,
 ) -> dict[str, Any]:
-    tool_name = "app.open" if "app.open" in allowed else ("app.focus" if "app.focus" in allowed else "")
+    tool_name = _first_allowed_tool(
+        ("app.open", "desktop.open_app", "app.focus", "desktop.focus_app"),
+        allowed,
+    )
     if not tool_name:
         return {}
     return _with_discovered_app_resolution(

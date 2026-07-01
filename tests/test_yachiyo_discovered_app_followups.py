@@ -24,8 +24,16 @@ def test_discovered_app_followup_allows_open_or_focus_actions() -> None:
         ["app.open"],
     )
     assert discovered_app_followup_target_can_direct_execute(
+        _target(target_action="open_app"),
+        ["desktop.open_app"],
+    )
+    assert discovered_app_followup_target_can_direct_execute(
         _target(target_action="focus_app"),
         ["app.focus"],
+    )
+    assert discovered_app_followup_target_can_direct_execute(
+        _target(target_action="focus_app"),
+        ["desktop.focus_app"],
     )
 
 
@@ -50,6 +58,10 @@ def test_discovered_app_followup_allows_safe_shortcut_with_preparation_tool() ->
     assert discovered_app_followup_target_can_direct_execute(
         _target(target_action="safe_shortcut", safe_shortcut_action="new_document"),
         ["app.open", "desktop.safe_shortcut"],
+    )
+    assert discovered_app_followup_target_can_direct_execute(
+        _target(target_action="safe_shortcut", safe_shortcut_action="new_document"),
+        ["desktop.open_app", "desktop.safe_shortcut"],
     )
     assert not discovered_app_followup_target_can_direct_execute(
         _target(target_action="safe_shortcut"),
@@ -99,7 +111,7 @@ def test_discovered_app_followup_allows_explicit_app_search() -> None:
     assert discovered_app_followup_target_can_direct_execute(
         click_target,
         [
-            "app.open",
+            "desktop.open_app",
             "desktop.click_ui_element",
             "desktop.safe_type_text",
             "desktop.search_submit",
@@ -204,7 +216,7 @@ def test_planner_discovered_app_followup_requires_list_apps_continuation() -> No
                 "continue_to_model": True,
             }
         ],
-        ["app.open"],
+        ["desktop.open_app"],
     )
     assert not planner_discovered_app_followup_can_direct_execute(
         selection_payload,

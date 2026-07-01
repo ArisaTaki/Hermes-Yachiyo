@@ -14681,6 +14681,23 @@ def test_auto_discovered_app_open_followup_verifies_active_window() -> None:
         },
     ]
 
+    alias_requests = custom_api_agent_module._auto_discovered_app_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "browser",
+                "target_action": "open_app",
+            }
+        },
+        ["desktop.open_app", "desktop.active_window"],
+        timeline,
+    )
+
+    assert alias_requests[0]["tool"] == "desktop.open_app"
+    assert alias_requests[0]["input"] == {"app_name": "Safari"}
+    assert alias_requests[0]["input_resolution"]["tool"] == "desktop.open_app"
+    assert alias_requests[1]["tool"] == "desktop.active_window"
+
 
 def test_auto_discovered_app_compose_followup_types_and_verifies() -> None:
     timeline = [

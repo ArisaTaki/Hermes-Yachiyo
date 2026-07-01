@@ -70,7 +70,7 @@ def discovered_app_followup_target_can_direct_execute(
         if not _can_select_app_search_result(target, allowed):
             return False
     elif target_action in {"open_app", "open", "focus_app", "focus"}:
-        can_prepare = "app.open" in allowed or "app.focus" in allowed
+        can_prepare = _can_prepare_app(target, allowed)
     elif target_action == "open_path_with_selected_app":
         can_prepare = (
             allow_open_path
@@ -96,9 +96,21 @@ def _can_prepare_safe_shortcut(target: Mapping[str, Any], allowed: set[str]) -> 
         "app.open_and_safe_shortcut" in allowed
         or "app.focus_and_safe_shortcut" in allowed
         or (
-            ("app.open" in allowed or "app.focus" in allowed)
+            _can_prepare_app(target, allowed)
             and "desktop.safe_shortcut" in allowed
         )
+    )
+
+
+def _can_prepare_app(_target: Mapping[str, Any], allowed: set[str]) -> bool:
+    return bool(
+        allowed
+        & {
+            "app.open",
+            "desktop.open_app",
+            "app.focus",
+            "desktop.focus_app",
+        }
     )
 
 
@@ -107,7 +119,7 @@ def _can_prepare_app_search(target: Mapping[str, Any], allowed: set[str]) -> boo
     if str(focus.get("tool") or "").strip() == "desktop.click_ui_element":
         return (
             "desktop.click_ui_element" in allowed
-            and ("app.open" in allowed or "app.focus" in allowed)
+            and _can_prepare_app(target, allowed)
         )
     return _can_prepare_safe_shortcut(target, allowed)
 
