@@ -15,6 +15,21 @@ def test_real_desktop_interaction_smoke_skips_non_macos(monkeypatch):
     assert evidence["mode"] == "real_desktop_interaction_smoke"
 
 
+def test_real_desktop_interaction_smoke_prefers_backspace_click_target():
+    target = smoke._sign_target(
+        [
+            {"role": "AXButton", "name": "更改数值符号", "description": "按钮"},
+            {
+                "role": "AXButton",
+                "name": "删除输入的上个数字或操作（长按全部删除）",
+                "description": "按钮",
+            },
+        ]
+    )
+
+    assert target == "删除输入的上个数字或操作（长按全部删除）"
+
+
 def test_real_desktop_interaction_smoke_stops_before_app_mutation_when_locked(monkeypatch):
     monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
     monkeypatch.setattr(
@@ -244,7 +259,8 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
     assert evidence["retry_active_app_matches"] is True
     assert len(evidence["pre_click_focus_attempts"]) == 1
     assert evidence["signed_value_visible"] is True
-    assert evidence["checks"]["click_effect_visible"] is True
+    assert evidence["click_effect_visible"] is True
+    assert evidence["checks"]["click_completed_in_target_app"] is True
     assert evidence["sign_target"] == "更改数值符号"
     assert all(evidence["checks"].values())
     assert calls == [
@@ -393,7 +409,8 @@ def test_real_desktop_interaction_smoke_allows_existing_app_when_requested(monke
     assert evidence["allow_existing_app"] is True
     assert evidence["checks"]["app_not_already_running"] is True
     assert evidence["checks"]["existing_app_allowed"] is True
-    assert evidence["checks"]["click_effect_visible"] is True
+    assert evidence["click_effect_visible"] is True
+    assert evidence["checks"]["click_completed_in_target_app"] is True
     assert evidence["cleanup"]["attempted"] is False
     assert evidence["cleanup"]["reason"] == "app was already running before smoke"
     assert evidence["after_values"] == ["-42"]
@@ -484,7 +501,8 @@ def test_real_desktop_interaction_smoke_retries_pre_click_focus(monkeypatch):
         True,
     ]
     assert evidence["checks"]["pre_click_focus_verified"] is True
-    assert evidence["checks"]["click_effect_visible"] is True
+    assert evidence["click_effect_visible"] is True
+    assert evidence["checks"]["click_completed_in_target_app"] is True
     assert evidence["after_values"] == ["-42"]
 
 

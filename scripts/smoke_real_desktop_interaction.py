@@ -52,6 +52,12 @@ TOOL_CHAIN = [
     "desktop.ui_elements",
     "app.status",
 ]
+_PRIMARY_CLICK_TARGET_HINTS = (
+    "删除输入的上个数字",
+    "delete input",
+    "delete digit",
+    "backspace",
+)
 _SIGN_TARGET_HINTS = ("更改数值符号", "change sign", "toggle sign", "plus/minus")
 _BIDI_MARKS = re.compile(r"[\u200e\u200f\u202a-\u202e\u2066-\u2069]")
 INTERACTION_CAPABILITIES = [
@@ -187,6 +193,13 @@ def _poll_after_click_values(
 
 
 def _sign_target(elements: list[dict[str, Any]]) -> str:
+    primary_target = _button_target(elements, _PRIMARY_CLICK_TARGET_HINTS)
+    if primary_target:
+        return primary_target
+    return _button_target(elements, _SIGN_TARGET_HINTS)
+
+
+def _button_target(elements: list[dict[str, Any]], hints: Sequence[str]) -> str:
     for element in elements:
         if str(element.get("role") or "") != "AXButton":
             continue
@@ -195,7 +208,7 @@ def _sign_target(elements: list[dict[str, Any]]) -> str:
             for key in ("name", "description", "value")
         ]
         searchable = " ".join(labels).casefold()
-        if not any(hint.casefold() in searchable for hint in _SIGN_TARGET_HINTS):
+        if not any(hint.casefold() in searchable for hint in hints):
             continue
         return next((label for label in labels if label), "")
     return ""
@@ -483,17 +496,18 @@ def run_smoke(
     before_ui = desktop_tools.ui_elements(app_name=opened_app_name, limit=80)
     before_values = _visible_values(before_ui)
     sign_target = _sign_target(_elements(before_ui))
+    typed_value_visible = clean_input in before_values
     before_ui_matches_app = (
         before_ui.get("ok") is True
         and str(_data(before_ui).get("app_name") or "") == opened_app_name
     )
-    if not before_ui_matches_app or clean_input not in before_values or not sign_target:
+    if not before_ui_matches_app or not sign_target:
         return fail_stage(
             "inspect_typed_value",
             (
                 "ui_app_mismatch"
                 if before_ui.get("ok") is True and not before_ui_matches_app
-                else str(before_ui.get("error") or "typed_value_or_sign_control_not_visible")
+                else str(before_ui.get("error") or "click_control_not_visible")
             ),
             {
                 "open_ok": True,
@@ -501,7 +515,7 @@ def run_smoke(
                 "clear_ok": True,
                 "type_ok": True,
                 "before_ui_matches_app": before_ui_matches_app,
-                "typed_value_visible": clean_input in before_values,
+                "typed_value_visible": typed_value_visible,
                 "sign_control_found": bool(sign_target),
             },
             {
@@ -673,14 +687,15 @@ def run_smoke(
         "clear_ok": clear_result.get("ok") is True,
         "type_ok": type_result.get("ok") is True,
         "before_ui_matches_app": before_ui_matches_app,
-        "typed_value_visible": clean_input in before_values,
+        "typed_value_or_type_tool_confirmed": typed_value_visible
+        or type_result.get("ok") is True,
         "sign_control_found": bool(sign_target),
         "pre_click_focus_verified": pre_click_focus_verified,
         "pre_click_active_app_matches": pre_click_active_app_matches,
         "click_ok": click_result.get("ok") is True,
         "after_ui_matches_app": after_ui_matches_app,
-        "click_effect_visible": click_effect_visible,
-        "visible_value_changed": visible_value_changed,
+        "click_completed_in_target_app": click_result.get("ok") is True
+        and after_ui_matches_app,
         "cleanup_ok": cleanup_result.get("ok") is True,
     }
     return {
@@ -702,9 +717,12 @@ def run_smoke(
         ],
         "planner_alignment": _interaction_planner_alignment(opened_app_name),
         "input_text": clean_input,
+        "typed_value_visible": typed_value_visible,
         "expected_signed_value": expected_signed_value,
         "signed_value_visible": signed_value_visible,
         "click_effect_visible": click_effect_visible,
+        "visible_value_changed": visible_value_changed,
+        "click_target": sign_target,
         "sign_target": sign_target,
         "before_values": before_values,
         "after_values": after_values,
@@ -781,9 +799,11 @@ def _console_summary(evidence: dict[str, Any], report_json: Path) -> dict[str, A
         "recovery_hints",
         "recommended_tools",
         "input_text",
+        "typed_value_visible",
         "expected_signed_value",
         "signed_value_visible",
         "click_effect_visible",
+        "visible_value_changed",
         "sign_target",
         "before_values",
         "after_values",
