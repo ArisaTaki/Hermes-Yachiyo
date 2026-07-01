@@ -867,6 +867,68 @@ def test_agent_task_snapshot_updates_task_core_progress_from_runtime_events() ->
     )
 
 
+def test_agent_task_snapshot_updates_task_core_from_desktop_approval_event() -> None:
+    core_payload = {
+        "core_id": "task-core-1",
+        "workspace": {
+            "workspace_id": "task-workspace-1",
+            "title": "Desktop Workspace",
+            "items": [
+                {
+                    "item_id": "ui-action-input",
+                    "title": "operate-foreground-ui.input.json",
+                    "kind": "scratch",
+                    "source_step_id": "operate-foreground-ui",
+                }
+            ],
+        },
+        "todos": [
+            {
+                "todo_id": "todo-1",
+                "title": "Click export",
+                "step_id": "operate-foreground-ui",
+                "tool_name": "app.open_and_click_ui_element",
+            }
+        ],
+        "checkpoints": [
+            {
+                "checkpoint_id": "checkpoint-1",
+                "title": "Verify click",
+                "after_step_id": "operate-foreground-ui",
+            }
+        ],
+        "replan_signals": [],
+    }
+
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-1",
+            "run_id": "run-1",
+            "title": "Click export",
+            "status": "approval_required",
+            "metadata": {"yachiyo_task_core": core_payload},
+            "events": [
+                {
+                    "event_type": "agent.desktop.intent_approval_required",
+                    "payload": {
+                        "step_id": "operate-foreground-ui",
+                        "tool": "app.open_and_click_ui_element",
+                        "status": "approval_required",
+                    },
+                }
+            ],
+        }
+    )
+
+    assert snapshot.task_core is not None
+    assert snapshot.task_core.workspace.items[0].status == "blocked"
+    assert snapshot.task_core.todos[0].status == "blocked"
+    assert snapshot.task_core.checkpoints[0].status == "waiting_approval"
+    assert snapshot.task_core.todos[0].metadata["runtime_event_type"] == (
+        "agent.desktop.intent_approval_required"
+    )
+
+
 def test_run_timeline_snapshot_projects_task_core_from_plan_event() -> None:
     core_payload = {
         "core_id": "task-core-1",

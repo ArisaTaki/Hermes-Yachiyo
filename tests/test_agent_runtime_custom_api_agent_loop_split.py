@@ -21938,11 +21938,14 @@ def test_custom_api_agent_loop_preserves_runtime_planner_source_on_approval_requ
     assert timeline[-1]["event"] == "agent.desktop.intent_approval_required"
     assert timeline[-1]["source"] == "runtime_planner"
     assert timeline[-1]["planning_reason"] == "planner_fallback_desktop_operation"
+    assert timeline[-1]["step_id"] == "operate-foreground-ui"
+    assert timeline[-1]["capability_id"] == "desktop.ui_operation"
     assert appended_events[-1]["event_type"] == "agent.desktop.intent_approval_required"
     assert appended_events[-1]["payload"]["source"] == "runtime_planner"
     assert appended_events[-1]["payload"]["planning_reason"] == (
         "planner_fallback_desktop_operation"
     )
+    assert appended_events[-1]["payload"]["step_id"] == "operate-foreground-ui"
 
 
 def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_response() -> None:

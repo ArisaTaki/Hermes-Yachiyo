@@ -410,6 +410,7 @@ class RuntimeCustomApiAgentLoop:
                         pending_approval=exc.pending_approval,
                         timeline=timeline,
                         run_id=run_id,
+                        planned_request=approval_request,
                         source=self._approval_event_source(approval_request, planned_tool),
                         planning_reason=self._approval_event_planning_reason(
                             approval_request,
@@ -549,6 +550,7 @@ class RuntimeCustomApiAgentLoop:
                                 pending_approval=exc.pending_approval,
                                 timeline=timeline,
                                 run_id=run_id,
+                                planned_request=approval_request,
                                 source=self._approval_event_source(
                                     approval_request,
                                     planned_tool,
@@ -742,6 +744,7 @@ class RuntimeCustomApiAgentLoop:
                                 pending_approval=exc.pending_approval,
                                 timeline=timeline,
                                 run_id=run_id,
+                                planned_request=approval_request,
                                 source=self._approval_event_source(
                                     approval_request,
                                     planned_tool,
@@ -950,6 +953,7 @@ class RuntimeCustomApiAgentLoop:
                             pending_approval=exc.pending_approval,
                             timeline=timeline,
                             run_id=run_id,
+                            planned_request=approval_request,
                             source=self._approval_event_source(approval_request, planned_tool),
                             planning_reason=self._approval_event_planning_reason(
                                 approval_request,
@@ -1037,6 +1041,7 @@ class RuntimeCustomApiAgentLoop:
                                 pending_approval=exc.pending_approval,
                                 timeline=timeline,
                                 run_id=run_id,
+                                planned_request=approval_request,
                                 source=self._approval_event_source(
                                     approval_request,
                                     planned_tool,
@@ -2270,6 +2275,7 @@ class RuntimeCustomApiAgentLoop:
         pending_approval: dict[str, Any],
         timeline: list[dict[str, Any]],
         run_id: str,
+        planned_request: dict[str, Any] | None = None,
         source: str = "daily_desktop_intent",
         planning_reason: str = "",
     ) -> None:
@@ -2287,6 +2293,12 @@ class RuntimeCustomApiAgentLoop:
             value = str(pending_approval.get(key) or "").strip()
             if value:
                 event_payload[key] = value
+        event_payload.update(
+            _approval_required_planner_trace_payload(
+                pending_approval,
+                planned_request or {},
+            )
+        )
         timeline.append(
             self._timeline(
                 "agent.desktop.intent_approval_required",
@@ -6933,6 +6945,35 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
         value = request.get(key)
         if isinstance(value, Mapping) and value:
             payload[key] = dict(value)
+    return payload
+
+
+def _approval_required_planner_trace_payload(
+    pending_approval: Mapping[str, Any],
+    planned_request: Mapping[str, Any],
+) -> dict[str, Any]:
+    tool_request = (
+        pending_approval.get("tool_request")
+        if isinstance(pending_approval.get("tool_request"), Mapping)
+        else {}
+    )
+    payload: dict[str, Any] = {}
+    for key in (
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "intent_kind",
+        "step_id",
+        "planner_step_id",
+        "capability_id",
+        "replan_request_id",
+        "replan_trigger",
+    ):
+        value = str(tool_request.get(key) or planned_request.get(key) or "").strip()
+        if value:
+            payload[key] = value
+    if payload.get("step_id") and not payload.get("planner_step_id"):
+        payload["planner_step_id"] = payload["step_id"]
     return payload
 
 
