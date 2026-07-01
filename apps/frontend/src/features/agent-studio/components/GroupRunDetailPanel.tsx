@@ -211,6 +211,7 @@ export function GroupRunDetailPanel({
       <PlannerTraceInspector
         events={groupRunReplayEvents}
         sourceLabel="GroupRun planner facts · Intent / Capability / Plan / Selection"
+        taskCore={selectedGroupRunSnapshot?.task_core}
         testId="agent-run-detail-group-run-planner-trace"
       />
       {groupRunApprovalFacts.length ? (

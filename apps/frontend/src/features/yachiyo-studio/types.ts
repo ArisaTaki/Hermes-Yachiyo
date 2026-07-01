@@ -81,6 +81,7 @@ export type YachiyoRunTimelineSnapshot = RuntimeRunTimelineSnapshot & {
   task_run_link_updated_at?: string | null;
   task_run_link_run_status?: string | null;
   task_run_link_last_event_sequence?: number | null;
+  task_core?: RuntimeRunTimelineSnapshot['task_core'];
   workflow_id?: RuntimeWorkflowRunSnapshot['workflow_id'];
   objective?: RuntimeWorkflowRunSnapshot['objective'];
   current_node_id?: RuntimeWorkflowRunSnapshot['current_node_id'];

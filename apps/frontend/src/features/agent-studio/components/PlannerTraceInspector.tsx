@@ -29,6 +29,7 @@ type PlannerTrace = {
   source: string;
   steps: ToolPlanStepSnapshot[];
   summaryFallback?: boolean;
+  taskCore?: TaskCoreSnapshot | null;
   toolPlan: ToolPlanSnapshot | null;
 };
 
@@ -101,6 +102,7 @@ type PlannerTraceInspectorProps = {
   events?: PublicRunEvent[];
   plannerSummary?: PlannerTraceSummarySnapshot | null;
   sourceLabel?: string;
+  taskCore?: TaskCoreSnapshot | null;
   testId?: string;
 };
 
@@ -108,9 +110,12 @@ export function PlannerTraceInspector({
   events = [],
   plannerSummary = null,
   sourceLabel = 'Intent / Capability / Plan 的 Runtime Planner replay 事实',
+  taskCore: taskCoreFallback = null,
   testId = 'agent-run-detail-planner-trace',
 }: PlannerTraceInspectorProps) {
-  const trace = plannerTraceFromEvents(events) || plannerTraceFromSummary(plannerSummary);
+  const trace = plannerTraceFromEvents(events)
+    || plannerTraceFromSummary(plannerSummary)
+    || plannerTraceFromTaskCore(taskCoreFallback);
   if (!trace) return null;
 
   const intent = trace.intent || trace.plan?.intent || null;
@@ -152,7 +157,7 @@ export function PlannerTraceInspector({
     ...(trace.selection?.openQuestions || []),
   ]);
   const confidence = confidenceLabel(intent?.confidence);
-  const taskCore = trace.plan?.task_core || null;
+  const taskCore = trace.plan?.task_core || trace.taskCore || taskCoreFallback || null;
   const replanRequests = trace.replanRequests || [];
   const capabilityRecovery = trace.capabilityRecovery || [];
 
@@ -1169,6 +1174,27 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     source,
     steps,
     toolPlan: effectiveToolPlan,
+  };
+}
+
+function plannerTraceFromTaskCore(taskCore: TaskCoreSnapshot | null | undefined): PlannerTrace | null {
+  if (!taskCore) return null;
+  return {
+    candidateIntents: [],
+    capabilityRecovery: [],
+    decisionId: '',
+    eventCount: 0,
+    intent: null,
+    plan: null,
+    planId: '',
+    replanRequests: [],
+    routeToStudio: undefined,
+    selection: null,
+    source: 'task_core',
+    steps: [],
+    summaryFallback: true,
+    taskCore,
+    toolPlan: null,
   };
 }
 

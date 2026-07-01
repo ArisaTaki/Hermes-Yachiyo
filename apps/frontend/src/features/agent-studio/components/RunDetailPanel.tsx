@@ -392,6 +392,7 @@ export function RunDetailPanel({
             events={selectedRunPlannerEvents}
             plannerSummary={selectedPublicRunTimeline?.planner_summary}
             sourceLabel={plannerTraceSource}
+            taskCore={selectedPublicRunTimeline?.task_core}
           />
           {selectedPublicRunTimeline || selectedRunToolCalls.length ? (
             <ToolCallInspector

@@ -552,6 +552,7 @@ export type RunTimelineSnapshot = {
   rerun_original_created_at?: string | null;
   rerun_original_updated_at?: string | null;
   planner_summary?: PlannerTraceSummarySnapshot | null;
+  task_core?: TaskCoreSnapshot | null;
   events?: PublicRunEvent[];
   tool_calls?: ToolCallSnapshot[];
   memory_traces?: MemoryTraceSnapshot[];
