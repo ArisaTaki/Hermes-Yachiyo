@@ -1433,6 +1433,7 @@ class RuntimeCustomApiAgentLoop:
                 list(timeline[tool_timeline_start:]),
             )
         )
+        failure_payloads.extend(_runtime_planner_unavailable_failure_payloads(decision))
         payloads: list[dict[str, Any]] = []
         for failure_payload in failure_payloads:
             replan_event = planner_replan_timeline_event(
@@ -4545,6 +4546,55 @@ def _runtime_planner_verification_failure_payloads(
                 ),
                 "detail": "verification observation returned no UI elements or readable text",
                 "result": result,
+            }
+        )
+    return payloads
+
+
+def _runtime_planner_unavailable_failure_payloads(decision: Any) -> list[dict[str, Any]]:
+    plan = getattr(decision, "plan", None)
+    tool_plan = getattr(plan, "tool_plan", None)
+    steps = list(getattr(tool_plan, "steps", []) or [])
+    payloads: list[dict[str, Any]] = []
+    for step in steps:
+        status = str(getattr(step, "status", "") or "").strip()
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if status != "unavailable" and (tool_name or status not in {"", "planned"}):
+            continue
+        step_id = str(getattr(step, "step_id", "") or "").strip()
+        capability_id = str(getattr(step, "capability_id", "") or "").strip()
+        if not step_id and not capability_id:
+            continue
+        reason = str(getattr(step, "reason", "") or "").strip()
+        title = str(getattr(step, "title", "") or "").strip()
+        detail_parts = [
+            "planned tool is missing or unavailable",
+            f"step={step_id}" if step_id else "",
+            f"capability={capability_id}" if capability_id else "",
+            reason,
+        ]
+        payloads.append(
+            {
+                "event_type": "agent.plan.step",
+                "trigger": "tool_unavailable",
+                "status": "tool_unavailable",
+                "source_step_id": step_id,
+                "planner_step_id": step_id,
+                "tool_name": tool_name,
+                "capability_id": capability_id,
+                "title": title,
+                "input_preview": (
+                    dict(getattr(step, "input_preview", {}) or {})
+                    if isinstance(getattr(step, "input_preview", {}), Mapping)
+                    else {}
+                ),
+                "detail": "; ".join(part for part in detail_parts if part),
+                "result": {
+                    "ok": False,
+                    "error": "planned tool is missing or unavailable",
+                    "step_status": status or "unavailable",
+                    "capability_id": capability_id,
+                },
             }
         )
     return payloads

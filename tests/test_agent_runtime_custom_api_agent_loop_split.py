@@ -1838,6 +1838,105 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
     assert run_events == []
 
 
+def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_unavailable_steps() -> None:
+    run_events: list[dict[str, Any]] = []
+    allowed_tools = ["desktop.list_apps", "app.open"]
+    decision = RuntimePlanner().decision(
+        "帮我打开一个设计工具，搜索 logo 模板",
+        allowed_tools=allowed_tools,
+    )
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": allowed_tools}},
+        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda _allowed_tools: [],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner for desktop actions.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: {"role": "assistant", "content": ""},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda *_args, **_kwargs: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda *_args, **_kwargs: None,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.list_apps",
+            input_preview={"query": "design", "limit": 20},
+            result={"ok": True, "data": {"apps": [{"name": "Figma"}]}},
+        ),
+        _timeline(
+            "agent.tool.call",
+            "app.open",
+            input_preview={"app_name": "Figma"},
+            result={"ok": True, "data": {"app_name": "Figma"}},
+        ),
+    ]
+
+    payloads = loop._record_runtime_planner_replan_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-unavailable-replan",
+    )
+
+    assert {payload["trigger"] for payload in payloads} == {"tool_unavailable"}
+    assert {
+        payload["source_step_id"] for payload in payloads
+    } == {
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "verify-desktop-result",
+    }
+    assert all(payload["run_id"] == "run-unavailable-replan" for payload in payloads)
+    assert all(payload["failure_event_type"] == "agent.plan.step" for payload in payloads)
+    assert any("desktop.ui_operation" in payload["failure_detail"] for payload in payloads)
+    messages: list[dict[str, Any]] = []
+    loop._append_replan_followup_context(
+        payloads,
+        allowed_tools=allowed_tools,
+        messages=messages,
+        timeline=timeline,
+        run_id="run-unavailable-replan",
+    )
+    assert "planned tool is unavailable" in messages[0]["content"]
+    followup_context = [
+        event
+        for event in timeline
+        if event["event"] == "agent.model.followup_context"
+    ][0]
+    assert followup_context["planning_reason"] == "planner_replan_after_tool_unavailable"
+    assert followup_context["triggers"] == ["tool_unavailable"]
+    assert [
+        event["payload"]["request_id"]
+        for event in run_events
+        if event["event_type"] == "agent.replan.requested"
+    ] == [payload["request_id"] for payload in payloads]
+    assert (
+        loop._record_runtime_planner_replan_events(
+            decision,
+            timeline=timeline,
+            tool_timeline_start=0,
+            run_id="run-unavailable-replan",
+        )
+        == []
+    )
+
+
 def test_custom_api_agent_loop_writes_data_analysis_report_to_target_app() -> None:
     budget = FakeBudget()
     tool_runs: list[dict[str, Any]] = []
