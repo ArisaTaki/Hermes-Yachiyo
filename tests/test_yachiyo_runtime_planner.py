@@ -8051,6 +8051,24 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
             "continue_to_model": True,
         }
     ]
+    local_markdown = RuntimePlanner().decision(
+        "打开我电脑里能写 markdown 的应用，新建文档并写一段项目总结",
+        allowed_tools=allowed_tools,
+    )
+    assert local_markdown.selected_intent.inputs["app_capability_hint"] == {
+        "query": "markdown",
+        "description": "markdown",
+    }
+    assert local_markdown.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "markdown",
+    }
+    assert [step.step_id for step in local_markdown.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
 
     document = RuntimePlanner().decision(
         "用任意可用的文档应用新建一份项目报告",
@@ -8310,6 +8328,18 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
             "planning_reason": "planner_desktop_operation",
             "continue_to_model": True,
         }
+    ]
+    local_pdf = RuntimePlanner().decision(
+        "找我电脑上可以编辑 PDF 的应用并打开它",
+        allowed_tools=["desktop.list_apps", "app.open"],
+    )
+    assert local_pdf.selected_intent.inputs["app_capability_hint"] == {
+        "query": "pdf",
+        "description": "PDF",
+    }
+    assert [step.step_id for step in local_pdf.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
     ]
 
     mindmap = RuntimePlanner().decision(

@@ -20326,12 +20326,19 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
     required_generic_prefix_en = (
         r"(?:(?:an?|any|some|available|default|suitable|best|usable|installed)\s+)+"
     )
+    local_scope_prefix = (
+        r"(?:(?:(?:我(?:的)?|这台|这个)?(?:电脑|机器|mac|Mac|系统)"
+        r"|本机|本地|桌面)"
+        r"(?:里|中|上|里面|内|下)?(?:的)?\s*)*"
+    )
     patterns = (
         r"(?:打开|启动|找|找一个|找一款|使用|在|用|通过)\s*"
+        rf"{local_scope_prefix}"
         rf"{generic_prefix}"
         r"(?:能|可以|适合|适用于|可用于|用来|用于)\s*(?P<capability>[^。！？!?，,]{1,40}?)"
         r"(?:的)?(?:应用(?:程序)?|app|软件|工具|程序)",
         r"(?:有没有|有无|是否有|装了|安装了|有没有安装).{0,12}"
+        rf"{local_scope_prefix}"
         r"(?:能|可以|适合|适用于|可用于|用来|用于)\s*(?P<installed_capability>[^。！？!?，,]{1,40}?)"
         r"(?:的)?(?:应用(?:程序)?|app|软件|工具|程序)",
         r"\b(?:open|launch|start|find|use)\s+"
@@ -20359,6 +20366,7 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
         r"(?:app|application|client|tool|program|editor)\b",
         r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
+        rf"{local_scope_prefix}"
         rf"{generic_prefix}"
         r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
         r"图片|图像|照片|绘图|画图|设计|视频|视频剪辑|视频编辑|音频|音频编辑|"
@@ -20375,6 +20383,7 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
         r"(?:app|application|client|tool|program|editor)\b",
         r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
+        rf"{local_scope_prefix}"
         rf"{required_generic_prefix}"
         r"(?P<generic_prefixed_capability_cn>[^。！？!?，,]{1,24}?)"
         r"(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
