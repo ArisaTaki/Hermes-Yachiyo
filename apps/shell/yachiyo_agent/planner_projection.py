@@ -516,7 +516,22 @@ def _media_app_playback_followup_target(inputs: Mapping[str, Any]) -> dict[str, 
         return {}
     media_query = str(inputs.get("query") or "").strip()
     if not media_query:
-        return {}
+        return {
+            "kind": "desktop_discovered_media_playback",
+            "app_query": "music",
+            "app_name_source": "desktop.list_apps",
+            "target_action": "play_control",
+            "result_selection": {
+                "target": "play 播放",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "post_action_observation": {
+                "tool": "desktop.ui_elements",
+                "input": {},
+            },
+        }
     return {
         "kind": "desktop_discovered_media_playback",
         "app_query": "music",

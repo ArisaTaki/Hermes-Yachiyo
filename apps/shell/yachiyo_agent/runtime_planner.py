@@ -1179,7 +1179,7 @@ class TaskIntentRouter:
         if score <= 0 and not hint.get("action"):
             return _empty_intent("media_playback", text)
         target_app_capability = _media_playback_target_app_capability_hint(text)
-        if target_app_capability and hint.get("action") == "play" and hint.get("query"):
+        if target_app_capability and hint.get("action") == "play":
             hint = {
                 **hint,
                 "app_name": "",

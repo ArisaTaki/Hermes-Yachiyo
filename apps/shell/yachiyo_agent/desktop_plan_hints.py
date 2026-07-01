@@ -844,6 +844,14 @@ def media_tool_preview(
     action = str(inputs.get("action") or "").strip() or "play"
     app_name = str(inputs.get("app_name") or "").strip()
     query = str(inputs.get("query") or "").strip()
+    app_capability = inputs.get("target_app_capability_hint")
+    if (
+        isinstance(app_capability, Mapping)
+        and not app_name
+        and not query
+        and "desktop.list_apps" in allowed
+    ):
+        return None, {}
     control_only = str(inputs.get("control_only") or "").strip().lower() == "true"
     is_apple_music = not app_name or app_name == "Music"
     if action == "status":

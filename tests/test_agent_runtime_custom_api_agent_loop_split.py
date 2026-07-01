@@ -15909,6 +15909,73 @@ def test_auto_discovered_media_playback_followup_searches_clicks_and_verifies() 
     assert requests[3]["input_resolution"]["resolved_app_name"] == "VLC"
 
 
+def test_auto_discovered_media_playback_followup_clicks_play_without_query() -> None:
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.list_apps",
+            input_preview={"query": "music", "limit": 20},
+            result={
+                "ok": True,
+                "action": "desktop.list_apps",
+                "summary": "Found VLC",
+                "data": {
+                    "query": "music",
+                    "best_match": {
+                        "name": "VLC",
+                        "path": "/Applications/VLC.app",
+                        "match_score": 94,
+                        "match_confidence": "high",
+                        "match_reason": "category:music",
+                    },
+                },
+            },
+        )
+    ]
+
+    requests = custom_api_agent_module._auto_discovered_media_playback_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_media_playback",
+                "app_query": "music",
+                "app_name_source": "desktop.list_apps",
+                "target_action": "play_control",
+                "result_selection": {
+                    "target": "play 播放",
+                    "role_filter": "button",
+                    "limit": 80,
+                    "click_count": 1,
+                },
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {},
+                },
+            }
+        },
+        [
+            "app.open",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+        timeline,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "app.open",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["input"] == {"app_name": "VLC"}
+    assert requests[1]["input"] == {
+        "app_name": "VLC",
+        "target": "play 播放",
+        "role_filter": "button",
+        "limit": 80,
+        "click_count": 1,
+    }
+    assert requests[1]["input_resolution"]["resolved_app_name"] == "VLC"
+
+
 def test_custom_api_agent_loop_continues_discovered_media_app_without_model(
     monkeypatch,
 ) -> None:

@@ -5836,7 +5836,7 @@ def _auto_discovered_media_playback_followup_requests(
         return []
     app_query = str(target.get("app_query") or "").strip()
     media_query = str(target.get("media_playback_query") or "").strip()
-    if not app_query or not media_query:
+    if not app_query:
         return []
     app_name = _discovered_app_name_for_query(timeline, app_query)
     if not app_name:
@@ -5848,6 +5848,42 @@ def _auto_discovered_media_playback_followup_requests(
     if not planning_reason:
         planning_reason = "planner_discovered_media_playback_followup"
     requests: list[dict[str, Any]] = []
+    if not media_query:
+        playback_request = _discovered_media_playback_request(
+            app_query,
+            app_name,
+            target,
+            allowed,
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if not playback_request:
+            return []
+        if str(playback_request.get("tool") or "").strip() != "media.music_app_open_and_play":
+            open_request = _discovered_app_open_request(
+                app_query,
+                app_name,
+                allowed,
+                source=source,
+                planning_reason=planning_reason,
+            )
+            if open_request:
+                requests.append(open_request)
+        requests.append(playback_request)
+        observation_request = _discovered_app_observation_request(
+            target,
+            allowed,
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if observation_request:
+            requests.append(observation_request)
+        if resolution_evidence:
+            requests = [
+                _with_discovered_app_resolution_evidence(request, resolution_evidence)
+                for request in requests
+            ]
+        return requests
     if str(target.get("target_action") or "").strip() == "safe_shortcut":
         safe_shortcut_action = str(target.get("safe_shortcut_action") or "").strip()
         if not safe_shortcut_action:
