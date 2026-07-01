@@ -16771,6 +16771,98 @@ def test_runtime_planner_tracks_context_communication_source_without_body() -> N
     assert _step_by_id(decision, "send-communication-message").approval_required is True
 
 
+def test_runtime_planner_routes_plain_recipient_current_page_report_to_generic_chat_app() -> None:
+    prompt = "读取当前网页内容，整理成 markdown 报告并发给 Alice"
+    allowed_tools = [
+        "browser.extract_text",
+        "desktop.ui_elements",
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {
+        "context_source": "current_page_content",
+        "content_transform_hint": "report",
+        "direct_message_hint": {
+            "recipient": "Alice",
+            "body_source": "current_page_content",
+            "mode": "focus",
+            "send_action": "send",
+            "channel": "message",
+            "content_transform_hint": "report",
+        },
+    }
+    assert decision.plan.tool_plan.missing_capabilities == []
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-communication-context",
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "inspect-selected-communication-compose-ui",
+        "fill-selected-communication-recipient",
+        "submit-selected-communication-recipient",
+        "draft-selected-communication-message",
+        "send-selected-communication-message",
+    ]
+    assert _step_by_id(decision, "discover_apps-desktop-state").input_preview == {
+        "query": "messaging",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "fill-selected-communication-recipient").input_preview == {
+        "text": "Alice"
+    }
+    assert _step_by_id(decision, "draft-selected-communication-message").input_preview == {
+        "body_source": "current_page_content",
+        "transform": "report",
+    }
+    assert _step_by_id(decision, "send-selected-communication-message").approval_required is True
+
+
+def test_runtime_planner_routes_recipient_first_current_page_summary_to_generic_chat_app() -> None:
+    prompt = "给 Alice 发当前网页摘要"
+    allowed_tools = [
+        "browser.extract_text",
+        "desktop.ui_elements",
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {
+        "context_source": "current_page_content",
+        "content_transform_hint": "summary",
+        "direct_message_hint": {
+            "recipient": "Alice",
+            "body_source": "current_page_content",
+            "mode": "focus",
+            "send_action": "send",
+            "channel": "message",
+            "content_transform_hint": "summary",
+        },
+    }
+    assert decision.plan.tool_plan.missing_capabilities == []
+    assert _step_by_id(decision, "read-communication-context").tool_name == (
+        "browser.extract_text"
+    )
+    assert _step_by_id(decision, "discover_apps-desktop-state").input_preview == {
+        "query": "messaging",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "draft-selected-communication-message").input_preview == {
+        "body_source": "current_page_content",
+        "transform": "summary",
+    }
+    assert _step_by_id(decision, "send-selected-communication-message").approval_required is True
+
+
 def test_runtime_planner_uses_browser_current_page_for_link_delivery() -> None:
     allowed_tools = [
         "browser.current_page",

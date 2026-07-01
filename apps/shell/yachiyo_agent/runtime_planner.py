@@ -16348,9 +16348,15 @@ def _direct_context_communication_hint(text: str, source: str) -> dict[str, str]
                 recipient = _clean_communication_recipient_text(target)
             else:
                 app_name = app_name or split_app
-                recipient = recipient or split_recipient
+                recipient = (
+                    recipient
+                    or split_recipient
+                    or _clean_communication_recipient_text(target)
+                )
         if not app_name and recipient:
             app_name = _communication_surface_for_recipient_hint(recipient)
+        if not app_name and recipient and not channel:
+            channel = "message"
         if not recipient or (not app_name and channel not in {"email", "message"}):
             continue
         hint = {
