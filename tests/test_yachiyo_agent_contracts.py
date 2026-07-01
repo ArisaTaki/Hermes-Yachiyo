@@ -1029,6 +1029,11 @@ def test_group_run_snapshot_synthesizes_scoped_replan_event() -> None:
     assert replan_event.payload["planner_event_type"] == "agent.replan.requested"
     assert replan_event.payload["planner_scope"] == "group_run"
     assert replan_event.payload["source_step_id"] == analysis_step.step_id
+    assert snapshot.task_core is not None
+    failed_todo = next(
+        todo for todo in snapshot.task_core.todos if todo.step_id == analysis_step.step_id
+    )
+    assert failed_todo.status == "blocked"
     assert "group.run.failed" in event_types
 
 

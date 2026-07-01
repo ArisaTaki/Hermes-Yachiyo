@@ -20,6 +20,7 @@ from .contracts import (
 from .group_member_snapshots import group_run_participants_from_payload
 from .replan_event_projection import run_events_with_replan_requests
 from .run_snapshots import RunSnapshotProjector
+from .task_core_snapshots import task_core_snapshot_from_payload
 
 _RUN_PROJECTOR = RunSnapshotProjector()
 
@@ -95,6 +96,7 @@ def group_run_snapshot_from_payload(
             shared_artifacts,
         ),
         active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
+        task_core=task_core_snapshot_from_payload(payload, events=events),
         events=events,
         runs=runs,
         child_run_ids=child_run_ids,

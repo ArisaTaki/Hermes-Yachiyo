@@ -2567,6 +2567,7 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type FutureTaskTriggerResultSnapshot",
             "export type AgentGroupSnapshot",
             "export type GroupRunSnapshot",
+            "task_core?: TaskCoreSnapshot | null;",
             "export type PublicRunEvent",
             "export type RunEventPageSnapshot",
             "export type ArtifactContentSnapshot",
