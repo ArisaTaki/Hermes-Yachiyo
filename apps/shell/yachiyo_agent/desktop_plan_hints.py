@@ -1982,7 +1982,7 @@ def _ui_inspection_app_name_hint(value: str) -> str:
 def _clean_ui_app_name_hint(value: str) -> str:
     app = clean(value)
     app = re.sub(
-        r"^(?:帮我|请|麻烦|你能|能否|能不能|可以|直接|把|将|列出|查看|看看|看一下|看下|显示|读取|观察|识别|"
+        r"^(?:帮我|请|麻烦|你能|能否|能不能|可以|直接|把|将|列出|查看|看看|看一下|看下|显示|读取|观察|识别|检查|确认|"
         r"list|show|read|inspect|the)\s*",
         "",
         app,
@@ -2004,8 +2004,8 @@ def _clean_ui_app_name_hint(value: str) -> str:
         flags=re.IGNORECASE,
     ).strip()
     app = re.split(
-        r"(?:看看|看一下|看下|查看|读一下|读一读|读|读取|观察|识别|有哪些|有什么|有啥|"
-        r"\b(?:look\s+at|inspect|view|show\s+me|show|read|which|what)\b)",
+        r"(?:看看|看一下|看下|查看|检查|确认|读一下|读一读|读|读取|观察|识别|有哪些|有什么|有啥|"
+        r"\b(?:look\s+at|check|inspect|view|show\s+me|show|read|which|what)\b)",
         app,
         maxsplit=1,
         flags=re.IGNORECASE,
@@ -2064,6 +2064,7 @@ def _clean_ui_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     ).strip()
+    app = re.sub(r"\s*(?:的)$", "", app).strip()
     if re.fullmatch(
         r"(?:当前|现在|这个|前台|该)?"
         r"(?:应用|app|界面|窗口|屏幕|页面|网页|标签页|"
@@ -2105,6 +2106,7 @@ def _clean_ui_app_name_hint(value: str) -> str:
         "你能",
         "我",
         "我的",
+        "我现在",
         "我现在的",
         "现在的",
         "当前的",
@@ -2118,6 +2120,11 @@ def _clean_ui_app_name_hint(value: str) -> str:
         "界面",
         "屏幕",
         "图",
+        "个屏",
+        "截屏",
+        "截图",
+        "截个屏",
+        "截个图",
         "页面",
         "网页",
         "标签页",
@@ -2241,7 +2248,7 @@ def _explicit_find_click_target_requested(value: str) -> bool:
 
 def _screen_capture_app_name_hint(value: str) -> str:
     patterns = (
-        r"^(?:截取|截图|截屏|截一下|截下|截个图|截|抓屏|拍屏)\s*"
+        r"^(?:截取|截图|截屏|截一下|截下|截个图|截个屏|截一屏|截|抓屏|拍屏)\s*"
         r"(?P<app_capture>[^。！？!?，,]+?)\s*(?:的)?\s*"
         r"(?:当前|现在|这个|前台)?(?:窗口|界面|画面|屏幕)?$",
         r"^(?P<app_suffix>[^。！？!?，,]+?)\s*(?:的)?\s*"

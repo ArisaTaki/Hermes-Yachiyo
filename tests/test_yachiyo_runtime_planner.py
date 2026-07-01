@@ -11095,6 +11095,10 @@ def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
         "Chrome 当前界面有哪些按钮",
         allowed_tools=["desktop.list_apps", "app.focus", "desktop.ui_elements"],
     )
+    prefixed_inspection = RuntimePlanner().decision(
+        "检查 Chrome 的页面里有什么按钮",
+        allowed_tools=["desktop.inspect_app", "desktop.ui_elements"],
+    )
     assert current_interface.selected_intent.kind == "desktop_operation"
     assert current_interface.selected_intent.inputs["app_name_hint"] == "Chrome"
     assert current_interface.selected_intent.inputs["ui_inspection_hint"] == {
@@ -11105,6 +11109,20 @@ def test_runtime_planner_focuses_app_before_app_scoped_ui_inspection() -> None:
     assert _step_by_id(current_interface, "discover-desktop-state").input_preview == {
         "query": "Chrome",
         "limit": 20,
+    }
+    assert prefixed_inspection.selected_intent.kind == "desktop_operation"
+    assert prefixed_inspection.selected_intent.inputs["app_name_hint"] == "Chrome"
+    assert prefixed_inspection.selected_intent.inputs["ui_inspection_hint"] == {
+        "role_filter": "button",
+        "limit": 80,
+        "app_name": "Chrome",
+    }
+    assert _step_by_id(prefixed_inspection, "inspect-app").input_preview == {
+        "app_name": "Chrome",
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "button",
+        "limit": 80,
     }
     assert _step_by_id(current_interface, "open-or-focus-app").input_preview == {
         "app_name": "Chrome",
@@ -11405,11 +11423,33 @@ def test_runtime_planner_does_not_treat_current_screen_as_app_name() -> None:
         "帮我看看现在屏幕",
         allowed_tools=["desktop.list_apps", "screen.capture", "desktop.active_window"],
     )
+    shorthand = RuntimePlanner().decision(
+        "截个屏看一下当前页面",
+        allowed_tools=["desktop.list_apps", "screen.capture", "app.focus"],
+    )
 
     assert decision.selected_intent.kind == "desktop_operation"
     assert decision.selected_intent.inputs["app_name_hint"] == ""
     assert [step.step_id for step in decision.plan.tool_plan.steps] == ["capture-screen"]
     assert _step_by_id(decision, "capture-screen").tool_name == "screen.capture"
+    assert shorthand.selected_intent.kind == "desktop_operation"
+    assert shorthand.selected_intent.inputs["app_name_hint"] == ""
+    assert shorthand.selected_intent.inputs["screen_capture_hint"] == {
+        "reason": "user asked to capture the screen",
+    }
+    assert [step.step_id for step in shorthand.plan.tool_plan.steps] == ["capture-screen"]
+    assert planner_tool_requests(
+        "截个屏看一下当前页面",
+        ["desktop.list_apps", "screen.capture", "app.focus"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        }
+    ]
 
     english_decision = RuntimePlanner().decision(
         "look at my screen",
