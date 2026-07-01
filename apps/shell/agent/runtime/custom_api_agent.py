@@ -1600,7 +1600,8 @@ class RuntimeCustomApiAgentLoop:
             event
             for event in list(timeline[tool_timeline_start:])
             if isinstance(event, dict)
-            and str(event.get("event") or "").strip() == "agent.tool.call"
+            and str(event.get("event") or "").strip()
+            in {"agent.tool.call", "agent.tool.failed"}
         ]
         step_payloads = _runtime_planner_tool_event_step_payloads(decision, tool_events)
         failure_payloads: list[dict[str, Any]] = []
@@ -1621,7 +1622,7 @@ class RuntimeCustomApiAgentLoop:
                 else {}
             )
             failure_payload = {
-                "event_type": "agent.tool.call",
+                "event_type": str(event.get("event") or "agent.tool.call").strip(),
                 "tool_name": tool_name,
                 "input_preview": input_preview,
                 "result": result,
@@ -1711,7 +1712,7 @@ class RuntimeCustomApiAgentLoop:
             for event in timeline[tool_timeline_start:]
             if isinstance(event, dict)
             and str(event.get("event") or "").strip()
-            in {"agent.tool.call", "agent.tool.skipped"}
+            in {"agent.tool.call", "agent.tool.failed", "agent.tool.skipped"}
         ]
         event_index = 0
         core_id = str(getattr(task_core, "core_id", "") or "").strip()

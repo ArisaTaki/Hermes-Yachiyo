@@ -15399,6 +15399,51 @@ def test_runtime_planner_replan_maps_tool_failure_to_plan_step_without_request_t
     assert "failed_step: analyze-data-file" in payload["replan_prompt"]
 
 
+def test_runtime_planner_replan_accepts_tool_failed_timeline_events() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+    loop = _private_runtime_loop()
+    timeline = [
+        _timeline(
+            "agent.tool.failed",
+            "data.analyze",
+            input_preview={"path": "sales.csv"},
+            result={"ok": False, "error": "parser crashed"},
+            status="failed",
+        )
+    ]
+
+    payloads = loop._record_runtime_planner_replan_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-tool-failed",
+    )
+    loop._record_runtime_planner_task_progress_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-tool-failed",
+    )
+
+    assert len(payloads) == 1
+    assert payloads[0]["failure_event_type"] == "agent.tool.failed"
+    assert payloads[0]["source_step_id"] == "analyze-data-file"
+    blocked_todo = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["step_id"] == "analyze-data-file"
+        and event["status"] == "blocked"
+    ][0]
+    assert blocked_todo["source_event"] == {
+        "event": "agent.tool.failed",
+        "detail": "data.analyze",
+    }
+
+
 def test_auto_replan_fallback_recovery_reuses_safe_file_inputs() -> None:
     decision = RuntimePlanner().decision(
         "请分析 legacy-report.xls 并输出报告",
