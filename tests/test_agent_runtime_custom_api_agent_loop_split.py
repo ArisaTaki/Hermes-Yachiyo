@@ -1440,6 +1440,7 @@ def test_custom_api_agent_loop_guides_code_patch_after_diagnostic_when_write_too
     )
 
     assert str(result) == "patch ready"
+    assert len(tool_runs) == 1
     assert [request["tool"] for request in tool_runs[0]["tool_requests"]] == [
         "workspace.list",
         "terminal.run",
@@ -1462,10 +1463,25 @@ def test_custom_api_agent_loop_guides_code_patch_after_diagnostic_when_write_too
             "risk_level": "high",
             "approval_required": True,
             "depends_on": ["run-code-diagnostic"],
+        },
+        {
+            "step_id": "verify-code-changes",
+            "title": "Verify code changes",
+            "tool_name": "terminal.run",
+            "capability_id": "terminal.execution",
+            "input_preview": {"command": "python -m pytest"},
+            "risk_level": "high",
+            "approval_required": True,
+            "depends_on": ["apply-code-changes"],
         }
     ]
     assert not any(
         event["event"] == "agent.replan.requested"
+        for event in timeline
+    )
+    assert not any(
+        event["event"] == "agent.desktop.intent_planned"
+        and event.get("step_id") == "verify-code-changes"
         for event in timeline
     )
     followup_message = str(model_calls[0][-1]["content"])
@@ -1473,6 +1489,7 @@ def test_custom_api_agent_loop_guides_code_patch_after_diagnostic_when_write_too
     assert "workspace.write_patch with path and patch" in followup_message
     assert "approval-gated" in followup_message
     assert "do not replace this pending patch step with a prose-only summary" in followup_message
+    assert "verify-code-changes via terminal.run" in followup_message
 
 
 def test_custom_api_agent_loop_runs_plain_test_command_without_model_followup() -> None:

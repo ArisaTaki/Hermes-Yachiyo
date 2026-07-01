@@ -368,6 +368,11 @@ class RuntimeCustomApiAgentLoop:
                     agent=agent,
                     run_id=run_id,
                 )
+                explicit_model_followup_requested = any(
+                    bool(request.get("continue_to_model"))
+                    for request in planned_tool_requests
+                    if isinstance(request, dict)
+                )
                 tool_timeline_start = len(timeline)
                 try:
                     self._run_tool_requests(
@@ -431,11 +436,7 @@ class RuntimeCustomApiAgentLoop:
                     tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
-                explicit_model_followup = any(
-                    bool(request.get("continue_to_model"))
-                    for request in planned_tool_requests
-                    if isinstance(request, dict)
-                )
+                explicit_model_followup = explicit_model_followup_requested
                 if (
                     explicit_model_followup
                     and not replan_payloads
@@ -2418,6 +2419,12 @@ class RuntimeCustomApiAgentLoop:
             for event in timeline[tool_timeline_start:]
             if event.get("event") in {"agent.tool.call", "agent.tool.skipped"}
         ]
+        if any(
+            bool(request.get("continue_to_model"))
+            for request in planned_tool_requests
+            if isinstance(request, dict)
+        ):
+            return ""
         event_index = 0
         completed_steps: list[dict[str, Any]] = []
         for planned_tool_request in planned_tool_requests:
@@ -2955,6 +2962,13 @@ class RuntimeCustomApiAgentLoop:
         )
         if sequence_result:
             return sequence_result
+        sequence = self._latest_uncompleted_daily_desktop_sequence(timeline)
+        if sequence is not None and any(
+            bool(request.get("continue_to_model"))
+            for request in sequence.get("requests", [])
+            if isinstance(request, dict)
+        ):
+            return ""
         tool_event = self._latest_tool_call_event_for_daily_desktop_intent(timeline)
         if not tool_event:
             return ""
@@ -3019,6 +3033,8 @@ class RuntimeCustomApiAgentLoop:
             planning_reason = str(event.get("planning_reason") or "").strip()
             if planning_reason:
                 request["planning_reason"] = planning_reason
+            if bool(event.get("continue_to_model")):
+                request["continue_to_model"] = True
             for key in ("step_id", "capability_id", "replan_request_id", "replan_trigger"):
                 value = str(event.get(key) or "").strip()
                 if value:
@@ -9183,9 +9199,7 @@ def _model_followup_pending_plan_requests(
             generated_content=generated_content,
         )
         if not request:
-            if requests:
-                break
-            continue
+            break
         requests.append(request)
         if len(requests) >= _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS:
             break

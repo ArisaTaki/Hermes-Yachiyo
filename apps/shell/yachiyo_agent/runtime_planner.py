@@ -5816,6 +5816,14 @@ class RuntimePlanner:
                         depends_on=depends_on,
                     )
                 )
+                steps.append(
+                    _code_verification_step(
+                        intent,
+                        allowed,
+                        command=str(diagnostic_hint.get("command") or "").strip(),
+                        depends_on=["apply-code-changes"],
+                    )
+                )
             else:
                 steps.append(
                     _step(
@@ -6425,6 +6433,31 @@ def _code_change_step(
         reason=(
             "Generate code changes only after inspecting workspace context; applying the "
             "patch remains approval-gated through workspace.write_patch."
+        ),
+    )
+
+
+def _code_verification_step(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    *,
+    command: str,
+    depends_on: Iterable[str],
+) -> ToolPlanStepSnapshot:
+    clean_command = str(command or "").strip()
+    return _step(
+        intent,
+        "verify-code-changes",
+        "Verify code changes",
+        "terminal.execution",
+        _first_allowed(("terminal.run",), allowed),
+        input_preview={"command": clean_command},
+        risk_level="high",
+        approval_required=True,
+        depends_on=list(depends_on),
+        reason=(
+            "Re-run the diagnostic command after the approved patch so the run can prove "
+            "whether the code change fixed the task."
         ),
     )
 

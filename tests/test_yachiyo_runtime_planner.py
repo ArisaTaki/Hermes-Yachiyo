@@ -4829,11 +4829,13 @@ def test_runtime_planner_routes_code_test_diagnostics_to_approval_terminal_plan(
     assert decision.plan.tool_plan.approvals_required == [
         "run-code-diagnostic",
         "apply-code-changes",
+        "verify-code-changes",
     ]
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "inspect-workspace",
         "run-code-diagnostic",
         "apply-code-changes",
+        "verify-code-changes",
     ]
     run_step = _step_by_id(decision, "run-code-diagnostic")
     assert run_step.tool_name == "terminal.run"
@@ -4848,6 +4850,11 @@ def test_runtime_planner_routes_code_test_diagnostics_to_approval_terminal_plan(
     }
     assert apply_step.depends_on == ["run-code-diagnostic"]
     assert apply_step.approval_required is True
+    verify_step = _step_by_id(decision, "verify-code-changes")
+    assert verify_step.tool_name == "terminal.run"
+    assert verify_step.input_preview == {"command": "python -m pytest"}
+    assert verify_step.depends_on == ["apply-code-changes"]
+    assert verify_step.approval_required is True
     assert all(step.step_id != "write-code-report" for step in decision.plan.tool_plan.steps)
     assert run_tests.selected_intent.inputs == {
         "code_diagnostic_command_hint": {"command": "python -m pytest"}
