@@ -18810,6 +18810,31 @@ def test_runtime_planner_routes_clipboard_read_to_clipboard_capability() -> None
     assert "clipboard.read" in clipboard_capability.available_tools
 
 
+def test_runtime_planner_routes_clipboard_meeting_minutes_to_report_artifact() -> None:
+    decision = RuntimePlanner().decision(
+        "把剪贴板里的内容整理成一份会议纪要并保存到桌面",
+        allowed_tools=["clipboard.read", "artifact.write"],
+    )
+
+    assert decision.selected_intent.kind == "report_generation"
+    assert decision.selected_intent.inputs == {"context_source": "clipboard"}
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-report-context",
+        "write-report-artifact",
+    ]
+    read_step = _step_by_id(decision, "read-report-context")
+    assert read_step.capability_id == "clipboard.read_write"
+    assert read_step.tool_name == "clipboard.read"
+    artifact_step = _step_by_id(decision, "write-report-artifact")
+    assert artifact_step.capability_id == "artifact.write"
+    assert artifact_step.tool_name == "artifact.write"
+    assert artifact_step.input_preview == {
+        "path": "Desktop/meeting-minutes.md",
+        "body_source": "clipboard",
+    }
+    assert artifact_step.depends_on == ["read-report-context"]
+
+
 def test_runtime_planner_routes_selected_text_read_through_clipboard() -> None:
     decision = RuntimePlanner().decision(
         "读一下选中的内容",
@@ -24054,6 +24079,22 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
     )
 
     assert clipboard_report_back_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        }
+    ]
+
+    clipboard_meeting_minutes_requests = planner_tool_requests(
+        "把剪贴板里的内容整理成一份会议纪要并保存到桌面",
+        allowed_tools=["clipboard.read", "artifact.write"],
+    )
+
+    assert clipboard_meeting_minutes_requests == [
         {
             "protocol": "json_fallback",
             "tool": "clipboard.read",

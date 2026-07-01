@@ -2129,6 +2129,11 @@ class TaskIntentRouter:
         hint = clipboard_operation_hint(text)
         if not hint:
             return _empty_intent("clipboard_operation", text)
+        if (
+            str(hint.get("action") or "").strip() == "read"
+            and _looks_like_context_artifact_request(text)
+        ):
+            return _empty_intent("clipboard_operation", text)
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "clipboard_operation", text),
             kind="clipboard_operation",
@@ -5362,7 +5367,10 @@ class RuntimePlanner:
                 }.items()
                 if value
             }
-            artifact_path = _artifact_output_path(intent.user_goal, "report.md")
+            artifact_path = _artifact_output_path(
+                intent.user_goal,
+                _report_artifact_filename(intent.user_goal),
+            )
             steps = [
                 _step(
                     intent,
@@ -5486,7 +5494,10 @@ class RuntimePlanner:
                     context_steps,
                     depends_on=depends_on,
                 )
-            artifact_path = _artifact_output_path(intent.user_goal, "report.md")
+            artifact_path = _artifact_output_path(
+                intent.user_goal,
+                _report_artifact_filename(intent.user_goal),
+            )
             steps = [
                 *context_steps,
                 (
@@ -5550,7 +5561,10 @@ class RuntimePlanner:
                 )
             )
         else:
-            artifact_path = _artifact_output_path(intent.user_goal, "report.md")
+            artifact_path = _artifact_output_path(
+                intent.user_goal,
+                _report_artifact_filename(intent.user_goal),
+            )
             steps.append(
                 _step(
                     intent,
@@ -10442,6 +10456,23 @@ def _artifact_output_path(text: str, filename: str) -> str:
 
 def _artifact_output_paths(text: str, filenames: Iterable[str]) -> list[str]:
     return [_artifact_output_path(text, filename) for filename in filenames]
+
+
+def _report_artifact_filename(text: str) -> str:
+    value = _clean_prompt(text)
+    if _looks_like_meeting_content_task(value):
+        return "meeting-minutes.md"
+    if _contains_any(value, ("周报", "weekly report", "weekly summary")):
+        return "weekly-report.md"
+    if _contains_any(value, ("日报", "daily report", "daily summary")):
+        return "daily-report.md"
+    if _contains_any(value, ("月报", "monthly report", "monthly summary")):
+        return "monthly-report.md"
+    if _contains_any(value, ("年报", "annual report", "yearly report")):
+        return "annual-report.md"
+    if _contains_any(value, ("发布说明", "变更说明", "更新说明", "release notes", "changelog")):
+        return "release-notes.md"
+    return "report.md"
 
 
 def _artifact_output_location_hint(text: str) -> str:
