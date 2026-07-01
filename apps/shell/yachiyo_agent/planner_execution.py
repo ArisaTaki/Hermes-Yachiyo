@@ -1675,7 +1675,7 @@ def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict
         prepare_plan = media_app_prepare_plan(inputs, allowed)
         if not prepare_plan:
             return []
-        return [
+        requests = [
             _request(
                 tool_name,
                 payload,
@@ -1683,6 +1683,11 @@ def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict
             )
             for tool_name, payload in prepare_plan
         ]
+        if _media_query_plan_needs_selected_app_followup(prepare_plan):
+            if requests:
+                requests[0]["continue_to_model"] = True
+            return requests[:1]
+        return requests
     requests = [
         _request(
             tool_name,

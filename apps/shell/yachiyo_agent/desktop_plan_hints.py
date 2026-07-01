@@ -959,18 +959,29 @@ def media_app_prepare_plan(
     action = str(inputs.get("action") or "").strip() or "play"
     app_name = str(inputs.get("app_name") or "").strip()
     query = str(inputs.get("query") or "").strip()
-    if action != "play" or not app_name or query:
+    app_capability = inputs.get("target_app_capability_hint")
+    capability_query = ""
+    selected_app_payload: dict[str, Any] = {}
+    if isinstance(app_capability, Mapping):
+        capability_query = str(app_capability.get("query") or "").strip()
+        if capability_query and not app_name:
+            app_name = _SELECTED_DESKTOP_APP_NAME
+            selected_app_payload = {
+                "selection_source": "desktop.list_apps",
+                "query": capability_query,
+            }
+    if action != "play" or not app_name or (query and not selected_app_payload):
         return []
 
     plan: list[tuple[str, dict[str, Any]]] = []
     discover_tool = _first_allowed(("desktop.list_apps",), allowed)
     if discover_tool:
-        plan.append((discover_tool, {"query": app_name, "limit": 20}))
+        plan.append((discover_tool, {"query": capability_query or app_name, "limit": 20}))
 
     app_tool = _first_allowed(("app.open", "app.focus"), allowed)
     if not app_tool:
         return []
-    plan.append((app_tool, {"app_name": app_name}))
+    plan.append((app_tool, {"app_name": app_name, **selected_app_payload}))
     _append_media_app_verify_step(plan, allowed)
     return plan
 
