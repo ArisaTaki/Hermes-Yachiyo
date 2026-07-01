@@ -3405,6 +3405,60 @@ def test_model_followup_context_instructs_generated_discovered_app_write() -> No
     ]
 
 
+def test_model_followup_context_preserves_discovered_canvas_remaining_action() -> None:
+    payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "desktop.ui_elements",
+                "planning_reason": "planner_discovered_app_followup",
+                "continue_to_model": True,
+            }
+        ],
+        {
+            "intent_kind": "desktop_operation",
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "绘图",
+                "target_action": "open_app",
+                "creative_canvas": {"kind": "image_canvas"},
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {"limit": 80},
+                    "continue_to_model": True,
+                },
+                "pending_user_action": "画一个圆并保存到桌面",
+            },
+        },
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.click_ui_element",
+            "desktop.type_into_ui_element",
+            "desktop.ui_elements",
+            "screen.capture",
+        ],
+        timeline=[
+            _timeline(
+                "agent.tool.call",
+                "desktop.ui_elements",
+                input_preview={"limit": 80},
+                result={
+                    "ok": True,
+                    "action": "desktop.ui_elements",
+                    "data": {"elements": [{"role": "button", "name": "Shape"}]},
+                },
+            )
+        ],
+    )
+    message = custom_api_agent_module._model_followup_context_message(payload)
+
+    assert payload["followup_target"]["creative_canvas"] == {"kind": "image_canvas"}
+    assert payload["followup_target"]["pending_user_action"] == "画一个圆并保存到桌面"
+    assert "The remaining user action is: '画一个圆并保存到桌面'" in message
+    assert "continue toward that action after the canvas is available" in message
+    assert "Call desktop UI tools next instead of replying inline" in message
+
+
 def test_model_followup_context_discovers_generic_communication_app_after_analysis() -> None:
     target = {
         "kind": "desktop_discovered_app_action",

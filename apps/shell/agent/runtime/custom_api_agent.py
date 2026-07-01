@@ -7036,10 +7036,17 @@ def _model_followup_desktop_discovered_app_instruction(target: Mapping[str, Any]
         width = str(creative_canvas.get("width") or "").strip()
         height = str(creative_canvas.get("height") or "").strip()
         size_text = f" {width}x{height}" if width and height else ""
+        pending_action = str(target.get("pending_user_action") or "").strip()
+        pending_text = (
+            f" The remaining user action is: {pending_action!r}; continue toward that "
+            "action after the canvas is available."
+            if pending_action
+            else ""
+        )
         return (
             f"The runtime already discovered and attempted to open the best app for {app_query!r}. "
             f"Use the latest UI observation to create or configure the requested{size_text} canvas. "
-            f"Call desktop UI tools next instead of replying inline. Prefer {tool_text}."
+            f"{pending_text} Call desktop UI tools next instead of replying inline. Prefer {tool_text}."
             f"{verify_text} If the required fields are not visible, inspect the UI again before "
             "claiming completion. "
         )
