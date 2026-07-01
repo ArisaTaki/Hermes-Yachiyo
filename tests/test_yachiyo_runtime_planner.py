@@ -23535,6 +23535,65 @@ def test_planner_desktop_tool_requests_maps_named_music_query_to_app_search_plan
     ]
 
 
+def test_planner_desktop_tool_requests_uses_generic_desktop_media_search() -> None:
+    requests = planner_desktop_tool_requests(
+        "打开 Spotify 播放晴天",
+        allowed_tools=[
+            "desktop.list_apps",
+            "desktop.open_app",
+            "desktop.shortcut",
+            "desktop.type",
+            "desktop.submit_foreground",
+            "desktop.read_ui",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Spotify", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_app",
+            "input": {"app_name": "Spotify"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.shortcut",
+            "input": {"key": "f", "modifiers": ["command"]},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type",
+            "input": {"text": "晴天"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.read_ui",
+            "input": {"role_filter": "", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+
+
 def test_planner_desktop_tool_requests_falls_back_to_app_search_for_apple_music_query() -> None:
     requests = planner_desktop_tool_requests(
         "打开 Apple Music 搜索超时空辉夜姬并播放",

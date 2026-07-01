@@ -923,6 +923,7 @@ def media_app_query_search_plan(
             "desktop.safe_type_text",
             "app.focus_and_safe_type_text",
             "app.open_and_safe_type_text",
+            "desktop.type_text",
         ),
         allowed,
     )
@@ -970,13 +971,13 @@ def media_app_query_search_plan(
         ("app.open", "desktop.open_app", "app.focus", "desktop.focus_app"),
         allowed,
     )
-    shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+    shortcut_tool = _first_allowed(("desktop.safe_shortcut", "desktop.hotkey"), allowed)
     if not app_tool or not shortcut_tool:
         return []
     plan = [
         *discovery_step,
         (app_tool, {"app_name": app_name, **selected_app_payload}),
-        (shortcut_tool, {"action": "find"}),
+        (shortcut_tool, _media_search_shortcut_payload(shortcut_tool)),
         (type_tool, type_payload),
         (submit_tool, submit_payload),
     ]
@@ -988,6 +989,12 @@ def media_app_query_search_plan(
     )
     _append_media_app_verify_step(plan, allowed)
     return plan
+
+
+def _media_search_shortcut_payload(tool_name: str | None) -> dict[str, Any]:
+    if tool_name in {"desktop.shortcut", "desktop.hotkey"}:
+        return {"key": "f", "modifiers": ["command"]}
+    return {"action": "find"}
 
 
 def _append_media_search_result_play_step(

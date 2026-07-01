@@ -4770,13 +4770,13 @@ class RuntimePlanner:
                         "Open the requested media app and focus its search affordance because "
                         "the generic media playback tool cannot search for a specific query."
                     )
-                elif tool_name == "desktop.safe_shortcut":
+                elif tool_name in {"desktop.safe_shortcut", "desktop.shortcut", "desktop.hotkey"}:
                     step_id = "focus-media-app-search"
                     title = "Focus media app search"
                     capability_id = "desktop.ui_operation"
                     action = "shortcut"
-                    reason = "Focus the media app search affordance with a safe shortcut."
-                elif tool_name == "desktop.safe_type_text":
+                    reason = "Focus the media app search affordance with a safe or generic foreground shortcut."
+                elif tool_name in {"desktop.safe_type_text", "desktop.type", "desktop.type_text"}:
                     step_id = "type-media-search-query"
                     title = "Type media search query"
                     capability_id = "desktop.ui_operation"
