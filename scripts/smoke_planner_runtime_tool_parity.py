@@ -262,6 +262,15 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "approval_required": ["terminal.run"],
     },
     {
+        "id": "code_diagnostic_with_workspace_context",
+        "category": "coding",
+        "prompt": "修复这个仓库里的 failing tests",
+        "expected_intent": "code_task",
+        "expected_plan_tools": ["workspace.list", "terminal.run", "artifact.write"],
+        "expected_request_tools": ["workspace.list", "terminal.run"],
+        "approval_required": ["terminal.run"],
+    },
+    {
         "id": "reminder_creation",
         "category": "orchestrator",
         "prompt": "提醒我明天九点开会",

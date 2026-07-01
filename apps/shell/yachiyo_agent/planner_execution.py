@@ -1561,13 +1561,21 @@ def _code_task_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str,
     if isinstance(diagnostic_hint, Mapping):
         command = str(diagnostic_hint.get("command") or "").strip()
         if command and "terminal.run" in allowed:
+            prefetch_requests = _context_prefetch_tool_requests(
+                decision,
+                allowed,
+                step_ids=("inspect-workspace",),
+                planning_reason="planner_prefetch_code_context",
+            )
+            for prefetch_request in prefetch_requests:
+                prefetch_request.pop("continue_to_model", None)
             request = _request(
                 "terminal.run",
                 {"command": command},
                 planning_reason="planner_fallback_code_diagnostic",
             )
             request["continue_to_model"] = True
-            return [request]
+            return [*prefetch_requests, request]
     return _context_prefetch_tool_requests(
         decision,
         allowed,

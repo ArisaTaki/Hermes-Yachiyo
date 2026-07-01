@@ -16,6 +16,7 @@ FOLLOWUP_CONTENT_SNAPSHOT_TOOLS: frozenset[str] = frozenset(
         "desktop.ui_elements",
         "file.read",
         "screen.capture",
+        "terminal.run",
         "workspace.read",
     }
 )
@@ -80,6 +81,8 @@ def followup_content_snapshot_for_tool_call(
         return clipboard_read_content_snapshot(result, input_preview)
     if tool_name == "data.analyze":
         return data_analyze_content_snapshot(result, input_preview)
+    if tool_name == "terminal.run":
+        return terminal_run_content_snapshot(result, input_preview)
     if tool_name in {"workspace.read", "file.read"}:
         return workspace_read_content_snapshot(result, input_preview, source_tool=tool_name)
     return {}
@@ -253,6 +256,58 @@ def data_analyze_content_snapshot(
     if not result.get("ok"):
         _add_failure_fields(snapshot, result)
     return _compact_snapshot(snapshot)
+
+
+def terminal_run_content_snapshot(
+    result: dict[str, Any],
+    input_preview: dict[str, Any],
+) -> dict[str, Any]:
+    stdout_raw = result.get("stdout")
+    stderr_raw = result.get("stderr")
+    stdout, stdout_truncated = _clean_followup_content_text_preview(
+        stdout_raw,
+        max_chars=4000,
+        preserve_lines=True,
+    )
+    stderr, stderr_truncated = _clean_followup_content_text_preview(
+        stderr_raw,
+        max_chars=2000,
+        preserve_lines=True,
+    )
+    exit_code = result.get("exit_code")
+    if exit_code in (None, ""):
+        exit_code = result.get("returncode")
+    snapshot: dict[str, Any] = {
+        "source_tool": "terminal.run",
+        "ok": bool(result.get("ok")),
+        "command": str(result.get("command") or input_preview.get("command") or "").strip(),
+        "stdout_length": len(str(stdout_raw or "")),
+        "stderr_length": len(str(stderr_raw or "")),
+        "truncated": bool(stdout_truncated or stderr_truncated),
+    }
+    if exit_code not in (None, ""):
+        snapshot["exit_code"] = _number_value(exit_code)
+    text = _terminal_run_snapshot_text(stdout, stderr, result)
+    if text:
+        snapshot["text"] = text
+    if not result.get("ok"):
+        _add_failure_fields(snapshot, result)
+    return _compact_snapshot(snapshot)
+
+
+def _terminal_run_snapshot_text(stdout: str, stderr: str, result: dict[str, Any]) -> str:
+    if stdout and stderr:
+        return f"stdout:\n{stdout}\n\nstderr:\n{stderr}"
+    if stdout:
+        return stdout
+    if stderr:
+        return f"stderr:\n{stderr}" if result.get("ok") else stderr
+    text, _truncated = _clean_followup_content_text_preview(
+        result.get("summary") or result.get("error"),
+        max_chars=1000,
+        preserve_lines=True,
+    )
+    return text
 
 
 def data_analyze_snapshot_text(snapshot: dict[str, Any], result: dict[str, Any]) -> str:

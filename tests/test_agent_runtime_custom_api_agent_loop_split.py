@@ -1060,6 +1060,130 @@ def test_custom_api_agent_loop_prefetches_runtime_planner_data_source_before_mod
     assert "region,revenue\nEast,10\nWest,20" in model_calls[0][-1]["content"]
 
 
+def test_custom_api_agent_loop_prefetches_code_context_before_diagnostic_terminal() -> None:
+    budget = FakeBudget()
+    tool_runs: list[dict[str, Any]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    messages = [{"role": "user", "content": "修复这个仓库里的 failing tests"}]
+    timeline: list[dict[str, Any]] = []
+
+    def fake_run_tool_requests(
+        tool_requests,
+        allowed_tools,
+        broker,
+        messages_arg,
+        timeline_arg,
+        artifacts,
+        **kwargs,
+    ) -> None:
+        tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": messages_arg,
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        for request in tool_requests:
+            tool_name = str(request.get("tool") or "")
+            input_preview = request.get("input") if isinstance(request.get("input"), dict) else {}
+            result = (
+                {"ok": True, "path": ".", "entries": ["pyproject.toml", "tests"]}
+                if tool_name == "workspace.list"
+                else {
+                    "ok": True,
+                    "command": "python -m pytest",
+                    "stdout": "2 passed",
+                    "stderr": "",
+                    "exit_code": 0,
+                }
+            )
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool_name,
+                    input_preview=input_preview,
+                    result=result,
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {"base_url": "https://model.local", "model": "m", "api_key": "k"},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["workspace.list", "terminal.run", "artifact.write"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner for code diagnostics.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": "diagnostic ready"},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=fake_run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Coder"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-code-diagnostic",
+    )
+
+    assert str(result) == "diagnostic ready"
+    assert tool_runs[0]["tool_requests"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_code_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "terminal.run",
+            "input": {"command": "python -m pytest"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_code_diagnostic",
+            "continue_to_model": True,
+        },
+    ]
+    planned_tools = [
+        event["tool"]
+        for event in timeline
+        if event["event"] == "agent.desktop.intent_planned"
+    ]
+    assert planned_tools == ["workspace.list", "terminal.run"]
+    followup_event = next(
+        event for event in timeline if event["event"] == "agent.model.followup_context"
+    )
+    assert followup_event["planning_reason"] == "planner_fallback_code_diagnostic"
+    assert followup_event["observation_tools"] == ["terminal.run"]
+    assert model_calls[0][0]["role"] == "system"
+    assert "selected intent=code_task" in model_calls[0][0]["content"]
+    assert "Observed content snapshot:" in model_calls[0][-1]["content"]
+    assert "2 passed" in model_calls[0][-1]["content"]
+
+
 def test_custom_api_agent_loop_auto_analyzes_captured_visible_table() -> None:
     budget = FakeBudget()
     tool_runs: list[dict[str, Any]] = []

@@ -3692,6 +3692,13 @@ def test_runtime_planner_routes_code_test_diagnostics_to_approval_terminal_plan(
     ) == [
         {
             "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_code_context",
+        },
+        {
+            "protocol": "json_fallback",
             "tool": "terminal.run",
             "input": {"command": "python -m pytest"},
             "source": "runtime_planner",
