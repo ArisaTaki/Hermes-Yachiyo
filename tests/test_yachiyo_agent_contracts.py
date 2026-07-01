@@ -16,6 +16,7 @@ from apps.shell.agent.tools.plugins import (
     register_restricted_tool_plugin,
     unregister_restricted_tool_plugin,
 )
+from apps.shell.agent.runtime.main_chat_config import MAIN_CHAT_DESKTOP_AGENT_INSTRUCTIONS
 from apps.shell.yachiyo_agent import (
     AgentDefinitionSnapshot,
     AgentDeskFileEventRequest,
@@ -1988,6 +1989,14 @@ def test_desktop_action_risk_catalog_covers_product_boundaries() -> None:
     assert catalog["delete_or_overwrite_user_file"].risk_level == "high"
     assert catalog["delete_or_overwrite_user_file"].requires_approval is True
     assert catalog["credential_access"].requires_approval is True
+
+
+def test_main_chat_desktop_prompt_separates_search_submit_from_foreground_send() -> None:
+    instructions = MAIN_CHAT_DESKTOP_AGENT_INSTRUCTIONS
+
+    assert "desktop.search_submit" in instructions
+    assert "提交搜索/查找 query 用 desktop.search_submit" in instructions
+    assert "发送消息、提交表单、确认破坏性或外部动作必须用 desktop.submit_foreground" in instructions
 
 
 def test_tool_catalog_snapshot_json_shape_is_stable() -> None:
