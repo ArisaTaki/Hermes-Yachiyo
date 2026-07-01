@@ -28,6 +28,24 @@ _RELATIVE_DELAY_TEXT_RE = (
     r"(?:minutes?|mins?|hours?|hrs?|days?)\b"
 )
 _DEFAULT_REMINDER_TITLE = "提醒"
+_SCHEDULE_APP_SURFACE_PREFIX_RE = re.compile(
+    r"^\s*(?:帮我|给我|请|麻烦|能否|能不能|可以)?\s*(?:直接)?\s*"
+    r"(?:(?:用|使用|通过|借助|利用|在|打开|启动|进入)|"
+    r"(?:use|using|via|with|in|on))\s*"
+    r"(?:(?:一个|一款|任意|任何|默认|可用|可使用|能用|已安装|本地|"
+    r"合适|适合|推荐|系统自带|内置|any|available|default|suitable|"
+    r"installed|local|best|some)\s*){0,8}"
+    r"(?:的\s*)?"
+    r"(?:提醒事项|提醒|日历|日程|calendar|reminders?)\s*"
+    r"(?:应用程序|应用|app|软件|客户端|工具|程序)?\s*"
+    r"(?:里|内|中|上)?\s*"
+    r"(?:(?:来|去|帮我|直接)\s*|(?:to\s+))?",
+    flags=re.IGNORECASE,
+)
+_REMINDER_APP_SURFACE_RE = re.compile(
+    r"(?:提醒事项|提醒|reminders?)\s*(?:应用程序|应用|app|软件|客户端|工具|程序)?",
+    flags=re.IGNORECASE,
+)
 
 
 def schedule_tool_preview(
@@ -35,13 +53,14 @@ def schedule_tool_preview(
     allowed_tools: Iterable[str] | None,
 ) -> tuple[str | None, dict[str, Any]]:
     allowed = _allowed_tool_set(allowed_tools)
-    scheduled_runnable = scheduled_runnable_payload(text)
+    source_text = _strip_schedule_app_surface_prefix(text)
+    scheduled_runnable = scheduled_runnable_payload(source_text)
     if scheduled_runnable:
         tool_name = _first_allowed(("future_task.schedule",), allowed)
         if tool_name:
             return tool_name, scheduled_runnable
         return None, scheduled_runnable
-    if _looks_like_calendar_event(text):
+    if _looks_like_calendar_event(source_text) or _looks_like_calendar_event(text):
         payload = calendar_event_payload(text)
         if payload:
             tool_name = _first_allowed(("calendar.create_event",), allowed)
@@ -89,10 +108,13 @@ def scheduled_runnable_payload(text: str) -> dict[str, Any]:
 def reminder_payload(text: str) -> dict[str, Any]:
     if _dynamic_schedule_source_request(text):
         return {}
-    body = _reminder_body(text)
+    source_text = _strip_schedule_app_surface_prefix(text)
+    body = _reminder_body(source_text)
+    if not body and source_text != _clean(text) and _looks_like_reminder_app_surface(text):
+        body = _strip_schedule_prefix(source_text)
     if not body:
         return {}
-    iso_due_at = _local_iso_hint(text)
+    iso_due_at = _local_iso_hint(source_text)
     if iso_due_at:
         title = _strip_schedule_prefix(re.sub(rf"\b{_LOCAL_ISO_RE}\b", "", body).strip())
         return {"title": title or _DEFAULT_REMINDER_TITLE, "due_at": iso_due_at}
@@ -135,16 +157,17 @@ def reminder_payload(text: str) -> dict[str, Any]:
 def calendar_event_payload(text: str) -> dict[str, Any]:
     if _dynamic_schedule_source_request(text):
         return {}
-    start_at = _local_iso_hint(text)
+    source_text = _strip_schedule_app_surface_prefix(text)
+    start_at = _local_iso_hint(source_text)
     if start_at:
-        title = _calendar_title(text, start_at)
+        title = _calendar_title(source_text, start_at)
         if not title:
             return {}
         return {
             "title": title,
             "start_at": start_at,
         }
-    body = _calendar_body(text)
+    body = _calendar_body(source_text)
     if not body:
         return {}
     scheduled = _extract_schedule_datetime_and_title(body)
@@ -220,6 +243,21 @@ def _looks_like_schedule_target(text: str) -> bool:
             "事件",
         )
     )
+
+
+def _strip_schedule_app_surface_prefix(text: str) -> str:
+    value = _clean(text)
+    if not value:
+        return ""
+    previous = None
+    while previous != value:
+        previous = value
+        value = _SCHEDULE_APP_SURFACE_PREFIX_RE.sub("", value, count=1).strip()
+    return _clean(value)
+
+
+def _looks_like_reminder_app_surface(text: str) -> bool:
+    return bool(_REMINDER_APP_SURFACE_RE.search(str(text or "")))
 
 
 def _reminder_body(text: str) -> str:
@@ -324,6 +362,9 @@ def _calendar_body(text: str) -> str:
         r"(?P<body_action_first>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:加|新建|创建|添加|新增|安排)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?P<body_action_scheduled>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:加|新建|创建|添加|新增|安排)\s*(?:一个|一条|一项|新的?)?\s*"
         r"(?P<body_target_after>[^。！？!?]+?)\s*"
         r"(?:的)?(?:日历事件|日历日程|日程|事件|会议)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
@@ -371,6 +412,10 @@ def _calendar_body(text: str) -> str:
         if groups.get("time_first") and groups.get("title_after_time"):
             return _strip_schedule_prefix(
                 f"{groups['time_first']} {_strip_calendar_target_suffix(groups['title_after_time'])}"
+            )
+        if groups.get("body_action_scheduled"):
+            return _strip_schedule_prefix(
+                _strip_calendar_target_suffix(groups["body_action_scheduled"])
             )
         body = _strip_schedule_prefix(
             groups.get("body")

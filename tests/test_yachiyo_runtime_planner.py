@@ -17405,6 +17405,14 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
         "提醒我明天买牛奶",
         allowed_tools=["reminders.create"],
     )
+    generic_surface = RuntimePlanner().decision(
+        "用任意可用的提醒应用提醒我明天买牛奶",
+        allowed_tools=["reminders.create"],
+    )
+    generic_surface_without_verb = RuntimePlanner().decision(
+        "用任意可用的提醒应用明天买牛奶",
+        allowed_tools=["reminders.create"],
+    )
     create_first = RuntimePlanner().decision(
         "创建明天上午10点开会的提醒",
         allowed_tools=["reminders.create"],
@@ -17446,6 +17454,11 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
     step = _step_by_id(decision, "create-schedule-item")
     assert step.tool_name == "reminders.create"
     assert step.input_preview == {"title": "买牛奶", "due_at": tomorrow_0900}
+    for reminder_decision in (generic_surface, generic_surface_without_verb):
+        assert reminder_decision.selected_intent.kind == "schedule"
+        reminder_step = _step_by_id(reminder_decision, "create-schedule-item")
+        assert reminder_step.tool_name == "reminders.create"
+        assert reminder_step.input_preview == {"title": "买牛奶", "due_at": tomorrow_0900}
     assert create_first.selected_intent.kind == "schedule"
     create_first_step = _step_by_id(create_first, "create-schedule-item")
     assert create_first_step.tool_name == "reminders.create"
@@ -17583,6 +17596,14 @@ def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability(m
         "明天下午三点日历上加一个开会",
         allowed_tools=["calendar.create_event"],
     )
+    generic_surface = RuntimePlanner().decision(
+        "用任意可用的日历应用创建明天下午三点开会的日程",
+        allowed_tools=["calendar.create_event"],
+    )
+    generic_surface_without_target_suffix = RuntimePlanner().decision(
+        "用任意可用的日历应用创建明天下午三点开会",
+        allowed_tools=["calendar.create_event"],
+    )
     time_first_create = RuntimePlanner().decision(
         "明天下午三点创建一个项目评审日程",
         allowed_tools=["calendar.create_event"],
@@ -17620,6 +17641,15 @@ def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability(m
         "start_at": tomorrow_1500,
         "end_at": tomorrow_1600,
     }
+    for calendar_decision in (generic_surface, generic_surface_without_target_suffix):
+        assert calendar_decision.selected_intent.kind == "schedule"
+        calendar_step = _step_by_id(calendar_decision, "create-schedule-item")
+        assert calendar_step.tool_name == "calendar.create_event"
+        assert calendar_step.input_preview == {
+            "title": "开会",
+            "start_at": tomorrow_1500,
+            "end_at": tomorrow_1600,
+        }
     for calendar_decision in (time_first_create, create_first):
         assert calendar_decision.selected_intent.kind == "schedule"
         calendar_step = _step_by_id(calendar_decision, "create-schedule-item")
@@ -22722,6 +22752,18 @@ def test_planner_tool_requests_maps_relative_schedule_plans(monkeypatch: Any) ->
         }
     ]
     assert planner_tool_requests(
+        "用任意可用的提醒应用提醒我明天买牛奶",
+        allowed_tools=["reminders.create"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {"title": "买牛奶", "due_at": tomorrow_0900},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
         "给我创建一个明天上午十点的提醒",
         allowed_tools=["reminders.create"],
     ) == [
@@ -22825,6 +22867,22 @@ def test_planner_tool_requests_maps_relative_schedule_plans(monkeypatch: Any) ->
     ]
     assert planner_tool_requests(
         "明天下午三点日历上加一个开会",
+        allowed_tools=["calendar.create_event"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "开会",
+                "start_at": tomorrow_1500,
+                "end_at": tomorrow_1600,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
+        "用任意可用的日历应用创建明天下午三点开会的日程",
         allowed_tools=["calendar.create_event"],
     ) == [
         {

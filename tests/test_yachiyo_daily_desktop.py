@@ -200,6 +200,50 @@ def test_planner_first_daily_desktop_entrypoint_discovers_apps_by_capability() -
     ]
 
 
+def test_planner_first_daily_desktop_entrypoint_routes_generic_schedule_apps() -> None:
+    tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
+    tomorrow_1500 = f"{(date.today() + timedelta(days=1)).isoformat()}T15:00"
+    tomorrow_1600 = f"{(date.today() + timedelta(days=1)).isoformat()}T16:00"
+
+    for prompt in (
+        "用任意可用的提醒应用提醒我明天买牛奶",
+        "用任意可用的提醒应用明天买牛奶",
+    ):
+        assert planner_first_daily_desktop_entrypoint_requests(
+            prompt,
+            allowed_tools=["reminders.create"],
+        ) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "reminders.create",
+                "input": {"title": "买牛奶", "due_at": tomorrow_0900},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_schedule",
+            }
+        ]
+
+    for prompt in (
+        "用任意可用的日历应用创建明天下午三点开会的日程",
+        "用任意可用的日历应用创建明天下午三点开会",
+    ):
+        assert planner_first_daily_desktop_entrypoint_requests(
+            prompt,
+            allowed_tools=["calendar.create_event"],
+        ) == [
+            {
+                "protocol": "json_fallback",
+                "tool": "calendar.create_event",
+                "input": {
+                    "title": "开会",
+                    "start_at": tomorrow_1500,
+                    "end_at": tomorrow_1600,
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_schedule",
+            }
+        ]
+
+
 def test_planner_first_daily_desktop_entrypoint_routes_browser_url_click_sequence() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(
         "打开 https://example.com 然后点击 More information 链接",
