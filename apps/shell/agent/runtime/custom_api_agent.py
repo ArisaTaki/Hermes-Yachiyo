@@ -5175,9 +5175,11 @@ def _model_followup_context_message(payload: dict[str, Any]) -> str:
     target_instruction = _model_followup_target_instruction(followup_target)
     pending_plan_instruction = _model_followup_pending_plan_instruction(payload)
     if target_instruction:
+        pending_suffix = f"{pending_plan_instruction} " if pending_plan_instruction else ""
         artifact_instruction = (
             f"{_model_followup_chained_artifact_instruction(followup_target)}"
             f"{target_instruction}"
+            f"{pending_suffix}"
         )
     elif pending_plan_instruction:
         artifact_instruction = pending_plan_instruction

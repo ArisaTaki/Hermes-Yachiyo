@@ -3428,6 +3428,43 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
                 },
                 "pending_user_action": "画一个圆并保存到桌面",
             },
+            "tool_plan": {
+                "steps": [
+                    {
+                        "step_id": "open-selected-discovered-app",
+                        "tool_name": "app.open",
+                        "capability_id": "desktop.app_discovery",
+                        "action": "open_selected_app",
+                        "status": "planned",
+                    },
+                    {
+                        "step_id": "observe-selected-discovered-app",
+                        "tool_name": "desktop.ui_elements",
+                        "capability_id": "desktop.app_discovery",
+                        "action": "inspect_ui",
+                        "status": "planned",
+                    },
+                    {
+                        "step_id": "draw-circle",
+                        "tool_name": "desktop.click_ui_element",
+                        "capability_id": "desktop.ui_operation",
+                        "action": "draw_shape",
+                        "input_preview": {"target": "circle shape tool"},
+                        "risk_level": "low",
+                        "approval_required": False,
+                        "status": "planned",
+                    },
+                    {
+                        "step_id": "verify-saved-image",
+                        "tool_name": "screen.capture",
+                        "capability_id": "desktop.visual_verification",
+                        "action": "verify_result",
+                        "risk_level": "low",
+                        "approval_required": False,
+                        "status": "planned",
+                    },
+                ]
+            },
         },
         allowed_tools=[
             "desktop.list_apps",
@@ -3454,8 +3491,14 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
 
     assert payload["followup_target"]["creative_canvas"] == {"kind": "image_canvas"}
     assert payload["followup_target"]["pending_user_action"] == "画一个圆并保存到桌面"
+    assert [step["step_id"] for step in payload["pending_plan_steps"]] == [
+        "draw-circle",
+        "verify-saved-image",
+    ]
     assert "The remaining user action is: '画一个圆并保存到桌面'" in message
     assert "continue toward that action after the canvas is available" in message
+    assert "Continue the pending Runtime Plan steps in order" in message
+    assert "draw-circle via desktop.click_ui_element" in message
     assert "Call desktop UI tools next instead of replying inline" in message
 
 
