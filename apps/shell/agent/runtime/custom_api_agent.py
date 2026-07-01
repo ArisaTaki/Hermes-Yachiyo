@@ -1053,6 +1053,14 @@ class RuntimeCustomApiAgentLoop:
                             tool_timeline_start=tool_timeline_start,
                             run_id=run_id,
                         )
+                        if runtime_planner_decision is None:
+                            self._record_model_followup_pending_plan_progress_events(
+                                followup_context,
+                                auto_pending_plan_requests,
+                                timeline=timeline,
+                                tool_timeline_start=tool_timeline_start,
+                                run_id=run_id,
+                            )
                         direct_result = self._direct_daily_desktop_sequence_result(
                             auto_pending_plan_requests,
                             timeline,
@@ -1921,6 +1929,203 @@ class RuntimeCustomApiAgentLoop:
                     self._timeline(
                         "agent.task.checkpoint.updated",
                         str(getattr(checkpoint, "title", "") or step_id),
+                        **payload,
+                    )
+                )
+                if run_id and self._append_run_event is not None:
+                    self._append_run_event(
+                        run_id,
+                        "agent.task.checkpoint.updated",
+                        payload,
+                    )
+
+    def _record_model_followup_pending_plan_progress_events(
+        self,
+        followup_context: Mapping[str, Any],
+        planned_tool_requests: list[dict[str, Any]],
+        *,
+        timeline: list[dict[str, Any]],
+        tool_timeline_start: int,
+        run_id: str = "",
+    ) -> None:
+        task_core = (
+            followup_context.get("task_core")
+            if isinstance(followup_context.get("task_core"), Mapping)
+            else {}
+        )
+        if not task_core:
+            return
+        workspace = task_core.get("workspace") if isinstance(task_core.get("workspace"), Mapping) else {}
+        workspace_items = (
+            workspace.get("items")
+            if isinstance(workspace.get("items"), list)
+            else []
+        )
+        workspace_items_by_step: dict[str, list[Mapping[str, Any]]] = {}
+        for item in workspace_items:
+            if not isinstance(item, Mapping):
+                continue
+            step_id = str(item.get("source_step_id") or "").strip()
+            if step_id:
+                workspace_items_by_step.setdefault(step_id, []).append(item)
+        todos_by_step = {
+            str(todo.get("step_id") or "").strip(): todo
+            for todo in task_core.get("todos", [])
+            if isinstance(todo, Mapping) and str(todo.get("step_id") or "").strip()
+        }
+        checkpoints_by_step: dict[str, list[Mapping[str, Any]]] = {}
+        for checkpoint in task_core.get("checkpoints", []):
+            if not isinstance(checkpoint, Mapping):
+                continue
+            step_id = str(checkpoint.get("after_step_id") or "").strip()
+            if step_id:
+                checkpoints_by_step.setdefault(step_id, []).append(checkpoint)
+        tool_events = [
+            event
+            for event in timeline[tool_timeline_start:]
+            if isinstance(event, dict)
+            and str(event.get("event") or "").strip()
+            in {"agent.tool.call", "agent.tool.failed", "agent.tool.skipped"}
+        ]
+        if not tool_events:
+            return
+        core_id = str(task_core.get("core_id") or "").strip()
+        workspace_id = str(workspace.get("workspace_id") or "").strip()
+        decision_id = str(followup_context.get("decision_id") or "").strip()
+        plan_id = str(followup_context.get("plan_id") or "").strip()
+        event_index = 0
+        for request in planned_tool_requests:
+            if not isinstance(request, Mapping):
+                continue
+            step_id = str(request.get("step_id") or "").strip()
+            tool_name = str(request.get("tool") or "").strip()
+            if not step_id or not tool_name:
+                continue
+            tool_event: dict[str, Any] | None = None
+            scan_index = event_index
+            while scan_index < len(tool_events):
+                candidate = tool_events[scan_index]
+                candidate_step_id = str(
+                    candidate.get("step_id") or candidate.get("planner_step_id") or ""
+                ).strip()
+                if (
+                    candidate_step_id == step_id
+                    or (
+                        not candidate_step_id
+                        and str(candidate.get("detail") or "").strip() == tool_name
+                    )
+                ):
+                    tool_event = candidate
+                    event_index = scan_index + 1
+                    break
+                scan_index += 1
+            if tool_event is None:
+                continue
+            result = tool_event.get("result") if isinstance(tool_event.get("result"), dict) else {}
+            todo_status = _task_todo_status_for_tool_result(
+                str(tool_event.get("event") or ""),
+                result,
+            )
+            checkpoint_status = _task_checkpoint_status_for_todo_status(todo_status, result)
+            skip_statuses = {todo_status}
+            if todo_status != "completed":
+                skip_statuses.add("completed")
+            if _runtime_planner_step_has_status(
+                timeline,
+                decision_id=decision_id,
+                step_id=step_id,
+                statuses=skip_statuses,
+            ):
+                continue
+            source_event = {
+                "event": str(tool_event.get("event") or ""),
+                "detail": str(tool_event.get("detail") or ""),
+            }
+            base_payload = {
+                "source": "runtime_planner",
+                "core_id": core_id,
+                "workspace_id": workspace_id,
+                "decision_id": decision_id,
+                "plan_id": plan_id,
+                "step_id": step_id,
+                "tool": tool_name,
+                "source_event": source_event,
+                "result_preview": _task_progress_result_preview(result),
+            }
+            for workspace_item in workspace_items_by_step.get(step_id, []):
+                item_payload = dict(workspace_item)
+                item_payload["status"] = todo_status
+                payload = {
+                    **base_payload,
+                    "workspace_item_id": str(workspace_item.get("item_id") or "").strip(),
+                    "status": todo_status,
+                    "previous_status": str(workspace_item.get("status") or "planned"),
+                    "workspace_item": item_payload,
+                }
+                if _runtime_task_update_exists(
+                    timeline,
+                    "agent.task.workspace_item.updated",
+                    payload,
+                ):
+                    continue
+                timeline.append(
+                    self._timeline(
+                        "agent.task.workspace_item.updated",
+                        str(workspace_item.get("title") or step_id),
+                        **payload,
+                    )
+                )
+                if run_id and self._append_run_event is not None:
+                    self._append_run_event(
+                        run_id,
+                        "agent.task.workspace_item.updated",
+                        payload,
+                    )
+            todo = todos_by_step.get(step_id)
+            if todo is not None:
+                todo_payload = dict(todo)
+                todo_payload["status"] = todo_status
+                payload = {
+                    **base_payload,
+                    "todo_id": str(todo.get("todo_id") or "").strip(),
+                    "status": todo_status,
+                    "previous_status": str(todo.get("status") or "pending"),
+                    "todo": todo_payload,
+                }
+                if not _runtime_task_update_exists(
+                    timeline,
+                    "agent.task.todo.updated",
+                    payload,
+                ):
+                    timeline.append(
+                        self._timeline(
+                            "agent.task.todo.updated",
+                            str(todo.get("title") or step_id),
+                            **payload,
+                        )
+                    )
+                    if run_id and self._append_run_event is not None:
+                        self._append_run_event(run_id, "agent.task.todo.updated", payload)
+            for checkpoint in checkpoints_by_step.get(step_id, []):
+                checkpoint_payload = dict(checkpoint)
+                checkpoint_payload["status"] = checkpoint_status
+                payload = {
+                    **base_payload,
+                    "checkpoint_id": str(checkpoint.get("checkpoint_id") or "").strip(),
+                    "status": checkpoint_status,
+                    "previous_status": str(checkpoint.get("status") or "planned"),
+                    "checkpoint": checkpoint_payload,
+                }
+                if _runtime_task_update_exists(
+                    timeline,
+                    "agent.task.checkpoint.updated",
+                    payload,
+                ):
+                    continue
+                timeline.append(
+                    self._timeline(
+                        "agent.task.checkpoint.updated",
+                        str(checkpoint.get("title") or step_id),
                         **payload,
                     )
                 )
@@ -4391,6 +4596,9 @@ def _model_followup_context_payload(
     )
     if pending_plan_steps:
         payload["pending_plan_steps"] = pending_plan_steps
+    task_core_payload = _model_followup_task_core_payload(selection_payload)
+    if task_core_payload:
+        payload["task_core"] = task_core_payload
     content_snapshots = followup_content_snapshots(timeline, observation_tools)
     content_snapshot = content_snapshots[-1] if content_snapshots else latest_followup_content_snapshot(timeline, observation_tools)
     if content_snapshot:
@@ -4402,6 +4610,20 @@ def _model_followup_context_payload(
         if value:
             payload[key] = value
     return payload
+
+
+def _model_followup_task_core_payload(selection_payload: Mapping[str, Any]) -> dict[str, Any]:
+    for key in ("task_core", "yachiyo_task_core"):
+        value = selection_payload.get(key)
+        if isinstance(value, Mapping) and value:
+            return dict(value)
+    runtime_plan = (
+        selection_payload.get("runtime_plan")
+        if isinstance(selection_payload.get("runtime_plan"), Mapping)
+        else {}
+    )
+    value = runtime_plan.get("task_core") if isinstance(runtime_plan, Mapping) else {}
+    return dict(value) if isinstance(value, Mapping) and value else {}
 
 
 def _model_followup_pending_plan_steps(

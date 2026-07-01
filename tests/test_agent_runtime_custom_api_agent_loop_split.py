@@ -3464,6 +3464,25 @@ def test_model_followup_context_instructs_pending_report_plan_steps() -> None:
                     },
                 ]
             },
+            "task_core": {
+                "core_id": "core-report",
+                "workspace": {
+                    "workspace_id": "workspace-report",
+                    "title": "Report Workspace",
+                    "items": [],
+                },
+                "todos": [
+                    {
+                        "todo_id": "todo-extract-report",
+                        "title": "Extract report file context",
+                        "step_id": "extract-report-file-context",
+                        "tool_name": "terminal.run",
+                        "capability_id": "terminal.execution",
+                    }
+                ],
+                "checkpoints": [],
+                "replan_signals": [],
+            },
         },
         allowed_tools=[
             "workspace.list",
@@ -3491,6 +3510,7 @@ def test_model_followup_context_instructs_pending_report_plan_steps() -> None:
     assert "medium risk approval required" in message
     assert "synthesize a concrete, safe command" in message
     assert "Call artifact.write next" not in message
+    assert payload["task_core"]["core_id"] == "core-report"
 
 
 def test_model_followup_pending_plan_promotes_model_terminal_command() -> None:
@@ -3609,6 +3629,33 @@ def test_custom_api_agent_loop_auto_dispatches_pending_terminal_command_from_mod
                     "approval_required": True,
                 }
             ],
+            task_core={
+                "core_id": "core-report",
+                "workspace": {
+                    "workspace_id": "workspace-report",
+                    "title": "Report Workspace",
+                    "items": [],
+                },
+                "todos": [
+                    {
+                        "todo_id": "todo-extract-report",
+                        "title": "Extract report file context",
+                        "step_id": "extract-report-file-context",
+                        "tool_name": "terminal.run",
+                        "capability_id": "terminal.execution",
+                        "status": "pending",
+                    }
+                ],
+                "checkpoints": [
+                    {
+                        "checkpoint_id": "checkpoint-extract-report",
+                        "title": "Report text extracted",
+                        "after_step_id": "extract-report-file-context",
+                        "status": "planned",
+                    }
+                ],
+                "replan_signals": [],
+            },
         )
     ]
     tool_runs: list[list[dict[str, Any]]] = []
@@ -3694,6 +3741,21 @@ def test_custom_api_agent_loop_auto_dispatches_pending_terminal_command_from_mod
     )
     assert planned_event["step_id"] == "extract-report-file-context"
     assert planned_event["capability_id"] == "terminal.execution"
+    todo_event = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["step_id"] == "extract-report-file-context"
+    )
+    assert todo_event["status"] == "completed"
+    assert todo_event["todo"]["status"] == "completed"
+    checkpoint_event = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event["step_id"] == "extract-report-file-context"
+    )
+    assert checkpoint_event["status"] == "completed"
 
 
 def test_model_followup_context_instructs_generated_app_write() -> None:
