@@ -7604,14 +7604,11 @@ def _auto_discovered_app_followup_requests(
             requests.append(type_request)
     if not requests:
         return []
-    if resolution_evidence:
-        requests = [
-            _with_discovered_app_resolution_evidence(request, resolution_evidence)
-            for request in requests
-        ]
     observation_request = _discovered_app_observation_request(
         target,
         allowed,
+        app_query=app_query,
+        app_name=app_name,
         source=source,
         planning_reason=planning_reason,
     )
@@ -7624,6 +7621,11 @@ def _auto_discovered_app_followup_requests(
         and requests
     ):
         requests[-1]["continue_to_model"] = True
+    if resolution_evidence:
+        requests = [
+            _with_discovered_app_resolution_evidence(request, resolution_evidence)
+            for request in requests
+        ]
     return requests
 
 
@@ -7680,6 +7682,8 @@ def _auto_discovered_media_playback_followup_requests(
         observation_request = _discovered_app_observation_request(
             target,
             allowed,
+            app_query=app_query,
+            app_name=app_name,
             source=source,
             planning_reason=planning_reason,
         )
@@ -7747,6 +7751,8 @@ def _auto_discovered_media_playback_followup_requests(
     observation_request = _discovered_app_observation_request(
         target,
         allowed,
+        app_query=app_query,
+        app_name=app_name,
         source=source,
         planning_reason=planning_reason,
     )
@@ -8425,6 +8431,8 @@ def _discovered_app_observation_request(
     target: Mapping[str, Any],
     allowed: set[str],
     *,
+    app_query: str = "",
+    app_name: str = "",
     source: str,
     planning_reason: str,
 ) -> dict[str, Any]:
@@ -8475,7 +8483,20 @@ def _discovered_app_observation_request(
         or _discovered_app_post_action_continue_requested(target)
     ):
         request["continue_to_model"] = True
+    if app_query and app_name and _tool_accepts_discovered_app_context(tool_name):
+        request = _with_discovered_app_resolution(request, app_query, app_name)
     return request
+
+
+def _tool_accepts_discovered_app_context(tool_name: str) -> bool:
+    return str(tool_name or "").strip() in {
+        "desktop.inspect_app",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.verify",
+        "desktop.windows",
+        "desktop.list_windows",
+    }
 
 
 def _discovered_app_post_action_continue_requested(

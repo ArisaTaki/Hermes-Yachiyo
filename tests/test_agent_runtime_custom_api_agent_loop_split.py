@@ -4101,6 +4101,15 @@ def test_model_followup_context_instructs_generated_discovered_app_write() -> No
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_followup_discovered_app_write",
+            "input_resolution": {
+                "tool": "desktop.ui_elements",
+                "field": "app_name",
+                "requested_app_name": "markdown",
+                "resolved_app_name": "Obsidian",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/Obsidian.app",
+                "app_resolution_score": "91",
+            },
         },
     ]
 
@@ -16643,6 +16652,15 @@ def test_auto_discovered_app_compose_followup_types_and_verifies() -> None:
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_discovered_app_followup",
+            "input_resolution": {
+                "tool": "desktop.ui_elements",
+                "field": "app_name",
+                "requested_app_name": "markdown",
+                "resolved_app_name": "Obsidian",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/Obsidian.app",
+                "app_resolution_score": "91",
+            },
         },
     ]
 
@@ -16754,6 +16772,15 @@ def test_auto_discovered_app_search_followup_types_submits_and_verifies() -> Non
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_discovered_app_followup",
+            "input_resolution": {
+                "tool": "desktop.ui_elements",
+                "field": "app_name",
+                "requested_app_name": "image",
+                "resolved_app_name": "Figma",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/Figma.app",
+                "app_resolution_score": "94",
+            },
         },
     ]
     click_requests = custom_api_agent_module._auto_discovered_app_followup_requests(
@@ -16976,6 +17003,15 @@ def test_auto_discovered_app_generated_write_followup_returns_to_model() -> None
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_discovered_app_followup",
+            "input_resolution": {
+                "tool": "desktop.ui_elements",
+                "field": "app_name",
+                "requested_app_name": "markdown",
+                "resolved_app_name": "Obsidian",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/Obsidian.app",
+                "app_resolution_score": "91",
+            },
             "continue_to_model": True,
         },
     ]
@@ -17344,21 +17380,30 @@ def test_custom_api_agent_loop_auto_dispatches_generic_discovered_app_pending_st
         run_id="run-generic-discovered-app-followup",
     )
 
-    assert [request["tool"] for request in tool_runs[0]] == ["desktop.list_apps"]
-    assert [request["tool"] for request in tool_runs[1]] == [
-        "app.open",
-        "desktop.ui_elements",
+    assert [[request["tool"] for request in run] for run in tool_runs] == [
+        [
+            "app.open",
+            "desktop.ui_elements",
+            "desktop.click_ui_element",
+            "screen.capture",
+        ]
     ]
-    assert [request["tool"] for request in tool_runs[2]] == [
-        "desktop.click_ui_element",
-        "screen.capture",
-    ]
-    assert tool_runs[2][0]["input"] == {
+    assert tool_runs[0][0]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "image",
+    }
+    assert tool_runs[0][1]["input"] == {"limit": 80}
+    assert tool_runs[0][2]["input"] == {
         "target": "导出",
         "role_filter": "",
         "click_count": 1,
         "limit": 80,
     }
+    assert [request["tool"] for request in tool_runs[0][2:]] == [
+        "desktop.click_ui_element",
+        "screen.capture",
+    ]
     assert len(model_calls) == 1
     assert "Continue the pending Runtime Plan steps in order" in model_calls[0][-1]["content"]
     completed_todos = [
@@ -17368,7 +17413,6 @@ def test_custom_api_agent_loop_auto_dispatches_generic_discovered_app_pending_st
         and event["status"] == "completed"
     ]
     assert [event["step_id"] for event in completed_todos] == [
-        "discover_apps-desktop-state",
         "open-selected-discovered-app",
         "observe-selected-discovered-app",
         "operate-selected-discovered-app-ui",
