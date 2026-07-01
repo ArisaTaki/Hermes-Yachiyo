@@ -2057,20 +2057,24 @@ def _code_task_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str,
     if isinstance(diagnostic_hint, Mapping):
         command = str(diagnostic_hint.get("command") or "").strip()
         if command and "terminal.run" in allowed:
-            prefetch_requests = _context_prefetch_tool_requests(
-                decision,
-                allowed,
-                step_ids=("inspect-workspace",),
-                planning_reason="planner_prefetch_code_context",
-            )
-            for prefetch_request in prefetch_requests:
-                prefetch_request.pop("continue_to_model", None)
+            needs_model_followup = _code_diagnostic_requires_model_followup(decision)
+            prefetch_requests = []
+            if needs_model_followup:
+                prefetch_requests = _context_prefetch_tool_requests(
+                    decision,
+                    allowed,
+                    step_ids=("inspect-workspace",),
+                    planning_reason="planner_prefetch_code_context",
+                )
+                for prefetch_request in prefetch_requests:
+                    prefetch_request.pop("continue_to_model", None)
             request = _request(
                 "terminal.run",
                 {"command": command},
                 planning_reason="planner_fallback_code_diagnostic",
             )
-            request["continue_to_model"] = True
+            if needs_model_followup:
+                request["continue_to_model"] = True
             return [*prefetch_requests, request]
     return _context_prefetch_tool_requests(
         decision,
@@ -2078,6 +2082,33 @@ def _code_task_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str,
         step_ids=("inspect-workspace",),
         planning_reason="planner_prefetch_code_context",
     )
+
+
+def _code_diagnostic_requires_model_followup(decision: Any) -> bool:
+    inputs = getattr(getattr(decision, "selected_intent", None), "inputs", None)
+    if isinstance(inputs, Mapping) and isinstance(inputs.get("code_change_hint"), Mapping):
+        return True
+    prompt = str(getattr(getattr(decision, "selected_intent", None), "user_goal", "") or "")
+    clean = re.sub(r"\s+", " ", prompt).strip()
+    if not clean:
+        return True
+    if re.search(
+        r"\b(?:fix|repair|debug|diagnose|analy[sz]e|explain)\b",
+        clean,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(r"failing\s+tests?|test\s+failures?", clean, flags=re.IGNORECASE):
+        return True
+    if re.search(r"(?:修复|修正|诊断|排查|分析|解释|失败|报错|不过|不通过)", clean):
+        return True
+    if re.search(
+        r"\b(?:run|execute|check)\b|(?:运行|执行|跑|检查)",
+        clean,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return True
 
 
 def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict[str, Any]]:
