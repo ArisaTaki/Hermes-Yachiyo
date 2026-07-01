@@ -22966,6 +22966,58 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
         },
     ]
 
+    generic_app_search_requests = planner_desktop_tool_requests(
+        "打开 Obsidian 搜索 yachiyo",
+        allowed_tools=[
+            "desktop.list_apps",
+            "desktop.open_app",
+            "desktop.focus_app",
+            "desktop.shortcut",
+            "desktop.type",
+            "desktop.submit_foreground",
+            "desktop.read_ui",
+        ],
+    )
+
+    assert generic_app_search_requests == [
+        _app_discovery_request("Obsidian"),
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_app",
+            "input": {"app_name": "Obsidian"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.shortcut",
+            "input": {"key": "f", "modifiers": ["command"]},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_hotkey",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type",
+            "input": {"text": "yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.read_ui",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
     app_scoped_shortcut_requests = planner_desktop_tool_requests(
         "在一个叫 SuperData Studio 的应用里搜索 sales.csv",
         allowed_tools=[

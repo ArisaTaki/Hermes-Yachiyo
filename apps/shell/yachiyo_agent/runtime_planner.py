@@ -4242,27 +4242,17 @@ class RuntimePlanner:
                     app_search_prepare_step_id = "open-or-focus-app"
                 elif app_search_prepare_step_id == "open-or-focus-app":
                     app_search_prepare_step_id = "discover-desktop-state"
-            search_focus_tool = _first_allowed(
-                _app_search_operation_candidates(
-                    "safe_shortcut",
-                    app_name=app_name,
-                    mode=_app_search_prepare_mode(intent.user_goal, mode),
-                    generic=("desktop.safe_shortcut", "desktop.click_ui_element"),
-                ),
+            search_focus_tool = _app_search_focus_operation_tool(
                 allowed,
+                app_name=app_name,
+                mode=_app_search_prepare_mode(intent.user_goal, mode),
             )
             search_focus_tool_name = str(search_focus_tool or "")
-            if search_focus_tool_name == "desktop.click_ui_element":
-                search_focus_preview = {
-                    "target": search_target,
-                    "role_filter": "text",
-                    "click_count": 1,
-                    "limit": 80,
-                }
-            elif search_focus_tool_name.startswith("app."):
-                search_focus_preview = {"app_name": app_name, "action": "find"}
-            else:
-                search_focus_preview = {"action": "find"}
+            search_focus_preview = _app_search_focus_input_preview(
+                search_focus_tool_name,
+                app_name=app_name,
+                search_target=search_target,
+            )
             search_depends_on = [
                 selected_discovered_app_step_id
                 or desktop_discovery_step_id
@@ -4303,14 +4293,10 @@ class RuntimePlanner:
                 )
                 search_terminal_step_id = "paste-app-search-query"
             else:
-                search_type_tool = _first_allowed(
-                    _app_search_operation_candidates(
-                        "safe_type_text",
-                        app_name=app_name,
-                        mode=_app_search_prepare_mode(intent.user_goal, mode),
-                        generic=("desktop.safe_type_text",),
-                    ),
+                search_type_tool = _app_search_type_operation_tool(
                     allowed,
+                    app_name=app_name,
+                    mode=_app_search_prepare_mode(intent.user_goal, mode),
                 )
                 search_type_payload = {"text": search_query}
                 if str(search_type_tool or "").startswith("app."):
@@ -4364,19 +4350,20 @@ class RuntimePlanner:
                 search_terminal_step_id = "confirm-app-search-result"
                 app_search_needs_verify = True
             elif _app_search_should_submit(intent.user_goal, search_followup):
+                submit_search_tool = _app_search_submit_operation_tool(allowed)
                 steps.append(
                     _step(
                         intent,
                         "submit-app-search",
                         "Submit app search",
                         "desktop.ui_operation",
-                        _first_allowed(("desktop.search_submit",), allowed),
-                        input_preview={},
+                        submit_search_tool,
+                        input_preview=_app_search_submit_input_preview(submit_search_tool),
                         depends_on=[search_terminal_step_id],
                         action="submit",
-                        risk_level="low",
-                        approval_required=False,
-                        reason="Submit the app search with the dedicated safe search submit tool.",
+                        risk_level=_app_search_submit_risk_level(submit_search_tool),
+                        approval_required=_app_search_submit_approval_required(submit_search_tool),
+                        reason="Submit the app search with the dedicated search-submit tool or the generic foreground confirm fallback.",
                     )
                 )
                 search_terminal_step_id = "submit-app-search"
@@ -19802,27 +19789,17 @@ def _app_search_safe_sequence_available(
         if _first_allowed(("desktop.safe_shortcut",), allowed_tools) is None:
             return False
     elif _first_allowed(
-        _app_search_operation_candidates(
-            "safe_shortcut",
-            app_name=app_name,
-            mode=mode,
-            generic=("desktop.safe_shortcut",),
-        ),
+        _app_search_focus_operation_candidates(app_name=app_name, mode=mode),
         allowed_tools,
     ) is None:
         return False
     if (
         context_source not in {"selection", "clipboard"}
-        and _first_allowed(
-            _app_search_operation_candidates(
-                "safe_type_text",
-                app_name=app_name,
-                mode=mode,
-                generic=("desktop.safe_type_text",),
-            ),
+        and _app_search_type_operation_tool(
             allowed_tools,
-        )
-        is None
+            app_name=app_name,
+            mode=mode,
+        ) is None
     ):
         return False
     followup = _app_search_followup_hint(text)
@@ -19833,7 +19810,7 @@ def _app_search_safe_sequence_available(
         )
     if (
         _app_search_should_submit(text, followup)
-        and _first_allowed(("desktop.search_submit",), allowed_tools) is None
+        and _app_search_submit_operation_tool(allowed_tools) is None
     ):
         return False
     if (
@@ -19853,6 +19830,110 @@ def _app_search_safe_sequence_available(
     return True
 
 
+def _app_search_focus_operation_candidates(
+    *,
+    app_name: str,
+    mode: str,
+) -> tuple[str, ...]:
+    return _app_search_operation_candidates(
+        "safe_shortcut",
+        app_name=app_name,
+        mode=mode,
+        generic=(
+            "desktop.safe_shortcut",
+            "desktop.shortcut",
+            "desktop.hotkey",
+            "desktop.click_ui_element",
+        ),
+    )
+
+
+def _app_search_focus_operation_tool(
+    allowed: set[str] | None,
+    *,
+    app_name: str,
+    mode: str,
+) -> str | None:
+    return _first_allowed(
+        _app_search_focus_operation_candidates(app_name=app_name, mode=mode),
+        allowed,
+    )
+
+
+def _app_search_focus_input_preview(
+    tool_name: str,
+    *,
+    app_name: str,
+    search_target: str,
+) -> dict[str, Any]:
+    if tool_name == "desktop.click_ui_element":
+        return {
+            "target": search_target,
+            "role_filter": "text",
+            "click_count": 1,
+            "limit": 80,
+        }
+    if tool_name.startswith("app."):
+        return {"app_name": app_name, "action": "find"}
+    if tool_name in {"desktop.shortcut", "desktop.hotkey"}:
+        return {"key": "f", "modifiers": ["command"]}
+    return {"action": "find"}
+
+
+def _app_search_type_operation_tool(
+    allowed: set[str] | None,
+    *,
+    app_name: str,
+    mode: str,
+) -> str | None:
+    return _safe_type_text_operation_tool(
+        app_name=app_name,
+        mode=mode,
+        allowed=allowed,
+    )
+
+
+def _safe_type_text_operation_tool(
+    *,
+    app_name: str,
+    mode: str,
+    allowed: set[str] | None,
+) -> str | None:
+    generic_safe_tool = _first_allowed(("desktop.safe_type_text",), allowed)
+    if generic_safe_tool:
+        return generic_safe_tool
+    if str(app_name or "").strip():
+        app_tool = _first_allowed(
+            app_foreground_tool_candidates(mode, "safe_type_text"),
+            allowed,
+        )
+        if app_tool:
+            return app_tool
+    return _first_allowed(("desktop.type_text",), allowed)
+
+
+def _app_search_submit_operation_tool(allowed: set[str] | None) -> str | None:
+    return _first_allowed(("desktop.search_submit", "desktop.submit_foreground"), allowed)
+
+
+def _app_search_submit_input_preview(tool_name: str | None) -> dict[str, Any]:
+    if tool_name == "desktop.submit_foreground":
+        return {"action": "confirm"}
+    return {}
+
+
+def _app_search_submit_risk_level(tool_name: str | None) -> str:
+    if tool_name == "desktop.search_submit":
+        return "low"
+    return _desktop_operation_risk_level(tool_name)
+
+
+def _app_search_submit_approval_required(tool_name: str | None) -> bool:
+    if tool_name == "desktop.search_submit":
+        return False
+    return _desktop_operation_approval_required(tool_name)
+
+
 def _app_search_operation_candidates(
     action: str,
     *,
@@ -19865,15 +19946,6 @@ def _app_search_operation_candidates(
     return (*app_foreground_tool_candidates(mode, action), *generic)
 
 
-def _safe_type_text_operation_candidates(app_name: str, mode: str) -> tuple[str, ...]:
-    return _app_search_operation_candidates(
-        "safe_type_text",
-        app_name=app_name,
-        mode=mode,
-        generic=("desktop.safe_type_text",),
-    )
-
-
 def _safe_type_text_operation_preview(
     *,
     app_name: str,
@@ -19881,9 +19953,10 @@ def _safe_type_text_operation_preview(
     allowed: set[str] | None,
     payload: Mapping[str, Any],
 ) -> tuple[str | None, dict[str, Any]]:
-    tool_name = _first_allowed(
-        _safe_type_text_operation_candidates(app_name, mode),
-        allowed,
+    tool_name = _safe_type_text_operation_tool(
+        app_name=app_name,
+        mode=mode,
+        allowed=allowed,
     )
     input_preview = dict(payload)
     if str(tool_name or "").startswith("app."):
