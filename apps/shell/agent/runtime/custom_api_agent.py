@@ -177,6 +177,7 @@ class RuntimeCustomApiAgentLoop:
         budget = budget or self._run_budget(run_id, timeline)
         self._check_context_budget(budget, messages)
         start_iteration = self._normalize_tool_iteration(start_iteration)
+        runtime_planner_decision = None
         if not default_messages:
             resumed_result = self._direct_existing_daily_desktop_result(
                 agent,
@@ -199,7 +200,6 @@ class RuntimeCustomApiAgentLoop:
                 direct_tool_requests,
                 allowed_tools,
             )
-            runtime_planner_decision = None
             direct_tool_selection_payload: dict[str, Any] = {}
             planner_replan_only = False
             if direct_planned_tool_requests:
@@ -935,6 +935,12 @@ class RuntimeCustomApiAgentLoop:
                                 budget=budget,
                             )
                         except AgentApprovalRequired as exc:
+                            self._record_runtime_planner_task_progress_events(
+                                runtime_planner_decision,
+                                timeline=timeline,
+                                tool_timeline_start=tool_timeline_start,
+                                run_id=run_id,
+                            )
                             pending_approval = (
                                 exc.pending_approval if isinstance(exc.pending_approval, dict) else {}
                             )
@@ -972,6 +978,12 @@ class RuntimeCustomApiAgentLoop:
                                 ),
                             )
                             raise
+                        self._record_runtime_planner_task_progress_events(
+                            runtime_planner_decision,
+                            timeline=timeline,
+                            tool_timeline_start=tool_timeline_start,
+                            run_id=run_id,
+                        )
                         direct_result = self._direct_daily_desktop_sequence_result(
                             auto_pending_plan_requests,
                             timeline,

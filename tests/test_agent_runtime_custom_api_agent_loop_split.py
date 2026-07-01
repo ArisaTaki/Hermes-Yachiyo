@@ -3504,14 +3504,15 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
     assert "Continue the pending Runtime Plan steps in order" in message
     assert "draw-circle via desktop.click_ui_element" in message
     assert "Call desktop UI tools next instead of replying inline" in message
-    assert custom_api_agent_module._model_followup_pending_plan_requests(
+    pending_plan_requests = custom_api_agent_module._model_followup_pending_plan_requests(
         payload,
         [
             "desktop.click_ui_element",
             "screen.capture",
             "terminal.run",
         ],
-    ) == [
+    )
+    assert pending_plan_requests == [
         {
             "protocol": "json_fallback",
             "tool": "desktop.click_ui_element",
@@ -3530,6 +3531,20 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
             "step_id": "verify-saved-image",
             "capability_id": "desktop.visual_verification",
         },
+    ]
+    planned_timeline: list[dict[str, Any]] = []
+    _private_runtime_loop()._record_auto_model_followup_app_write_plan(
+        pending_plan_requests,
+        timeline=planned_timeline,
+        run_id="run-pending-plan",
+    )
+    assert [
+        (event["tool"], event["step_id"], event["capability_id"])
+        for event in planned_timeline
+        if event["event"] == "agent.desktop.intent_planned"
+    ] == [
+        ("desktop.click_ui_element", "draw-circle", "desktop.ui_operation"),
+        ("screen.capture", "verify-saved-image", "desktop.visual_verification"),
     ]
     assert custom_api_agent_module._model_followup_pending_plan_requests(
         {
