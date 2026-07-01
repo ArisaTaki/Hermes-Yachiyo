@@ -3315,6 +3315,10 @@ def test_model_followup_context_instructs_generated_discovered_app_write() -> No
         "verify_tools": ["desktop.ui_elements"],
         "safe_shortcut_action": "new_document",
         "body_source": "model_generated_content",
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
     }
     assert "Data analysis result for sales.csv (csv)." in message
     assert "call desktop.list_apps for 'markdown'" in message
@@ -3500,6 +3504,47 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
     assert "Continue the pending Runtime Plan steps in order" in message
     assert "draw-circle via desktop.click_ui_element" in message
     assert "Call desktop UI tools next instead of replying inline" in message
+    assert custom_api_agent_module._model_followup_pending_plan_requests(
+        payload,
+        [
+            "desktop.click_ui_element",
+            "screen.capture",
+            "terminal.run",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {"target": "circle shape tool"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+            "step_id": "draw-circle",
+            "capability_id": "desktop.ui_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+            "step_id": "verify-saved-image",
+            "capability_id": "desktop.visual_verification",
+        },
+    ]
+    assert custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            **payload,
+            "pending_plan_steps": [
+                {
+                    "step_id": "run-script",
+                    "tool_name": "terminal.run",
+                    "capability_id": "terminal.execution",
+                    "input_preview": {"operation": "generate_report"},
+                }
+            ],
+        },
+        ["terminal.run"],
+    ) == []
 
 
 def test_model_followup_context_discovers_generic_communication_app_after_analysis() -> None:

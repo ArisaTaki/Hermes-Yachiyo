@@ -778,7 +778,8 @@ class RuntimeCustomApiAgentLoop:
             if not tool_requests:
                 if not content.strip():
                     raise self._error_type("Native Agent 模型返回了空回复")
-                followup_target = _latest_model_followup_target(timeline)
+                followup_context = _latest_model_followup_context(timeline)
+                followup_target = _model_followup_context_target(followup_context)
                 auto_app_write_requests = _model_followup_app_write_requests(
                     content,
                     followup_target,
@@ -896,6 +897,89 @@ class RuntimeCustomApiAgentLoop:
                     )
                     if direct_result:
                         return direct_result
+                else:
+                    auto_pending_plan_requests = _model_followup_pending_plan_requests(
+                        followup_context,
+                        allowed_tools,
+                    )
+                    if auto_pending_plan_requests:
+                        messages.append({"role": "assistant", "content": content})
+                        self._record_auto_model_followup_app_write_plan(
+                            auto_pending_plan_requests,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
+                        self._record_desktop_permission_preflight(
+                            auto_pending_plan_requests,
+                            broker,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
+                        self._record_desktop_tool_policy_decisions(
+                            auto_pending_plan_requests,
+                            allowed_tools=allowed_tools,
+                            agent=agent,
+                            run_id=run_id,
+                        )
+                        tool_timeline_start = len(timeline)
+                        try:
+                            self._run_tool_requests(
+                                auto_pending_plan_requests,
+                                allowed_tools,
+                                broker,
+                                messages,
+                                timeline,
+                                artifacts,
+                                next_iteration=iteration + 1,
+                                run_id=run_id,
+                                budget=budget,
+                            )
+                        except AgentApprovalRequired as exc:
+                            pending_approval = (
+                                exc.pending_approval if isinstance(exc.pending_approval, dict) else {}
+                            )
+                            planned_tool = str(
+                                pending_approval.get("tool")
+                                or auto_pending_plan_requests[0].get("tool")
+                                or ""
+                            )
+                            approval_request = self._planned_request_for_tool(
+                                auto_pending_plan_requests,
+                                planned_tool,
+                            )
+                            planned_input = self._pending_approval_input_preview(
+                                pending_approval,
+                                approval_request,
+                                (
+                                    auto_pending_plan_requests[0]
+                                    if auto_pending_plan_requests
+                                    else {}
+                                ),
+                            )
+                            self._record_desktop_intent_approval_required(
+                                planned_tool,
+                                planned_input,
+                                pending_approval=exc.pending_approval,
+                                timeline=timeline,
+                                run_id=run_id,
+                                source=self._approval_event_source(
+                                    approval_request,
+                                    planned_tool,
+                                ),
+                                planning_reason=self._approval_event_planning_reason(
+                                    approval_request,
+                                    planned_tool,
+                                ),
+                            )
+                            raise
+                        direct_result = self._direct_daily_desktop_sequence_result(
+                            auto_pending_plan_requests,
+                            timeline,
+                            tool_timeline_start=tool_timeline_start,
+                            run_id=run_id,
+                        )
+                        if direct_result:
+                            return direct_result
                 result_text, truncated = self._limit_model_output(content)
                 return self._model_output_text_factory(
                     result_text,
@@ -1137,7 +1221,7 @@ class RuntimeCustomApiAgentLoop:
             }
             if request.get("continue_to_model"):
                 payload["continue_to_model"] = True
-            for key in ("replan_request_id", "replan_trigger"):
+            for key in ("step_id", "capability_id", "replan_request_id", "replan_trigger"):
                 value = str(request.get(key) or "").strip()
                 if value:
                     payload[key] = value
@@ -7156,6 +7240,10 @@ def _model_followup_communication_instruction(target: Mapping[str, Any]) -> str:
 
 
 def _latest_model_followup_target(timeline: list[dict[str, Any]]) -> dict[str, Any]:
+    return _model_followup_context_target(_latest_model_followup_context(timeline))
+
+
+def _latest_model_followup_context(timeline: list[dict[str, Any]]) -> dict[str, Any]:
     for event in reversed(timeline):
         if not isinstance(event, dict):
             continue
@@ -7163,10 +7251,17 @@ def _latest_model_followup_target(timeline: list[dict[str, Any]]) -> dict[str, A
             continue
         if not _followup_event_has_readable_source(event):
             return {}
-        target = event.get("followup_target")
-        if isinstance(target, dict):
-            return dict(target)
+        return {
+            str(key): value
+            for key, value in event.items()
+            if key not in {"timestamp"}
+        }
     return {}
+
+
+def _model_followup_context_target(context: Mapping[str, Any]) -> dict[str, Any]:
+    target = context.get("followup_target") if isinstance(context, Mapping) else {}
+    return dict(target) if isinstance(target, dict) else {}
 
 
 def _followup_event_has_readable_source(event: Mapping[str, Any]) -> bool:
@@ -7184,6 +7279,95 @@ def _followup_event_has_readable_source(event: Mapping[str, Any]) -> bool:
         and bool(str(snapshot.get("text") or "").strip())
         for snapshot in snapshots
     )
+
+
+_MODEL_FOLLOWUP_AUTO_PENDING_TOOLS = {
+    "app.open",
+    "app.focus",
+    "app.open_and_safe_shortcut",
+    "app.focus_and_safe_shortcut",
+    "desktop.active_window",
+    "desktop.click_ui_element",
+    "desktop.read_ui",
+    "desktop.safe_key",
+    "desktop.safe_shortcut",
+    "desktop.safe_type_text",
+    "desktop.search_submit",
+    "desktop.submit_foreground",
+    "desktop.type_into_ui_element",
+    "desktop.ui_elements",
+    "screen.capture",
+}
+
+
+def _model_followup_pending_plan_requests(
+    followup_context: Mapping[str, Any] | None,
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    if not isinstance(followup_context, Mapping):
+        return []
+    raw_steps = followup_context.get("pending_plan_steps")
+    if not isinstance(raw_steps, list):
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    planning_reason = str(
+        followup_context.get("planning_reason") or "planner_followup_pending_plan"
+    ).strip()
+    requests: list[dict[str, Any]] = []
+    for raw_step in raw_steps:
+        if not isinstance(raw_step, Mapping):
+            continue
+        request = _model_followup_pending_plan_request(
+            raw_step,
+            allowed,
+            planning_reason=planning_reason,
+        )
+        if not request:
+            if requests:
+                break
+            continue
+        requests.append(request)
+        if len(requests) >= 3:
+            break
+    return requests
+
+
+def _model_followup_pending_plan_request(
+    step: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    planning_reason: str,
+) -> dict[str, Any]:
+    tool_name = str(step.get("tool_name") or "").strip()
+    if (
+        not tool_name
+        or tool_name not in allowed
+        or tool_name not in _MODEL_FOLLOWUP_AUTO_PENDING_TOOLS
+    ):
+        return {}
+    raw_input = step.get("input_preview") if isinstance(step.get("input_preview"), Mapping) else {}
+    if not raw_input and tool_name not in {
+        "desktop.active_window",
+        "desktop.read_ui",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+        "screen.capture",
+    }:
+        return {}
+    request = _request_like(
+        tool_name,
+        dict(raw_input),
+        source="runtime_planner",
+        planning_reason=planning_reason or "planner_followup_pending_plan",
+    )
+    step_id = str(step.get("step_id") or "").strip()
+    if step_id:
+        request["step_id"] = step_id
+    capability_id = str(step.get("capability_id") or "").strip()
+    if capability_id:
+        request["capability_id"] = capability_id
+    return request
 
 
 def _model_followup_app_write_requests(
