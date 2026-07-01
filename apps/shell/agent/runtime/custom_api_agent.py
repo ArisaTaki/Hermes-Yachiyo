@@ -6430,10 +6430,15 @@ def _auto_desktop_observed_type_requests(
     text = str(target.get("text") or "")
     if not target_label or not text:
         return []
+    role_filter = str(target.get("role_filter") or "").strip()
+    execution_target = _desktop_observed_action_execution_target(
+        target_label,
+        role_filter,
+    )
     base_input = {
-        "target": target_label,
+        "target": execution_target,
         "text": text,
-        "role_filter": str(target.get("role_filter") or "").strip(),
+        "role_filter": role_filter,
         "limit": _clean_model_followup_int(target.get("limit"), default=80),
     }
     if "desktop.type_into_ui_element" in allowed:
@@ -6452,8 +6457,8 @@ def _auto_desktop_observed_type_requests(
         click_request = _request_like(
             "desktop.click_ui_element",
             {
-                "target": target_label,
-                "role_filter": str(target.get("role_filter") or "").strip(),
+                "target": execution_target,
+                "role_filter": role_filter,
                 "click_count": 1,
                 "limit": _clean_model_followup_int(target.get("limit"), default=80),
             },
@@ -6463,8 +6468,8 @@ def _auto_desktop_observed_type_requests(
     elif "desktop.click" in allowed:
         center = _latest_desktop_observation_match_center(
             timeline,
-            target_label,
-            str(target.get("role_filter") or "").strip(),
+            execution_target,
+            role_filter,
         )
         if not center:
             return []
@@ -6497,6 +6502,19 @@ def _latest_desktop_observation_succeeded(timeline: list[dict[str, Any]]) -> boo
         result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
         return result.get("ok") is True
     return False
+
+
+def _desktop_observed_action_execution_target(target: str, role_filter: str) -> str:
+    clean_target = str(target or "").strip()
+    normalized_target = _normalize_observed_desktop_text(clean_target)
+    normalized_filter = _normalize_observed_desktop_text(role_filter)
+    if normalized_target in {"text input", "input"} and normalized_filter in {
+        "text field",
+        "textfield",
+        "axtextfield",
+    }:
+        return "text field"
+    return clean_target
 
 
 def _latest_desktop_observation_match_center(
@@ -6601,7 +6619,11 @@ def _observed_desktop_element_match_score(
 
 
 def _normalize_observed_desktop_text(value: Any) -> str:
-    return re.sub(r"\s+", " ", str(value or "").strip().casefold())
+    text = str(value or "").strip().casefold()
+    text = re.sub(r"\baxtextfield\b", "text field", text)
+    text = re.sub(r"\baxbutton\b", "button", text)
+    text = re.sub(r"\baxlink\b", "link", text)
+    return re.sub(r"\s+", " ", text)
 
 
 def _drop_completed_auto_followup_prefix(

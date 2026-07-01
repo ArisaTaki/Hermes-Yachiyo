@@ -3215,7 +3215,7 @@ def test_auto_followup_dispatches_observed_desktop_type_action() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.type_into_ui_element",
             "input": {
-                "target": "text input",
+                "target": "text field",
                 "text": "hello",
                 "role_filter": "text field",
                 "limit": 80,
@@ -3233,7 +3233,7 @@ def test_auto_followup_dispatches_observed_desktop_type_action() -> None:
             "protocol": "json_fallback",
             "tool": "desktop.click_ui_element",
             "input": {
-                "target": "text input",
+                "target": "text field",
                 "role_filter": "text field",
                 "click_count": 1,
                 "limit": 80,
