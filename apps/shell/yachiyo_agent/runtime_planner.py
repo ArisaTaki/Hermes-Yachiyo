@@ -4374,7 +4374,7 @@ class RuntimePlanner:
                     )
                 )
                 return steps
-            if not app_search_needs_verify or not app_name:
+            if not app_search_needs_verify or not (app_name or selected_discovered_app_step_id):
                 return steps
             verify_tool = _first_allowed(
                 ("desktop.ui_elements", "desktop.active_window", "screen.capture"),

@@ -8332,6 +8332,7 @@ def test_runtime_planner_discovers_generic_design_tool_before_searching() -> Non
         "focus-app-search-field",
         "type-app-search-query",
         "submit-app-search",
+        "verify-desktop-result",
     ]
     assert _step_by_id(decision, "discover_apps-desktop-state").input_preview == {
         "query": "image",
@@ -8348,6 +8349,10 @@ def test_runtime_planner_discovers_generic_design_tool_before_searching() -> Non
     assert _step_by_id(decision, "type-app-search-query").input_preview == {
         "text": "logo 模板"
     }
+    assert _step_by_id(decision, "verify-desktop-result").tool_name == "desktop.ui_elements"
+    assert _step_by_id(decision, "verify-desktop-result").depends_on == [
+        "submit-app-search"
+    ]
     assert planner_tool_requests(prompt, allowed_tools) == [
         {
             "protocol": "json_fallback",
