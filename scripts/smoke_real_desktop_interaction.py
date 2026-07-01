@@ -35,6 +35,8 @@ from scripts.smoke_real_desktop_app_open import (
 DEFAULT_INPUT_TEXT = "42"
 _AFTER_CLICK_VERIFY_MAX_POLLS = 5
 _AFTER_CLICK_VERIFY_POLL_INTERVAL_SECONDS = 0.2
+_PRE_CLICK_FOCUS_MAX_ATTEMPTS = 3
+_PRE_CLICK_FOCUS_RETRY_INTERVAL_SECONDS = 0.2
 TOOL_CHAIN = [
     "desktop.active_window",
     "desktop.list_apps",
@@ -117,6 +119,34 @@ def _visible_values(result: dict[str, Any]) -> list[str]:
             if value and value not in values:
                 values.append(value)
     return values
+
+
+def _focus_verified(result: dict[str, Any]) -> bool:
+    return result.get("ok") is True and _data(result).get("focus_verified") is True
+
+
+def _focus_retryable(result: dict[str, Any]) -> bool:
+    return (
+        _data(result).get("retryable") is True
+        or str(result.get("error") or "") == "app_focus_not_verified"
+        or str(result.get("blocking_condition") or "") == "foreground_focus_unavailable"
+    )
+
+
+def _focus_with_retries(app_name: str) -> tuple[dict[str, Any], list[dict[str, Any]], bool]:
+    attempts: list[dict[str, Any]] = []
+    result: dict[str, Any] = {}
+    for attempt in range(1, _PRE_CLICK_FOCUS_MAX_ATTEMPTS + 1):
+        result = desktop_tools.app_focus(app_name)
+        verified = _focus_verified(result)
+        attempts.append({"attempt": attempt, "result": result, "focus_verified": verified})
+        if verified:
+            break
+        if attempt < _PRE_CLICK_FOCUS_MAX_ATTEMPTS and _focus_retryable(result):
+            time.sleep(_PRE_CLICK_FOCUS_RETRY_INTERVAL_SECONDS)
+            continue
+        break
+    return result, attempts, _focus_verified(result)
 
 
 def _poll_after_click_values(
@@ -405,9 +435,7 @@ def run_smoke(
         )
 
     focus_result = desktop_tools.app_focus(opened_app_name)
-    focus_verified = focus_result.get("ok") is True and _data(focus_result).get(
-        "focus_verified"
-    ) is True
+    focus_verified = _focus_verified(focus_result)
     if not focus_verified:
         return fail_stage(
             "app_focus",
@@ -484,10 +512,9 @@ def run_smoke(
             },
         )
 
-    pre_click_focus_result = desktop_tools.app_focus(opened_app_name)
-    pre_click_focus_verified = pre_click_focus_result.get("ok") is True and _data(
-        pre_click_focus_result
-    ).get("focus_verified") is True
+    pre_click_focus_result, pre_click_focus_attempts, pre_click_focus_verified = (
+        _focus_with_retries(opened_app_name)
+    )
     if not pre_click_focus_verified:
         return fail_stage(
             "pre_click_focus",
@@ -510,6 +537,7 @@ def run_smoke(
                 "before_values": before_values,
                 "sign_target": sign_target,
                 "pre_click_focus_result": pre_click_focus_result,
+                "pre_click_focus_attempts": pre_click_focus_attempts,
             },
         )
 
@@ -683,6 +711,7 @@ def run_smoke(
         "type_result": type_result,
         "before_ui": before_ui,
         "pre_click_focus_result": pre_click_focus_result,
+        "pre_click_focus_attempts": pre_click_focus_attempts,
         "pre_click_window": pre_click_window,
         "click_result": click_result,
         "click_attempts": click_attempts,

@@ -240,6 +240,7 @@ def test_real_desktop_interaction_smoke_types_clicks_and_verifies(monkeypatch):
     assert evidence["click_attempts"][0]["result"]["error"] == "foreground_app_mismatch"
     assert evidence["click_attempts"][1]["result"]["ok"] is True
     assert evidence["retry_active_app_matches"] is True
+    assert len(evidence["pre_click_focus_attempts"]) == 1
     assert evidence["checks"]["signed_value_visible"] is True
     assert evidence["sign_target"] == "更改数值符号"
     assert all(evidence["checks"].values())
@@ -391,6 +392,94 @@ def test_real_desktop_interaction_smoke_allows_existing_app_when_requested(monke
     assert evidence["checks"]["existing_app_allowed"] is True
     assert evidence["cleanup"]["attempted"] is False
     assert evidence["cleanup"]["reason"] == "app was already running before smoke"
+    assert evidence["after_values"] == ["-42"]
+
+
+def test_real_desktop_interaction_smoke_retries_pre_click_focus(monkeypatch):
+    statuses = iter([False, True, False])
+    active_windows = iter(
+        [
+            {"ok": True, "data": {"app_name": "Codex"}},
+            {"ok": True, "data": {"app_name": "Calculator"}},
+        ]
+    )
+    focus_results = iter(
+        [
+            {"ok": True, "data": {"app_name": "Calculator", "focus_verified": True}},
+            {
+                "ok": False,
+                "error": "app_focus_not_verified",
+                "blocking_condition": "foreground_focus_unavailable",
+                "data": {
+                    "app_name": "Calculator",
+                    "frontmost_app": "Google Chrome",
+                    "focus_verified": False,
+                    "retryable": True,
+                },
+            },
+            {"ok": True, "data": {"app_name": "Calculator", "focus_verified": True}},
+        ]
+    )
+    ui_results = iter(
+        [
+            {
+                "ok": True,
+                "data": {
+                    "app_name": "Calculator",
+                    "elements": [
+                        {"role": "AXStaticText", "name": "42", "value": "42"},
+                        {"role": "AXButton", "name": "更改数值符号", "description": "按钮"},
+                    ],
+                },
+            },
+            {
+                "ok": True,
+                "data": {
+                    "app_name": "Calculator",
+                    "elements": [
+                        {"role": "AXStaticText", "name": "-42", "value": "-42"},
+                    ],
+                },
+            },
+        ]
+    )
+    monkeypatch.setattr(smoke.platform, "system", lambda: "Darwin")
+    monkeypatch.setattr(smoke.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(smoke.desktop_tools, "active_window", lambda: next(active_windows))
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "list_apps",
+        lambda **_kwargs: {"ok": True, "data": {"apps": [{"name": "Calculator"}]}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_status",
+        lambda app_name: {"ok": True, "data": {"app_name": app_name, "running": next(statuses)}},
+    )
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_open",
+        lambda app_name: {"ok": True, "data": {"app_name": app_name}},
+    )
+    monkeypatch.setattr(smoke.desktop_tools, "app_focus", lambda app_name: next(focus_results))
+    monkeypatch.setattr(smoke.desktop_tools, "desktop_safe_key", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(smoke.desktop_tools, "desktop_safe_type_text", lambda _text: {"ok": True})
+    monkeypatch.setattr(smoke.desktop_tools, "ui_elements", lambda **_kwargs: next(ui_results))
+    monkeypatch.setattr(smoke.desktop_tools, "click_ui_element", lambda *_args, **_kwargs: {"ok": True})
+    monkeypatch.setattr(
+        smoke.desktop_tools,
+        "app_quit",
+        lambda app_name: {"ok": True, "data": {"app_name": app_name, "running": False}},
+    )
+
+    evidence = smoke.run_smoke()
+
+    assert evidence["ok"] is True
+    assert [item["focus_verified"] for item in evidence["pre_click_focus_attempts"]] == [
+        False,
+        True,
+    ]
+    assert evidence["checks"]["pre_click_focus_verified"] is True
     assert evidence["after_values"] == ["-42"]
 
 
