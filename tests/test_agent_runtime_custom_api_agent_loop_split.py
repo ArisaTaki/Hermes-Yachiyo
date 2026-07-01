@@ -18867,6 +18867,108 @@ def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_bef
     assert non_planner_run_events[-1]["payload"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
 
 
+def test_runtime_tool_runner_skips_unresolved_selected_discovered_app() -> None:
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = []
+    messages = [
+        {"role": "system", "content": "Use tools."},
+        {"role": "user", "content": "打开 PixelForge"},
+    ]
+    run_events: list[dict[str, Any]] = []
+    tool_calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_value: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        tool_calls.append((tool, dict(payload)))
+        assert tool == "desktop.list_apps"
+        result = {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": "No installed apps matching PixelForge",
+            "data": {"query": "PixelForge", "apps": [], "count": 0},
+        }
+        timeline_value.append(
+            _timeline(
+                "agent.tool.call",
+                tool,
+                input_preview=dict(payload),
+                result=result,
+            )
+        )
+        return result
+
+    runner = RuntimeToolRequestRunner(
+        normalize_tool_name=normalize_tool_name,
+        input_preview=tool_input_preview,
+        run_budget=lambda _run_id, _timeline_value: budget,
+        user_goal_from_messages=lambda value: str(value[1].get("content") or ""),
+        goal_disallows_tool=lambda _goal, _tool: "",
+        timeline_factory=_timeline,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+        tool_loop_projection=RuntimeToolLoopProjectionBuilder(),
+        pending_approval_builder=NoopPendingApprovalBuilder(),
+        call_agent_tool=call_agent_tool,
+    )
+
+    runner.run(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": "PixelForge", "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": "PixelForge",
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+        ],
+        ["desktop.list_apps", "app.open"],
+        broker={},
+        messages=messages,
+        timeline=timeline,
+        artifacts=[],
+        next_iteration=1,
+        run_id="run-unresolved-app",
+        budget=budget,
+    )
+
+    assert tool_calls == [("desktop.list_apps", {"query": "PixelForge", "limit": 20})]
+    skipped = next(event for event in timeline if event["event"] == "agent.tool.skipped")
+    assert skipped["detail"] == "app.open"
+    assert skipped["result"]["error"] == "app_resolution_failed"
+    assert skipped["result"]["blocked_by_app_resolution"] is True
+    assert skipped["result"]["recovery_actions"] == [
+        {
+            "label": "重新发现应用",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "permission_target": "app_discovery",
+            "risk_level": "low",
+        }
+    ]
+    assert budget.tool_claims == [("app.open", False)]
+    assert run_events[-1]["event_type"] == "agent.tool.skipped"
+    assert run_events[-1]["payload"]["result"]["error"] == "app_resolution_failed"
+
+
 def test_main_chat_desktop_intent_returns_deterministic_result_without_model() -> None:
     budget = FakeBudget()
     order: list[str] = []

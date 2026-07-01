@@ -661,9 +661,13 @@ class RuntimeToolRequestRunner:
                 app_name_resolution,
             )
             trace_payload = _tool_request_trace_payload(tool_request)
-            runtime_skip = None
+            runtime_skip = _unresolved_discovered_app_skip_result(
+                tool_name,
+                raw_input,
+                app_name_resolution,
+            )
             if not _broker_requires_approval(broker, tool_name):
-                runtime_skip = _runtime_readiness_skip_result(
+                runtime_skip = runtime_skip or _runtime_readiness_skip_result(
                     tool_name,
                     raw_input,
                     foreground_readiness_blocker,
@@ -901,6 +905,59 @@ def _runtime_readiness_skip_result(
     if isinstance(recommended_tools, list) and recommended_tools:
         result["recommended_tools"] = recommended_tools
     return result
+
+
+def _unresolved_discovered_app_skip_result(
+    tool_name: str,
+    raw_input: dict[str, Any],
+    app_name_resolution: dict[str, str],
+) -> dict[str, Any] | None:
+    if app_name_resolution:
+        return None
+    requested_app = _selected_discovered_app_requested_name(raw_input)
+    if not requested_app:
+        return None
+    result: dict[str, Any] = {
+        "ok": False,
+        "skipped": True,
+        "blocked_by_app_resolution": True,
+        "tool": tool_name,
+        "action": tool_name,
+        "error": "app_resolution_failed",
+        "blocking_condition": "app_resolution_failed",
+        "blocking_conditions": ["app_resolution_failed"],
+        "source_tool": "desktop.list_apps",
+        "source_summary": f"No installed app was selected for {requested_app}.",
+        "hint": (
+            "desktop.list_apps did not return a high-confidence app match. "
+            "Discover the app again or ask the user to choose a candidate before executing."
+        ),
+        "data": {
+            "requested_app_name": requested_app,
+            "selection_source": "desktop.list_apps",
+            "skipped_tool": tool_name,
+            "skipped_input": raw_input,
+        },
+        "recommended_tools": ["desktop.list_apps"],
+        "recovery_actions": [
+            {
+                "label": "重新发现应用",
+                "tool": "desktop.list_apps",
+                "input": {"query": requested_app, "limit": 20},
+                "permission_target": "app_discovery",
+                "risk_level": "low",
+            }
+        ],
+    }
+    return result
+
+
+def _selected_discovered_app_requested_name(raw_input: dict[str, Any]) -> str:
+    raw_app_name = str(raw_input.get("app_name") or "").strip()
+    selection_source = str(raw_input.get("selection_source") or "").strip()
+    if raw_app_name != _SELECTED_DESKTOP_APP_NAME and selection_source != "desktop.list_apps":
+        return ""
+    return str(raw_input.get("query") or raw_app_name or "").strip()
 
 
 def _broker_requires_approval(broker: Any, tool_name: str) -> bool:
