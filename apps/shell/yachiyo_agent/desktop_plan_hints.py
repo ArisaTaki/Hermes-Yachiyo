@@ -383,6 +383,15 @@ def _looks_like_current_window_observation(value: str, lowered: str) -> bool:
 
 def focus_window_hint(text: str) -> dict[str, str] | None:
     value = clean(text)
+    if re.search(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:切换到|切到|聚焦|激活|置前)\s*"
+        r"(?:(?:一个|一款|任意|任何|默认|可用|正在运行|运行中|已打开|打开的)(?:的)?\s*)*"
+        r"(?:浏览器|browser)\s*(?:窗口|window)$",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return None
     patterns = (
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:切换到|切到|聚焦|激活|置前)\s*(?P<app>[^。！？!?，,]+?)"

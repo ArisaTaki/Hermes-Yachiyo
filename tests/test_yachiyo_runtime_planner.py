@@ -10704,6 +10704,51 @@ def test_runtime_planner_routes_focus_window_to_focus_window_tool() -> None:
     assert _step_by_id(decision, "verify-desktop-result").depends_on == ["focus-app-window"]
 
 
+def test_runtime_planner_focuses_generic_browser_window_through_discovery() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.windows",
+        "app.focus_window",
+        "desktop.active_window",
+    ]
+
+    for prompt in ("切到一个正在运行的浏览器窗口", "focus a running browser window"):
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == ""
+        assert decision.selected_intent.inputs["operation_hint"] == "discover_apps"
+        assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+            "action": "discover_apps",
+            "query": "browser",
+        }
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover_apps-desktop-state",
+            "open-selected-discovered-app",
+        ]
+        assert _step_by_id(decision, "open-selected-discovered-app").tool_name == (
+            "app.focus"
+        )
+        assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": "browser",
+        }
+
+    named_window = RuntimePlanner().decision(
+        "切到 Safari 的下载窗口",
+        allowed_tools=allowed_tools,
+    )
+    assert named_window.selected_intent.inputs["operation_hint"] == "focus_window"
+    assert _step_by_id(named_window, "focus-app-window").tool_name == "app.focus_window"
+    assert _step_by_id(named_window, "focus-app-window").input_preview == {
+        "app_name": "Safari",
+        "title_contains": "下载",
+    }
+
+
 def test_runtime_planner_routes_current_ui_inspection_to_ui_elements() -> None:
     decision = RuntimePlanner().decision(
         "当前界面有哪些按钮",

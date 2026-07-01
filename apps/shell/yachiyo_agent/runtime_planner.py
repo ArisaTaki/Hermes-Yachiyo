@@ -3189,6 +3189,7 @@ class RuntimePlanner:
                 allowed,
                 safe_shortcut=safe_shortcut,
                 target_path=selected_app_target_path,
+                mode=mode,
             )
             if action == "discover_apps" and _discovered_app_open_requested(intent) and selected_app_tool:
                 selected_app_capability = (
@@ -3323,6 +3324,7 @@ class RuntimePlanner:
             selected_app_tool = _selected_discovered_app_tool(
                 allowed,
                 safe_shortcut=safe_shortcut,
+                mode=mode,
             )
             if action == "discover_apps" and _discovered_app_open_requested(intent) and selected_app_tool:
                 selected_app_capability = (
@@ -8089,6 +8091,7 @@ def _selected_discovered_app_tool(
     *,
     safe_shortcut: Mapping[str, Any] | None,
     target_path: str = "",
+    mode: str = "open",
 ) -> str:
     if str(target_path or "").strip():
         tool_name = _first_allowed(("desktop.open_path_with_app",), allowed)
@@ -8098,7 +8101,7 @@ def _selected_discovered_app_tool(
         tool_name = _first_allowed(("app.open_and_safe_shortcut",), allowed)
         if tool_name:
             return tool_name
-    tool_name = _first_allowed(("app.open",), allowed)
+    tool_name = _first_allowed(app_control_tool_candidates(mode), allowed)
     if tool_name:
         return tool_name
     return ""
@@ -16343,10 +16346,17 @@ def _generic_browser_app_target_requested(text: str) -> bool:
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|启动|开启|切到|聚焦|检查|查看|看看)\s*"
         r"(?:一个|一款|默认|任意|任何|可用)?\s*浏览器(?:\s*(?:一下|下|起来|开了吗|打开了吗))?\s*[?？。！!]*$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:切换到|切到|聚焦|激活|置前)\s*"
+        r"(?:(?:一个|一款|任意|任何|默认|可用|正在运行|运行中|已打开|打开的)(?:的)?\s*)*"
+        r"浏览器\s*窗口\s*[?？。！!]*$",
         r"^(?:默认|任意|任何)?\s*浏览器.{0,24}"
         r"(?:有哪些|有什么|按钮|控件|元素|界面|窗口|开了吗|打开了吗|是否打开)",
         r"\b(?:open|launch|start|focus|inspect|check)\s+(?:the\s+)?"
         r"(?:(?:default|any)\s+)?browser\b\s*[.!?]*$",
+        r"\b(?:focus|activate|switch\s+to)\s+"
+        r"(?:(?:a|an|the|any|default|available|running|open)\s+)*"
+        r"(?:browser|web\s+browser)\s+window\b\s*[.!?]*$",
         r"\b(?:(?:default|any)\s+)?browser\s+"
         r"(?:buttons?|controls?|elements?|visible|running|open)\b",
     )
@@ -22118,6 +22128,8 @@ def _discovered_app_open_requested(intent: TaskIntentSnapshot) -> bool:
         safe_shortcut = intent.inputs.get("safe_shortcut_hint")
         if _explicit_app_open_request(text):
             return True
+        if app_control_mode(text) == "focus":
+            return True
         if str(intent.inputs.get("selected_app_target_path_hint") or "").strip():
             return True
         if (
@@ -22159,7 +22171,7 @@ def _discovered_app_open_requested(intent: TaskIntentSnapshot) -> bool:
     if (
         isinstance(desktop_discovery, Mapping)
         and str(desktop_discovery.get("action") or "").strip() == "discover_apps"
-        and _explicit_app_open_request(text)
+        and (_explicit_app_open_request(text) or app_control_mode(text) == "focus")
     ):
         return True
     return bool(
