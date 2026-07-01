@@ -8358,6 +8358,16 @@ def test_runtime_planner_discovers_generic_design_tool_before_searching() -> Non
             "continue_to_model": True,
         }
     ]
+    assert planner_direct_tool_requests(prompt, allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "image", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
 
 
 def test_runtime_planner_discovers_prefixed_generic_tool_categories() -> None:

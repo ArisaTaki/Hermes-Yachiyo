@@ -882,14 +882,16 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
     if _has_unavailable_required_desktop_step(decision):
         return []
     requests: list[dict[str, Any]] = []
-    for step in decision.plan.tool_plan.steps:
+    steps = list(decision.plan.tool_plan.steps)
+    model_selected_step_ids = _model_selected_desktop_step_ids(steps)
+    for step in steps:
         if not _step_available(step):
             continue
         step_id = str(getattr(step, "step_id", "") or "").strip()
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if not tool_name or tool_name not in allowed:
             continue
-        if step_id in {"write-desktop-content-artifact", "open-selected-discovered-app"}:
+        if step_id == "write-desktop-content-artifact" or step_id in model_selected_step_ids:
             continue
         if step_id == "discover-desktop-state" and not _keep_direct_discovery_step(step, tool_name):
             continue
