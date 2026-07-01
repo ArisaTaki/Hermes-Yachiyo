@@ -3277,6 +3277,12 @@ class RuntimePlanner:
                     allowed,
                     depends_on=selected_discovered_app_action_dependency,
                 )
+                _append_selected_discovered_launch_verification_step(
+                    steps,
+                    intent,
+                    allowed,
+                    depends_on="open-selected-discovered-app",
+                )
             return steps
         if (
             not app_name
@@ -8279,6 +8285,68 @@ def _append_selected_discovered_app_observation_step(
             reason=(
                 "Observe the model-selected app after opening it because the user asked "
                 "for a follow-up desktop action, not just app launch."
+            ),
+        )
+    )
+
+
+def _append_selected_discovered_launch_verification_step(
+    steps: list[ToolPlanStepSnapshot],
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    *,
+    depends_on: str,
+) -> None:
+    if not steps or steps[-1].step_id != depends_on:
+        return
+    selected_step = next((step for step in steps if step.step_id == depends_on), None)
+    if selected_step is None:
+        return
+    selected_tool = str(selected_step.tool_name or "").strip()
+    selected_payload = (
+        selected_step.input_preview
+        if isinstance(selected_step.input_preview, Mapping)
+        else {}
+    )
+    embedded_action = bool(str(selected_payload.get("action") or "").strip()) or selected_tool in {
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+    }
+    verify_tool = _first_allowed(
+        (
+            ("desktop.ui_elements", "desktop.active_window", "screen.capture")
+            if embedded_action
+            else ("desktop.active_window", "desktop.ui_elements", "screen.capture")
+        ),
+        allowed,
+    )
+    if not verify_tool:
+        return
+    if verify_tool in {"desktop.ui_elements", "desktop.read_ui"}:
+        input_preview = {"limit": 80} if embedded_action else {}
+    elif verify_tool == "screen.capture":
+        input_preview = {
+            "reason": (
+                "verify selected discovered app action"
+                if embedded_action
+                else "verify selected discovered app launch"
+            )
+        }
+    else:
+        input_preview = {}
+    steps.append(
+        _step(
+            intent,
+            "verify-desktop-result",
+            "Verify desktop result",
+            "desktop.app_discovery",
+            verify_tool,
+            input_preview=input_preview,
+            depends_on=[depends_on],
+            action=_desktop_discovery_action(verify_tool),
+            reason=(
+                "Observe the selected discovered app after opening or focusing it, "
+                "so the desktop execution path follows discover, act, verify."
             ),
         )
     )

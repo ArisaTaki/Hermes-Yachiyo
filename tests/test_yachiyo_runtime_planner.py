@@ -2893,6 +2893,7 @@ def test_planner_does_not_duplicate_selected_app_open_shortcut_followup() -> Non
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
+        "verify-desktop-result",
     ]
     selected_app = _step_by_id(decision, "open-selected-discovered-app")
     assert selected_app.tool_name == "app.open_and_safe_shortcut"
@@ -2902,6 +2903,10 @@ def test_planner_does_not_duplicate_selected_app_open_shortcut_followup() -> Non
         "query": "document",
         "action": "new_document",
     }
+    assert _step_by_id(decision, "verify-desktop-result").tool_name == "desktop.ui_elements"
+    assert _step_by_id(decision, "verify-desktop-result").depends_on == [
+        "open-selected-discovered-app"
+    ]
 
 
 def test_planner_selection_payload_surfaces_discovered_app_open_path_target() -> None:
@@ -9065,6 +9070,13 @@ def test_runtime_planner_discovers_chinese_generic_editor_apps_before_acting() -
         assert [step.step_id for step in decision.plan.tool_plan.steps] == [
             "discover_apps-desktop-state",
             "open-selected-discovered-app",
+            "verify-desktop-result",
+        ]
+        assert _step_by_id(decision, "verify-desktop-result").tool_name == (
+            "desktop.active_window"
+        )
+        assert _step_by_id(decision, "verify-desktop-result").depends_on == [
+            "open-selected-discovered-app"
         ]
         assert planner_tool_requests(prompt, allowed_tools) == [
             {
@@ -9074,7 +9086,25 @@ def test_runtime_planner_discovers_chinese_generic_editor_apps_before_acting() -
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
                 "continue_to_model": True,
-            }
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": query,
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.active_window",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
         ]
 
     assert RuntimePlanner().decision(
@@ -9709,6 +9739,13 @@ def test_runtime_planner_discovers_generic_file_manager_before_acting() -> None:
         assert [step.step_id for step in decision.plan.tool_plan.steps] == [
             "discover_apps-desktop-state",
             "open-selected-discovered-app",
+            "verify-desktop-result",
+        ]
+        assert _step_by_id(decision, "verify-desktop-result").tool_name == (
+            "desktop.active_window"
+        )
+        assert _step_by_id(decision, "verify-desktop-result").depends_on == [
+            "open-selected-discovered-app"
         ]
         assert planner_tool_requests(prompt, allowed_tools) == [
             {
@@ -9718,7 +9755,25 @@ def test_runtime_planner_discovers_generic_file_manager_before_acting() -> None:
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
                 "continue_to_model": True,
-            }
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": "file manager",
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.active_window",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
         ]
 
     assert planner_tool_requests("打开 Finder", allowed_tools) == [
@@ -10469,13 +10524,22 @@ def test_runtime_planner_discovers_generic_music_app_before_acting() -> None:
             "action": "discover_apps",
             "query": "music",
         }
-        assert decision.selected_intent.inputs["generic_music_app_discovery_hint"] == {
-            "query": "music",
-            "description": "music",
-        }
+        app_discovery_hint = (
+            decision.selected_intent.inputs.get("generic_music_app_discovery_hint")
+            or decision.selected_intent.inputs.get("app_capability_hint")
+        )
+        assert app_discovery_hint is not None
+        assert app_discovery_hint["query"] == "music"
         assert [step.step_id for step in decision.plan.tool_plan.steps] == [
             "discover_apps-desktop-state",
             "open-selected-discovered-app",
+            "verify-desktop-result",
+        ]
+        assert _step_by_id(decision, "verify-desktop-result").tool_name == (
+            "desktop.active_window"
+        )
+        assert _step_by_id(decision, "verify-desktop-result").depends_on == [
+            "open-selected-discovered-app"
         ]
         assert planner_tool_requests(prompt, allowed_tools) == [
             {
@@ -10485,7 +10549,25 @@ def test_runtime_planner_discovers_generic_music_app_before_acting() -> None:
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
                 "continue_to_model": True,
-            }
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": "music",
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.active_window",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
         ]
 
     capability_decision = RuntimePlanner().decision(
@@ -10504,7 +10586,25 @@ def test_runtime_planner_discovers_generic_music_app_before_acting() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
             "continue_to_model": True,
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "music",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
     playback = RuntimePlanner().decision(
@@ -10727,6 +10827,7 @@ def test_runtime_planner_focuses_generic_browser_window_through_discovery() -> N
         assert [step.step_id for step in decision.plan.tool_plan.steps] == [
             "discover_apps-desktop-state",
             "open-selected-discovered-app",
+            "verify-desktop-result",
         ]
         assert _step_by_id(decision, "open-selected-discovered-app").tool_name == (
             "app.focus"
@@ -10736,6 +10837,12 @@ def test_runtime_planner_focuses_generic_browser_window_through_discovery() -> N
             "selection_source": "desktop.list_apps",
             "query": "browser",
         }
+        assert _step_by_id(decision, "verify-desktop-result").tool_name == (
+            "desktop.active_window"
+        )
+        assert _step_by_id(decision, "verify-desktop-result").depends_on == [
+            "open-selected-discovered-app"
+        ]
 
     named_window = RuntimePlanner().decision(
         "切到 Safari 的下载窗口",
