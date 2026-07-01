@@ -228,6 +228,30 @@ export type TaskCoreSnapshot = {
   source?: string;
 };
 
+export type TaskReplanRequestSnapshot = {
+  request_id: string;
+  trigger: string;
+  status?: 'requested' | 'planned' | 'running' | 'completed' | 'blocked' | string;
+  run_id?: string | null;
+  task_id?: string | null;
+  decision_id?: string | null;
+  plan_id?: string | null;
+  core_id?: string | null;
+  source_step_id?: string | null;
+  source_tool_name?: string | null;
+  target_capability_id?: string;
+  condition?: string;
+  reason?: string;
+  failure_event_type?: string;
+  failure_detail?: string;
+  fallback_tools?: string[];
+  replan_prompt?: string;
+  route_to_studio?: boolean;
+  metadata?: Record<string, unknown>;
+  created_at?: string;
+  source?: string;
+};
+
 export type RuntimePlanSnapshot = {
   plan_id: string;
   intent: TaskIntentSnapshot;

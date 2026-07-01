@@ -38,6 +38,8 @@ from apps.shell.yachiyo_agent.hotkey_hints import (
 )
 from apps.shell.yachiyo_agent.planner_projection import (
     planner_enriched_chat_request,
+    planner_replan_run_event_payload,
+    planner_replan_timeline_event,
     planner_selection_payload,
     planner_selection_timeline_event,
     planner_timeline_events,
@@ -1623,6 +1625,52 @@ def test_runtime_planner_emits_deepagent_style_task_core() -> None:
         "write-analysis-artifact",
     ]
     assert any(signal.trigger == "tool_failure" for signal in task_core.replan_signals)
+
+
+def test_runtime_planner_builds_replan_request_from_failed_step() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+    request_event = planner_replan_timeline_event(
+        decision,
+        {
+            "event_type": "agent.tool.call",
+            "step_id": "run-analysis",
+            "tool_name": "data.analyze",
+            "result": {"ok": False, "error": "unsupported chart type"},
+        },
+        run_id="run-1",
+        task_id="task-1",
+    )
+    run_event = planner_replan_run_event_payload(
+        decision,
+        {
+            "event_type": "agent.tool.call",
+            "step_id": "run-analysis",
+            "tool_name": "data.analyze",
+            "result": {"ok": False, "error": "unsupported chart type"},
+        },
+    )
+
+    assert request_event is not None
+    assert request_event["event"] == "agent.replan.requested"
+    payload = request_event["payload"]
+    assert payload["trigger"] == "tool_failure"
+    assert payload["run_id"] == "run-1"
+    assert payload["task_id"] == "task-1"
+    assert payload["decision_id"] == decision.decision_id
+    assert payload["plan_id"] == decision.plan.plan_id
+    assert payload["core_id"] == decision.plan.task_core.core_id
+    assert payload["source_step_id"] == "run-analysis"
+    assert payload["source_tool_name"] == "data.analyze"
+    assert payload["target_capability_id"] == "data.analysis"
+    assert payload["fallback_tools"] == ["terminal.run"]
+    assert "unsupported chart type" in payload["failure_detail"]
+    assert "Continue from the existing task workspace" in payload["replan_prompt"]
+    assert run_event is not None
+    assert run_event[0] == "agent.replan.requested"
+    assert run_event[1]["request_id"] == payload["request_id"]
 
 
 def test_runtime_planner_timeline_events_include_full_studio_trace_payloads() -> None:

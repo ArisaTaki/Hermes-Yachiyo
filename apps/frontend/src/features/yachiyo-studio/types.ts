@@ -49,6 +49,7 @@ export type {
   ReplanSignalSnapshot,
   TaskCheckpointSnapshot,
   TaskCoreSnapshot,
+  TaskReplanRequestSnapshot,
   TaskTodoItemSnapshot,
   UpdateRestrictedToolPluginRequest,
   WorkflowRunSnapshot,

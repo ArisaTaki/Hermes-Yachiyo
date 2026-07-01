@@ -2325,6 +2325,7 @@ class RuntimePlanner:
                             "Analyze captured visible, selected, clipboard, or page data with "
                             "the built-in local parser before escalating to terminal.run."
                         ),
+                        fallback_tools=_data_analyze_fallback_tools(allowed),
                     ),
                 ]
                 return _append_data_analysis_followup_steps(
@@ -2418,6 +2419,7 @@ class RuntimePlanner:
                         "Use the built-in local parser for straightforward CSV, TSV, JSON, JSONL, XLSX, "
                         "text-table, and standard report artifacts before escalating to terminal.run."
                     ),
+                    fallback_tools=_data_analyze_fallback_tools(allowed),
                 )
             ]
             return _append_data_analysis_followup_steps(
@@ -9694,6 +9696,11 @@ def _can_use_builtin_data_analysis(
     if source_kind not in {"csv", "tsv", "json", "jsonl", "xlsx", "text", "text_table"}:
         return False
     return True
+
+
+def _data_analyze_fallback_tools(allowed: set[str] | None) -> list[str]:
+    fallback_tool = _first_allowed(("python.run", "terminal.run"), allowed)
+    return [fallback_tool] if fallback_tool else []
 
 
 def _task_core_snapshot(

@@ -6,6 +6,7 @@ import type {
   RuntimePlanSnapshot,
   TaskCoreSnapshot,
   TaskIntentSnapshot,
+  TaskReplanRequestSnapshot,
   ToolPlanSnapshot,
   ToolPlanStepSnapshot,
 } from '../../yachiyo-studio/types';
@@ -17,6 +18,7 @@ type PlannerTrace = {
   intent: TaskIntentSnapshot | null;
   plan: RuntimePlanSnapshot | null;
   planId: string;
+  replanRequests: TaskReplanRequestSnapshot[];
   routeToStudio?: boolean;
   selection: PlannerSelection | null;
   source: string;
@@ -128,6 +130,7 @@ export function PlannerTraceInspector({
   ]);
   const confidence = confidenceLabel(intent?.confidence);
   const taskCore = trace.plan?.task_core || null;
+  const replanRequests = trace.replanRequests || [];
 
   return (
     <details
@@ -217,6 +220,8 @@ export function PlannerTraceInspector({
         ) : null}
 
         {taskCore ? <TaskCoreInspector taskCore={taskCore} /> : null}
+
+        {replanRequests.length ? <ReplanRequestInspector requests={replanRequests} /> : null}
 
         {trace.selection ? (
           <section
@@ -597,6 +602,37 @@ function TaskCoreInspector({ taskCore }: { taskCore: TaskCoreSnapshot }) {
   );
 }
 
+function ReplanRequestInspector({ requests }: { requests: TaskReplanRequestSnapshot[] }) {
+  return (
+    <section data-replan-request-count={requests.length} data-testid="agent-run-detail-replan-requests">
+      <div className="studio-tool-inspector-heading">
+        <h3>Replan Requests</h3>
+        <span>{requests.length}</span>
+      </div>
+      <div className="studio-tool-pill-row">
+        {requests.map((request) => {
+          const fallbackTools = uniqueStrings(request.fallback_tools || []);
+          return (
+            <span
+              className="studio-tool-permission"
+              data-replan-request-id={request.request_id}
+              data-replan-source-step={request.source_step_id || ''}
+              data-replan-status={request.status || 'requested'}
+              data-replan-trigger={request.trigger}
+              key={request.request_id}
+              title={request.failure_detail || request.reason || request.condition}
+            >
+              replan · {request.trigger}
+              {request.source_step_id ? ` · ${request.source_step_id}` : ''}
+              {fallbackTools.length ? ` · fallback: ${fallbackTools.join(', ')}` : ''}
+            </span>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
 function PlannerTraceStepRow({
   index,
   step,
@@ -686,6 +722,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   let source = '';
   let decisionId = '';
   let planId = '';
+  let replanRequests: TaskReplanRequestSnapshot[] = [];
   let routeToStudio: boolean | undefined;
   let selection: PlannerSelection | null = null;
   let eventCount = 0;
@@ -771,6 +808,17 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     if (plannerEventType === 'agent.plan.step') {
       const step = toolPlanStepSnapshot(payload.step);
       if (step) addPlannerStep(stepById, step);
+      continue;
+    }
+
+    if (plannerEventType === 'agent.replan.requested') {
+      const request = taskReplanRequestSnapshot(payload);
+      if (request) {
+        replanRequests = [...replanRequests, request];
+        decisionId = request.decision_id || decisionId;
+        planId = request.plan_id || planId;
+        routeToStudio = booleanValue(request.route_to_studio, routeToStudio);
+      }
     }
   }
 
@@ -783,7 +831,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   const steps = stepById.size ? Array.from(stepById.values()) : fallbackSteps;
   const effectivePlanId = planId || effectiveToolPlan?.plan_id || '';
 
-  if (!effectiveIntent && !plan && !steps.length && !selection) return null;
+  if (!effectiveIntent && !plan && !steps.length && !selection && !replanRequests.length) return null;
   return {
     candidateIntents,
     decisionId,
@@ -791,6 +839,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     intent: effectiveIntent,
     plan,
     planId: effectivePlanId,
+    replanRequests,
     routeToStudio,
     selection,
     source,
@@ -868,6 +917,7 @@ function plannerTraceFromSummary(summary: PlannerTraceSummarySnapshot | null | u
     intent,
     plan: null,
     planId: planId || toolPlan?.plan_id || '',
+    replanRequests: [],
     routeToStudio,
     selection,
     source,
@@ -978,6 +1028,7 @@ function plannerSelectionFromSummary(
 
 function runtimePlannerEventType(eventType: string): string {
   if (eventType === 'agent.intent.selected') return eventType;
+  if (eventType === 'agent.replan.requested') return eventType;
   if (eventType.startsWith('agent.plan.')) return eventType;
   if (eventType === 'group.run.intent.selected') return 'agent.intent.selected';
   if (eventType === 'group.run.plan.created') return 'agent.plan.created';
@@ -1102,6 +1153,14 @@ function toolPlanStepSnapshot(value: unknown): ToolPlanStepSnapshot | null {
   const record = objectRecord(value);
   if (!stringValue(record.step_id) && !stringValue(record.title) && !stringValue(record.capability_id)) return null;
   return record as ToolPlanStepSnapshot;
+}
+
+function taskReplanRequestSnapshot(value: unknown): TaskReplanRequestSnapshot | null {
+  const record = objectRecord(value);
+  const nested = objectRecord(record.request);
+  const request = Object.keys(nested).length ? nested : record;
+  if (!stringValue(request.request_id) && !stringValue(request.trigger)) return null;
+  return request as TaskReplanRequestSnapshot;
 }
 
 function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerSelection | null {

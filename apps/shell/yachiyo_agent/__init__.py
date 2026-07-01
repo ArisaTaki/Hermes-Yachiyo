@@ -58,6 +58,7 @@ from .contracts import (
     StartWorkflowRunRequest,
     TaskCheckpointSnapshot,
     TaskCoreSnapshot,
+    TaskReplanRequestSnapshot,
     RuntimePlanSnapshot,
     TaskTodoItemSnapshot,
     TaskWorkspaceItemSnapshot,
@@ -115,6 +116,11 @@ from .recovery_actions import (
     recovery_retry_context_payload,
 )
 from .runtime_planner import RuntimePlanner, TaskIntentRouter
+from .replans import (
+    task_replan_request_from_failure,
+    task_replan_run_event_payload,
+    task_replan_timeline_event,
+)
 from .service import YachiyoAgentService
 from .studio_service import AgentStudioService
 
@@ -206,6 +212,10 @@ __all__ = [
     "StartWorkflowRunRequest",
     "TaskCheckpointSnapshot",
     "TaskCoreSnapshot",
+    "TaskReplanRequestSnapshot",
+    "task_replan_request_from_failure",
+    "task_replan_run_event_payload",
+    "task_replan_timeline_event",
     "RuntimePlanner",
     "RuntimePlanSnapshot",
     "TaskTodoItemSnapshot",

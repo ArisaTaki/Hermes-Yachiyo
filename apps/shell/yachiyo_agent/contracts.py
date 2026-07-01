@@ -36,6 +36,7 @@ TaskCheckpointStatus = Literal[
     "blocked",
     "completed",
 ]
+TaskReplanStatus = Literal["requested", "planned", "running", "completed", "blocked"]
 TaskIntentKind = Literal[
     "desktop_operation",
     "data_analysis",
@@ -308,6 +309,30 @@ class TaskCoreSnapshot(_PublicSnapshot):
     todos: list[TaskTodoItemSnapshot] = Field(default_factory=list)
     checkpoints: list[TaskCheckpointSnapshot] = Field(default_factory=list)
     replan_signals: list[ReplanSignalSnapshot] = Field(default_factory=list)
+    source: str = "runtime_planner"
+
+
+class TaskReplanRequestSnapshot(_PublicSnapshot):
+    request_id: str
+    trigger: str
+    status: TaskReplanStatus | str = "requested"
+    run_id: str | None = None
+    task_id: str | None = None
+    decision_id: str | None = None
+    plan_id: str | None = None
+    core_id: str | None = None
+    source_step_id: str | None = None
+    source_tool_name: str | None = None
+    target_capability_id: str = ""
+    condition: str = ""
+    reason: str = ""
+    failure_event_type: str = ""
+    failure_detail: str = ""
+    fallback_tools: list[str] = Field(default_factory=list)
+    replan_prompt: str = ""
+    route_to_studio: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    created_at: str = ""
     source: str = "runtime_planner"
 
 

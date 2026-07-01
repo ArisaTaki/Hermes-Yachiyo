@@ -69,6 +69,7 @@ from apps.shell.yachiyo_agent import (
     TaskCoreSnapshot,
     TaskIntentSnapshot,
     TaskIntentKind,
+    TaskReplanRequestSnapshot,
     TaskTodoItemSnapshot,
     TaskWorkspaceItemSnapshot,
     TaskWorkspaceSnapshot,
@@ -312,6 +313,54 @@ def test_task_core_public_snapshot_exposes_workspace_todo_checkpoint_and_replan(
     assert payload["todos"][0]["approval_required"] is True
     assert payload["checkpoints"][0]["replan_on_failure"] is True
     assert payload["replan_signals"][0]["fallback_tools"] == ["terminal.run"]
+
+
+def test_task_replan_request_contract_links_failure_to_planner_state() -> None:
+    request = TaskReplanRequestSnapshot(
+        request_id="replan-request-1",
+        trigger="tool_failure",
+        run_id="run-1",
+        task_id="task-1",
+        decision_id="decision-1",
+        plan_id="plan-1",
+        core_id="core-1",
+        source_step_id="run-analysis",
+        source_tool_name="data.analyze",
+        target_capability_id="data.analysis",
+        failure_event_type="agent.tool.call",
+        failure_detail="data.analyze failed",
+        fallback_tools=["terminal.run"],
+        replan_prompt="replan prompt",
+    )
+
+    payload = _json(request)
+
+    assert list(payload) == [
+        "request_id",
+        "trigger",
+        "status",
+        "run_id",
+        "task_id",
+        "decision_id",
+        "plan_id",
+        "core_id",
+        "source_step_id",
+        "source_tool_name",
+        "target_capability_id",
+        "condition",
+        "reason",
+        "failure_event_type",
+        "failure_detail",
+        "fallback_tools",
+        "replan_prompt",
+        "route_to_studio",
+        "metadata",
+        "created_at",
+        "source",
+    ]
+    assert payload["status"] == "requested"
+    assert payload["route_to_studio"] is True
+    assert payload["fallback_tools"] == ["terminal.run"]
 
 
 def test_planner_orchestration_start_contract_links_decision_and_started_run() -> None:

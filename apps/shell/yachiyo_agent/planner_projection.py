@@ -7,6 +7,11 @@ from typing import Any
 
 from .contracts import PlannerDecisionSnapshot
 from .planner_execution import planner_orchestration_requests
+from .replans import (
+    task_replan_request_from_failure,
+    task_replan_run_event_payload,
+    task_replan_timeline_event,
+)
 from .runtime_planner import RuntimePlanner
 
 _MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
@@ -635,6 +640,36 @@ def planner_selection_timeline_event(
         "plan_id": str(event_payload.get("plan_id") or ""),
         "payload": event_payload,
     }
+
+
+def planner_replan_request(
+    decision: PlannerDecisionSnapshot,
+    failure: Mapping[str, Any] | None = None,
+    **kwargs: Any,
+):
+    return task_replan_request_from_failure(decision, failure, **kwargs)
+
+
+def planner_replan_timeline_event(
+    decision: PlannerDecisionSnapshot,
+    failure: Mapping[str, Any] | None = None,
+    **kwargs: Any,
+) -> dict[str, Any] | None:
+    request = task_replan_request_from_failure(decision, failure, **kwargs)
+    if request is None:
+        return None
+    return task_replan_timeline_event(request)
+
+
+def planner_replan_run_event_payload(
+    decision: PlannerDecisionSnapshot,
+    failure: Mapping[str, Any] | None = None,
+    **kwargs: Any,
+) -> tuple[str, dict[str, Any]] | None:
+    request = task_replan_request_from_failure(decision, failure, **kwargs)
+    if request is None:
+        return None
+    return task_replan_run_event_payload(request)
 
 
 def _planner_timeline_detail(event_type: str, payload: Mapping[str, Any]) -> str:
