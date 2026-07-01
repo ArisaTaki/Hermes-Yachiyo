@@ -3124,7 +3124,10 @@ def test_auto_followup_dispatches_observed_desktop_click_action() -> None:
             "agent.tool.call",
             "desktop.read_ui",
             input_preview={"role_filter": "button", "limit": 80},
-            result={"ok": True, "data": {"elements": [{"label": "登录"}]}},
+            result={
+                "ok": True,
+                "data": {"elements": [{"label": "登录", "center": {"x": 120, "y": 240}}]},
+            },
         )
     ]
 
@@ -3150,6 +3153,25 @@ def test_auto_followup_dispatches_observed_desktop_click_action() -> None:
         selection_payload,
         ["desktop.read_ui", "desktop.click"],
         timeline,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click",
+            "input": {"x": 120, "y": 240, "click_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_desktop_observed_action",
+        }
+    ]
+    assert custom_api_agent_module._auto_discovered_followup_requests(
+        selection_payload,
+        ["desktop.read_ui", "desktop.click"],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.read_ui",
+                result={"ok": True, "data": {"elements": [{"label": "登录"}]}},
+            )
+        ],
     ) == []
 
 
@@ -3169,7 +3191,18 @@ def test_auto_followup_dispatches_observed_desktop_type_action() -> None:
             "agent.tool.call",
             "desktop.read_ui",
             input_preview={"role_filter": "text field", "limit": 80},
-            result={"ok": True, "data": {"elements": [{"role": "text field"}]}},
+            result={
+                "ok": True,
+                "data": {
+                    "elements": [
+                        {
+                            "role": "text field",
+                            "description": "text input",
+                            "center": {"x": 44, "y": 88},
+                        }
+                    ]
+                },
+            },
         )
     ]
 
@@ -3211,6 +3244,26 @@ def test_auto_followup_dispatches_observed_desktop_type_action() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.type_text",
+            "input": {"text": "hello"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_desktop_observed_action",
+        },
+    ]
+    assert custom_api_agent_module._auto_discovered_followup_requests(
+        selection_payload,
+        ["desktop.read_ui", "desktop.click", "desktop.type"],
+        timeline,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click",
+            "input": {"x": 44, "y": 88, "click_count": 1},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_desktop_observed_action",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type",
             "input": {"text": "hello"},
             "source": "runtime_planner",
             "planning_reason": "planner_followup_desktop_observed_action",

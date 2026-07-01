@@ -6356,12 +6356,14 @@ def _auto_desktop_observed_action_followup_requests(
         return _auto_desktop_observed_click_requests(
             target,
             allowed,
+            timeline,
             planning_reason=planning_reason,
         )
     if target_action == "type_text":
         return _auto_desktop_observed_type_requests(
             target,
             allowed,
+            timeline,
             planning_reason=planning_reason,
         )
     return []
@@ -6370,25 +6372,46 @@ def _auto_desktop_observed_action_followup_requests(
 def _auto_desktop_observed_click_requests(
     target: Mapping[str, Any],
     allowed: set[str],
+    timeline: list[dict[str, Any]],
     *,
     planning_reason: str,
 ) -> list[dict[str, Any]]:
-    if "desktop.click_ui_element" not in allowed:
-        return []
     target_label = str(target.get("target") or "").strip()
     if not target_label:
         return []
+    role_filter = str(target.get("role_filter") or "").strip()
+    click_count = _clean_model_followup_int(target.get("click_count"), default=1)
+    limit = _clean_model_followup_int(target.get("limit"), default=80)
+    if "desktop.click_ui_element" in allowed:
+        return [
+            _request_like(
+                "desktop.click_ui_element",
+                {
+                    "target": target_label,
+                    "role_filter": role_filter,
+                    "click_count": click_count,
+                    "limit": limit,
+                },
+                source="runtime_planner",
+                planning_reason=planning_reason,
+            )
+        ]
+    if "desktop.click" not in allowed:
+        return []
+    center = _latest_desktop_observation_match_center(
+        timeline,
+        target_label,
+        role_filter,
+    )
+    if not center:
+        return []
     return [
         _request_like(
-            "desktop.click_ui_element",
+            "desktop.click",
             {
-                "target": target_label,
-                "role_filter": str(target.get("role_filter") or "").strip(),
-                "click_count": _clean_model_followup_int(
-                    target.get("click_count"),
-                    default=1,
-                ),
-                "limit": _clean_model_followup_int(target.get("limit"), default=80),
+                "x": center["x"],
+                "y": center["y"],
+                "click_count": click_count,
             },
             source="runtime_planner",
             planning_reason=planning_reason,
@@ -6399,6 +6422,7 @@ def _auto_desktop_observed_click_requests(
 def _auto_desktop_observed_type_requests(
     target: Mapping[str, Any],
     allowed: set[str],
+    timeline: list[dict[str, Any]],
     *,
     planning_reason: str,
 ) -> list[dict[str, Any]]:
@@ -6422,21 +6446,38 @@ def _auto_desktop_observed_type_requests(
             )
         ]
     type_tool = _first_allowed_tool(("desktop.type_text", "desktop.type"), allowed)
-    if "desktop.click_ui_element" not in allowed or not type_tool:
+    if not type_tool:
         return []
-    click_input = {
-        "target": target_label,
-        "role_filter": str(target.get("role_filter") or "").strip(),
-        "click_count": 1,
-        "limit": _clean_model_followup_int(target.get("limit"), default=80),
-    }
-    return [
-        _request_like(
+    if "desktop.click_ui_element" in allowed:
+        click_request = _request_like(
             "desktop.click_ui_element",
-            click_input,
+            {
+                "target": target_label,
+                "role_filter": str(target.get("role_filter") or "").strip(),
+                "click_count": 1,
+                "limit": _clean_model_followup_int(target.get("limit"), default=80),
+            },
             source="runtime_planner",
             planning_reason=planning_reason,
-        ),
+        )
+    elif "desktop.click" in allowed:
+        center = _latest_desktop_observation_match_center(
+            timeline,
+            target_label,
+            str(target.get("role_filter") or "").strip(),
+        )
+        if not center:
+            return []
+        click_request = _request_like(
+            "desktop.click",
+            {"x": center["x"], "y": center["y"], "click_count": 1},
+            source="runtime_planner",
+            planning_reason=planning_reason,
+        )
+    else:
+        return []
+    return [
+        click_request,
         _request_like(
             type_tool,
             {"text": text},
@@ -6456,6 +6497,111 @@ def _latest_desktop_observation_succeeded(timeline: list[dict[str, Any]]) -> boo
         result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
         return result.get("ok") is True
     return False
+
+
+def _latest_desktop_observation_match_center(
+    timeline: list[dict[str, Any]],
+    target: str,
+    role_filter: str,
+) -> dict[str, Any]:
+    elements = _latest_desktop_observation_elements(timeline)
+    if not elements:
+        return {}
+    matches = _matching_observed_desktop_elements(elements, target, role_filter)
+    if not matches:
+        return {}
+    center = matches[0].get("center") if isinstance(matches[0].get("center"), Mapping) else {}
+    x = center.get("x")
+    y = center.get("y")
+    if x is None or y is None:
+        return {}
+    return {"x": x, "y": y}
+
+
+def _latest_desktop_observation_elements(timeline: list[dict[str, Any]]) -> list[Any]:
+    for event in reversed(timeline):
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        tool_name = str(event.get("detail") or "").strip()
+        if tool_name not in {"desktop.read_ui", "desktop.ui_elements"}:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is not True:
+            return []
+        data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+        elements = data.get("elements")
+        if not isinstance(elements, list):
+            elements = result.get("elements") if isinstance(result.get("elements"), list) else []
+        return elements
+    return []
+
+
+def _matching_observed_desktop_elements(
+    elements: list[Any],
+    target: str,
+    role_filter: str,
+) -> list[dict[str, Any]]:
+    target_text = _normalize_observed_desktop_text(target)
+    if not target_text:
+        return []
+    scored: list[tuple[int, int, dict[str, Any]]] = []
+    for index, raw_element in enumerate(elements):
+        if not isinstance(raw_element, Mapping):
+            continue
+        element = dict(raw_element)
+        if element.get("enabled") is False:
+            continue
+        center = element.get("center") if isinstance(element.get("center"), Mapping) else {}
+        if center.get("x") is None or center.get("y") is None:
+            continue
+        score = _observed_desktop_element_match_score(element, target_text, role_filter)
+        if score <= 0:
+            continue
+        depth = element.get("depth") if isinstance(element.get("depth"), int) else 0
+        scored.append((score - depth, -index, element))
+    scored.sort(reverse=True, key=lambda item: (item[0], item[1]))
+    return [element for _, _, element in scored]
+
+
+def _observed_desktop_element_match_score(
+    element: Mapping[str, Any],
+    normalized_target: str,
+    role_filter: str,
+) -> int:
+    label_texts = [
+        _normalize_observed_desktop_text(element.get(key))
+        for key in ("name", "description", "value", "label")
+    ]
+    label_texts = [text for text in label_texts if text]
+    searchable = _normalize_observed_desktop_text(
+        " ".join(
+            str(element.get(key) or "")
+            for key in ("role", "subrole", "name", "description", "value", "label")
+        )
+    )
+    if not searchable:
+        return 0
+    score = 0
+    if normalized_target in label_texts:
+        score = 100
+    elif any(normalized_target in text for text in label_texts):
+        score = 85
+    elif any(text in normalized_target for text in label_texts if len(text) >= 2):
+        score = 70
+    elif normalized_target in searchable:
+        score = 55
+    if not score:
+        return 0
+    normalized_filter = _normalize_observed_desktop_text(role_filter)
+    if normalized_filter and normalized_filter in searchable:
+        score += 10
+    if str(element.get("role") or "").strip():
+        score += 2
+    return score
+
+
+def _normalize_observed_desktop_text(value: Any) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().casefold())
 
 
 def _drop_completed_auto_followup_prefix(
