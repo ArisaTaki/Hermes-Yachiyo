@@ -14698,6 +14698,30 @@ def test_auto_discovered_app_open_followup_verifies_active_window() -> None:
     assert alias_requests[0]["input_resolution"]["tool"] == "desktop.open_app"
     assert alias_requests[1]["tool"] == "desktop.active_window"
 
+    read_ui_requests = custom_api_agent_module._auto_discovered_app_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "browser",
+                "target_action": "open_app",
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {"role_filter": "text", "limit": 80},
+                },
+            }
+        },
+        ["desktop.open_app", "desktop.read_ui"],
+        timeline,
+    )
+
+    assert [request["tool"] for request in read_ui_requests] == [
+        "desktop.open_app",
+        "desktop.read_ui",
+    ]
+    assert read_ui_requests[1]["input"] == {"role_filter": "text", "limit": 80}
+    assert read_ui_requests[1]["source"] == "runtime_planner"
+    assert read_ui_requests[1]["planning_reason"] == "planner_discovered_app_followup"
+
 
 def test_auto_discovered_app_compose_followup_types_and_verifies() -> None:
     timeline = [

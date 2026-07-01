@@ -6551,10 +6551,13 @@ def _discovered_app_observation_request(
         else {}
     )
     if tool_name not in allowed:
-        if "desktop.ui_elements" not in allowed:
+        alias_tool = _discovered_app_observation_alias_tool(tool_name)
+        fallback_tool = _discovered_app_observation_fallback_tool(tool_name, allowed)
+        if not fallback_tool:
             return {}
-        tool_name = "desktop.ui_elements"
-        raw_input = {}
+        tool_name = fallback_tool
+        if fallback_tool != alias_tool:
+            raw_input = {}
     request = _request_like(
         tool_name,
         dict(raw_input),
@@ -6564,6 +6567,27 @@ def _discovered_app_observation_request(
     if isinstance(target.get("creative_canvas"), Mapping):
         request["continue_to_model"] = True
     return request
+
+
+def _discovered_app_observation_fallback_tool(
+    requested_tool: str,
+    allowed: set[str],
+) -> str:
+    alias = _discovered_app_observation_alias_tool(requested_tool)
+    if alias and alias in allowed:
+        return alias
+    if "desktop.ui_elements" in allowed:
+        return "desktop.ui_elements"
+    if "desktop.read_ui" in allowed:
+        return "desktop.read_ui"
+    return ""
+
+
+def _discovered_app_observation_alias_tool(requested_tool: str) -> str:
+    return {
+        "desktop.ui_elements": "desktop.read_ui",
+        "desktop.windows": "desktop.list_windows",
+    }.get(str(requested_tool or "").strip(), "")
 
 
 def _with_discovered_app_resolution(
