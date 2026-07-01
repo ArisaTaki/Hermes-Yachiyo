@@ -1937,6 +1937,102 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_unavai
     )
 
 
+def test_custom_api_agent_loop_preserves_unavailable_runtime_plan_without_tool_requests() -> None:
+    budget = FakeBudget()
+    tool_runs: list[dict[str, Any]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    run_events: list[dict[str, Any]] = []
+    timeline: list[dict[str, Any]] = []
+    messages = [{"role": "user", "content": "请分析 data/sales.csv 并输出报告"}]
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local/",
+            "model": "test-model",
+            "api_key": "key",
+        },
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": []}},
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner and keep replan context visible.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": "需要开启数据分析能力后继续。"},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda *_args, **_kwargs: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda *args, **kwargs: tool_runs.append(
+            {"args": args, "kwargs": kwargs}
+        ),
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+
+    result = loop.run(
+        {"name": "Analyst"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-all-unavailable",
+    )
+
+    assert str(result) == "需要开启数据分析能力后继续。"
+    assert tool_runs == []
+    assert any(event["event"] == "agent.plan.created" for event in timeline)
+    assert any(event["event"] == "agent.task.todo.updated" for event in timeline)
+    replan_events = [
+        event for event in timeline if event["event"] == "agent.replan.requested"
+    ]
+    assert len(replan_events) == 3
+    assert {
+        event["payload"]["source_step_id"] for event in replan_events
+    } == {
+        "inspect-data-source",
+        "run-analysis",
+        "write-analysis-artifact",
+    }
+    assert {event["payload"]["trigger"] for event in replan_events} == {
+        "tool_unavailable"
+    }
+    followup_context = [
+        event
+        for event in timeline
+        if event["event"] == "agent.model.followup_context"
+    ][0]
+    assert followup_context["planning_reason"] == "planner_replan_after_tool_unavailable"
+    assert followup_context["triggers"] == ["tool_unavailable"]
+    assert not any(
+        event["event"] == "agent.desktop.intent_unavailable" for event in timeline
+    )
+    assert model_calls
+    assert any(
+        message["role"] == "user"
+        and "Runtime replan context" in message["content"]
+        and "planned tool is unavailable" in message["content"]
+        and "failed_step: run-analysis" in message["content"]
+        for message in model_calls[0]
+    )
+    assert [
+        event["payload"]["request_id"]
+        for event in run_events
+        if event["event_type"] == "agent.replan.requested"
+    ] == [event["payload"]["request_id"] for event in replan_events]
+
+
 def test_custom_api_agent_loop_writes_data_analysis_report_to_target_app() -> None:
     budget = FakeBudget()
     tool_runs: list[dict[str, Any]] = []

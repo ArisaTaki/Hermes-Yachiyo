@@ -42,7 +42,10 @@ from apps.shell.yachiyo_agent.planner_execution import (
     planner_execution_tool_requests,
     planner_tool_requests,
 )
-from apps.shell.yachiyo_agent.planner_projection import planner_selection_payload
+from apps.shell.yachiyo_agent.planner_projection import (
+    planner_selection_payload,
+    runtime_planner_decision,
+)
 from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_OPERATING_MANUAL
 
 _DIRECT_DAILY_DESKTOP_TOOLS = {
@@ -197,6 +200,7 @@ class RuntimeCustomApiAgentLoop:
             )
             runtime_planner_decision = None
             direct_tool_selection_payload: dict[str, Any] = {}
+            planner_replan_only = False
             if direct_planned_tool_requests:
                 planned_tool_requests = direct_planned_tool_requests
                 if any(
@@ -227,19 +231,53 @@ class RuntimeCustomApiAgentLoop:
                     allowed_tools,
                 )
                 if not planned_tool_requests:
-                    runtime_planner_decision = None
-                    direct_tool_selection_payload = {}
-                    planned_tool_requests = daily_desktop_intent_tool_requests(
-                        planning_context,
-                        allowed_tools,
+                    planner_unavailable_payloads = (
+                        _runtime_planner_unavailable_failure_payloads(
+                            runtime_planner_decision
+                        )
+                        if runtime_planner_decision is not None
+                        else []
                     )
-                    approval_hotkey_request = self._approval_hotkey_request_for_safe_shortcut(
-                        planning_context,
-                        planned_tool_requests,
-                        allowed_tools,
-                    )
-                    if approval_hotkey_request:
-                        planned_tool_requests = [approval_hotkey_request]
+                    if planner_unavailable_payloads:
+                        self._record_runtime_planner_events(
+                            runtime_planner_decision,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
+                        self._record_direct_tool_selection_event(
+                            direct_tool_selection_payload,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
+                        replan_payloads = self._record_runtime_planner_replan_events(
+                            runtime_planner_decision,
+                            timeline=timeline,
+                            tool_timeline_start=len(timeline),
+                            run_id=run_id,
+                        )
+                        if replan_payloads:
+                            self._append_replan_followup_context(
+                                replan_payloads,
+                                allowed_tools=allowed_tools,
+                                messages=messages,
+                                timeline=timeline,
+                                run_id=run_id,
+                            )
+                        planner_replan_only = True
+                    if not planner_replan_only:
+                        runtime_planner_decision = None
+                        direct_tool_selection_payload = {}
+                        planned_tool_requests = daily_desktop_intent_tool_requests(
+                            planning_context,
+                            allowed_tools,
+                        )
+                        approval_hotkey_request = self._approval_hotkey_request_for_safe_shortcut(
+                            planning_context,
+                            planned_tool_requests,
+                            allowed_tools,
+                        )
+                        if approval_hotkey_request:
+                            planned_tool_requests = [approval_hotkey_request]
             if planned_tool_requests:
                 if runtime_planner_decision is not None:
                     self._record_runtime_planner_events(
@@ -666,7 +704,7 @@ class RuntimeCustomApiAgentLoop:
                     )
                 if direct_result:
                     return direct_result
-            else:
+            elif not planner_replan_only:
                 direct_candidate = (
                     direct_tool_request
                     if isinstance(direct_tool_request, dict)
@@ -1224,6 +1262,27 @@ class RuntimeCustomApiAgentLoop:
                 allowed_tools,
             )
             execution_requests = _drop_trailing_daily_desktop_verify_requests(execution_requests)
+            if not execution_requests and not selection.requests:
+                unavailable_decision = runtime_planner_decision(
+                    planning_context,
+                    allowed_tools=allowed_tools,
+                )
+                if (
+                    unavailable_decision is not None
+                    and _runtime_planner_unavailable_failure_payloads(unavailable_decision)
+                ):
+                    return (
+                        unavailable_decision,
+                        [],
+                        planner_selection_payload(
+                            decision=unavailable_decision,
+                            planner_requests=[],
+                            legacy_requests=[],
+                            selected_requests=[],
+                            selected_source="runtime_planner",
+                            selected_reason="runtime_planner_unavailable_plan",
+                        ),
+                    )
             event_payload = selection.event_payload
             if execution_requests != selection.requests:
                 execution_tools = [
