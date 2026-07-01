@@ -21853,6 +21853,34 @@ def test_planner_desktop_tool_requests_prefers_discovered_media_app_operation_fo
     assert all(request["tool"] != "media.apple_music_play" for request in requests)
 
 
+def test_runtime_planner_uses_app_scoped_typing_for_media_search_when_global_type_is_missing() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Apple Music 播放超时空辉夜姬",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_type_text",
+            "desktop.search_submit",
+            "media.apple_music_play",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "desktop.search_submit",
+        "media.music_app_open_and_play",
+        "desktop.ui_elements",
+    ]
+    type_step = _step_by_id(decision, "type-media-search-query")
+    assert type_step.input_preview == {"app_name": "Music", "text": "超时空辉夜姬"}
+    assert all(step.tool_name != "media.apple_music_play" for step in decision.plan.tool_plan.steps)
+
+
 def test_planner_desktop_tool_requests_verifies_media_app_search_when_available() -> None:
     requests = planner_desktop_tool_requests(
         "打开 Apple Music 搜索超时空辉夜姬并播放",

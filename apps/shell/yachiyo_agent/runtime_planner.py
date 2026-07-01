@@ -4685,6 +4685,15 @@ class RuntimePlanner:
                     capability_id = "desktop.ui_operation"
                     action = "click"
                     reason = "Click the first visible media search result when no dedicated playback tool is available."
+                elif tool_name in {
+                    "app.open_and_safe_type_text",
+                    "app.focus_and_safe_type_text",
+                }:
+                    step_id = "type-media-search-query"
+                    title = "Type media search query"
+                    capability_id = "desktop.ui_operation"
+                    action = "type"
+                    reason = "Type only the explicit media query inside the resolved media app."
                 elif tool_name.startswith("app."):
                     step_id = "focus-media-app-search"
                     title = "Focus media app search"

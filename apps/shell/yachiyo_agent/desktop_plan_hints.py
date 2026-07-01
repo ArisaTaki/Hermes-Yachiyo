@@ -896,11 +896,21 @@ def media_app_query_search_plan(
     if action != "play" or not app_name or not query:
         return []
 
-    type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
+    type_tool = _first_allowed(
+        (
+            "desktop.safe_type_text",
+            "app.focus_and_safe_type_text",
+            "app.open_and_safe_type_text",
+        ),
+        allowed,
+    )
     submit_tool = _first_allowed(("desktop.search_submit", "desktop.submit_foreground"), allowed)
     if not type_tool or not submit_tool:
         return []
     submit_payload = {"action": "confirm"} if submit_tool == "desktop.submit_foreground" else {}
+    type_payload = {"text": query}
+    if type_tool.startswith("app."):
+        type_payload = {"app_name": app_name, **selected_app_payload, "text": query}
 
     discovery_step = []
     discover_tool = _first_allowed(("desktop.list_apps",), allowed)
@@ -922,7 +932,7 @@ def media_app_query_search_plan(
         plan = [
             *discovery_step,
             (app_search_tool, app_search_payload),
-            (type_tool, {"text": query}),
+            (type_tool, type_payload),
             (submit_tool, submit_payload),
         ]
         _append_media_search_result_play_step(
@@ -942,7 +952,7 @@ def media_app_query_search_plan(
         *discovery_step,
         (app_tool, {"app_name": app_name, **selected_app_payload}),
         (shortcut_tool, {"action": "find"}),
-        (type_tool, {"text": query}),
+        (type_tool, type_payload),
         (submit_tool, submit_payload),
     ]
     _append_media_search_result_play_step(
