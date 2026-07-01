@@ -8515,7 +8515,7 @@ def _append_selected_discovered_creative_action_steps(
     previous_step = depends_on
     if _creative_action_requests_circle(pending_action):
         select_shape_tool = _first_allowed(
-            ("desktop.click_ui_element", "app.focus_and_click_ui_element"),
+            ("app.focus_and_click_ui_element", "desktop.click_ui_element"),
             allowed,
         )
         shape_input = {
@@ -8524,13 +8524,6 @@ def _append_selected_discovered_creative_action_steps(
             "limit": 80,
             "click_count": 1,
         }
-        if str(select_shape_tool or "").startswith("app."):
-            shape_input = {
-                "app_name": "<selected app from desktop.list_apps>",
-                "selection_source": "desktop.list_apps",
-                "query": _selected_discovered_app_query(intent),
-                **shape_input,
-            }
         steps.append(
             _step(
                 intent,
@@ -8538,7 +8531,11 @@ def _append_selected_discovered_creative_action_steps(
                 "Select circle shape tool",
                 "desktop.ui_operation",
                 select_shape_tool,
-                input_preview=shape_input,
+                input_preview=_selected_discovered_app_operation_input(
+                    intent,
+                    select_shape_tool,
+                    shape_input,
+                ),
                 depends_on=[previous_step],
                 action="click",
                 risk_level="medium",
@@ -8552,7 +8549,10 @@ def _append_selected_discovered_creative_action_steps(
         previous_step = "select-discovered-app-circle-tool"
 
     if _creative_action_requests_save(pending_action):
-        save_tool = _first_allowed(("desktop.shortcut", "desktop.hotkey"), allowed)
+        save_tool = _first_allowed(
+            ("app.focus_and_hotkey", "app.open_and_hotkey", "desktop.hotkey", "desktop.shortcut"),
+            allowed,
+        )
         steps.append(
             _step(
                 intent,
@@ -8560,7 +8560,11 @@ def _append_selected_discovered_creative_action_steps(
                 "Save creative result",
                 "desktop.ui_operation",
                 save_tool,
-                input_preview={"key": "s", "modifiers": ["command"]},
+                input_preview=_selected_discovered_app_operation_input(
+                    intent,
+                    save_tool,
+                    {"key": "s", "modifiers": ["command"]},
+                ),
                 depends_on=[previous_step],
                 action="shortcut",
                 risk_level="medium",

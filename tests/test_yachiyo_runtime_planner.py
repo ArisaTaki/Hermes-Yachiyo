@@ -2551,6 +2551,45 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
     }
 
 
+def test_planner_binds_discovered_creative_actions_to_selected_app_when_available() -> None:
+    prompt = "打开一个能画图的应用，画一个圆并保存到桌面"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "app.focus_and_click_ui_element",
+        "app.focus_and_hotkey",
+        "screen.capture",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    select_shape = _step_by_id(decision, "select-discovered-app-circle-tool")
+    assert select_shape.tool_name == "app.focus_and_click_ui_element"
+    assert select_shape.input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "image",
+        "target": "circle ellipse shape",
+        "role_filter": "button",
+        "limit": 80,
+        "click_count": 1,
+    }
+
+    save = _step_by_id(decision, "save-discovered-app-creative-result")
+    assert save.tool_name == "app.focus_and_hotkey"
+    assert save.input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "image",
+        "key": "s",
+        "modifiers": ["command"],
+    }
+    assert _step_by_id(
+        decision,
+        "verify-discovered-app-creative-result",
+    ).depends_on == ["save-discovered-app-creative-result"]
+
+
 def test_planner_adds_generic_discovered_app_followup_action_steps() -> None:
     prompt = "打开一个能编辑图片的应用，然后点击导出"
     allowed_tools = [
