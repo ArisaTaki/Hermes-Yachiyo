@@ -2935,7 +2935,49 @@ def test_runtime_planner_routes_web_research_report_to_communication_target() ->
         "mode": "focus",
         "app_name": "Slack",
         "transform": "report",
+        "artifact_write": {
+            "target_action": "write_artifact",
+            "path": "research-summary.md",
+            "body_source": "model_generated_content",
+            "tool": "artifact.write",
+            "intent_kind": "web_research",
+        },
     }
+
+    generic_prompt = "调研 https://example.com 的信息，写成报告，并发到任意聊天应用给 yachiyo"
+    generic_allowed_tools = [
+        "browser.open_url_and_extract_text",
+        "artifact.write",
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    generic_decision = RuntimePlanner().decision(
+        generic_prompt,
+        allowed_tools=generic_allowed_tools,
+    )
+    generic_requests = planner_tool_requests(generic_prompt, generic_allowed_tools)
+    generic_payload = planner_selection_payload(
+        decision=generic_decision,
+        planner_requests=generic_requests,
+        legacy_requests=[],
+        selected_requests=generic_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_full_plan_execution",
+    )
+
+    assert generic_payload["followup_target"]["kind"] == "desktop_discovered_app_action"
+    assert generic_payload["followup_target"]["app_query"] == "chat"
+    assert generic_payload["followup_target"]["communication_compose"] == {
+        "recipient": "yachiyo",
+        "send_action": "draft",
+        "channel": "message",
+    }
+    assert generic_payload["followup_target"]["artifact_write"]["path"] == "research-summary.md"
+    assert "desktop.list_apps" in generic_payload["plan_tools"]
 
     app_scoped_allowed_tools = [
         "browser.open_url_and_extract_text",

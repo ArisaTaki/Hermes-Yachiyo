@@ -361,8 +361,8 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
                 transform = str(payload.get("transform") or "").strip()
                 if transform:
                     discovered_payload["content_transform_hint"] = transform
-                return discovered_payload
-            return payload
+                return _with_generated_artifact_write(discovered_payload, decision)
+            return _with_generated_artifact_write(payload, decision)
     return _artifact_write_followup_target(decision, inputs)
 
 
@@ -390,6 +390,29 @@ def _artifact_write_followup_target(
     if intent_kind:
         payload["intent_kind"] = intent_kind
     return payload
+
+
+def _with_generated_artifact_write(
+    payload: dict[str, Any],
+    decision: Any | None,
+) -> dict[str, Any]:
+    intent = getattr(decision, "selected_intent", None)
+    intent_kind = str(getattr(intent, "kind", "") or "").strip()
+    if intent_kind not in {"report_generation", "web_research"}:
+        return payload
+    artifact_paths = _tool_plan_values(decision, "artifacts_expected")
+    if not artifact_paths:
+        return payload
+    return {
+        **payload,
+        "artifact_write": {
+            "target_action": "write_artifact",
+            "path": artifact_paths[0],
+            "body_source": "model_generated_content",
+            "tool": "artifact.write",
+            "intent_kind": intent_kind,
+        },
+    }
 
 
 def _note_write_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:

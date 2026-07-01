@@ -4133,7 +4133,10 @@ def _model_followup_context_message(payload: dict[str, Any]) -> str:
     followup_target = payload.get("followup_target") if isinstance(payload.get("followup_target"), dict) else {}
     target_instruction = _model_followup_target_instruction(followup_target)
     if target_instruction:
-        artifact_instruction = target_instruction
+        artifact_instruction = (
+            f"{_model_followup_chained_artifact_instruction(followup_target)}"
+            f"{target_instruction}"
+        )
     elif artifact_write_allowed and artifacts:
         artifact_instruction = (
             "The user requested a durable output. Call artifact.write next with "
@@ -4204,6 +4207,9 @@ def _model_followup_target_payload(
     context_source = str(target.get("context_source") or "").strip()
     if context_source:
         payload["context_source"] = context_source
+    artifact_write = _model_followup_chained_artifact_write_payload(target, allowed)
+    if artifact_write:
+        payload["artifact_write"] = artifact_write
     return payload
 
 
@@ -4323,6 +4329,9 @@ def _model_followup_desktop_discovered_app_target_payload(
         ).strip()
         if transform:
             payload["transform"] = transform
+    artifact_write = _model_followup_chained_artifact_write_payload(target, allowed)
+    if artifact_write:
+        payload["artifact_write"] = artifact_write
     creative_canvas = (
         target.get("creative_canvas")
         if isinstance(target.get("creative_canvas"), Mapping)
@@ -4432,6 +4441,36 @@ def _model_followup_communication_target_payload(
     transform = str(target.get("transform") or "").strip()
     if transform:
         payload["transform"] = transform
+    artifact_write = _model_followup_chained_artifact_write_payload(target, allowed)
+    if artifact_write:
+        payload["artifact_write"] = artifact_write
+    return payload
+
+
+def _model_followup_chained_artifact_write_payload(
+    target: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    raw = (
+        target.get("artifact_write")
+        if isinstance(target.get("artifact_write"), Mapping)
+        else {}
+    )
+    path = str(raw.get("path") or "").strip()
+    if not path:
+        return {}
+    write_allowed = "artifact.write" in allowed
+    payload: dict[str, Any] = {
+        "target_action": str(raw.get("target_action") or "write_artifact").strip(),
+        "path": path,
+        "body_source": str(raw.get("body_source") or "model_generated_content").strip(),
+        "tool": str(raw.get("tool") or "artifact.write").strip(),
+        "write_allowed": write_allowed,
+        "recommended_tools": ["artifact.write"] if write_allowed else [],
+    }
+    intent_kind = str(raw.get("intent_kind") or "").strip()
+    if intent_kind:
+        payload["intent_kind"] = intent_kind
     return payload
 
 
@@ -5319,6 +5358,24 @@ def _model_followup_artifact_write_instruction(target: Mapping[str, Any]) -> str
     )
 
 
+def _model_followup_chained_artifact_instruction(target: Mapping[str, Any]) -> str:
+    raw = target.get("artifact_write") if isinstance(target.get("artifact_write"), Mapping) else {}
+    path = str(raw.get("path") or "").strip()
+    if not path:
+        return ""
+    if not bool(raw.get("write_allowed")):
+        return (
+            f"The user also requested a durable artifact at {path!r}, but artifact.write is not "
+            "available; continue the delivery step only if its tools are available and do not "
+            "claim the file was written. "
+        )
+    return (
+        f"Before the delivery step, call artifact.write with path {path!r} and the same generated "
+        "final content, then continue with the requested app or communication delivery. Do not "
+        "stop after writing the artifact. "
+    )
+
+
 def _model_followup_note_write_instruction(target: Mapping[str, Any]) -> str:
     if not bool(target.get("write_allowed")):
         return (
@@ -5533,21 +5590,35 @@ def _model_followup_app_write_requests(
     content = str(generated_content or "").strip()
     if not content or not isinstance(target, Mapping):
         return []
+    artifact_requests = _model_followup_chained_artifact_write_requests(
+        content,
+        target,
+        allowed_tools,
+    )
     if str(target.get("kind") or "").strip() == "communication_message":
-        return _model_followup_communication_requests(content, target, allowed_tools)
+        return [
+            *artifact_requests,
+            *_model_followup_communication_requests(content, target, allowed_tools),
+        ]
     if str(target.get("kind") or "").strip() == "artifact_write":
         return _model_followup_artifact_write_requests(content, target, allowed_tools)
     if str(target.get("kind") or "").strip() == "note_write":
-        return _model_followup_note_write_requests(content, target, allowed_tools)
+        return [
+            *artifact_requests,
+            *_model_followup_note_write_requests(content, target, allowed_tools),
+        ]
     if str(target.get("kind") or "").strip() == "desktop_discovered_app_action":
-        return _model_followup_discovered_app_write_discovery_requests(
-            content,
-            target,
-            allowed_tools,
-        )
+        return [
+            *artifact_requests,
+            *_model_followup_discovered_app_write_discovery_requests(
+                content,
+                target,
+                allowed_tools,
+            ),
+        ]
     app_name = str(target.get("app_name") or "").strip()
     if str(target.get("kind") or "").strip() != "app_write" or not app_name:
-        return []
+        return artifact_requests
     allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
     planning_reason = "planner_followup_app_write"
     source = "runtime_planner"
@@ -5580,7 +5651,7 @@ def _model_followup_app_write_requests(
                 planning_reason=planning_reason,
             )
         ]
-        return [*requests, *([verify_request] if verify_request else [])]
+        return [*artifact_requests, *requests, *([verify_request] if verify_request else [])]
     if "app.open_and_safe_type_text" in allowed:
         requests = [
             *container_requests,
@@ -5591,7 +5662,7 @@ def _model_followup_app_write_requests(
                 planning_reason=planning_reason,
             )
         ]
-        return [*requests, *([verify_request] if verify_request else [])]
+        return [*artifact_requests, *requests, *([verify_request] if verify_request else [])]
     focus_tool = "app.focus" if "app.focus" in allowed else ("app.open" if "app.open" in allowed else "")
     if focus_tool and "desktop.safe_type_text" in allowed:
         requests = [
@@ -5609,7 +5680,7 @@ def _model_followup_app_write_requests(
                 planning_reason=planning_reason,
             ),
         ]
-        return [*requests, *([verify_request] if verify_request else [])]
+        return [*artifact_requests, *requests, *([verify_request] if verify_request else [])]
     if focus_tool and "clipboard.write" in allowed and "desktop.safe_shortcut" in allowed:
         requests = [
             *container_requests,
@@ -5632,8 +5703,8 @@ def _model_followup_app_write_requests(
                 planning_reason=planning_reason,
             ),
         ]
-        return [*requests, *([verify_request] if verify_request else [])]
-    return []
+        return [*artifact_requests, *requests, *([verify_request] if verify_request else [])]
+    return artifact_requests
 
 
 def _model_followup_discovered_app_write_discovery_requests(
@@ -5740,6 +5811,36 @@ def _model_followup_discovered_app_write_requests_after_discovery(
         timeline,
         planning_reason="planner_followup_discovered_app_write",
     )
+
+
+def _model_followup_chained_artifact_write_requests(
+    generated_content: str,
+    target: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    content = str(generated_content or "").strip()
+    if not content:
+        return []
+    raw = (
+        target.get("artifact_write")
+        if isinstance(target.get("artifact_write"), Mapping)
+        else {}
+    )
+    path = str(raw.get("path") or "").strip()
+    if not path:
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    tool_name = str(raw.get("tool") or "artifact.write").strip()
+    if tool_name != "artifact.write" or tool_name not in allowed:
+        return []
+    return [
+        _request_like(
+            "artifact.write",
+            {"path": path, "content": content},
+            source="runtime_planner",
+            planning_reason="planner_followup_artifact_write",
+        )
+    ]
 
 
 def _model_followup_artifact_write_requests(

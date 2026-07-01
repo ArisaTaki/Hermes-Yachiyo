@@ -3000,6 +3000,133 @@ def test_model_followup_context_instructs_generated_artifact_write() -> None:
     ]
 
 
+def test_model_followup_context_writes_artifact_before_specific_communication() -> None:
+    payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "browser.open_url_and_extract_text",
+                "planning_reason": "planner_fallback_web_research",
+                "continue_to_model": True,
+            }
+        ],
+        {
+            "intent_kind": "web_research",
+            "artifacts_expected": ["research-summary.md"],
+            "followup_target": {
+                "kind": "communication_message",
+                "recipient": "yachiyo",
+                "body_source": "model_generated_content",
+                "send_action": "send",
+                "mode": "focus",
+                "app_name": "Slack",
+                "transform": "report",
+                "artifact_write": {
+                    "target_action": "write_artifact",
+                    "path": "research-summary.md",
+                    "body_source": "model_generated_content",
+                    "tool": "artifact.write",
+                    "intent_kind": "web_research",
+                },
+            },
+        },
+        allowed_tools=[
+            "browser.open_url_and_extract_text",
+            "artifact.write",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+        timeline=[
+            _timeline(
+                "agent.tool.call",
+                "browser.open_url_and_extract_text",
+                input_preview={"url": "https://example.com"},
+                result={"ok": True, "text": "Raw page text"},
+            )
+        ],
+    )
+    message = custom_api_agent_module._model_followup_context_message(payload)
+
+    assert payload["followup_target"]["artifact_write"] == {
+        "target_action": "write_artifact",
+        "path": "research-summary.md",
+        "body_source": "model_generated_content",
+        "tool": "artifact.write",
+        "write_allowed": True,
+        "recommended_tools": ["artifact.write"],
+        "intent_kind": "web_research",
+    }
+    assert "Before the delivery step, call artifact.write" in message
+    assert "do not stop after writing the artifact" in message.lower()
+    assert custom_api_agent_module._model_followup_app_write_requests(
+        "整理后的网页研究报告",
+        payload["followup_target"],
+        [
+            "artifact.write",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "artifact.write",
+            "input": {
+                "path": "research-summary.md",
+                "content": "整理后的网页研究报告",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_artifact_write",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Slack", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_communication",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "yachiyo"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_communication",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_communication",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "整理后的网页研究报告"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_communication",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_communication",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_communication",
+        },
+    ]
+
+
 def test_custom_api_agent_loop_writes_generated_followup_content_to_target_app() -> None:
     budget = FakeBudget()
     tool_runs: list[dict[str, Any]] = []
