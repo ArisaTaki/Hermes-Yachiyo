@@ -555,7 +555,7 @@ function PlannerCapabilityPill({
   );
 }
 
-function TaskCoreInspector({ taskCore }: { taskCore: TaskCoreSnapshot }) {
+export function TaskCoreInspector({ taskCore }: { taskCore: TaskCoreSnapshot }) {
   const workspaceItems = taskCore.workspace?.items || [];
   const todos = taskCore.todos || [];
   const checkpoints = taskCore.checkpoints || [];

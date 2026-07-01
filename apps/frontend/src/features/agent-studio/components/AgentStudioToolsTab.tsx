@@ -11,6 +11,7 @@ import type {
   ToolCatalogSnapshot,
   ToolPlanStepSnapshot,
 } from '../../yachiyo-studio/types';
+import { TaskCoreInspector } from './PlannerTraceInspector';
 
 type RiskFilter = 'all' | 'low' | 'medium' | 'high' | 'unknown';
 
@@ -368,6 +369,7 @@ function RuntimePlannerPreview({
             ))}
             {!steps.length ? <span className="studio-tool-empty">No planned steps</span> : null}
           </div>
+          {plan?.task_core ? <TaskCoreInspector taskCore={plan.task_core} /> : null}
         </div>
       ) : null}
     </div>
