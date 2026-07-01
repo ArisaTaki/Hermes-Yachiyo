@@ -4316,6 +4316,13 @@ def _model_followup_desktop_discovered_app_target_payload(
             communication_compose.get("send_action") == "send"
             and "desktop.submit_foreground" in allowed
         )
+        transform = str(
+            target.get("content_transform_hint")
+            or target.get("transform")
+            or ""
+        ).strip()
+        if transform:
+            payload["transform"] = transform
     creative_canvas = (
         target.get("creative_canvas")
         if isinstance(target.get("creative_canvas"), Mapping)
@@ -5080,6 +5087,13 @@ def _discovered_app_type_into_ui_element_request(
             source=source,
             planning_reason=planning_reason,
         )
+    if "desktop.safe_type_text" in allowed:
+        return _request_like(
+            "desktop.safe_type_text",
+            {"text": text},
+            source=source,
+            planning_reason=planning_reason,
+        )
     return {}
 
 
@@ -5349,16 +5363,23 @@ def _model_followup_desktop_discovered_app_instruction(target: Mapping[str, Any]
         recipient = str(communication_compose.get("recipient") or "").strip()
         body = str(communication_compose.get("body") or "").strip()
         send_action = str(communication_compose.get("send_action") or "draft").strip()
+        transform = str(
+            target.get("transform")
+            or target.get("content_transform_hint")
+            or ""
+        ).strip()
+        transform_text = f" Apply the requested content transform: {transform}." if transform else ""
         send_text = (
             " Send only through the approval-gated submit tool after the draft is filled."
             if send_action == "send"
             else " Prepare the draft only unless the user explicitly asks to send."
         )
         return (
-            f"The runtime discovered an app for {app_query!r}. Continue by opening a new "
-            "message in the discovered app, inspecting the compose UI, filling the explicit "
+            f"The user requested delivery through an app matching {app_query!r}. After deriving "
+            f"the final content, call desktop.list_apps for {app_query!r}, select the best "
+            "matching app, then open a new message in the discovered app, inspect the compose UI, fill the explicit "
             f"recipient {recipient!r}, and typing the explicit body {body!r}. "
-            f"Prefer {tool_text}.{send_text}{verify_text} If these UI tools are unavailable, "
+            f"{transform_text} Prefer {tool_text}.{send_text}{verify_text} If these UI tools are unavailable, "
             "explain the missing capability instead of claiming the message was prepared. "
         )
     if target_path:
@@ -5633,6 +5654,7 @@ def _model_followup_discovered_app_write_discovery_requests(
         return []
     target_action = str(target.get("target_action") or "").strip()
     safe_shortcut_action = str(target.get("safe_shortcut_action") or "").strip()
+    communication_compose = _discovered_app_communication_compose_payload(target)
     can_prepare = False
     if target_action == "safe_shortcut" and safe_shortcut_action:
         can_prepare = (
@@ -5647,6 +5669,26 @@ def _model_followup_discovered_app_write_discovery_requests(
         can_prepare = "app.open" in allowed or "app.focus" in allowed
     if not can_prepare:
         return []
+    if communication_compose:
+        can_type = (
+            "app.focus_and_type_into_ui_element" in allowed
+            or "desktop.type_into_ui_element" in allowed
+            or "desktop.safe_type_text" in allowed
+        )
+        can_send = (
+            communication_compose.get("send_action") != "send"
+            or "desktop.submit_foreground" in allowed
+        )
+        if not (can_type and "desktop.search_submit" in allowed and can_send):
+            return []
+        return [
+            _request_like(
+                "desktop.list_apps",
+                {"query": app_query, "limit": 20},
+                source="runtime_planner",
+                planning_reason="planner_followup_discovered_app_write",
+            )
+        ]
     if not (
         "desktop.safe_type_text" in allowed
         or "app.focus_and_safe_type_text" in allowed
@@ -5676,11 +5718,22 @@ def _model_followup_discovered_app_write_requests_after_discovery(
     app_query = str(target.get("app_query") or "").strip()
     if not app_query or not _discovered_app_name_for_query(timeline, app_query):
         return []
+    communication_compose = (
+        target.get("communication_compose")
+        if isinstance(target.get("communication_compose"), Mapping)
+        else {}
+    )
     followup_target = {
         **dict(target),
-        "compose_text": content,
         "body_source": "explicit_user_text",
     }
+    if communication_compose:
+        followup_target["communication_compose"] = {
+            **dict(communication_compose),
+            "body": content,
+        }
+    else:
+        followup_target["compose_text"] = content
     return _auto_discovered_app_followup_requests(
         {"followup_target": followup_target},
         allowed_tools,

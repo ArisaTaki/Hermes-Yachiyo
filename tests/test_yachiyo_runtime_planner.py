@@ -2719,6 +2719,32 @@ def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -
         "query": "chat",
     }
     assert _step_by_id(communication_decision, "send-analysis-communication-message").approval_required is True
+    communication_payload = planner_selection_payload(
+        decision=communication_decision,
+        planner_requests=[],
+        legacy_requests=[],
+        selected_requests=[],
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_projection",
+    )
+    assert communication_payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "chat",
+        "app_name_source": "desktop.list_apps",
+        "target_action": "safe_shortcut",
+        "safe_shortcut_action": "new_message",
+        "body_source": "model_generated_content",
+        "communication_compose": {
+            "recipient": "Alice",
+            "send_action": "send",
+            "channel": "message",
+        },
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
+        "content_transform_hint": "report",
+    }
 
     visible_prompt = "分析当前窗口里的表格并把报告写进任意文档应用"
     visible_decision = RuntimePlanner().decision(

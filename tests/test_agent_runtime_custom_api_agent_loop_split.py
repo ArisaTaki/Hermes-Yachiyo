@@ -2740,6 +2740,146 @@ def test_model_followup_context_instructs_generated_discovered_app_write() -> No
     ]
 
 
+def test_model_followup_context_discovers_generic_communication_app_after_analysis() -> None:
+    target = {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "chat",
+        "app_name_source": "desktop.list_apps",
+        "target_action": "safe_shortcut",
+        "safe_shortcut_action": "new_message",
+        "body_source": "model_generated_content",
+        "communication_compose": {
+            "recipient": "Alice",
+            "send_action": "send",
+            "channel": "message",
+        },
+        "content_transform_hint": "report",
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
+    }
+    payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "data.analyze",
+                "planning_reason": "planner_builtin_data_analysis",
+                "continue_to_model": True,
+            }
+        ],
+        {
+            "intent_kind": "data_analysis",
+            "followup_target": target,
+        },
+        allowed_tools=[
+            "data.analyze",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+        timeline=[
+            _timeline(
+                "agent.tool.call",
+                "data.analyze",
+                input_preview={"path": "sales.csv", "source_kind": "csv"},
+                result={
+                    "ok": True,
+                    "path": "sales.csv",
+                    "source_kind": "csv",
+                    "rows": 2,
+                    "columns": ["region", "revenue"],
+                    "artifact_paths": ["analysis-report.md", "analysis-chart.png"],
+                },
+            )
+        ],
+    )
+    message = custom_api_agent_module._model_followup_context_message(payload)
+
+    assert payload["followup_target"]["kind"] == "desktop_discovered_app_action"
+    assert payload["followup_target"]["app_query"] == "chat"
+    assert payload["followup_target"]["communication_compose"] == {
+        "channel": "message",
+        "recipient": "Alice",
+        "send_action": "send",
+    }
+    assert payload["followup_target"]["transform"] == "report"
+    assert "call desktop.list_apps for 'chat'" in message
+    assert "Apply the requested content transform: report." in message
+    assert custom_api_agent_module._model_followup_app_write_requests(
+        "销售分析报告\n- East revenue 10\n- West revenue 20",
+        payload["followup_target"],
+        [
+            "data.analyze",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "chat", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_discovered_app_write",
+        }
+    ]
+    discovered_requests = custom_api_agent_module._model_followup_discovered_app_write_requests_after_discovery(
+        "销售分析报告\n- East revenue 10\n- West revenue 20",
+        payload["followup_target"],
+        [
+            "data.analyze",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.list_apps",
+                input_preview={"query": "chat", "limit": 20},
+                result={
+                    "ok": True,
+                    "action": "desktop.list_apps",
+                    "summary": "Found Slack",
+                    "data": {
+                        "query": "chat",
+                        "best_match": {
+                            "name": "Slack",
+                            "path": "/Applications/Slack.app",
+                            "match_score": 96,
+                        },
+                    },
+                },
+            )
+        ],
+    )
+
+    assert [request["tool"] for request in discovered_requests] == [
+        "app.open_and_safe_shortcut",
+        "desktop.ui_elements",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    assert discovered_requests[0]["input"] == {"app_name": "Slack", "action": "new_message"}
+    assert discovered_requests[2]["input"] == {"text": "Alice"}
+    assert discovered_requests[4]["input"] == {
+        "text": "销售分析报告\n- East revenue 10\n- West revenue 20"
+    }
+    assert discovered_requests[5]["input"] == {"action": "send"}
+
+
 def test_model_followup_context_instructs_generated_note_write() -> None:
     payload = custom_api_agent_module._model_followup_context_payload(
         [

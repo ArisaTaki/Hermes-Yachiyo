@@ -336,6 +336,32 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
                 value = str(communication_target.get(source_key) or "").strip()
                 if value:
                     payload[target_key] = value
+            app_query = _communication_app_query_for_channel(str(payload.get("channel") or ""))
+            if not payload.get("app_name") and app_query:
+                compose_payload = {
+                    "recipient": recipient,
+                    "send_action": str(payload.get("send_action") or "send").strip(),
+                }
+                channel = str(payload.get("channel") or "").strip()
+                if channel:
+                    compose_payload["channel"] = channel
+                discovered_payload: dict[str, Any] = {
+                    "kind": "desktop_discovered_app_action",
+                    "app_query": app_query,
+                    "app_name_source": "desktop.list_apps",
+                    "target_action": "safe_shortcut",
+                    "safe_shortcut_action": "new_message",
+                    "body_source": "model_generated_content",
+                    "communication_compose": compose_payload,
+                    "post_action_observation": {
+                        "tool": "desktop.ui_elements",
+                        "input": {},
+                    },
+                }
+                transform = str(payload.get("transform") or "").strip()
+                if transform:
+                    discovered_payload["content_transform_hint"] = transform
+                return discovered_payload
             return payload
     return _artifact_write_followup_target(decision, inputs)
 
@@ -593,6 +619,15 @@ def _communication_followup_hint(inputs: Mapping[str, Any]) -> Mapping[str, Any]
         if isinstance(target, Mapping):
             return target
     return {}
+
+
+def _communication_app_query_for_channel(channel: str) -> str:
+    clean_channel = str(channel or "").strip()
+    if clean_channel == "email":
+        return "email"
+    if clean_channel in {"message", "chat"}:
+        return "chat"
+    return ""
 
 
 def _selection_entrypoint_payload(metadata: Mapping[str, Any] | None) -> dict[str, Any]:
