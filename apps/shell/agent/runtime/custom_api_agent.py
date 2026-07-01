@@ -1595,16 +1595,25 @@ class RuntimeCustomApiAgentLoop:
             if isinstance(event, dict)
             and str(event.get("event") or "").strip() == "agent.replan.requested"
         }
+        tool_events = [
+            event
+            for event in list(timeline[tool_timeline_start:])
+            if isinstance(event, dict)
+            and str(event.get("event") or "").strip() == "agent.tool.call"
+        ]
+        step_payloads = _runtime_planner_tool_event_step_payloads(decision, tool_events)
         failure_payloads: list[dict[str, Any]] = []
-        for event in list(timeline[tool_timeline_start:]):
-            if not isinstance(event, dict):
-                continue
-            if str(event.get("event") or "").strip() != "agent.tool.call":
-                continue
+        for event_index, event in enumerate(tool_events):
             result = event.get("result") if isinstance(event.get("result"), dict) else {}
             if not _tool_result_requests_replan(result):
                 continue
             tool_name = str(event.get("detail") or "").strip()
+            step_payload = step_payloads.get(event_index, {})
+            step_metadata = (
+                step_payload.get("metadata")
+                if isinstance(step_payload.get("metadata"), Mapping)
+                else {}
+            )
             failure_payload = {
                 "event_type": "agent.tool.call",
                 "tool_name": tool_name,
@@ -1614,7 +1623,14 @@ class RuntimeCustomApiAgentLoop:
                     else {}
                 ),
                 "result": result,
+                **{
+                    key: value
+                    for key, value in step_payload.items()
+                    if key != "metadata"
+                },
             }
+            if step_metadata:
+                failure_payload["metadata"] = dict(step_metadata)
             failure_payloads.append(failure_payload)
         failure_payloads.extend(
             _runtime_planner_verification_failure_payloads(
@@ -1622,7 +1638,8 @@ class RuntimeCustomApiAgentLoop:
                 list(timeline[tool_timeline_start:]),
             )
         )
-        failure_payloads.extend(_runtime_planner_unavailable_failure_payloads(decision))
+        if not failure_payloads:
+            failure_payloads.extend(_runtime_planner_unavailable_failure_payloads(decision))
         payloads: list[dict[str, Any]] = []
         for failure_payload in failure_payloads:
             replan_metadata = (
@@ -4812,6 +4829,96 @@ def _tool_result_requests_replan(result: Mapping[str, Any]) -> bool:
     if exit_code not in (None, "", 0, "0"):
         return True
     return False
+
+
+def _runtime_planner_tool_event_step_payloads(
+    decision: Any,
+    tool_events: list[dict[str, Any]],
+) -> dict[int, dict[str, Any]]:
+    plan = getattr(decision, "plan", None)
+    tool_plan = getattr(plan, "tool_plan", None)
+    steps = list(getattr(tool_plan, "steps", []) or [])
+    if not steps or not tool_events:
+        return {}
+    by_event_index: dict[int, dict[str, Any]] = {}
+    step_cursor = 0
+    for event_index, event in enumerate(tool_events):
+        tool_name = str(event.get("detail") or "").strip()
+        if not tool_name:
+            continue
+        explicit_step_id = str(event.get("step_id") or event.get("planner_step_id") or "").strip()
+        match_index, step = _runtime_planner_matching_tool_event_step(
+            steps,
+            tool_name=tool_name,
+            step_cursor=step_cursor,
+            explicit_step_id=explicit_step_id,
+        )
+        if step is None:
+            continue
+        if match_index >= step_cursor:
+            step_cursor = match_index + 1
+        by_event_index[event_index] = _runtime_planner_step_failure_trace_payload(step)
+    return by_event_index
+
+
+def _runtime_planner_matching_tool_event_step(
+    steps: list[Any],
+    *,
+    tool_name: str,
+    step_cursor: int,
+    explicit_step_id: str = "",
+) -> tuple[int, Any | None]:
+    if explicit_step_id:
+        for index, step in enumerate(steps):
+            if str(getattr(step, "step_id", "") or "").strip() == explicit_step_id:
+                return index, step
+    for index in range(max(0, step_cursor), len(steps)):
+        step = steps[index]
+        if str(getattr(step, "tool_name", "") or "").strip() == tool_name:
+            return index, step
+    for index, step in enumerate(steps):
+        if index >= step_cursor:
+            continue
+        if str(getattr(step, "tool_name", "") or "").strip() == tool_name:
+            return index, step
+    return -1, None
+
+
+def _runtime_planner_step_failure_trace_payload(step: Any) -> dict[str, Any]:
+    step_id = str(getattr(step, "step_id", "") or "").strip()
+    capability_id = str(getattr(step, "capability_id", "") or "").strip()
+    tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    payload: dict[str, Any] = {}
+    if step_id:
+        payload["source_step_id"] = step_id
+        payload["planner_step_id"] = step_id
+    if tool_name:
+        payload["planned_tool_name"] = tool_name
+    if capability_id:
+        payload["capability_id"] = capability_id
+    metadata = {
+        key: value
+        for key, value in {
+            "step_id": step_id,
+            "capability_id": capability_id,
+            "planned_tool_name": tool_name,
+            "step_title": str(getattr(step, "title", "") or "").strip(),
+            "step_action": str(getattr(step, "action", "") or "").strip(),
+            "risk_level": str(getattr(step, "risk_level", "") or "").strip(),
+            "approval_required": bool(getattr(step, "approval_required", False)),
+        }.items()
+        if value not in ("", None)
+    }
+    fallback_tools = [
+        str(tool or "").strip()
+        for tool in list(getattr(step, "fallback_tools", []) or [])
+        if str(tool or "").strip()
+    ]
+    if fallback_tools:
+        metadata["fallback_tools"] = fallback_tools
+    if metadata:
+        payload["metadata"] = metadata
+    return payload
 
 
 def _runtime_planner_verification_failure_payloads(

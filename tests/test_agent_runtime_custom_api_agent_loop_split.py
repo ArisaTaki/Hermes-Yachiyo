@@ -15365,6 +15365,40 @@ def test_runtime_planner_replans_empty_auto_discovered_app_observation() -> None
     } == {payload["request_id"]}
 
 
+def test_runtime_planner_replan_maps_tool_failure_to_plan_step_without_request_trace() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+    loop = _private_runtime_loop()
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "data.analyze",
+            input_preview={"path": "sales.csv"},
+            result={"ok": False, "error": "unsupported chart type"},
+        )
+    ]
+
+    payloads = loop._record_runtime_planner_replan_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-analysis",
+    )
+
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload["trigger"] == "tool_failure"
+    assert payload["source_step_id"] == "analyze-data-file"
+    assert payload["source_tool_name"] == "data.analyze"
+    assert payload["target_capability_id"] == "data.analysis"
+    assert payload["fallback_tools"] == ["terminal.run"]
+    assert payload["metadata"]["step_title"] == "Analyze data file"
+    assert payload["metadata"]["step_action"] == "analyze_data_file"
+    assert "failed_step: analyze-data-file" in payload["replan_prompt"]
+
+
 def test_auto_discovered_app_compose_followup_types_and_verifies() -> None:
     timeline = [
         _timeline(
