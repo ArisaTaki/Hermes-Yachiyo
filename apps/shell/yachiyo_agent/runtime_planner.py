@@ -25,8 +25,14 @@ from .capability_registry import capability_snapshots
 from .clipboard_plan_hints import clipboard_operation_hint, clipboard_tool_preview
 from .contracts import (
     PlannerDecisionSnapshot,
+    ReplanSignalSnapshot,
     RuntimePlanSnapshot,
+    TaskCheckpointSnapshot,
+    TaskCoreSnapshot,
     TaskIntentSnapshot,
+    TaskTodoItemSnapshot,
+    TaskWorkspaceItemSnapshot,
+    TaskWorkspaceSnapshot,
     ToolPlanSnapshot,
     ToolPlanStepSnapshot,
 )
@@ -2167,13 +2173,20 @@ class RuntimePlanner:
             artifacts_expected=_artifacts_expected(intent, steps),
             open_questions=list(intent.missing_inputs),
         )
+        task_core = _task_core_snapshot(
+            intent,
+            steps,
+            artifacts_expected=tool_plan.artifacts_expected,
+            open_questions=tool_plan.open_questions,
+        )
         return RuntimePlanSnapshot(
             plan_id=_stable_id("runtime-plan", intent.kind, intent.user_goal),
             intent=intent,
             capabilities=snapshots,
             tool_plan=tool_plan,
+            task_core=task_core,
             route_to_studio=_route_to_studio(intent, steps),
-            timeline_preview=_timeline_preview(intent, steps),
+            timeline_preview=_timeline_preview(intent, steps, task_core),
         )
 
     def _steps_for_intent(
@@ -9683,7 +9696,268 @@ def _can_use_builtin_data_analysis(
     return True
 
 
-def _timeline_preview(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapshot]) -> list[dict[str, Any]]:
+def _task_core_snapshot(
+    intent: TaskIntentSnapshot,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    artifacts_expected: list[str],
+    open_questions: list[str],
+) -> TaskCoreSnapshot:
+    workspace_id = _stable_id("task-workspace", intent.kind, intent.user_goal)
+    workspace = TaskWorkspaceSnapshot(
+        workspace_id=workspace_id,
+        title=f"{intent.title} Workspace",
+        summary=(
+            "DeepAgent-style task workspace for planner-visible inputs, scratch state, "
+            "expected artifacts, and replay checkpoints."
+        ),
+        items=_task_workspace_items(intent, steps, artifacts_expected, open_questions),
+        context={
+            "intent_id": intent.intent_id,
+            "intent_kind": intent.kind,
+            "risk_level": intent.risk_level,
+            "expected_outputs": list(intent.expected_outputs),
+            "missing_inputs": list(intent.missing_inputs),
+        },
+    )
+    return TaskCoreSnapshot(
+        core_id=_stable_id("task-core", intent.kind, intent.user_goal),
+        workspace=workspace,
+        todos=_task_todo_items(steps),
+        checkpoints=_task_checkpoints(intent, steps, artifacts_expected),
+        replan_signals=_task_replan_signals(steps),
+    )
+
+
+def _task_workspace_items(
+    intent: TaskIntentSnapshot,
+    steps: list[ToolPlanStepSnapshot],
+    artifacts_expected: list[str],
+    open_questions: list[str],
+) -> list[TaskWorkspaceItemSnapshot]:
+    items: list[TaskWorkspaceItemSnapshot] = []
+    for key, value in sorted(intent.inputs.items()):
+        if value in ("", None, [], {}):
+            continue
+        if not _task_workspace_input_key(key):
+            continue
+        items.append(
+            TaskWorkspaceItemSnapshot(
+                item_id=_stable_id("workspace-input", intent.intent_id, key),
+                title=key,
+                kind="input",
+                path=str(value) if isinstance(value, str) and _looks_like_workspace_path(value) else None,
+                description=_workspace_item_description(value),
+                metadata={"input_key": key},
+            )
+        )
+    for artifact in artifacts_expected:
+        items.append(
+            TaskWorkspaceItemSnapshot(
+                item_id=_stable_id("workspace-artifact", intent.intent_id, artifact),
+                title=artifact,
+                kind="artifact",
+                path=artifact if _looks_like_workspace_path(artifact) else None,
+                description="Expected durable output from the task plan.",
+                metadata={"planned_artifact": artifact},
+            )
+        )
+    for question in open_questions:
+        items.append(
+            TaskWorkspaceItemSnapshot(
+                item_id=_stable_id("workspace-open-question", intent.intent_id, question),
+                title=question,
+                kind="scratch",
+                description="Open question that must be resolved before the task can finish.",
+                status="blocked",
+                metadata={"missing_input": question},
+            )
+        )
+    if steps:
+        items.append(
+            TaskWorkspaceItemSnapshot(
+                item_id=_stable_id("workspace-plan", intent.intent_id, str(len(steps))),
+                title="tool-plan.todo.md",
+                kind="todo",
+                path="tool-plan.todo.md",
+                description="Runtime-generated todo list derived from planned tool steps.",
+                metadata={"step_count": len(steps)},
+            )
+        )
+    return items
+
+
+def _task_workspace_input_key(key: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:path|file|source|data|url|query|target|app|artifact|context|body|recipient)",
+            str(key or ""),
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _workspace_item_description(value: Any) -> str:
+    if isinstance(value, str):
+        return _clean_prompt(value)[:240]
+    if isinstance(value, (int, float, bool)):
+        return str(value)
+    return _tool_input_preview(value, limit=300)
+
+
+def _looks_like_workspace_path(value: str) -> bool:
+    text = str(value or "").strip()
+    if not text or len(text) > 260:
+        return False
+    if re.search(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", text):
+        return False
+    return bool(
+        "/" in text
+        or "\\" in text
+        or re.search(r"\.(?:csv|tsv|json|jsonl|xlsx|txt|md|html|png|jpg|jpeg|pdf)$", text, re.IGNORECASE)
+    )
+
+
+def _task_todo_items(steps: list[ToolPlanStepSnapshot]) -> list[TaskTodoItemSnapshot]:
+    todos: list[TaskTodoItemSnapshot] = []
+    for index, step in enumerate(steps, start=1):
+        todos.append(
+            TaskTodoItemSnapshot(
+                todo_id=_stable_id("todo", step.step_id, str(index)),
+                title=step.title,
+                status="blocked" if step.status == "unavailable" else "pending",
+                capability_id=step.capability_id,
+                step_id=step.step_id,
+                tool_name=step.tool_name,
+                approval_required=step.approval_required,
+                depends_on=list(step.depends_on),
+                reason=step.reason,
+                metadata={
+                    "action": step.action,
+                    "risk_level": step.risk_level,
+                    "fallback_tools": list(step.fallback_tools),
+                },
+            )
+        )
+    return todos
+
+
+def _task_checkpoints(
+    intent: TaskIntentSnapshot,
+    steps: list[ToolPlanStepSnapshot],
+    artifacts_expected: list[str],
+) -> list[TaskCheckpointSnapshot]:
+    checkpoints: list[TaskCheckpointSnapshot] = []
+    for index, step in enumerate(steps, start=1):
+        checkpoints.append(
+            TaskCheckpointSnapshot(
+                checkpoint_id=_stable_id("checkpoint", step.step_id, str(index)),
+                title=f"Verify {step.title}",
+                status="waiting_approval" if step.approval_required else "planned",
+                after_step_id=step.step_id,
+                depends_on=[step.step_id],
+                verifies=[
+                    item
+                    for item in (
+                        step.step_id,
+                        step.capability_id,
+                        step.action,
+                        step.tool_name or "",
+                    )
+                    if item
+                ],
+                replan_on_failure=True,
+                payload={
+                    "intent_id": intent.intent_id,
+                    "approval_required": step.approval_required,
+                    "risk_level": step.risk_level,
+                },
+            )
+        )
+    if artifacts_expected:
+        checkpoints.append(
+            TaskCheckpointSnapshot(
+                checkpoint_id=_stable_id("checkpoint", intent.intent_id, "artifacts"),
+                title="Verify expected artifacts",
+                status="planned",
+                after_step_id=steps[-1].step_id if steps else None,
+                depends_on=[steps[-1].step_id] if steps else [],
+                verifies=list(artifacts_expected),
+                replan_on_failure=True,
+                payload={"artifact_count": len(artifacts_expected)},
+            )
+        )
+    return checkpoints
+
+
+def _task_replan_signals(steps: list[ToolPlanStepSnapshot]) -> list[ReplanSignalSnapshot]:
+    signals: list[ReplanSignalSnapshot] = []
+    for step in steps:
+        fallback_tools = list(step.fallback_tools)
+        if step.status == "unavailable" or not step.tool_name:
+            signals.append(
+                ReplanSignalSnapshot(
+                    signal_id=_stable_id("replan", step.step_id, "unavailable"),
+                    trigger="tool_unavailable",
+                    source_step_id=step.step_id,
+                    condition="planned tool is missing or marked unavailable",
+                    target=step.capability_id,
+                    fallback_tools=fallback_tools,
+                    reason="Select another available tool or ask for the missing capability.",
+                )
+            )
+            continue
+        if fallback_tools:
+            signals.append(
+                ReplanSignalSnapshot(
+                    signal_id=_stable_id("replan", step.step_id, "fallback"),
+                    trigger="tool_failure",
+                    source_step_id=step.step_id,
+                    condition="tool result fails, is empty, or contradicts the requested state",
+                    target=step.capability_id,
+                    fallback_tools=fallback_tools,
+                    reason="Try the declared fallback tools before giving up.",
+                )
+            )
+            continue
+        if _step_should_verify_before_continuing(step):
+            signals.append(
+                ReplanSignalSnapshot(
+                    signal_id=_stable_id("replan", step.step_id, "verify"),
+                    trigger="verification_failed",
+                    source_step_id=step.step_id,
+                    condition="post-action observation does not confirm the requested state",
+                    target=step.capability_id,
+                    reason="Return to discovery/inspection and choose the next observable action.",
+                )
+            )
+    return signals
+
+
+def _step_should_verify_before_continuing(step: ToolPlanStepSnapshot) -> bool:
+    action = str(step.action or "").strip()
+    tool_name = str(step.tool_name or "").strip()
+    return bool(
+        step.approval_required
+        or action in {
+            "click",
+            "draft_message",
+            "hotkey",
+            "open_app",
+            "safe_shortcut",
+            "send_message",
+            "submit",
+            "type",
+        }
+        or tool_name.startswith(("app.", "desktop.", "browser.", "data.", "terminal."))
+    )
+
+
+def _timeline_preview(
+    intent: TaskIntentSnapshot,
+    steps: list[ToolPlanStepSnapshot],
+    task_core: TaskCoreSnapshot | None = None,
+) -> list[dict[str, Any]]:
     events = [
         {
             "event_type": "agent.intent.selected",
@@ -9709,6 +9983,20 @@ def _timeline_preview(intent: TaskIntentSnapshot, steps: list[ToolPlanStepSnapsh
             },
         }
     )
+    if task_core is not None:
+        events.append(
+            {
+                "event_type": "agent.task_core.created",
+                "detail": task_core.workspace.title,
+                "payload": {
+                    "core_id": task_core.core_id,
+                    "workspace_id": task_core.workspace.workspace_id,
+                    "todo_count": len(task_core.todos),
+                    "checkpoint_count": len(task_core.checkpoints),
+                    "replan_signal_count": len(task_core.replan_signals),
+                },
+            }
+        )
     for index, step in enumerate(steps, start=1):
         events.append(
             {

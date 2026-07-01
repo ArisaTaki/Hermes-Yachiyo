@@ -19,6 +19,23 @@ MemoryScope = Literal["shared", "per_agent", "hybrid"]
 ApprovalStatus = Literal["pending", "approved", "rejected", "cancelled", "expired"]
 DesktopExecutionRisk = Literal["low", "medium", "high"]
 RecoveryActionKind = Literal["permission_recovery", "retry_original"]
+TaskWorkspaceItemKind = Literal[
+    "input",
+    "scratch",
+    "artifact",
+    "checkpoint",
+    "todo",
+    "memory",
+    "other",
+]
+TaskTodoStatus = Literal["pending", "in_progress", "blocked", "completed", "skipped"]
+TaskCheckpointStatus = Literal[
+    "planned",
+    "ready",
+    "waiting_approval",
+    "blocked",
+    "completed",
+]
 TaskIntentKind = Literal[
     "desktop_operation",
     "data_analysis",
@@ -230,11 +247,76 @@ class ToolPlanSnapshot(_PublicSnapshot):
     source: str = "runtime_planner"
 
 
+class TaskWorkspaceItemSnapshot(_PublicSnapshot):
+    item_id: str
+    title: str
+    kind: TaskWorkspaceItemKind | str = "other"
+    path: str | None = None
+    description: str = ""
+    source_step_id: str | None = None
+    status: str = "planned"
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskWorkspaceSnapshot(_PublicSnapshot):
+    workspace_id: str
+    title: str
+    root_label: str = "runtime://task-workspace"
+    summary: str = ""
+    items: list[TaskWorkspaceItemSnapshot] = Field(default_factory=list)
+    context: dict[str, Any] = Field(default_factory=dict)
+    source: str = "runtime_planner"
+
+
+class TaskTodoItemSnapshot(_PublicSnapshot):
+    todo_id: str
+    title: str
+    status: TaskTodoStatus | str = "pending"
+    capability_id: str = ""
+    step_id: str | None = None
+    tool_name: str | None = None
+    approval_required: bool = False
+    depends_on: list[str] = Field(default_factory=list)
+    reason: str = ""
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class TaskCheckpointSnapshot(_PublicSnapshot):
+    checkpoint_id: str
+    title: str
+    status: TaskCheckpointStatus | str = "planned"
+    after_step_id: str | None = None
+    depends_on: list[str] = Field(default_factory=list)
+    verifies: list[str] = Field(default_factory=list)
+    replan_on_failure: bool = True
+    payload: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReplanSignalSnapshot(_PublicSnapshot):
+    signal_id: str
+    trigger: str
+    source_step_id: str | None = None
+    condition: str = ""
+    target: str = ""
+    fallback_tools: list[str] = Field(default_factory=list)
+    reason: str = ""
+
+
+class TaskCoreSnapshot(_PublicSnapshot):
+    core_id: str
+    workspace: TaskWorkspaceSnapshot
+    todos: list[TaskTodoItemSnapshot] = Field(default_factory=list)
+    checkpoints: list[TaskCheckpointSnapshot] = Field(default_factory=list)
+    replan_signals: list[ReplanSignalSnapshot] = Field(default_factory=list)
+    source: str = "runtime_planner"
+
+
 class RuntimePlanSnapshot(_PublicSnapshot):
     plan_id: str
     intent: TaskIntentSnapshot
     capabilities: list[CapabilitySnapshot] = Field(default_factory=list)
     tool_plan: ToolPlanSnapshot
+    task_core: TaskCoreSnapshot | None = None
     route_to_studio: bool = False
     timeline_preview: list[dict[str, Any]] = Field(default_factory=list)
     source: str = "runtime_planner"

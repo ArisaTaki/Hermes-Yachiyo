@@ -64,8 +64,14 @@ from apps.shell.yachiyo_agent import (
     SkillTraceSnapshot,
     StartChatTaskRequest,
     StartPlannerOrchestrationRequest,
+    ReplanSignalSnapshot,
+    TaskCheckpointSnapshot,
+    TaskCoreSnapshot,
     TaskIntentSnapshot,
     TaskIntentKind,
+    TaskTodoItemSnapshot,
+    TaskWorkspaceItemSnapshot,
+    TaskWorkspaceSnapshot,
     ToolCatalogItemSnapshot,
     ToolCatalogSnapshot,
     ToolCallSnapshot,
@@ -245,6 +251,67 @@ def test_planner_public_snapshots_explain_intent_capabilities_and_tool_plan() ->
     )
     assert payload["plan"]["tool_plan"]["steps"][1]["fallback_tools"] == ["terminal.run"]
     assert payload["plan"]["timeline_preview"] == [{"event_type": "agent.plan.created"}]
+
+
+def test_task_core_public_snapshot_exposes_workspace_todo_checkpoint_and_replan() -> None:
+    workspace = TaskWorkspaceSnapshot(
+        workspace_id="workspace-1",
+        title="Analyze workspace",
+        items=[
+            TaskWorkspaceItemSnapshot(
+                item_id="input-1",
+                title="sales.csv",
+                kind="input",
+                path="sales.csv",
+            )
+        ],
+    )
+    task_core = TaskCoreSnapshot(
+        core_id="task-core-1",
+        workspace=workspace,
+        todos=[
+            TaskTodoItemSnapshot(
+                todo_id="todo-1",
+                title="Run analysis",
+                capability_id="data.analysis",
+                step_id="run-analysis",
+                tool_name="data.analyze",
+                approval_required=True,
+            )
+        ],
+        checkpoints=[
+            TaskCheckpointSnapshot(
+                checkpoint_id="checkpoint-1",
+                title="Verify report",
+                after_step_id="write-report",
+                verifies=["analysis-report.md"],
+            )
+        ],
+        replan_signals=[
+            ReplanSignalSnapshot(
+                signal_id="replan-1",
+                trigger="tool_failure",
+                source_step_id="run-analysis",
+                target="data.analysis",
+                fallback_tools=["terminal.run"],
+            )
+        ],
+    )
+
+    payload = _json(task_core)
+
+    assert list(payload) == [
+        "core_id",
+        "workspace",
+        "todos",
+        "checkpoints",
+        "replan_signals",
+        "source",
+    ]
+    assert payload["workspace"]["items"][0]["kind"] == "input"
+    assert payload["todos"][0]["approval_required"] is True
+    assert payload["checkpoints"][0]["replan_on_failure"] is True
+    assert payload["replan_signals"][0]["fallback_tools"] == ["terminal.run"]
 
 
 def test_planner_orchestration_start_contract_links_decision_and_started_run() -> None:

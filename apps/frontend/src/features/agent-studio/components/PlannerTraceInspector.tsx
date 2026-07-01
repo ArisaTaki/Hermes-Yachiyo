@@ -4,6 +4,7 @@ import type {
   PlannerTraceSummarySnapshot,
   PublicRunEvent,
   RuntimePlanSnapshot,
+  TaskCoreSnapshot,
   TaskIntentSnapshot,
   ToolPlanSnapshot,
   ToolPlanStepSnapshot,
@@ -126,6 +127,7 @@ export function PlannerTraceInspector({
     ...(trace.selection?.openQuestions || []),
   ]);
   const confidence = confidenceLabel(intent?.confidence);
+  const taskCore = trace.plan?.task_core || null;
 
   return (
     <details
@@ -213,6 +215,8 @@ export function PlannerTraceInspector({
             </div>
           </section>
         ) : null}
+
+        {taskCore ? <TaskCoreInspector taskCore={taskCore} /> : null}
 
         {trace.selection ? (
           <section
@@ -510,6 +514,86 @@ function PlannerCapabilityPill({
       {capabilityLabel(capabilityId, capabilityById)}
       {actionSummary ? ` (${actionSummary})` : ''}
     </span>
+  );
+}
+
+function TaskCoreInspector({ taskCore }: { taskCore: TaskCoreSnapshot }) {
+  const workspaceItems = taskCore.workspace?.items || [];
+  const todos = taskCore.todos || [];
+  const checkpoints = taskCore.checkpoints || [];
+  const replanSignals = taskCore.replan_signals || [];
+  return (
+    <section
+      data-checkpoint-count={checkpoints.length}
+      data-core-id={taskCore.core_id}
+      data-replan-signal-count={replanSignals.length}
+      data-testid="agent-run-detail-task-core"
+      data-todo-count={todos.length}
+      data-workspace-id={taskCore.workspace?.workspace_id || ''}
+    >
+      <div className="studio-tool-inspector-heading">
+        <h3>Task Core</h3>
+        <span>{taskCore.workspace?.title || taskCore.core_id}</span>
+      </div>
+      <div className="studio-tool-pill-row">
+        <span className="studio-tool-permission" data-task-core-count-kind="workspace">
+          workspace · {workspaceItems.length}
+        </span>
+        <span className="studio-tool-permission" data-task-core-count-kind="todo">
+          todos · {todos.length}
+        </span>
+        <span className="studio-tool-permission" data-task-core-count-kind="checkpoint">
+          checkpoints · {checkpoints.length}
+        </span>
+        <span className="studio-tool-permission" data-task-core-count-kind="replan">
+          replan · {replanSignals.length}
+        </span>
+        {workspaceItems.slice(0, 8).map((item) => (
+          <span
+            className="studio-tool-permission"
+            data-task-workspace-item={item.item_id}
+            data-task-workspace-item-kind={item.kind || ''}
+            key={`workspace:${item.item_id}`}
+            title={item.description || item.path || item.title}
+          >
+            item · {item.kind || 'other'}: {item.title}
+          </span>
+        ))}
+        {todos.slice(0, 8).map((todo) => (
+          <span
+            className={todo.status === 'blocked' ? 'studio-tool-permission missing' : 'studio-tool-permission'}
+            data-task-todo-id={todo.todo_id}
+            data-task-todo-status={todo.status || 'pending'}
+            key={`todo:${todo.todo_id}`}
+            title={todo.reason || todo.tool_name || todo.capability_id}
+          >
+            todo · {todo.title}
+          </span>
+        ))}
+        {checkpoints.slice(0, 8).map((checkpoint) => (
+          <span
+            className={checkpoint.status === 'waiting_approval' ? 'studio-tool-permission missing' : 'studio-tool-permission'}
+            data-task-checkpoint-id={checkpoint.checkpoint_id}
+            data-task-checkpoint-status={checkpoint.status || 'planned'}
+            key={`checkpoint:${checkpoint.checkpoint_id}`}
+            title={uniqueStrings(checkpoint.verifies || []).join(', ')}
+          >
+            checkpoint · {checkpoint.title}
+          </span>
+        ))}
+        {replanSignals.slice(0, 8).map((signal) => (
+          <span
+            className="studio-tool-permission"
+            data-task-replan-signal={signal.signal_id}
+            data-task-replan-trigger={signal.trigger}
+            key={`replan:${signal.signal_id}`}
+            title={signal.reason || signal.condition || signal.target}
+          >
+            replan · {signal.trigger}
+          </span>
+        ))}
+      </div>
+    </section>
   );
 }
 

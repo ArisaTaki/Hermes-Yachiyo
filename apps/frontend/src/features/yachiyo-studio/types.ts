@@ -46,11 +46,17 @@ export type {
   ToolPlanStepSnapshot,
   RuntimePlanSnapshot,
   StartPlannerOrchestrationRequest,
+  ReplanSignalSnapshot,
+  TaskCheckpointSnapshot,
+  TaskCoreSnapshot,
+  TaskTodoItemSnapshot,
   UpdateRestrictedToolPluginRequest,
   WorkflowRunSnapshot,
   WorkflowSnapshot,
   TaskIntentKind,
   TaskIntentSnapshot,
+  TaskWorkspaceItemSnapshot,
+  TaskWorkspaceSnapshot,
 } from '../runtime-shared/types';
 
 export type SaveAgentGroupRequest = {

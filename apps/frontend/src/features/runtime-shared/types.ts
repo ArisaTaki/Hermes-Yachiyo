@@ -164,11 +164,76 @@ export type ToolPlanSnapshot = {
   source?: string;
 };
 
+export type TaskWorkspaceItemSnapshot = {
+  item_id: string;
+  title: string;
+  kind?: 'input' | 'scratch' | 'artifact' | 'checkpoint' | 'todo' | 'memory' | 'other' | string;
+  path?: string | null;
+  description?: string;
+  source_step_id?: string | null;
+  status?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type TaskWorkspaceSnapshot = {
+  workspace_id: string;
+  title: string;
+  root_label?: string;
+  summary?: string;
+  items?: TaskWorkspaceItemSnapshot[];
+  context?: Record<string, unknown>;
+  source?: string;
+};
+
+export type TaskTodoItemSnapshot = {
+  todo_id: string;
+  title: string;
+  status?: 'pending' | 'in_progress' | 'blocked' | 'completed' | 'skipped' | string;
+  capability_id?: string;
+  step_id?: string | null;
+  tool_name?: string | null;
+  approval_required?: boolean;
+  depends_on?: string[];
+  reason?: string;
+  metadata?: Record<string, unknown>;
+};
+
+export type TaskCheckpointSnapshot = {
+  checkpoint_id: string;
+  title: string;
+  status?: 'planned' | 'ready' | 'waiting_approval' | 'blocked' | 'completed' | string;
+  after_step_id?: string | null;
+  depends_on?: string[];
+  verifies?: string[];
+  replan_on_failure?: boolean;
+  payload?: Record<string, unknown>;
+};
+
+export type ReplanSignalSnapshot = {
+  signal_id: string;
+  trigger: string;
+  source_step_id?: string | null;
+  condition?: string;
+  target?: string;
+  fallback_tools?: string[];
+  reason?: string;
+};
+
+export type TaskCoreSnapshot = {
+  core_id: string;
+  workspace: TaskWorkspaceSnapshot;
+  todos?: TaskTodoItemSnapshot[];
+  checkpoints?: TaskCheckpointSnapshot[];
+  replan_signals?: ReplanSignalSnapshot[];
+  source?: string;
+};
+
 export type RuntimePlanSnapshot = {
   plan_id: string;
   intent: TaskIntentSnapshot;
   capabilities?: CapabilitySnapshot[];
   tool_plan: ToolPlanSnapshot;
+  task_core?: TaskCoreSnapshot | null;
   route_to_studio?: boolean;
   timeline_preview?: Array<Record<string, unknown>>;
   source?: string;

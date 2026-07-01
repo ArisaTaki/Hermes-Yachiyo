@@ -1579,6 +1579,7 @@ def test_runtime_planner_timeline_preview_includes_created_plan_event() -> None:
     assert event_types == [
         "agent.intent.selected",
         "agent.plan.created",
+        "agent.task_core.created",
         "agent.plan.step",
         "agent.plan.step",
         "agent.plan.step",
@@ -1589,6 +1590,39 @@ def test_runtime_planner_timeline_preview_includes_created_plan_event() -> None:
     assert created["payload"]["approvals_required"] == ["run-analysis"]
     assert created["payload"]["artifacts_expected"] == ["analysis-report.md"]
     assert created["payload"]["route_to_studio"] is True
+    task_core_event = decision.plan.timeline_preview[2]
+    assert task_core_event["payload"]["core_id"] == decision.plan.task_core.core_id
+    assert task_core_event["payload"]["todo_count"] == 3
+    assert task_core_event["payload"]["checkpoint_count"] == 4
+
+
+def test_runtime_planner_emits_deepagent_style_task_core() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "terminal.run", "artifact.write"],
+    )
+
+    task_core = decision.plan.task_core
+
+    assert task_core is not None
+    assert task_core.workspace.workspace_id.startswith("task-workspace-")
+    assert [todo.step_id for todo in task_core.todos] == [
+        "inspect-data-source",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert task_core.todos[1].approval_required is True
+    assert any(item.kind == "input" and item.path == "sales.csv" for item in task_core.workspace.items)
+    assert any(
+        item.kind == "artifact" and item.path == "analysis-report.md"
+        for item in task_core.workspace.items
+    )
+    assert [checkpoint.after_step_id for checkpoint in task_core.checkpoints[:3]] == [
+        "inspect-data-source",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert any(signal.trigger == "tool_failure" for signal in task_core.replan_signals)
 
 
 def test_runtime_planner_timeline_events_include_full_studio_trace_payloads() -> None:
