@@ -18526,6 +18526,104 @@ button.activity-item {
   white-space: pre-wrap;
 }
 
+.run-capability-recovery {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding-top: 9px;
+  border-top: 1px solid var(--hy-border-soft);
+}
+
+.run-capability-recovery-head,
+.run-capability-recovery-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px;
+  min-width: 0;
+}
+
+.run-capability-recovery-head strong,
+.run-capability-recovery-title strong {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--hy-fg);
+  font-size: 11px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-capability-recovery-head span {
+  color: var(--hy-faint);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.run-capability-recovery-items {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+
+.run-capability-recovery-item {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+  padding-bottom: 7px;
+  border-bottom: 1px solid var(--hy-border-soft);
+}
+
+.run-capability-recovery-item:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.run-capability-recovery-title code {
+  max-width: 100%;
+  overflow: hidden;
+  color: var(--hy-accent);
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.run-capability-recovery-item p {
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--hy-faint);
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.run-capability-recovery-row {
+  display: grid;
+  grid-template-columns: minmax(70px, max-content) minmax(0, 1fr);
+  gap: 8px;
+  min-width: 0;
+  align-items: baseline;
+}
+
+.run-capability-recovery-row span {
+  color: var(--hy-muted);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.run-capability-recovery-row code {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--hy-fg);
+  font-family: "SF Mono", "JetBrains Mono", ui-monospace, monospace;
+  font-size: 10px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .run-expandable-content {
   display: grid;
   gap: 8px;

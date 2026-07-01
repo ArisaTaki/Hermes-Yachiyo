@@ -67,6 +67,7 @@ export function RuntimeTimelineEventList({
           const traceContext = runtimeEventTraceContext(event, payloadRecord);
           const plannerContext = runtimeEventPlannerContext(event, payloadRecord);
           const contentSnapshots = eventIsSecret ? [] : runtimeEventContentSnapshots(payloadRecord);
+          const capabilityRecovery = eventIsSecret ? [] : runtimeEventCapabilityRecovery(payloadRecord);
           const eventMetadata = runtimeEventMetadata(
             event,
             payloadRecord,
@@ -144,6 +145,12 @@ export function RuntimeTimelineEventList({
                     ))}
                   </div>
                 ) : null}
+                {capabilityRecovery.length ? (
+                  <RuntimeCapabilityRecoveryList
+                    items={capabilityRecovery}
+                    testId={`${eventTestId}-capability-recovery`}
+                  />
+                ) : null}
                 {payload ? (
                   <ExpandableRuntimeContent
                     content={payload}
@@ -184,6 +191,73 @@ export function RuntimeTimelineEventList({
         );
       })}
     </ol>
+  );
+}
+
+function RuntimeCapabilityRecoveryList({
+  items,
+  testId,
+}: {
+  items: RuntimeTimelineEventRecord[];
+  testId: string;
+}) {
+  return (
+    <section className="run-capability-recovery" data-testid={testId}>
+      <div className="run-capability-recovery-head">
+        <strong>能力恢复</strong>
+        <span>{items.length} 个 capability</span>
+      </div>
+      <div className="run-capability-recovery-items">
+        {items.map((item, index) => {
+          const capabilityId = defaultString(item.capability_id);
+          const title = defaultString(item.title) || capabilityId || 'capability';
+          const action = defaultString(item.suggested_action);
+          const missingTools = runtimeEventStringList(item.missing_tools);
+          const recommendedTools = runtimeEventStringList(item.recommended_enable_tools);
+          const availableTools = runtimeEventStringList(item.available_tools);
+          const permissions = runtimeEventStringList(item.missing_permissions);
+          const blockers = runtimeEventStringList(item.blocking_conditions);
+          const sourceSteps = runtimeEventStringList(item.source_step_ids);
+          return (
+            <article
+              className="run-capability-recovery-item"
+              data-capability-id={capabilityId}
+              key={`${capabilityId || title}-${index}`}
+            >
+              <div className="run-capability-recovery-title">
+                <strong>{title}</strong>
+                {action ? <code>{action}</code> : null}
+              </div>
+              {capabilityId ? <p>{capabilityId}</p> : null}
+              <RuntimeCapabilityRecoveryValue label="Enable" values={recommendedTools} />
+              <RuntimeCapabilityRecoveryValue label="Missing" values={missingTools} />
+              <RuntimeCapabilityRecoveryValue label="Available" values={availableTools} />
+              <RuntimeCapabilityRecoveryValue label="Permissions" values={permissions} />
+              <RuntimeCapabilityRecoveryValue label="Blockers" values={blockers} />
+              <RuntimeCapabilityRecoveryValue label="Steps" values={sourceSteps} />
+            </article>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function RuntimeCapabilityRecoveryValue({
+  label,
+  values,
+}: {
+  label: string;
+  values: string[];
+}) {
+  if (!values.length) return null;
+  const visible = values.slice(0, 6);
+  const remaining = values.length - visible.length;
+  return (
+    <div className="run-capability-recovery-row">
+      <span>{label}</span>
+      <code>{visible.join(', ')}{remaining > 0 ? ` +${remaining}` : ''}</code>
+    </div>
   );
 }
 
@@ -461,6 +535,19 @@ function runtimeEventContentSnapshots(
   return snapshot && Object.keys(snapshot).length ? [snapshot] : [];
 }
 
+function runtimeEventCapabilityRecovery(
+  payload: RuntimeTimelineEventRecord,
+): RuntimeTimelineEventRecord[] {
+  const recoveries = payload.capability_recovery;
+  if (!Array.isArray(recoveries)) return [];
+  return recoveries.filter((item): item is RuntimeTimelineEventRecord => (
+    Boolean(item)
+    && typeof item === 'object'
+    && !Array.isArray(item)
+    && Object.keys(item).length > 0
+  ));
+}
+
 function runtimeContentSnapshotMeta(snapshot: RuntimeTimelineEventRecord): string {
   const textItemCount = runtimeEventNumberString(snapshot, 'text_item_count');
   const elementCount = runtimeEventNumberString(snapshot, 'element_count');
@@ -498,6 +585,14 @@ function runtimeEventArrayLength(
 ): number {
   const value = record[key];
   return Array.isArray(value) ? value.length : 0;
+}
+
+function runtimeEventStringList(value: unknown): string[] {
+  if (Array.isArray(value)) {
+    return value.map(defaultString).filter(Boolean);
+  }
+  const single = defaultString(value);
+  return single ? [single] : [];
 }
 
 function runtimeEventString(
