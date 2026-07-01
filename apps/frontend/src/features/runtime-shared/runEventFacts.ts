@@ -362,6 +362,7 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
     risk_level: riskLevel || null,
     input_preview: inputPreview,
     output_preview: outputPreview,
+    metadata: toolCallMetadata(payload),
     approval_id: approvalId || null,
     started_at: publicRunEventPayloadString(payload, 'started_at') || event.created_at || '',
     completed_at: publicRunEventPayloadString(payload, 'completed_at')
@@ -541,6 +542,10 @@ function mergeToolCallTrace(current: ToolCallSnapshot, incoming: ToolCallSnapsho
     capability_id: current.capability_id || incoming.capability_id || null,
     replan_request_id: current.replan_request_id || incoming.replan_request_id || null,
     replan_trigger: current.replan_trigger || incoming.replan_trigger || null,
+    metadata: {
+      ...(incoming.metadata || {}),
+      ...(current.metadata || {}),
+    },
   };
 }
 
@@ -578,6 +583,10 @@ function mergeToolCallReplayTrace(current: ToolCallSnapshot, incoming: ToolCallS
       ...(incoming.input_preview || {}),
     },
     output_preview: Object.keys(outputPreview).length ? outputPreview : {},
+    metadata: {
+      ...(current.metadata || {}),
+      ...(incoming.metadata || {}),
+    },
     approval_id: current.approval_id || incoming.approval_id || null,
     started_at: current.started_at || incoming.started_at || '',
     completed_at: incoming.completed_at || (
@@ -906,6 +915,15 @@ function toolInputResolutionPreview(
     preview.resolved_app_path = resolvedAppPath;
   }
   return preview;
+}
+
+function toolCallMetadata(payload: Record<string, unknown>): Record<string, unknown> {
+  const metadata = { ...(objectPreview(payload.metadata) || {}) };
+  ['followup_target', 'action_target', 'observation_evidence'].forEach((key) => {
+    const value = objectPreview(payload[key]);
+    if (value) metadata[key] = value;
+  });
+  return metadata;
 }
 
 function toolCallInputPreviewWithTraceContext(

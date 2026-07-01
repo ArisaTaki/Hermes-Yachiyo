@@ -28,6 +28,11 @@ _PLANNER_TRACE_KEYS = (
     "replan_request_id",
     "replan_trigger",
 )
+_TOOL_METADATA_KEYS = (
+    "followup_target",
+    "action_target",
+    "observation_evidence",
+)
 
 
 def tool_call_snapshot_from_payload(
@@ -103,6 +108,7 @@ def tool_call_snapshot_from_payload(
         risk_level=_optional_text(payload.get("risk_level") or payload.get("risk")),
         input_preview=input_preview,
         output_preview=output_preview,
+        metadata=tool_call_metadata(payload),
         foreground_lock_busy=foreground_lock_busy,
         foreground_lock_holder=tool_foreground_lock_holder(payload, output_preview),
         approval_id=_optional_text(payload.get("approval_id")),
@@ -229,6 +235,7 @@ def _redacted_tool_call_snapshot(snapshot: ToolCallSnapshot) -> ToolCallSnapshot
             "risk_level": _optional_text(snapshot.risk_level),
             "input_preview": _mapping(snapshot.input_preview),
             "output_preview": _mapping(snapshot.output_preview),
+            "metadata": _mapping(snapshot.metadata),
             "foreground_lock_busy": bool(snapshot.foreground_lock_busy),
             "foreground_lock_holder": _optional_text(snapshot.foreground_lock_holder),
             "approval_id": _optional_text(snapshot.approval_id),
@@ -236,6 +243,15 @@ def _redacted_tool_call_snapshot(snapshot: ToolCallSnapshot) -> ToolCallSnapshot
             "completed_at": _optional_text(snapshot.completed_at),
         }
     )
+
+
+def tool_call_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = _mapping(payload.get("metadata"))
+    for key in _TOOL_METADATA_KEYS:
+        value = payload.get(key)
+        if isinstance(value, Mapping) and value:
+            metadata[key] = _mapping(value)
+    return metadata
 
 
 def _mapping(value: Any) -> dict[str, Any]:

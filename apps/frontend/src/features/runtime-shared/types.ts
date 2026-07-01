@@ -435,6 +435,7 @@ export type ToolCallSnapshot = {
   risk_level?: string | null;
   input_preview?: Record<string, unknown>;
   output_preview?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
   approval_id?: string | null;
   started_at?: string;
   completed_at?: string | null;

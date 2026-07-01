@@ -1285,6 +1285,7 @@ class RuntimeCustomApiAgentLoop:
                 value = str(request.get(key) or "").strip()
                 if value:
                     payload[key] = value
+            payload.update(_request_observability_metadata(request))
             timeline.append(
                 self._timeline(
                     "agent.desktop.intent_planned",
@@ -2203,6 +2204,7 @@ class RuntimeCustomApiAgentLoop:
                 "result": result,
                 "summary": summary,
             }
+            completed_step.update(_request_observability_metadata(planned_tool_request))
             if presentation:
                 completed_step["presentation"] = presentation
             completed_steps.append(completed_step)
@@ -2250,6 +2252,7 @@ class RuntimeCustomApiAgentLoop:
         }
         if len(planning_reasons) == 1:
             event_payload["planning_reason"] = next(iter(planning_reasons))
+        event_payload.update(_step_observability_metadata(last_step))
         presentation = str(last_step.get("presentation") or "").strip()
         if presentation:
             event_payload["presentation"] = presentation
@@ -6384,16 +6387,23 @@ def _auto_desktop_observed_click_requests(
     limit = _clean_model_followup_int(target.get("limit"), default=80)
     if "desktop.click_ui_element" in allowed:
         return [
-            _request_like(
-                "desktop.click_ui_element",
-                {
-                    "target": target_label,
-                    "role_filter": role_filter,
-                    "click_count": click_count,
-                    "limit": limit,
-                },
-                source="runtime_planner",
-                planning_reason=planning_reason,
+            _with_observed_action_metadata(
+                _request_like(
+                    "desktop.click_ui_element",
+                    {
+                        "target": target_label,
+                        "role_filter": role_filter,
+                        "click_count": click_count,
+                        "limit": limit,
+                    },
+                    source="runtime_planner",
+                    planning_reason=planning_reason,
+                ),
+                target,
+                action="click",
+                target_label=target_label,
+                role_filter=role_filter,
+                evidence={"strategy": "semantic_ui_tool"},
             )
         ]
     if "desktop.click" not in allowed:
@@ -6406,15 +6416,22 @@ def _auto_desktop_observed_click_requests(
     if not center:
         return []
     return [
-        _request_like(
-            "desktop.click",
-            {
-                "x": center["x"],
-                "y": center["y"],
-                "click_count": click_count,
-            },
-            source="runtime_planner",
-            planning_reason=planning_reason,
+        _with_observed_action_metadata(
+            _request_like(
+                "desktop.click",
+                {
+                    "x": center["x"],
+                    "y": center["y"],
+                    "click_count": click_count,
+                },
+                source="runtime_planner",
+                planning_reason=planning_reason,
+            ),
+            target,
+            action="click",
+            target_label=target_label,
+            role_filter=role_filter,
+            evidence={"strategy": "observed_center", "center": center},
         )
     ]
 
@@ -6443,27 +6460,41 @@ def _auto_desktop_observed_type_requests(
     }
     if "desktop.type_into_ui_element" in allowed:
         return [
-            _request_like(
-                "desktop.type_into_ui_element",
-                base_input,
-                source="runtime_planner",
-                planning_reason=planning_reason,
+            _with_observed_action_metadata(
+                _request_like(
+                    "desktop.type_into_ui_element",
+                    base_input,
+                    source="runtime_planner",
+                    planning_reason=planning_reason,
+                ),
+                target,
+                action="type_text",
+                target_label=execution_target,
+                role_filter=role_filter,
+                evidence={"strategy": "semantic_ui_tool"},
             )
         ]
     type_tool = _first_allowed_tool(("desktop.type_text", "desktop.type"), allowed)
     if not type_tool:
         return []
     if "desktop.click_ui_element" in allowed:
-        click_request = _request_like(
-            "desktop.click_ui_element",
-            {
-                "target": execution_target,
-                "role_filter": role_filter,
-                "click_count": 1,
-                "limit": _clean_model_followup_int(target.get("limit"), default=80),
-            },
-            source="runtime_planner",
-            planning_reason=planning_reason,
+        click_request = _with_observed_action_metadata(
+            _request_like(
+                "desktop.click_ui_element",
+                {
+                    "target": execution_target,
+                    "role_filter": role_filter,
+                    "click_count": 1,
+                    "limit": _clean_model_followup_int(target.get("limit"), default=80),
+                },
+                source="runtime_planner",
+                planning_reason=planning_reason,
+            ),
+            target,
+            action="focus_for_type",
+            target_label=execution_target,
+            role_filter=role_filter,
+            evidence={"strategy": "semantic_ui_tool"},
         )
     elif "desktop.click" in allowed:
         center = _latest_desktop_observation_match_center(
@@ -6473,21 +6504,35 @@ def _auto_desktop_observed_type_requests(
         )
         if not center:
             return []
-        click_request = _request_like(
-            "desktop.click",
-            {"x": center["x"], "y": center["y"], "click_count": 1},
-            source="runtime_planner",
-            planning_reason=planning_reason,
+        click_request = _with_observed_action_metadata(
+            _request_like(
+                "desktop.click",
+                {"x": center["x"], "y": center["y"], "click_count": 1},
+                source="runtime_planner",
+                planning_reason=planning_reason,
+            ),
+            target,
+            action="focus_for_type",
+            target_label=execution_target,
+            role_filter=role_filter,
+            evidence={"strategy": "observed_center", "center": center},
         )
     else:
         return []
     return [
         click_request,
-        _request_like(
-            type_tool,
-            {"text": text},
-            source="runtime_planner",
-            planning_reason=planning_reason,
+        _with_observed_action_metadata(
+            _request_like(
+                type_tool,
+                {"text": text},
+                source="runtime_planner",
+                planning_reason=planning_reason,
+            ),
+            target,
+            action="type_text",
+            target_label=execution_target,
+            role_filter=role_filter,
+            evidence={"strategy": "focused_after_observed_target"},
         ),
     ]
 
@@ -6502,6 +6547,64 @@ def _latest_desktop_observation_succeeded(timeline: list[dict[str, Any]]) -> boo
         result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
         return result.get("ok") is True
     return False
+
+
+def _with_observed_action_metadata(
+    request: dict[str, Any],
+    target: Mapping[str, Any],
+    *,
+    action: str,
+    target_label: str,
+    role_filter: str,
+    evidence: Mapping[str, Any],
+) -> dict[str, Any]:
+    request["capability_id"] = "desktop.ui_operation"
+    request["followup_target"] = _compact_observed_action_target(target)
+    request["action_target"] = {
+        "kind": "desktop_observed_action",
+        "action": str(action or "").strip(),
+        "target": str(target_label or "").strip(),
+        "role_filter": str(role_filter or "").strip(),
+    }
+    request["observation_evidence"] = {
+        "source_tool": str(target.get("observation_source") or "desktop.read_ui").strip(),
+        **{
+            str(key): value
+            for key, value in evidence.items()
+            if str(key) and value not in (None, "", [], {})
+        },
+    }
+    return request
+
+
+def _compact_observed_action_target(target: Mapping[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "kind": "desktop_observed_action",
+        "target_action": str(target.get("target_action") or "").strip(),
+        "target": str(target.get("target") or "").strip(),
+        "role_filter": str(target.get("role_filter") or "").strip(),
+        "observation_source": str(target.get("observation_source") or "desktop.read_ui").strip(),
+    }
+    text = str(target.get("text") or "")
+    if text:
+        payload["text"] = text
+    click_count = target.get("click_count")
+    if click_count not in (None, ""):
+        payload["click_count"] = _clean_model_followup_int(click_count, default=1)
+    return {key: value for key, value in payload.items() if value not in ("", None, [], {})}
+
+
+def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key in ("followup_target", "action_target", "observation_evidence"):
+        value = request.get(key)
+        if isinstance(value, Mapping) and value:
+            payload[key] = dict(value)
+    return payload
+
+
+def _step_observability_metadata(step: Mapping[str, Any]) -> dict[str, Any]:
+    return _request_observability_metadata(step)
 
 
 def _desktop_observed_action_execution_target(target: str, role_filter: str) -> str:

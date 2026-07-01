@@ -379,6 +379,60 @@ def test_tool_call_snapshots_from_events_projects_daily_desktop_intent_completio
     assert snapshots[0].completed_at == "2026-06-22T00:00:02Z"
 
 
+def test_tool_call_snapshots_preserve_observed_desktop_action_metadata() -> None:
+    snapshots = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                event_id="evt-observed-click",
+                run_id="run-observed-desktop",
+                sequence=1,
+                event_type="agent.desktop.intent_completed",
+                detail="desktop.click",
+                payload={
+                    "tool": "desktop.click",
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_followup_desktop_observed_action",
+                    "capability_id": "desktop.ui_operation",
+                    "input_preview": {"x": 120, "y": 240, "click_count": 1},
+                    "result": {"ok": True, "summary": "Clicked observed target"},
+                    "followup_target": {
+                        "kind": "desktop_observed_action",
+                        "target_action": "click",
+                        "target": "登录",
+                    },
+                    "action_target": {
+                        "kind": "desktop_observed_action",
+                        "action": "click",
+                        "target": "登录",
+                        "role_filter": "button",
+                    },
+                    "observation_evidence": {
+                        "source_tool": "desktop.read_ui",
+                        "strategy": "observed_center",
+                        "center": {"x": 120, "y": 240},
+                    },
+                },
+                created_at="2026-06-22T00:00:03Z",
+            )
+        ]
+    )
+
+    assert len(snapshots) == 1
+    assert snapshots[0].tool_name == "desktop.click"
+    assert snapshots[0].capability_id == "desktop.ui_operation"
+    assert snapshots[0].metadata["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "click",
+        "target": "登录",
+        "role_filter": "button",
+    }
+    assert snapshots[0].metadata["observation_evidence"] == {
+        "source_tool": "desktop.read_ui",
+        "strategy": "observed_center",
+        "center": {"x": 120, "y": 240},
+    }
+
+
 def test_tool_call_snapshots_from_events_projects_daily_desktop_intent_sequence_steps() -> None:
     snapshots = tool_call_snapshots_from_events(
         [

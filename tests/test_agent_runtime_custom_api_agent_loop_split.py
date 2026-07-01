@@ -3131,13 +3131,20 @@ def test_auto_followup_dispatches_observed_desktop_click_action() -> None:
         )
     ]
 
-    assert custom_api_agent_module._auto_discovered_followup_requests(
+    semantic_click = custom_api_agent_module._auto_discovered_followup_requests(
         selection_payload,
         ["desktop.read_ui", "desktop.click_ui_element"],
         timeline,
-    ) == [
+    )
+    assert [
         {
-            "protocol": "json_fallback",
+            "tool": request["tool"],
+            "input": request["input"],
+            "planning_reason": request["planning_reason"],
+        }
+        for request in semantic_click
+    ] == [
+        {
             "tool": "desktop.click_ui_element",
             "input": {
                 "target": "登录",
@@ -3145,23 +3152,73 @@ def test_auto_followup_dispatches_observed_desktop_click_action() -> None:
                 "click_count": 1,
                 "limit": 80,
             },
-            "source": "runtime_planner",
             "planning_reason": "planner_followup_desktop_observed_action",
         }
     ]
-    assert custom_api_agent_module._auto_discovered_followup_requests(
+    assert semantic_click[0]["capability_id"] == "desktop.ui_operation"
+    assert semantic_click[0]["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "click",
+        "target": "登录",
+        "role_filter": "button",
+    }
+    assert semantic_click[0]["observation_evidence"] == {
+        "source_tool": "desktop.read_ui",
+        "strategy": "semantic_ui_tool",
+    }
+
+    low_level_click = custom_api_agent_module._auto_discovered_followup_requests(
         selection_payload,
         ["desktop.read_ui", "desktop.click"],
         timeline,
-    ) == [
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.click",
-            "input": {"x": 120, "y": 240, "click_count": 1},
-            "source": "runtime_planner",
-            "planning_reason": "planner_followup_desktop_observed_action",
-        }
+    )
+    assert low_level_click[0]["tool"] == "desktop.click"
+    assert low_level_click[0]["input"] == {"x": 120, "y": 240, "click_count": 1}
+    assert low_level_click[0]["observation_evidence"] == {
+        "source_tool": "desktop.read_ui",
+        "strategy": "observed_center",
+        "center": {"x": 120, "y": 240},
+    }
+    event_timeline: list[dict[str, Any]] = []
+    loop = _private_runtime_loop()
+    loop._record_auto_model_followup_app_write_plan(
+        low_level_click,
+        timeline=event_timeline,
+    )
+    planned = next(
+        event for event in event_timeline if event["event"] == "agent.desktop.intent_planned"
+    )
+    assert planned["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "click",
+        "target": "登录",
+        "role_filter": "button",
+    }
+    assert planned["observation_evidence"] == {
+        "source_tool": "desktop.read_ui",
+        "strategy": "observed_center",
+        "center": {"x": 120, "y": 240},
+    }
+    completion_timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.click",
+            input_preview={"x": 120, "y": 240, "click_count": 1},
+            result={"ok": True, "summary": "Clicked observed target"},
+        )
     ]
+    assert loop._direct_daily_desktop_sequence_result(
+        low_level_click,
+        completion_timeline,
+        tool_timeline_start=0,
+    )
+    completed = next(
+        event
+        for event in completion_timeline
+        if event["event"] == "agent.desktop.intent_completed"
+    )
+    assert completed["action_target"] == planned["action_target"]
+    assert completed["observation_evidence"] == planned["observation_evidence"]
     assert custom_api_agent_module._auto_discovered_followup_requests(
         selection_payload,
         ["desktop.read_ui", "desktop.click"],
@@ -3206,31 +3263,39 @@ def test_auto_followup_dispatches_observed_desktop_type_action() -> None:
         )
     ]
 
-    assert custom_api_agent_module._auto_discovered_followup_requests(
+    semantic_type = custom_api_agent_module._auto_discovered_followup_requests(
         selection_payload,
         ["desktop.read_ui", "desktop.type_into_ui_element"],
         timeline,
-    ) == [
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.type_into_ui_element",
-            "input": {
-                "target": "text field",
-                "text": "hello",
-                "role_filter": "text field",
-                "limit": 80,
-            },
-            "source": "runtime_planner",
-            "planning_reason": "planner_followup_desktop_observed_action",
-        }
-    ]
-    assert custom_api_agent_module._auto_discovered_followup_requests(
+    )
+    assert semantic_type[0]["tool"] == "desktop.type_into_ui_element"
+    assert semantic_type[0]["input"] == {
+        "target": "text field",
+        "text": "hello",
+        "role_filter": "text field",
+        "limit": 80,
+    }
+    assert semantic_type[0]["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "type_text",
+        "target": "text field",
+        "role_filter": "text field",
+    }
+
+    semantic_focus_type = custom_api_agent_module._auto_discovered_followup_requests(
         selection_payload,
         ["desktop.read_ui", "desktop.click_ui_element", "desktop.type_text"],
         timeline,
-    ) == [
+    )
+    assert [
         {
-            "protocol": "json_fallback",
+            "tool": request["tool"],
+            "input": request["input"],
+            "action": request["action_target"]["action"],
+        }
+        for request in semantic_focus_type
+    ] == [
+        {
             "tool": "desktop.click_ui_element",
             "input": {
                 "target": "text field",
@@ -3238,35 +3303,43 @@ def test_auto_followup_dispatches_observed_desktop_type_action() -> None:
                 "click_count": 1,
                 "limit": 80,
             },
-            "source": "runtime_planner",
-            "planning_reason": "planner_followup_desktop_observed_action",
+            "action": "focus_for_type",
         },
         {
-            "protocol": "json_fallback",
             "tool": "desktop.type_text",
             "input": {"text": "hello"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_followup_desktop_observed_action",
+            "action": "type_text",
         },
     ]
-    assert custom_api_agent_module._auto_discovered_followup_requests(
+    low_level_type = custom_api_agent_module._auto_discovered_followup_requests(
         selection_payload,
         ["desktop.read_ui", "desktop.click", "desktop.type"],
         timeline,
-    ) == [
+    )
+    assert [
         {
-            "protocol": "json_fallback",
+            "tool": request["tool"],
+            "input": request["input"],
+            "evidence": request["observation_evidence"],
+        }
+        for request in low_level_type
+    ] == [
+        {
             "tool": "desktop.click",
             "input": {"x": 44, "y": 88, "click_count": 1},
-            "source": "runtime_planner",
-            "planning_reason": "planner_followup_desktop_observed_action",
+            "evidence": {
+                "source_tool": "desktop.read_ui",
+                "strategy": "observed_center",
+                "center": {"x": 44, "y": 88},
+            },
         },
         {
-            "protocol": "json_fallback",
             "tool": "desktop.type",
             "input": {"text": "hello"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_followup_desktop_observed_action",
+            "evidence": {
+                "source_tool": "desktop.read_ui",
+                "strategy": "focused_after_observed_target",
+            },
         },
     ]
 
