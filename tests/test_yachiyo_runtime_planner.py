@@ -12992,6 +12992,52 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
         "text": "open hanako"
     }
 
+    foreground_search_field_type = RuntimePlanner().decision(
+        "在当前应用点击搜索框并输入 hello",
+        allowed_tools=[
+            "desktop.active_window",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "browser.open_url",
+        ],
+    )
+    assert foreground_search_field_type.selected_intent.kind == "desktop_operation"
+    assert foreground_search_field_type.selected_intent.inputs["app_name_hint"] == ""
+    assert foreground_search_field_type.selected_intent.inputs["app_search_hint"] == {
+        "query": "hello",
+        "target": "搜索",
+        "scope": "foreground",
+    }
+    assert [step.step_id for step in foreground_search_field_type.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "focus-app-search-field",
+        "type-app-search-query",
+    ]
+    assert _step_by_id(foreground_search_field_type, "discover-desktop-state").tool_name == (
+        "desktop.active_window"
+    )
+    assert _step_by_id(foreground_search_field_type, "type-app-search-query").input_preview == {
+        "text": "hello"
+    }
+    assert [
+        request["tool"]
+        for request in planner_tool_requests(
+            "在当前应用点击搜索框并输入 hello",
+            [
+                "desktop.active_window",
+                "desktop.safe_shortcut",
+                "desktop.safe_type_text",
+                "desktop.search_submit",
+                "browser.open_url",
+            ],
+        )
+    ] == [
+        "desktop.active_window",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+    ]
+
     any_current_search = RuntimePlanner().decision(
         "在任何当前应用里找到搜索框输入 OpenAI 并回车",
         allowed_tools=[

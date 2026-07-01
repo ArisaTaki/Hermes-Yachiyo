@@ -1261,6 +1261,8 @@ class TaskIntentRouter:
             return _empty_intent("web_research", text)
         if _browser_internal_page_hint(text):
             return _empty_intent("web_research", text)
+        if _foreground_ui_operation_requested(text):
+            return _empty_intent("web_research", text)
         if _foreground_app_search_hint(text):
             return _empty_intent("web_research", text)
         if _workflow_action_hint(text) in {"create", "debug"}:
@@ -13368,6 +13370,54 @@ def _looks_like_local_observation_or_control_request(text: str) -> bool:
     return False
 
 
+def _foreground_ui_operation_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    foreground_scope = bool(
+        re.search(
+            r"(?:当前|现在|前台|这个|该)\s*(?:应用|app|application|窗口|界面|ui)"
+            r"|(?:current|active|foreground)\s+(?:app|application|window|interface|ui)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+    if not foreground_scope:
+        return False
+    if _contains_any(
+        value,
+        (
+            "当前网页",
+            "当前页面",
+            "这个网页",
+            "这个页面",
+            "current page",
+            "current webpage",
+            "this page",
+            "this webpage",
+        ),
+    ):
+        return False
+    return bool(
+        _foreground_app_search_hint(value)
+        or _foreground_search_submit_hint(value)
+        or _target_first_foreground_click_hint(value)
+        or _target_first_foreground_type_hint(value)
+        or click_target_hint(value)
+        or type_into_ui_hint(value)
+        or safe_click_hint(value)
+        or safe_type_text_hint(value)
+        or safe_shortcut_hint(value)
+        or safe_key_hint(value)
+        or re.search(
+            r"(?:点击|点按|单击|双击|输入|键入|填写|填入|写入|回车|搜索框|搜索栏|"
+            r"click|press|tap|type|enter|fill|search\s+field|search\s+box|search\s+bar)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def _looks_like_external_info_lookup(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
@@ -18980,6 +19030,7 @@ def _foreground_app_search_hint(text: str) -> dict[str, str]:
         r"(?:里|中|上|内)?\s*(?:找到|找|定位|聚焦|点击|点按|选择|选中)?(?:一下|下)?\s*"
         r"(?:搜索框|搜索栏|搜索输入框|搜索输入栏|"
         r"search\s+field|search\s+box|search\s+input|search\s+bar)[\s，,：:]*"
+        r"(?:(?:并|然后|再|接着|之后|后|and\s+then|then)\s*)?"
         r"(?:输入|键入|填写|填入|写入|写|搜索|查找|检索|type|enter|fill|search|find)\s*"
         r"(?P<field_query>.+?)(?:\s*(?:并|然后|再|后|之后|and|then)?\s*"
         r"(?:搜索|查找|检索|提交|确认|回车|search|submit|confirm|press\s+enter|hit\s+enter))?$",
