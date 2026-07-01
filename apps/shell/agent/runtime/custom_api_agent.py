@@ -9205,10 +9205,42 @@ def _model_followup_pending_plan_requests(
         )
         if not request:
             break
+        _attach_model_followup_pending_plan_trace_metadata(
+            request,
+            raw_step,
+            followup_context,
+        )
         requests.append(request)
         if len(requests) >= _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS:
             break
     return requests
+
+
+def _attach_model_followup_pending_plan_trace_metadata(
+    request: dict[str, Any],
+    step: Mapping[str, Any],
+    followup_context: Mapping[str, Any],
+) -> None:
+    for key in (
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "intent_kind",
+        "replan_request_id",
+        "replan_trigger",
+    ):
+        value = str(
+            request.get(key)
+            or step.get(key)
+            or followup_context.get(key)
+            or ""
+        ).strip()
+        if value:
+            request[key] = value
+    if str(request.get("step_id") or "").strip() and not str(
+        request.get("planner_step_id") or ""
+    ).strip():
+        request["planner_step_id"] = str(request.get("step_id") or "").strip()
 
 
 def _model_followup_pending_plan_request(
@@ -9301,7 +9333,10 @@ def _tool_requests_with_pending_plan_metadata(
                 "capability_id",
                 "decision_id",
                 "plan_id",
+                "tool_plan_id",
                 "intent_kind",
+                "replan_request_id",
+                "replan_trigger",
             ):
                 value = str(
                     item.get(key)
@@ -9318,6 +9353,10 @@ def _tool_requests_with_pending_plan_metadata(
                 ).strip()
                 if planning_reason:
                     item["planning_reason"] = planning_reason
+            if str(item.get("step_id") or "").strip() and not str(
+                item.get("planner_step_id") or ""
+            ).strip():
+                item["planner_step_id"] = str(item.get("step_id") or "").strip()
             consumed = True
         enriched.append(item)
     return enriched

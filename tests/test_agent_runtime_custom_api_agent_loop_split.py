@@ -1626,6 +1626,7 @@ def test_custom_api_agent_loop_attaches_pending_patch_step_metadata_to_model_too
             "plan_id": "plan-code",
             "intent_kind": "code_task",
             "planning_reason": "planner_fallback_code_diagnostic",
+            "planner_step_id": "apply-code-changes",
         }
     ]
 
@@ -4089,6 +4090,7 @@ def test_model_followup_pending_plan_promotes_model_terminal_command() -> None:
             "planning_reason": "planner_prefetch_report_context",
             "step_id": "extract-report-file-context",
             "capability_id": "terminal.execution",
+            "planner_step_id": "extract-report-file-context",
         }
     ]
     assert (
@@ -4142,6 +4144,7 @@ def test_model_followup_pending_plan_promotes_model_artifact_content() -> None:
             "planning_reason": "planner_prefetch_report_context",
             "step_id": "write-report-artifact",
             "capability_id": "artifact.write",
+            "planner_step_id": "write-report-artifact",
         }
     ]
 
@@ -4176,8 +4179,41 @@ def test_model_followup_pending_plan_promotes_model_clipboard_content() -> None:
             "planning_reason": "planner_prefetch_data_source",
             "step_id": "write-clipboard-output",
             "capability_id": "clipboard.read_write",
+            "planner_step_id": "write-clipboard-output",
         }
     ]
+
+
+def test_model_followup_pending_plan_inherits_trace_metadata() -> None:
+    requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            "planning_reason": "planner_prefetch_data_source",
+            "decision_id": "decision-data",
+            "plan_id": "plan-data",
+            "intent_kind": "data_analysis",
+            "replan_request_id": "replan-1",
+            "pending_plan_steps": [
+                {
+                    "step_id": "write-clipboard-output",
+                    "tool_name": "clipboard.write",
+                    "capability_id": "clipboard.read_write",
+                    "tool_plan_id": "tool-plan-clipboard",
+                    "input_preview": {
+                        "body_source": "model_generated_content",
+                    },
+                }
+            ],
+        },
+        ["clipboard.write"],
+        generated_content="分析结论：East 收入最高。",
+    )
+
+    assert requests[0]["decision_id"] == "decision-data"
+    assert requests[0]["plan_id"] == "plan-data"
+    assert requests[0]["tool_plan_id"] == "tool-plan-clipboard"
+    assert requests[0]["intent_kind"] == "data_analysis"
+    assert requests[0]["replan_request_id"] == "replan-1"
+    assert requests[0]["planner_step_id"] == "write-clipboard-output"
 
 
 def test_custom_api_agent_loop_auto_dispatches_pending_clipboard_write_after_model_output() -> None:
@@ -4280,6 +4316,7 @@ def test_custom_api_agent_loop_auto_dispatches_pending_clipboard_write_after_mod
             "planning_reason": "planner_prefetch_data_source",
             "step_id": "write-clipboard-output",
             "capability_id": "clipboard.read_write",
+            "planner_step_id": "write-clipboard-output",
         }
     ]
 
@@ -4915,6 +4952,7 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
             "planning_reason": "planner_discovered_app_followup",
             "step_id": "draw-circle",
             "capability_id": "desktop.ui_operation",
+            "planner_step_id": "draw-circle",
         },
         {
             "protocol": "json_fallback",
@@ -4924,6 +4962,7 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
             "planning_reason": "planner_discovered_app_followup",
             "step_id": "save-image",
             "capability_id": "desktop.ui_operation",
+            "planner_step_id": "save-image",
         },
         {
             "protocol": "json_fallback",
@@ -4933,6 +4972,7 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
             "planning_reason": "planner_discovered_app_followup",
             "step_id": "verify-saved-image",
             "capability_id": "desktop.visual_verification",
+            "planner_step_id": "verify-saved-image",
         },
     ]
     planned_timeline: list[dict[str, Any]] = []
@@ -5007,6 +5047,7 @@ def test_model_followup_pending_plan_auto_dispatches_discovered_app_hotkeys() ->
             "planning_reason": "planner_discovered_app_followup",
             "step_id": "hotkey-selected-discovered-app",
             "capability_id": "desktop.ui_operation",
+            "planner_step_id": "hotkey-selected-discovered-app",
         },
         {
             "protocol": "json_fallback",
@@ -5016,6 +5057,7 @@ def test_model_followup_pending_plan_auto_dispatches_discovered_app_hotkeys() ->
             "planning_reason": "planner_discovered_app_followup",
             "step_id": "fallback-hotkey",
             "capability_id": "desktop.ui_operation",
+            "planner_step_id": "fallback-hotkey",
         },
     ]
 
