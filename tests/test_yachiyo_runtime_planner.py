@@ -15005,6 +15005,60 @@ def test_runtime_planner_prepares_media_app_when_playback_tool_is_missing() -> N
     assert decision.plan.tool_plan.missing_capabilities == ["media.playback"]
 
 
+def test_runtime_planner_treats_desktop_media_app_aliases_as_app_control() -> None:
+    prepare = RuntimePlanner().decision(
+        "帮我播放 Apple Music",
+        allowed_tools=[
+            "desktop.list_apps",
+            "desktop.open_app",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert [step.step_id for step in prepare.plan.tool_plan.steps] == [
+        "discover-media-app",
+        "open-media-app",
+        "control-media-playback",
+        "verify-media-playback",
+    ]
+    open_step = _step_by_id(prepare, "open-media-app")
+    assert open_step.tool_name == "desktop.open_app"
+    assert open_step.capability_id == "desktop.app_control"
+    assert open_step.action == "open_app"
+    assert _step_by_id(prepare, "control-media-playback").depends_on == [
+        "open-media-app"
+    ]
+    assert _step_by_id(prepare, "verify-media-playback").depends_on == [
+        "open-media-app"
+    ]
+
+    search = RuntimePlanner().decision(
+        "打开 Apple Music 搜索超时空辉夜姬并播放",
+        allowed_tools=[
+            "desktop.open_app",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert [step.step_id for step in search.plan.tool_plan.steps] == [
+        "open-media-app",
+        "focus-media-app-search",
+        "type-media-search-query",
+        "submit-media-search",
+        "verify-media-search",
+    ]
+    search_open = _step_by_id(search, "open-media-app")
+    assert search_open.tool_name == "desktop.open_app"
+    assert search_open.capability_id == "desktop.app_control"
+    assert search_open.action == "open_app"
+    assert _step_by_id(search, "focus-media-app-search").depends_on == [
+        "open-media-app"
+    ]
+
+
 def test_runtime_planner_discovers_generic_media_app_when_query_playback_tool_is_missing() -> None:
     decision = RuntimePlanner().decision(
         "打开一个可用的音乐应用播放超时空辉夜姬",

@@ -4673,11 +4673,12 @@ class RuntimePlanner:
                         "Resolve the requested media app through desktop discovery before opening "
                         "or operating it."
                     )
-                elif tool_name in {"app.open", "app.focus"}:
-                    step_id = "open-media-app" if tool_name == "app.open" else "focus-media-app"
-                    title = "Open media app" if tool_name == "app.open" else "Focus media app"
+                elif _is_media_app_open_or_focus_tool(tool_name):
+                    is_open_tool = _is_media_app_open_tool(tool_name)
+                    step_id = "open-media-app" if is_open_tool else "focus-media-app"
+                    title = "Open media app" if is_open_tool else "Focus media app"
                     capability_id = "desktop.app_control"
-                    action = "open" if tool_name == "app.open" else "focus"
+                    action = _media_app_open_focus_action(tool_name)
                     reason = (
                         "Open or focus the requested media app before searching because "
                         "the generic media playback tool cannot search for a specific query."
@@ -4771,15 +4772,16 @@ class RuntimePlanner:
                         capability_id = "desktop.app_discovery"
                         action = "discover"
                         reason = "Resolve the requested media app through desktop discovery before opening it."
-                    elif prepare_tool_name in {"app.open", "app.focus"}:
+                    elif _is_media_app_open_or_focus_tool(prepare_tool_name):
+                        is_open_tool = _is_media_app_open_tool(prepare_tool_name)
                         step_id = (
                             "open-media-app"
-                            if prepare_tool_name == "app.open"
+                            if is_open_tool
                             else "focus-media-app"
                         )
-                        title = "Open media app" if prepare_tool_name == "app.open" else "Focus media app"
+                        title = "Open media app" if is_open_tool else "Focus media app"
                         capability_id = "desktop.app_control"
-                        action = "open" if prepare_tool_name == "app.open" else "focus"
+                        action = _media_app_open_focus_action(prepare_tool_name)
                         reason = (
                             "Open or focus the requested media app as a low-risk fallback "
                             "when no dedicated media playback tool is available."
@@ -4807,7 +4809,7 @@ class RuntimePlanner:
                         )
                     )
                     previous_step_id = step_id
-                    if prepare_tool_name in {"app.open", "app.focus"}:
+                    if _is_media_app_open_or_focus_tool(prepare_tool_name):
                         playback_depends_on = [step_id]
                 steps.append(
                     _step(
@@ -8408,6 +8410,30 @@ def _context_source_action(tool_name: str | None) -> str:
     if clean_tool == "screen.capture":
         return "capture_screen"
     return "capture"
+
+
+_MEDIA_APP_OPEN_TOOLS = {"app.open", "desktop.open_app"}
+_MEDIA_APP_FOCUS_TOOLS = {"app.focus", "desktop.focus_app"}
+
+
+def _is_media_app_open_tool(tool_name: str | None) -> bool:
+    return str(tool_name or "").strip() in _MEDIA_APP_OPEN_TOOLS
+
+
+def _is_media_app_open_or_focus_tool(tool_name: str | None) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    return clean_tool in _MEDIA_APP_OPEN_TOOLS or clean_tool in _MEDIA_APP_FOCUS_TOOLS
+
+
+def _media_app_open_focus_action(tool_name: str | None) -> str:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool == "desktop.open_app":
+        return "open_app"
+    if clean_tool == "desktop.focus_app":
+        return "focus_app"
+    if clean_tool == "app.focus":
+        return "focus"
+    return "open"
 
 
 def _desktop_operation_action(tool_name: str | None) -> str:
