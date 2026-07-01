@@ -1827,8 +1827,7 @@ def _media_query_plan_needs_selected_app_followup(
     app_query_plan: list[tuple[str, dict[str, Any]]],
 ) -> bool:
     return any(
-        str(payload.get("app_name") or "").strip()
-        == "<selected app from desktop.list_apps>"
+        _selected_discovered_app_payload_requires_model(payload)
         for _tool_name, payload in app_query_plan
         if isinstance(payload, Mapping)
     )

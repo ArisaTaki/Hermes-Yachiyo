@@ -16200,8 +16200,51 @@ def test_runtime_planner_routes_generic_music_app_query_to_search_play_plan() ->
                 "input": {"query": "music", "limit": 20},
                 "source": "runtime_planner",
                 "planning_reason": "planner_fallback_media_playback",
-                "continue_to_model": True,
-            }
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open_and_safe_shortcut",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": "music",
+                    "action": "find",
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_media_playback",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.safe_type_text",
+                "input": {"text": query},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_media_playback",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.search_submit",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_media_playback",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "media.music_app_open_and_play",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": "music",
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_media_playback",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {"role_filter": "", "limit": 80},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_media_playback",
+            },
         ]
 
 
@@ -23025,7 +23068,24 @@ def test_planner_desktop_tool_requests_discovers_generic_media_app_when_query_pl
             "input": {"query": "music", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
-            "continue_to_model": True,
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "music",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
         },
     ]
 
@@ -23250,7 +23310,39 @@ def test_planner_desktop_tool_requests_discovers_generic_music_app_before_playba
             "input": {"query": "music", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
-            "continue_to_model": True,
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "music",
+                "action": "find",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "lo-fi beats"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
         },
     ]
 
