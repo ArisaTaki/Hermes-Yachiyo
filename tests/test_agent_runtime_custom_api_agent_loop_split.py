@@ -29,7 +29,10 @@ from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES, PolicyGate
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
 from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
-from apps.shell.yachiyo_agent.planner_execution import planner_tool_requests
+from apps.shell.yachiyo_agent.planner_execution import (
+    planner_direct_tool_requests,
+    planner_tool_requests,
+)
 from apps.shell.yachiyo_agent.planner_projection import planner_selection_payload
 
 
@@ -16229,6 +16232,37 @@ def test_custom_api_agent_loop_auto_dispatches_creative_pending_steps(
         "save-discovered-app-creative-result",
         "verify-discovered-app-creative-result",
     ]
+
+
+def test_runtime_planner_keeps_generic_app_discovery_when_later_ui_tools_unavailable() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+    ]
+
+    full_requests = planner_tool_requests(
+        "打开一个能画图的应用，画一个圆并保存到桌面",
+        allowed_tools,
+    )
+    direct_requests = planner_direct_tool_requests(
+        "打开一个能画图的应用，画一个圆并保存到桌面",
+        allowed_tools,
+    )
+
+    assert full_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "image", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+    assert direct_requests == full_requests
 
 
 def test_custom_api_agent_loop_auto_dispatches_generic_discovered_app_pending_steps(

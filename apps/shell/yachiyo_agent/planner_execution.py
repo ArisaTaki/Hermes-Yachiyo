@@ -615,6 +615,7 @@ def _has_unavailable_required_desktop_step(decision: Any) -> bool:
     steps = getattr(tool_plan, "steps", None)
     if not isinstance(steps, list):
         return False
+    has_actionable_discovery = _has_actionable_desktop_app_discovery_step(steps)
     for step in steps:
         status = str(getattr(step, "status", "") or "").strip()
         if status != "unavailable":
@@ -626,7 +627,24 @@ def _has_unavailable_required_desktop_step(decision: Any) -> bool:
             continue
         if not tool_name and step_id == "submit-foreground-ui":
             continue
+        if has_actionable_discovery and capability_id in {
+            "desktop.app_control",
+            "desktop.ui_operation",
+        }:
+            continue
         if capability_id in {"desktop.app_control", "desktop.ui_operation"}:
+            return True
+    return False
+
+
+def _has_actionable_desktop_app_discovery_step(steps: list[Any]) -> bool:
+    for step in steps:
+        if str(getattr(step, "status", "") or "").strip() == "unavailable":
+            continue
+        if str(getattr(step, "tool_name", "") or "").strip() != "desktop.list_apps":
+            continue
+        step_id = str(getattr(step, "step_id", "") or "").strip()
+        if step_id in {"discover-desktop-state", "discover_apps-desktop-state"}:
             return True
     return False
 
