@@ -9901,11 +9901,27 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     score = float(intent.confidence or 0)
     external_info_lookup = _looks_like_external_info_lookup(text)
     app_scoped_ui_operation = _app_scoped_ui_operation_hint(text)
+    desktop_communication_discovery = (
+        intent.kind == "desktop_operation"
+        and isinstance(intent.inputs.get("app_capability_hint"), Mapping)
+        and _communication_capability_query(
+            str(intent.inputs["app_capability_hint"].get("query") or "")
+        )
+        and isinstance(intent.inputs.get("communication_compose_hint"), Mapping)
+    )
     if intent.kind == "desktop_operation" and _looks_like_file_organization_request(text):
         score -= 0.3
-    if intent.kind == "desktop_operation" and _looks_like_recipient_message_request(text):
+    if (
+        intent.kind == "desktop_operation"
+        and _looks_like_recipient_message_request(text)
+        and not desktop_communication_discovery
+    ):
         score -= 0.3
-    if intent.kind == "desktop_operation" and _looks_like_communication_task_request(text):
+    if (
+        intent.kind == "desktop_operation"
+        and _looks_like_communication_task_request(text)
+        and not desktop_communication_discovery
+    ):
         score -= 0.3
     if intent.kind == "desktop_operation" and _looks_like_schedule_request(text):
         score -= 0.2
@@ -9926,6 +9942,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and str(intent.inputs["desktop_discovery_hint"].get("query") or "").strip()
     ):
         score += 0.34
+        if desktop_communication_discovery:
+            score += 0.38
     if (
         intent.kind == "desktop_operation"
         and app_scoped_ui_operation
@@ -14769,6 +14787,15 @@ def _generic_communication_compose_requested(text: str) -> bool:
             r"(?:给|向|发给|发送给)\s*[^。！？!?，,]{1,40}?"
             r"(?:写|发|发送|输入|键入)?\s*"
             r"(?:邮件|电子邮件|消息|短信|微信|hello|你好|您好|hi|在吗)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:邮件|电子邮件|邮箱|聊天|通讯|通信|消息|即时通讯|"
+            r"mail|email|chat|messaging|message)"
+            r"\s*(?:应用|app|软件|客户端|工具|程序)?\s*"
+            r"(?:给|向|对|发给|发送给)\s*[^。！？!?，,]{1,40}?\s*"
+            r"(?:写|撰写|起草|草拟|发|发送|输入|键入|说|说明|内容是|内容为|[:：])",
             value,
             flags=re.IGNORECASE,
         )

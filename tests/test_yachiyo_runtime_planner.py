@@ -8347,6 +8347,45 @@ def test_runtime_planner_discovers_generic_communication_app_before_composing() 
             ],
         ),
         (
+            "找一个可用的邮件应用，给 Alice 写邮件说明项目延期",
+            "mail",
+            "邮件",
+            {
+                "send_action": "draft",
+                "channel": "email",
+                "recipient": "Alice",
+                "body": "项目延期",
+            },
+            [
+                "discover_apps-desktop-state",
+                "open-selected-discovered-app",
+                "inspect-selected-communication-compose-ui",
+                "fill-selected-communication-recipient",
+                "submit-selected-communication-recipient",
+                "draft-selected-communication-message",
+            ],
+        ),
+        (
+            "找一个可用的邮件应用给 Alice 发送：项目延期",
+            "mail",
+            "邮件",
+            {
+                "send_action": "send",
+                "channel": "email",
+                "recipient": "Alice",
+                "body": "项目延期",
+            },
+            [
+                "discover_apps-desktop-state",
+                "open-selected-discovered-app",
+                "inspect-selected-communication-compose-ui",
+                "fill-selected-communication-recipient",
+                "submit-selected-communication-recipient",
+                "draft-selected-communication-message",
+                "send-selected-communication-message",
+            ],
+        ),
+        (
             "打开一个聊天软件，给 Alice 输入 hello",
             "messaging",
             "聊天",
@@ -8367,6 +8406,26 @@ def test_runtime_planner_discovers_generic_communication_app_before_composing() 
         ),
         (
             "打开一个聊天软件，给 Alice 发送 hello",
+            "messaging",
+            "聊天",
+            {
+                "send_action": "send",
+                "channel": "message",
+                "recipient": "Alice",
+                "body": "hello",
+            },
+            [
+                "discover_apps-desktop-state",
+                "open-selected-discovered-app",
+                "inspect-selected-communication-compose-ui",
+                "fill-selected-communication-recipient",
+                "submit-selected-communication-recipient",
+                "draft-selected-communication-message",
+                "send-selected-communication-message",
+            ],
+        ),
+        (
+            "找一个可用的聊天应用，给 Alice 发消息说 hello",
             "messaging",
             "聊天",
             {
