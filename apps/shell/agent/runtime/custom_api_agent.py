@@ -791,14 +791,15 @@ class RuntimeCustomApiAgentLoop:
                             )
                             if direct_result:
                                 return direct_result
-                    self._append_model_followup_context(
-                        planned_tool_requests,
-                        followup_selection_payload,
-                        allowed_tools=allowed_tools,
-                        messages=messages,
-                        timeline=timeline,
-                        run_id=run_id,
-                    )
+                    if not replan_payloads:
+                        self._append_model_followup_context(
+                            planned_tool_requests,
+                            followup_selection_payload,
+                            allowed_tools=allowed_tools,
+                            messages=messages,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
                     direct_result = ""
                 elif len(execution_tool_requests) == 1:
                     planned_tool = str(execution_tool_requests[0].get("tool") or "")

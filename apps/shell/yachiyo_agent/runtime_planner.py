@@ -5816,19 +5816,19 @@ class RuntimePlanner:
                         depends_on=depends_on,
                     )
                 )
-                depends_on = ["apply-code-changes"]
-            steps.append(
-                _step(
-                    intent,
-                    "write-code-report",
-                    "Write result artifact",
-                    "artifact.write",
-                    _first_allowed(("artifact.write",), allowed),
-                    input_preview={"path": "code-task-summary.md"},
-                    depends_on=depends_on,
-                    reason="Summarize diagnostic output, fixes, or findings for replay.",
+            else:
+                steps.append(
+                    _step(
+                        intent,
+                        "write-code-report",
+                        "Write result artifact",
+                        "artifact.write",
+                        _first_allowed(("artifact.write",), allowed),
+                        input_preview={"path": "code-task-summary.md"},
+                        depends_on=depends_on,
+                        reason="Summarize diagnostic output or findings for replay.",
+                    )
                 )
-            )
             return steps
         if _code_task_intent_writes_code(intent):
             return [
@@ -5837,16 +5837,6 @@ class RuntimePlanner:
                     intent,
                     allowed,
                     depends_on=["inspect-workspace"],
-                ),
-                _step(
-                    intent,
-                    "write-code-report",
-                    "Write result artifact",
-                    "artifact.write",
-                    _first_allowed(("artifact.write",), allowed),
-                    input_preview={"path": "code-task-summary.md"},
-                    depends_on=["apply-code-changes"],
-                    reason="Summarize the generated or applied code changes for replay.",
                 ),
             ]
         return [

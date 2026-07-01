@@ -1297,6 +1297,8 @@ def test_custom_api_agent_loop_prefetches_code_context_before_diagnostic_termina
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_code_context",
+            "step_id": "inspect-workspace",
+            "capability_id": "file.workspace_read",
         },
         {
             "protocol": "json_fallback",
@@ -1305,6 +1307,8 @@ def test_custom_api_agent_loop_prefetches_code_context_before_diagnostic_termina
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_code_diagnostic",
             "continue_to_model": True,
+            "step_id": "run-code-diagnostic",
+            "capability_id": "terminal.execution",
         },
     ]
     planned_tools = [
@@ -1316,12 +1320,26 @@ def test_custom_api_agent_loop_prefetches_code_context_before_diagnostic_termina
     followup_event = next(
         event for event in timeline if event["event"] == "agent.model.followup_context"
     )
-    assert followup_event["planning_reason"] == "planner_fallback_code_diagnostic"
-    assert followup_event["observation_tools"] == ["terminal.run"]
+    assert followup_event["planning_reason"] == "planner_replan_after_tool_unavailable"
+    assert followup_event["trigger"] == "tool_unavailable"
+    assert followup_event["task_progress"]["completed_steps"] == [
+        "inspect-workspace",
+        "run-code-diagnostic",
+    ]
+    assert followup_event["task_progress"]["blocked_steps"] == ["apply-code-changes"]
+    assert followup_event["capability_recovery"][0]["capability_id"] == "file.workspace_write"
+    assert followup_event["capability_recovery"][0]["recommended_enable_tools"] == [
+        "workspace.write_patch"
+    ]
+    assert not any(
+        event["event"] == "agent.desktop.intent_planned"
+        and event.get("tool") == "artifact.write"
+        for event in timeline
+    )
     assert model_calls[0][0]["role"] == "system"
     assert "selected intent=code_task" in model_calls[0][0]["content"]
-    assert "Observed content snapshot:" in model_calls[0][-1]["content"]
-    assert "2 passed" in model_calls[0][-1]["content"]
+    assert "Runtime replan context" in model_calls[0][-1]["content"]
+    assert "workspace.write_patch" in model_calls[0][-1]["content"]
 
 
 def test_custom_api_agent_loop_runs_plain_test_command_without_model_followup() -> None:
