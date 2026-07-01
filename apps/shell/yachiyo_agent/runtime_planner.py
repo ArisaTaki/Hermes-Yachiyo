@@ -1211,6 +1211,8 @@ class TaskIntentRouter:
         if _browser_internal_page_hint(text):
             return _empty_intent("system_control", text)
         app_hint = _app_name_hint(text)
+        app_search_hint = _app_search_hint(text, app_hint)
+        app_hint = app_hint or str(app_search_hint.get("app_name") or "").strip()
         if app_hint and _app_search_hint(text, app_hint):
             return _empty_intent("system_control", text)
         hint = system_control_hint(text)
@@ -4163,15 +4165,15 @@ class RuntimePlanner:
                     app_search_prepare_step_id = "open-or-focus-app"
                 elif app_search_prepare_step_id == "open-or-focus-app":
                     app_search_prepare_step_id = "discover-desktop-state"
-            search_focus_tool = _first_allowed(("desktop.safe_shortcut", "desktop.click_ui_element"), allowed)
-            if not search_focus_tool and app_name:
-                search_focus_tool = _first_allowed(
-                    app_foreground_tool_candidates(
-                        _app_search_prepare_mode(intent.user_goal, mode),
-                        "safe_shortcut",
-                    ),
-                    allowed,
-                )
+            search_focus_tool = _first_allowed(
+                _app_search_operation_candidates(
+                    "safe_shortcut",
+                    app_name=app_name,
+                    mode=_app_search_prepare_mode(intent.user_goal, mode),
+                    generic=("desktop.safe_shortcut", "desktop.click_ui_element"),
+                ),
+                allowed,
+            )
             search_focus_tool_name = str(search_focus_tool or "")
             if search_focus_tool_name == "desktop.click_ui_element":
                 search_focus_preview = {
@@ -4224,15 +4226,15 @@ class RuntimePlanner:
                 )
                 search_terminal_step_id = "paste-app-search-query"
             else:
-                search_type_tool = _first_allowed(("desktop.safe_type_text",), allowed)
-                if not search_type_tool and app_name:
-                    search_type_tool = _first_allowed(
-                        app_foreground_tool_candidates(
-                            _app_search_prepare_mode(intent.user_goal, mode),
-                            "safe_type_text",
-                        ),
-                        allowed,
-                    )
+                search_type_tool = _first_allowed(
+                    _app_search_operation_candidates(
+                        "safe_type_text",
+                        app_name=app_name,
+                        mode=_app_search_prepare_mode(intent.user_goal, mode),
+                        generic=("desktop.safe_type_text",),
+                    ),
+                    allowed,
+                )
                 search_type_payload = {"text": search_query}
                 if str(search_type_tool or "").startswith("app."):
                     search_type_payload = {"app_name": app_name, **search_type_payload}
@@ -4303,21 +4305,21 @@ class RuntimePlanner:
                 search_terminal_step_id = "submit-app-search"
                 app_search_needs_verify = True
                 if search_followup.get("action") == "click_first_result":
-                    click_tool = _first_allowed(("desktop.click_ui_element",), allowed)
+                    click_tool = _first_allowed(
+                        _app_search_operation_candidates(
+                            "click_ui_element",
+                            app_name=app_name,
+                            mode=_app_search_prepare_mode(intent.user_goal, mode),
+                            generic=("desktop.click_ui_element",),
+                        ),
+                        allowed,
+                    )
                     click_payload = {
                         "target": str(search_followup.get("target") or "第一个结果"),
                         "role_filter": "",
                         "limit": 80,
                         "click_count": int(search_followup.get("click_count") or 1),
                     }
-                    if not click_tool and app_name:
-                        click_tool = _first_allowed(
-                            app_foreground_tool_candidates(
-                                _app_search_prepare_mode(intent.user_goal, mode),
-                                "click_ui_element",
-                            ),
-                            allowed,
-                        )
                     if str(click_tool or "").startswith("app."):
                         click_payload = {"app_name": app_name, **click_payload}
                     steps.append(
@@ -7964,9 +7966,29 @@ def _append_selected_discovered_foreground_compose_steps(
     compose_text = str(intent.inputs.get("foreground_compose_text_hint") or "").strip()
     if not compose_text:
         return
-    type_tool = _first_allowed(("desktop.safe_type_text", "desktop.type_text"), allowed)
+    selected_app = "<selected app from desktop.list_apps>"
+    selected_app_payload = {
+        "selection_source": "desktop.list_apps",
+        "query": _selected_discovered_app_query(intent),
+    }
+    type_tool = _first_allowed(
+        (
+            *app_foreground_tool_candidates("focus", "safe_type_text"),
+            *app_foreground_tool_candidates("open", "safe_type_text"),
+            "desktop.safe_type_text",
+            "desktop.type_text",
+        ),
+        allowed,
+    )
     if not type_tool:
         return
+    type_input_preview = {"text": compose_text}
+    if str(type_tool or "").startswith("app."):
+        type_input_preview = {
+            "app_name": selected_app,
+            **selected_app_payload,
+            "text": compose_text,
+        }
     type_step_id = "operate-foreground-ui-followup-type"
     steps.append(
         _step(
@@ -7975,7 +7997,7 @@ def _append_selected_discovered_foreground_compose_steps(
             "Type after selected app create action",
             "desktop.ui_operation",
             type_tool,
-            input_preview={"text": compose_text},
+            input_preview=type_input_preview,
             depends_on=[depends_on],
             action="type",
             reason=(
@@ -8026,7 +8048,7 @@ def _append_selected_discovered_foreground_compose_steps(
             verify_tool,
             input_preview=_desktop_verify_input_preview(
                 verify_tool,
-                app_name="<selected app from desktop.list_apps>",
+                app_name=selected_app,
                 operation_preview={},
             ),
             depends_on=[verify_depends_on],
@@ -8034,6 +8056,18 @@ def _append_selected_discovered_foreground_compose_steps(
             reason="Observe the selected app after typing the requested text.",
         )
     )
+
+
+def _selected_discovered_app_query(intent: TaskIntentSnapshot) -> str:
+    app_capability = intent.inputs.get("app_capability_hint")
+    if isinstance(app_capability, Mapping):
+        query = str(app_capability.get("query") or "").strip()
+        if query:
+            return query
+    desktop_discovery = intent.inputs.get("desktop_discovery_hint")
+    if isinstance(desktop_discovery, Mapping):
+        return str(desktop_discovery.get("query") or "").strip()
+    return ""
 
 
 def _append_selected_discovered_communication_compose_steps(
@@ -18331,7 +18365,7 @@ def _app_search_operation_candidates(
 ) -> tuple[str, ...]:
     if not str(app_name or "").strip():
         return generic
-    return (*generic, *app_foreground_tool_candidates(mode, action))
+    return (*app_foreground_tool_candidates(mode, action), *generic)
 
 
 def _safe_type_text_operation_candidates(app_name: str, mode: str) -> tuple[str, ...]:
@@ -20375,6 +20409,8 @@ def _app_capability_discovery_query(value: str) -> str:
     lowered = description.lower()
     if not description:
         return ""
+    if _explicit_named_app_descriptor(description):
+        return ""
     if _generic_unknown_app_descriptor(description):
         return ""
     if _contains_any(
@@ -20566,6 +20602,24 @@ def _generic_unknown_app_descriptor(description: str) -> bool:
             r"(?:(?:any|some|available|default|suitable|best|usable|installed|"
             r"unknown|new|unmentioned|unfamiliar)\s*)+",
             lowered,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _explicit_named_app_descriptor(description: str) -> bool:
+    value = _clean_prompt(description)
+    if not value:
+        return False
+    return bool(
+        re.match(
+            r"^(?:叫|名叫|叫做|名称是|名字是)\s*[^。！？!?，,]{1,80}(?:的)?$",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.match(
+            r"^(?:called|named)\s+[A-Za-z][A-Za-z0-9 ._-]{1,80}$",
+            value,
             flags=re.IGNORECASE,
         )
     )

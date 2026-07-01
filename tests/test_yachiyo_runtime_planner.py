@@ -11417,6 +11417,32 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     assert _step_by_id(decision, "submit-app-search").tool_name == "desktop.search_submit"
     assert _step_by_id(decision, "submit-app-search").approval_required is False
 
+    app_scoped_when_generic_is_available = RuntimePlanner().decision(
+        "在 Obsidian 搜索 yachiyo",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "app.focus_and_safe_shortcut",
+            "app.focus_and_safe_type_text",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+    )
+    assert _step_by_id(
+        app_scoped_when_generic_is_available,
+        "focus-app-search-field",
+    ).tool_name == "app.focus_and_safe_shortcut"
+    assert _step_by_id(
+        app_scoped_when_generic_is_available,
+        "type-app-search-query",
+    ).tool_name == "app.focus_and_safe_type_text"
+    assert _step_by_id(
+        app_scoped_when_generic_is_available,
+        "type-app-search-query",
+    ).input_preview == {"app_name": "Obsidian", "text": "yachiyo"}
+
     desktop_content_report = RuntimePlanner().decision(
         "打开 Obsidian，搜索 yachiyo runtime，然后把当前内容总结成报告",
         allowed_tools=[
@@ -11465,6 +11491,30 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     assert _step_by_id(desktop_content_report, "write-desktop-content-artifact").input_preview == {
         "path": "desktop-content-report.md",
         "body_source": "desktop_content",
+    }
+
+    selected_discovered_app_scoped_type = RuntimePlanner().decision(
+        "打开一个 markdown 编辑器并输入周报",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus_and_safe_type_text",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    assert _step_by_id(
+        selected_discovered_app_scoped_type,
+        "operate-foreground-ui-followup-type",
+    ).tool_name == "app.focus_and_safe_type_text"
+    assert _step_by_id(
+        selected_discovered_app_scoped_type,
+        "operate-foreground-ui-followup-type",
+    ).input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "markdown",
+        "text": "周报",
     }
 
     app_scoped_content_tools = [
