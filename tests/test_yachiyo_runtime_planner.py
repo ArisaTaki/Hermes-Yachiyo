@@ -18258,9 +18258,65 @@ def test_runtime_planner_discovers_generic_communication_app_before_sending() ->
             "tool": "desktop.list_apps",
             "input": {"query": "messaging", "limit": 20},
             "source": "runtime_planner",
-            "planning_reason": "planner_prefetch_communication_surface",
-            "continue_to_model": True,
-        }
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "messaging",
+                "action": "new_message",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_into_ui_element",
+            "input": {
+                "target": "recipient",
+                "text": "Alice",
+                "role_filter": "text",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.type_into_ui_element",
+            "input": {
+                "target": "message",
+                "text": "会议取消",
+                "role_filter": "text",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
     ]
 
     email_decision = RuntimePlanner().decision(
@@ -18326,6 +18382,13 @@ def test_runtime_planner_discovers_generic_communication_app_before_sending() ->
         "role_filter": "text",
         "limit": 80,
     }
+    assert "desktop.submit_foreground" not in [
+        request["tool"]
+        for request in planner_tool_requests(
+            "用任意可用的邮件应用给 Alice 写封邮件说明项目延期",
+            allowed_tools,
+        )
+    ]
 
     english_decision = RuntimePlanner().decision(
         "use any available messaging app to send Alice hello",
@@ -18343,6 +18406,45 @@ def test_runtime_planner_discovers_generic_communication_app_before_sending() ->
         english_decision,
         "discover_apps-desktop-state",
     ).input_preview == {"query": "messaging", "limit": 20}
+
+    app_scoped_requests = planner_tool_requests(
+        "帮我打开一个聊天应用给 Alice 发送 hello",
+        [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+            "app.focus_and_type_into_ui_element",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+    assert [request["tool"] for request in app_scoped_requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.ui_elements",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus_and_type_into_ui_element",
+        "desktop.submit_foreground",
+    ]
+    assert app_scoped_requests[3]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "target": "recipient",
+        "text": "Alice",
+        "role_filter": "text",
+        "limit": 80,
+        "selection_source": "desktop.list_apps",
+        "query": "messaging",
+    }
+    assert app_scoped_requests[5]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "target": "message",
+        "text": "hello",
+        "role_filter": "text",
+        "limit": 80,
+        "selection_source": "desktop.list_apps",
+        "query": "messaging",
+    }
 
 
 def test_runtime_planner_tracks_context_communication_source_without_body() -> None:

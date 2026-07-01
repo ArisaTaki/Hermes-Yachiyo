@@ -1935,6 +1935,13 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
         str(getattr(step, "step_id", "") or "").strip(): step
         for step in decision.plan.tool_plan.steps
     }
+    selected_app_requests = _selected_communication_tool_requests(
+        direct_hint,
+        steps_by_id,
+        allowed,
+    )
+    if selected_app_requests:
+        return selected_app_requests
     if body_source in {"selection", "current_page_link"}:
         required_step_ids = ("copy-communication-body-source",)
     else:
@@ -1996,6 +2003,73 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
             )
         )
     return requests
+
+
+def _selected_communication_tool_requests(
+    direct_hint: Mapping[str, Any],
+    steps_by_id: Mapping[str, Any],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    if (
+        "discover_apps-desktop-state" not in steps_by_id
+        or "open-selected-discovered-app" not in steps_by_id
+    ):
+        return []
+    send_action = str(direct_hint.get("send_action") or "send").strip() or "send"
+    required_step_ids = [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "inspect-selected-communication-compose-ui",
+        "fill-selected-communication-recipient",
+        "submit-selected-communication-recipient",
+        "draft-selected-communication-message",
+    ]
+    if send_action != "draft":
+        required_step_ids.append("send-selected-communication-message")
+    selected_query = _selected_communication_app_query(steps_by_id)
+    requests: list[dict[str, Any]] = []
+    for step_id in required_step_ids:
+        step = steps_by_id.get(step_id)
+        if not _step_available(step):
+            return []
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if not tool_name or tool_name not in allowed:
+            return []
+        input_preview = getattr(step, "input_preview", None)
+        payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        payload = _selected_communication_payload(payload, selected_query)
+        requests.append(
+            _request(
+                tool_name,
+                _desktop_request_payload(tool_name, payload),
+                planning_reason="planner_fallback_communication_send",
+            )
+        )
+    return requests
+
+
+def _selected_communication_app_query(steps_by_id: Mapping[str, Any]) -> str:
+    for step_id in ("open-selected-discovered-app", "discover_apps-desktop-state"):
+        step = steps_by_id.get(step_id)
+        input_preview = getattr(step, "input_preview", None)
+        payload = input_preview if isinstance(input_preview, Mapping) else {}
+        query = str(payload.get("query") or "").strip()
+        if query:
+            return query
+    return ""
+
+
+def _selected_communication_payload(
+    payload: dict[str, Any],
+    selected_query: str,
+) -> dict[str, Any]:
+    if str(payload.get("app_name") or "").strip() != "<selected app from desktop.list_apps>":
+        return payload
+    next_payload = dict(payload)
+    if selected_query:
+        next_payload.setdefault("selection_source", "desktop.list_apps")
+        next_payload.setdefault("query", selected_query)
+    return next_payload
 
 
 def _direct_communication_requires_model_body(direct_hint: Mapping[str, Any]) -> bool:
