@@ -1029,6 +1029,8 @@ function plannerSelectionFromSummary(
 function runtimePlannerEventType(eventType: string): string {
   if (eventType === 'agent.intent.selected') return eventType;
   if (eventType === 'agent.replan.requested') return eventType;
+  if (eventType === 'agent.task.todo.updated') return eventType;
+  if (eventType === 'agent.task.checkpoint.updated') return eventType;
   if (eventType.startsWith('agent.plan.')) return eventType;
   if (eventType === 'group.run.intent.selected') return 'agent.intent.selected';
   if (eventType === 'group.run.plan.created') return 'agent.plan.created';

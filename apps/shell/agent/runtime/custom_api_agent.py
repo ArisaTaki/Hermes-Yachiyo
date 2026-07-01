@@ -351,6 +351,12 @@ class RuntimeCustomApiAgentLoop:
                     tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
+                self._record_runtime_planner_task_progress_events(
+                    runtime_planner_decision,
+                    timeline=timeline,
+                    tool_timeline_start=tool_timeline_start,
+                    run_id=run_id,
+                )
                 continue_to_model = bool(replan_payloads) or any(
                     bool(request.get("continue_to_model"))
                     for request in planned_tool_requests
@@ -1337,6 +1343,131 @@ class RuntimeCustomApiAgentLoop:
             if run_id and self._append_run_event is not None:
                 self._append_run_event(run_id, "agent.replan.requested", payload_dict)
         return payloads
+
+    def _record_runtime_planner_task_progress_events(
+        self,
+        decision: Any,
+        *,
+        timeline: list[dict[str, Any]],
+        tool_timeline_start: int,
+        run_id: str = "",
+    ) -> None:
+        plan = getattr(decision, "plan", None)
+        if plan is None:
+            return
+        task_core = getattr(plan, "task_core", None)
+        tool_plan = getattr(plan, "tool_plan", None)
+        if task_core is None or tool_plan is None:
+            return
+        steps = list(getattr(tool_plan, "steps", []) or [])
+        if not steps:
+            return
+        todo_by_step = {
+            str(getattr(todo, "step_id", "") or "").strip(): todo
+            for todo in list(getattr(task_core, "todos", []) or [])
+            if str(getattr(todo, "step_id", "") or "").strip()
+        }
+        checkpoints_by_step: dict[str, list[Any]] = {}
+        for checkpoint in list(getattr(task_core, "checkpoints", []) or []):
+            step_id = str(getattr(checkpoint, "after_step_id", "") or "").strip()
+            if not step_id:
+                continue
+            checkpoints_by_step.setdefault(step_id, []).append(checkpoint)
+        tool_events = [
+            event
+            for event in timeline[tool_timeline_start:]
+            if isinstance(event, dict)
+            and str(event.get("event") or "").strip()
+            in {"agent.tool.call", "agent.tool.skipped"}
+        ]
+        event_index = 0
+        core_id = str(getattr(task_core, "core_id", "") or "").strip()
+        workspace = getattr(task_core, "workspace", None)
+        workspace_id = str(getattr(workspace, "workspace_id", "") or "").strip()
+        plan_id = str(getattr(plan, "plan_id", "") or "").strip()
+        decision_id = str(getattr(decision, "decision_id", "") or "").strip()
+        for step in steps:
+            tool_name = str(getattr(step, "tool_name", "") or "").strip()
+            step_id = str(getattr(step, "step_id", "") or "").strip()
+            if not tool_name or not step_id:
+                continue
+            tool_event: dict[str, Any] | None = None
+            while event_index < len(tool_events):
+                candidate = tool_events[event_index]
+                event_index += 1
+                if str(candidate.get("detail") or "").strip() == tool_name:
+                    tool_event = candidate
+                    break
+            if tool_event is None:
+                continue
+            result = tool_event.get("result") if isinstance(tool_event.get("result"), dict) else {}
+            todo_status = _task_todo_status_for_tool_result(
+                str(tool_event.get("event") or ""),
+                result,
+            )
+            checkpoint_status = _task_checkpoint_status_for_todo_status(todo_status, result)
+            source_event = {
+                "event": str(tool_event.get("event") or ""),
+                "detail": str(tool_event.get("detail") or ""),
+            }
+            base_payload = {
+                "source": "runtime_planner",
+                "core_id": core_id,
+                "workspace_id": workspace_id,
+                "decision_id": decision_id,
+                "plan_id": plan_id,
+                "step_id": step_id,
+                "tool": tool_name,
+                "source_event": source_event,
+                "result_preview": _task_progress_result_preview(result),
+            }
+            todo = todo_by_step.get(step_id)
+            if todo is not None:
+                todo_payload = _snapshot_payload(todo)
+                todo_payload["status"] = todo_status
+                payload = {
+                    **base_payload,
+                    "todo_id": str(getattr(todo, "todo_id", "") or "").strip(),
+                    "status": todo_status,
+                    "previous_status": str(getattr(todo, "status", "") or "pending"),
+                    "todo": todo_payload,
+                }
+                timeline.append(
+                    self._timeline(
+                        "agent.task.todo.updated",
+                        str(getattr(todo, "title", "") or step_id),
+                        **payload,
+                    )
+                )
+                if run_id and self._append_run_event is not None:
+                    self._append_run_event(run_id, "agent.task.todo.updated", payload)
+            for checkpoint in checkpoints_by_step.get(step_id, []):
+                checkpoint_payload = _snapshot_payload(checkpoint)
+                checkpoint_payload["status"] = checkpoint_status
+                payload = {
+                    **base_payload,
+                    "checkpoint_id": str(
+                        getattr(checkpoint, "checkpoint_id", "") or ""
+                    ).strip(),
+                    "status": checkpoint_status,
+                    "previous_status": str(
+                        getattr(checkpoint, "status", "") or "planned"
+                    ),
+                    "checkpoint": checkpoint_payload,
+                }
+                timeline.append(
+                    self._timeline(
+                        "agent.task.checkpoint.updated",
+                        str(getattr(checkpoint, "title", "") or step_id),
+                        **payload,
+                    )
+                )
+                if run_id and self._append_run_event is not None:
+                    self._append_run_event(
+                        run_id,
+                        "agent.task.checkpoint.updated",
+                        payload,
+                    )
 
     def _record_unavailable_desktop_intent(
         self,
@@ -3940,6 +4071,58 @@ def _tool_result_requests_replan(result: Mapping[str, Any]) -> bool:
     if exit_code not in (None, "", 0, "0"):
         return True
     return False
+
+
+def _task_todo_status_for_tool_result(event_type: str, result: Mapping[str, Any]) -> str:
+    if not isinstance(result, Mapping):
+        return "blocked"
+    if result.get("approval_required"):
+        return "blocked"
+    if str(event_type or "").strip() == "agent.tool.skipped":
+        return "skipped" if result.get("blocked_by_user_goal") else "blocked"
+    return "blocked" if _tool_result_requests_replan(result) else "completed"
+
+
+def _task_checkpoint_status_for_todo_status(
+    todo_status: str,
+    result: Mapping[str, Any],
+) -> str:
+    if isinstance(result, Mapping) and result.get("approval_required"):
+        return "waiting_approval"
+    if todo_status == "completed":
+        return "completed"
+    return "blocked"
+
+
+def _task_progress_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(result, Mapping):
+        return {}
+    preview: dict[str, Any] = {}
+    for key in (
+        "ok",
+        "action",
+        "summary",
+        "error",
+        "hint",
+        "returncode",
+        "exit_code",
+        "blocked_by_user_goal",
+        "approval_required",
+    ):
+        if key in result:
+            preview[key] = result.get(key)
+    stderr = str(result.get("stderr") or "").strip()
+    if stderr:
+        preview["stderr"] = stderr[:500]
+    return preview
+
+
+def _snapshot_payload(snapshot: Any) -> dict[str, Any]:
+    if hasattr(snapshot, "model_dump"):
+        return snapshot.model_dump(mode="json")
+    if isinstance(snapshot, Mapping):
+        return dict(snapshot)
+    return {}
 
 
 def _model_followup_context_message(payload: dict[str, Any]) -> str:

@@ -42,6 +42,8 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'agent.intent.selected') return detail ? `Intent 识别 · ${detail}` : 'Intent 识别';
   if (name === 'agent.plan.created') return detail ? `Planner 计划 · ${detail}` : 'Planner 计划';
   if (name === 'agent.plan.step') return detail ? `计划步骤 · ${detail}` : '计划步骤';
+  if (name === 'agent.task.todo.updated') return detail ? `Task Todo · ${detail}` : 'Task Todo';
+  if (name === 'agent.task.checkpoint.updated') return detail ? `Task Checkpoint · ${detail}` : 'Task Checkpoint';
   if (name === 'agent.plan.selection') {
     const selectionDetail = plannerSelectionTimelineDetail(event, detail);
     return selectionDetail ? `Planner 选择 · ${selectionDetail}` : 'Planner 选择';
@@ -180,6 +182,8 @@ export function timelineEventTone(event: Record<string, unknown>): string {
     || name === 'agent.plan.created'
     || name === 'agent.plan.step'
     || name === 'agent.plan.selection'
+    || name === 'agent.task.todo.updated'
+    || name === 'agent.task.checkpoint.updated'
   ) return 'tool';
   if (name.includes('tool')) return 'tool';
   if (name.startsWith('model.') || name.includes('model.response')) return 'model';
