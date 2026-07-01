@@ -85,6 +85,30 @@ def test_discovered_app_followup_allows_explicit_app_search() -> None:
         ),
         ["app.open", "desktop.safe_shortcut"],
     )
+    click_target = _target(
+        target_action="app_search",
+        app_search={
+            "query": "logo 模板",
+            "submit": True,
+            "focus": {
+                "tool": "desktop.click_ui_element",
+                "input": {"target": "搜索", "role_filter": "text"},
+            },
+        },
+    )
+    assert discovered_app_followup_target_can_direct_execute(
+        click_target,
+        [
+            "app.open",
+            "desktop.click_ui_element",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ],
+    )
+    assert not discovered_app_followup_target_can_direct_execute(
+        click_target,
+        ["desktop.click_ui_element", "desktop.safe_type_text", "desktop.search_submit"],
+    )
 
 
 def test_discovered_app_followup_rejects_model_required_or_risky_targets() -> None:

@@ -5067,10 +5067,11 @@ def _auto_discovered_app_followup_requests(
         if not search_query:
             return []
         requests.extend(
-            _discovered_app_safe_shortcut_requests(
+            _discovered_app_search_focus_requests(
                 app_query,
                 app_name,
-                safe_shortcut_action or "find",
+                app_search,
+                safe_shortcut_action,
                 allowed,
                 source=source,
                 planning_reason=planning_reason,
@@ -5503,6 +5504,15 @@ def _discovered_app_search_payload(target: Mapping[str, Any]) -> dict[str, Any]:
         value = str(raw.get(key) or target.get(f"app_search_{key}") or "").strip()
         if value:
             payload[key] = value
+    focus = raw.get("focus") if isinstance(raw.get("focus"), Mapping) else {}
+    if focus:
+        tool_name = str(focus.get("tool") or "").strip()
+        raw_input = focus.get("input") if isinstance(focus.get("input"), Mapping) else {}
+        if tool_name:
+            payload["focus"] = {
+                "tool": tool_name,
+                "input": dict(raw_input),
+            }
     submit = raw.get("submit", target.get("app_search_submit"))
     if isinstance(submit, bool):
         payload["submit"] = submit
@@ -5523,6 +5533,53 @@ def _discovered_app_search_submit_requested(app_search: Mapping[str, Any]) -> bo
     if str(submit or "").strip().lower() in {"1", "true", "yes", "y"}:
         return True
     return bool(str(app_search.get("submit_action") or "").strip())
+
+
+def _discovered_app_search_focus_requests(
+    app_query: str,
+    app_name: str,
+    app_search: Mapping[str, Any],
+    safe_shortcut_action: str,
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    focus = app_search.get("focus") if isinstance(app_search.get("focus"), Mapping) else {}
+    focus_tool = str(focus.get("tool") or "").strip()
+    focus_input = focus.get("input") if isinstance(focus.get("input"), Mapping) else {}
+    if focus_tool == "desktop.click_ui_element" and focus_tool in allowed:
+        open_request = _discovered_app_open_request(
+            app_query,
+            app_name,
+            allowed,
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if not open_request:
+            return []
+        click_request = _with_discovered_app_resolution(
+            _request_like(
+                focus_tool,
+                dict(focus_input),
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            app_query,
+            app_name,
+        )
+        return [open_request, click_request]
+    action = str(focus_input.get("action") or safe_shortcut_action or "find").strip()
+    if not action:
+        return []
+    return _discovered_app_safe_shortcut_requests(
+        app_query,
+        app_name,
+        action,
+        allowed,
+        source=source,
+        planning_reason=planning_reason,
+    )
 
 
 def _discovered_app_communication_compose_requests(

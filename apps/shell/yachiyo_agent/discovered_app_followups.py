@@ -57,7 +57,7 @@ def discovered_app_followup_target_can_direct_execute(
     elif target_action == "app_search":
         if not _app_search_query(target):
             return False
-        can_prepare = _can_prepare_safe_shortcut(target, allowed)
+        can_prepare = _can_prepare_app_search(target, allowed)
         if not can_prepare:
             return False
         if not (
@@ -98,6 +98,22 @@ def _can_prepare_safe_shortcut(target: Mapping[str, Any], allowed: set[str]) -> 
             and "desktop.safe_shortcut" in allowed
         )
     )
+
+
+def _can_prepare_app_search(target: Mapping[str, Any], allowed: set[str]) -> bool:
+    focus = _app_search_focus(target)
+    if str(focus.get("tool") or "").strip() == "desktop.click_ui_element":
+        return (
+            "desktop.click_ui_element" in allowed
+            and ("app.open" in allowed or "app.focus" in allowed)
+        )
+    return _can_prepare_safe_shortcut(target, allowed)
+
+
+def _app_search_focus(target: Mapping[str, Any]) -> Mapping[str, Any]:
+    raw = target.get("app_search") if isinstance(target.get("app_search"), Mapping) else {}
+    focus = raw.get("focus") if isinstance(raw.get("focus"), Mapping) else {}
+    return focus
 
 
 def _app_search_query(target: Mapping[str, Any]) -> str:

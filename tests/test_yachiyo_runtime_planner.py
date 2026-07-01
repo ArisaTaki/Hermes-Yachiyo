@@ -2170,6 +2170,10 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         "app_search": {
             "query": "logo 模板",
             "target": "搜索",
+            "focus": {
+                "tool": "desktop.safe_shortcut",
+                "input": {"action": "find"},
+            },
             "submit": True,
             "verify": True,
         },
@@ -8418,6 +8422,23 @@ def test_runtime_planner_discovers_generic_design_tool_before_searching() -> Non
             "continue_to_model": True,
         }
     ]
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=planner_tool_requests(prompt, allowed_tools),
+        legacy_requests=[],
+        selected_requests=planner_tool_requests(prompt, allowed_tools),
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+    assert payload["followup_target"]["app_search"]["focus"] == {
+        "tool": "desktop.click_ui_element",
+        "input": {
+            "target": "搜索",
+            "role_filter": "text",
+            "click_count": 1,
+            "limit": 80,
+        },
+    }
 
 
 def test_runtime_planner_keeps_unknown_app_descriptor_as_named_app() -> None:

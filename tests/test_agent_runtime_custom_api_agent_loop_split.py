@@ -14363,6 +14363,57 @@ def test_auto_discovered_app_search_followup_types_submits_and_verifies() -> Non
             "planning_reason": "planner_discovered_app_followup",
         },
     ]
+    click_requests = custom_api_agent_module._auto_discovered_app_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "image",
+                "target_action": "app_search",
+                "app_search": {
+                    "query": "logo 模板",
+                    "target": "搜索",
+                    "submit": True,
+                    "focus": {
+                        "tool": "desktop.click_ui_element",
+                        "input": {
+                            "target": "搜索",
+                            "role_filter": "text",
+                            "click_count": 1,
+                            "limit": 80,
+                        },
+                    },
+                },
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {},
+                },
+            }
+        },
+        [
+            "app.open",
+            "desktop.click_ui_element",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+        timeline,
+    )
+
+    assert [request["tool"] for request in click_requests] == [
+        "app.open",
+        "desktop.click_ui_element",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    assert click_requests[1]["input"] == {
+        "target": "搜索",
+        "role_filter": "text",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert click_requests[1]["input_resolution"]["resolved_app_name"] == "Figma"
+    assert click_requests[2]["input"] == {"text": "logo 模板"}
 
 
 def test_auto_discovered_app_generated_write_followup_returns_to_model() -> None:

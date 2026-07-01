@@ -659,6 +659,11 @@ def _desktop_discovered_app_search_payload(
     scope = str(app_search.get("scope") or "").strip()
     if scope:
         payload["scope"] = scope
+    focus_payload = _decision_step_focus_payload(
+        _decision_plan_step(decision, "focus-app-search-field")
+    )
+    if focus_payload:
+        payload["focus"] = focus_payload
     if _decision_plan_has_step(decision, "submit-app-search"):
         payload["submit"] = True
     if _decision_plan_has_step(decision, "confirm-app-search-result"):
@@ -671,16 +676,35 @@ def _desktop_discovered_app_search_payload(
     return payload
 
 
-def _decision_plan_has_step(decision: Any | None, step_id: str) -> bool:
+def _decision_step_focus_payload(step: Any | None) -> dict[str, Any]:
+    tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if not tool_name:
+        return {}
+    raw_input = getattr(step, "input_preview", {})
+    input_preview = dict(raw_input) if isinstance(raw_input, Mapping) else {}
+    return {
+        "tool": tool_name,
+        "input": input_preview,
+    }
+
+
+def _decision_plan_step(decision: Any | None, step_id: str) -> Any | None:
     plan = getattr(decision, "plan", None)
     tool_plan = getattr(plan, "tool_plan", None)
     steps = getattr(tool_plan, "steps", None)
     if not isinstance(steps, Iterable) or isinstance(steps, (str, bytes)):
-        return False
+        return None
     expected = str(step_id or "").strip()
     if not expected:
-        return False
-    return any(str(getattr(step, "step_id", "") or "").strip() == expected for step in steps)
+        return None
+    for step in steps:
+        if str(getattr(step, "step_id", "") or "").strip() == expected:
+            return step
+    return None
+
+
+def _decision_plan_has_step(decision: Any | None, step_id: str) -> bool:
+    return _decision_plan_step(decision, step_id) is not None
 
 
 def _desktop_discovery_capability_hint(inputs: Mapping[str, Any]) -> Mapping[str, Any]:
