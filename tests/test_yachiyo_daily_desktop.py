@@ -180,6 +180,25 @@ def test_planner_first_daily_desktop_entrypoint_discovers_apps_by_capability() -
         }
     ]
 
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "用任意可用的文档应用新建一份项目报告",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "document", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
 
 def test_planner_first_daily_desktop_entrypoint_routes_browser_url_click_sequence() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(

@@ -19085,44 +19085,51 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
     value = _clean_prompt(text)
     if not value:
         return {}
+    generic_prefix = (
+        r"(?:(?:一个|一款|任意|任何|默认|可用|合适|适合|推荐|能用|可使用|已安装)"
+        r"(?:的)?\s*)*"
+    )
+    generic_prefix_en = (
+        r"(?:(?:an?|any|some|available|default|suitable|best|usable|installed)\s+)*"
+    )
     patterns = (
         r"(?:打开|启动|找|找一个|找一款|使用|在|用|通过)\s*"
-        r"(?:一个|一款|任意|任何|可用)?\s*"
+        rf"{generic_prefix}"
         r"(?:能|可以|适合|适用于|可用于|用来|用于)\s*(?P<capability>[^。！？!?，,]{1,40}?)"
         r"(?:的)?(?:应用(?:程序)?|app|软件|工具|程序)",
         r"(?:有没有|有无|是否有|装了|安装了|有没有安装).{0,12}"
         r"(?:能|可以|适合|适用于|可用于|用来|用于)\s*(?P<installed_capability>[^。！？!?，,]{1,40}?)"
         r"(?:的)?(?:应用(?:程序)?|app|软件|工具|程序)",
         r"\b(?:open|launch|start|find|use)\s+"
-        r"(?:(?:an?|any|some|available)\s+)?"
+        rf"{generic_prefix_en}"
         r"(?:app|application|tool|program)\s+"
         r"(?:that\s+can|to|for)\s+(?P<capability_en>[^.!?,]{1,60})",
         r"\b(?:in|inside|within|using|with)\s+"
-        r"(?:(?:an?|any|some|available)\s+)?"
+        rf"{generic_prefix_en}"
         r"(?:app|application|tool|program)\s+"
         r"(?:that\s+can|to|for)\s+(?P<scoped_capability_en>[^.!?,]{1,60})",
         r"(?:写进|写入|写到|放进|放到|保存到|导出到|输出到|整理到|总结到|发到)\s*"
-        r"(?:一个|一款|任意|任何|可用)?\s*"
+        rf"{generic_prefix}"
         r"(?P<target_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
         r"图片|图像|照片|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
         r"聊天|通讯|通信|消息|即时通讯|日历|项目管理|任务管理|工单|看板|"
         r"issue|ticket)"
         r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
         r"\b(?:write|save|export|output|put|send|copy|paste)\b.{0,80}?"
-        r"\b(?:to|into|in)\s+(?:(?:an?|any|some|available)\s+)?"
+        rf"\b(?:to|into|in)\s+{generic_prefix_en}"
         r"(?P<target_capability_en>markdown|code|image|photo|document|text|spreadsheet|"
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
         r"(?:app|application|client|tool|program|editor)\b",
         r"(?:打开|启动|找|找一个|找一款|使用|用|通过)\s*"
-        r"(?:一个|一款|任意|任何|可用)?\s*"
+        rf"{generic_prefix}"
         r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
         r"图片|图像|照片|pdf|PDF|演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
         r"聊天|通讯|通信|消息|即时通讯|日历|项目管理|任务管理|工单|看板|"
         r"issue|ticket)"
         r"(?:\s*)?(?:编辑器|应用(?:程序)?|app|软件|客户端|工具|程序)",
         r"\b(?:open|launch|start|find|use)\s+"
-        r"(?:(?:an?|any|some|available)\s+)?"
+        rf"{generic_prefix_en}"
         r"(?P<direct_capability_en>markdown|code|image|photo|document|text|spreadsheet|"
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"

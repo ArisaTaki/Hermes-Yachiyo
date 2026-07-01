@@ -7222,6 +7222,68 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
             "continue_to_model": True,
         }
     ]
+
+    document = RuntimePlanner().decision(
+        "用任意可用的文档应用新建一份项目报告",
+        allowed_tools=allowed_tools,
+    )
+    assert document.selected_intent.inputs["app_name_hint"] == ""
+    assert document.selected_intent.inputs["operation_hint"] == "discover_apps"
+    assert document.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "document",
+    }
+    assert document.selected_intent.inputs["app_capability_hint"] == {
+        "query": "document",
+        "description": "文档",
+    }
+    assert [step.step_id for step in document.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+    ]
+    assert _step_by_id(document, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "document",
+        "action": "new_document",
+    }
+    assert planner_tool_requests(
+        "用任意可用的文档应用新建一份项目报告",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "document", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+
+    default_document = RuntimePlanner().decision(
+        "通过默认文档应用新建一份项目报告",
+        allowed_tools=allowed_tools,
+    )
+    assert default_document.selected_intent.inputs["app_capability_hint"] == {
+        "query": "document",
+        "description": "文档",
+    }
+
+    document_en = RuntimePlanner().decision(
+        "use any available document app to create a new project report",
+        allowed_tools=allowed_tools,
+    )
+    assert document_en.selected_intent.inputs["app_name_hint"] == ""
+    assert document_en.selected_intent.inputs["app_capability_hint"] == {
+        "query": "document",
+        "description": "document",
+    }
+    assert _step_by_id(document_en, "discover_apps-desktop-state").input_preview == {
+        "query": "document",
+        "limit": 20,
+    }
+
     scoped_markdown = RuntimePlanner().decision(
         "帮我在一个能写 Markdown 的应用里新建文档",
         allowed_tools=allowed_tools,
