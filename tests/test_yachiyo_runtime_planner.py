@@ -2608,6 +2608,30 @@ def test_runtime_planner_discovers_generic_browser_before_specific_search() -> N
         "desktop.ui_elements",
     ]
 
+    for prompt, target in (
+        ("打开任意浏览器搜索 open hanako", "搜索"),
+        ("open any browser and search open hanako", "Search"),
+    ):
+        search_decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+        assert search_decision.selected_intent.kind == "desktop_operation"
+        assert search_decision.selected_intent.inputs["app_search_hint"] == {
+            "query": "open hanako",
+            "target": target,
+        }
+        assert _step_by_id(search_decision, "type-app-search-query").input_preview == {
+            "text": "open hanako"
+        }
+        search_requests = planner_tool_requests(prompt, allowed_tools)
+        assert [request["tool"] for request in search_requests] == [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.click_ui_element",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ]
+        assert search_requests[3]["input"] == {"text": "open hanako"}
+
     web_decision = RuntimePlanner().decision(
         "用浏览器搜索 OpenAI 最新新闻",
         allowed_tools=["browser.open_url", "desktop.list_apps", "app.open"],

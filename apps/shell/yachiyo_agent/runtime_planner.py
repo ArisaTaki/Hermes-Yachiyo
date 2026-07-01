@@ -16433,22 +16433,31 @@ def _generic_browser_app_search_hint(text: str) -> dict[str, str]:
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:找|找个|找一个|找一款|打开|启动|开启)\s*"
         r"(?:一个|一款|任意|任何|默认|可用|合适|适合)?\s*浏览器"
-        r"(?:\s*(?:打开|访问|进入|搜索|搜|查找|检索))?\s*(?P<query>.+)$",
+        r"(?:\s*(?P<action_cn>打开|访问|进入|搜索|搜|查找|检索))?\s*(?P<query>.+)$",
         r"\b(?:find|open|launch|start)\s+"
         r"(?:an?\s+|the\s+|any\s+|default\s+|available\s+|suitable\s+)?"
         r"(?:browser|web\s+browser)\b"
         r"(?:\s+(?:and|then|to|for))?"
-        r"(?:\s+(?:open|visit|go\s+to|search|find|look\s+up))?"
+        r"(?:\s+(?P<action_en>open|visit|go\s+to|search|find|look\s+up))?"
         r"\s+(?P<query_en>.+)$",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
         if not match:
             continue
+        groups = match.groupdict()
+        action = str(groups.get("action_cn") or groups.get("action_en") or "").strip()
         query = _clean_generic_browser_app_search_query(
-            match.groupdict().get("query")
-            or match.groupdict().get("query_en")
-            or ""
+            groups.get("query")
+            or groups.get("query_en")
+            or "",
+            preserve_leading_english_action=bool(
+                re.fullmatch(
+                    r"(?:搜索|搜|查找|检索|search|find|look\s+up)",
+                    action,
+                    flags=re.IGNORECASE,
+                )
+            ),
         )
         if query:
             return {
@@ -16458,7 +16467,11 @@ def _generic_browser_app_search_hint(text: str) -> dict[str, str]:
     return {}
 
 
-def _clean_generic_browser_app_search_query(query: str) -> str:
+def _clean_generic_browser_app_search_query(
+    query: str,
+    *,
+    preserve_leading_english_action: bool = False,
+) -> str:
     value = _clean_app_search_query(query).strip(" .，,。?？!！")
     if not value:
         return ""
@@ -16474,12 +16487,13 @@ def _clean_generic_browser_app_search_query(query: str) -> str:
         value,
         flags=re.IGNORECASE,
     )
-    value = re.sub(
-        r"^(?:open|visit|go\s+to|search|find|look\s+up)\s+",
-        "",
-        value,
-        flags=re.IGNORECASE,
-    )
+    if not preserve_leading_english_action:
+        value = re.sub(
+            r"^(?:open|visit|go\s+to|search|find|look\s+up)\s+",
+            "",
+            value,
+            flags=re.IGNORECASE,
+        )
     value = re.sub(
         r"\s+(?:and|then|to)?\s*(?:search|find|look\s+up)\s+",
         " ",
