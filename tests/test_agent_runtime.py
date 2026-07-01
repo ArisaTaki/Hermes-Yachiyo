@@ -5444,6 +5444,222 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_notes(
         service.close()
 
 
+def test_main_chat_model_loop_writes_generated_page_summary_to_discovered_document_app(
+    tmp_path,
+    monkeypatch,
+):
+    service = make_service(tmp_path)
+    tool_calls: list[tuple[str, dict[str, Any]]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    generated = "网页摘要：Oha-Yachiyo 可以发现桌面应用、执行工具并验证结果。"
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: FakeDefaultProfileService(),
+    )
+
+    def fake_extract_text(selector: str = "") -> dict[str, Any]:
+        tool_calls.append(("browser.extract_text", {"selector": selector}))
+        return {
+            "ok": True,
+            "action": "browser.extract_text",
+            "summary": "Extracted current page text",
+            "data": {
+                "selector": selector,
+                "text": "Oha-Yachiyo can discover desktop apps, execute tools, and verify results.",
+                "truncated": False,
+            },
+        }
+
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict[str, Any]:
+        tool_calls.append(("desktop.list_apps", {"query": query, "limit": limit}))
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": f"Found Typora for {query}",
+            "data": {
+                "query": query,
+                "apps": [
+                    {
+                        "name": "Typora",
+                        "path": "/Applications/Typora.app",
+                        "match_score": 94,
+                    }
+                ],
+            },
+        }
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        tool_calls.append(("app.open", {"app_name": app_name}))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_app_focus(app_name: str) -> dict[str, Any]:
+        tool_calls.append(("app.focus", {"app_name": app_name}))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict[str, Any]:
+        tool_calls.append(("desktop.safe_shortcut", {"action": action}))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": f"Executed safe shortcut: {action}",
+            "data": {"shortcut_action": action},
+        }
+
+    def fake_safe_type_text(text: str) -> dict[str, Any]:
+        tool_calls.append(("desktop.safe_type_text", {"text": text}))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": f"Typed {len(text)} chars",
+            "data": {"text_length": len(text)},
+        }
+
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        tool_calls.append(
+            (
+                "desktop.ui_elements",
+                {"role_filter": role_filter, "limit": limit, "app_name": app_name},
+            )
+        )
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read Typora document controls",
+            "data": {"app_name": "Typora", "title": "Untitled", "elements": []},
+        }
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        model_calls.append([dict(message) for message in messages])
+        assert messages[-1]["role"] == "user"
+        assert messages[-1]["content"].startswith("Runtime follow-up context:")
+        assert "call desktop.list_apps for 'document'" in messages[-1]["content"]
+        assert "insert the generated content" in messages[-1]["content"]
+        assert "Oha-Yachiyo can discover desktop apps" in messages[-1]["content"]
+        return {"content": generated}
+
+    monkeypatch.setattr("apps.shell.agent.tools.browser.extract_text", fake_extract_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
+        fake_safe_shortcut,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_type_text",
+        fake_safe_type_text,
+    )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        run = service.start_main_chat_run(
+            task_id="task-main-page-summary-discovered-document-app",
+            session_id="session-main-page-summary-discovered-document-app",
+            user_goal="把当前网页总结到任意文档应用",
+        )
+        updated = service.execute_main_chat_model_loop(
+            run["run_id"],
+            [{"role": "user", "content": "把当前网页总结到任意文档应用"}],
+            tool_policy={
+                "allowed_tools": [
+                    "browser.extract_text",
+                    "desktop.list_apps",
+                    "app.open_and_safe_shortcut",
+                    "desktop.safe_type_text",
+                    "desktop.ui_elements",
+                ]
+            },
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        planned_events = [
+            event for event in events if event["event_type"] == "agent.desktop.intent_planned"
+        ]
+        followup = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.model.followup_context"
+        )
+        completed_event = next(
+            event
+            for event in reversed(events)
+            if event["event_type"] == "agent.desktop.intent_completed"
+        )
+        resolved_event = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.tool.input_resolved"
+            and event["payload"]["tool"] == "app.open_and_safe_shortcut"
+        )
+
+        assert "Typora" in str(updated["result"])
+        assert "输入文字" in str(updated["result"])
+        assert tool_calls == [
+            ("browser.extract_text", {"selector": ""}),
+            ("desktop.list_apps", {"query": "document", "limit": 20}),
+            ("app.open", {"app_name": "Typora"}),
+            ("app.focus", {"app_name": "Typora"}),
+            ("desktop.safe_shortcut", {"action": "new_document"}),
+            ("desktop.safe_type_text", {"text": generated}),
+            ("desktop.ui_elements", {"role_filter": "", "limit": 80, "app_name": ""}),
+        ]
+        assert len(model_calls) == 1
+        assert [event["payload"]["tool"] for event in planned_events] == [
+            "browser.extract_text",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ]
+        assert [event["payload"]["planning_reason"] for event in planned_events] == [
+            "planner_prefetch_report_context",
+            "planner_followup_discovered_app_write",
+            "planner_followup_discovered_app_write",
+            "planner_followup_discovered_app_write",
+            "planner_followup_discovered_app_write",
+        ]
+        followup_target = followup["payload"]["followup_target"]
+        assert {
+            "kind": "desktop_discovered_app_action",
+            "app_query": "document",
+            "app_name_source": "desktop.list_apps",
+            "target_action": "safe_shortcut",
+            "safe_shortcut_action": "new_document",
+            "body_source": "model_generated_content",
+        }.items() <= followup_target.items()
+        assert "desktop.list_apps" in followup_target["recommended_tools"]
+        assert "app.open_and_safe_shortcut" in followup_target["recommended_tools"]
+        assert "desktop.safe_type_text" in followup_target["recommended_tools"]
+        assert "desktop.ui_elements" in followup_target["verify_tools"]
+        assert resolved_event["payload"]["requested_app_name"] == "document"
+        assert resolved_event["payload"]["resolved_app_name"] == "Typora"
+        assert completed_event["payload"]["tools"] == [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ]
+        assert completed_event["payload"]["planning_reason"] == (
+            "planner_followup_discovered_app_write"
+        )
+        assert "model.request.started" in [event["event_type"] for event in events]
+    finally:
+        service.close()
+
+
 def test_main_chat_model_loop_writes_generated_page_summary_to_artifact(
     tmp_path,
     monkeypatch,

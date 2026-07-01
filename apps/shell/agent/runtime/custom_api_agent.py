@@ -606,9 +606,10 @@ class RuntimeCustomApiAgentLoop:
             if not tool_requests:
                 if not content.strip():
                     raise self._error_type("Native Agent 模型返回了空回复")
+                followup_target = _latest_model_followup_target(timeline)
                 auto_app_write_requests = _model_followup_app_write_requests(
                     content,
-                    _latest_model_followup_target(timeline),
+                    followup_target,
                     allowed_tools,
                 )
                 if auto_app_write_requests:
@@ -643,6 +644,47 @@ class RuntimeCustomApiAgentLoop:
                             run_id=run_id,
                             budget=budget,
                         )
+                        discovered_app_write_requests = (
+                            _model_followup_discovered_app_write_requests_after_discovery(
+                                content,
+                                followup_target,
+                                allowed_tools,
+                                timeline,
+                            )
+                        )
+                        if discovered_app_write_requests:
+                            self._record_auto_model_followup_app_write_plan(
+                                discovered_app_write_requests,
+                                timeline=timeline,
+                                run_id=run_id,
+                            )
+                            self._record_desktop_permission_preflight(
+                                discovered_app_write_requests,
+                                broker,
+                                timeline=timeline,
+                                run_id=run_id,
+                            )
+                            self._record_desktop_tool_policy_decisions(
+                                discovered_app_write_requests,
+                                allowed_tools=allowed_tools,
+                                agent=agent,
+                                run_id=run_id,
+                            )
+                            self._run_tool_requests(
+                                discovered_app_write_requests,
+                                allowed_tools,
+                                broker,
+                                messages,
+                                timeline,
+                                artifacts,
+                                next_iteration=iteration + 1,
+                                run_id=run_id,
+                                budget=budget,
+                            )
+                            auto_app_write_requests = [
+                                *auto_app_write_requests,
+                                *discovered_app_write_requests,
+                            ]
                     except AgentApprovalRequired as exc:
                         pending_approval = (
                             exc.pending_approval if isinstance(exc.pending_approval, dict) else {}
@@ -3936,6 +3978,8 @@ def _auto_discovered_app_followup_requests(
     selection_payload: Mapping[str, Any],
     allowed_tools: Iterable[str],
     timeline: list[dict[str, Any]],
+    *,
+    planning_reason: str = "planner_discovered_app_followup",
 ) -> list[dict[str, Any]]:
     target = (
         selection_payload.get("followup_target")
@@ -3951,7 +3995,9 @@ def _auto_discovered_app_followup_requests(
     resolution_evidence = _discovered_app_resolution_evidence(timeline, app_query, app_name)
     allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
     source = "runtime_planner"
-    planning_reason = "planner_discovered_app_followup"
+    planning_reason = str(planning_reason or "planner_discovered_app_followup").strip()
+    if not planning_reason:
+        planning_reason = "planner_discovered_app_followup"
     target_action = str(target.get("target_action") or "").strip()
     safe_shortcut_action = str(target.get("safe_shortcut_action") or "").strip()
     requests: list[dict[str, Any]] = []
@@ -4764,6 +4810,12 @@ def _model_followup_app_write_requests(
         return _model_followup_artifact_write_requests(content, target, allowed_tools)
     if str(target.get("kind") or "").strip() == "note_write":
         return _model_followup_note_write_requests(content, target, allowed_tools)
+    if str(target.get("kind") or "").strip() == "desktop_discovered_app_action":
+        return _model_followup_discovered_app_write_discovery_requests(
+            content,
+            target,
+            allowed_tools,
+        )
     app_name = str(target.get("app_name") or "").strip()
     if str(target.get("kind") or "").strip() != "app_write" or not app_name:
         return []
@@ -4853,6 +4905,80 @@ def _model_followup_app_write_requests(
         ]
         return [*requests, *([verify_request] if verify_request else [])]
     return []
+
+
+def _model_followup_discovered_app_write_discovery_requests(
+    generated_content: str,
+    target: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    content = str(generated_content or "").strip()
+    if not content or str(target.get("kind") or "").strip() != "desktop_discovered_app_action":
+        return []
+    if str(target.get("body_source") or "").strip() != "model_generated_content":
+        return []
+    app_query = str(target.get("app_query") or "").strip()
+    if not app_query:
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if "desktop.list_apps" not in allowed:
+        return []
+    target_action = str(target.get("target_action") or "").strip()
+    safe_shortcut_action = str(target.get("safe_shortcut_action") or "").strip()
+    can_prepare = False
+    if target_action == "safe_shortcut" and safe_shortcut_action:
+        can_prepare = (
+            "app.open_and_safe_shortcut" in allowed
+            or "app.focus_and_safe_shortcut" in allowed
+            or (
+                ("app.open" in allowed or "app.focus" in allowed)
+                and "desktop.safe_shortcut" in allowed
+            )
+        )
+    elif target_action in {"open_app", "open", "focus_app", "focus"}:
+        can_prepare = "app.open" in allowed or "app.focus" in allowed
+    if not can_prepare:
+        return []
+    if not (
+        "desktop.safe_type_text" in allowed
+        or "app.focus_and_safe_type_text" in allowed
+    ):
+        return []
+    return [
+        _request_like(
+            "desktop.list_apps",
+            {"query": app_query, "limit": 20},
+            source="runtime_planner",
+            planning_reason="planner_followup_discovered_app_write",
+        )
+    ]
+
+
+def _model_followup_discovered_app_write_requests_after_discovery(
+    generated_content: str,
+    target: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    content = str(generated_content or "").strip()
+    if not content or str(target.get("kind") or "").strip() != "desktop_discovered_app_action":
+        return []
+    if str(target.get("body_source") or "").strip() != "model_generated_content":
+        return []
+    app_query = str(target.get("app_query") or "").strip()
+    if not app_query or not _discovered_app_name_for_query(timeline, app_query):
+        return []
+    followup_target = {
+        **dict(target),
+        "compose_text": content,
+        "body_source": "explicit_user_text",
+    }
+    return _auto_discovered_app_followup_requests(
+        {"followup_target": followup_target},
+        allowed_tools,
+        timeline,
+        planning_reason="planner_followup_discovered_app_write",
+    )
 
 
 def _model_followup_artifact_write_requests(

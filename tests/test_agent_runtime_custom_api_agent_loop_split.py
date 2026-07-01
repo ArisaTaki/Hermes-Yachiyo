@@ -2347,6 +2347,89 @@ def test_model_followup_context_instructs_generated_discovered_app_write() -> No
     assert "call desktop.list_apps for 'markdown'" in message
     assert "insert the generated content" in message
     assert "Do not write the raw observed source" in message
+    assert custom_api_agent_module._model_followup_app_write_requests(
+        "## 分析报告\n\n收入增长。",
+        payload["followup_target"],
+        [
+            "data.analyze",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "markdown", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_discovered_app_write",
+        }
+    ]
+    assert custom_api_agent_module._model_followup_discovered_app_write_requests_after_discovery(
+        "## 分析报告\n\n收入增长。",
+        payload["followup_target"],
+        [
+            "data.analyze",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.list_apps",
+                input_preview={"query": "markdown", "limit": 20},
+                result={
+                    "ok": True,
+                    "action": "desktop.list_apps",
+                    "summary": "Found Obsidian",
+                    "data": {
+                        "query": "markdown",
+                        "apps": [
+                            {
+                                "name": "Obsidian",
+                                "path": "/Applications/Obsidian.app",
+                                "match_score": 91,
+                            }
+                        ],
+                    },
+                },
+            )
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Obsidian", "action": "new_document"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_discovered_app_write",
+            "input_resolution": {
+                "tool": "app.open_and_safe_shortcut",
+                "field": "app_name",
+                "requested_app_name": "markdown",
+                "resolved_app_name": "Obsidian",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/Obsidian.app",
+                "app_resolution_score": "91",
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "## 分析报告\n\n收入增长。"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_discovered_app_write",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_discovered_app_write",
+        },
+    ]
 
 
 def test_model_followup_context_instructs_generated_note_write() -> None:
