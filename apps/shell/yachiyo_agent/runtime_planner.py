@@ -1446,7 +1446,11 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
-        if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
+        if (
+            _explicit_app_open_request(text)
+            and _app_capability_discovery_hint(text)
+            and not _opened_app_transform_target_hint(text)
+        ):
             return _empty_intent("report_generation", text)
         shortcut = safe_shortcut_hint(text)
         shortcut_action = str((shortcut or {}).get("action") or "").strip()
@@ -1526,11 +1530,7 @@ class TaskIntentRouter:
         context_source = (
             str(transform_target.get("context_source") or "").strip()
             or app_write_current_page_context
-            or (
-                ""
-                if artifact_context_source == "current_page_content"
-                else artifact_context_source
-            )
+            or artifact_context_source
         )
         file_context = {} if artifact_context_source else _report_file_context_hint(text)
         if score <= 0 and transform_target:
@@ -10951,6 +10951,11 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
             and str(intent.inputs.get("target_app_hint") or "").strip()
         ):
             score += 0.32
+        if (
+            str(intent.inputs.get("context_source") or "").strip()
+            and isinstance(intent.inputs.get("target_app_capability_hint"), Mapping)
+        ):
+            score += 0.32
         file_context = intent.inputs.get("file_context_hint")
         if isinstance(file_context, Mapping):
             score += 0.3 if str(file_context.get("file_type") or "").strip() else 0.08
@@ -14370,8 +14375,11 @@ def _dynamic_context_transform_target_hint(text: str) -> dict[str, str]:
     }
 
 
-def _app_write_followup_target_hint(text: str) -> dict[str, str]:
+def _app_write_followup_target_hint(text: str) -> dict[str, Any]:
     value = _clean_prompt(text)
+    opened_app_target = _opened_app_transform_target_hint(value)
+    if opened_app_target:
+        return opened_app_target
     if not _looks_like_dynamic_context_transfer(value):
         return {}
     if _app_capability_discovery_hint(value):
@@ -14395,6 +14403,81 @@ def _app_write_followup_target_hint(text: str) -> dict[str, str]:
             else {}
         ),
     }
+
+
+def _opened_app_transform_target_hint(text: str) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    if not (
+        _dynamic_context_transform_requested(value)
+        and _context_artifact_source_hint(value)
+        and _explicit_app_open_request(value)
+    ):
+        return {}
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|开启)\s*"
+        r"(?P<app>[\w .·-]{1,40}?)"
+        r"(?:\s*(?:或|或者)\s*(?:其他|其它|任意|任何|可用|合适)?\s*"
+        r"[^，,。！？!?]{0,40}?(?:应用(?:程序)?|app|软件|工具|程序|编辑器))?"
+        r"\s*[，,].+",
+        r"^(?:open|launch|start)\s+"
+        r"(?P<app_en>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)"
+        r"(?:\s+or\s+(?:another|other|any|available|suitable)?\s*"
+        r"[^.!?,]{0,40}?(?:app|application|tool|program|editor))?"
+        r"\s*[,，].+",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = (match.groupdict().get("app") or match.groupdict().get("app_en") or "").strip()
+        app = _clean_dynamic_context_target_app(raw_app)
+        if app and not _looks_like_generic_capability_app_phrase(raw_app, app):
+            container_action = _dynamic_context_target_container_action_hint(value)
+            return {
+                "target_app_hint": app,
+                "target_action_hint": "app_paste",
+                **(
+                    {"target_container_action_hint": container_action}
+                    if container_action
+                    else {}
+                ),
+            }
+    capability = _app_capability_discovery_hint(value)
+    if not capability:
+        return {}
+    container_action = _dynamic_context_target_container_action_hint(value) or "new_document"
+    return {
+        "target_app_capability_hint": capability,
+        "target_action_hint": "app_paste",
+        **(
+            {"target_container_action_hint": container_action}
+            if container_action
+            else {}
+        ),
+    }
+
+
+def _looks_like_generic_capability_app_phrase(value: str, app_name: str) -> bool:
+    raw = _clean_prompt(value)
+    if not raw:
+        return False
+    app_noun = re.search(
+        r"(?:应用(?:程序)?|app|application|软件|工具|程序|编辑器|tool|program|editor)",
+        raw,
+        flags=re.IGNORECASE,
+    )
+    if not app_noun:
+        return False
+    if re.search(
+        r"(?:一个|一款|任意|任何|默认|可用|合适|其他|其它|"
+        r"\b(?:an?|any|some|available|default|suitable|other|another|local)\b)",
+        raw,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    query = _app_capability_discovery_query(raw)
+    return bool(query and query.lower() == _clean_prompt(app_name).lower())
 
 
 def _discovered_app_write_followup_target_hint(

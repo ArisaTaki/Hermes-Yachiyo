@@ -1213,6 +1213,17 @@ def media_query_hint(text: str) -> str:
         r"(?:\s*(?:第?一首|第?一个(?:结果|条目)?|第一条|首个))?",
         r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|启动|找一个|找个|用|在|通过)?\s*"
+        r"(?:(?:(?:我(?:的)?|这台|这个)?(?:电脑|机器|mac|Mac|系统)|本机|本地|桌面)"
+        r"(?:里|中|上|里面|内|下)?(?:的)?\s*)?"
+        r"(?:任意|任何|默认|一个|个|可用)?\s*"
+        r"(?:能|可以|可|会)?\s*(?:播放|播|放|听)?\s*音乐(?:的)?"
+        r"(?:应用(?:程序)?|app|软件|播放器|工具|程序)"
+        r"(?:里|中|上|内|里面)?\s*(?:[，,]\s*)?"
+        r"(?:(?:并|然后|再|接着|之后)\s*)?"
+        r"(?:播放|播|放|play)(?:一下|下|一首|首|个|点)?\s*"
+        r"(?P<query_music_capability_play>[^。！？!?，,]+)",
+        r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:打开|启动|找一个|找个|用|在|通过)?\s*"
         r"(?:任意|任何|默认|一个|个|可用)?\s*(?:音乐\s*(?:应用|app|软件|播放器)?|播放器|music\s+app|music\s+player)"
         r"(?:里|中|上|内|里面)?\s*(?:[，,]\s*)?"
         r"(?:播放|播|放|play)(?:一下|下|一首|首|个|点)?\s*"
@@ -1246,6 +1257,7 @@ def media_query_hint(text: str) -> str:
             or groups.get("query_open_search")
             or groups.get("query_en_scoped_app")
             or groups.get("query_zh_scoped_search")
+            or groups.get("query_music_capability_play")
             or groups.get("query_generic_music_play")
             or groups.get("query_generic_music_search")
             or groups.get("query_zh_search")

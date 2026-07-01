@@ -6948,6 +6948,10 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
     assert decision.selected_intent.kind == "report_generation"
     assert _step_by_id(decision, "gather-context").tool_name == "workspace.list"
 
+    current_page_report = RuntimePlanner().decision(
+        "把当前页面内容做成研究报告并保存到桌面",
+        allowed_tools=["browser.extract_text", "browser.current_page", "artifact.write"],
+    )
     clipboard = RuntimePlanner().decision(
         "把剪贴板内容做成报告",
         allowed_tools=["clipboard.read", "artifact.write"],
@@ -6998,6 +7002,34 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
             "artifact.write",
         ],
     )
+    assert current_page_report.selected_intent.kind == "report_generation"
+    assert current_page_report.selected_intent.inputs == {
+        "context_source": "current_page_content"
+    }
+    assert [step.step_id for step in current_page_report.plan.tool_plan.steps] == [
+        "read-report-context",
+        "write-report-artifact",
+    ]
+    assert _step_by_id(current_page_report, "read-report-context").tool_name == (
+        "browser.extract_text"
+    )
+    assert _step_by_id(current_page_report, "write-report-artifact").input_preview == {
+        "path": "Desktop/report.md",
+        "body_source": "current_page_content",
+    }
+    assert planner_tool_requests(
+        "把当前页面内容做成研究报告并保存到桌面",
+        ["browser.extract_text", "browser.current_page", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        }
+    ]
     assert clipboard.selected_intent.kind == "report_generation"
     assert clipboard.selected_intent.inputs == {"context_source": "clipboard"}
     assert [step.step_id for step in clipboard.plan.tool_plan.steps] == [
@@ -7023,7 +7055,7 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
     )
     assert _step_by_id(selected_weekly, "read-report-context").tool_name == "clipboard.read"
     assert _step_by_id(selected_weekly, "write-report-artifact").input_preview == {
-        "path": "report.md",
+        "path": "weekly-report.md",
         "body_source": "selection",
     }
     assert selected_markdown.selected_intent.kind == "report_generation"
@@ -7320,6 +7352,33 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         allowed,
     ) == [clipboard_prefetch]
 
+    opened_named_clipboard = RuntimePlanner().decision(
+        "打开 Obsidian 或其他 markdown 应用，把剪贴板内容整理成会议纪要",
+        allowed_tools=allowed,
+    )
+    assert opened_named_clipboard.selected_intent.kind == "report_generation"
+    assert opened_named_clipboard.selected_intent.inputs == {
+        "context_source": "clipboard",
+        "target_app_hint": "Obsidian",
+        "target_action_hint": "app_paste",
+    }
+    assert [step.step_id for step in opened_named_clipboard.plan.tool_plan.steps] == [
+        "read-report-context",
+        "prepare-report-target-app",
+    ]
+    assert _step_by_id(opened_named_clipboard, "read-report-context").tool_name == (
+        "clipboard.read"
+    )
+    assert _step_by_id(opened_named_clipboard, "prepare-report-target-app").input_preview == {
+        "app_name": "Obsidian",
+        "target_action": "app_paste",
+        "body_source": "model_generated_content",
+    }
+    assert planner_tool_requests(
+        "打开 Obsidian 或其他 markdown 应用，把剪贴板内容整理成会议纪要",
+        allowed,
+    ) == [clipboard_prefetch]
+
     current_page_discovered = RuntimePlanner().decision(
         "把当前网页总结到任意文档应用",
         allowed_tools=allowed,
@@ -7330,6 +7389,10 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
     )
     clipboard_discovered = RuntimePlanner().decision(
         "把剪贴板内容整理成报告写进任意文档应用",
+        allowed_tools=allowed,
+    )
+    opened_markdown_clipboard = RuntimePlanner().decision(
+        "打开一个 markdown 应用，把剪贴板内容整理成会议纪要",
         allowed_tools=allowed,
     )
 
@@ -7425,6 +7488,38 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
     )
     assert planner_tool_requests(
         "把剪贴板内容整理成报告写进任意文档应用",
+        allowed,
+    ) == [clipboard_prefetch]
+
+    assert opened_markdown_clipboard.selected_intent.kind == "report_generation"
+    assert opened_markdown_clipboard.selected_intent.inputs == {
+        "context_source": "clipboard",
+        "target_app_capability_hint": {"query": "markdown", "description": "markdown"},
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert [step.step_id for step in opened_markdown_clipboard.plan.tool_plan.steps] == [
+        "read-report-context",
+        "discover-report-target-app",
+        "prepare-report-discovered-target-app",
+    ]
+    assert _step_by_id(opened_markdown_clipboard, "discover-report-target-app").input_preview == {
+        "query": "markdown",
+        "limit": 20,
+    }
+    assert _step_by_id(
+        opened_markdown_clipboard,
+        "prepare-report-discovered-target-app",
+    ).input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "markdown",
+        "target_action": "app_paste",
+        "body_source": "model_generated_content",
+        "action": "new_document",
+    }
+    assert planner_tool_requests(
+        "打开一个 markdown 应用，把剪贴板内容整理成会议纪要",
         allowed,
     ) == [clipboard_prefetch]
 
@@ -15066,6 +15161,7 @@ def test_runtime_planner_routes_generic_music_app_query_to_search_play_plan() ->
         ("找一个音乐 app 搜索 lo-fi beats 并播放第一个结果", "lo-fi beats", "音乐"),
         ("帮我在任意可用播放器里播放 city pop", "city pop", "音乐"),
         ("打开任意能播放音乐的应用播放 lo-fi", "lo-fi", "播放音乐"),
+        ("打开我电脑里可以播放音乐的应用并播放轻音乐", "轻音乐", "播放音乐"),
     ):
         decision = RuntimePlanner().decision(
             prompt,
