@@ -1240,6 +1240,48 @@ def test_approval_resume_schedules_code_verification_after_approved_patch():
     budget = SimpleNamespace(name="budget")
     timeline: list[dict[str, object]] = [
         {
+            "event": "agent.task_core.created",
+            "payload": {
+                "decision_id": "decision-code",
+                "plan_id": "plan-code",
+                "core_id": "task-core-code",
+                "task_core": {
+                    "core_id": "task-core-code",
+                    "workspace": {"workspace_id": "workspace-code"},
+                    "todos": [
+                        {
+                            "todo_id": "todo-patch",
+                            "title": "Apply code changes",
+                            "status": "pending",
+                            "step_id": "apply-code-changes",
+                            "tool_name": "workspace.write_patch",
+                        },
+                        {
+                            "todo_id": "todo-verify",
+                            "title": "Verify code changes",
+                            "status": "pending",
+                            "step_id": "verify-code-changes",
+                            "tool_name": "terminal.run",
+                        },
+                    ],
+                    "checkpoints": [
+                        {
+                            "checkpoint_id": "checkpoint-patch",
+                            "title": "Verify Apply code changes",
+                            "status": "waiting_approval",
+                            "after_step_id": "apply-code-changes",
+                        },
+                        {
+                            "checkpoint_id": "checkpoint-verify",
+                            "title": "Verify Verify code changes",
+                            "status": "waiting_approval",
+                            "after_step_id": "verify-code-changes",
+                        },
+                    ],
+                },
+            },
+        },
+        {
             "event": "agent.model.followup_context",
             "planning_reason": "planner_fallback_code_diagnostic",
             "pending_plan_steps": [
@@ -1295,7 +1337,15 @@ def test_approval_resume_schedules_code_verification_after_approved_patch():
                 },
             )
         )
-        return {"ok": True, "mode": "patch", "path": "app.py"}
+        result = {"ok": True, "mode": "patch", "path": "app.py"}
+        run_timeline.append(
+            {
+                "event": "agent.tool.call",
+                "detail": "workspace.write_patch",
+                "result": result,
+            }
+        )
+        return result
 
     def append_tool_result_message(run_messages, request, result):
         calls.append(("append_tool_result_message", {"request": request, "result": result}))
@@ -1377,6 +1427,22 @@ def test_approval_resume_schedules_code_verification_after_approved_patch():
         "role": "tool",
         "content": '{"ok": true, "mode": "patch", "path": "app.py"}',
     }
+    todo_event = next(
+        event
+        for event in timeline
+        if event.get("event") == "agent.task.todo.updated"
+        and event.get("step_id") == "apply-code-changes"
+    )
+    checkpoint_event = next(
+        event
+        for event in timeline
+        if event.get("event") == "agent.task.checkpoint.updated"
+        and event.get("step_id") == "apply-code-changes"
+    )
+    assert todo_event["status"] == "completed"
+    assert todo_event["todo"]["status"] == "completed"
+    assert checkpoint_event["status"] == "completed"
+    assert checkpoint_event["checkpoint"]["status"] == "completed"
 
 
 def test_approval_resume_coordinator_claims_and_projects_approved_tool_once():
