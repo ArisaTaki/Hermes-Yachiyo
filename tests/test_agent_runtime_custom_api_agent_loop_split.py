@@ -1974,7 +1974,7 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
         "desktop.list_windows",
         "screen.capture",
     ]
-    assert all(request["continue_to_model"] is True for request in recovery_requests)
+    assert all("continue_to_model" not in request for request in recovery_requests)
     assert {
         request["replan_request_id"] for request in recovery_requests
     } == {payload["request_id"]}
@@ -1997,7 +1997,7 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
         "desktop.list_windows",
         "screen.capture",
     ]
-    assert all(event["continue_to_model"] is True for event in recovery_plan_events)
+    assert all("continue_to_model" not in event for event in recovery_plan_events)
     assert {
         event["replan_request_id"] for event in recovery_plan_events
     } == {payload["request_id"]}
@@ -2024,6 +2024,132 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
     )
     assert not any(event["event"] == "agent.replan.requested" for event in readable_timeline)
     assert run_events == []
+
+
+def test_custom_api_agent_loop_completes_verification_recovery_without_model_followup() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+        "desktop.active_window",
+        "desktop.list_windows",
+        "screen.capture",
+    ]
+    model_calls: list[list[dict[str, Any]]] = []
+    tool_runs: list[list[str]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append([str(request.get("tool") or "") for request in tool_requests])
+        for request in tool_requests:
+            tool = str(request.get("tool") or "")
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if tool == "desktop.list_apps":
+                result = {"ok": True, "data": {"apps": [{"name": "Figma"}]}}
+            elif tool == "app.open":
+                result = {"ok": True, "data": {"app_name": payload.get("app_name")}}
+            elif tool in {"desktop.safe_shortcut", "desktop.safe_type_text", "desktop.search_submit"}:
+                result = {"ok": True}
+            elif tool == "desktop.ui_elements":
+                result = {"ok": True, "data": {"elements": [], "count": 0, "text_item_count": 0}}
+            elif tool == "desktop.active_window":
+                result = {"ok": True, "data": {"app_name": "Figma", "title": "Logo templates"}}
+            elif tool == "desktop.list_windows":
+                result = {
+                    "ok": True,
+                    "data": {"windows": [{"app_name": "Figma", "title": "Logo templates"}]},
+                }
+            elif tool == "screen.capture":
+                result = {"ok": True, "summary": "已截取验证画面。", "data": {"path": "verify.png"}}
+            else:
+                raise AssertionError(f"unexpected tool: {tool}")
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool,
+                    input_preview=payload,
+                    result=result,
+                )
+            )
+            messages_arg.append({"role": "user", "content": f"Tool result for {tool}: {result}"})
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": allowed_tools}},
+        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda tools: [{"name": tool} for tool in tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner for desktop actions.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": "model fallback"},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda *_args, **_kwargs: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+    timeline: list[dict[str, Any]] = []
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "帮我打开一个设计工具，搜索 logo 模板",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-verify-recovery-direct",
+    )
+
+    assert tool_runs == [
+        [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+        ["desktop.active_window", "desktop.list_windows", "screen.capture"],
+    ]
+    assert model_calls == []
+    assert "当前前台窗口是 Figma" in str(result)
+    assert not any(event["event"] == "agent.model.followup_context" for event in timeline)
+    recovery_plan_events = [
+        event
+        for event in timeline
+        if event["event"] == "agent.desktop.intent_planned"
+        and event.get("planning_reason") == "planner_verification_recovery_observation"
+    ]
+    assert [event["tool"] for event in recovery_plan_events] == [
+        "desktop.active_window",
+        "desktop.list_windows",
+        "screen.capture",
+    ]
+    assert all("continue_to_model" not in event for event in recovery_plan_events)
 
 
 def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_unavailable_steps() -> None:
@@ -16313,7 +16439,7 @@ def test_runtime_planner_replans_empty_auto_discovered_app_observation() -> None
         "desktop.list_windows",
         "screen.capture",
     ]
-    assert all(request["continue_to_model"] is True for request in recovery_requests)
+    assert all("continue_to_model" not in request for request in recovery_requests)
     assert {
         request["replan_request_id"] for request in recovery_requests
     } == {payload["request_id"]}

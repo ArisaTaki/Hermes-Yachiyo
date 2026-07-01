@@ -72,6 +72,7 @@ _DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS = {
 
 _DAILY_DESKTOP_VERIFY_TOOLS = {
     "desktop.active_window",
+    "desktop.list_windows",
     "desktop.read_ui",
     "desktop.windows",
     "desktop.ui_elements",
@@ -469,14 +470,6 @@ class RuntimeCustomApiAgentLoop:
                         followup_selection_payload,
                         timeline,
                     )
-                    if replan_payloads:
-                        self._append_replan_followup_context(
-                            replan_payloads,
-                            allowed_tools=allowed_tools,
-                            messages=messages,
-                            timeline=timeline,
-                            run_id=run_id,
-                        )
                     auto_replan_recovery_requests = (
                         _auto_replan_recovery_requests(
                             replan_payloads,
@@ -565,6 +558,25 @@ class RuntimeCustomApiAgentLoop:
                             *planned_tool_requests,
                             *auto_replan_recovery_requests,
                         ]
+                        if not _replan_recovery_requests_need_model_followup(
+                            auto_replan_recovery_requests
+                        ):
+                            direct_result = self._direct_daily_desktop_sequence_result(
+                                auto_replan_recovery_requests,
+                                timeline,
+                                tool_timeline_start=auto_tool_timeline_start,
+                                run_id=run_id,
+                            )
+                            if direct_result:
+                                return direct_result
+                    if replan_payloads:
+                        self._append_replan_followup_context(
+                            replan_payloads,
+                            allowed_tools=allowed_tools,
+                            messages=messages,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
                     if auto_followup_request:
                         auto_payload = {
                             "tool": str(auto_followup_request.get("tool") or ""),
@@ -2728,7 +2740,7 @@ class RuntimeCustomApiAgentLoop:
                 return _installed_apps_summary(result) or result_summary or "已发现已安装应用。"
             if tool_name == "desktop.running_apps":
                 return _running_apps_summary(result) or result_summary or "已读取运行中的应用。"
-            if tool_name == "desktop.windows":
+            if tool_name in {"desktop.windows", "desktop.list_windows"}:
                 return _windows_summary(result, planned_input) or result_summary or "已读取窗口列表。"
             if tool_name == "desktop.ui_elements":
                 return _ui_elements_summary(result) or result_summary or "已读取当前界面控件。"
@@ -7192,9 +7204,18 @@ def _auto_replan_verification_recovery_requests(
         if request_id:
             request["replan_request_id"] = request_id
         request["replan_trigger"] = "verification_failed"
-        request["continue_to_model"] = True
         requests.append(request)
     return requests
+
+
+def _replan_recovery_requests_need_model_followup(
+    requests: Iterable[Mapping[str, Any]],
+) -> bool:
+    return any(
+        bool(request.get("continue_to_model"))
+        for request in requests
+        if isinstance(request, Mapping)
+    )
 
 
 def _auto_replan_recovery_requests(
