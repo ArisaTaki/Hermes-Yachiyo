@@ -1751,6 +1751,27 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
         and event["payload"]["request_id"] == payload["request_id"]
         for event in run_events
     )
+    messages: list[dict[str, Any]] = []
+    loop._append_replan_followup_context(
+        payloads,
+        allowed_tools=allowed_tools,
+        messages=messages,
+        timeline=empty_timeline,
+        run_id="run-verify-replan",
+    )
+    assert messages
+    assert "post-action verification did not confirm" in messages[0]["content"]
+    followup_context = [
+        event
+        for event in empty_timeline
+        if event["event"] == "agent.model.followup_context"
+    ][0]
+    assert (
+        followup_context["planning_reason"]
+        == "planner_replan_after_verification_failed"
+    )
+    assert followup_context["trigger"] == "verification_failed"
+    assert followup_context["triggers"] == ["verification_failed"]
 
     run_events.clear()
     readable_timeline = build_timeline(

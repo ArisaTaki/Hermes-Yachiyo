@@ -4061,6 +4061,7 @@ def _model_replan_followup_context_payload(
     requests: list[dict[str, Any]] = []
     fallback_candidates: list[str] = []
     failed_tools: list[str] = []
+    triggers: list[str] = []
     for payload in replan_payloads:
         if not isinstance(payload, Mapping):
             continue
@@ -4080,22 +4081,25 @@ def _model_replan_followup_context_payload(
         requests.append(request)
         failed_tools.append(request["source_tool_name"])
         fallback_candidates.extend(request["fallback_tools"])
+        triggers.append(request["trigger"])
     if not requests:
         return {}
     fallback_candidates = _ordered_text_list(fallback_candidates)
     allowed_fallback_tools = [
         tool for tool in fallback_candidates if not allowed or tool in allowed
     ]
+    triggers = _ordered_text_list(triggers)
     first = requests[0]
     payload = {
         "source": "runtime_planner",
         "status": "ready",
-        "planning_reason": "planner_replan_after_tool_failure",
+        "planning_reason": _runtime_replan_planning_reason(triggers),
         "replan_request_count": len(requests),
         "replan_requests": requests,
         "fallback_tools": allowed_fallback_tools,
         "fallback_tool_candidates": fallback_candidates,
         "failed_tools": _ordered_text_list(failed_tools),
+        "triggers": triggers,
         "trigger": first.get("trigger", ""),
         "failure_detail": first.get("failure_detail", ""),
         "source_tool_name": first.get("source_tool_name", ""),
@@ -4114,6 +4118,17 @@ def _model_replan_followup_context_payload(
     return payload
 
 
+def _runtime_replan_planning_reason(triggers: list[str]) -> str:
+    clean = {str(trigger or "").strip() for trigger in triggers if str(trigger or "").strip()}
+    if clean == {"verification_failed"}:
+        return "planner_replan_after_verification_failed"
+    if clean == {"tool_unavailable"}:
+        return "planner_replan_after_tool_unavailable"
+    if "verification_failed" in clean:
+        return "planner_replan_after_mixed_runtime_failure"
+    return "planner_replan_after_tool_failure"
+
+
 def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
     requests = [
         request
@@ -4122,17 +4137,8 @@ def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
     ]
     fallback_tools = _string_list(payload.get("fallback_tools"))
     failed_tools = _string_list(payload.get("failed_tools"))
-    lines = [
-        "Runtime replan context: a planned tool failed or could not be verified.",
-        (
-            "Continue the existing task workspace. Do not ask the user to perform the "
-            "tool-capable action manually."
-        ),
-        (
-            "Inspect the failure, choose the next safe observable action, and keep all "
-            "approval and policy gates."
-        ),
-    ]
+    planning_reason = str(payload.get("planning_reason") or "").strip()
+    lines = _runtime_replan_message_preamble(planning_reason)
     if failed_tools:
         lines.append(f"Failed tools: {', '.join(failed_tools)}.")
     if fallback_tools:
@@ -4187,6 +4193,44 @@ def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
         if prompt:
             lines.append(f"- planner_replan_prompt: {prompt}")
     return "\n".join(lines)
+
+
+def _runtime_replan_message_preamble(planning_reason: str) -> list[str]:
+    if planning_reason == "planner_replan_after_verification_failed":
+        return [
+            (
+                "Runtime replan context: post-action verification did not confirm "
+                "the requested desktop state."
+            ),
+            (
+                "Continue the existing task workspace. Do not ask the user to perform "
+                "the desktop-capable action manually."
+            ),
+            (
+                "Rediscover or inspect the visible app/window state, choose the next "
+                "safe observable action, and keep all approval and policy gates."
+            ),
+        ]
+    if planning_reason == "planner_replan_after_tool_unavailable":
+        return [
+            "Runtime replan context: a planned tool is unavailable.",
+            (
+                "Continue the existing task workspace. Select another available "
+                "capability or ask only for the missing permission/tool."
+            ),
+            "Keep all approval and policy gates.",
+        ]
+    return [
+        "Runtime replan context: a planned tool failed or could not be verified.",
+        (
+            "Continue the existing task workspace. Do not ask the user to perform the "
+            "tool-capable action manually."
+        ),
+        (
+            "Inspect the failure, choose the next safe observable action, and keep all "
+            "approval and policy gates."
+        ),
+    ]
 
 
 def _runtime_replan_task_progress_summary(
