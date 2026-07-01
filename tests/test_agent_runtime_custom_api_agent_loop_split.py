@@ -2391,9 +2391,19 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
     assert {
         request["replan_request_id"] for request in recovery_requests
     } == {payload["request_id"]}
+    assert {request["decision_id"] for request in recovery_requests} == {
+        decision.decision_id
+    }
     assert {
         request["replan_trigger"] for request in recovery_requests
     } == {"verification_failed"}
+    assert {request["plan_id"] for request in recovery_requests} == {decision.plan.plan_id}
+    assert {request["planner_step_id"] for request in recovery_requests} == {
+        "verify-desktop-result"
+    }
+    assert {request["capability_id"] for request in recovery_requests} == {
+        payload["target_capability_id"]
+    }
     loop._record_auto_model_followup_app_write_plan(
         recovery_requests,
         timeline=empty_timeline,
@@ -2414,6 +2424,15 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
     assert {
         event["replan_request_id"] for event in recovery_plan_events
     } == {payload["request_id"]}
+    assert {event["decision_id"] for event in recovery_plan_events} == {
+        decision.decision_id
+    }
+    assert {event["plan_id"] for event in recovery_plan_events} == {
+        decision.plan.plan_id
+    }
+    assert {event["planner_step_id"] for event in recovery_plan_events} == {
+        "verify-desktop-result"
+    }
 
     run_events.clear()
     readable_timeline = build_timeline(
@@ -17035,6 +17054,12 @@ def test_runtime_planner_replans_empty_auto_discovered_app_observation() -> None
     assert {
         request["replan_request_id"] for request in recovery_requests
     } == {payload["request_id"]}
+    assert {request["decision_id"] for request in recovery_requests} == {
+        decision.decision_id
+    }
+    assert {request["planner_step_id"] for request in recovery_requests} == {
+        "observe-selected-discovered-app"
+    }
 
 
 def test_runtime_planner_replan_maps_tool_failure_to_plan_step_without_request_trace() -> None:
@@ -17160,6 +17185,12 @@ def test_auto_replan_fallback_recovery_reuses_safe_file_inputs() -> None:
     }
     assert {request["replan_trigger"] for request in fallback_requests} == {"tool_failure"}
     assert {request["step_id"] for request in fallback_requests} == {"inspect-data-source"}
+    assert {request["planner_step_id"] for request in fallback_requests} == {
+        "inspect-data-source"
+    }
+    assert {request["decision_id"] for request in fallback_requests} == {
+        decision.decision_id
+    }
     assert all(request.get("replan_request_id") for request in fallback_requests)
 
     data_failure = [
@@ -17192,6 +17223,7 @@ def test_auto_replan_fallback_recovery_reuses_safe_file_inputs() -> None:
     assert terminal_requests[0]["replan_request_id"] == "replan-terminal"
     assert terminal_requests[0]["replan_trigger"] == "tool_failure"
     assert terminal_requests[0]["step_id"] == "analyze-data-file"
+    assert terminal_requests[0]["planner_step_id"] == "analyze-data-file"
     assert terminal_requests[0]["capability_id"] == "data.analysis"
     assert "continue_to_model" not in terminal_requests[0]
 

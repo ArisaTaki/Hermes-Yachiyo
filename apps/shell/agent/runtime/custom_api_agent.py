@@ -6996,6 +6996,26 @@ def _compact_observed_action_target(target: Mapping[str, Any]) -> dict[str, Any]
 
 def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {}
+    for key in (
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "intent_kind",
+        "step_id",
+        "planner_step_id",
+        "capability_id",
+        "core_id",
+        "workspace_id",
+        "task_id",
+        "run_id",
+        "replan_request_id",
+        "replan_trigger",
+    ):
+        value = str(request.get(key) or "").strip()
+        if value:
+            payload[key] = value
+    if payload.get("step_id") and not payload.get("planner_step_id"):
+        payload["planner_step_id"] = payload["step_id"]
     for key in ("followup_target", "action_target", "observation_evidence"):
         value = request.get(key)
         if isinstance(value, Mapping) and value:
@@ -7247,8 +7267,51 @@ def _auto_replan_verification_recovery_requests(
         if request_id:
             request["replan_request_id"] = request_id
         request["replan_trigger"] = "verification_failed"
+        _attach_replan_payload_trace_metadata(request, first)
         requests.append(request)
     return requests
+
+
+def _attach_replan_payload_trace_metadata(
+    request: dict[str, Any],
+    payload: Mapping[str, Any],
+) -> None:
+    for key in ("decision_id", "plan_id", "core_id", "task_id", "run_id"):
+        value = str(request.get(key) or payload.get(key) or "").strip()
+        if value:
+            request[key] = value
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    intent_kind = str(
+        request.get("intent_kind")
+        or payload.get("intent_kind")
+        or metadata.get("original_intent_kind")
+        or ""
+    ).strip()
+    if intent_kind:
+        request["intent_kind"] = intent_kind
+    request_id = str(payload.get("request_id") or "").strip()
+    if request_id and not str(request.get("replan_request_id") or "").strip():
+        request["replan_request_id"] = request_id
+    trigger = str(payload.get("trigger") or "").strip()
+    if trigger and not str(request.get("replan_trigger") or "").strip():
+        request["replan_trigger"] = trigger
+    step_id = str(
+        request.get("step_id")
+        or payload.get("source_step_id")
+        or payload.get("planner_step_id")
+        or ""
+    ).strip()
+    if step_id:
+        request["step_id"] = step_id
+        request.setdefault("planner_step_id", step_id)
+    capability_id = str(
+        request.get("capability_id")
+        or payload.get("target_capability_id")
+        or payload.get("capability_id")
+        or ""
+    ).strip()
+    if capability_id:
+        request["capability_id"] = capability_id
 
 
 def _replan_recovery_requests_need_model_followup(
@@ -7317,6 +7380,7 @@ def _auto_replan_fallback_recovery_requests(
                 request["capability_id"] = capability_id
             if _replan_fallback_request_needs_model_followup(tool_name, payload):
                 request["continue_to_model"] = True
+            _attach_replan_payload_trace_metadata(request, payload)
             requests.append(request)
     return _dedupe_replan_recovery_requests(requests)
 
