@@ -37,6 +37,17 @@ if str(ROOT) not in sys.path:
 from scripts.build_release_candidate_artifacts import build_release_candidate_artifacts
 
 
+def _project_venv_python() -> Path:
+    return ROOT / ".venv" / "bin" / "python"
+
+
+def _same_python(left: Path, right: Path) -> bool:
+    try:
+        return left.resolve(strict=False) == right.resolve(strict=False)
+    except OSError:
+        return str(left) == str(right)
+
+
 def _run(command: list[str], *, allow_failure: bool = False) -> int:
     result = subprocess.run(command, cwd=ROOT, check=False)
     if result.returncode and not allow_failure:
@@ -57,6 +68,22 @@ def _git_short_commit() -> str:
 
 def _provider_smoke_configured() -> bool:
     return all(os.getenv(name, "").strip() for name in PROVIDER_SMOKE_ENV_VARS)
+
+
+def _build_release_candidate_artifacts(*, channel: str, repository: str | None) -> None:
+    venv_python = _project_venv_python()
+    if venv_python.exists() and not _same_python(Path(sys.executable), venv_python):
+        command = [
+            str(venv_python),
+            "scripts/build_release_candidate_artifacts.py",
+            "--channel",
+            channel,
+        ]
+        if repository:
+            command.extend(["--repository", repository])
+        _run(command)
+        return
+    build_release_candidate_artifacts(channel=channel, repository=repository)
 
 
 def _non_manual_findings(report: dict[str, object]) -> list[tuple[str, object]]:
@@ -420,7 +447,7 @@ def refresh_local_rc_signoff(
     )
 
     if not skip_build and not batch_report_is_current:
-        build_release_candidate_artifacts(channel=channel, repository=repository)
+        _build_release_candidate_artifacts(channel=channel, repository=repository)
         screen_report_is_current = False
 
     if not skip_source_capability_smoke and not source_capability_report_is_current:

@@ -10,6 +10,49 @@ from pathlib import Path
 from scripts import refresh_local_rc_signoff as refresh
 
 
+def test_refresh_local_rc_signoff_build_uses_project_venv_python(
+    monkeypatch,
+    tmp_path,
+):
+    commands: list[tuple[list[str], bool]] = []
+    build_calls: list[dict[str, object]] = []
+    venv_python = tmp_path / ".venv" / "bin" / "python"
+    venv_python.parent.mkdir(parents=True)
+    venv_python.write_text("#!/bin/sh\n", encoding="utf-8")
+    monkeypatch.setattr(refresh, "ROOT", tmp_path)
+    monkeypatch.setattr(
+        refresh,
+        "build_release_candidate_artifacts",
+        lambda **kwargs: build_calls.append(kwargs),
+    )
+
+    def fake_run(command: list[str], *, allow_failure: bool = False) -> int:
+        commands.append((command, allow_failure))
+        return 0
+
+    monkeypatch.setattr(refresh, "_run", fake_run)
+
+    refresh._build_release_candidate_artifacts(
+        channel="experimental",
+        repository="owner/repo",
+    )
+
+    assert build_calls == []
+    assert commands == [
+        (
+            [
+                str(venv_python),
+                "scripts/build_release_candidate_artifacts.py",
+                "--channel",
+                "experimental",
+                "--repository",
+                "owner/repo",
+            ],
+            False,
+        )
+    ]
+
+
 def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
     monkeypatch,
     tmp_path,

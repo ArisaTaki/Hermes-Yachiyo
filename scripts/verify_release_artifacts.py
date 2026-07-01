@@ -778,6 +778,10 @@ RELEASE_PACKAGING_DOC_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
         "release packaging docs must document local RC signoff refresh helper",
     ),
     (
+        "构建阶段会优先用 `.venv` 解释器运行 `scripts/build_release_candidate_artifacts.py`",
+        "release packaging docs must document refresh helper project-venv build behavior",
+    ),
+    (
         "python scripts/run_public_release_gate.py",
         "release packaging docs must document public release preflight gate",
     ),
