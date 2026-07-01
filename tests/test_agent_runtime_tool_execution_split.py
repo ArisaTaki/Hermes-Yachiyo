@@ -236,6 +236,52 @@ def test_runtime_tool_call_executor_uses_injected_policy_gate() -> None:
     assert broker.calls == []
 
 
+def test_runtime_tool_call_executor_validates_active_window_target_before_projection() -> None:
+    events = FakeToolCallEvents()
+    executor = _executor(tool_call_events=events)
+    timeline: list[dict[str, Any]] = []
+
+    result = executor.execute(
+        {
+            "tool": "desktop.active_window",
+            "input": {},
+            "verification_target": {"app_name": "Safari"},
+        },
+        ["desktop.active_window"],
+        FakeBroker({"ok": True, "data": {"app_name": "Google Chrome", "title": "Search"}}),
+        timeline,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert result["ok"] is False
+    assert result["verification_failed"] is True
+    assert result["error"] == "foreground_focus_unverified"
+    assert result["data"]["expected_app_name"] == "Safari"
+    assert result["data"]["active_app_name"] == "Google Chrome"
+    assert timeline[-1]["event"] == "agent.tool.call"
+    assert timeline[-1]["result"]["ok"] is False
+    assert events.calls[-1][0] == "agent_tool_call"
+    assert events.calls[-1][1][3]["ok"] is False
+
+    matching_timeline: list[dict[str, Any]] = []
+    matching = executor.execute(
+        {
+            "tool": "desktop.active_window",
+            "input": {},
+            "verification_target": {"app_name": "Chrome"},
+        },
+        ["desktop.active_window"],
+        FakeBroker({"ok": True, "data": {"app_name": "Google Chrome", "title": "Search"}}),
+        matching_timeline,
+        run_id="run-2",
+        budget=FakeBudget(),
+    )
+
+    assert matching["ok"] is True
+    assert matching["data"]["focus_verified"] is True
+
+
 def test_runtime_tool_call_executor_projects_workspace_failure_as_tool_result() -> None:
     events = FakeToolCallEvents()
     executor = _executor(tool_call_events=events)
@@ -1580,6 +1626,45 @@ def test_runtime_tool_request_runner_raises_pending_approval_with_remaining_requ
     assert exc.value.pending_approval["risk_level"] == "high"
     assert exc.value.pending_approval["policy_reason"] == "Terminal commands need review."
     assert exc.value.pending_approval["plugin_id"] == "ops"
+
+
+def test_runtime_tool_request_runner_adds_active_window_target_after_app_control() -> None:
+    seen_requests: list[dict[str, Any]] = []
+
+    def call_agent_tool(tool_request, *_args, **_kwargs):
+        seen_requests.append(tool_request)
+        if tool_request["tool"] == "app.open":
+            return {
+                "ok": True,
+                "data": {"app_name": str(tool_request["input"].get("app_name") or "")},
+            }
+        if tool_request["tool"] == "desktop.active_window":
+            return {"ok": True, "data": {"app_name": "Safari"}}
+        raise AssertionError(f"unexpected tool: {tool_request['tool']}")
+
+    runner = _runner(call_agent_tool=call_agent_tool)
+    messages = [{"role": "user", "content": "open safari"}]
+
+    runner.run(
+        [
+            {"tool": "app.open", "input": {"app_name": "Safari"}},
+            {"tool": "desktop.active_window", "input": {}},
+        ],
+        ["app.open", "desktop.active_window"],
+        FakeBroker({"ok": True}),
+        messages,
+        [],
+        [],
+        next_iteration=1,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert seen_requests[1]["input"] == {}
+    assert seen_requests[1]["verification_target"] == {
+        "app_name": "Safari",
+        "source_tool": "app.open",
+    }
 
 
 def test_runtime_tool_request_runner_projects_fatal_failures_and_success_messages() -> None:

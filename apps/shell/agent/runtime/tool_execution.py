@@ -179,6 +179,32 @@ def _tool_request_with_app_name_resolution(
     }
 
 
+def _tool_request_with_verification_target(
+    tool_request: dict[str, Any],
+    target: dict[str, Any] | None,
+) -> dict[str, Any]:
+    if not target:
+        return tool_request
+    if str(tool_request.get("tool") or "").strip() != "desktop.active_window":
+        return tool_request
+    if isinstance(tool_request.get("verification_target"), dict):
+        return tool_request
+    app_name = str(target.get("app_name") or "").strip()
+    if not app_name:
+        return tool_request
+    return {
+        **tool_request,
+        "verification_target": {
+            "app_name": app_name,
+            **(
+                {"source_tool": str(target.get("source_tool") or "").strip()}
+                if str(target.get("source_tool") or "").strip()
+                else {}
+            ),
+        },
+    }
+
+
 def _tool_request_app_name_resolution(
     tool_request: dict[str, Any],
     timeline: list[dict[str, Any]],
@@ -470,6 +496,15 @@ class RuntimeToolCallExecutor:
                 ),
             }
         tool_result = self._limit_tool_result(tool_result)
+        tool_result = _tool_result_with_active_window_verification_target(
+            tool_name,
+            tool_result,
+            (
+                tool_request.get("verification_target")
+                if isinstance(tool_request.get("verification_target"), dict)
+                else {}
+            ),
+        )
         self._tool_call_events.result(
             run_id,
             tool_name,
@@ -583,6 +618,7 @@ class RuntimeToolRequestRunner:
         budget = budget or self._run_budget(run_id, timeline)
         user_goal = self._user_goal_from_messages(messages)
         foreground_readiness_blocker: dict[str, Any] | None = None
+        active_window_verification_target: dict[str, Any] | None = None
         for index, tool_request in enumerate(tool_requests):
             app_name_resolution = (
                 tool_request.get("input_resolution")
@@ -596,6 +632,10 @@ class RuntimeToolRequestRunner:
                 app_name_resolution,
             )
             tool_name = self._normalize_tool_name(tool_request.get("tool"))
+            tool_request = _tool_request_with_verification_target(
+                tool_request,
+                active_window_verification_target,
+            )
             raw_input = (
                 tool_request.get("input")
                 if isinstance(tool_request.get("input"), dict)
@@ -766,6 +806,16 @@ class RuntimeToolRequestRunner:
                         recovered_payload,
                     )
             foreground_readiness_blocker = next_readiness_blocker
+            if tool_name == "desktop.active_window":
+                active_window_verification_target = None
+            else:
+                next_active_window_target = _active_window_target_from_tool_result(
+                    tool_name,
+                    raw_input,
+                    tool_result,
+                )
+                if next_active_window_target is not None:
+                    active_window_verification_target = next_active_window_target
 
 
 _FOREGROUND_READINESS_GATED_TOOLS = {
@@ -858,6 +908,84 @@ def _broker_requires_approval(broker: Any, tool_name: str) -> bool:
     if not isinstance(approvals, dict):
         return False
     return bool(approvals.get(str(tool_name or "").strip()))
+
+
+def _tool_result_with_active_window_verification_target(
+    tool_name: str,
+    tool_result: dict[str, Any],
+    verification_target: dict[str, Any],
+) -> dict[str, Any]:
+    if tool_name != "desktop.active_window":
+        return tool_result
+    expected_app = str(verification_target.get("app_name") or "").strip()
+    if not expected_app or tool_result.get("ok") is not True:
+        return tool_result
+    data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    active_app = str(data.get("app_name") or data.get("frontmost_app") or "").strip()
+    verified = _app_names_match(active_app, expected_app)
+    updated_data = {
+        **data,
+        "expected_app_name": expected_app,
+        "active_app_name": active_app,
+        "focus_verified": verified,
+    }
+    if verified:
+        return {**tool_result, "data": updated_data}
+    return {
+        **tool_result,
+        "ok": False,
+        "error": "foreground_focus_unverified",
+        "verification_failed": True,
+        "blocking_condition": "foreground_focus_unverified",
+        "blocking_conditions": ["foreground_focus_unverified"],
+        "expected_app_name": expected_app,
+        "active_app_name": active_app,
+        "hint": (
+            "The active window does not match the app that was just opened or focused. "
+            "Focus the expected app again or inspect windows before continuing."
+        ),
+        "data": updated_data,
+    }
+
+
+def _active_window_target_from_tool_result(
+    tool_name: str,
+    raw_input: dict[str, Any],
+    tool_result: dict[str, Any],
+) -> dict[str, Any] | None:
+    if tool_result.get("ok") is not True or tool_result.get("approval_required"):
+        return None
+    if not _tool_can_change_active_app(tool_name):
+        return None
+    data = tool_result.get("data") if isinstance(tool_result.get("data"), dict) else {}
+    app_name = str(
+        data.get("app_name")
+        or data.get("discovered_app_name")
+        or raw_input.get("app_name")
+        or ""
+    ).strip()
+    if not app_name:
+        return None
+    return {"app_name": app_name, "source_tool": tool_name}
+
+
+def _tool_can_change_active_app(tool_name: str) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    return bool(
+        clean_tool in {
+            "app.open",
+            "app.focus",
+            "app.focus_window",
+            "desktop.open_app",
+            "desktop.focus_app",
+        }
+        or clean_tool.startswith("app.open_and_")
+        or clean_tool.startswith("app.focus_and_")
+    )
+
+
+def _app_names_match(left: str, right: str) -> bool:
+    return _app_lookups_related(left, right)
 
 
 def _foreground_readiness_blocker(
