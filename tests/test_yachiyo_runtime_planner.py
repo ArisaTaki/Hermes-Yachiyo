@@ -7603,6 +7603,74 @@ def test_runtime_planner_routes_local_file_report_to_file_terminal_artifact_plan
     assert decision.plan.tool_plan.artifacts_expected == ["report.md"]
 
 
+def test_runtime_planner_routes_document_analysis_report_to_report_generation() -> None:
+    allowed = [
+        "workspace.list",
+        "workspace.read",
+        "terminal.run",
+        "artifact.write",
+        "data.analyze",
+    ]
+    decision = RuntimePlanner().decision(
+        "根据 ~/Downloads/report.pdf 写一份分析报告",
+        allowed_tools=allowed,
+    )
+
+    assert decision.selected_intent.kind == "report_generation"
+    assert decision.selected_intent.inputs == {
+        "file_context_hint": {
+            "location": "~/Downloads/report.pdf",
+            "file_type": "pdf",
+            "pattern": "*.pdf",
+        }
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-report-file-scope",
+        "extract-report-file-context",
+        "write-report-artifact",
+    ]
+    assert _step_by_id(decision, "inspect-report-file-scope").input_preview == {
+        "path": "~/Downloads/report.pdf",
+        "file_type": "pdf",
+        "pattern": "*.pdf",
+    }
+    assert _step_by_id(decision, "extract-report-file-context").input_preview == {
+        "path": "~/Downloads/report.pdf",
+        "file_type": "pdf",
+        "pattern": "*.pdf",
+        "operation": "extract_text_for_report",
+    }
+    assert planner_tool_requests(
+        "根据 ~/Downloads/report.pdf 写一份分析报告",
+        allowed,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {
+                "path": "~/Downloads/report.pdf",
+                "pattern": "*.pdf",
+                "file_type": "pdf",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        }
+    ]
+
+    csv_report = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告和图表",
+        allowed_tools=allowed,
+    )
+    assert csv_report.selected_intent.kind == "data_analysis"
+
+    pdf_table = RuntimePlanner().decision(
+        "分析 ~/Downloads/report.pdf 里的表格数据并输出图表",
+        allowed_tools=allowed,
+    )
+    assert pdf_table.selected_intent.kind == "data_analysis"
+
+
 def test_runtime_planner_routes_unknown_desktop_app_without_known_alias() -> None:
     decision = RuntimePlanner().decision(
         "打开 SuperData Studio 并点击导入按钮",

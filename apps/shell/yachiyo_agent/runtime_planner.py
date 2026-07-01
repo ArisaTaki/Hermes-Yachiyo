@@ -160,6 +160,8 @@ class TaskIntentRouter:
             return _empty_intent("data_analysis", text)
         if _app_file_open_discovery_hint(text, metadata) and not _data_analysis_action_requested(text):
             return _empty_intent("data_analysis", text)
+        if _looks_like_document_report_analysis_request(text, metadata):
+            return _empty_intent("data_analysis", text)
         score = _score_terms(
             text,
             [
@@ -1634,6 +1636,8 @@ class TaskIntentRouter:
 
     def _code_task_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
+            return _empty_intent("code_task", text)
+        if _looks_like_document_report_analysis_request(text, metadata):
             return _empty_intent("code_task", text)
         if _looks_like_generic_data_source_analysis_request(text):
             return _empty_intent("code_task", text)
@@ -11344,6 +11348,85 @@ def _data_analysis_action_requested(text: str) -> bool:
             "trend",
             "report",
         ),
+    )
+
+
+def _looks_like_document_report_analysis_request(
+    text: str,
+    metadata: Mapping[str, Any] | None = None,
+) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if not _contains_any(
+        value,
+        (
+            "分析",
+            "解析",
+            "总结",
+            "摘要",
+            "报告",
+            "写",
+            "生成",
+            "analyze",
+            "analyse",
+            "summarize",
+            "summarise",
+            "summary",
+            "report",
+            "write",
+        ),
+    ):
+        return False
+    if _contains_any(
+        value,
+        (
+            "数据",
+            "数据集",
+            "表格",
+            "电子表格",
+            "报表",
+            "明细",
+            "统计",
+            "可视化",
+            "图表",
+            "csv",
+            "tsv",
+            "xlsx",
+            "xls",
+            "json",
+            "jsonl",
+            "parquet",
+            "dataset",
+            "table",
+            "spreadsheet",
+            "chart",
+            "plot",
+            "graph",
+        ),
+    ):
+        return False
+
+    file_context = _report_file_context_hint(value)
+    file_type = str(file_context.get("file_type") or "").strip().lower()
+    if file_type in {"pdf", "docx", "markdown", "text"}:
+        return True
+
+    metadata = metadata or {}
+    for key in ("attachment", "file", "path"):
+        candidate = str(metadata.get(key) or "").strip()
+        if _looks_like_document_report_source(candidate):
+            return True
+    return _looks_like_document_report_source(value)
+
+
+def _looks_like_document_report_source(value: str) -> bool:
+    return bool(
+        re.search(
+            r"\.(?:pdf|docx?|rtf|pages|md|markdown|txt)\b",
+            str(value or ""),
+            flags=re.IGNORECASE,
+        )
     )
 
 
