@@ -4,9 +4,11 @@ import type {
   PlannerTraceSummarySnapshot,
   PublicRunEvent,
   RuntimePlanSnapshot,
+  TaskCheckpointSnapshot,
   TaskCoreSnapshot,
   TaskIntentSnapshot,
   TaskReplanRequestSnapshot,
+  TaskTodoItemSnapshot,
   ToolPlanSnapshot,
   ToolPlanStepSnapshot,
 } from '../../yachiyo-studio/types';
@@ -572,18 +574,18 @@ function TaskCoreInspector({ taskCore }: { taskCore: TaskCoreSnapshot }) {
             key={`todo:${todo.todo_id}`}
             title={todo.reason || todo.tool_name || todo.capability_id}
           >
-            todo · {todo.title}
+            todo · {todo.title} · {todo.status || 'pending'}
           </span>
         ))}
         {checkpoints.slice(0, 8).map((checkpoint) => (
           <span
-            className={checkpoint.status === 'waiting_approval' ? 'studio-tool-permission missing' : 'studio-tool-permission'}
+            className={checkpoint.status === 'waiting_approval' || checkpoint.status === 'blocked' ? 'studio-tool-permission missing' : 'studio-tool-permission'}
             data-task-checkpoint-id={checkpoint.checkpoint_id}
             data-task-checkpoint-status={checkpoint.status || 'planned'}
             key={`checkpoint:${checkpoint.checkpoint_id}`}
             title={uniqueStrings(checkpoint.verifies || []).join(', ')}
           >
-            checkpoint · {checkpoint.title}
+            checkpoint · {checkpoint.title} · {checkpoint.status || 'planned'}
           </span>
         ))}
         {replanSignals.slice(0, 8).map((signal) => (
@@ -728,6 +730,8 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   let eventCount = 0;
   const stepById = new Map<string, ToolPlanStepSnapshot>();
   const desktopFallbackStepById = new Map<string, ToolPlanStepSnapshot>();
+  const todoUpdateById = new Map<string, TaskTodoItemSnapshot>();
+  const checkpointUpdateById = new Map<string, TaskCheckpointSnapshot>();
 
   for (const event of events) {
     if (publicRunEventIsSecret(event)) continue;
@@ -811,6 +815,18 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
       continue;
     }
 
+    if (plannerEventType === 'agent.task.todo.updated') {
+      const todo = taskTodoItemSnapshot(payload.todo);
+      if (todo) todoUpdateById.set(todo.todo_id, todo);
+      continue;
+    }
+
+    if (plannerEventType === 'agent.task.checkpoint.updated') {
+      const checkpoint = taskCheckpointSnapshot(payload.checkpoint);
+      if (checkpoint) checkpointUpdateById.set(checkpoint.checkpoint_id, checkpoint);
+      continue;
+    }
+
     if (plannerEventType === 'agent.replan.requested') {
       const request = taskReplanRequestSnapshot(payload);
       if (request) {
@@ -830,6 +846,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   const effectiveToolPlan = toolPlan || fallbackToolPlan;
   const steps = stepById.size ? Array.from(stepById.values()) : fallbackSteps;
   const effectivePlanId = planId || effectiveToolPlan?.plan_id || '';
+  const effectivePlan = applyTaskCoreUpdates(plan, todoUpdateById, checkpointUpdateById);
 
   if (!effectiveIntent && !plan && !steps.length && !selection && !replanRequests.length) return null;
   return {
@@ -837,7 +854,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     decisionId,
     eventCount,
     intent: effectiveIntent,
-    plan,
+    plan: effectivePlan,
     planId: effectivePlanId,
     replanRequests,
     routeToStudio,
@@ -1157,12 +1174,49 @@ function toolPlanStepSnapshot(value: unknown): ToolPlanStepSnapshot | null {
   return record as ToolPlanStepSnapshot;
 }
 
+function taskTodoItemSnapshot(value: unknown): TaskTodoItemSnapshot | null {
+  const record = objectRecord(value);
+  if (!stringValue(record.todo_id) && !stringValue(record.step_id) && !stringValue(record.title)) return null;
+  return record as TaskTodoItemSnapshot;
+}
+
+function taskCheckpointSnapshot(value: unknown): TaskCheckpointSnapshot | null {
+  const record = objectRecord(value);
+  if (!stringValue(record.checkpoint_id) && !stringValue(record.after_step_id) && !stringValue(record.title)) return null;
+  return record as TaskCheckpointSnapshot;
+}
+
 function taskReplanRequestSnapshot(value: unknown): TaskReplanRequestSnapshot | null {
   const record = objectRecord(value);
   const nested = objectRecord(record.request);
   const request = Object.keys(nested).length ? nested : record;
   if (!stringValue(request.request_id) && !stringValue(request.trigger)) return null;
   return request as TaskReplanRequestSnapshot;
+}
+
+function applyTaskCoreUpdates(
+  plan: RuntimePlanSnapshot | null,
+  todoUpdateById: Map<string, TaskTodoItemSnapshot>,
+  checkpointUpdateById: Map<string, TaskCheckpointSnapshot>,
+): RuntimePlanSnapshot | null {
+  const taskCore = plan?.task_core;
+  if (!plan || !taskCore || (!todoUpdateById.size && !checkpointUpdateById.size)) return plan;
+  const todos = (taskCore.todos || []).map((todo) => {
+    const update = todoUpdateById.get(todo.todo_id);
+    return update ? { ...todo, ...update } : todo;
+  });
+  const checkpoints = (taskCore.checkpoints || []).map((checkpoint) => {
+    const update = checkpointUpdateById.get(checkpoint.checkpoint_id);
+    return update ? { ...checkpoint, ...update } : checkpoint;
+  });
+  return {
+    ...plan,
+    task_core: {
+      ...taskCore,
+      todos,
+      checkpoints,
+    },
+  };
 }
 
 function plannerSelectionFromPayload(payload: Record<string, unknown>): PlannerSelection | null {
