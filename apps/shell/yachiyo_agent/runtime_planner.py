@@ -14399,23 +14399,29 @@ def _generic_communication_app_target_requested(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
         return False
+    generic_prefix = (
+        r"(?:(?:一个|一款|任意|任何|默认|可用|合适|适合)(?:的)?\s*)*"
+    )
+    generic_prefix_en = (
+        r"(?:(?:an?|the|any|some|available|default|suitable|best|usable)\s+)*"
+    )
     patterns = (
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|启动|开启|切到|聚焦|查看|看看|检查)\s*"
-        r"(?:一个|一款|任意|任何|默认|可用)?\s*"
+        rf"{generic_prefix}"
         r"(?:聊天|通讯|通信|消息|即时通讯|IM)\s*(?:应用|app|软件|工具|程序)?"
         r"(?:\s*(?:一下|下|起来|开了吗|打开了吗))?\s*[?？。！!]*$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:打开|启动|开启|切到|聚焦|查看|看看|检查)\s*"
-        r"(?:一个|一款|任意|任何|默认|可用)?\s*"
+        rf"{generic_prefix}"
         r"(?:邮件|电子邮件|邮箱)\s*(?:应用|app|软件|客户端|工具|程序)?"
         r"(?:\s*(?:一下|下|起来|开了吗|打开了吗))?\s*[?？。！!]*$",
         r"\b(?:open|launch|start|focus|inspect|check)\s+"
-        r"(?:an?\s+|the\s+|any\s+|default\s+)?"
+        rf"{generic_prefix_en}"
         r"(?:chat|messaging|message|messenger|communication|email|mail)\s+"
         r"(?:app|application|client|tool|program)\b\s*[.!?]*$",
         r"\b(?:open|launch|start|focus|inspect|check)\s+"
-        r"(?:an?\s+|the\s+|any\s+|default\s+)?(?:messenger|email|mail)\b\s*[.!?]*$",
+        rf"{generic_prefix_en}(?:messenger|email|mail)\b\s*[.!?]*$",
     )
     return any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in patterns)
 
@@ -15267,6 +15273,12 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
             r"(?P<body>[^.!?]+)$"
         ),
         (
+            r"^(?:please\s+)?(?:use|using|with|through)\s+"
+            r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,50}?)\s+"
+            r"(?:to\s+)?(?:send|message)\s+(?P<recipient>[^.!?,]+?)\s+"
+            r"(?P<body>[^.!?]+)$"
+        ),
+        (
             r"^(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s+"
             r"(?:send|message)\s+(?P<body>[^.!?]+?)\s+"
             r"(?:to|for)\s+(?P<recipient>[^.!?,]+)$"
@@ -15280,7 +15292,8 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
         raw_app = groups.get("app") or ""
         if _looks_like_recipient_scoped_communication_app_capture(raw_app):
             continue
-        app_name = _canonical_app_name_hint(raw_app)
+        generic_app_channel = _generic_communication_app_label_channel(raw_app)
+        app_name = "" if generic_app_channel else _canonical_app_name_hint(raw_app)
         recipient_tail = str(groups.get("recipient_message_tail") or "").strip()
         if recipient_tail:
             split_tail = _split_communication_implicit_recipient_message(recipient_tail)
@@ -15297,17 +15310,20 @@ def _direct_communication_hint(text: str) -> dict[str, str]:
         else:
             recipient = _clean_communication_recipient_text(groups.get("recipient") or "")
             body = _clean_communication_body_text(groups.get("body") or "")
-        if _is_generic_communication_app_label(raw_app):
-            continue
         if not app_name or not recipient or not body:
-            continue
-        return {
-            "app_name": app_name,
+            if not generic_app_channel or not recipient or not body:
+                continue
+        hint = {
             "recipient": recipient,
             "body": body,
             "mode": _communication_app_mode(value),
             "send_action": _communication_send_action(value),
         }
+        if app_name:
+            hint["app_name"] = app_name
+        if generic_app_channel:
+            hint["channel"] = generic_app_channel
+        return hint
     return _generic_direct_communication_hint(value)
 
 
@@ -15687,8 +15703,9 @@ def _looks_like_recipient_scoped_communication_app_capture(value: str) -> bool:
 
 
 def _is_generic_communication_app_label(value: str) -> bool:
-    normalized = re.sub(r"[\s._·-]+", "", str(value or "").strip().lower())
-    return normalized in {
+    raw = str(value or "").strip()
+    normalized = re.sub(r"[\s._·-]+", "", raw.lower())
+    generic_labels = {
         "聊天",
         "聊天应用",
         "聊天app",
@@ -15724,6 +15741,11 @@ def _is_generic_communication_app_label(value: str) -> bool:
         "封电子邮件",
         "邮箱",
         "邮件客户端",
+        "消息工具",
+        "聊天工具",
+        "通讯工具",
+        "通信工具",
+        "邮箱客户端",
         "mail",
         "email",
         "emailapp",
@@ -15742,6 +15764,44 @@ def _is_generic_communication_app_label(value: str) -> bool:
         "msg",
         "dm",
     }
+    if normalized in generic_labels:
+        return True
+    normalized_without_qualifiers = re.sub(
+        r"^(?:一个|一款)?(?:(?:任意|任何|默认|可用|合适|适合|推荐|能用|可使用|已安装)(?:的)?)+",
+        "",
+        normalized,
+    )
+    if normalized_without_qualifiers in generic_labels:
+        return True
+    english = re.sub(r"[^a-z0-9]+", " ", raw.lower()).strip()
+    english = re.sub(
+        r"^(?:(?:a|an|the|any|some|available|default|suitable|best|usable|installed)\s+)+",
+        "",
+        english,
+    ).strip()
+    english = re.sub(
+        r"\s+(?:app|application|client|tool|program|software)$",
+        "",
+        english,
+    ).strip()
+    return english in {
+        "chat",
+        "messaging",
+        "message",
+        "messages",
+        "messenger",
+        "communication",
+        "email",
+        "mail",
+    }
+
+
+def _generic_communication_app_label_channel(value: str) -> str:
+    if not _is_generic_communication_app_label(value):
+        return ""
+    if _contains_any(value, ("邮件", "电子邮件", "邮箱", "email", "e-mail", "mail")):
+        return "email"
+    return "message"
 
 
 def _app_scoped_desktop_operation_hint(text: str) -> bool:

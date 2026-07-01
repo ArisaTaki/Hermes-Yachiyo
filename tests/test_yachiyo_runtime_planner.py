@@ -15576,6 +15576,130 @@ def test_runtime_planner_can_fall_back_to_artifact_for_communication_draft() -> 
     ]
 
 
+def test_runtime_planner_discovers_generic_communication_app_before_sending() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.ui_elements",
+        "desktop.type_into_ui_element",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+
+    message_decision = RuntimePlanner().decision(
+        "用任意可用的聊天应用给 Alice 发消息说会议取消",
+        allowed_tools=allowed_tools,
+    )
+
+    assert message_decision.selected_intent.kind == "communication"
+    assert message_decision.selected_intent.inputs["direct_message_hint"] == {
+        "recipient": "Alice",
+        "body": "会议取消",
+        "mode": "focus",
+        "send_action": "send",
+        "channel": "message",
+    }
+    assert [step.step_id for step in message_decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "inspect-selected-communication-compose-ui",
+        "fill-selected-communication-recipient",
+        "submit-selected-communication-recipient",
+        "draft-selected-communication-message",
+        "send-selected-communication-message",
+    ]
+    assert _step_by_id(
+        message_decision,
+        "discover_apps-desktop-state",
+    ).input_preview == {"query": "messaging", "limit": 20}
+    assert _step_by_id(
+        message_decision,
+        "open-selected-discovered-app",
+    ).input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "messaging",
+        "action": "new_message",
+    }
+    assert _step_by_id(
+        message_decision,
+        "fill-selected-communication-recipient",
+    ).input_preview == {
+        "target": "recipient",
+        "text": "Alice",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert _step_by_id(
+        message_decision,
+        "draft-selected-communication-message",
+    ).input_preview == {
+        "target": "message",
+        "text": "会议取消",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert _step_by_id(
+        message_decision,
+        "send-selected-communication-message",
+    ).approval_required is True
+    assert planner_tool_requests(
+        "用任意可用的聊天应用给 Alice 发消息说会议取消",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "messaging", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_surface",
+            "continue_to_model": True,
+        }
+    ]
+
+    email_decision = RuntimePlanner().decision(
+        "通过默认邮件客户端给 Alice 发送：项目延期",
+        allowed_tools=allowed_tools,
+    )
+
+    assert email_decision.selected_intent.inputs["direct_message_hint"] == {
+        "recipient": "Alice",
+        "body": "项目延期",
+        "mode": "focus",
+        "send_action": "send",
+        "channel": "email",
+    }
+    assert _step_by_id(email_decision, "discover_apps-desktop-state").input_preview == {
+        "query": "mail",
+        "limit": 20,
+    }
+    assert _step_by_id(
+        email_decision,
+        "fill-selected-communication-recipient",
+    ).input_preview["target"] == "To"
+    assert _step_by_id(
+        email_decision,
+        "draft-selected-communication-message",
+    ).input_preview["target"] == "message body"
+
+    english_decision = RuntimePlanner().decision(
+        "use any available messaging app to send Alice hello",
+        allowed_tools=allowed_tools,
+    )
+
+    assert english_decision.selected_intent.inputs["direct_message_hint"] == {
+        "recipient": "Alice",
+        "body": "hello",
+        "mode": "focus",
+        "send_action": "send",
+        "channel": "message",
+    }
+    assert _step_by_id(
+        english_decision,
+        "discover_apps-desktop-state",
+    ).input_preview == {"query": "messaging", "limit": 20}
+
+
 def test_runtime_planner_tracks_context_communication_source_without_body() -> None:
     decision = RuntimePlanner().decision(
         "把当前网页内容发给微信文件传输助手",
