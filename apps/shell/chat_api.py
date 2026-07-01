@@ -2317,6 +2317,7 @@ class ChatAPI:
             }
             if runnable_daily_desktop_requests:
                 run_kwargs["daily_desktop_policy_overlay"] = True
+                run_kwargs["runtime_planner_entrypoint"] = True
             run = service.create_run_for_runnable_async(**run_kwargs)
         except AgentRuntimeError as exc:
             content = redact_api_error_text(exc)

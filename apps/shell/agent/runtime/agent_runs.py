@@ -16,12 +16,6 @@ from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_decision_and_tool_requests,
 )
 
-_RUNTIME_PLANNER_ENTRYPOINT_EXECUTION_REASONS = {
-    "planner_builtin_data_analysis",
-    "planner_prefetch_data_source",
-}
-
-
 @dataclass(frozen=True)
 class AgentRunStart:
     run: dict[str, Any]
@@ -375,14 +369,7 @@ def _runtime_planner_entrypoint_should_execute(context: str, allowed_tools: list
         clean_context,
         allowed_tools,
     )
-    if not direct_requests:
-        return False
-    reasons = {
-        str(request.get("planning_reason") or "").strip()
-        for request in direct_requests
-        if isinstance(request, dict)
-    }
-    return bool(reasons) and reasons <= _RUNTIME_PLANNER_ENTRYPOINT_EXECUTION_REASONS
+    return bool(direct_requests)
 
 
 def _with_entrypoint_runtime_planner(agent: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:

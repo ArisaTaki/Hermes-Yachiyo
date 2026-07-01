@@ -402,11 +402,23 @@ class RuntimeCustomApiAgentLoop:
                     tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
-                continue_to_model = bool(replan_payloads) or any(
+                explicit_model_followup = any(
                     bool(request.get("continue_to_model"))
                     for request in planned_tool_requests
                     if isinstance(request, dict)
                 )
+                if (
+                    replan_payloads
+                    and not explicit_model_followup
+                    and _runtime_planner_completed_direct_requests_with_unavailable_replan(
+                        execution_tool_requests,
+                        replan_payloads,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    )
+                ):
+                    replan_payloads = []
+                continue_to_model = bool(replan_payloads) or explicit_model_followup
                 if continue_to_model:
                     followup_selection_payload = _selection_payload_with_timeline_fallback(
                         direct_tool_selection_payload,
@@ -4847,6 +4859,59 @@ def _tool_result_requests_replan(result: Mapping[str, Any]) -> bool:
     if exit_code not in (None, "", 0, "0"):
         return True
     return False
+
+
+def _runtime_planner_completed_direct_requests_with_unavailable_replan(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    replan_payloads: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    if not _runtime_planner_replan_payloads_only_tool_unavailable(replan_payloads):
+        return False
+    planned_tools = [
+        str(request.get("tool") or "").strip()
+        for request in planned_tool_requests
+        if isinstance(request, Mapping)
+        and str(request.get("tool") or "").strip() in _DIRECT_DAILY_DESKTOP_TOOLS
+    ]
+    if not planned_tools:
+        return False
+    tool_events = [
+        event
+        for event in timeline[tool_timeline_start:]
+        if isinstance(event, dict)
+        and str(event.get("event") or "").strip() == "agent.tool.call"
+    ]
+    event_index = 0
+    for planned_tool in planned_tools:
+        matched_event: dict[str, Any] | None = None
+        while event_index < len(tool_events):
+            candidate = tool_events[event_index]
+            event_index += 1
+            if str(candidate.get("detail") or "").strip() == planned_tool:
+                matched_event = candidate
+                break
+        if matched_event is None:
+            return False
+        result = (
+            matched_event.get("result")
+            if isinstance(matched_event.get("result"), Mapping)
+            else {}
+        )
+        if result.get("ok") is not True or result.get("approval_required"):
+            return False
+    return True
+
+
+def _runtime_planner_replan_payloads_only_tool_unavailable(
+    replan_payloads: Iterable[Mapping[str, Any]],
+) -> bool:
+    payloads = [payload for payload in replan_payloads if isinstance(payload, Mapping)]
+    if not payloads:
+        return False
+    return all(str(payload.get("trigger") or "").strip() == "tool_unavailable" for payload in payloads)
 
 
 def _runtime_planner_tool_event_step_payloads(

@@ -12536,6 +12536,7 @@ def test_agent_runnable_daily_desktop_intent_requests_policy_overlay(tmp_path, m
         assert captured["runnable_id"] == agent["id"]
         assert captured["user_goal"] == "能否帮我播放apple Music?"
         assert captured["daily_desktop_policy_overlay"] is True
+        assert captured["runtime_planner_entrypoint"] is True
         user_message = runtime.chat_session.get_messages()[0]
         assert user_message.metadata["daily_desktop_intent"] is True
         assert user_message.metadata["daily_desktop_tool"] == "media.music_app_open_and_play"
@@ -12604,6 +12605,7 @@ def test_bound_agent_session_daily_desktop_intent_requests_policy_overlay(tmp_pa
         assert captured[-1]["runnable_id"] == agent["id"]
         assert captured[-1]["user_goal"] == "能否帮我播放apple Music?"
         assert captured[-1]["daily_desktop_policy_overlay"] is True
+        assert captured[-1]["runtime_planner_entrypoint"] is True
         user_message = runtime.chat_session.get_messages()[-2]
         assert user_message.metadata["daily_desktop_tool"] == "media.music_app_open_and_play"
     finally:

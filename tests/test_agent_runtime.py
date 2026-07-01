@@ -4600,6 +4600,69 @@ def test_agent_runtime_file_namespace_tools_alias_workspace_access(tmp_path, mon
         service.close()
 
 
+def test_agent_run_runtime_planner_entrypoint_opens_desktop_app_before_model(
+    tmp_path,
+    monkeypatch,
+):
+    service = make_service(tmp_path)
+    app_open_calls: list[str] = []
+
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: pytest.fail("desktop planner entrypoint should execute before model call"),
+    )
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        app_open_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "opened": True},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Desktop Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {
+                    "allowed_tools": ["desktop.open_app"],
+                    "approval_required": {},
+                },
+            }
+        )
+
+        run = service.create_agent_run(
+            {
+                "agent_id": agent["agent_id"],
+                "user_goal": "打开 Apple Music",
+                "runtime_planner_entrypoint": True,
+            }
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        planned_event = next(event for event in events if event["event_type"] == "agent.desktop.intent_planned")
+        tool_event = next(event for event in events if event["event_type"] == "agent.tool.call")
+
+        assert app_open_calls == ["Music"]
+        assert run["status"] == "completed"
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert planned_event["payload"]["planning_reason"] == "planner_desktop_operation"
+        assert planned_event["payload"]["tool"] == "desktop.open_app"
+        assert tool_event["payload"]["tool"] == "desktop.open_app"
+        assert tool_event["payload"]["result"]["action"] == "desktop.open_app"
+    finally:
+        service.close()
+
+
 def test_agent_runtime_planner_file_search_auto_analyzes_single_data_file(
     tmp_path,
     monkeypatch,
