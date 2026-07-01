@@ -8160,6 +8160,10 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "打开一个能编辑图片的应用，新建一张 1024x1024 图片",
         allowed_tools=allowed_tools,
     )
+    unknown_image = RuntimePlanner().decision(
+        "用我没提过的绘图 app 新建一张 1024x1024 图片",
+        allowed_tools=allowed_tools,
+    )
     project_task = RuntimePlanner().decision(
         "打开任意项目管理工具，新建任务：整理发布清单",
         allowed_tools=allowed_tools,
@@ -8207,6 +8211,39 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     assert image.selected_intent.inputs["app_capability_hint"]["query"] == "image"
     assert _step_by_id(image, "discover_apps-desktop-state").input_preview["query"] == "image"
     assert _step_by_id(image, "open-selected-discovered-app").input_preview["query"] == "image"
+    assert unknown_image.selected_intent.inputs["app_name_hint"] == ""
+    assert unknown_image.selected_intent.inputs["app_capability_hint"] == {
+        "query": "image",
+        "description": "绘图",
+    }
+    assert unknown_image.selected_intent.inputs["creative_canvas_hint"] == {
+        "kind": "image_canvas",
+        "width": 1024,
+        "height": 1024,
+    }
+    assert _step_by_id(unknown_image, "discover_apps-desktop-state").input_preview == {
+        "query": "image",
+        "limit": 20,
+    }
+    assert _step_by_id(unknown_image, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "image",
+        "action": "new_document",
+    }
+    assert planner_tool_requests(
+        "用我没提过的绘图 app 新建一张 1024x1024 图片",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "image", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
     assert project_task.selected_intent.inputs["app_name_hint"] == ""
     assert project_task.selected_intent.inputs["app_capability_hint"] == {
         "query": "project management",
