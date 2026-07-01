@@ -507,6 +507,12 @@ class RuntimeCustomApiAgentLoop:
                                 run_id=run_id,
                                 budget=budget,
                             )
+                            self._record_runtime_planner_task_progress_events(
+                                runtime_planner_decision,
+                                timeline=timeline,
+                                tool_timeline_start=auto_tool_timeline_start,
+                                run_id=run_id,
+                            )
                         except AgentApprovalRequired as exc:
                             self._record_runtime_planner_task_progress_events(
                                 runtime_planner_decision,
@@ -7272,9 +7278,37 @@ def _auto_replan_fallback_recovery_requests(
                 request["step_id"] = step_id
             if capability_id:
                 request["capability_id"] = capability_id
-            request["continue_to_model"] = True
+            if _replan_fallback_request_needs_model_followup(tool_name, payload):
+                request["continue_to_model"] = True
             requests.append(request)
     return _dedupe_replan_recovery_requests(requests)
+
+
+def _replan_fallback_request_needs_model_followup(
+    tool_name: str,
+    payload: Mapping[str, Any],
+) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool == "terminal.run" and _replan_payload_is_data_analysis_fallback(payload):
+        return False
+    return True
+
+
+def _replan_payload_is_data_analysis_fallback(payload: Mapping[str, Any]) -> bool:
+    capability_id = str(
+        payload.get("target_capability_id") or payload.get("capability_id") or ""
+    ).strip()
+    source_tool = str(
+        payload.get("source_tool_name") or payload.get("tool_name") or ""
+    ).strip()
+    step_id = str(
+        payload.get("source_step_id") or payload.get("planner_step_id") or ""
+    ).strip()
+    return (
+        capability_id == "data.analysis"
+        or source_tool == "data.analyze"
+        or "analysis" in step_id
+    )
 
 
 def _replan_fallback_tool_input(
@@ -7319,10 +7353,13 @@ def _terminal_data_analysis_replan_input(
     step_id = str(
         payload.get("source_step_id") or payload.get("planner_step_id") or ""
     ).strip()
-    if (
-        capability_id != "data.analysis"
-        and source_tool != "data.analyze"
-        and "analysis" not in step_id
+    if not _replan_payload_is_data_analysis_fallback(
+        {
+            **dict(payload),
+            "target_capability_id": capability_id,
+            "source_tool_name": source_tool,
+            "source_step_id": step_id,
+        }
     ):
         return None
     path = _first_replan_fallback_path(source_input, payload, metadata)

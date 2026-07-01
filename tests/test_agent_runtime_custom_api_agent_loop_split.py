@@ -1612,10 +1612,6 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
     run_events: list[dict[str, Any]] = []
     timeline: list[dict[str, Any]] = []
     messages = [{"role": "user", "content": "请分析 data/sales.csv 并输出报告"}]
-    model_responses = [
-        {"role": "assistant", "content": "run fallback"},
-        {"role": "assistant", "content": "analysis fallback noted"},
-    ]
 
     def fake_run_tool_requests(
         tool_requests,
@@ -1661,6 +1657,16 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
                     tool_name,
                     input_preview=input_preview,
                     result=result,
+                    **{
+                        key: request[key]
+                        for key in (
+                            "step_id",
+                            "capability_id",
+                            "replan_request_id",
+                            "replan_trigger",
+                        )
+                        if key in request
+                    },
                 )
             )
 
@@ -1694,7 +1700,7 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
         call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
             list(model_messages)
         )
-        or model_responses.pop(0),
+        or {"role": "assistant", "content": "unexpected model fallback"},
         coalesce_model_message=lambda value: value,
         message_visible_content_text=lambda message: str(message.get("content") or ""),
         model_message_metadata=lambda _message: {},
@@ -1720,8 +1726,8 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
         run_id="run-data-replan",
     )
 
-    assert str(result) == "analysis fallback noted"
-    assert len(model_calls) == 2
+    assert "fallback analysis complete" in str(result)
+    assert model_calls == []
     assert tool_runs[0]["tool_requests"][0]["tool"] == "data.analyze"
     auto_recovery_request = tool_runs[1]["tool_requests"][0]
     assert auto_recovery_request["tool"] == "terminal.run"
@@ -1729,18 +1735,10 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
     assert auto_recovery_request["replan_trigger"] == "tool_failure"
     assert auto_recovery_request["step_id"] == "analyze-data-file"
     assert auto_recovery_request["capability_id"] == "data.analysis"
-    assert auto_recovery_request["continue_to_model"] is True
+    assert "continue_to_model" not in auto_recovery_request
     assert auto_recovery_request["input"]["shell"] is True
     assert "data/sales.csv" in auto_recovery_request["input"]["command"]
-    assert any(
-        run["tool_requests"][0]
-        == {
-            "tool": "terminal.run",
-            "input": {"command": "python analyze_sales.py data/sales.csv"},
-            "protocol": "json_fallback",
-        }
-        for run in tool_runs[2:]
-    )
+    assert len(tool_runs) == 2
     replan_events = [
         event for event in timeline if event["event"] == "agent.replan.requested"
     ]
@@ -1786,37 +1784,36 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
     assert initial_todo["todo"]["status"] == "pending"
     assert blocked_todo["todo"]["status"] == "blocked"
     assert "unsupported chart type" in blocked_checkpoint["result_preview"]["error"]
-    assert [event["status"] for event in workspace_item_events] == ["planned", "blocked"]
+    assert [event["status"] for event in workspace_item_events] == [
+        "planned",
+        "blocked",
+        "completed",
+    ]
     assert workspace_item_events[-1]["source_event"] == {
         "event": "agent.tool.call",
-        "detail": "data.analyze",
+        "detail": "terminal.run",
     }
-    replan_context = [
+    completed_todo = [
         event
-        for event in timeline
-        if event["event"] == "agent.model.followup_context"
-        and event.get("planning_reason") == "planner_replan_after_tool_failure"
+        for event in todo_events
+        if event["step_id"] == "analyze-data-file" and event["status"] == "completed"
     ][0]
-    assert replan_context["replan_requests"][0]["request_id"] == payload["request_id"]
-    assert replan_context["fallback_tools"] == ["terminal.run"]
-    assert replan_context["task_progress"]["blocked_steps"] == ["analyze-data-file"]
-    assert any(
-        item.get("path") == "data/sales.csv"
-        for item in replan_context["task_progress"]["workspace_items"]
-    )
-    assert any(
-        message["role"] == "user"
-        and "Runtime replan context" in message["content"]
-        and "terminal.run" in message["content"]
-        and "blocked_steps: analyze-data-file" in message["content"]
-        for message in model_calls[0]
+    assert completed_todo["previous_status"] == "pending"
+    assert completed_todo["source_event"] == {
+        "event": "agent.tool.call",
+        "detail": "terminal.run",
+    }
+    assert not any(
+        event["event"] == "agent.model.followup_context"
+        and event.get("planning_reason") == "planner_replan_after_tool_failure"
+        for event in timeline
     )
     assert any(
         event["event_type"] == "agent.replan.requested"
         and event["payload"]["request_id"] == payload["request_id"]
         for event in run_events
     )
-    assert any(
+    assert not any(
         event["event_type"] == "agent.model.followup_context"
         and event["payload"]["planning_reason"] == "planner_replan_after_tool_failure"
         for event in run_events
@@ -1831,6 +1828,12 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
         event["event_type"] == "agent.task.workspace_item.updated"
         and event["payload"]["workspace_item"]["path"] == "analysis-report.md"
         and event["payload"]["status"] == "blocked"
+        for event in run_events
+    )
+    assert any(
+        event["event_type"] == "agent.task.todo.updated"
+        and event["payload"]["step_id"] == "analyze-data-file"
+        and event["payload"]["status"] == "completed"
         for event in run_events
     )
 
@@ -16601,7 +16604,7 @@ def test_auto_replan_fallback_recovery_reuses_safe_file_inputs() -> None:
     assert terminal_requests[0]["replan_trigger"] == "tool_failure"
     assert terminal_requests[0]["step_id"] == "analyze-data-file"
     assert terminal_requests[0]["capability_id"] == "data.analysis"
-    assert terminal_requests[0]["continue_to_model"] is True
+    assert "continue_to_model" not in terminal_requests[0]
 
 
 def test_auto_replan_terminal_data_analysis_command_writes_report(tmp_path) -> None:
