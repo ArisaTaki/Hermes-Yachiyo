@@ -17,6 +17,9 @@ def _normalized_app_lookup(value: Any) -> str:
     return " ".join(str(value or "").strip().casefold().split())
 
 
+_SELECTED_DESKTOP_APP_NAME = "<selected app from desktop.list_apps>"
+
+
 def _app_lookups_related(left: Any, right: Any) -> bool:
     clean_left = _normalized_app_lookup(left)
     clean_right = _normalized_app_lookup(right)
@@ -136,13 +139,20 @@ def _tool_request_with_app_name_resolution(
     if not resolution:
         return tool_request
     raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+    resolved_input = {
+        **raw_input,
+        "app_name": str(resolution.get("resolved_app_name") or "").strip(),
+    }
+    if (
+        str(raw_input.get("app_name") or "").strip() == _SELECTED_DESKTOP_APP_NAME
+        or str(raw_input.get("selection_source") or "").strip() == "desktop.list_apps"
+    ):
+        resolved_input.pop("selection_source", None)
+        resolved_input.pop("query", None)
     return {
         **tool_request,
         "input_resolution": resolution,
-        "input": {
-            **raw_input,
-            "app_name": str(resolution.get("resolved_app_name") or "").strip(),
-        },
+        "input": resolved_input,
     }
 
 
@@ -151,10 +161,26 @@ def _tool_request_app_name_resolution(
     timeline: list[dict[str, Any]],
 ) -> dict[str, str]:
     raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
-    requested_app_name = str(raw_input.get("app_name") or "").strip()
+    raw_app_name = str(raw_input.get("app_name") or "").strip()
+    selection_source = str(raw_input.get("selection_source") or "").strip()
+    selected_app_query = str(raw_input.get("query") or "").strip()
+    uses_selected_app_placeholder = (
+        raw_app_name == _SELECTED_DESKTOP_APP_NAME
+        or selection_source == "desktop.list_apps"
+    )
+    requested_app_name = (
+        selected_app_query
+        if uses_selected_app_placeholder and selected_app_query
+        else raw_app_name
+    )
     discovered_app_name = _discovered_app_name_for_query(timeline, requested_app_name)
-    if not discovered_app_name or _normalized_app_lookup(discovered_app_name) == _normalized_app_lookup(
-        requested_app_name
+    if not discovered_app_name:
+        return {}
+    if (
+        not uses_selected_app_placeholder
+        and _normalized_app_lookup(discovered_app_name) == _normalized_app_lookup(
+            requested_app_name
+        )
     ):
         return {}
     return {

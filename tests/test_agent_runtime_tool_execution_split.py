@@ -1040,6 +1040,109 @@ def test_runtime_tool_request_runner_records_discovered_app_name_resolution() ->
     assert ("run-1", "agent.tool.input_resolved", resolution_payload) in run_events
 
 
+def test_runtime_tool_request_runner_resolves_selected_discovered_app_placeholder() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        calls.append((tool_name, payload))
+        if tool_name == "desktop.list_apps":
+            result = {
+                "ok": True,
+                "action": "desktop.list_apps",
+                "data": {
+                    "query": payload["query"],
+                    "best_match": {
+                        "name": "Pixelmator Pro",
+                        "path": "/Applications/Pixelmator Pro.app",
+                        "match_score": 94,
+                        "match_confidence": "high",
+                    },
+                },
+            }
+        else:
+            result = {
+                "ok": True,
+                "action": tool_name,
+                "data": {
+                    "app_name": payload["app_name"],
+                    "target": payload["target"],
+                },
+            }
+        timeline_arg.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+    messages = [{"role": "user", "content": "打开一个能编辑图片的应用，然后点击导出"}]
+
+    runner.run(
+        [
+            {"tool": "desktop.list_apps", "input": {"query": "image", "limit": 20}},
+            {
+                "tool": "app.focus_and_click_ui_element",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": "image",
+                    "target": "导出",
+                    "limit": 80,
+                },
+            },
+        ],
+        ["desktop.list_apps", "app.focus_and_click_ui_element"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-selected-app",
+        budget=FakeBudget(),
+    )
+
+    assert calls == [
+        ("desktop.list_apps", {"query": "image", "limit": 20}),
+        (
+            "app.focus_and_click_ui_element",
+            {
+                "app_name": "Pixelmator Pro",
+                "target": "导出",
+                "limit": 80,
+            },
+        ),
+    ]
+    resolution_payload = {
+        "tool": "app.focus_and_click_ui_element",
+        "field": "app_name",
+        "requested_app_name": "image",
+        "resolved_app_name": "Pixelmator Pro",
+        "source_tool": "desktop.list_apps",
+        "resolved_app_path": "/Applications/Pixelmator Pro.app",
+        "app_resolution_score": "94",
+        "app_resolution_confidence": "high",
+    }
+    assert [
+        event for event in timeline if event["event"] == "agent.tool.input_resolved"
+    ] == [
+        {
+            "event": "agent.tool.input_resolved",
+            "detail": "app.focus_and_click_ui_element",
+            **resolution_payload,
+        }
+    ]
+    assert ("run-selected-app", "agent.tool.input_resolved", resolution_payload) in run_events
+
+
 def test_runtime_tool_request_runner_records_best_match_resolution_evidence() -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
