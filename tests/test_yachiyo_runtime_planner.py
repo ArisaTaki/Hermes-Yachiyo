@@ -2458,6 +2458,49 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         "target_action": "open_app",
     }
 
+    draw_circle_prompt = "打开一个能画图的应用，画一个圆并保存到桌面"
+    draw_circle_allowed_tools = ["desktop.list_apps", "app.open", "desktop.ui_elements"]
+    draw_circle_decision = RuntimePlanner().decision(
+        draw_circle_prompt,
+        allowed_tools=draw_circle_allowed_tools,
+    )
+    draw_circle_requests = planner_tool_requests(
+        draw_circle_prompt,
+        draw_circle_allowed_tools,
+    )
+    draw_circle_payload = planner_selection_payload(
+        decision=draw_circle_decision,
+        planner_requests=draw_circle_requests,
+        legacy_requests=[],
+        selected_requests=draw_circle_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert draw_circle_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "image", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+    assert draw_circle_payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "image",
+        "app_name_source": "desktop.list_apps",
+        "capability_description": "画图",
+        "target_action": "open_app",
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80},
+            "continue_to_model": True,
+        },
+        "pending_user_action": "画一个圆并保存到桌面",
+    }
+
 
 def test_planner_selection_payload_surfaces_discovered_app_open_path_target() -> None:
     prompt = "找一个代码编辑器打开 README.md"

@@ -14774,6 +14774,30 @@ def test_auto_discovered_app_open_followup_verifies_active_window() -> None:
     assert read_ui_requests[1]["source"] == "runtime_planner"
     assert read_ui_requests[1]["planning_reason"] == "planner_discovered_app_followup"
 
+    continuing_requests = custom_api_agent_module._auto_discovered_app_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "browser",
+                "target_action": "open_app",
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {"limit": 80},
+                    "continue_to_model": True,
+                },
+            }
+        },
+        ["desktop.open_app", "desktop.read_ui"],
+        timeline,
+    )
+
+    assert [request["tool"] for request in continuing_requests] == [
+        "desktop.open_app",
+        "desktop.read_ui",
+    ]
+    assert continuing_requests[1]["input"] == {"limit": 80}
+    assert continuing_requests[1]["continue_to_model"] is True
+
 
 def test_auto_discovered_app_compose_followup_types_and_verifies() -> None:
     timeline = [

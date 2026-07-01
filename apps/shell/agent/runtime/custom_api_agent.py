@@ -5435,6 +5435,16 @@ def _model_followup_desktop_discovered_app_target_payload(
     )
     if creative_canvas:
         payload["creative_canvas"] = dict(creative_canvas)
+    post_action_observation = (
+        target.get("post_action_observation")
+        if isinstance(target.get("post_action_observation"), Mapping)
+        else {}
+    )
+    if post_action_observation:
+        payload["post_action_observation"] = dict(post_action_observation)
+    pending_user_action = str(target.get("pending_user_action") or "").strip()
+    if pending_user_action:
+        payload["pending_user_action"] = pending_user_action
     return payload
 
 
@@ -5821,6 +5831,8 @@ def _auto_discovered_app_followup_requests(
     )
     if observation_request:
         requests.append(observation_request)
+    elif _discovered_app_post_action_continue_requested(target) and requests:
+        requests[-1]["continue_to_model"] = True
     if (
         str(target.get("body_source") or "").strip() == "model_generated_content"
         and requests
@@ -6672,9 +6684,26 @@ def _discovered_app_observation_request(
         source=source,
         planning_reason=planning_reason,
     )
-    if isinstance(target.get("creative_canvas"), Mapping):
+    if (
+        isinstance(target.get("creative_canvas"), Mapping)
+        or _discovered_app_post_action_continue_requested(target)
+    ):
         request["continue_to_model"] = True
     return request
+
+
+def _discovered_app_post_action_continue_requested(
+    target: Mapping[str, Any],
+) -> bool:
+    post_action_observation = (
+        target.get("post_action_observation")
+        if isinstance(target.get("post_action_observation"), Mapping)
+        else {}
+    )
+    value = post_action_observation.get("continue_to_model")
+    if isinstance(value, bool):
+        return value
+    return str(value or "").strip().lower() in {"1", "true", "yes", "y"}
 
 
 def _discovered_app_observation_fallback_tool(
@@ -7007,6 +7036,21 @@ def _model_followup_desktop_discovered_app_instruction(target: Mapping[str, Any]
             f"Call desktop UI tools next instead of replying inline. Prefer {tool_text}."
             f"{verify_text} If the required fields are not visible, inspect the UI again before "
             "claiming completion. "
+        )
+    if _discovered_app_post_action_continue_requested(target):
+        pending_action = str(target.get("pending_user_action") or "").strip()
+        pending_text = (
+            f" The remaining user action is: {pending_action!r}."
+            if pending_action
+            else ""
+        )
+        return (
+            f"The runtime discovered and opened an app for {app_query!r}, then requested "
+            "a UI observation because the user asked for more than simply opening it."
+            f"{pending_text} Use the latest observed UI to continue with desktop tools next; "
+            f"prefer {tool_text}.{verify_text} If the required controls are not visible, "
+            "inspect the app again or explain the missing desktop UI capability instead of "
+            "claiming the task is complete. "
         )
     return (
         f"The runtime discovered an app for {app_query!r}. Continue the requested desktop action "
