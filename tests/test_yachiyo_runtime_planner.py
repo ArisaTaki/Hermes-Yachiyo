@@ -6353,8 +6353,10 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "browser.extract_text",
         "browser.current_page",
         "clipboard.read",
+        "desktop.list_apps",
         "app.focus",
         "app.open",
+        "app.open_and_safe_shortcut",
         "desktop.safe_shortcut",
         "desktop.ui_elements",
     ]
@@ -6370,6 +6372,14 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "protocol": "json_fallback",
         "tool": "clipboard.read",
         "input": {},
+        "source": "runtime_planner",
+        "planning_reason": "planner_prefetch_report_context",
+        "continue_to_model": True,
+    }
+    visible_text_prefetch = {
+        "protocol": "json_fallback",
+        "tool": "desktop.ui_elements",
+        "input": {"role_filter": "text", "limit": 80},
         "source": "runtime_planner",
         "planning_reason": "planner_prefetch_report_context",
         "continue_to_model": True,
@@ -6539,6 +6549,114 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
     ) == [clipboard_prefetch]
     assert planner_direct_tool_requests(
         "把剪贴板内容整理成待办并写进 Obsidian",
+        allowed,
+    ) == [clipboard_prefetch]
+
+    current_page_discovered = RuntimePlanner().decision(
+        "把当前网页总结到任意文档应用",
+        allowed_tools=allowed,
+    )
+    current_window_discovered = RuntimePlanner().decision(
+        "把当前窗口内容整理成报告写进任意文档应用",
+        allowed_tools=allowed,
+    )
+    clipboard_discovered = RuntimePlanner().decision(
+        "把剪贴板内容整理成报告写进任意文档应用",
+        allowed_tools=allowed,
+    )
+
+    assert current_page_discovered.selected_intent.kind == "report_generation"
+    assert current_page_discovered.selected_intent.inputs == {
+        "context_source": "current_page_content",
+        "target_app_capability_hint": {"query": "document", "description": "文档"},
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert current_page_discovered.selected_intent.required_capabilities == [
+        "browser.research",
+        "desktop.app_discovery",
+        "desktop.ui_operation",
+    ]
+    assert [step.step_id for step in current_page_discovered.plan.tool_plan.steps] == [
+        "read-report-context",
+        "discover-report-target-app",
+        "prepare-report-discovered-target-app",
+    ]
+    assert _step_by_id(current_page_discovered, "read-report-context").tool_name == (
+        "browser.extract_text"
+    )
+    assert _step_by_id(
+        current_page_discovered,
+        "discover-report-target-app",
+    ).input_preview == {"query": "document", "limit": 20}
+    assert _step_by_id(
+        current_page_discovered,
+        "prepare-report-discovered-target-app",
+    ).input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "document",
+        "target_action": "app_paste",
+        "body_source": "model_generated_content",
+        "action": "new_document",
+    }
+    assert planner_tool_requests(
+        "把当前网页总结到任意文档应用",
+        allowed,
+    ) == [page_prefetch]
+    assert runtime_planner_metadata(current_page_discovered)[
+        "yachiyo_followup_target"
+    ] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "document",
+        "app_name_source": "desktop.list_apps",
+        "target_action": "safe_shortcut",
+        "body_source": "model_generated_content",
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
+        "capability_description": "文档",
+        "safe_shortcut_action": "new_document",
+    }
+
+    assert current_window_discovered.selected_intent.kind == "report_generation"
+    assert current_window_discovered.selected_intent.inputs == {
+        "context_source": "visible_text",
+        "target_app_capability_hint": {"query": "document", "description": "文档"},
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert [step.step_id for step in current_window_discovered.plan.tool_plan.steps] == [
+        "read-report-context",
+        "discover-report-target-app",
+        "prepare-report-discovered-target-app",
+    ]
+    assert _step_by_id(current_window_discovered, "read-report-context").tool_name == (
+        "desktop.ui_elements"
+    )
+    assert planner_tool_requests(
+        "把当前窗口内容整理成报告写进任意文档应用",
+        allowed,
+    ) == [visible_text_prefetch]
+
+    assert clipboard_discovered.selected_intent.kind == "report_generation"
+    assert clipboard_discovered.selected_intent.inputs == {
+        "context_source": "clipboard",
+        "target_app_capability_hint": {"query": "document", "description": "文档"},
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert [step.step_id for step in clipboard_discovered.plan.tool_plan.steps] == [
+        "read-report-context",
+        "discover-report-target-app",
+        "prepare-report-discovered-target-app",
+    ]
+    assert _step_by_id(clipboard_discovered, "read-report-context").tool_name == (
+        "clipboard.read"
+    )
+    assert planner_tool_requests(
+        "把剪贴板内容整理成报告写进任意文档应用",
         allowed,
     ) == [clipboard_prefetch]
 
