@@ -1706,11 +1706,14 @@ class TaskIntentRouter:
         if score <= 0:
             return _empty_intent("code_task", text)
         diagnostic_command = _code_task_diagnostic_command_hint(text)
-        inputs = (
-            {"code_diagnostic_command_hint": diagnostic_command}
-            if diagnostic_command
-            else {}
-        )
+        write_requested = _code_task_write_requested(text)
+        inputs: dict[str, Any] = {}
+        if diagnostic_command:
+            inputs["code_diagnostic_command_hint"] = diagnostic_command
+        if write_requested:
+            inputs["code_change_hint"] = {
+                "mode": _code_task_change_mode(text),
+            }
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "code_task", text),
             kind="code_task",
@@ -1719,13 +1722,17 @@ class TaskIntentRouter:
             confidence=min(0.88, 0.4 + score),
             description="Read, modify, or test code in the configured workspace.",
             inputs=inputs,
-            expected_outputs=["test_output"] if diagnostic_command else [],
+            expected_outputs=[
+                *(["patch"] if write_requested else []),
+                *(["test_output"] if diagnostic_command else []),
+            ],
             required_capabilities=[
                 "file.workspace_read",
+                *(["file.workspace_write"] if write_requested else []),
                 *(["terminal.execution"] if diagnostic_command else []),
             ],
             preferred_capabilities=["terminal.execution", "artifact.write"],
-            risk_level="high" if _contains_any(text, ["改", "写", "fix", "change", "modify"]) else "medium",
+            risk_level="high" if write_requested else "medium",
         )
 
     def _file_organization_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
@@ -5590,9 +5597,21 @@ class RuntimePlanner:
                     "terminal execution remains approval-gated."
                 ),
             )
-            return [
+            depends_on = ["run-code-diagnostic"]
+            steps = [
                 inspect_step,
                 run_step,
+            ]
+            if _code_task_intent_writes_code(intent):
+                steps.append(
+                    _code_change_step(
+                        intent,
+                        allowed,
+                        depends_on=depends_on,
+                    )
+                )
+                depends_on = ["apply-code-changes"]
+            steps.append(
                 _step(
                     intent,
                     "write-code-report",
@@ -5600,8 +5619,28 @@ class RuntimePlanner:
                     "artifact.write",
                     _first_allowed(("artifact.write",), allowed),
                     input_preview={"path": "code-task-summary.md"},
-                    depends_on=["run-code-diagnostic"],
+                    depends_on=depends_on,
                     reason="Summarize diagnostic output, fixes, or findings for replay.",
+                )
+            )
+            return steps
+        if _code_task_intent_writes_code(intent):
+            return [
+                inspect_step,
+                _code_change_step(
+                    intent,
+                    allowed,
+                    depends_on=["inspect-workspace"],
+                ),
+                _step(
+                    intent,
+                    "write-code-report",
+                    "Write result artifact",
+                    "artifact.write",
+                    _first_allowed(("artifact.write",), allowed),
+                    input_preview={"path": "code-task-summary.md"},
+                    depends_on=["apply-code-changes"],
+                    reason="Summarize the generated or applied code changes for replay.",
                 ),
             ]
         return [
@@ -6153,6 +6192,43 @@ def _data_file_open_step(
         reason=(
             "Open the explicit local data file on the desktop so the requested spreadsheet app "
             "path is observable while data.analyze keeps the reproducible analysis artifact."
+        ),
+    )
+
+
+def _code_task_intent_writes_code(intent: TaskIntentSnapshot) -> bool:
+    return isinstance(intent.inputs.get("code_change_hint"), Mapping)
+
+
+def _code_change_step(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    *,
+    depends_on: Iterable[str],
+) -> ToolPlanStepSnapshot:
+    change_hint = (
+        intent.inputs.get("code_change_hint")
+        if isinstance(intent.inputs.get("code_change_hint"), Mapping)
+        else {}
+    )
+    mode = str(change_hint.get("mode") or "modify").strip() or "modify"
+    return _step(
+        intent,
+        "apply-code-changes",
+        "Apply code changes",
+        "file.workspace_write",
+        _first_allowed(("workspace.write_patch",), allowed),
+        input_preview={
+            "mode": mode,
+            "patch_source": "model_after_workspace_inspection",
+        },
+        action="apply_patch",
+        risk_level="high",
+        approval_required=True,
+        depends_on=list(depends_on),
+        reason=(
+            "Generate code changes only after inspecting workspace context; applying the "
+            "patch remains approval-gated through workspace.write_patch."
         ),
     )
 
@@ -10907,6 +10983,41 @@ def _code_task_diagnostic_command_hint(text: str) -> dict[str, str]:
     ):
         return {"command": "python -m pytest"}
     return {}
+
+
+def _code_task_write_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if re.search(
+        r"\b(?:fix|repair|change|modify|edit|implement|add|create|write|generate|"
+        r"scaffold|refactor|patch|update)\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return bool(
+        re.search(
+            r"(?:修复|修正|修改|改一下|改成|实现|新增|添加|创建|新建|生成|编写|"
+            r"写一个|写个|写出|重构|补上|接入|调整|更新|改造)",
+            value,
+        )
+    )
+
+
+def _code_task_change_mode(text: str) -> str:
+    value = _clean_prompt(text)
+    lowered = value.lower()
+    if re.search(r"\b(?:create|write|generate|scaffold|add)\b", lowered) or re.search(
+        r"(?:新增|添加|创建|新建|生成|编写|写一个|写个|写出)",
+        value,
+    ):
+        return "create"
+    if re.search(r"\b(?:refactor|restructure)\b", lowered) or re.search(r"(?:重构|改造)", value):
+        return "refactor"
+    if re.search(r"\b(?:fix|repair|patch)\b", lowered) or re.search(r"(?:修复|修正|补上)", value):
+        return "fix"
+    return "modify"
 
 
 def _score_terms(text: str, terms: Iterable[str]) -> float:

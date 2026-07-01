@@ -213,9 +213,13 @@ def test_task_intent_router_covers_agent_work_domains() -> None:
         (
             "修复这个仓库里的 failing tests",
             "code_task",
-            ["file.workspace_read", "terminal.execution"],
+            ["file.workspace_read", "file.workspace_write", "terminal.execution"],
         ),
-        ("帮我写一个 Python 脚本处理日志", "code_task", ["file.workspace_read"]),
+        (
+            "帮我写一个 Python 脚本处理日志",
+            "code_task",
+            ["file.workspace_read", "file.workspace_write"],
+        ),
         ("运行日报 Workflow", "workflow_orchestration", ["workflow.orchestration"]),
         ("让研究群组协作比较三个方案", "multi_agent", ["group.multi_agent"]),
         ("打开 PixelForge", "desktop_operation", ["desktop.app_discovery"]),
@@ -4123,31 +4127,59 @@ def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> 
     ]
 
 
-def test_runtime_planner_keeps_generic_code_task_plan_non_executable_until_inspected() -> None:
+def test_runtime_planner_plans_code_changes_after_workspace_inspection() -> None:
     decision = RuntimePlanner().decision(
         "帮我写一个 Python 脚本处理日志",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
     )
+    writable_decision = RuntimePlanner().decision(
+        "帮我写一个 Python 脚本处理日志",
+        allowed_tools=[
+            "workspace.list",
+            "workspace.read",
+            "workspace.write_patch",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
 
     assert decision.selected_intent.kind == "code_task"
+    assert decision.selected_intent.inputs == {
+        "code_change_hint": {"mode": "create"}
+    }
     assert decision.plan.tool_plan.required_capabilities == [
         "file.workspace_read",
+        "file.workspace_write",
         "artifact.write",
     ]
-    assert decision.plan.tool_plan.approvals_required == []
+    assert decision.plan.tool_plan.missing_capabilities == ["file.workspace_write"]
+    assert decision.plan.tool_plan.approvals_required == ["apply-code-changes"]
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "inspect-workspace",
+        "apply-code-changes",
         "write-code-report",
     ]
     assert _step_by_id(decision, "inspect-workspace").tool_name == "workspace.list"
+    assert _step_by_id(decision, "apply-code-changes").tool_name is None
+    assert _step_by_id(decision, "apply-code-changes").status == "unavailable"
     assert _step_by_id(decision, "write-code-report").tool_name == "artifact.write"
     assert all(step.tool_name != "terminal.run" for step in decision.plan.tool_plan.steps)
+    assert _step_by_id(writable_decision, "apply-code-changes").tool_name == (
+        "workspace.write_patch"
+    )
+    assert _step_by_id(writable_decision, "apply-code-changes").approval_required is True
 
 
 def test_runtime_planner_routes_code_test_diagnostics_to_approval_terminal_plan() -> None:
     decision = RuntimePlanner().decision(
         "修复这个仓库里的 failing tests",
-        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+        allowed_tools=[
+            "workspace.list",
+            "workspace.read",
+            "workspace.write_patch",
+            "terminal.run",
+            "artifact.write",
+        ],
     )
     run_tests = RuntimePlanner().decision(
         "运行这个仓库的测试",
@@ -4156,22 +4188,29 @@ def test_runtime_planner_routes_code_test_diagnostics_to_approval_terminal_plan(
 
     assert decision.selected_intent.kind == "code_task"
     assert decision.selected_intent.inputs == {
-        "code_diagnostic_command_hint": {"command": "python -m pytest"}
+        "code_diagnostic_command_hint": {"command": "python -m pytest"},
+        "code_change_hint": {"mode": "fix"},
     }
-    assert decision.selected_intent.expected_outputs == ["test_output"]
+    assert decision.selected_intent.expected_outputs == ["patch", "test_output"]
     assert decision.selected_intent.required_capabilities == [
         "file.workspace_read",
+        "file.workspace_write",
         "terminal.execution",
     ]
     assert decision.plan.tool_plan.required_capabilities == [
         "file.workspace_read",
         "terminal.execution",
+        "file.workspace_write",
         "artifact.write",
     ]
-    assert decision.plan.tool_plan.approvals_required == ["run-code-diagnostic"]
+    assert decision.plan.tool_plan.approvals_required == [
+        "run-code-diagnostic",
+        "apply-code-changes",
+    ]
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "inspect-workspace",
         "run-code-diagnostic",
+        "apply-code-changes",
         "write-code-report",
     ]
     run_step = _step_by_id(decision, "run-code-diagnostic")
@@ -4179,15 +4218,29 @@ def test_runtime_planner_routes_code_test_diagnostics_to_approval_terminal_plan(
     assert run_step.input_preview == {"command": "python -m pytest"}
     assert run_step.depends_on == ["inspect-workspace"]
     assert run_step.approval_required is True
+    apply_step = _step_by_id(decision, "apply-code-changes")
+    assert apply_step.tool_name == "workspace.write_patch"
+    assert apply_step.input_preview == {
+        "mode": "fix",
+        "patch_source": "model_after_workspace_inspection",
+    }
+    assert apply_step.depends_on == ["run-code-diagnostic"]
+    assert apply_step.approval_required is True
     assert _step_by_id(decision, "write-code-report").depends_on == [
-        "run-code-diagnostic"
+        "apply-code-changes"
     ]
     assert run_tests.selected_intent.inputs == {
         "code_diagnostic_command_hint": {"command": "python -m pytest"}
     }
     assert planner_tool_requests(
         "修复这个仓库里的 failing tests",
-        ["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+        [
+            "workspace.list",
+            "workspace.read",
+            "workspace.write_patch",
+            "terminal.run",
+            "artifact.write",
+        ],
     ) == [
         {
             "protocol": "json_fallback",
