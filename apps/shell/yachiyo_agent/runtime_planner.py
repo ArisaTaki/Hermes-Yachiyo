@@ -3226,17 +3226,25 @@ class RuntimePlanner:
                     allowed,
                     depends_on="open-selected-discovered-app",
                 )
+                selected_discovered_app_action_dependency = (
+                    "observe-selected-discovered-app"
+                    if any(
+                        step.step_id == "observe-selected-discovered-app"
+                        for step in steps
+                    )
+                    else "open-selected-discovered-app"
+                )
                 _append_selected_discovered_generic_action_steps(
                     steps,
                     intent,
                     allowed,
-                    depends_on="observe-selected-discovered-app",
+                    depends_on=selected_discovered_app_action_dependency,
                 )
                 _append_selected_discovered_creative_action_steps(
                     steps,
                     intent,
                     allowed,
-                    depends_on="observe-selected-discovered-app",
+                    depends_on=selected_discovered_app_action_dependency,
                 )
             return steps
         if (
@@ -8242,9 +8250,9 @@ def _append_selected_discovered_generic_action_steps(
     if safe_shortcut:
         shortcut_tool = _first_allowed(
             (
-                "desktop.safe_shortcut",
                 "app.focus_and_safe_shortcut",
                 "app.open_and_safe_shortcut",
+                "desktop.safe_shortcut",
             ),
             allowed,
         )
@@ -8277,10 +8285,10 @@ def _append_selected_discovered_generic_action_steps(
     if hotkey:
         hotkey_tool = _first_allowed(
             (
-                "desktop.hotkey",
-                "desktop.shortcut",
                 "app.focus_and_hotkey",
                 "app.open_and_hotkey",
+                "desktop.hotkey",
+                "desktop.shortcut",
             ),
             allowed,
         )
@@ -8313,9 +8321,9 @@ def _append_selected_discovered_generic_action_steps(
     if type_target:
         type_tool = _first_allowed(
             (
-                "desktop.type_into_ui_element",
                 "app.focus_and_type_into_ui_element",
                 "app.open_and_type_into_ui_element",
+                "desktop.type_into_ui_element",
             ),
             allowed,
         )
@@ -8347,9 +8355,9 @@ def _append_selected_discovered_generic_action_steps(
     elif safe_type_text:
         type_text_tool = _first_allowed(
             (
-                "desktop.safe_type_text",
                 "app.focus_and_safe_type_text",
                 "app.open_and_safe_type_text",
+                "desktop.safe_type_text",
                 "desktop.type_text",
             ),
             allowed,
@@ -8383,9 +8391,9 @@ def _append_selected_discovered_generic_action_steps(
     if click_target and not type_target:
         click_tool = _first_allowed(
             (
-                "desktop.click_ui_element",
                 "app.focus_and_click_ui_element",
                 "app.open_and_click_ui_element",
+                "desktop.click_ui_element",
             ),
             allowed,
         )

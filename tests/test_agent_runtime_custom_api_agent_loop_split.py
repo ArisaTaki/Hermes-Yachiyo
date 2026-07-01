@@ -3585,6 +3585,60 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
     ) == []
 
 
+def test_model_followup_pending_plan_auto_dispatches_discovered_app_hotkeys() -> None:
+    assert custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            "planning_reason": "planner_discovered_app_followup",
+            "pending_plan_steps": [
+                {
+                    "step_id": "hotkey-selected-discovered-app",
+                    "tool_name": "app.focus_and_hotkey",
+                    "capability_id": "desktop.ui_operation",
+                    "input_preview": {
+                        "app_name": "<selected app from desktop.list_apps>",
+                        "selection_source": "desktop.list_apps",
+                        "query": "image",
+                        "key": "s",
+                        "modifiers": ["command"],
+                    },
+                },
+                {
+                    "step_id": "fallback-hotkey",
+                    "tool_name": "desktop.hotkey",
+                    "capability_id": "desktop.ui_operation",
+                    "input_preview": {"key": "w", "modifiers": ["command"]},
+                },
+            ],
+        },
+        ["app.focus_and_hotkey", "desktop.hotkey"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_hotkey",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "image",
+                "key": "s",
+                "modifiers": ["command"],
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+            "step_id": "hotkey-selected-discovered-app",
+            "capability_id": "desktop.ui_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "w", "modifiers": ["command"]},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+            "step_id": "fallback-hotkey",
+            "capability_id": "desktop.ui_operation",
+        },
+    ]
+
+
 def test_model_followup_context_discovers_generic_communication_app_after_analysis() -> None:
     target = {
         "kind": "desktop_discovered_app_action",

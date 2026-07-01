@@ -2595,6 +2595,39 @@ def test_planner_adds_generic_discovered_app_followup_action_steps() -> None:
     ).tool_name == "screen.capture"
 
 
+def test_planner_binds_discovered_app_hotkey_to_selected_app_without_dangling_observation() -> None:
+    prompt = "打开一个能编辑图片的应用，然后按 Command+S"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus_and_hotkey",
+        "desktop.hotkey",
+        "screen.capture",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "hotkey-selected-discovered-app",
+        "verify-selected-discovered-app-action",
+    ]
+    hotkey = _step_by_id(decision, "hotkey-selected-discovered-app")
+    assert hotkey.tool_name == "app.focus_and_hotkey"
+    assert hotkey.depends_on == ["open-selected-discovered-app"]
+    assert hotkey.input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "image",
+        "key": "s",
+        "modifiers": ["command"],
+    }
+    assert _step_by_id(
+        decision,
+        "verify-selected-discovered-app-action",
+    ).depends_on == ["hotkey-selected-discovered-app"]
+
+
 def test_planner_selection_payload_surfaces_discovered_app_open_path_target() -> None:
     prompt = "找一个代码编辑器打开 README.md"
     allowed_tools = [
