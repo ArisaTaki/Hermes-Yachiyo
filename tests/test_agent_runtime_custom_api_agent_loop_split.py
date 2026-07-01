@@ -2458,6 +2458,93 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
     assert run_events == []
 
 
+def test_model_replan_followup_context_includes_task_core_workspace() -> None:
+    task_core = {
+        "core_id": "core-data",
+        "workspace": {
+            "workspace_id": "workspace-data",
+            "title": "Data Analysis Workspace",
+            "items": [
+                {
+                    "item_id": "input-sales",
+                    "kind": "input",
+                    "path": "sales.csv",
+                    "status": "available",
+                }
+            ],
+        },
+        "todos": [
+            {
+                "todo_id": "todo-analyze",
+                "step_id": "analyze-data-file",
+                "title": "Analyze data file",
+                "tool_name": "data.analyze",
+                "status": "planned",
+            }
+        ],
+        "checkpoints": [
+            {
+                "checkpoint_id": "checkpoint-analyze",
+                "after_step_id": "analyze-data-file",
+                "title": "Verify analysis output",
+                "status": "planned",
+            }
+        ],
+        "replan_signals": [],
+    }
+    payload = custom_api_agent_module._model_replan_followup_context_payload(
+        [
+            {
+                "request_id": "replan-data",
+                "trigger": "tool_failure",
+                "decision_id": "decision-data",
+                "plan_id": "plan-data",
+                "core_id": "core-data",
+                "source_step_id": "analyze-data-file",
+                "source_tool_name": "data.analyze",
+                "target_capability_id": "data.analysis",
+                "fallback_tools": ["terminal.run"],
+                "failure_detail": "data.analyze returned unsupported format",
+            }
+        ],
+        allowed_tools=["terminal.run"],
+        timeline=[
+            _timeline(
+                "agent.task_core.created",
+                "Data Analysis Workspace",
+                core_id="core-data",
+                plan_id="plan-data",
+                payload={
+                    "core_id": "core-data",
+                    "plan_id": "plan-data",
+                    "task_core": task_core,
+                },
+            ),
+            _timeline(
+                "agent.task.todo.updated",
+                "Analyze data file",
+                core_id="core-data",
+                plan_id="plan-data",
+                step_id="analyze-data-file",
+                status="blocked",
+                todo={
+                    "step_id": "analyze-data-file",
+                    "title": "Analyze data file",
+                    "tool_name": "data.analyze",
+                },
+            ),
+        ],
+    )
+    message = custom_api_agent_module._model_replan_followup_context_message(payload)
+
+    assert payload["task_core"] == task_core
+    assert payload["task_progress"]["blocked_steps"] == ["analyze-data-file"]
+    assert "Task workspace:" in message
+    assert "- workspace: Data Analysis Workspace" in message
+    assert "analyze-data-file · planned · data.analyze" in message
+    assert "analyze-data-file · planned · Verify analysis output" in message
+
+
 def test_custom_api_agent_loop_completes_verification_recovery_without_model_followup() -> None:
     allowed_tools = [
         "desktop.list_apps",

@@ -4833,6 +4833,9 @@ def _model_replan_followup_context_payload(
     )
     if task_progress:
         payload["task_progress"] = task_progress
+    task_core = _runtime_replan_task_core_payload(replan_payloads, timeline or [])
+    if task_core:
+        payload["task_core"] = task_core
     capability_recovery = _runtime_replan_capability_recovery(
         requests,
         allowed_tools=allowed_tools,
@@ -5005,6 +5008,9 @@ def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
                     rendered_items.append(f"{kind}:{path}" if kind else path)
             if rendered_items:
                 lines.append(f"- workspace_items: {', '.join(rendered_items)}")
+    task_core = payload.get("task_core") if isinstance(payload.get("task_core"), dict) else {}
+    if task_core:
+        lines.extend(_runtime_replan_task_core_message_lines(task_core))
     for index, request in enumerate(requests[:3], start=1):
         detail = str(request.get("failure_detail") or "").strip()
         reason = str(request.get("reason") or "").strip()
@@ -5025,6 +5031,51 @@ def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
         if prompt:
             lines.append(f"- planner_replan_prompt: {prompt}")
     return "\n".join(lines)
+
+
+def _runtime_replan_task_core_message_lines(task_core: Mapping[str, Any]) -> list[str]:
+    lines = ["Task workspace:"]
+    workspace = (
+        task_core.get("workspace")
+        if isinstance(task_core.get("workspace"), Mapping)
+        else {}
+    )
+    workspace_title = str(
+        workspace.get("title") or workspace.get("workspace_id") or ""
+    ).strip()
+    if workspace_title:
+        lines.append(f"- workspace: {workspace_title}")
+    todos = [todo for todo in task_core.get("todos", []) if isinstance(todo, Mapping)]
+    if todos:
+        rendered = []
+        for todo in todos[:8]:
+            step_id = str(todo.get("step_id") or todo.get("todo_id") or "").strip()
+            status = str(todo.get("status") or "planned").strip()
+            tool = str(todo.get("tool_name") or "").strip()
+            parts = [part for part in (step_id, status, tool) if part]
+            if parts:
+                rendered.append(" · ".join(parts))
+        if rendered:
+            lines.append(f"- todos: {'; '.join(rendered)}")
+    checkpoints = [
+        checkpoint
+        for checkpoint in task_core.get("checkpoints", [])
+        if isinstance(checkpoint, Mapping)
+    ]
+    if checkpoints:
+        rendered = []
+        for checkpoint in checkpoints[:5]:
+            step_id = str(
+                checkpoint.get("after_step_id") or checkpoint.get("step_id") or ""
+            ).strip()
+            status = str(checkpoint.get("status") or "planned").strip()
+            title = str(checkpoint.get("title") or checkpoint.get("checkpoint_id") or "").strip()
+            parts = [part for part in (step_id, status, title) if part]
+            if parts:
+                rendered.append(" · ".join(parts))
+        if rendered:
+            lines.append(f"- checkpoints: {'; '.join(rendered)}")
+    return lines
 
 
 def _runtime_replan_message_preamble(planning_reason: str) -> list[str]:
@@ -5190,6 +5241,44 @@ def _runtime_replan_task_progress_summary(
     if workspace_items:
         summary["workspace_items"] = workspace_items
     return summary
+
+
+def _runtime_replan_task_core_payload(
+    replan_payloads: list[dict[str, Any]],
+    timeline: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if not timeline:
+        return {}
+    core_ids = {
+        str(payload.get("core_id") or "").strip()
+        for payload in replan_payloads
+        if isinstance(payload, Mapping) and str(payload.get("core_id") or "").strip()
+    }
+    plan_ids = {
+        str(payload.get("plan_id") or "").strip()
+        for payload in replan_payloads
+        if isinstance(payload, Mapping) and str(payload.get("plan_id") or "").strip()
+    }
+    for event in reversed(timeline):
+        if not isinstance(event, Mapping):
+            continue
+        if str(event.get("event") or "").strip() != "agent.task_core.created":
+            continue
+        event_payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+        core_id = str(event.get("core_id") or event_payload.get("core_id") or "").strip()
+        plan_id = str(event.get("plan_id") or event_payload.get("plan_id") or "").strip()
+        if core_ids and core_id and core_id not in core_ids:
+            continue
+        if plan_ids and plan_id and plan_id not in plan_ids:
+            continue
+        task_core = (
+            event_payload.get("task_core")
+            if isinstance(event_payload.get("task_core"), Mapping)
+            else {}
+        )
+        if task_core:
+            return dict(task_core)
+    return {}
 
 
 def _runtime_workspace_item_summaries(items: Any) -> list[dict[str, Any]]:
