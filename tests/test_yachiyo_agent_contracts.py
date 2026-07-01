@@ -1037,6 +1037,50 @@ def test_run_timeline_snapshot_synthesizes_scoped_workflow_replan_event() -> Non
     assert replan_event.payload["source_step_id"] == analysis_step.step_id
 
 
+def test_run_timeline_snapshot_synthesizes_replan_from_native_scoped_workflow_events() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+    analysis_step = next(
+        step for step in decision.plan.tool_plan.steps if step.tool_name == "data.analyze"
+    )
+    scoped_events = []
+    for event_type, payload in planner_run_event_payloads(decision):
+        scoped_type = {
+            "agent.intent.selected": "workflow.run.intent.selected",
+            "agent.plan.created": "workflow.run.plan.created",
+            "agent.task_core.created": "workflow.run.task_core.created",
+            "agent.plan.step": "workflow.run.plan.step",
+        }.get(event_type, event_type)
+        scoped_events.append({"event_type": scoped_type, "payload": payload})
+    scoped_events.append(
+        {
+            "event_type": "agent.tool.call",
+            "payload": {
+                "step_id": analysis_step.step_id,
+                "tool_name": "data.analyze",
+                "status": "failed",
+                "result": {"ok": False, "error": "empty result"},
+            },
+        }
+    )
+
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "workflow_run_id": "workflow-run-1",
+            "status": "failed",
+            "events": scoped_events,
+        }
+    )
+
+    replan_event = snapshot.events[-1]
+    assert replan_event.event_type == "workflow.run.replan.requested"
+    assert replan_event.payload["planner_event_type"] == "agent.replan.requested"
+    assert replan_event.payload["planner_scope"] == "workflow_run"
+    assert replan_event.payload["source_step_id"] == analysis_step.step_id
+
+
 def test_group_run_snapshot_synthesizes_scoped_replan_event() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",

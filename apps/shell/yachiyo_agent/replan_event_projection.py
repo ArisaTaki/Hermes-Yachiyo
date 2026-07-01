@@ -380,7 +380,45 @@ def _failure_trigger(event: PublicRunEvent) -> str:
 
 def _planner_event_type(event: PublicRunEvent) -> str:
     payload = event.payload if isinstance(event.payload, Mapping) else {}
-    return _text(payload.get("planner_event_type") or event.event_type)
+    explicit = _text(payload.get("planner_event_type"))
+    if explicit:
+        return explicit
+    return _canonical_planner_event_type(_text(event.event_type))
+
+
+_SCOPED_PLANNER_EVENT_TYPES = {
+    "group.run.intent.selected": "agent.intent.selected",
+    "group.run.plan.created": "agent.plan.created",
+    "group.run.task_core.created": "agent.task_core.created",
+    "group.run.plan.step": "agent.plan.step",
+    "group.run.plan.selection": "agent.plan.selection",
+    "group.run.replan.requested": "agent.replan.requested",
+    "group.run.task.workspace_item.updated": "agent.task.workspace_item.updated",
+    "group.run.task.todo.updated": "agent.task.todo.updated",
+    "group.run.task.checkpoint.updated": "agent.task.checkpoint.updated",
+    "workflow.intent.selected": "agent.intent.selected",
+    "workflow.plan.created": "agent.plan.created",
+    "workflow.task_core.created": "agent.task_core.created",
+    "workflow.plan.step": "agent.plan.step",
+    "workflow.plan.selection": "agent.plan.selection",
+    "workflow.replan.requested": "agent.replan.requested",
+    "workflow.task.workspace_item.updated": "agent.task.workspace_item.updated",
+    "workflow.task.todo.updated": "agent.task.todo.updated",
+    "workflow.task.checkpoint.updated": "agent.task.checkpoint.updated",
+    "workflow.run.intent.selected": "agent.intent.selected",
+    "workflow.run.plan.created": "agent.plan.created",
+    "workflow.run.task_core.created": "agent.task_core.created",
+    "workflow.run.plan.step": "agent.plan.step",
+    "workflow.run.plan.selection": "agent.plan.selection",
+    "workflow.run.replan.requested": "agent.replan.requested",
+    "workflow.run.task.workspace_item.updated": "agent.task.workspace_item.updated",
+    "workflow.run.task.todo.updated": "agent.task.todo.updated",
+    "workflow.run.task.checkpoint.updated": "agent.task.checkpoint.updated",
+}
+
+
+def _canonical_planner_event_type(event_type: str) -> str:
+    return _SCOPED_PLANNER_EVENT_TYPES.get(_text(event_type), _text(event_type))
 
 
 def _planner_scope(event: PublicRunEvent) -> str:
