@@ -509,7 +509,7 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
 
-    service.start_chat_task(
+    task = service.start_chat_task(
         StartChatTaskRequest(
             prompt="请分析 data/sales.csv 并输出报告",
             conversation_id="chat-1",
@@ -530,6 +530,15 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     assert metadata["yachiyo_plan_artifacts_expected"] == ["analysis-report.md"]
     assert metadata["yachiyo_plan_open_questions"] == []
     assert metadata["yachiyo_missing_capabilities"] == []
+    assert metadata["yachiyo_task_core"]["workspace"]["workspace_id"].startswith(
+        "task-workspace-"
+    )
+    assert [todo["step_id"] for todo in metadata["yachiyo_task_core"]["todos"]] == [
+        "analyze-data-file"
+    ]
+    assert task.task_core is not None
+    assert task.task_core.workspace.workspace_id == metadata["yachiyo_task_core"]["workspace"]["workspace_id"]
+    assert [todo.step_id for todo in task.task_core.todos] == ["analyze-data-file"]
 
 
 def test_yachiyo_agent_service_defaults_main_chat_entrypoint_metadata() -> None:

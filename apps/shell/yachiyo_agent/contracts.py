@@ -563,6 +563,7 @@ class AgentTaskSnapshot(_PublicSnapshot):
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     planner_summary: PlannerTraceSummarySnapshot | None = None
+    task_core: TaskCoreSnapshot | None = None
     open_in_studio_url: str | None = None
     created_at: str = ""
     updated_at: str = ""
@@ -620,6 +621,7 @@ class RunTimelineSnapshot(_PublicSnapshot):
     rerun_original_created_at: str | None = None
     rerun_original_updated_at: str | None = None
     planner_summary: PlannerTraceSummarySnapshot | None = None
+    task_core: TaskCoreSnapshot | None = None
     events: list[PublicRunEvent] = Field(default_factory=list)
     tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
     memory_traces: list[MemoryTraceSnapshot] = Field(default_factory=list)

@@ -668,6 +668,122 @@ def test_run_timeline_snapshot_projects_planner_summary_from_events() -> None:
     assert _json(snapshot)["planner_summary"]["artifacts_expected"] == ["markdown_report"]
 
 
+def test_agent_task_snapshot_projects_task_core_from_planner_metadata() -> None:
+    core_payload = {
+        "core_id": "task-core-1",
+        "workspace": {
+            "workspace_id": "task-workspace-1",
+            "title": "Analysis Workspace",
+            "items": [
+                {
+                    "item_id": "input-1",
+                    "title": "sales.csv",
+                    "kind": "input",
+                    "path": "sales.csv",
+                }
+            ],
+        },
+        "todos": [
+            {
+                "todo_id": "todo-1",
+                "title": "Run analysis",
+                "step_id": "run-analysis",
+                "tool_name": "data.analyze",
+            }
+        ],
+        "checkpoints": [
+            {
+                "checkpoint_id": "checkpoint-1",
+                "title": "Verify analysis",
+                "after_step_id": "run-analysis",
+            }
+        ],
+        "replan_signals": [
+            {
+                "signal_id": "replan-1",
+                "trigger": "tool_failure",
+                "source_step_id": "run-analysis",
+                "target": "data.analysis",
+            }
+        ],
+    }
+
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-1",
+            "run_id": "run-1",
+            "title": "Analyze data",
+            "status": "running",
+            "metadata": {"yachiyo_task_core": core_payload},
+        }
+    )
+
+    assert snapshot.task_core is not None
+    assert snapshot.task_core.core_id == "task-core-1"
+    assert snapshot.task_core.workspace.items[0].path == "sales.csv"
+    assert snapshot.task_core.todos[0].step_id == "run-analysis"
+    assert snapshot.task_core.checkpoints[0].after_step_id == "run-analysis"
+    assert snapshot.task_core.replan_signals[0].target == "data.analysis"
+
+
+def test_run_timeline_snapshot_projects_task_core_from_plan_event() -> None:
+    core_payload = {
+        "core_id": "task-core-1",
+        "workspace": {
+            "workspace_id": "task-workspace-1",
+            "title": "Report Workspace",
+            "items": [
+                {
+                    "item_id": "artifact-1",
+                    "title": "report.md",
+                    "kind": "artifact",
+                    "path": "report.md",
+                }
+            ],
+        },
+        "todos": [
+            {
+                "todo_id": "todo-1",
+                "title": "Write report",
+                "step_id": "write-report",
+                "tool_name": "artifact.write",
+            }
+        ],
+        "checkpoints": [],
+        "replan_signals": [],
+    }
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "status": "running",
+            "events": [
+                {
+                    "event_type": "agent.plan.created",
+                    "payload": {
+                        "source": "runtime_planner",
+                        "decision_id": "decision-1",
+                        "plan": {
+                            "plan_id": "plan-1",
+                            "intent": {
+                                "intent_id": "intent-1",
+                                "kind": "report_generation",
+                                "title": "Write report",
+                            },
+                            "tool_plan": {"steps": []},
+                            "task_core": core_payload,
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert snapshot.task_core is not None
+    assert snapshot.task_core.core_id == "task-core-1"
+    assert snapshot.task_core.workspace.items[0].kind == "artifact"
+    assert snapshot.task_core.todos[0].tool_name == "artifact.write"
+
+
 def test_planner_summary_redacts_followup_target_secret_fields() -> None:
     snapshot = run_timeline_snapshot_from_payload(
         {
@@ -787,6 +903,7 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
         "artifacts",
         "metadata",
         "planner_summary",
+        "task_core",
         "open_in_studio_url",
         "created_at",
         "updated_at",
@@ -2549,6 +2666,7 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
         "rerun_original_created_at",
         "rerun_original_updated_at",
         "planner_summary",
+        "task_core",
         "events",
         "tool_calls",
         "memory_traces",

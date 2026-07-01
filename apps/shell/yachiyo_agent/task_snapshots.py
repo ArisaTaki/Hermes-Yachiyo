@@ -26,6 +26,7 @@ from .links import studio_run_url
 from .recovery_actions import RECOVERY_RETRY_CONTEXT_EVENT_TYPE
 from .timeline_metadata_snapshots import planner_trace_summary_from_payload
 from .tool_call_snapshots import tool_call_snapshots_from_payloads
+from .task_core_snapshots import task_core_snapshot_from_payload
 
 _ACTIVE_TASK_STATUSES = {"queued", "running", "waiting_approval"}
 _PLANNED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_planned"
@@ -147,6 +148,7 @@ def agent_task_snapshot_from_payload(
                 "events": recent_events,
             }
         ),
+        task_core=task_core_snapshot_from_payload(payload, events=all_events),
         open_in_studio_url=_optional_text(payload.get("open_in_studio_url"))
         or studio_run_url(run_id, group_run_id=group_run_id),
         created_at=_text(payload.get("created_at")),

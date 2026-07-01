@@ -28,6 +28,7 @@ from .ports import ChatTaskStarter, RuntimePort
 from .runtime_planner import RuntimePlanner
 from .run_snapshots import run_timeline_snapshot_from_payload
 from .task_cards import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
+from .task_core_snapshots import task_core_snapshot_from_payload
 from .task_snapshots import _chat_task_tool_calls
 from .tool_call_snapshots import tool_call_snapshots_from_payloads
 
@@ -230,7 +231,13 @@ def _task_with_request_metadata(
     if not isinstance(redacted, Mapping):
         return task
     merged = {**dict(redacted), **dict(task.metadata or {})}
-    return task.model_copy(update={"metadata": merged})
+    return task.model_copy(
+        update={
+            "metadata": merged,
+            "task_core": task.task_core
+            or task_core_snapshot_from_payload({"metadata": merged}),
+        }
+    )
 
 
 def _payload_run_id(payload: Any) -> str:

@@ -24,6 +24,7 @@ from .contracts import (
     RunTimelineSnapshot,
 )
 from .task_snapshots import run_events_from_payload, task_status_from_value
+from .task_core_snapshots import task_core_snapshot_from_payload
 from .timeline_metadata_snapshots import (
     merge_timeline_child_snapshots,
     planner_trace_summary_from_payload,
@@ -86,6 +87,7 @@ def run_timeline_snapshot_from_payload(
         rerun_original_created_at=rerun_provenance.get("rerun_original_created_at"),
         rerun_original_updated_at=rerun_provenance.get("rerun_original_updated_at"),
         planner_summary=planner_trace_summary_from_payload(payload),
+        task_core=task_core_snapshot_from_payload(payload, events=events),
         events=events,
         tool_calls=tool_call_snapshots_from_payloads(
             payload.get("tool_calls"),

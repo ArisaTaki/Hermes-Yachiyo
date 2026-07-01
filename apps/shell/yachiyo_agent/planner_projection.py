@@ -61,6 +61,8 @@ def runtime_planner_metadata(
         "yachiyo_required_capabilities": _required_capability_ids(decision),
         "yachiyo_missing_capabilities": list(tool_plan.missing_capabilities),
     }
+    if decision.plan.task_core is not None:
+        payload["yachiyo_task_core"] = decision.plan.task_core.model_dump(mode="json")
     followup_target = _selection_followup_target_payload(decision)
     if followup_target:
         payload["yachiyo_followup_target"] = followup_target
