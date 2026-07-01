@@ -445,13 +445,7 @@ def refresh_local_rc_signoff(
         batch_command = [
             sys.executable,
             "scripts/verify_release_candidate.py",
-            "--require-artifacts",
-            "--check-dmg-mount",
-            "--check-gatekeeper-readiness",
-            "--run-packaged-backend-bridge-smoke",
-            "--run-dmg-app-smoke",
-            "--run-dmg-ui-sampling-smoke",
-            "--run-dmg-chat-native-file-smoke",
+            "--run-full-local-native-agent-rc",
             "--report-json",
             str(batch_report.relative_to(ROOT)),
         ]
@@ -937,7 +931,8 @@ def main(argv: list[str] | None = None) -> int:
         action="store_true",
         help=(
             "Include opt-in real desktop app open, UI inspection, and interaction "
-            "smokes in the source capability report."
+            "smokes in the source capability and public-demo reports. The packaged "
+            "batch report always uses the full local Native Agent RC bundle."
         ),
     )
     parser.add_argument("--skip-screen-smoke", action="store_true")

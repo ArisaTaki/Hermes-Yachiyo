@@ -111,13 +111,7 @@ def test_refresh_local_rc_signoff_runs_batch_screen_draft_and_preview(
     assert commands[1][0] == [
         sys.executable,
         "scripts/verify_release_candidate.py",
-        "--require-artifacts",
-        "--check-dmg-mount",
-        "--check-gatekeeper-readiness",
-        "--run-packaged-backend-bridge-smoke",
-        "--run-dmg-app-smoke",
-        "--run-dmg-ui-sampling-smoke",
-        "--run-dmg-chat-native-file-smoke",
+        "--run-full-local-native-agent-rc",
         "--report-json",
         "tmp/rc-verification-abc12345-packaged-batch.json",
     ]
@@ -606,13 +600,7 @@ def test_refresh_local_rc_signoff_does_not_reuse_failed_batch_report(
     assert commands[0][0] == [
         sys.executable,
         "scripts/verify_release_candidate.py",
-        "--require-artifacts",
-        "--check-dmg-mount",
-        "--check-gatekeeper-readiness",
-        "--run-packaged-backend-bridge-smoke",
-        "--run-dmg-app-smoke",
-        "--run-dmg-ui-sampling-smoke",
-        "--run-dmg-chat-native-file-smoke",
+        "--run-full-local-native-agent-rc",
         "--report-json",
         "tmp/rc-verification-abc12345-packaged-batch.json",
     ]
