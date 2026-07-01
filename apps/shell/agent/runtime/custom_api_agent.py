@@ -6185,13 +6185,14 @@ def _model_followup_desktop_discovered_app_instruction(target: Mapping[str, Any]
             if _discovered_app_search_submit_requested(app_search)
             else ""
         )
+        result_text = _model_followup_app_search_result_instruction(app_search)
         return (
             f"The runtime discovered an app for {app_query!r}. Continue by using desktop "
             "tools to focus the discovered app's search field, type the explicit user "
             f"search query {search_query!r},{submit_text} and then continue from the observed "
-            f"result. Prefer {tool_text}.{verify_text} If search-field focus or text input "
-            "tools are unavailable, explain the missing capability instead of claiming the "
-            "app search was completed. "
+            f"result.{result_text} Prefer {tool_text}.{verify_text} If search-field focus "
+            "or text input tools are unavailable, explain the missing capability instead "
+            "of claiming the app search was completed. "
         )
     communication_compose = (
         target.get("communication_compose")
@@ -6274,6 +6275,31 @@ def _model_followup_desktop_discovered_app_instruction(target: Mapping[str, Any]
         f"The runtime discovered an app for {app_query!r}. Continue the requested desktop action "
         f"with safe app or foreground tools next. Prefer {tool_text}.{verify_text} "
     )
+
+
+def _model_followup_app_search_result_instruction(app_search: Mapping[str, Any]) -> str:
+    result_selection = _discovered_app_search_result_selection(app_search)
+    action = str(result_selection.get("action") or "").strip()
+    if action == "click":
+        tool_name = str(result_selection.get("tool") or "desktop.click_ui_element").strip()
+        raw_input = (
+            result_selection.get("input")
+            if isinstance(result_selection.get("input"), Mapping)
+            else {}
+        )
+        target = str(raw_input.get("target") or "the requested result").strip()
+        return (
+            f" Then select the requested app-search result {target!r} with {tool_name}; "
+            "if that click tool requires approval, pause for approval instead of claiming "
+            "the result was opened. "
+        )
+    if action == "key_confirm":
+        return (
+            " Then use desktop.safe_key for the requested navigation key and request the "
+            "approval-gated desktop.submit_foreground confirm action; do not claim the "
+            "result was opened until the approval-gated confirm tool has executed. "
+        )
+    return " "
 
 
 def _model_followup_discovered_media_playback_instruction(target: Mapping[str, Any]) -> str:

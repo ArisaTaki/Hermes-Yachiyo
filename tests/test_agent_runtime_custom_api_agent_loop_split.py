@@ -2695,6 +2695,100 @@ def test_model_followup_context_instructs_generated_app_write() -> None:
     ) == {}
 
 
+def test_model_followup_context_instructs_discovered_app_search_result_selection() -> None:
+    payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "desktop.list_apps",
+                "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
+            }
+        ],
+        {
+            "intent_kind": "desktop_operation",
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "image",
+                "target_action": "app_search",
+                "safe_shortcut_action": "find",
+                "app_search": {
+                    "query": "logo 模板",
+                    "submit": True,
+                    "result_selection": {
+                        "action": "click",
+                        "tool": "desktop.click_ui_element",
+                        "input": {"target": "第一个结果", "click_count": 1},
+                    },
+                },
+            },
+        },
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+        timeline=[],
+    )
+    message = custom_api_agent_module._model_followup_context_message(payload)
+
+    assert payload["followup_target"]["app_search"]["result_selection"]["action"] == "click"
+    assert "search query 'logo 模板'" in message
+    assert "select the requested app-search result '第一个结果'" in message
+    assert "desktop.click_ui_element" in message
+    assert "pause for approval" in message
+
+    confirm_payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "desktop.list_apps",
+                "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
+            }
+        ],
+        {
+            "intent_kind": "desktop_operation",
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "image",
+                "target_action": "app_search",
+                "safe_shortcut_action": "find",
+                "app_search": {
+                    "query": "logo 模板",
+                    "submit": True,
+                    "submit_action": "confirm",
+                    "result_selection": {
+                        "action": "key_confirm",
+                        "key": {"tool": "desktop.safe_key", "input": {"action": "arrow_down"}},
+                        "confirm": {
+                            "tool": "desktop.submit_foreground",
+                            "input": {"action": "confirm"},
+                        },
+                    },
+                },
+            },
+        },
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.safe_key",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+        timeline=[],
+    )
+    confirm_message = custom_api_agent_module._model_followup_context_message(confirm_payload)
+
+    assert "desktop.safe_key" in confirm_message
+    assert "approval-gated desktop.submit_foreground confirm" in confirm_message
+    assert "until the approval-gated confirm tool has executed" in confirm_message
+
+
 def test_model_followup_context_instructs_generated_discovered_app_write() -> None:
     payload = custom_api_agent_module._model_followup_context_payload(
         [
