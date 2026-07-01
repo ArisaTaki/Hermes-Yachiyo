@@ -82,21 +82,28 @@ def approval_snapshots_from_events(
 
 
 def approval_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
-    if event.event_type in {
+    event_type = _text(event.event_type)
+    if event_type in {
         "agent.tool.approval_required",
+        "agent.desktop.intent_approval_required",
         "approval.required",
         "group.approval_required",
+        "group.run.approval_required",
         "group.member.approval_required",
         "tool.approval_required",
         "workflow.node.approval_required",
         "workflow.run.approval_required",
-    }:
+    } or _is_approval_required_event_type(event_type):
         return _approval_required_payload_from_event(event)
-    if event.event_type in {
+    if event_type in {
         "agent.tool.approval_approved",
         "agent.tool.approval_rejected",
         "agent.tool.approval_timeout",
         "agent.tool.approval_cancelled",
+        "group.run.approval_approved",
+        "group.run.approval_rejected",
+        "group.run.approval_timeout",
+        "group.run.approval_cancelled",
         "approval.approved",
         "approval.cancelled",
         "approval.rejected",
@@ -108,9 +115,24 @@ def approval_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         "workflow.node.approval_cancelled",
         "workflow.node.approval_rejected",
         "workflow.node.approval_timeout",
-    }:
+    } or _is_approval_resolution_event_type(event_type):
         return _approval_resolution_payload_from_event(event)
     return {}
+
+
+def _is_approval_required_event_type(event_type: str) -> bool:
+    return event_type.endswith(".approval_required") or event_type.endswith(
+        ".intent_approval_required"
+    )
+
+
+def _is_approval_resolution_event_type(event_type: str) -> bool:
+    return (
+        event_type.endswith(".approval_approved")
+        or event_type.endswith(".approval_rejected")
+        or event_type.endswith(".approval_timeout")
+        or event_type.endswith(".approval_cancelled")
+    )
 
 
 def merge_trace_context_into_approval(source: dict[str, Any], payload: dict[str, Any]) -> None:

@@ -1025,7 +1025,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     const plannerEventType = runtimePlannerEventType(eventType);
     const payload = objectRecord(event.payload);
     const eventCapabilityRecovery = plannerCapabilityRecoveriesFromPayload(payload);
-    const isRuntimePlannerDesktopIntentEvent = eventType === 'agent.desktop.intent_planned'
+    const isRuntimePlannerDesktopIntentEvent = runtimePlannerDesktopIntentEventType(eventType)
       && runtimePlannerDesktopIntentPayload(payload);
     if (!plannerEventType && !isRuntimePlannerDesktopIntentEvent && !eventCapabilityRecovery.length) continue;
     eventCount += 1;
@@ -1419,6 +1419,15 @@ function runtimePlannerEventType(eventType: string): string {
   return '';
 }
 
+function runtimePlannerDesktopIntentEventType(eventType: string): boolean {
+  return eventType === 'agent.desktop.intent_planned'
+    || eventType === 'agent.desktop.intent_approval_required'
+    || eventType === 'group.run.desktop.intent_planned'
+    || eventType === 'group.run.desktop.intent_approval_required'
+    || eventType === 'workflow.run.desktop.intent_planned'
+    || eventType === 'workflow.run.desktop.intent_approval_required';
+}
+
 function addPlannerStep(stepById: Map<string, ToolPlanStepSnapshot>, step: ToolPlanStepSnapshot) {
   const key = step.step_id || `${step.capability_id}:${step.tool_name || step.title}`;
   stepById.set(key, step);
@@ -1439,17 +1448,24 @@ function desktopIntentPlanStepFromPayload(
   const planningReason = stringValue(payload.planning_reason) || stringValue(payload.reason);
   if (!toolName && !detail && !planningReason) return null;
   const inputPreview = objectRecord(payload.input_preview);
+  const status = stringValue(payload.status) || 'planned';
+  const approvalRequired = booleanValue(
+    payload.approval_required,
+    status === 'approval_required' || status === 'waiting_approval' || status === 'requires_approval',
+  );
   return {
-    step_id: `desktop-intent-${ordinal}-${slugValue(toolName || detail || planningReason || 'tool')}`,
+    step_id: stringValue(payload.step_id)
+      || stringValue(payload.planner_step_id)
+      || `desktop-intent-${ordinal}-${slugValue(toolName || detail || planningReason || 'tool')}`,
     title: desktopPlannedStepTitle(toolName, detail),
     capability_id: desktopCapabilityForTool(toolName),
     action: planningReason || toolName || 'desktop_intent',
     tool_name: toolName || null,
     input_preview: Object.keys(inputPreview).length ? inputPreview : undefined,
     risk_level: stringValue(payload.risk_level) || 'medium',
-    approval_required: booleanValue(payload.approval_required, false),
+    approval_required: approvalRequired,
     reason: planningReason || 'runtime planner desktop intent event',
-    status: stringValue(payload.status) || 'planned',
+    status,
   };
 }
 

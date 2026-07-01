@@ -130,6 +130,8 @@ _WORKFLOW_PLANNER_EVENT_TYPES = {
     "agent.plan.step": "workflow.run.plan.step",
     "agent.plan.selection": "workflow.run.plan.selection",
     "agent.replan.requested": "workflow.run.replan.requested",
+    "agent.tool.approval_required": "workflow.run.tool.approval_required",
+    "agent.desktop.intent_approval_required": "workflow.run.desktop.intent_approval_required",
     "agent.task.workspace_item.updated": "workflow.run.task.workspace_item.updated",
     "agent.task.todo.updated": "workflow.run.task.todo.updated",
     "agent.task.checkpoint.updated": "workflow.run.task.checkpoint.updated",

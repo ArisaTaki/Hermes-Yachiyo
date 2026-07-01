@@ -534,6 +534,8 @@ _GROUP_PLANNER_EVENT_TYPES = {
     "agent.plan.step": "group.run.plan.step",
     "agent.plan.selection": "group.run.plan.selection",
     "agent.replan.requested": "group.run.replan.requested",
+    "agent.tool.approval_required": "group.run.tool.approval_required",
+    "agent.desktop.intent_approval_required": "group.run.desktop.intent_approval_required",
     "agent.task.workspace_item.updated": "group.run.task.workspace_item.updated",
     "agent.task.todo.updated": "group.run.task.todo.updated",
     "agent.task.checkpoint.updated": "group.run.task.checkpoint.updated",

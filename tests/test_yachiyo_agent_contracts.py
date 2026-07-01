@@ -1252,6 +1252,152 @@ def test_workflow_run_snapshot_scopes_agent_planner_events_to_workflow_run() -> 
     assert task_core_event.payload["task_core"]["workspace"]["title"] == "Workflow Workspace"
 
 
+def test_run_timeline_snapshot_projects_desktop_approval_event() -> None:
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-approval-1",
+            "status": "approval_required",
+            "events": [
+                {
+                    "event_type": "agent.task_core.created",
+                    "payload": {"task_core": _desktop_approval_task_core_payload()},
+                },
+                {
+                    "event_type": "agent.desktop.intent_approval_required",
+                    "payload": _desktop_approval_event_payload("approval-1"),
+                },
+            ],
+        }
+    )
+
+    assert snapshot.pending_approval is not None
+    assert snapshot.pending_approval.approval_id == "approval-1"
+    assert snapshot.pending_approval.tool_name == "desktop.click_ui_element"
+    assert snapshot.pending_approval.step_id == "operate-foreground-ui"
+    assert snapshot.pending_approval.capability_id == "desktop.ui_operation"
+    assert snapshot.pending_approval.plan_id == "runtime-plan-1"
+    assert snapshot.task_core is not None
+    assert snapshot.task_core.todos[0].status == "blocked"
+    assert snapshot.task_core.checkpoints[0].status == "waiting_approval"
+
+
+def test_group_and_workflow_snapshots_scope_desktop_approval_events() -> None:
+    group_snapshot = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-approval-1",
+            "group_id": "group-1",
+            "status": "approval_required",
+            "objective": "Operate desktop as a group",
+            "events": [
+                {
+                    "event_type": "agent.task_core.created",
+                    "payload": {"task_core": _desktop_approval_task_core_payload()},
+                },
+                {
+                    "event_type": "agent.desktop.intent_approval_required",
+                    "payload": _desktop_approval_event_payload("approval-group-1"),
+                },
+            ],
+        }
+    )
+    workflow_snapshot = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-approval-1",
+            "workflow_run_id": "workflow-run-approval-1",
+            "workflow_id": "workflow-1",
+            "status": "approval_required",
+            "objective": "Operate desktop in workflow",
+            "events": [
+                {
+                    "event_type": "agent.task_core.created",
+                    "payload": {"task_core": _desktop_approval_task_core_payload()},
+                },
+                {
+                    "event_type": "agent.desktop.intent_approval_required",
+                    "payload": {
+                        **_desktop_approval_event_payload("approval-workflow-1"),
+                        "workflow_id": "workflow-1",
+                        "workflow_run_id": "workflow-run-approval-1",
+                    },
+                },
+            ],
+        }
+    )
+
+    group_event_types = [event.event_type for event in group_snapshot.events]
+    assert "group.run.desktop.intent_approval_required" in group_event_types
+    assert group_snapshot.pending_approvals[0].group_run_id == "group-run-approval-1"
+    assert group_snapshot.pending_approvals[0].step_id == "operate-foreground-ui"
+    assert group_snapshot.task_core is not None
+    assert group_snapshot.task_core.todos[0].metadata["runtime_event_type"] == (
+        "group.run.desktop.intent_approval_required"
+    )
+
+    workflow_event_types = [event.event_type for event in workflow_snapshot.events]
+    assert "workflow.run.desktop.intent_approval_required" in workflow_event_types
+    assert workflow_snapshot.pending_approval is not None
+    assert workflow_snapshot.pending_approval.workflow_run_id == "workflow-run-approval-1"
+    assert workflow_snapshot.pending_approval.step_id == "operate-foreground-ui"
+    assert workflow_snapshot.task_core is not None
+    assert workflow_snapshot.task_core.todos[0].metadata["runtime_event_type"] == (
+        "workflow.run.desktop.intent_approval_required"
+    )
+
+
+def _desktop_approval_task_core_payload() -> dict:
+    return {
+        "core_id": "task-core-desktop-approval",
+        "workspace": {
+            "workspace_id": "task-workspace-desktop",
+            "title": "Desktop Workspace",
+            "items": [
+                {
+                    "item_id": "desktop-ui-target",
+                    "title": "Foreground UI",
+                    "kind": "app",
+                    "source_step_id": "operate-foreground-ui",
+                }
+            ],
+        },
+        "todos": [
+            {
+                "todo_id": "todo-operate-foreground-ui",
+                "title": "Operate foreground UI",
+                "step_id": "operate-foreground-ui",
+                "capability_id": "desktop.ui_operation",
+                "tool_name": "desktop.click_ui_element",
+                "approval_required": True,
+            }
+        ],
+        "checkpoints": [
+            {
+                "checkpoint_id": "checkpoint-foreground-ui",
+                "title": "Verify foreground UI",
+                "after_step_id": "operate-foreground-ui",
+            }
+        ],
+        "replan_signals": [],
+    }
+
+
+def _desktop_approval_event_payload(approval_id: str) -> dict:
+    return {
+        "tool": "desktop.click_ui_element",
+        "status": "approval_required",
+        "source": "runtime_planner",
+        "planning_reason": "planner_policy_gate",
+        "approval_id": approval_id,
+        "risk_level": "medium",
+        "input_preview": {"label": "Play"},
+        "step_id": "operate-foreground-ui",
+        "capability_id": "desktop.ui_operation",
+        "decision_id": "decision-1",
+        "plan_id": "runtime-plan-1",
+        "tool_plan_id": "tool-plan-1",
+        "intent_kind": "desktop_operation",
+    }
+
+
 def test_planner_summary_redacts_followup_target_secret_fields() -> None:
     snapshot = run_timeline_snapshot_from_payload(
         {
