@@ -11108,6 +11108,26 @@ def _task_workspace_items(
                 metadata={"planned_artifact": artifact},
             )
         )
+    for step in steps:
+        if not step.input_preview:
+            continue
+        items.append(
+            TaskWorkspaceItemSnapshot(
+                item_id=_stable_id("workspace-step-input", intent.intent_id, step.step_id),
+                title=f"{step.step_id}.input.json",
+                kind="scratch",
+                source_step_id=step.step_id,
+                description=_tool_input_preview(step.input_preview),
+                status="blocked" if step.status == "unavailable" else "planned",
+                metadata={
+                    "planner_step_id": step.step_id,
+                    "capability_id": step.capability_id,
+                    "tool_name": step.tool_name or "",
+                    "approval_required": step.approval_required,
+                    "input_preview": dict(step.input_preview),
+                },
+            )
+        )
     for question in open_questions:
         items.append(
             TaskWorkspaceItemSnapshot(

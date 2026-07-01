@@ -1704,6 +1704,18 @@ def test_runtime_planner_emits_deepagent_style_task_core() -> None:
         and item.source_step_id == "write-analysis-artifact"
         for item in task_core.workspace.items
     )
+    run_input = next(
+        item
+        for item in task_core.workspace.items
+        if item.title == "run-analysis.input.json"
+    )
+    assert run_input.kind == "scratch"
+    assert run_input.source_step_id == "run-analysis"
+    assert run_input.metadata["tool_name"] == "terminal.run"
+    assert run_input.metadata["approval_required"] is True
+    assert run_input.metadata["input_preview"] == {
+        "command": "python - <<'PY'\n# inspect data, compute summary, generate charts\nPY"
+    }
     assert [checkpoint.after_step_id for checkpoint in task_core.checkpoints[:3]] == [
         "inspect-data-source",
         "run-analysis",
