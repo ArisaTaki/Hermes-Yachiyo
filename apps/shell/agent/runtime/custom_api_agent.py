@@ -345,6 +345,12 @@ class RuntimeCustomApiAgentLoop:
                         ),
                     )
                     raise
+                self._record_runtime_planner_replan_events(
+                    runtime_planner_decision,
+                    timeline=timeline,
+                    tool_timeline_start=tool_timeline_start,
+                    run_id=run_id,
+                )
                 continue_to_model = any(
                     bool(request.get("continue_to_model"))
                     for request in planned_tool_requests
@@ -1219,6 +1225,75 @@ class RuntimeCustomApiAgentLoop:
         )
         if run_id and self._append_run_event is not None:
             self._append_run_event(run_id, "agent.plan.selection", event_payload)
+
+    def _record_runtime_planner_replan_events(
+        self,
+        decision: Any,
+        *,
+        timeline: list[dict[str, Any]],
+        tool_timeline_start: int,
+        run_id: str = "",
+    ) -> None:
+        if decision is None:
+            return
+        try:
+            from apps.shell.yachiyo_agent.planner_projection import (
+                planner_replan_timeline_event,
+            )
+        except Exception:
+            return
+        existing_request_ids = {
+            str(
+                (
+                    event.get("payload")
+                    if isinstance(event.get("payload"), dict)
+                    else {}
+                ).get("request_id")
+                or ""
+            )
+            for event in timeline
+            if isinstance(event, dict)
+            and str(event.get("event") or "").strip() == "agent.replan.requested"
+        }
+        for event in list(timeline[tool_timeline_start:]):
+            if not isinstance(event, dict):
+                continue
+            if str(event.get("event") or "").strip() != "agent.tool.call":
+                continue
+            result = event.get("result") if isinstance(event.get("result"), dict) else {}
+            if not _tool_result_requests_replan(result):
+                continue
+            tool_name = str(event.get("detail") or "").strip()
+            failure_payload = {
+                "event_type": "agent.tool.call",
+                "tool_name": tool_name,
+                "input_preview": (
+                    event.get("input_preview")
+                    if isinstance(event.get("input_preview"), dict)
+                    else {}
+                ),
+                "result": result,
+            }
+            replan_event = planner_replan_timeline_event(
+                decision,
+                failure_payload,
+                run_id=run_id,
+            )
+            if not replan_event:
+                continue
+            payload = (
+                replan_event.get("payload")
+                if isinstance(replan_event.get("payload"), dict)
+                else {}
+            )
+            request_id = str(payload.get("request_id") or "").strip()
+            if request_id and request_id in existing_request_ids:
+                continue
+            if request_id:
+                existing_request_ids.add(request_id)
+            timeline.append(replan_event)
+            if run_id and self._append_run_event is not None:
+                self._append_run_event(run_id, "agent.replan.requested", dict(payload))
 
     def _record_unavailable_desktop_intent(
         self,
@@ -3701,6 +3776,26 @@ def _selection_payload_with_timeline_fallback(
         }
         return {**event_payload, **payload, "followup_target": dict(target)}
     return payload
+
+
+def _tool_result_requests_replan(result: Mapping[str, Any]) -> bool:
+    if not isinstance(result, Mapping):
+        return False
+    if result.get("ok") is True:
+        return False
+    if result.get("approval_required") or result.get("blocked_by_user_goal"):
+        return False
+    if result.get("ok") is False:
+        return True
+    if str(result.get("error") or "").strip():
+        return True
+    returncode = result.get("returncode")
+    if returncode not in (None, "", 0, "0"):
+        return True
+    exit_code = result.get("exit_code")
+    if exit_code not in (None, "", 0, "0"):
+        return True
+    return False
 
 
 def _model_followup_context_message(payload: dict[str, Any]) -> str:

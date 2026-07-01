@@ -65,6 +65,7 @@ _PLANNER_EVENT_TYPES = {
     "agent.plan.created",
     "agent.plan.step",
     "agent.plan.selection",
+    "agent.replan.requested",
 }
 
 
@@ -1441,6 +1442,115 @@ def test_custom_api_agent_loop_surfaces_builtin_data_analysis_followup_context()
     assert "Observed content snapshot:" in model_calls[0][-1]["content"]
     assert "Data analysis result for data/sales.csv (csv)." in model_calls[0][-1]["content"]
     assert "Artifacts: analysis-report.md (markdown), analysis-chart.png (chart)" in model_calls[0][-1]["content"]
+
+
+def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_failure() -> None:
+    budget = FakeBudget()
+    tool_runs: list[dict[str, Any]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    run_events: list[dict[str, Any]] = []
+    timeline: list[dict[str, Any]] = []
+    messages = [{"role": "user", "content": "请分析 data/sales.csv 并输出报告"}]
+
+    def fake_run_tool_requests(
+        tool_requests,
+        allowed_tools,
+        broker,
+        messages_arg,
+        timeline_arg,
+        artifacts,
+        **kwargs,
+    ):
+        tool_runs.append(
+            {
+                "tool_requests": tool_requests,
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": messages_arg,
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        request = tool_requests[0]
+        input_preview = request.get("input") if isinstance(request.get("input"), dict) else {}
+        timeline_arg.append(
+            _timeline(
+                "agent.tool.call",
+                str(request.get("tool") or ""),
+                input_preview=input_preview,
+                result={
+                    "ok": False,
+                    "error": "unsupported chart type",
+                    "hint": "fall back to python analysis",
+                },
+            )
+        )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {"base_url": "https://model.local", "model": "m", "api_key": "k"},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["data.analyze", "terminal.run", "artifact.write"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner for data analysis.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": "analysis fallback noted"},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=fake_run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+
+    result = loop.run(
+        {"name": "Analyst"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-data-replan",
+    )
+
+    assert str(result) == "桌面操作未完成：unsupported chart type。"
+    assert model_calls == []
+    assert tool_runs[0]["tool_requests"][0]["tool"] == "data.analyze"
+    replan_events = [
+        event for event in timeline if event["event"] == "agent.replan.requested"
+    ]
+    assert len(replan_events) == 1
+    payload = replan_events[0]["payload"]
+    assert payload["trigger"] == "tool_failure"
+    assert payload["run_id"] == "run-data-replan"
+    assert payload["source_step_id"] == "analyze-data-file"
+    assert payload["source_tool_name"] == "data.analyze"
+    assert payload["target_capability_id"] == "data.analysis"
+    assert payload["fallback_tools"] == ["terminal.run"]
+    assert payload["failure_event_type"] == "agent.tool.call"
+    assert "unsupported chart type" in payload["failure_detail"]
+    assert "terminal.run" in payload["replan_prompt"]
+    assert any(
+        event["event_type"] == "agent.replan.requested"
+        and event["payload"]["request_id"] == payload["request_id"]
+        for event in run_events
+    )
 
 
 def test_custom_api_agent_loop_writes_data_analysis_report_to_target_app() -> None:
