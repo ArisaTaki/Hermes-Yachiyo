@@ -3639,6 +3639,89 @@ def test_model_followup_pending_plan_auto_dispatches_discovered_app_hotkeys() ->
     ]
 
 
+def test_model_followup_pending_plan_dispatches_short_multi_step_workflow() -> None:
+    pending_steps = [
+        {
+            "step_id": "type-selected-recipient",
+            "tool_name": "app.focus_and_type_into_ui_element",
+            "capability_id": "desktop.ui_operation",
+            "input_preview": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "messaging",
+                "target": "recipient",
+                "text": "Alice",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        },
+        {
+            "step_id": "submit-selected-recipient",
+            "tool_name": "desktop.search_submit",
+            "capability_id": "desktop.ui_operation",
+            "input_preview": {},
+        },
+        {
+            "step_id": "type-selected-body",
+            "tool_name": "app.focus_and_type_into_ui_element",
+            "capability_id": "desktop.ui_operation",
+            "input_preview": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "messaging",
+                "target": "message",
+                "text": "hello",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        },
+        {
+            "step_id": "send-selected-message",
+            "tool_name": "desktop.submit_foreground",
+            "capability_id": "desktop.ui_operation",
+            "input_preview": {"action": "send"},
+        },
+        {
+            "step_id": "verify-selected-message",
+            "tool_name": "screen.capture",
+            "capability_id": "desktop.visual_verification",
+            "input_preview": {"reason": "verify selected discovered app action"},
+        },
+    ]
+
+    requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            "planning_reason": "planner_discovered_app_followup",
+            "pending_plan_steps": pending_steps,
+        },
+        [
+            "app.focus_and_type_into_ui_element",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "screen.capture",
+        ],
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus_and_type_into_ui_element",
+        "desktop.submit_foreground",
+        "screen.capture",
+    ]
+    assert [request["step_id"] for request in requests] == [
+        "type-selected-recipient",
+        "submit-selected-recipient",
+        "type-selected-body",
+        "send-selected-message",
+        "verify-selected-message",
+    ]
+    assert all(
+        request["planning_reason"] == "planner_discovered_app_followup"
+        for request in requests
+    )
+
+
 def test_model_followup_context_discovers_generic_communication_app_after_analysis() -> None:
     target = {
         "kind": "desktop_discovered_app_action",

@@ -7330,6 +7330,8 @@ _MODEL_FOLLOWUP_AUTO_PENDING_TOOLS = {
     "screen.capture",
 }
 
+_MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS = 6
+
 
 def _model_followup_pending_plan_requests(
     followup_context: Mapping[str, Any] | None,
@@ -7358,7 +7360,7 @@ def _model_followup_pending_plan_requests(
                 break
             continue
         requests.append(request)
-        if len(requests) >= 3:
+        if len(requests) >= _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS:
             break
     return requests
 
