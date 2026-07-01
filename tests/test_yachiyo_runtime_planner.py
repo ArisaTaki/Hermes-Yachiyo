@@ -18530,6 +18530,44 @@ def test_runtime_planner_keeps_current_and_global_desktop_scopes_generic() -> No
         },
     ]
 
+    generic_available_click_decision = RuntimePlanner().decision(
+        "在任意可用的应用里点击导出按钮",
+        allowed_tools=["desktop.running_apps", "desktop.click_ui_element", "desktop.ui_elements"],
+    )
+    assert generic_available_click_decision.selected_intent.kind == "desktop_operation"
+    assert generic_available_click_decision.selected_intent.inputs["app_name_hint"] == ""
+    assert planner_tool_requests(
+        "在任意可用的应用里点击导出按钮",
+        ["desktop.running_apps", "desktop.click_ui_element", "desktop.ui_elements"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "导出",
+                "role_filter": "button",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
 
 def test_runtime_planner_cleans_desktop_app_surface_qualifiers() -> None:
     slack_ui = RuntimePlanner().decision(

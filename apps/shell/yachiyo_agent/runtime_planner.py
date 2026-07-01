@@ -13880,6 +13880,42 @@ def _looks_like_foreground_text_scope(value: str) -> bool:
 def _is_generic_foreground_app_label(value: str) -> bool:
     clean = str(value or "").strip().lower()
     normalized = re.sub(r"[\s._·-]+", "", clean)
+    qualifier_only = {
+        "可用",
+        "可用的",
+        "任意可用",
+        "任意可用的",
+        "任何可用",
+        "任何可用的",
+        "可使用",
+        "可使用的",
+        "能用",
+        "能用的",
+        "合适",
+        "合适的",
+        "适合",
+        "适合的",
+        "推荐",
+        "推荐的",
+        "available",
+        "anyavailable",
+        "someavailable",
+        "default",
+        "suitable",
+        "best",
+        "usable",
+        "installed",
+        "local",
+    }
+    if normalized in qualifier_only:
+        return True
+    normalized_without_suffix = re.sub(
+        r"(?:应用程序|应用|软件|客户端|工具|程序|app|application|software)$",
+        "",
+        normalized,
+    )
+    if normalized_without_suffix in qualifier_only:
+        return True
     if any(
         term in normalized
         for term in (
@@ -13903,6 +13939,12 @@ def _is_generic_foreground_app_label(value: str) -> bool:
         "在任何当前",
         "前台",
         "在前台",
+        "可用",
+        "可用的",
+        "任意可用",
+        "任意可用的",
+        "任何可用",
+        "任何可用的",
         "当前输入框",
         "前台输入框",
         "当前文本框",
@@ -13912,6 +13954,8 @@ def _is_generic_foreground_app_label(value: str) -> bool:
         "current",
         "foreground",
         "any",
+        "available",
+        "anyavailable",
         "任意",
         "currentinput",
         "foregroundinput",

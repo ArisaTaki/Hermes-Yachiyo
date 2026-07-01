@@ -843,6 +843,41 @@ def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_clic
             "continue_to_model": True,
         }
     ]
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "在任意可用的应用里点击导出按钮",
+        allowed_tools=[
+            "desktop.running_apps",
+            "desktop.ui_elements",
+            "desktop.click_ui_element",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.running_apps",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "导出",
+                "role_filter": "button",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
 
 
 def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_input() -> None:
