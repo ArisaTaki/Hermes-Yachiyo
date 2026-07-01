@@ -32,6 +32,47 @@ def _stub_agent_market_parity_summary(monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _stub_real_desktop_discovery_source_smoke(monkeypatch):
+    monkeypatch.setattr(
+        rc,
+        "run_real_desktop_discovery_smoke",
+        lambda: {
+            "ok": True,
+            "mode": "real_desktop_discovery_smoke",
+            "catalog": {"total_count": 3},
+            "case_count": 5,
+            "cases": [
+                {
+                    "id": "safari",
+                    "checks": {"did_not_open_app": True},
+                    "matched_capabilities": [],
+                },
+                {
+                    "id": "system_settings",
+                    "checks": {"did_not_open_app": True},
+                    "matched_capabilities": [],
+                },
+                {
+                    "id": "textedit",
+                    "checks": {"did_not_open_app": True},
+                    "matched_capabilities": [],
+                },
+                {
+                    "id": "browser_capability",
+                    "checks": {"did_not_open_app": True},
+                    "matched_capabilities": ["web_browser"],
+                },
+                {
+                    "id": "file_manager_capability",
+                    "checks": {"did_not_open_app": True},
+                    "matched_capabilities": ["file_manager"],
+                },
+            ],
+        },
+    )
+
+
+@pytest.fixture(autouse=True)
 def _stub_media_playback_chain_source_smoke(monkeypatch):
     monkeypatch.setattr(
         rc,
@@ -4477,11 +4518,13 @@ def test_release_candidate_verifier_runs_packaged_backend_bridge_smoke(
         report_json=Path("tmp/rc.json"),
     ) == 0
 
-    assert len(popen_calls) == 1
-    assert popen_calls[0]["command"] == [str(backend)]
-    assert popen_calls[0]["cwd"] == str(backend_dir)
-    assert popen_calls[0]["start_new_session"] is True
-    env = popen_calls[0]["env"]
+    backend_popen_calls = [
+        call for call in popen_calls if call["command"] == [str(backend)]
+    ]
+    assert len(backend_popen_calls) == 1
+    assert backend_popen_calls[0]["cwd"] == str(backend_dir)
+    assert backend_popen_calls[0]["start_new_session"] is True
+    env = backend_popen_calls[0]["env"]
     assert env["OHA_YACHIYO_BRIDGE_URL"] == "http://127.0.0.1:49124"
     assert env["OHA_YACHIYO_HOME"].endswith("/.oha-yachiyo")
     assert env["OHA_YACHIYO_BRIDGE_ACCESS_LOG"] == "0"
