@@ -1,6 +1,10 @@
 import { Fragment } from 'react';
 
 import { publicRunEventIsSecret } from '../../runtime-shared/runEvents';
+import {
+  runtimeToolRecoveryActionsFromRecords,
+  type RuntimeToolRecoveryAction,
+} from '../../runtime-shared/toolRecoveryActions';
 import type {
   CapabilitySnapshot,
   PlannerTraceSummarySnapshot,
@@ -740,6 +744,7 @@ function ReplanRequestInspector({ requests }: { requests: TaskReplanRequestSnaps
           const stepStatus = stringValue(metadata.step_status);
           const stepTitle = stringValue(metadata.step_title);
           const inputPreview = plannerValuePreview(metadata.input_preview);
+          const recoveryActions = replanRequestRecoveryActions(request, metadata);
           const missingPermissions = uniqueStrings(
             Array.isArray(metadata.missing_permissions) ? metadata.missing_permissions : [],
           );
@@ -811,6 +816,14 @@ function ReplanRequestInspector({ requests }: { requests: TaskReplanRequestSnaps
                   input · {inputPreview}
                 </span>
               ) : null}
+              {recoveryActions.slice(0, 5).map((action, index) => (
+                <ReplanRecoveryActionPill
+                  action={action}
+                  index={index}
+                  key={`${request.request_id}:recovery:${action.tool}:${index}`}
+                  requestId={request.request_id}
+                />
+              ))}
               {missingPermissions.map((permission) => (
                 <span
                   className="studio-tool-permission missing"
@@ -834,6 +847,37 @@ function ReplanRequestInspector({ requests }: { requests: TaskReplanRequestSnaps
         })}
       </div>
     </section>
+  );
+}
+
+function ReplanRecoveryActionPill({
+  action,
+  index,
+  requestId,
+}: {
+  action: RuntimeToolRecoveryAction;
+  index: number;
+  requestId: string;
+}) {
+  const inputPreview = plannerValuePreview(action.input);
+  const recommendedTools = uniqueStrings(action.recommended_tools || []);
+  return (
+    <span
+      className="studio-tool-permission"
+      data-replan-recovery-input={inputPreview}
+      data-replan-recovery-label={action.label || action.prompt || action.tool}
+      data-replan-recovery-permission-target={action.permission_target || ''}
+      data-replan-recovery-request-id={requestId}
+      data-replan-recovery-risk={action.risk_level || ''}
+      data-replan-recovery-tool={action.tool}
+      data-replan-recovery-tool-index={index}
+      data-replan-recovery-tools={recommendedTools.join(',')}
+      title={[action.prompt, inputPreview].filter(Boolean).join(' · ')}
+    >
+      recovery · {action.label || action.tool}
+      {action.tool ? ` · ${action.tool}` : ''}
+      {inputPreview ? ` · input: ${inputPreview}` : ''}
+    </span>
   );
 }
 
@@ -1851,6 +1895,16 @@ function taskReplanRequestSnapshot(value: unknown): TaskReplanRequestSnapshot | 
   const request = Object.keys(nested).length ? nested : record;
   if (!stringValue(request.request_id) && !stringValue(request.trigger)) return null;
   return request as TaskReplanRequestSnapshot;
+}
+
+function replanRequestRecoveryActions(
+  request: TaskReplanRequestSnapshot,
+  metadata: Record<string, unknown> = objectRecord(request.metadata),
+): RuntimeToolRecoveryAction[] {
+  return runtimeToolRecoveryActionsFromRecords([
+    objectRecord(request),
+    metadata,
+  ]);
 }
 
 function applyTaskCoreUpdates(
