@@ -5391,13 +5391,34 @@ def _auto_deferred_observed_ui_followup_requests(
             or "planner_followup_deferred_ui_action",
         )
         if requests:
-            return _annotate_deferred_observed_ui_followup_requests(
+            annotated = _annotate_deferred_observed_ui_followup_requests(
                 requests,
                 request,
                 tool_name=tool_name,
                 index=index,
             )
+            continuation = _deferred_observed_ui_continuation_requests(request, allowed)
+            return [*annotated, *continuation]
     return []
+
+
+def _deferred_observed_ui_continuation_requests(
+    request: Mapping[str, Any],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    raw_continuation = request.get("deferred_continuation")
+    if not isinstance(raw_continuation, list):
+        return []
+    continuation: list[dict[str, Any]] = []
+    for item in raw_continuation:
+        if not isinstance(item, Mapping):
+            continue
+        next_request = dict(item)
+        tool_name = str(next_request.get("tool") or "").strip()
+        if not tool_name or (allowed and tool_name not in allowed):
+            continue
+        continuation.append(next_request)
+    return continuation
 
 
 def _deferred_observed_ui_target_from_request(

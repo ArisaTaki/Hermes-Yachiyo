@@ -425,7 +425,11 @@ def _defer_semantic_ui_types_to_observation(
         if not _should_defer_semantic_ui_type_request(request):
             normalized.append(request)
             continue
-        if _has_later_mutation_before_verification(requests, index):
+        continuation, continuation_indexes = _semantic_ui_type_deferred_continuation(
+            requests,
+            index,
+        )
+        if _has_later_mutation_before_verification(requests, index) and not continuation:
             normalized.append(request)
             continue
         if _has_recent_ui_observation_for_action(normalized, request):
@@ -441,9 +445,12 @@ def _defer_semantic_ui_types_to_observation(
             continue
         if prepare and not _last_request_matches_tool_and_input(normalized, prepare):
             normalized.append(prepare)
+        if continuation:
+            observation["deferred_continuation"] = continuation
         normalized.append(observation)
+        skip_indexes.update(continuation_indexes)
         after_type = requests[index + 1] if index + 1 < len(requests) else {}
-        if _is_execution_verification_request(after_type):
+        if not continuation and _is_execution_verification_request(after_type):
             skip_indexes.add(index + 1)
     return normalized
 
@@ -478,6 +485,42 @@ def _has_later_mutation_before_verification(
         ):
             return True
     return False
+
+
+def _semantic_ui_type_deferred_continuation(
+    requests: list[dict[str, Any]],
+    index: int,
+) -> tuple[list[dict[str, Any]], set[int]]:
+    continuation: list[dict[str, Any]] = []
+    continuation_indexes: set[int] = set()
+    saw_mutation = False
+    for later_index, later_request in enumerate(requests[index + 1 :], start=index + 1):
+        later_tool = str(later_request.get("tool") or "").strip()
+        if _is_execution_verification_request(later_request):
+            if not saw_mutation:
+                return [], set()
+            if _is_deferred_observation_request(later_request):
+                return [], set()
+            continuation.append(dict(later_request))
+            continuation_indexes.add(later_index)
+            return continuation, continuation_indexes
+        if not (
+            later_tool in _EXECUTION_MUTATION_TOOLS
+            or _tool_continues_foreground_operation_chain(later_tool)
+        ):
+            return [], set()
+        saw_mutation = True
+        continuation.append(dict(later_request))
+        continuation_indexes.add(later_index)
+    return (continuation, continuation_indexes) if saw_mutation else ([], set())
+
+
+def _is_deferred_observation_request(request: Mapping[str, Any]) -> bool:
+    return bool(
+        isinstance(request, Mapping)
+        and str(request.get("deferred_tool") or "").strip()
+        and isinstance(request.get("deferred_input"), Mapping)
+    )
 
 
 def _semantic_ui_type_observation_request(

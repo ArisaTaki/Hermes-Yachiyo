@@ -21801,7 +21801,7 @@ def test_runtime_planner_generic_desktop_type_execution_observes_target_before_t
     assert observation_request["input"] == {"role_filter": "text", "limit": 80}
 
 
-def test_runtime_planner_keeps_type_before_submit_order_without_deferred_observation() -> None:
+def test_runtime_planner_generic_desktop_type_with_submit_defers_continuation() -> None:
     allowed_tools = [
         "app.open",
         "desktop.type_into_ui_element",
@@ -21818,11 +21818,22 @@ def test_runtime_planner_keeps_type_before_submit_order_without_deferred_observa
 
     assert [request["tool"] for request in execution_requests] == [
         "app.open",
-        "desktop.type_into_ui_element",
+        "desktop.ui_elements",
+    ]
+    observation_request = execution_requests[-1]
+    assert observation_request["continue_to_model"] is True
+    assert observation_request["deferred_tool"] == "desktop.type_into_ui_element"
+    assert [request["tool"] for request in observation_request["deferred_continuation"]] == [
         "desktop.submit_foreground",
         "desktop.ui_elements",
     ]
-    assert all("deferred_tool" not in request for request in execution_requests)
+    assert observation_request["deferred_continuation"][0]["input"] == {
+        "action": "confirm"
+    }
+    assert observation_request["deferred_continuation"][1]["input"] == {
+        "role_filter": "text",
+        "limit": 80,
+    }
 
 
 def test_custom_api_agent_loop_observes_generic_desktop_type_target_before_default_type(
@@ -21995,6 +22006,183 @@ def test_custom_api_agent_loop_observes_generic_desktop_type_target_before_defau
         "source_tool": "desktop.ui_elements",
         "strategy": "semantic_ui_tool",
     }
+    assert not any(event["event"] == "agent.model.response" for event in timeline)
+
+
+def test_custom_api_agent_loop_continues_submit_after_observed_desktop_type(
+    monkeypatch,
+) -> None:
+    def fail_legacy_daily_planner(*_args, **_kwargs):
+        raise AssertionError("legacy desktop planner should not run for observed type continuation")
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
+        fail_legacy_daily_planner,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
+        fail_legacy_daily_planner,
+    )
+
+    allowed_tools = [
+        "app.open",
+        "desktop.type_into_ui_element",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    budget = FakeBudget()
+    tool_batches: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_batches.append([dict(request) for request in tool_requests])
+        batch_index = len(tool_batches)
+        for request in tool_requests:
+            tool = str(request.get("tool") or "")
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if batch_index == 1:
+                if tool == "app.open":
+                    result = {
+                        "ok": True,
+                        "action": "app.open",
+                        "data": {"app_name": payload["app_name"]},
+                    }
+                elif tool == "desktop.ui_elements":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {
+                            "elements": [
+                                {
+                                    "role": "text field",
+                                    "label": "搜索框",
+                                    "center": {"x": 300, "y": 120},
+                                }
+                            ],
+                            "count": 1,
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected initial type-submit tool: {tool}")
+            elif batch_index == 2:
+                if tool == "desktop.type_into_ui_element":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.type_into_ui_element",
+                        "data": {
+                            "target": payload["target"],
+                            "text": payload["text"],
+                        },
+                    }
+                elif tool == "desktop.submit_foreground":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.submit_foreground",
+                        "data": {"action": payload.get("action")},
+                    }
+                elif tool == "desktop.ui_elements":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {
+                            "elements": [
+                                {
+                                    "role": "text field",
+                                    "label": "搜索框",
+                                    "value": "hello",
+                                }
+                            ],
+                            "count": 1,
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected observed type-submit tool: {tool}")
+            else:
+                raise AssertionError(f"unexpected tool batch {batch_index}: {tool}")
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool,
+                    input_preview=payload,
+                    result=result,
+                    **{
+                        key: request[key]
+                        for key in (
+                            "planning_reason",
+                            "decision_id",
+                            "plan_id",
+                            "core_id",
+                            "task_id",
+                            "step_id",
+                            "planner_step_id",
+                            "capability_id",
+                            "followup_target",
+                            "action_target",
+                            "observation_evidence",
+                        )
+                        if key in request
+                    },
+                )
+            )
+            messages_arg.append({"role": "user", "content": f"Tool result for {tool}: {result}"})
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": allowed_tools}},
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use runtime planner desktop tools with observed UI typing.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("generic desktop type-submit continuation should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "打开 PixelForge 在搜索框输入 hello 并提交",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-planner-generic-observe-type-submit",
+    )
+
+    assert "搜索框" in str(result)
+    assert [[request["tool"] for request in batch] for batch in tool_batches] == [
+        ["app.open", "desktop.ui_elements"],
+        [
+            "desktop.type_into_ui_element",
+            "desktop.ui_elements",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    ]
+    continuation_submit = tool_batches[1][2]
+    assert continuation_submit["tool"] == "desktop.submit_foreground"
+    assert continuation_submit["step_id"] == "submit-foreground-ui"
+    assert continuation_submit["capability_id"] == "desktop.ui_operation"
     assert not any(event["event"] == "agent.model.response" for event in timeline)
 
 
