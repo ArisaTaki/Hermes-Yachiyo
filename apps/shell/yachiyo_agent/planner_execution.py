@@ -1289,15 +1289,61 @@ def _collapse_app_foreground_direct_requests(
             index += 1
             continue
         combined_payload = {"app_name": app_name, **dict(operation_input)}
-        collapsed.append(
-            _request(
-                combined_tool,
-                _desktop_request_payload(combined_tool, combined_payload),
-                planning_reason=str(operation.get("planning_reason") or request.get("planning_reason") or "planner_desktop_operation"),
-            )
+        combined_request = _request(
+            combined_tool,
+            _desktop_request_payload(combined_tool, combined_payload),
+            planning_reason=str(
+                operation.get("planning_reason")
+                or request.get("planning_reason")
+                or "planner_desktop_operation"
+            ),
         )
+        _inherit_combined_request_trace_metadata(combined_request, operation, request)
+        collapsed.append(combined_request)
         index = operation_index + 1
     return collapsed
+
+
+_COMBINED_REQUEST_TRACE_KEYS = (
+    "request_id",
+    "step_id",
+    "planner_step_id",
+    "capability_id",
+    "decision_id",
+    "plan_id",
+    "tool_plan_id",
+    "intent_kind",
+    "core_id",
+    "workspace_id",
+    "task_id",
+    "run_id",
+    "runtime_doctrine",
+    "runtime_stage",
+    "runtime_role",
+    "requires_observation",
+    "requires_post_action_verification",
+    "task_todo",
+    "task_checkpoints",
+    "task_workspace_items",
+    "replan_signal_ids",
+    "replan_triggers",
+)
+
+
+def _inherit_combined_request_trace_metadata(
+    target: dict[str, Any],
+    operation: Mapping[str, Any],
+    prepare: Mapping[str, Any],
+) -> None:
+    for key in _COMBINED_REQUEST_TRACE_KEYS:
+        value = operation.get(key)
+        if value in (None, "", [], {}):
+            value = prepare.get(key)
+        if value in (None, "", [], {}):
+            continue
+        target[key] = value
+    if target.get("step_id") and not target.get("planner_step_id"):
+        target["planner_step_id"] = str(target.get("step_id") or "").strip()
 
 
 def _has_later_search_submit(
@@ -1480,7 +1526,6 @@ def _drop_redundant_app_foreground_prepare_requests(
         if (
             app_name
             and tool_name in _APP_OPEN_AND_FOREGROUND_TOOLS
-            and not _should_keep_app_prepare_before_foreground(request)
         ):
             while _last_prepare_request_matches(
                 filtered,
@@ -1491,7 +1536,6 @@ def _drop_redundant_app_foreground_prepare_requests(
         elif (
             app_name
             and tool_name in _APP_FOCUS_AND_FOREGROUND_TOOLS
-            and not _should_keep_app_prepare_before_foreground(request)
         ):
             while _last_prepare_request_matches(
                 filtered,
@@ -1501,16 +1545,6 @@ def _drop_redundant_app_foreground_prepare_requests(
                 filtered.pop()
         filtered.append(request)
     return filtered
-
-
-def _should_keep_app_prepare_before_foreground(request: Mapping[str, Any]) -> bool:
-    tool_name = str(request.get("tool") or "").strip()
-    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
-    action = str(payload.get("action") or "").strip()
-    return tool_name in {
-        "app.open_and_safe_shortcut",
-        "app.focus_and_safe_shortcut",
-    } and action == "find"
 
 
 def _last_prepare_request_matches(

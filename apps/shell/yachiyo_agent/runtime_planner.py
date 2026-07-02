@@ -20318,13 +20318,6 @@ def _app_search_type_operation_tool(
     app_name: str,
     mode: str,
 ) -> str | None:
-    if str(app_name or "").strip():
-        app_tool = _first_allowed(
-            app_foreground_tool_candidates(mode, "safe_type_text"),
-            allowed,
-        )
-        if app_tool:
-            return app_tool
     return _safe_type_text_operation_tool(
         app_name=app_name,
         mode=mode,

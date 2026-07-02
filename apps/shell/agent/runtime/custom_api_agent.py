@@ -467,6 +467,17 @@ class RuntimeCustomApiAgentLoop:
                     )
                 ):
                     replan_payloads = []
+                if (
+                    replan_payloads
+                    and not explicit_model_followup
+                    and _runtime_planner_completed_direct_requests_with_verification_replan(
+                        execution_tool_requests,
+                        replan_payloads,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    )
+                ):
+                    replan_payloads = []
                 continue_to_model = bool(replan_payloads) or explicit_model_followup
                 if continue_to_model:
                     followup_selection_payload = _selection_payload_with_timeline_fallback(
@@ -2559,7 +2570,7 @@ class RuntimeCustomApiAgentLoop:
         )
         if not summary:
             return ""
-        last_step = visible_steps[-1]
+        last_step = summary_steps[-1] if summary_steps else visible_steps[-1]
         completed_tools_steps = (
             visible_steps
             if any(
@@ -2609,7 +2620,7 @@ class RuntimeCustomApiAgentLoop:
         )
         if run_id and self._append_run_event is not None:
             self._append_run_event(run_id, "agent.desktop.intent_completed", event_payload)
-        for step in completed_steps:
+        for step in summary_steps:
             recovery_payload = _desktop_permission_recovery_event_payload(
                 str(step.get("tool") or ""),
                 step.get("input_preview") if isinstance(step.get("input_preview"), dict) else {},
@@ -5988,6 +5999,80 @@ def _runtime_planner_completed_direct_requests_with_unavailable_replan(
     return True
 
 
+def _runtime_planner_completed_direct_requests_with_verification_replan(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    replan_payloads: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    payloads = [payload for payload in replan_payloads if isinstance(payload, Mapping)]
+    if not payloads:
+        return False
+    requests = [request for request in planned_tool_requests if isinstance(request, Mapping)]
+    if any(bool(request.get("continue_to_model")) for request in requests):
+        return False
+
+    primary_requests: list[Mapping[str, Any]] = []
+    last_primary_index = -1
+    for index, request in enumerate(requests):
+        tool_name = str(request.get("tool") or "").strip()
+        if not tool_name or tool_name not in _DIRECT_DAILY_DESKTOP_TOOLS:
+            continue
+        if tool_name in _DAILY_DESKTOP_DISCOVERY_TOOLS or tool_name in _DAILY_DESKTOP_VERIFY_TOOLS:
+            continue
+        primary_requests.append(request)
+        last_primary_index = index
+    if last_primary_index < 0:
+        return False
+    if not any(
+        _runtime_planner_tool_request_completed(
+            request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        )
+        for request in primary_requests
+    ):
+        return False
+
+    trailing_verification_tools = {
+        str(request.get("tool") or "").strip()
+        for request in requests[last_primary_index + 1 :]
+        if str(request.get("tool") or "").strip() in _DAILY_DESKTOP_VERIFY_TOOLS
+    }
+    if not trailing_verification_tools:
+        return False
+    return all(
+        _runtime_replan_payload_is_trailing_verification_failure(
+            payload,
+            trailing_verification_tools,
+        )
+        for payload in payloads
+    )
+
+
+def _runtime_replan_payload_is_trailing_verification_failure(
+    payload: Mapping[str, Any],
+    trailing_verification_tools: set[str],
+) -> bool:
+    source_tool = str(
+        payload.get("source_tool_name")
+        or payload.get("tool_name")
+        or payload.get("tool")
+        or ""
+    ).strip()
+    if source_tool not in trailing_verification_tools:
+        return False
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    trigger = str(payload.get("trigger") or metadata.get("signal_trigger") or "").strip()
+    if trigger and trigger not in {"tool_failure", "verification_failed"}:
+        return False
+    source_step = str(payload.get("source_step_id") or metadata.get("step_id") or "").strip()
+    if source_step and "verify" not in source_step and trigger != "verification_failed":
+        return False
+    return True
+
+
 def _runtime_planner_completed_discovered_app_direct_action(
     planned_tool_requests: Iterable[Mapping[str, Any]],
     selection_payload: Mapping[str, Any],
@@ -8983,7 +9068,7 @@ def _auto_discovered_app_followup_requests(
         )
         if not type_request:
             return []
-        requests.append(_with_discovered_app_resolution(type_request, app_query, app_name))
+        requests.append(type_request)
         if _discovered_app_search_submit_requested(app_search):
             submit_request = _media_search_submit_request(
                 allowed,

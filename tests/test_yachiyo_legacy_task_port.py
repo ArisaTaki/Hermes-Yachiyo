@@ -70,13 +70,14 @@ def test_legacy_runtime_port_appends_runtime_planner_events_when_available() -> 
     assert [event[1]["event_type"] for event in planner_events] == [
         "agent.intent.selected",
         "agent.plan.created",
+        "agent.task_core.created",
         "agent.plan.step",
     ]
     assert planner_events[0][1]["payload"]["intent"]["kind"] == "data_analysis"
     assert planner_events[1][1]["payload"]["plan"]["tool_plan"]["artifacts_expected"] == [
         "analysis-report.md",
     ]
-    assert planner_events[2][1]["payload"]["step"]["tool_name"] == "data.analyze"
+    assert planner_events[3][1]["payload"]["step"]["tool_name"] == "data.analyze"
 
 
 def test_legacy_runtime_port_appends_desktop_readiness_blocked_plan_events(monkeypatch) -> None:
@@ -154,6 +155,7 @@ def test_legacy_runtime_port_appends_media_planner_events() -> None:
     assert [event[1]["event_type"] for event in planner_events] == [
         "agent.intent.selected",
         "agent.plan.created",
+        "agent.task_core.created",
         "agent.plan.step",
         "agent.plan.step",
     ]
@@ -627,11 +629,11 @@ def test_planner_first_direct_selection_owns_schedule_and_empty_note_app_items_w
     cases = (
         (
             "把当前网页链接加入提醒事项",
-            ["desktop.safe_shortcut", "app.open", "desktop.safe_shortcut", "desktop.safe_shortcut"],
+            ["desktop.safe_shortcut", "app.open_and_safe_shortcut", "desktop.safe_shortcut"],
         ),
         (
             "把当前网页链接加入日历",
-            ["desktop.safe_shortcut", "app.open", "desktop.safe_shortcut", "desktop.safe_shortcut"],
+            ["desktop.safe_shortcut", "app.open_and_safe_shortcut", "desktop.safe_shortcut"],
         ),
         ("创建备忘录", ["desktop.safe_shortcut"]),
     )
@@ -685,8 +687,7 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
             "Finder look for Downloads",
             [
                 "desktop.list_apps",
-                "app.focus",
-                "desktop.safe_shortcut",
+                "app.focus_and_safe_shortcut",
                 "desktop.safe_type_text",
                 "desktop.search_submit",
                 "desktop.ui_elements",
@@ -1171,7 +1172,7 @@ def test_planner_first_direct_selection_owns_app_management_without_legacy() -> 
         assert selection.event_payload["legacy_request_count"] == 0
         assert selection.requests[0]["tool"] == "desktop.list_apps"
         assert selection.requests[0]["input"]["limit"] == 20
-        assert selection.requests[1:] == [
+        expected_requests = [
             {
                 "protocol": "json_fallback",
                 "tool": tool_name,
@@ -1179,14 +1180,18 @@ def test_planner_first_direct_selection_owns_app_management_without_legacy() -> 
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.running_apps",
-                "input": {},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
         ]
+        if tool_name != "app.status":
+            expected_requests.append(
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.running_apps",
+                    "input": {},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_desktop_operation",
+                }
+            )
+        assert selection.requests[1:] == expected_requests
     assert legacy_calls == []
 
 
@@ -1205,13 +1210,6 @@ def test_planner_first_direct_selection_owns_show_all_hidden_apps_without_legacy
         {
             "protocol": "json_fallback",
             "tool": "desktop.show_all_apps",
-            "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.active_window",
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
@@ -1681,11 +1679,8 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
 
     assert task is not None
     assert task["task_id"] == "task-main"
-    assert app_runtime.chat_session.metadata_calls[0]["metadata"]["yachiyo_runtime_planner"] is True
-    assert app_runtime.chat_session.metadata_calls[0]["metadata"]["yachiyo_intent_kind"] == (
-        "desktop_operation"
-    )
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
+    assert "yachiyo_runtime_planner" not in metadata
     assert metadata["daily_desktop_tool"] == "app.open"
     assert metadata["daily_desktop_tools"] == ["app.open"]
     assert metadata["daily_desktop_source"] == "daily_desktop_intent"
@@ -1696,20 +1691,22 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     assert metadata["entrypoint_plan_tools"] == ["app.open"]
     assert metadata["entrypoint_plan_legacy_fallback"] is True
     planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
-    assert [event[1]["event_type"] for event in planner_events[:2]] == [
+    planner_event_types = [event[1]["event_type"] for event in planner_events]
+    assert planner_event_types[:3] == [
         "agent.intent.selected",
         "agent.plan.created",
+        "agent.task_core.created",
     ]
+    assert planner_event_types[-1] == "agent.plan.selection"
     assert planner_events[0][1]["payload"]["intent"]["inputs"]["app_name_hint"] == "PixelForge"
     selection_events = [
         event for event in planner_events if event[1]["event_type"] == "agent.plan.selection"
     ]
-    assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
+    assert selection_events[0][1]["payload"]["selection_source"] == "daily_desktop_intent"
     assert selection_events[0][1]["payload"]["selected_tools"] == [
-        "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
     ]
+    assert selection_events[0][1]["payload"]["legacy_request_count"] == 1
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
@@ -1717,7 +1714,6 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     assert [request["tool"] for request in model_loop_call[1]["direct_tool_requests"]] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.active_window",
     ]
 
 
@@ -1854,37 +1850,38 @@ def test_legacy_chat_task_starter_records_known_site_selection_on_runtime_planne
 
     assert task is not None
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
-    assert metadata["daily_desktop_source"] == "runtime_planner"
+    assert metadata["daily_desktop_source"] == "daily_desktop_intent"
     assert metadata["daily_desktop_tool"] == "browser.open_url"
-    assert metadata["daily_desktop_planning_reason"] == "planner_fallback_web_research"
-    assert metadata["entrypoint_plan_source"] == "runtime_planner"
+    assert metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
+    assert metadata["entrypoint_plan_source"] == "daily_desktop_intent"
     assert metadata["entrypoint_plan_tool"] == "browser.open_url"
     run_events = [call for call in runtime.calls if call[0] == "append_run_event"]
-    assert [event[1]["event_type"] for event in run_events[:2]] == [
+    run_event_types = [event[1]["event_type"] for event in run_events]
+    assert run_event_types[:3] == [
         "agent.intent.selected",
         "agent.plan.created",
+        "agent.task_core.created",
     ]
+    assert run_event_types[-1] == "agent.plan.selection"
     assert run_events[0][1]["payload"]["intent"]["kind"] == "web_research"
     selection_events = [
         event for event in run_events if event[1]["event_type"] == "agent.plan.selection"
     ]
-    assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
-    assert selection_events[0][1]["payload"]["legacy_request_count"] == 0
-    assert selection_events[0][1]["payload"]["planner_tools"] == ["browser.open_url"]
+    assert selection_events[0][1]["payload"]["selection_source"] == "daily_desktop_intent"
+    assert selection_events[0][1]["payload"]["legacy_request_count"] == 1
     assert selection_events[0][1]["payload"]["selected_tools"] == ["browser.open_url"]
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     assert model_loop_call[1]["direct_tool_request"] is None
-    assert model_loop_call[1]["direct_tool_requests"] == [
-        {
-            "protocol": "json_fallback",
-            "tool": "browser.open_url",
-            "input": {"url": "https://github.com"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_web_research",
-        }
-    ]
+    direct_requests = model_loop_call[1]["direct_tool_requests"]
+    assert len(direct_requests) == 1
+    assert direct_requests[0]["protocol"] == "json_fallback"
+    assert direct_requests[0]["tool"] == "browser.open_url"
+    assert direct_requests[0]["input"] == {"url": "https://github.com"}
+    assert direct_requests[0]["capability_id"] == "browser.research"
+    assert direct_requests[0]["intent_kind"] == "web_research"
+    assert direct_requests[0]["plan_id"].startswith("runtime-plan-")
 
 
 def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_planner() -> None:
@@ -1900,30 +1897,22 @@ def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_pla
 
     assert task is not None
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
-    assert metadata["daily_desktop_source"] == "runtime_planner"
-    assert metadata["daily_desktop_tool"] == "clipboard.read"
-    assert metadata["daily_desktop_planning_reason"] == (
-        "planner_prefetch_information_capture_context"
-    )
+    assert metadata["daily_desktop_source"] == "daily_desktop_intent"
+    assert metadata["daily_desktop_tool"] == "app.open_and_safe_shortcut"
+    assert metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
     selection_events = [
         event for event in runtime.calls if event[0] == "append_run_event"
         and event[1]["event_type"] == "agent.plan.selection"
     ]
-    assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
-    assert selection_events[0][1]["payload"]["legacy_request_count"] == 0
+    assert selection_events[0][1]["payload"]["selection_source"] == "daily_desktop_intent"
+    assert selection_events[0][1]["payload"]["legacy_request_count"] == 2
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     assert model_loop_call[1]["direct_tool_request"] is None
-    assert model_loop_call[1]["direct_tool_requests"] == [
-        {
-            "protocol": "json_fallback",
-            "tool": "clipboard.read",
-            "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_prefetch_information_capture_context",
-            "continue_to_model": True,
-        }
+    assert [request["tool"] for request in model_loop_call[1]["direct_tool_requests"]] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_shortcut",
     ]
 
     runtime.calls.clear()
@@ -1937,28 +1926,22 @@ def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_pla
     assert task is not None
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
     assert metadata["daily_desktop_source"] == "runtime_planner"
-    assert metadata["daily_desktop_tool"] == "desktop.safe_shortcut"
-    assert metadata["daily_desktop_tools"] == [
-        "desktop.safe_shortcut",
-        "app.focus",
-        "desktop.safe_shortcut",
-        "desktop.safe_type_text",
-        "desktop.search_submit",
-        "desktop.safe_shortcut",
-        "desktop.submit_foreground",
-    ]
-    assert metadata["daily_desktop_planning_reason"] == "planner_fallback_communication_send"
+    assert metadata["daily_desktop_tool"] == "browser.current_page"
+    assert metadata["daily_desktop_tools"] == ["browser.current_page"]
+    assert metadata["daily_desktop_planning_reason"] == "planner_prefetch_communication_context"
     selection_events = [
         event for event in runtime.calls if event[0] == "append_run_event"
         and event[1]["event_type"] == "agent.plan.selection"
     ]
     assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
     assert selection_events[0][1]["payload"]["legacy_request_count"] == 0
-    assert selection_events[0][1]["payload"]["selected_tools"] == ["desktop.submit_foreground"]
+    assert selection_events[0][1]["payload"]["selected_tools"] == ["browser.current_page"]
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
-    assert model_loop_call[1]["direct_tool_requests"] == []
+    assert [request["tool"] for request in model_loop_call[1]["direct_tool_requests"]] == [
+        "browser.current_page"
+    ]
 
     runtime.calls.clear()
     app_runtime.chat_session.metadata_calls.clear()
@@ -1970,41 +1953,21 @@ def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_pla
 
     assert task is not None
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
-    assert metadata["daily_desktop_source"] == "runtime_planner"
-    assert metadata["daily_desktop_tool"] == "desktop.safe_shortcut"
+    assert metadata["daily_desktop_source"] == "daily_desktop_intent"
+    assert metadata["daily_desktop_tool"] == "app.open_and_safe_shortcut"
     assert metadata["daily_desktop_tools"] == [
-        "desktop.safe_shortcut",
+        "app.open_and_safe_shortcut",
         "desktop.safe_shortcut",
         "desktop.search_submit",
     ]
-    assert metadata["daily_desktop_planning_reason"] == (
-        "planner_fallback_dynamic_browser_context"
-    )
+    assert metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
-    assert model_loop_call[1]["direct_tool_requests"] == [
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.safe_shortcut",
-            "input": {"action": "focus_address_bar"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_dynamic_browser_context",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.safe_shortcut",
-            "input": {"action": "paste"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_dynamic_browser_context",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.search_submit",
-            "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_dynamic_browser_context",
-        }
+    assert [request["tool"] for request in model_loop_call[1]["direct_tool_requests"]] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_shortcut",
+        "desktop.search_submit",
     ]
 
 
@@ -2032,18 +1995,17 @@ def test_legacy_chat_task_starter_writes_explicit_note_as_artifact_fallback() ->
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     assert model_loop_call[1]["direct_tool_request"] is None
-    assert model_loop_call[1]["direct_tool_requests"] == [
-        {
-            "protocol": "json_fallback",
-            "tool": "artifact.write",
-            "input": {
-                "path": "captured-note.md",
-                "content": "今天要买牛奶",
-            },
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_information_capture",
-        }
-    ]
+    direct_requests = model_loop_call[1]["direct_tool_requests"]
+    assert len(direct_requests) == 1
+    assert direct_requests[0]["protocol"] == "json_fallback"
+    assert direct_requests[0]["tool"] == "artifact.write"
+    assert direct_requests[0]["input"] == {
+        "path": "captured-note.md",
+        "content": "今天要买牛奶",
+    }
+    assert direct_requests[0]["source"] == "runtime_planner"
+    assert direct_requests[0]["planning_reason"] == "planner_fallback_information_capture"
+    assert direct_requests[0]["planner_step_id"] == "write-note-artifact"
 
 
 def test_legacy_chat_task_starter_does_not_pass_full_plan_for_approval_tools() -> None:
@@ -2059,9 +2021,9 @@ def test_legacy_chat_task_starter_does_not_pass_full_plan_for_approval_tools() -
 
     assert task is not None
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
-    assert metadata["yachiyo_runtime_planner"] is True
+    assert "yachiyo_runtime_planner" not in metadata
     assert metadata["daily_desktop_tool"] == "app.quit"
-    assert metadata["daily_desktop_source"] == "runtime_planner"
+    assert metadata["daily_desktop_source"] == "daily_desktop_intent"
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
@@ -2092,9 +2054,9 @@ def test_legacy_chat_task_starter_does_not_pass_hotkey_safe_shortcut_full_plan()
 
     assert task is not None
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
-    assert metadata["yachiyo_runtime_planner"] is True
+    assert "yachiyo_runtime_planner" not in metadata
     assert metadata["daily_desktop_tool"] == "desktop.safe_shortcut"
-    assert metadata["daily_desktop_source"] == "runtime_planner"
+    assert metadata["daily_desktop_source"] == "daily_desktop_intent"
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
@@ -2104,7 +2066,7 @@ def test_legacy_chat_task_starter_does_not_pass_hotkey_safe_shortcut_full_plan()
         event for event in runtime.calls if event[0] == "append_run_event"
         and event[1]["event_type"] == "agent.plan.selection"
     ]
-    assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
+    assert selection_events[0][1]["payload"]["selection_source"] == "daily_desktop_intent"
     assert selection_events[0][1]["payload"]["selected_tools"] == ["desktop.safe_shortcut"]
 
 
@@ -2156,11 +2118,9 @@ def test_legacy_chat_task_starter_uses_spreadsheet_app_planner_sequence() -> Non
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
     assert metadata["yachiyo_runtime_planner"] is True
     assert metadata["yachiyo_intent_kind"] == "data_analysis"
-    assert metadata["daily_desktop_tool"] == "app.open"
+    assert metadata["daily_desktop_tool"] == "data.analyze"
     assert metadata["daily_desktop_source"] == "runtime_planner"
-    assert metadata["daily_desktop_planning_reason"] == (
-        "planner_fallback_data_analysis_spreadsheet_app"
-    )
+    assert metadata["daily_desktop_planning_reason"] == "planner_builtin_data_analysis"
     planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
     assert [
         step["tool_name"]
@@ -2170,30 +2130,19 @@ def test_legacy_chat_task_starter_uses_spreadsheet_app_planner_sequence() -> Non
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     assert model_loop_call[1]["direct_tool_request"] is None
-    assert model_loop_call[1]["direct_tool_requests"] == [
-        {
-            "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {"app_name": "Microsoft Excel"},
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_data_analysis_spreadsheet_app",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "data.analyze",
-            "input": {
-                "path": "data/sales.csv",
-                "artifact_path": "analysis-report.md",
-                "source_kind": "csv",
-                "requested_outputs": ["report"],
-                "artifact_manifest": [
-                    {"path": "analysis-report.md", "kind": "markdown"},
-                ],
-            },
-            "source": "runtime_planner",
-            "planning_reason": "planner_builtin_data_analysis",
-        },
-    ]
+    direct_requests = model_loop_call[1]["direct_tool_requests"]
+    assert [request["tool"] for request in direct_requests] == ["data.analyze"]
+    assert direct_requests[0]["input"] == {
+        "path": "data/sales.csv",
+        "artifact_path": "analysis-report.md",
+        "source_kind": "csv",
+        "requested_outputs": ["report"],
+        "artifact_manifest": [
+            {"path": "analysis-report.md", "kind": "markdown"},
+        ],
+    }
+    assert direct_requests[0]["planning_reason"] == "planner_builtin_data_analysis"
+    assert direct_requests[0]["planner_step_id"] == "analyze-data-file"
 
 
 def test_legacy_chat_task_starter_uses_future_task_schedule_fallback() -> None:
@@ -2219,19 +2168,17 @@ def test_legacy_chat_task_starter_uses_future_task_schedule_fallback() -> None:
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     assert model_loop_call[1]["direct_tool_request"] is None
-    assert model_loop_call[1]["direct_tool_requests"] == [
-        {
-            "protocol": "json_fallback",
-            "tool": "future_task.schedule",
-            "input": {
-                "title": "买牛奶",
-                "prompt": "提醒用户：买牛奶。原始请求：提醒我明天买牛奶",
-                "scheduled_at_epoch": datetime.fromisoformat(tomorrow_0900).timestamp(),
-            },
-            "source": "runtime_planner",
-            "planning_reason": "planner_fallback_schedule",
-        }
-    ]
+    direct_requests = model_loop_call[1]["direct_tool_requests"]
+    assert len(direct_requests) == 1
+    assert direct_requests[0]["tool"] == "future_task.schedule"
+    assert direct_requests[0]["input"] == {
+        "title": "买牛奶",
+        "prompt": "提醒用户：买牛奶。原始请求：提醒我明天买牛奶",
+        "scheduled_at_epoch": datetime.fromisoformat(tomorrow_0900).timestamp(),
+    }
+    assert direct_requests[0]["source"] == "runtime_planner"
+    assert direct_requests[0]["planning_reason"] == "planner_fallback_schedule"
+    assert direct_requests[0]["planner_step_id"] == "create-schedule-item"
 
 
 def test_legacy_runtime_port_readiness_includes_desktop_execution_capabilities(monkeypatch) -> None:

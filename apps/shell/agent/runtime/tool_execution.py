@@ -43,6 +43,32 @@ _TOOL_REQUEST_TRACE_LIST_KEYS = (
     "replan_signal_ids",
 )
 
+_INPUT_PREVIEW_TRACE_KEYS = (
+    "decision_id",
+    "plan_id",
+    "tool_plan_id",
+    "intent_kind",
+    "step_id",
+    "planner_step_id",
+    "capability_id",
+    "core_id",
+    "workspace_id",
+    "task_id",
+    "run_id",
+    "replan_request_id",
+    "replan_trigger",
+    "target_app_name",
+    "target_app_query",
+    "target_search_text",
+    "runtime_doctrine",
+    "runtime_stage",
+    "runtime_role",
+    "requires_observation",
+    "requires_post_action_verification",
+    "replan_triggers",
+    "replan_signal_ids",
+)
+
 
 def _default_allows_tool(tool_name: str, allowed_tools: list[str]) -> bool:
     return tool_name in set(str(tool or "").strip() for tool in allowed_tools)
@@ -63,6 +89,27 @@ def _tool_request_trace_payload(tool_request: dict[str, Any]) -> dict[str, Any]:
         if values:
             payload[key] = values
     return payload
+
+
+def _input_preview_with_trace_payload(
+    input_preview: Any,
+    trace_payload: dict[str, Any],
+) -> Any:
+    if not isinstance(input_preview, dict) or not trace_payload:
+        return input_preview
+    if not (
+        trace_payload.get("plan_id")
+        or trace_payload.get("decision_id")
+        or trace_payload.get("capability_id")
+    ):
+        return input_preview
+    enriched = dict(input_preview)
+    for key in _INPUT_PREVIEW_TRACE_KEYS:
+        value = trace_payload.get(key)
+        if value in (None, "", [], {}):
+            continue
+        enriched.setdefault(key, value)
+    return enriched
 
 
 def _tool_result_requests_user_recovery(result: dict[str, Any]) -> bool:
@@ -505,6 +552,7 @@ class RuntimeToolCallExecutor:
         )
         trace_payload = _tool_request_trace_payload(tool_request)
         input_preview = _input_preview_with_app_name_resolution(input_preview, input_resolution)
+        input_preview = _input_preview_with_trace_payload(input_preview, trace_payload)
         budget = budget or self._run_budget(run_id, timeline)
         if not self._allows_tool(tool_name, allowed_tools):
             budget.claim_tool_call(tool_name)
@@ -768,6 +816,7 @@ class RuntimeToolRequestRunner:
                 app_name_resolution,
             )
             trace_payload = _tool_request_trace_payload(tool_request)
+            input_preview = _input_preview_with_trace_payload(input_preview, trace_payload)
             runtime_skip = _unresolved_discovered_app_skip_result(
                 tool_name,
                 raw_input,

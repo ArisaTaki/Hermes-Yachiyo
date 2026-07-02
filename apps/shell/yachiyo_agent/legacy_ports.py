@@ -351,6 +351,10 @@ class LegacyChatTaskStarter:
                     selected_requests,
                     allowed_entrypoint_tools,
                 )
+            selected_requests = _annotate_legacy_selected_requests_with_planner_trace(
+                selected_requests,
+                planner_decision,
+            )
             selected_source = selection.selected_source
             direct_tool_selection_payload = (
                 _selection_payload_with_selected_requests(
@@ -364,21 +368,27 @@ class LegacyChatTaskStarter:
                 direct_tool_selection_payload,
                 selected_requests,
             )
-            if selected_source == "runtime_planner":
+            envelope_tool_requests = _safe_runtime_execution_envelope_requests(
+                prompt or execution_prompt,
+                metadata,
+                allowed_entrypoint_tools,
+                selected_requests=selected_requests,
+            )
+            if envelope_tool_requests:
+                direct_tool_requests = envelope_tool_requests
+            elif selected_source == "runtime_planner":
                 direct_tool_requests = _safe_runtime_planner_tool_requests(
                     planning_prompt,
                     allowed_entrypoint_tools,
                     metadata=metadata,
                     selected_requests=selected_requests,
                 )
-                envelope_tool_requests = _safe_runtime_execution_envelope_requests(
+            else:
+                direct_tool_requests = _safe_selected_entrypoint_tool_requests(
                     prompt or execution_prompt,
-                    metadata,
+                    selected_requests,
                     allowed_entrypoint_tools,
-                    selected_requests=selected_requests,
                 )
-                if envelope_tool_requests:
-                    direct_tool_requests = envelope_tool_requests
         if not task_id:
             return None
         if not direct_tool_request and not selected_requests:
@@ -1246,6 +1256,20 @@ def _safe_runtime_execution_envelope_requests(
     return requests
 
 
+def _safe_selected_entrypoint_tool_requests(
+    prompt: str,
+    selected_requests: list[dict[str, Any]],
+    allowed_tools: list[str],
+) -> list[dict[str, Any]]:
+    if not selected_requests:
+        return []
+    if _has_approval_plan_tool(selected_requests):
+        return []
+    if _has_explicit_hotkey_safe_shortcut(prompt, selected_requests, allowed_tools):
+        return []
+    return planner_execution_tool_requests(selected_requests, allowed_tools) or selected_requests
+
+
 def _apply_legacy_file_transfer_app_alias(
     prompt: str,
     requests: list[dict[str, Any]],
@@ -1477,6 +1501,78 @@ def _selection_payload_with_selected_requests(
         "selected_tools": selected_tools,
         "selected_request_count": len(selected_tools),
     }
+
+
+def _annotate_legacy_selected_requests_with_planner_trace(
+    selected_requests: list[dict[str, Any]],
+    planner_decision: Any | None,
+) -> list[dict[str, Any]]:
+    if planner_decision is None or not selected_requests:
+        return selected_requests
+    plan = getattr(planner_decision, "plan", None)
+    tool_plan = getattr(plan, "tool_plan", None)
+    steps = list(getattr(tool_plan, "steps", []) or [])
+    if not steps:
+        return selected_requests
+    used_step_indexes: set[int] = set()
+    annotated: list[dict[str, Any]] = []
+    for request in selected_requests:
+        item = dict(request)
+        step_index, step = _matching_planner_step_for_request(item, steps, used_step_indexes)
+        if step_index >= 0 and step is not None:
+            used_step_indexes.add(step_index)
+            _attach_legacy_request_planner_trace(item, planner_decision, step)
+        annotated.append(item)
+    return annotated
+
+
+def _matching_planner_step_for_request(
+    request: dict[str, Any],
+    steps: list[Any],
+    used_step_indexes: set[int],
+) -> tuple[int, Any | None]:
+    tool_name = str(request.get("tool") or "").strip()
+    if not tool_name:
+        return -1, None
+    for index, step in enumerate(steps):
+        if index in used_step_indexes:
+            continue
+        if str(getattr(step, "tool_name", "") or "").strip() == tool_name:
+            return index, step
+    return -1, None
+
+
+def _attach_legacy_request_planner_trace(
+    request: dict[str, Any],
+    planner_decision: Any,
+    step: Any,
+) -> None:
+    step_id = str(getattr(step, "step_id", "") or "").strip()
+    capability_id = str(getattr(step, "capability_id", "") or "").strip()
+    if step_id:
+        request.setdefault("step_id", step_id)
+        request.setdefault("planner_step_id", step_id)
+    if capability_id:
+        request.setdefault("capability_id", capability_id)
+    decision_id = str(getattr(planner_decision, "decision_id", "") or "").strip()
+    plan = getattr(planner_decision, "plan", None)
+    plan_id = str(getattr(plan, "plan_id", "") or "").strip()
+    tool_plan = getattr(plan, "tool_plan", None)
+    tool_plan_id = str(getattr(tool_plan, "plan_id", "") or "").strip()
+    intent = getattr(planner_decision, "selected_intent", None)
+    intent_kind = str(getattr(intent, "kind", "") or "").strip()
+    task_core = getattr(plan, "task_core", None)
+    workspace = getattr(task_core, "workspace", None)
+    for key, value in (
+        ("decision_id", decision_id),
+        ("plan_id", plan_id),
+        ("tool_plan_id", tool_plan_id),
+        ("intent_kind", intent_kind),
+        ("core_id", str(getattr(task_core, "core_id", "") or "").strip()),
+        ("workspace_id", str(getattr(workspace, "workspace_id", "") or "").strip()),
+    ):
+        if value:
+            request.setdefault(key, value)
 
 
 def _approval_first_selection_payload(

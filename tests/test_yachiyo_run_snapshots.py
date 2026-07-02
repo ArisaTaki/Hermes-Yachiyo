@@ -1240,6 +1240,9 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
         "group_run_id": "group-run-1",
         "member_agent_id": "agent-reviewer",
         "member_agent_name": "Reviewer",
+        "run_group_id": "group-run-1",
+        "source_runnable_id": "agent-reviewer",
+        "source_runnable_name": "Reviewer",
         "workflow_id": "workflow-1",
         "workflow_run_id": "run-events-only",
         "workflow_node_id": "review",
@@ -2344,6 +2347,9 @@ def test_group_run_snapshot_derives_approvals_and_artifacts_from_group_events() 
         "group_run_id": "group-events-only",
         "member_agent_id": "agent-1",
         "member_agent_name": "Planner",
+        "run_group_id": "group-events-only",
+        "source_runnable_id": "agent-1",
+        "source_runnable_name": "Planner",
     }
     assert group_run.shared_artifacts[0].kind == "group_artifact"
     assert group_run.shared_artifacts[0].title == "Planner / team-summary.md"

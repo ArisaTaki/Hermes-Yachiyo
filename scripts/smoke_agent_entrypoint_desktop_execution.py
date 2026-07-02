@@ -378,14 +378,17 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
             "desktop.list_apps",
             "app.open",
         ],
-        "resolved_app_from_discovery": app_open_input == {
+        "resolved_app_from_discovery": {
             "app_name": "PixelForge",
             "app_resolution_source": "desktop.list_apps",
             "requested_app_name": "pdf",
             "resolved_app_name": "PixelForge",
             "resolved_app_path": "/Applications/PixelForge.app",
             "app_resolution_score": "100",
-        },
+        }.items()
+        <= app_open_input.items()
+        if isinstance(app_open_input, dict)
+        else False,
         "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
         "completed_tools_match": completed_payload.get("tools")
         == ["desktop.list_apps", "app.open"],

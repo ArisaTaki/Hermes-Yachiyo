@@ -90,7 +90,7 @@ def planner_first_direct_tool_selection(
         )
     if selected_requests:
         return DirectToolSelection(
-            decision=None,
+            decision=decision,
             requests=selected_requests,
             event_payload=planner_selection_payload(
                 decision=decision,
