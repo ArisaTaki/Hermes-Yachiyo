@@ -43,16 +43,16 @@ def group_run_snapshot_from_payload(
     runs_payload = payload.get("runs") or payload.get("child_runs") or []
     child_run_ids = [_text(item) for item in payload.get("child_run_ids") or [] if _text(item)]
     participants = group_run_participants_from_payload(payload)
+    event_payload = dict(payload)
+    event_payload["events"] = group_run_events_with_lifecycle(
+        payload,
+        group_run_id=group_run_id,
+        group_id=group_id,
+        objective=_text(payload.get("objective") or payload.get("user_goal")),
+        child_run_ids=child_run_ids,
+    )
     events = _RUN_PROJECTOR.events_from_payload(
-        {
-            "events": group_run_events_with_lifecycle(
-                payload,
-                group_run_id=group_run_id,
-                group_id=group_id,
-                objective=_text(payload.get("objective") or payload.get("user_goal")),
-                child_run_ids=child_run_ids,
-            )
-        },
+        event_payload,
         run_id=group_run_id,
         keys=("events",),
     )

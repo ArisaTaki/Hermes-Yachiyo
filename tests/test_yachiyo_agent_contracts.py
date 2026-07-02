@@ -4512,6 +4512,49 @@ def test_run_timeline_events_inherit_parent_task_core_context() -> None:
     assert tool_call.input_preview["task_id"] == "task-1"
 
 
+def test_group_run_events_inherit_parent_task_core_context() -> None:
+    snapshot = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-1",
+            "group_id": "group-1",
+            "status": "running",
+            "task_id": "task-1",
+            "task_core": {
+                "core_id": "core-1",
+                "workspace": {
+                    "workspace_id": "workspace-1",
+                    "title": "Workspace",
+                    "context": {"task_id": "task-1"},
+                },
+            },
+            "events": [
+                {
+                    "event_type": "agent.tool.call",
+                    "detail": "workspace.read",
+                    "payload": {
+                        "tool_call_id": "call-1",
+                        "tool": "workspace.read",
+                        "input_preview": {"path": "README.md"},
+                    },
+                }
+            ],
+        }
+    )
+
+    started_event = snapshot.events[0]
+    tool_call = snapshot.tool_calls[0]
+    assert started_event.event_type == "group.run.started"
+    assert started_event.core_id == "core-1"
+    assert started_event.workspace_id == "workspace-1"
+    assert started_event.task_id == "task-1"
+    assert tool_call.core_id == "core-1"
+    assert tool_call.workspace_id == "workspace-1"
+    assert tool_call.task_id == "task-1"
+    assert tool_call.input_preview["core_id"] == "core-1"
+    assert tool_call.input_preview["workspace_id"] == "workspace-1"
+    assert tool_call.input_preview["task_id"] == "task-1"
+
+
 def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
     snapshot = ToolCallSnapshot(
         tool_call_id="tool-1",
