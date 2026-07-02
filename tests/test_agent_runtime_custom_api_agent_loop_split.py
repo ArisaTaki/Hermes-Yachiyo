@@ -17785,6 +17785,106 @@ def test_auto_discovered_app_compose_followup_types_and_verifies() -> None:
     ]
 
 
+def test_auto_discovered_app_followup_requests_inherit_tool_plan_trace() -> None:
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.list_apps",
+            input_preview={"query": "markdown", "limit": 20},
+            result={
+                "ok": True,
+                "action": "desktop.list_apps",
+                "data": {
+                    "query": "markdown",
+                    "apps": [
+                        {
+                            "name": "Obsidian",
+                            "path": "/Applications/Obsidian.app",
+                            "match_score": 91,
+                        }
+                    ],
+                },
+            },
+        )
+    ]
+
+    requests = custom_api_agent_module._auto_discovered_app_followup_requests(
+        {
+            "decision_id": "decision-markdown",
+            "plan_id": "runtime-plan-markdown",
+            "intent_kind": "desktop_operation",
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "markdown",
+                "target_action": "safe_shortcut",
+                "safe_shortcut_action": "new_document",
+                "compose_text": "周报",
+                "body_source": "explicit_user_text",
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {},
+                },
+            },
+            "tool_plan": {
+                "plan_id": "tool-plan-markdown",
+                "steps": [
+                    {
+                        "step_id": "discover_apps-desktop-state",
+                        "tool_name": "desktop.list_apps",
+                        "capability_id": "desktop.app_discovery",
+                        "status": "planned",
+                    },
+                    {
+                        "step_id": "open-selected-discovered-app",
+                        "tool_name": "app.open_and_safe_shortcut",
+                        "capability_id": "desktop.ui_operation",
+                        "status": "planned",
+                    },
+                    {
+                        "step_id": "operate-foreground-ui-followup-type",
+                        "tool_name": "desktop.safe_type_text",
+                        "capability_id": "desktop.ui_operation",
+                        "status": "planned",
+                    },
+                    {
+                        "step_id": "verify-desktop-result",
+                        "tool_name": "desktop.ui_elements",
+                        "capability_id": "desktop.app_discovery",
+                        "status": "planned",
+                    },
+                ],
+            },
+        },
+        ["app.open_and_safe_shortcut", "desktop.safe_type_text", "desktop.ui_elements"],
+        timeline,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert [request["step_id"] for request in requests] == [
+        "open-selected-discovered-app",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
+    assert [request["planner_step_id"] for request in requests] == [
+        "open-selected-discovered-app",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
+    assert {request["decision_id"] for request in requests} == {"decision-markdown"}
+    assert {request["plan_id"] for request in requests} == {"runtime-plan-markdown"}
+    assert {request["tool_plan_id"] for request in requests} == {"tool-plan-markdown"}
+    assert {request["intent_kind"] for request in requests} == {"desktop_operation"}
+    assert [request["capability_id"] for request in requests] == [
+        "desktop.ui_operation",
+        "desktop.ui_operation",
+        "desktop.app_discovery",
+    ]
+
+
 def test_auto_discovered_app_search_followup_types_submits_and_verifies() -> None:
     timeline = [
         _timeline(

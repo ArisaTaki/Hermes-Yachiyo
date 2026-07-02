@@ -7874,7 +7874,86 @@ def _auto_discovered_app_followup_requests(
             _with_discovered_app_resolution_evidence(request, resolution_evidence)
             for request in requests
         ]
-    return requests
+    return _annotate_auto_followup_requests_from_tool_plan(requests, selection_payload)
+
+
+def _annotate_auto_followup_requests_from_tool_plan(
+    requests: list[dict[str, Any]],
+    selection_payload: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    steps = _selection_tool_plan_steps(selection_payload)
+    if not requests or not steps:
+        return requests
+    trace_base = _auto_followup_selection_trace_base(selection_payload)
+    annotated: list[dict[str, Any]] = []
+    step_cursor = 0
+    for request in requests:
+        if not isinstance(request, dict):
+            continue
+        item = {**trace_base, **request}
+        step_index, step = _next_matching_followup_plan_step(
+            item,
+            steps,
+            start_index=step_cursor,
+        )
+        if step_index >= 0 and step:
+            step_cursor = step_index + 1
+            for key, value in _auto_followup_plan_step_trace(step).items():
+                item.setdefault(key, value)
+        if str(item.get("step_id") or "").strip() and not str(
+            item.get("planner_step_id") or ""
+        ).strip():
+            item["planner_step_id"] = str(item.get("step_id") or "").strip()
+        annotated.append(item)
+    return annotated
+
+
+def _auto_followup_selection_trace_base(selection_payload: Mapping[str, Any]) -> dict[str, str]:
+    trace: dict[str, str] = {}
+    for key in ("decision_id", "plan_id", "intent_kind"):
+        value = str(selection_payload.get(key) or "").strip()
+        if value:
+            trace[key] = value
+    tool_plan = (
+        selection_payload.get("tool_plan")
+        if isinstance(selection_payload.get("tool_plan"), Mapping)
+        else {}
+    )
+    tool_plan_id = str(tool_plan.get("plan_id") or "").strip()
+    if tool_plan_id:
+        trace["tool_plan_id"] = tool_plan_id
+    return trace
+
+
+def _next_matching_followup_plan_step(
+    request: Mapping[str, Any],
+    steps: list[Mapping[str, Any]],
+    *,
+    start_index: int,
+) -> tuple[int, Mapping[str, Any] | None]:
+    tool_name = str(request.get("tool") or "").strip()
+    if not tool_name:
+        return -1, None
+    for index in range(max(0, start_index), len(steps)):
+        step = steps[index]
+        if str(step.get("status") or "planned").strip() not in {"", "planned"}:
+            continue
+        if str(step.get("tool_name") or "").strip() != tool_name:
+            continue
+        return index, step
+    return -1, None
+
+
+def _auto_followup_plan_step_trace(step: Mapping[str, Any]) -> dict[str, str]:
+    trace: dict[str, str] = {}
+    for source_key, target_key in (
+        ("step_id", "step_id"),
+        ("capability_id", "capability_id"),
+    ):
+        value = str(step.get(source_key) or "").strip()
+        if value:
+            trace[target_key] = value
+    return trace
 
 
 def _auto_discovered_media_playback_followup_requests(
