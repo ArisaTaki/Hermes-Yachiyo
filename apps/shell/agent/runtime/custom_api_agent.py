@@ -4840,6 +4840,11 @@ def _model_replan_followup_context_payload(
     for payload in replan_payloads:
         if not isinstance(payload, Mapping):
             continue
+        metadata = (
+            dict(payload.get("metadata"))
+            if isinstance(payload.get("metadata"), Mapping)
+            else {}
+        )
         request = {
             "request_id": str(payload.get("request_id") or "").strip(),
             "trigger": str(payload.get("trigger") or "").strip(),
@@ -4852,11 +4857,8 @@ def _model_replan_followup_context_payload(
             "failure_detail": str(payload.get("failure_detail") or "").strip(),
             "fallback_tools": _string_list(payload.get("fallback_tools")),
             "replan_prompt": str(payload.get("replan_prompt") or "").strip(),
-            "metadata": (
-                dict(payload.get("metadata"))
-                if isinstance(payload.get("metadata"), Mapping)
-                else {}
-            ),
+            "metadata": metadata,
+            **_replan_recovery_target(payload),
         }
         requests.append(request)
         failed_tools.append(request["source_tool_name"])
@@ -4885,6 +4887,13 @@ def _model_replan_followup_context_payload(
         "source_tool_name": first.get("source_tool_name", ""),
         "target_capability_id": first.get("target_capability_id", ""),
     }
+    recovery_targets = _runtime_replan_recovery_targets(requests)
+    if recovery_targets:
+        payload["recovery_targets"] = recovery_targets
+        for key in ("target_app_name", "target_app_query", "target_search_text"):
+            value = str(recovery_targets[0].get(key) or "").strip()
+            if value:
+                payload[key] = value
     for key in ("request_id", "decision_id", "plan_id", "core_id", "run_id", "task_id"):
         value = str((replan_payloads[0] if replan_payloads else {}).get(key) or "").strip()
         if value:
@@ -5002,6 +5011,30 @@ def _runtime_replan_capability_recovery(
     return result
 
 
+def _runtime_replan_recovery_targets(
+    requests: Iterable[Mapping[str, Any]],
+) -> list[dict[str, str]]:
+    targets: list[dict[str, str]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        target = {
+            key: str(request.get(key) or "").strip()
+            for key in ("target_app_name", "target_app_query", "target_search_text")
+        }
+        signature = (
+            target["target_app_name"],
+            target["target_app_query"],
+            target["target_search_text"],
+        )
+        if not any(signature) or signature in seen:
+            continue
+        seen.add(signature)
+        targets.append({key: value for key, value in target.items() if value})
+    return targets
+
+
 def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
     requests = [
         request
@@ -5016,6 +5049,25 @@ def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
         lines.append(f"Failed tools: {', '.join(failed_tools)}.")
     if fallback_tools:
         lines.append(f"Preferred fallback tools: {', '.join(fallback_tools)}.")
+    recovery_targets = [
+        item
+        for item in payload.get("recovery_targets", [])
+        if isinstance(item, dict)
+    ]
+    if recovery_targets:
+        lines.append("Recovery targets:")
+        for item in recovery_targets[:3]:
+            parts = [
+                part
+                for part in (
+                    _runtime_replan_target_part("app", item.get("target_app_name")),
+                    _runtime_replan_target_part("query", item.get("target_app_query")),
+                    _runtime_replan_target_part("text", item.get("target_search_text")),
+                )
+                if part
+            ]
+            if parts:
+                lines.append(f"- {'; '.join(parts)}")
     capability_recovery = [
         item
         for item in payload.get("capability_recovery", [])
@@ -5093,6 +5145,11 @@ def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
         if prompt:
             lines.append(f"- planner_replan_prompt: {prompt}")
     return "\n".join(lines)
+
+
+def _runtime_replan_target_part(label: str, value: Any) -> str:
+    clean = str(value or "").strip()
+    return f"{label}={clean}" if clean else ""
 
 
 def _runtime_replan_task_core_message_lines(task_core: Mapping[str, Any]) -> list[str]:
@@ -7758,7 +7815,7 @@ def _auto_replan_verification_recovery_requests(
     request_id = str(first.get("request_id") or "").strip()
     source = "runtime_planner"
     planning_reason = "planner_verification_recovery_observation"
-    target = _replan_verification_recovery_target(first)
+    target = _replan_recovery_target(first)
     requests: list[dict[str, Any]] = []
     for tool_name in _verification_recovery_tool_order(allowed):
         request = _request_like(
@@ -7779,7 +7836,7 @@ def _auto_replan_verification_recovery_requests(
     return requests
 
 
-def _replan_verification_recovery_target(payload: Mapping[str, Any]) -> dict[str, str]:
+def _replan_recovery_target(payload: Mapping[str, Any]) -> dict[str, str]:
     metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
     input_preview = (
         payload.get("input_preview")

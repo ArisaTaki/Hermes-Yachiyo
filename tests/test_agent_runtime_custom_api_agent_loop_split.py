@@ -2472,6 +2472,9 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
     assert payload["metadata"]["runtime_stage"] == "verify"
     assert payload["metadata"]["runtime_role"] == "verify_result"
     assert payload["metadata"]["replan_signal_ids"] == ["replan-verify"]
+    assert payload["metadata"]["target_app_name"] == "Figma"
+    assert payload["metadata"]["target_app_query"] == "design"
+    assert payload["metadata"]["target_search_text"] == "logo 模板"
     assert "no UI elements or readable text" in payload["failure_detail"]
     assert any(event["event"] == "agent.replan.requested" for event in empty_timeline)
     assert any(
@@ -2489,6 +2492,10 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
     )
     assert messages
     assert "post-action verification did not confirm" in messages[0]["content"]
+    assert "Recovery targets:" in messages[0]["content"]
+    assert "app=Figma" in messages[0]["content"]
+    assert "query=design" in messages[0]["content"]
+    assert "text=logo 模板" in messages[0]["content"]
     followup_context = [
         event
         for event in empty_timeline
@@ -2500,6 +2507,18 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
     )
     assert followup_context["trigger"] == "verification_failed"
     assert followup_context["triggers"] == ["verification_failed"]
+    assert followup_context["target_app_name"] == "Figma"
+    assert followup_context["target_app_query"] == "design"
+    assert followup_context["target_search_text"] == "logo 模板"
+    assert followup_context["recovery_targets"] == [
+        {
+            "target_app_name": "Figma",
+            "target_app_query": "design",
+            "target_search_text": "logo 模板",
+        }
+    ]
+    assert followup_context["replan_requests"][0]["target_app_name"] == "Figma"
+    assert followup_context["replan_requests"][0]["target_search_text"] == "logo 模板"
     recovery_requests = custom_api_agent_module._auto_replan_verification_recovery_requests(
         payloads,
         [
