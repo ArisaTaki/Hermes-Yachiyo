@@ -7819,9 +7819,67 @@ def test_planner_execution_tool_requests_prepends_unknown_app_discovery() -> Non
         {
             "protocol": "json_fallback",
             "tool": "app.open",
-            "input": {"app_name": "PixelForge"},
+            "input": {
+                "app_name": "PixelForge",
+                "selection_source": "desktop.list_apps",
+                "query": "PixelForge",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
+def test_planner_execution_tool_requests_annotates_selected_app_placeholders() -> None:
+    allowed = ["desktop.list_apps", "desktop.inspect_app"]
+
+    assert planner_execution_tool_requests(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": "mail", "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_communication_send",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.inspect_app",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "open_if_needed": False,
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_fallback_communication_send",
+            },
+        ],
+        allowed,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "mail", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.inspect_app",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "open_if_needed": False,
+                "selection_source": "desktop.list_apps",
+                "query": "mail",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_communication_send",
         },
     ]
 

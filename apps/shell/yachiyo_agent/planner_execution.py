@@ -62,6 +62,9 @@ def planner_execution_tool_requests(
         return []
     normalized_requests = _expand_inspect_app_execution_requests(normalized_requests, allowed)
     normalized_requests = _prepend_unknown_app_discovery_requests(normalized_requests, allowed)
+    normalized_requests = _annotate_selected_app_placeholders_with_discovery_query(
+        normalized_requests
+    )
     normalized_requests = _defer_unknown_app_ui_element_operations_to_observation(
         normalized_requests,
         allowed,
@@ -166,6 +169,45 @@ def _request_with_desktop_app_selection_source(
             "query": clean_app_name,
         },
     }
+
+
+def _annotate_selected_app_placeholders_with_discovery_query(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    discovery_query = ""
+    normalized: list[dict[str, Any]] = []
+    for request in requests:
+        tool_name = str(request.get("tool") or "").strip()
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        if tool_name == "desktop.list_apps":
+            query = str(payload.get("query") or "").strip()
+            if query:
+                discovery_query = query
+            normalized.append(request)
+            continue
+        if not discovery_query:
+            normalized.append(request)
+            continue
+        if not _payload_uses_selected_desktop_app(payload):
+            normalized.append(request)
+            continue
+        normalized.append(
+            {
+                **request,
+                "input": {
+                    **dict(payload),
+                    "selection_source": "desktop.list_apps",
+                    "query": str(payload.get("query") or discovery_query).strip(),
+                },
+            }
+        )
+    return normalized
+
+
+def _payload_uses_selected_desktop_app(payload: Mapping[str, Any]) -> bool:
+    if str(payload.get("app_name") or "").strip() == "<selected app from desktop.list_apps>":
+        return True
+    return str(payload.get("selection_source") or "").strip() == "desktop.list_apps"
 
 
 def _defer_unknown_app_ui_element_operations_to_observation(
