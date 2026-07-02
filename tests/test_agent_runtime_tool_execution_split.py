@@ -182,6 +182,86 @@ def _runner(
     )
 
 
+def test_runtime_tool_request_runner_preserves_scope_on_task_progress_events() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        _timeline: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "action": str(tool_request.get("tool") or ""),
+            "summary": "done",
+        }
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+
+    runner.run(
+        [
+            {
+                "tool": "artifact.write",
+                "input": {"path": "report.md"},
+                "source": "runtime_planner",
+                "step_id": "write-report",
+                "core_id": "task-core-1",
+                "workspace_id": "task-workspace-1",
+                "decision_id": "decision-1",
+                "plan_id": "plan-1",
+                "task_id": "task-1",
+                "group_run_id": "group-run-1",
+                "workflow_run_id": "workflow-run-1",
+                "task_todo": {
+                    "todo_id": "todo-write-report",
+                    "title": "Write report",
+                    "status": "pending",
+                    "step_id": "write-report",
+                    "tool_name": "artifact.write",
+                },
+                "task_checkpoints": [
+                    {
+                        "checkpoint_id": "checkpoint-write-report",
+                        "title": "Verify report",
+                        "status": "planned",
+                        "after_step_id": "write-report",
+                    }
+                ],
+            }
+        ],
+        ["artifact.write"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "write report"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    todo_event = next(event for event in timeline if event["event"] == "agent.task.todo.updated")
+    checkpoint_event = next(
+        event for event in timeline if event["event"] == "agent.task.checkpoint.updated"
+    )
+    for event in (todo_event, checkpoint_event):
+        assert event["task_id"] == "task-1"
+        assert event["group_run_id"] == "group-run-1"
+        assert event["workflow_run_id"] == "workflow-run-1"
+        assert event["status"] == "completed"
+
+    run_todo_event = next(
+        payload
+        for _run_id, event_type, payload in run_events
+        if event_type == "agent.task.todo.updated"
+    )
+    assert run_todo_event["task_id"] == "task-1"
+    assert run_todo_event["group_run_id"] == "group-run-1"
+    assert run_todo_event["workflow_run_id"] == "workflow-run-1"
+
+
 def test_runtime_tool_call_executor_denies_unallowed_tools_before_broker_call() -> None:
     events = FakeToolCallEvents()
     executor = _executor(tool_call_events=events)

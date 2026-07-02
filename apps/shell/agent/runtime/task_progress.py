@@ -55,6 +55,18 @@ def append_task_progress_events_for_tool_result(
         "source_event": source_event,
         "result_preview": _task_progress_result_preview(result),
     }
+    for key in (
+        "task_id",
+        "run_group_id",
+        "group_run_id",
+        "group_id",
+        "workflow_run_id",
+        "workflow_id",
+        "workflow_node_id",
+    ):
+        value = str(tool_request.get(key) or "").strip()
+        if value:
+            base_payload[key] = value
 
     if not task_update_already_recorded:
         for workspace_item in workspace_items:
