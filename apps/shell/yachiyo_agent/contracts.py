@@ -388,6 +388,8 @@ class ReplanRecoverySnapshot(_PublicSnapshot):
     recovery_action_label: str = ""
     permission_target: str = ""
     risk_level: str = ""
+    action_target: dict[str, Any] = Field(default_factory=dict)
+    observation_evidence: dict[str, Any] = Field(default_factory=dict)
     tool_call_id: str | None = None
     tool_status: str | None = None
     todo_status: str | None = None

@@ -559,6 +559,15 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         recovery_action_label="Run terminal fallback",
         permission_target="terminal_execution",
         risk_level="medium",
+        action_target={
+            "action": "click",
+            "label": "Apple Music result",
+            "app_name": "Music",
+        },
+        observation_evidence={
+            "strategy": "observed_center_fallback",
+            "observed_center": {"x": 512, "y": 220},
+        },
         tool_call_id="tool-call-1",
         tool_status="completed",
         todo_status="completed",
@@ -593,6 +602,8 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         "recovery_action_label",
         "permission_target",
         "risk_level",
+        "action_target",
+        "observation_evidence",
         "tool_call_id",
         "tool_status",
         "todo_status",
@@ -608,6 +619,15 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
     assert payload["recovery_action_label"] == "Run terminal fallback"
     assert payload["permission_target"] == "terminal_execution"
     assert payload["risk_level"] == "medium"
+    assert payload["action_target"] == {
+        "action": "click",
+        "label": "Apple Music result",
+        "app_name": "Music",
+    }
+    assert payload["observation_evidence"] == {
+        "strategy": "observed_center_fallback",
+        "observed_center": {"x": 512, "y": 220},
+    }
     assert payload["checkpoint_status"] == "completed"
 
 
@@ -1526,6 +1546,15 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
                         "recovery_action_label": "Run terminal fallback",
                         "permission_target": "terminal_execution",
                         "risk_level": "medium",
+                        "action_target": {
+                            "action": "click",
+                            "label": "Apple Music result",
+                            "app_name": "Music",
+                        },
+                        "observation_evidence": {
+                            "strategy": "observed_center_fallback",
+                            "observed_center": {"x": 512, "y": 220},
+                        },
                         "result": {"ok": True, "stdout": "report.md"},
                     },
                 },
@@ -1557,6 +1586,15 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
     assert recovery.recovery_action_label == "Run terminal fallback"
     assert recovery.permission_target == "terminal_execution"
     assert recovery.risk_level == "medium"
+    assert recovery.action_target == {
+        "action": "click",
+        "label": "Apple Music result",
+        "app_name": "Music",
+    }
+    assert recovery.observation_evidence == {
+        "strategy": "observed_center_fallback",
+        "observed_center": {"x": 512, "y": 220},
+    }
     assert recovery.tool_status == "completed"
     assert recovery.checkpoint_status == "completed"
     assert recovery.result_preview == {"ok": True, "stdout": "report.md"}

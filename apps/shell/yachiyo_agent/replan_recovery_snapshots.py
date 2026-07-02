@@ -37,6 +37,8 @@ class _RecoveryRecord:
     recovery_action_label: str = ""
     permission_target: str = ""
     risk_level: str = ""
+    action_target: dict[str, Any] = field(default_factory=dict)
+    observation_evidence: dict[str, Any] = field(default_factory=dict)
     tool_call_id: str | None = None
     tool_status: str | None = None
     todo_status: str | None = None
@@ -129,6 +131,8 @@ def replan_recovery_snapshots_from_events(
             recovery_action_label=record.recovery_action_label,
             permission_target=record.permission_target,
             risk_level=record.risk_level,
+            action_target=dict(record.action_target),
+            observation_evidence=dict(record.observation_evidence),
             tool_call_id=record.tool_call_id or None,
             tool_status=record.tool_status or None,
             todo_status=record.todo_status or None,
@@ -207,6 +211,7 @@ def _apply_request_event(
     )
     _extend_unique(record.fallback_tools, _string_list(request.get("fallback_tools")))
     _apply_recovery_action_metadata(record, request)
+    _apply_observed_action_metadata(record, request)
     record.failure_detail = _first_text(
         record.failure_detail,
         request.get("failure_detail"),
@@ -272,6 +277,7 @@ def _apply_planned_event(
     )
     _extend_unique(record.fallback_tools, _string_list(payload.get("fallback_tools")))
     _apply_recovery_action_metadata(record, payload, selected_tool=selected_tool)
+    _apply_observed_action_metadata(record, payload)
     _mark_event(record, event)
 
 
@@ -323,6 +329,7 @@ def _apply_tool_event(
             payload,
             selected_tool=record.selected_tool_name or call.tool_name,
         )
+        _apply_observed_action_metadata(record, payload, call=call)
         record.result_preview = _mapping(call.output_preview)
         _mark_event(record, event)
 
@@ -403,6 +410,12 @@ def _merge_recovery_snapshots(
     result_preview = dict(current.result_preview or {})
     if incoming.result_preview:
         result_preview.update(incoming.result_preview)
+    action_target = dict(current.action_target or {})
+    if incoming.action_target:
+        action_target.update(incoming.action_target)
+    observation_evidence = dict(current.observation_evidence or {})
+    if incoming.observation_evidence:
+        observation_evidence.update(incoming.observation_evidence)
     event_ids = list(current.recovery_event_ids)
     _extend_unique(event_ids, incoming.recovery_event_ids)
     return current.model_copy(
@@ -426,6 +439,8 @@ def _merge_recovery_snapshots(
             or incoming.recovery_action_label,
             "permission_target": current.permission_target or incoming.permission_target,
             "risk_level": current.risk_level or incoming.risk_level,
+            "action_target": action_target,
+            "observation_evidence": observation_evidence,
             "tool_call_id": current.tool_call_id or incoming.tool_call_id,
             "tool_status": current.tool_status or incoming.tool_status,
             "todo_status": current.todo_status or incoming.todo_status,
@@ -572,6 +587,33 @@ def _apply_recovery_action_metadata(
         selected_action.get("risk_level") if selected_action else "",
         record.risk_level,
     )
+
+
+def _apply_observed_action_metadata(
+    record: _RecoveryRecord,
+    payload: Mapping[str, Any],
+    *,
+    call: ToolCallSnapshot | None = None,
+) -> None:
+    action_target = _observed_mapping(payload, "action_target")
+    observation_evidence = _observed_mapping(payload, "observation_evidence")
+    if call is not None:
+        if not action_target:
+            action_target = _mapping(call.metadata.get("action_target"))
+        if not observation_evidence:
+            observation_evidence = _mapping(call.metadata.get("observation_evidence"))
+    if action_target:
+        record.action_target.update(action_target)
+    if observation_evidence:
+        record.observation_evidence.update(observation_evidence)
+
+
+def _observed_mapping(payload: Mapping[str, Any], key: str) -> dict[str, Any]:
+    value = _mapping(payload.get(key))
+    if value:
+        return value
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    return _mapping(metadata.get(key))
 
 
 def _recovery_action_records(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
