@@ -9311,6 +9311,7 @@ _MODEL_FOLLOWUP_AUTO_PENDING_TOOLS = {
     "desktop.active_window",
     "desktop.click_ui_element",
     "desktop.hotkey",
+    "desktop.open_path_with_app",
     "desktop.read_ui",
     "desktop.safe_click",
     "desktop.safe_key",
@@ -9355,6 +9356,7 @@ def _model_followup_pending_plan_requests(
             allowed,
             planning_reason=planning_reason,
             generated_content=generated_content,
+            followup_context=followup_context,
         )
         if not request:
             break
@@ -9402,6 +9404,7 @@ def _model_followup_pending_plan_request(
     *,
     planning_reason: str,
     generated_content: str = "",
+    followup_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     tool_name = str(step.get("tool_name") or "").strip()
     if (
@@ -9411,10 +9414,18 @@ def _model_followup_pending_plan_request(
     ):
         return {}
     raw_input = step.get("input_preview") if isinstance(step.get("input_preview"), Mapping) else {}
+    input_resolution: dict[str, Any] = {}
     if tool_name == "terminal.run":
         input_payload = _model_followup_terminal_pending_input(
             raw_input,
             generated_content,
+        )
+        if not input_payload:
+            return {}
+    elif tool_name == "desktop.open_path_with_app":
+        input_payload, input_resolution = _model_followup_open_path_with_app_pending_input(
+            raw_input,
+            followup_context or {},
         )
         if not input_payload:
             return {}
@@ -9455,7 +9466,195 @@ def _model_followup_pending_plan_request(
     capability_id = str(step.get("capability_id") or "").strip()
     if capability_id:
         request["capability_id"] = capability_id
+    if input_resolution:
+        request["input_resolution"] = input_resolution
     return request
+
+
+def _model_followup_open_path_with_app_pending_input(
+    raw_input: Mapping[str, Any],
+    followup_context: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    if not isinstance(raw_input, Mapping):
+        raw_input = {}
+    app_name = str(raw_input.get("app_name") or "").strip()
+    path = str(raw_input.get("path") or raw_input.get("target_path") or "").strip()
+    app_resolution: dict[str, Any] = {}
+    if _pending_plan_placeholder_value(path, "workspace.list"):
+        path = _resolved_followup_workspace_path(followup_context, raw_input)
+    if _pending_plan_placeholder_value(app_name, "desktop.list_apps"):
+        app_name, app_resolution = _resolved_followup_desktop_app_name(
+            followup_context,
+            raw_input,
+        )
+    if (
+        not path
+        or not app_name
+        or _pending_plan_placeholder_value(path, "workspace.list")
+        or _pending_plan_placeholder_value(app_name, "desktop.list_apps")
+    ):
+        return {}, {}
+    return {"path": path, "app_name": app_name}, app_resolution
+
+
+def _pending_plan_placeholder_value(value: Any, source: str) -> bool:
+    text = str(value or "").strip()
+    if not text:
+        return True
+    lowered = text.lower()
+    return (
+        (text.startswith("<") and text.endswith(">"))
+        or source.lower() in lowered
+    )
+
+
+def _resolved_followup_workspace_path(
+    followup_context: Mapping[str, Any],
+    raw_input: Mapping[str, Any],
+) -> str:
+    for snapshot in reversed(_followup_snapshots_for_tool(followup_context, "workspace.list")):
+        entries = snapshot.get("entries")
+        if not isinstance(entries, list) or not entries:
+            continue
+        entry = _select_followup_workspace_entry(entries, raw_input)
+        if not entry:
+            continue
+        path = str(entry.get("path") or "").strip()
+        if path:
+            return path
+        name = str(entry.get("name") or "").strip()
+        if not name:
+            continue
+        return _join_followup_workspace_path(str(snapshot.get("path") or ""), name)
+    return ""
+
+
+def _resolved_followup_desktop_app_name(
+    followup_context: Mapping[str, Any],
+    raw_input: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]]:
+    for snapshot in reversed(_followup_snapshots_for_tool(followup_context, "desktop.list_apps")):
+        apps = snapshot.get("apps")
+        if not isinstance(apps, list) or not apps:
+            continue
+        app = _select_followup_desktop_app(apps)
+        app_name = str(app.get("name") or "").strip()
+        if not app_name:
+            continue
+        query = str(
+            raw_input.get("query")
+            or raw_input.get("app_query")
+            or snapshot.get("query")
+            or ""
+        ).strip()
+        resolution: dict[str, Any] = {
+            "tool": "desktop.open_path_with_app",
+            "field": "app_name",
+            "requested_app_name": query or str(raw_input.get("app_name") or "").strip(),
+            "resolved_app_name": app_name,
+            "source_tool": "desktop.list_apps",
+        }
+        app_path = str(app.get("path") or "").strip()
+        if app_path:
+            resolution["resolved_app_path"] = app_path
+        score = app.get("match_score") if app.get("match_score") not in (None, "") else app.get("score")
+        if score not in (None, ""):
+            resolution["app_resolution_score"] = str(score)
+        return app_name, {
+            key: value
+            for key, value in resolution.items()
+            if value not in ("", None)
+        }
+    return "", {}
+
+
+def _followup_snapshots_for_tool(
+    followup_context: Mapping[str, Any],
+    source_tool: str,
+) -> list[Mapping[str, Any]]:
+    snapshots: list[Mapping[str, Any]] = []
+    raw_snapshots = followup_context.get("content_snapshots")
+    if isinstance(raw_snapshots, list):
+        snapshots.extend(snapshot for snapshot in raw_snapshots if isinstance(snapshot, Mapping))
+    raw_snapshot = followup_context.get("content_snapshot")
+    if isinstance(raw_snapshot, Mapping):
+        snapshots.append(raw_snapshot)
+    return [
+        snapshot
+        for snapshot in snapshots
+        if str(snapshot.get("source_tool") or "").strip() == source_tool
+    ]
+
+
+def _select_followup_workspace_entry(
+    entries: list[Any],
+    raw_input: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    candidates = [entry for entry in entries if isinstance(entry, Mapping)]
+    if not candidates:
+        return {}
+    selection = str(raw_input.get("selection") or "").strip().lower()
+    if any(marker in selection for marker in ("last", "最后", "末尾")):
+        return candidates[-1]
+    if any(
+        marker in selection
+        for marker in ("recent", "latest", "newest", "最近", "最新", "刚刚")
+    ):
+        return max(
+            candidates,
+            key=lambda entry: _workspace_entry_recency_score(entry, candidates.index(entry)),
+        )
+    return candidates[0]
+
+
+def _workspace_entry_recency_score(entry: Mapping[str, Any], index: int) -> tuple[float, int, int]:
+    numeric_score = 0.0
+    for key in ("mtime_ns", "mtime", "modified_at", "score"):
+        value = entry.get(key)
+        try:
+            numeric_score = max(numeric_score, float(value))
+        except (TypeError, ValueError):
+            pass
+    name = str(entry.get("name") or entry.get("path") or "").lower()
+    name_score = 0
+    for marker, score in (
+        ("latest", 30),
+        ("newest", 25),
+        ("recent", 20),
+        ("final", 10),
+        ("最新", 30),
+        ("最近", 20),
+    ):
+        if marker in name:
+            name_score = max(name_score, score)
+    return numeric_score, name_score, -index
+
+
+def _select_followup_desktop_app(apps: list[Any]) -> Mapping[str, Any]:
+    candidates = [app for app in apps if isinstance(app, Mapping)]
+    if not candidates:
+        return {}
+    return max(candidates, key=_desktop_app_candidate_score)
+
+
+def _desktop_app_candidate_score(app: Mapping[str, Any]) -> float:
+    for key in ("match_score", "score", "confidence"):
+        value = app.get(key)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return 0.0
+
+
+def _join_followup_workspace_path(base_path: str, name: str) -> str:
+    clean_name = str(name or "").strip().strip("/")
+    clean_base = str(base_path or "").strip()
+    if not clean_name:
+        return clean_base
+    if not clean_base or clean_base == ".":
+        return clean_name
+    return posixpath.normpath(posixpath.join(clean_base.rstrip("/"), clean_name))
 
 
 def _tool_requests_with_pending_plan_metadata(
@@ -9510,9 +9709,36 @@ def _tool_requests_with_pending_plan_metadata(
                 item.get("planner_step_id") or ""
             ).strip():
                 item["planner_step_id"] = str(item.get("step_id") or "").strip()
+            item = _resolve_dynamic_pending_plan_request_input(
+                item,
+                first_step,
+                followup_context,
+            )
             consumed = True
         enriched.append(item)
     return enriched
+
+
+def _resolve_dynamic_pending_plan_request_input(
+    request: dict[str, Any],
+    step: Mapping[str, Any],
+    followup_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    if str(request.get("tool") or "").strip() != "desktop.open_path_with_app":
+        return request
+    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    step_input = step.get("input_preview") if isinstance(step.get("input_preview"), Mapping) else {}
+    merged_input = {**dict(step_input), **dict(request_input)}
+    resolved_input, input_resolution = _model_followup_open_path_with_app_pending_input(
+        merged_input,
+        followup_context,
+    )
+    if not resolved_input:
+        return request
+    resolved_request = {**request, "input": resolved_input}
+    if input_resolution and not isinstance(resolved_request.get("input_resolution"), Mapping):
+        resolved_request["input_resolution"] = input_resolution
+    return resolved_request
 
 
 def _model_followup_clipboard_pending_input(

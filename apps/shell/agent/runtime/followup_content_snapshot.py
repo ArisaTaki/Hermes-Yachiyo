@@ -306,8 +306,9 @@ def workspace_list_content_snapshot(
     input_preview: dict[str, Any],
 ) -> dict[str, Any]:
     entries = _workspace_list_entries(result)
+    entry_candidates = _workspace_list_entry_candidates(entries)
     lines = []
-    for entry in entries[:32]:
+    for entry in entry_candidates:
         name = str(entry.get("name") or entry.get("path") or "").strip()
         if not name:
             continue
@@ -333,6 +334,8 @@ def workspace_list_content_snapshot(
         "total_entries": _number_value(result.get("total_entries")),
         "truncated": len(entries) > 32 or bool(result.get("truncated")),
     }
+    if entry_candidates:
+        snapshot["entries"] = entry_candidates
     if text:
         snapshot["text"] = (
             f"Candidate files in {snapshot['path']}:\n{text}"
@@ -352,10 +355,9 @@ def desktop_list_apps_content_snapshot(
     apps = data.get("apps") if isinstance(data.get("apps"), list) else result.get("apps")
     if not isinstance(apps, list):
         apps = []
+    app_candidates = _desktop_list_app_candidates(apps)
     lines = []
-    for app in apps[:24]:
-        if not isinstance(app, dict):
-            continue
+    for app in app_candidates:
         name = str(app.get("name") or "").strip()
         if not name:
             continue
@@ -376,6 +378,8 @@ def desktop_list_apps_content_snapshot(
         "total_count": _number_value(data.get("total_count") or result.get("total_count")),
         "truncated": len(apps) > 24 or bool(data.get("truncated") or result.get("truncated")),
     }
+    if app_candidates:
+        snapshot["apps"] = app_candidates
     if lines:
         snapshot["text"] = (
             f"Candidate apps for {query}:\n" if query else "Candidate apps:\n"
@@ -398,6 +402,56 @@ def _workspace_list_entries(result: dict[str, Any]) -> list[dict[str, Any]]:
             continue
         return [dict(item) for item in raw_items if isinstance(item, dict)]
     return []
+
+
+def _workspace_list_entry_candidates(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for entry in entries[:32]:
+        if not isinstance(entry, dict):
+            continue
+        name = str(entry.get("name") or "").strip()
+        path = str(entry.get("path") or entry.get("display_path") or "").strip()
+        if not name and path:
+            name = path.rsplit("/", 1)[-1]
+        if not name and not path:
+            continue
+        candidate: dict[str, Any] = {}
+        if name:
+            candidate["name"] = name
+        if path and path != name:
+            candidate["path"] = path
+        entry_type = str(entry.get("type") or entry.get("kind") or "").strip()
+        if entry_type:
+            candidate["type"] = entry_type
+        for key in ("modified_at", "mtime", "mtime_ns", "size", "score"):
+            value = entry.get(key)
+            if value not in (None, ""):
+                candidate[key] = value
+        candidates.append(candidate)
+    return candidates
+
+
+def _desktop_list_app_candidates(apps: list[Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for app in apps[:24]:
+        if not isinstance(app, dict):
+            continue
+        name = str(app.get("name") or "").strip()
+        if not name:
+            continue
+        candidate: dict[str, Any] = {"name": name}
+        for source_key, target_key in (
+            ("path", "path"),
+            ("bundle_id", "bundle_id"),
+            ("match_score", "match_score"),
+            ("score", "score"),
+            ("confidence", "confidence"),
+        ):
+            value = app.get(source_key)
+            if value not in (None, ""):
+                candidate[target_key] = value
+        candidates.append(candidate)
+    return candidates
 
 
 def _terminal_run_snapshot_text(stdout: str, stderr: str, result: dict[str, Any]) -> str:

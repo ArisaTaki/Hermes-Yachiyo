@@ -3836,6 +3836,183 @@ def test_model_followup_context_snapshots_file_and_app_discovery_candidates() ->
     assert "open-discovered-file-with-app via desktop.open_path_with_app" in message
 
 
+def test_model_followup_pending_plan_resolves_dynamic_file_and_app_candidates() -> None:
+    requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            "planning_reason": "planner_model_followup_context",
+            "decision_id": "decision-pdf",
+            "plan_id": "plan-pdf",
+            "intent_kind": "desktop_operation",
+            "content_snapshots": [
+                {
+                    "source_tool": "workspace.list",
+                    "ok": True,
+                    "path": "Downloads",
+                    "text": "Candidate files in Downloads:\n- older.pdf\n- brief-latest.pdf",
+                    "entries": [
+                        {"name": "older.pdf", "type": "file", "mtime": 1},
+                        {"name": "brief-latest.pdf", "type": "file", "mtime": 2},
+                    ],
+                },
+                {
+                    "source_tool": "desktop.list_apps",
+                    "ok": True,
+                    "query": "pdf",
+                    "text": "Candidate apps for pdf:\n- Preview\n- PDF Expert",
+                    "apps": [
+                        {
+                            "name": "Preview",
+                            "path": "/System/Applications/Preview.app",
+                            "match_score": 72,
+                        },
+                        {
+                            "name": "PDF Expert",
+                            "path": "/Applications/PDF Expert.app",
+                            "match_score": 98,
+                        },
+                    ],
+                },
+            ],
+            "pending_plan_steps": [
+                {
+                    "step_id": "open-discovered-file-with-app",
+                    "tool_name": "desktop.open_path_with_app",
+                    "capability_id": "file.desktop_access",
+                    "input_preview": {
+                        "app_name": "<selected app from desktop.list_apps>",
+                        "app_selection_source": "desktop.list_apps",
+                        "query": "pdf",
+                        "target_path": "<selected file from workspace.list>",
+                        "selection_source": "workspace.list",
+                        "selection": "最近",
+                    },
+                }
+            ],
+        },
+        ["desktop.open_path_with_app"],
+        generated_content="我会用 PDF Expert 打开最近的 PDF。",
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path_with_app",
+            "input": {
+                "path": "Downloads/brief-latest.pdf",
+                "app_name": "PDF Expert",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_model_followup_context",
+            "step_id": "open-discovered-file-with-app",
+            "capability_id": "file.desktop_access",
+            "input_resolution": {
+                "tool": "desktop.open_path_with_app",
+                "field": "app_name",
+                "requested_app_name": "pdf",
+                "resolved_app_name": "PDF Expert",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/PDF Expert.app",
+                "app_resolution_score": "98",
+            },
+            "decision_id": "decision-pdf",
+            "plan_id": "plan-pdf",
+            "intent_kind": "desktop_operation",
+            "planner_step_id": "open-discovered-file-with-app",
+        }
+    ]
+
+
+def test_model_tool_call_resolves_dynamic_pending_open_path_placeholders() -> None:
+    requests = custom_api_agent_module._tool_requests_with_pending_plan_metadata(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.open_path_with_app",
+                "input": {
+                    "path": "<selected file from workspace.list>",
+                    "app_name": "<selected app from desktop.list_apps>",
+                },
+                "source": "model",
+            }
+        ],
+        [
+            _timeline(
+                "agent.model.followup_context",
+                "planner_model_followup_context",
+                planning_reason="planner_model_followup_context",
+                decision_id="decision-pdf",
+                plan_id="plan-pdf",
+                intent_kind="desktop_operation",
+                content_snapshots=[
+                    {
+                        "source_tool": "workspace.list",
+                        "ok": True,
+                        "path": "Downloads",
+                        "text": "Candidate files in Downloads:\n- brief-latest.pdf",
+                        "entries": [
+                            {"name": "brief-latest.pdf", "type": "file", "mtime": 2}
+                        ],
+                    },
+                    {
+                        "source_tool": "desktop.list_apps",
+                        "ok": True,
+                        "query": "pdf",
+                        "text": "Candidate apps for pdf:\n- PDF Expert",
+                        "apps": [
+                            {
+                                "name": "PDF Expert",
+                                "path": "/Applications/PDF Expert.app",
+                                "match_score": 98,
+                            }
+                        ],
+                    },
+                ],
+                pending_plan_steps=[
+                    {
+                        "step_id": "open-discovered-file-with-app",
+                        "tool_name": "desktop.open_path_with_app",
+                        "capability_id": "file.desktop_access",
+                        "input_preview": {
+                            "app_name": "<selected app from desktop.list_apps>",
+                            "query": "pdf",
+                            "target_path": "<selected file from workspace.list>",
+                            "selection": "最近",
+                        },
+                    }
+                ],
+            )
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path_with_app",
+            "input": {
+                "path": "Downloads/brief-latest.pdf",
+                "app_name": "PDF Expert",
+            },
+            "source": "model",
+            "step_id": "open-discovered-file-with-app",
+            "capability_id": "file.desktop_access",
+            "decision_id": "decision-pdf",
+            "plan_id": "plan-pdf",
+            "intent_kind": "desktop_operation",
+            "planning_reason": "planner_model_followup_context",
+            "planner_step_id": "open-discovered-file-with-app",
+            "input_resolution": {
+                "tool": "desktop.open_path_with_app",
+                "field": "app_name",
+                "requested_app_name": "pdf",
+                "resolved_app_name": "PDF Expert",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/PDF Expert.app",
+                "app_resolution_score": "98",
+            },
+        }
+    ]
+
+
 def test_auto_followup_dispatches_observed_desktop_click_action() -> None:
     selection_payload = {
         "followup_target": {
