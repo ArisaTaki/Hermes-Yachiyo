@@ -173,11 +173,7 @@ class ToolApprovalResumeContext:
             messages=messages,
             tool_request=tool_request,
             tool_name=tool_name,
-            input_preview=_tool_input_preview(
-                tool_request.get("input")
-                if isinstance(tool_request.get("input"), dict)
-                else {}
-            ),
+            input_preview=_pending_approval_resume_input_preview(pending, tool_request),
             remaining_requests=remaining_requests,
             next_iteration=next_iteration,
         )
@@ -212,6 +208,24 @@ def _pending_approval_input_preview(
     for key, value in context.items():
         preview.setdefault(key, deepcopy(value))
     return preview
+
+
+def _pending_approval_resume_input_preview(
+    pending: dict[str, Any],
+    tool_request: dict[str, Any],
+) -> dict[str, Any]:
+    pending_preview = pending.get("input_preview")
+    if isinstance(pending_preview, dict):
+        preview = deepcopy(pending_preview)
+    else:
+        raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        computed = _tool_input_preview(raw_input)
+        preview = dict(computed) if isinstance(computed, dict) else {}
+    enriched = _pending_approval_input_preview(
+        preview,
+        _pending_approval_context(tool_request),
+    )
+    return enriched if isinstance(enriched, dict) else {}
 
 
 @dataclass(frozen=True)

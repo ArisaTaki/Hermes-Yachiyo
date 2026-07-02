@@ -145,3 +145,78 @@ def test_tool_pending_approval_builder_preserves_runtime_context() -> None:
     assert pending["input_preview"]["requires_post_action_verification"] is True
     assert pending["replan_triggers"] == ["ui_not_found"]
     assert pending["input_preview"]["replan_triggers"] == ["ui_not_found"]
+
+
+def test_tool_approval_resume_context_preserves_pending_input_preview_context() -> None:
+    pending = {
+        "approval_id": "approval-context",
+        "tool": "desktop.click_ui_element",
+        "messages": [{"role": "user", "content": "save"}],
+        "tool_request": {
+            "tool": "desktop.click_ui_element",
+            "input": {"label": "Save"},
+            "core_id": "core-1",
+            "workspace_id": "workspace-1",
+            "task_id": "task-1",
+            "step_id": "save-file",
+            "capability_id": "desktop.ui_operation",
+            "group_run_id": "group-run-1",
+            "workflow_run_id": "workflow-run-1",
+        },
+        "input_preview": {
+            "label": "Save",
+            "core_id": "core-1",
+            "workspace_id": "workspace-1",
+            "task_id": "task-1",
+            "step_id": "save-file",
+            "capability_id": "desktop.ui_operation",
+            "group_run_id": "group-run-1",
+            "workflow_run_id": "workflow-run-1",
+        },
+        "remaining_tool_requests": [],
+        "next_iteration": 3,
+    }
+
+    context = ToolApprovalResumeContext.from_run(
+        {"run_id": "run-1", "timeline": [], "artifacts": []},
+        pending,
+        broker=object(),
+        allowed_tools=["desktop.click_ui_element"],
+        budget=object(),
+    )
+
+    assert context.input_preview == pending["input_preview"]
+
+
+def test_tool_approval_resume_context_backfills_context_from_tool_request() -> None:
+    pending = {
+        "approval_id": "approval-context",
+        "tool": "desktop.click_ui_element",
+        "messages": [{"role": "user", "content": "save"}],
+        "tool_request": {
+            "tool": "desktop.click_ui_element",
+            "input": {"label": "Save"},
+            "core_id": "core-1",
+            "workspace_id": "workspace-1",
+            "task_id": "task-1",
+            "step_id": "save-file",
+            "capability_id": "desktop.ui_operation",
+        },
+        "remaining_tool_requests": [],
+        "next_iteration": 3,
+    }
+
+    context = ToolApprovalResumeContext.from_run(
+        {"run_id": "run-1", "timeline": [], "artifacts": []},
+        pending,
+        broker=object(),
+        allowed_tools=["desktop.click_ui_element"],
+        budget=object(),
+    )
+
+    assert context.input_preview["label"] == "Save"
+    assert context.input_preview["core_id"] == "core-1"
+    assert context.input_preview["workspace_id"] == "workspace-1"
+    assert context.input_preview["task_id"] == "task-1"
+    assert context.input_preview["step_id"] == "save-file"
+    assert context.input_preview["capability_id"] == "desktop.ui_operation"
