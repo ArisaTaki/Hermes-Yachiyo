@@ -3255,6 +3255,7 @@ def test_auto_replan_ui_continuation_runs_remaining_plan_after_retry() -> None:
             "app.focus_and_type_into_ui_element",
             "desktop.search_submit",
             "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
         ],
         [
             _timeline(
@@ -3272,7 +3273,7 @@ def test_auto_replan_ui_continuation_runs_remaining_plan_after_retry() -> None:
 
     assert [request["tool"] for request in requests] == [
         "desktop.search_submit",
-        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
     ]
     assert {request["planning_reason"] for request in requests} == {
         "planner_replan_ui_continuation"
@@ -3283,8 +3284,134 @@ def test_auto_replan_ui_continuation_runs_remaining_plan_after_retry() -> None:
     assert requests[0]["step_id"] == "submit-media-search"
     assert requests[0]["planner_step_id"] == "submit-media-search"
     assert requests[0]["capability_id"] == "desktop.ui_operation"
-    assert requests[1]["step_id"] == "play-media-search-result"
-    assert requests[1]["input"]["target"] == "first result"
+    assert "step_id" not in requests[1]
+    assert requests[1]["input"] == {"limit": 80, "app_name": "Music"}
+
+
+def test_auto_replan_ui_search_observed_result_clicks_after_result_observation() -> None:
+    payload = {
+        "request_id": "replan-ui-result",
+        "trigger": "tool_failure",
+        "decision_id": "decision-ui-result",
+        "plan_id": "plan-ui-result",
+        "source_step_id": "type-media-search-query",
+        "source_tool_name": "app.focus_and_type_into_ui_element",
+        "target_capability_id": "desktop.ui_operation",
+        "input_preview": {
+            "app_name": "Music",
+            "target": "search 搜索",
+            "text": "超时空辉夜姬",
+            "role_filter": "text",
+            "limit": 80,
+        },
+    }
+    planned = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_type_into_ui_element",
+            "input": {
+                "app_name": "Music",
+                "target": "search 搜索",
+                "text": "超时空辉夜姬",
+                "role_filter": "text",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+            "step_id": "type-media-search-query",
+            "capability_id": "desktop.ui_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+            "step_id": "submit-media-search",
+            "capability_id": "desktop.ui_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Music",
+                "target": "first result",
+                "role_filter": "",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+            "step_id": "play-media-search-result",
+            "capability_id": "desktop.ui_operation",
+        },
+    ]
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.focus_and_type_into_ui_element",
+            input_preview=planned[0]["input"],
+            result={"ok": True},
+            planning_reason="planner_replan_ui_observed_action",
+            replan_request_id="replan-ui-result",
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.search_submit",
+            input_preview={},
+            result={"ok": True},
+            planning_reason="planner_replan_ui_continuation",
+            replan_request_id="replan-ui-result",
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            input_preview={"app_name": "Music", "limit": 80},
+            result={
+                "ok": True,
+                "data": {
+                    "elements": [
+                        {
+                            "role": "AXStaticText",
+                            "name": "超时空辉夜姬 - Apple Music",
+                            "center": {"x": 240, "y": 360},
+                        }
+                    ],
+                    "count": 1,
+                },
+            },
+            planning_reason="planner_replan_ui_continuation",
+            replan_request_id="replan-ui-result",
+        ),
+    ]
+
+    requests = custom_api_agent_module._auto_replan_ui_search_observed_result_requests(
+        [payload],
+        planned,
+        ["app.focus_and_click_ui_element", "desktop.ui_elements"],
+        timeline,
+        planning_reason="planner_replan_ui_search_observed_result",
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    click_request = requests[0]
+    assert click_request["planning_reason"] == "planner_replan_ui_search_observed_result"
+    assert click_request["step_id"] == "play-media-search-result"
+    assert click_request["replan_request_id"] == "replan-ui-result"
+    assert click_request["input"] == {
+        "app_name": "Music",
+        "target": "first result",
+        "role_filter": "",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert click_request["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "app_scoped_semantic_ui_tool",
+    }
 
 
 def test_custom_api_agent_loop_refocuses_after_active_window_mismatch_without_model() -> None:
@@ -22013,7 +22140,25 @@ def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observa
                         "action": "desktop.search_submit",
                         "data": {"app_name": "Music"},
                     }
-                elif tool == "app.focus_and_click_ui_element":
+                elif tool == "desktop.ui_elements":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {
+                            "elements": [
+                                {
+                                    "role": "AXStaticText",
+                                    "name": "超时空辉夜姬 - Apple Music",
+                                    "center": {"x": 260, "y": 360},
+                                }
+                            ],
+                            "count": 1,
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected continuation tool: {tool}")
+            elif batch_index == 5:
+                if tool == "app.focus_and_click_ui_element":
                     result = {
                         "ok": True,
                         "action": "app.focus_and_click_ui_element",
@@ -22022,8 +22167,23 @@ def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observa
                             "target": payload.get("target"),
                         },
                     }
+                elif tool == "desktop.ui_elements":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {
+                            "elements": [
+                                {
+                                    "role": "AXStaticText",
+                                    "name": "正在播放 超时空辉夜姬",
+                                    "center": {"x": 260, "y": 360},
+                                }
+                            ],
+                            "count": 1,
+                        },
+                    }
                 else:
-                    raise AssertionError(f"unexpected continuation tool: {tool}")
+                    raise AssertionError(f"unexpected observed result tool: {tool}")
             else:
                 raise AssertionError(f"unexpected tool batch {batch_index}: {tool}")
             append_tool_event(request, payload, result, messages_arg, timeline_arg)
@@ -22077,7 +22237,8 @@ def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observa
         ],
         ["desktop.ui_elements"],
         ["app.focus_and_type_into_ui_element", "desktop.ui_elements"],
-        ["desktop.search_submit", "app.focus_and_click_ui_element"],
+        ["desktop.search_submit", "desktop.ui_elements"],
+        ["app.focus_and_click_ui_element", "desktop.ui_elements"],
     ]
     observation_request = tool_batches[1][0]
     assert observation_request["planning_reason"] == "planner_replan_ui_observation_recovery"
@@ -22098,6 +22259,16 @@ def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observa
     continuation_request = tool_batches[3][0]
     assert continuation_request["planning_reason"] == "planner_replan_ui_continuation"
     assert continuation_request["replan_request_id"] == retry_request["replan_request_id"]
+    observed_result_request = tool_batches[4][0]
+    assert (
+        observed_result_request["planning_reason"]
+        == "planner_replan_ui_search_observed_result"
+    )
+    assert observed_result_request["input"]["target"] == "first result"
+    assert observed_result_request["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "app_scoped_semantic_ui_tool",
+    }
     assert not any(event["event"] == "agent.model.response" for event in timeline)
 
 
