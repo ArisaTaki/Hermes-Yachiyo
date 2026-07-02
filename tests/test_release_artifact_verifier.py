@@ -1754,6 +1754,18 @@ def test_verifier_reports_packaged_app_missing_required_run_handoff_data_attribu
         app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
         "packaged Electron app.asar must include UI E2E data attribute 'data-run-status'",
     ) in findings
+    assert verifier.Finding(
+        app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
+        "packaged Electron app.asar must include UI E2E data attribute 'data-replan-recovery-request-id'",
+    ) in findings
+    assert verifier.Finding(
+        app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
+        "packaged Electron app.asar must include UI E2E data attribute 'data-replan-recovery-tool'",
+    ) in findings
+    assert verifier.Finding(
+        app_dir / verifier.PACKAGED_ASAR_RELATIVE_PATH,
+        "packaged Electron app.asar must include UI E2E data attribute 'data-replan-recovery-input'",
+    ) in findings
 
 
 def test_verifier_reports_packaged_app_development_only_ui_e2e_hook(tmp_path):

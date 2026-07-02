@@ -641,6 +641,9 @@ PACKAGED_UI_E2E_REQUIRED_SELECTORS: tuple[str, ...] = (
 PACKAGED_UI_E2E_REQUIRED_DATA_ATTRIBUTES: tuple[str, ...] = (
     "data-run-id",
     "data-run-status",
+    "data-replan-recovery-request-id",
+    "data-replan-recovery-tool",
+    "data-replan-recovery-input",
 )
 PACKAGED_UI_E2E_FORBIDDEN_TEXT: tuple[str, ...] = (
     "oha-chat-e2e-add-image",
