@@ -1557,17 +1557,18 @@ def _keep_post_mutation_verification_request(
         return False
     if tool_name in {"desktop.ui_elements", "desktop.read_ui", "desktop.windows", "desktop.list_windows"}:
         return True
+    if previous_mutation_tool in {
+        "app.quit",
+        "app.hide",
+        "app.show",
+        "app.minimize",
+        "desktop.close_window",
+        "desktop.minimize_window",
+        "desktop.quit_app",
+    } and tool_name in {"desktop.active_window", "desktop.running_apps"}:
+        return True
     if tool_name == "desktop.active_window" and (
-        previous_mutation_tool in {
-            "app.quit",
-            "app.hide",
-            "app.show",
-            "app.minimize",
-            "desktop.close_window",
-            "desktop.minimize_window",
-            "desktop.quit_app",
-        }
-        or previous_mutation_tool.startswith("app.open_and_")
+        previous_mutation_tool.startswith("app.open_and_")
         or previous_mutation_tool.startswith("app.focus_and_")
     ):
         return True
