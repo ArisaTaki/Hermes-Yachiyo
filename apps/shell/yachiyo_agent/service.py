@@ -24,7 +24,7 @@ from .contracts import (
     RunTimelineSnapshot,
     StartChatTaskRequest,
 )
-from .events import public_run_event_from_payload, public_run_event_page_from_payload
+from .events import public_run_event_page_from_payload
 from .planner_projection import planner_enriched_chat_request
 from .ports import ChatTaskStarter, RuntimePort
 from .runtime_execution import runtime_execution_envelope_from_decision
@@ -33,7 +33,7 @@ from .run_snapshots import run_timeline_snapshot_from_payload
 from .start_event_enrichment import start_payload_with_planner_events
 from .task_cards import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
 from .task_core_snapshots import task_core_snapshot_from_payload
-from .task_snapshots import _chat_task_tool_calls
+from .task_snapshots import _chat_task_tool_calls, run_events_from_payload
 from .tool_call_snapshots import tool_call_snapshots_from_payloads
 
 
@@ -154,13 +154,17 @@ class YachiyoAgentService:
         return agent_task_snapshot_from_payload(self._runtime_port.get_task_snapshot(task_id))
 
     def get_task_timeline(self, task_id: str) -> RunTimelineSnapshot:
-        return _chat_timeline_snapshot_from_payload(self._runtime_port.get_task_timeline(task_id))
+        return _chat_timeline_snapshot_from_payload(
+            _task_context_payload(self._runtime_port.get_task_timeline(task_id), task_id)
+        )
 
     def get_task_event_stream(self, task_id: str) -> Iterable[PublicRunEvent]:
-        raw_events = self._runtime_port.get_task_event_stream(task_id)
+        raw_events = _task_context_payload(
+            self._runtime_port.get_task_event_stream(task_id),
+            task_id,
+        )
         run_id = _payload_run_id(raw_events) or task_id
-        for event in _payload_items(raw_events, "events"):
-            yield public_run_event_from_payload(event, run_id=run_id)
+        yield from run_events_from_payload(raw_events, run_id=run_id, keys=("events",))
 
     def get_task_event_page(
         self,
@@ -172,10 +176,13 @@ class YachiyoAgentService:
         clean_limit = max(1, min(500, int(limit or 200)))
         port_event_page = getattr(self._runtime_port, "get_task_event_page", None)
         if callable(port_event_page):
-            raw_page = port_event_page(
+            raw_page = _task_context_payload(
+                port_event_page(
+                    task_id,
+                    after_sequence=clean_after_sequence,
+                    limit=clean_limit,
+                ),
                 task_id,
-                after_sequence=clean_after_sequence,
-                limit=clean_limit,
             )
             page = public_run_event_page_from_payload(
                 raw_page,
@@ -345,6 +352,14 @@ def _callable_accepts_keyword(callback: Any, keyword: str) -> bool:
         parameter.kind == Parameter.VAR_KEYWORD
         for parameter in parameters.values()
     )
+
+
+def _task_context_payload(payload: Any, task_id: str) -> Mapping[str, Any]:
+    if not isinstance(payload, Mapping):
+        return {"task_id": task_id, "events": []}
+    clean_payload = dict(payload)
+    clean_payload.setdefault("task_id", task_id)
+    return clean_payload
 
 
 def _chat_timeline_snapshot_from_payload(payload: Mapping[str, Any]) -> RunTimelineSnapshot:

@@ -932,9 +932,11 @@ def test_yachiyo_agent_service_maps_task_timeline_snapshot() -> None:
     assert timeline.task_id == "task-1"
     assert timeline.status == "approval_required"
     assert timeline.events[0].event_type == "agent.tool.approval_required"
+    assert timeline.events[0].task_id == "task-1"
     assert timeline.pending_approval is not None
     assert timeline.pending_approval.tool_name == "workspace.write_patch"
     assert timeline.tool_calls[0].tool_name == "workspace.write_patch"
+    assert timeline.tool_calls[0].task_id == "task-1"
     assert port.calls == [("get_task_timeline", "task-1")]
 
 
@@ -952,6 +954,7 @@ def test_yachiyo_agent_service_preserves_desktop_intent_planning_event() -> None
         "planning_reason": "clear_daily_desktop_intent",
         "source": "daily_desktop_intent",
         "status": "planned",
+        "task_id": "task-music",
         "tool": "media.apple_music_play",
     }
     assert task.current_step == "准备执行 · 播放 Apple Music"
@@ -989,7 +992,10 @@ def test_yachiyo_agent_service_projects_completed_desktop_intent_as_tool_call() 
     assert len(timeline.tool_calls) == 1
     assert timeline.tool_calls[0].tool_name == "desktop.windows"
     assert timeline.tool_calls[0].status == "completed"
-    assert timeline.tool_calls[0].input_preview == {"app_name": "Google Chrome"}
+    assert timeline.tool_calls[0].input_preview == {
+        "app_name": "Google Chrome",
+        "task_id": "task-windows",
+    }
     assert timeline.tool_calls[0].output_preview["action"] == "desktop.windows"
     assert timeline.tool_calls[0].output_preview["data"]["count"] == 1
     assert port.calls == [("get_task_timeline", "task-windows")]
@@ -1010,9 +1016,16 @@ def test_yachiyo_agent_service_projects_completed_desktop_intent_sequence_tool_c
         "completed",
         "completed",
     ]
-    assert timeline.tool_calls[0].input_preview == {"app_name": "WeChat"}
+    assert timeline.tool_calls[0].input_preview == {
+        "app_name": "WeChat",
+        "task_id": "task-wechat",
+    }
     assert timeline.tool_calls[0].output_preview["action"] == "app.open"
-    assert timeline.tool_calls[1].input_preview == {"role_filter": "button", "limit": 80}
+    assert timeline.tool_calls[1].input_preview == {
+        "role_filter": "button",
+        "limit": 80,
+        "task_id": "task-wechat",
+    }
     assert timeline.tool_calls[1].output_preview["action"] == "desktop.ui_elements"
     assert port.calls == [("get_task_timeline", "task-wechat")]
 
@@ -1029,6 +1042,8 @@ def test_yachiyo_agent_service_pages_task_events() -> None:
     assert page.next_after_sequence == 2
     assert page.has_more is True
     assert [event.event_type for event in page.events] == ["tool.requested"]
+    assert page.events[0].task_id == "task-1"
+    assert page.events[0].payload["task_id"] == "task-1"
     assert port.calls == [("get_task_event_stream", "task-1")]
 
 
@@ -1044,7 +1059,8 @@ def test_yachiyo_agent_service_prefers_runtime_port_task_event_pages() -> None:
     assert page.next_after_sequence == 7
     assert page.has_more is True
     assert [event.event_type for event in page.events] == ["task.progress"]
-    assert page.events[0].payload == {"step": "read workspace"}
+    assert page.events[0].task_id == "task-1"
+    assert page.events[0].payload == {"step": "read workspace", "task_id": "task-1"}
     assert port.calls == [
         (
             "get_task_event_page",

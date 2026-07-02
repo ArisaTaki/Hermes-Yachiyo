@@ -4467,6 +4467,51 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
     assert payload["children"][0]["planner_summary"] is None
 
 
+def test_run_timeline_events_inherit_parent_task_core_context() -> None:
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "status": "running",
+            "task_id": "task-1",
+            "task_core": {
+                "core_id": "core-1",
+                "workspace": {
+                    "workspace_id": "workspace-1",
+                    "title": "Workspace",
+                    "context": {"task_id": "task-1"},
+                },
+            },
+            "events": [
+                {
+                    "event_type": "tool.requested",
+                    "sequence": 1,
+                    "detail": "workspace.read",
+                    "payload": {
+                        "tool_call_id": "call-1",
+                        "tool": "workspace.read",
+                        "input_preview": {"path": "README.md"},
+                    },
+                }
+            ],
+        }
+    )
+
+    event = snapshot.events[0]
+    tool_call = snapshot.tool_calls[0]
+    assert event.core_id == "core-1"
+    assert event.workspace_id == "workspace-1"
+    assert event.task_id == "task-1"
+    assert event.payload["core_id"] == "core-1"
+    assert event.payload["workspace_id"] == "workspace-1"
+    assert event.payload["task_id"] == "task-1"
+    assert tool_call.core_id == "core-1"
+    assert tool_call.workspace_id == "workspace-1"
+    assert tool_call.task_id == "task-1"
+    assert tool_call.input_preview["core_id"] == "core-1"
+    assert tool_call.input_preview["workspace_id"] == "workspace-1"
+    assert tool_call.input_preview["task_id"] == "task-1"
+
+
 def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
     snapshot = ToolCallSnapshot(
         tool_call_id="tool-1",
@@ -4504,6 +4549,9 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
         "workflow_node_label",
         "group_id",
         "group_run_id",
+        "core_id",
+        "workspace_id",
+        "task_id",
         "source",
         "planning_reason",
         "decision_id",
@@ -4585,6 +4633,9 @@ def test_memory_trace_snapshot_keeps_runtime_trace_fields() -> None:
         "workflow_node_label",
         "group_id",
         "group_run_id",
+        "core_id",
+        "workspace_id",
+        "task_id",
         "title",
         "detail",
         "payload_preview",
@@ -4646,6 +4697,9 @@ def test_skill_trace_snapshot_keeps_runtime_trace_fields() -> None:
         "workflow_node_label",
         "group_id",
         "group_run_id",
+        "core_id",
+        "workspace_id",
+        "task_id",
         "title",
         "detail",
         "payload_preview",
@@ -4763,6 +4817,9 @@ def test_artifact_snapshot_keeps_runtime_trace_fields() -> None:
         "workflow_node_label",
         "group_id",
         "group_run_id",
+        "core_id",
+        "workspace_id",
+        "task_id",
         "title",
         "kind",
         "planned_kind",

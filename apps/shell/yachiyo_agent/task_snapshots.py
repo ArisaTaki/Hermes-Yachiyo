@@ -21,7 +21,7 @@ from .artifact_event_snapshots import (
 )
 from .artifacts import artifact_snapshots_from_payloads
 from .contracts import AgentTaskSnapshot, PublicRunEvent, ToolCallSnapshot
-from .events import public_run_event_from_payload
+from .events import public_run_event_from_payload, run_event_parent_context
 from .links import studio_run_url
 from .recovery_actions import RECOVERY_RETRY_CONTEXT_EVENT_TYPE
 from .replan_event_projection import run_events_with_replan_requests
@@ -283,6 +283,7 @@ def run_events_from_payload(
     run_id: str,
     keys: tuple[str, ...],
 ) -> list[PublicRunEvent]:
+    context = run_event_parent_context(payload)
     raw_events = []
     for key in keys:
         value = payload.get(key)
@@ -290,7 +291,12 @@ def run_events_from_payload(
             raw_events = value
             break
     return [
-        public_run_event_from_payload(event, run_id=run_id, sequence=index + 1)
+        public_run_event_from_payload(
+            event,
+            run_id=run_id,
+            sequence=index + 1,
+            context=context,
+        )
         for index, event in enumerate(raw_events if isinstance(raw_events, list) else [])
     ]
 

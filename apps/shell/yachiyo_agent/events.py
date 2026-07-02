@@ -17,10 +17,12 @@ def public_run_event_from_payload(
     *,
     run_id: str = "",
     sequence: int = 0,
+    context: Mapping[str, Any] | None = None,
 ) -> PublicRunEvent:
     if isinstance(payload, PublicRunEvent):
-        return _redacted_public_run_event(payload)
+        return _redacted_public_run_event(_public_run_event_with_context(payload, context))
 
+    payload = _payload_with_parent_context(payload, context)
     raw_payload = _mapping(payload.get("payload"))
     event_type = _text(payload.get("event_type") or payload.get("event"))
     event_run_id = _text(payload.get("run_id") or run_id)
@@ -142,11 +144,13 @@ def public_run_event_page_from_payload(
     after_sequence: int,
     limit: int,
 ) -> RunEventPageSnapshot:
+    context = run_event_parent_context(payload)
     events = [
         public_run_event_from_payload(
             event,
             run_id=run_id,
             sequence=after_sequence + index + 1,
+            context=context,
         )
         for index, event in enumerate(_payload_items(payload, "events"))
     ]
@@ -163,6 +167,80 @@ def public_run_event_page_from_payload(
         has_more=bool(payload.get("has_more", False)),
         events=events,
     )
+
+
+def run_event_parent_context(payload: Mapping[str, Any]) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    _set_context(context, "core_id", payload.get("core_id"))
+    _set_context(context, "workspace_id", payload.get("workspace_id"))
+    _set_context(context, "task_id", payload.get("task_id"))
+    _merge_task_core_context(context, payload.get("task_core"))
+    _merge_task_core_context(context, payload.get("planner_task_core"))
+    metadata = payload.get("metadata")
+    if isinstance(metadata, Mapping):
+        _merge_task_core_context(context, metadata.get("yachiyo_task_core"))
+        _merge_task_core_context(context, metadata.get("task_core"))
+    return context
+
+
+def _payload_with_parent_context(
+    payload: Mapping[str, Any],
+    context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    merged = dict(payload)
+    if not context:
+        return merged
+    for key, value in context.items():
+        if _optional_text(value) and not _optional_text(merged.get(key)):
+            merged[key] = value
+    raw_payload = merged.get("payload")
+    if isinstance(raw_payload, Mapping):
+        nested = dict(raw_payload)
+        for key, value in context.items():
+            if _optional_text(value) and not _optional_text(nested.get(key)):
+                nested[key] = value
+        merged["payload"] = nested
+    return merged
+
+
+def _public_run_event_with_context(
+    event: PublicRunEvent,
+    context: Mapping[str, Any] | None,
+) -> PublicRunEvent:
+    if not context:
+        return event
+    updates: dict[str, Any] = {}
+    payload = dict(event.payload)
+    for key, value in context.items():
+        text = _optional_text(value)
+        if not text or _optional_text(getattr(event, key, None)):
+            continue
+        updates[key] = text
+        if event.sensitivity != "secret":
+            payload.setdefault(key, text)
+    if payload != event.payload and event.sensitivity != "secret":
+        updates["payload"] = payload
+    return event.model_copy(update=updates) if updates else event
+
+
+def _merge_task_core_context(context: dict[str, Any], candidate: Any) -> None:
+    if not isinstance(candidate, Mapping):
+        return
+    _set_context(context, "core_id", candidate.get("core_id"))
+    _set_context(context, "workspace_id", candidate.get("workspace_id"))
+    _set_context(context, "task_id", candidate.get("task_id"))
+    workspace = candidate.get("workspace")
+    if isinstance(workspace, Mapping):
+        _set_context(context, "workspace_id", workspace.get("workspace_id"))
+        workspace_context = workspace.get("context")
+        if isinstance(workspace_context, Mapping):
+            _set_context(context, "task_id", workspace_context.get("task_id"))
+
+
+def _set_context(target: dict[str, Any], key: str, value: Any) -> None:
+    text = _optional_text(value)
+    if text and not _optional_text(target.get(key)):
+        target[key] = text
 
 
 def _mapping(value: Any) -> dict[str, Any]:
