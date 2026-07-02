@@ -6980,18 +6980,23 @@ def _runtime_replan_replayed_task_core_payload(
     replay_events: list[Mapping[str, Any]],
 ) -> dict[str, Any]:
     try:
-        from apps.shell.yachiyo_agent.events import public_run_event_from_payload
+        from apps.shell.yachiyo_agent.events import (
+            public_run_event_from_payload,
+            run_event_parent_context,
+        )
         from apps.shell.yachiyo_agent.task_core_snapshots import (
             task_core_snapshot_from_payload,
         )
     except Exception:
         return {}
+    normalized_task_core = _runtime_replan_normalized_task_core_payload(task_core)
+    context = run_event_parent_context({"task_core": normalized_task_core})
     public_events = [
-        public_run_event_from_payload(event, sequence=index + 1)
+        public_run_event_from_payload(event, sequence=index + 1, context=context)
         for index, event in enumerate(replay_events)
     ]
     snapshot = task_core_snapshot_from_payload(
-        {"task_core": _runtime_replan_normalized_task_core_payload(task_core)},
+        {"task_core": normalized_task_core},
         events=public_events,
     )
     if snapshot is None:
