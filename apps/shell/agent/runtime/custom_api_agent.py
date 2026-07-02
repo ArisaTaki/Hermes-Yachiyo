@@ -1925,6 +1925,9 @@ class RuntimeCustomApiAgentLoop:
                     if key != "metadata"
                 },
             }
+            if result.get("verification_failed") is True:
+                failure_payload["trigger"] = "verification_failed"
+                failure_payload["status"] = "verification_failed"
             event_trace_metadata = _runtime_trace_metadata_from_mapping(event)
             recovery_metadata = _runtime_replan_failure_metadata(result)
             if step_metadata or input_preview or event_trace_metadata or recovery_metadata:
@@ -6431,6 +6434,25 @@ def _runtime_replan_failure_metadata(result: Mapping[str, Any]) -> dict[str, Any
         values = _string_list(result.get(key)) or _string_list(data.get(key))
         if values:
             metadata[key] = values
+    blocking_condition = str(
+        result.get("blocking_condition") or data.get("blocking_condition") or ""
+    ).strip()
+    if blocking_condition:
+        blocking_conditions = _string_list(metadata.get("blocking_conditions"))
+        if blocking_condition not in blocking_conditions:
+            blocking_conditions.append(blocking_condition)
+        metadata["blocking_conditions"] = blocking_conditions
+    expected_app_name = str(
+        result.get("expected_app_name") or data.get("expected_app_name") or ""
+    ).strip()
+    if expected_app_name:
+        metadata["expected_app_name"] = expected_app_name
+        metadata.setdefault("target_app_name", expected_app_name)
+    active_app_name = str(
+        result.get("active_app_name") or data.get("active_app_name") or ""
+    ).strip()
+    if active_app_name:
+        metadata["active_app_name"] = active_app_name
     return metadata
 
 
@@ -8680,6 +8702,7 @@ def _auto_replan_verification_recovery_requests(
         for payload in replan_payloads
         if isinstance(payload, Mapping)
         and str(payload.get("trigger") or "").strip() == "verification_failed"
+        and not _replan_payload_is_focus_mismatch(payload)
         and str(payload.get("source_step_id") or "").strip()
         in {"verify-desktop-result", "observe-selected-discovered-app"}
     ]
@@ -8711,6 +8734,96 @@ def _auto_replan_verification_recovery_requests(
         _attach_replan_payload_trace_metadata(request, first)
         requests.append(request)
     return requests
+
+
+def _auto_replan_focus_recovery_requests(
+    replan_payloads: list[dict[str, Any]],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return []
+    focus_tool = "app.focus" if "app.focus" in allowed else ""
+    if not focus_tool and "desktop.focus_app" in allowed:
+        focus_tool = "desktop.focus_app"
+    if not focus_tool:
+        return []
+    requests: list[dict[str, Any]] = []
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        if not _replan_payload_is_focus_mismatch(payload):
+            continue
+        app_name = _replan_focus_recovery_app_name(payload)
+        if not app_name:
+            continue
+        request_id = str(payload.get("request_id") or "").strip()
+        target = {
+            **_replan_recovery_target(payload),
+            "target_app_name": app_name,
+        }
+        for tool_name, request_input in (
+            (focus_tool, {"app_name": app_name}),
+            ("desktop.active_window", {}),
+        ):
+            if tool_name not in allowed:
+                continue
+            request = _request_like(
+                tool_name,
+                request_input,
+                source="runtime_planner",
+                planning_reason="planner_replan_focus_recovery",
+            )
+            if request_id:
+                request["replan_request_id"] = request_id
+            request["replan_trigger"] = "verification_failed"
+            for key, value in target.items():
+                if value:
+                    request[key] = value
+            _attach_replan_payload_trace_metadata(request, payload)
+            requests.append(request)
+    return _dedupe_replan_recovery_requests(requests)
+
+
+def _replan_payload_is_focus_mismatch(payload: Mapping[str, Any]) -> bool:
+    if str(payload.get("trigger") or "").strip() != "verification_failed":
+        return False
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    tokens = [
+        str(payload.get("failure_detail") or ""),
+        str(payload.get("condition") or ""),
+        str(payload.get("reason") or ""),
+        *_string_list(payload.get("blocking_conditions")),
+        *_string_list(metadata.get("blocking_conditions")),
+    ]
+    return any("foreground_focus_unverified" in token for token in tokens)
+
+
+def _replan_focus_recovery_app_name(payload: Mapping[str, Any]) -> str:
+    target = _replan_recovery_target(payload)
+    app_name = str(target.get("target_app_name") or "").strip()
+    if app_name and not _runtime_planner_placeholder_app_name(app_name):
+        return app_name
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    app_name = _first_replan_recovery_text(
+        (
+            "expected_app_name",
+            "target_app_name",
+            "resolved_app_name",
+            "discovered_app_name",
+            "requested_app_name",
+            "app_name",
+        ),
+        metadata,
+        data,
+        result,
+        payload,
+    )
+    if app_name and not _runtime_planner_placeholder_app_name(app_name):
+        return app_name
+    return ""
 
 
 def _replan_recovery_target(payload: Mapping[str, Any]) -> dict[str, str]:
@@ -8901,6 +9014,10 @@ def _auto_replan_recovery_requests(
 ) -> list[dict[str, Any]]:
     return _dedupe_replan_recovery_requests(
         [
+            *_auto_replan_focus_recovery_requests(
+                replan_payloads,
+                allowed_tools,
+            ),
             *_auto_replan_verification_recovery_requests(
                 replan_payloads,
                 allowed_tools,

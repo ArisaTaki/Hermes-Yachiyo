@@ -2628,6 +2628,205 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
     assert run_events == []
 
 
+def test_auto_replan_focus_recovery_refocuses_expected_app_without_model_followup() -> None:
+    requests = custom_api_agent_module._auto_replan_recovery_requests_with_task_context(
+        [
+            {
+                "request_id": "replan-focus",
+                "trigger": "verification_failed",
+                "decision_id": "decision-focus",
+                "plan_id": "plan-focus",
+                "source_step_id": "verify-desktop-result",
+                "source_tool_name": "desktop.active_window",
+                "target_capability_id": "desktop.app_discovery",
+                "failure_detail": "foreground_focus_unverified",
+                "metadata": {
+                    "runtime_stage": "verify",
+                    "runtime_role": "verify_result",
+                    "expected_app_name": "PixelForge",
+                    "active_app_name": "Finder",
+                    "blocking_conditions": ["foreground_focus_unverified"],
+                },
+            }
+        ],
+        [
+            "app.focus",
+            "desktop.active_window",
+            "desktop.list_windows",
+            "desktop.ui_elements",
+            "screen.capture",
+        ],
+        [],
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "app.focus",
+        "desktop.active_window",
+    ]
+    assert all("continue_to_model" not in request for request in requests)
+    assert {request["planning_reason"] for request in requests} == {
+        "planner_replan_focus_recovery"
+    }
+    assert requests[0]["input"] == {"app_name": "PixelForge"}
+    assert requests[1]["input"] == {}
+    assert {request["target_app_name"] for request in requests} == {"PixelForge"}
+    assert {request["replan_request_id"] for request in requests} == {"replan-focus"}
+    assert {request["replan_trigger"] for request in requests} == {
+        "verification_failed"
+    }
+    assert {request["decision_id"] for request in requests} == {"decision-focus"}
+    assert {request["plan_id"] for request in requests} == {"plan-focus"}
+    assert {request["runtime_stage"] for request in requests} == {"verify"}
+    assert {request["runtime_role"] for request in requests} == {"verify_result"}
+
+
+def test_custom_api_agent_loop_refocuses_after_active_window_mismatch_without_model() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+        "app.focus",
+    ]
+    budget = FakeBudget()
+    tool_batches: list[list[dict[str, Any]]] = []
+    active_window_calls = 0
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        nonlocal active_window_calls
+        tool_batches.append([dict(request) for request in tool_requests])
+        for request in tool_requests:
+            tool = str(request.get("tool") or "")
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if tool == "desktop.list_apps":
+                result = {"ok": True, "data": {"apps": [{"name": "PixelForge"}]}}
+            elif tool == "app.open":
+                result = {"ok": True, "data": {"app_name": "PixelForge"}}
+            elif tool == "app.focus":
+                result = {"ok": True, "data": {"app_name": payload.get("app_name")}}
+            elif tool == "desktop.active_window":
+                active_window_calls += 1
+                if active_window_calls == 1:
+                    result = {
+                        "ok": False,
+                        "error": "foreground_focus_unverified",
+                        "verification_failed": True,
+                        "blocking_condition": "foreground_focus_unverified",
+                        "data": {
+                            "expected_app_name": "PixelForge",
+                            "active_app_name": "Finder",
+                            "focus_verified": False,
+                        },
+                    }
+                else:
+                    result = {
+                        "ok": True,
+                        "data": {
+                            "app_name": "PixelForge",
+                            "expected_app_name": "PixelForge",
+                            "active_app_name": "PixelForge",
+                            "focus_verified": True,
+                        },
+                    }
+            else:
+                raise AssertionError(f"unexpected tool: {tool}")
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool,
+                    input_preview=payload,
+                    result=result,
+                    **{
+                        key: request[key]
+                        for key in (
+                            "planning_reason",
+                            "decision_id",
+                            "plan_id",
+                            "core_id",
+                            "task_id",
+                            "capability_id",
+                            "replan_request_id",
+                            "replan_trigger",
+                            "target_app_name",
+                            "runtime_stage",
+                            "runtime_role",
+                            "replan_triggers",
+                            "replan_signal_ids",
+                        )
+                        if key in request
+                    },
+                )
+            )
+            messages_arg.append({"role": "user", "content": f"Tool result for {tool}: {result}"})
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": allowed_tools}},
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda tools: [{"name": tool} for tool in tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner for desktop actions.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("model should not be called for focus recovery")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda *_args, **_kwargs: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+    timeline: list[dict[str, Any]] = []
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "打开 PixelForge 并告诉我当前前台窗口",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-focus-recovery-direct",
+    )
+
+    assert [[request["tool"] for request in batch] for batch in tool_batches] == [
+        ["desktop.list_apps", "app.open", "desktop.active_window"],
+        ["app.focus", "desktop.active_window"],
+    ]
+    assert budget.claims == 0
+    assert "PixelForge" in str(result)
+    assert not any(event["event"] == "agent.model.followup_context" for event in timeline)
+    recovery_plan_events = [
+        event
+        for event in timeline
+        if event["event"] == "agent.desktop.intent_planned"
+        and event.get("planning_reason") == "planner_replan_focus_recovery"
+    ]
+    assert [event["tool"] for event in recovery_plan_events] == [
+        "app.focus",
+        "desktop.active_window",
+    ]
+    assert all(event.get("continue_to_model") is not True for event in recovery_plan_events)
+    assert {event["target_app_name"] for event in recovery_plan_events} == {"PixelForge"}
+
+
 def test_model_replan_followup_context_includes_task_core_workspace() -> None:
     task_core = {
         "core_id": "core-data",
