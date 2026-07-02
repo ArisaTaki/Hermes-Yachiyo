@@ -5254,6 +5254,22 @@ def test_custom_api_agent_loop_auto_dispatches_pending_terminal_command_from_mod
                     "approval_required": True,
                 }
             ],
+            pending_execution_requests=[
+                {
+                    "request_id": "runtime-plan-report:request:2:terminal.run",
+                    "step_id": "extract-report-file-context",
+                    "tool_name": "terminal.run",
+                    "capability_id": "terminal.execution",
+                    "input_preview": {
+                        "path": "~/Downloads/report.pdf",
+                        "operation": "extract_text_for_report",
+                    },
+                    "approval_required": True,
+                    "runtime_stage": "operate",
+                    "runtime_role": "execute",
+                    "requires_post_action_verification": True,
+                }
+            ],
             task_core={
                 "core_id": "core-report",
                 "workspace": {
@@ -5361,6 +5377,9 @@ def test_custom_api_agent_loop_auto_dispatches_pending_terminal_command_from_mod
         "shell": True,
         "timeout_seconds": 60,
     }
+    assert tool_runs[0][0]["request_id"] == "runtime-plan-report:request:2:terminal.run"
+    assert tool_runs[0][0]["runtime_stage"] == "operate"
+    assert tool_runs[0][0]["requires_post_action_verification"] is True
     planned_event = next(
         event for event in timeline if event["event"] == "agent.desktop.intent_planned"
     )
