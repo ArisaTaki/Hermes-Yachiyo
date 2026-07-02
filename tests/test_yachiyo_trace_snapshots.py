@@ -68,6 +68,45 @@ def test_trace_snapshot_mappers_filter_secret_events_and_preserve_context() -> N
     assert skill_traces[0].source_ref == "skills/demo/SKILL.md"
 
 
+def test_trace_snapshot_mappers_use_top_level_run_context() -> None:
+    traces = memory_trace_snapshots_from_events(
+        [
+            PublicRunEvent(
+                run_id="run-1",
+                sequence=1,
+                event_type="memory.retrieved",
+                source_runnable_id="agent-1",
+                source_runnable_name="Researcher",
+                workflow_id="workflow-1",
+                workflow_run_id="workflow-run-1",
+                workflow_node_id="retrieve",
+                workflow_node_label="Retrieve Context",
+                group_id="group-1",
+                group_run_id="group-run-1",
+                payload={
+                    "memories": [
+                        {
+                            "memory_id": "memory-1",
+                            "kind": "preference",
+                            "scope": "global",
+                        }
+                    ],
+                },
+            )
+        ]
+    )
+
+    assert len(traces) == 1
+    assert traces[0].source_runnable_id == "agent-1"
+    assert traces[0].source_runnable_name == "Researcher"
+    assert traces[0].workflow_id == "workflow-1"
+    assert traces[0].workflow_run_id == "workflow-run-1"
+    assert traces[0].workflow_node_id == "retrieve"
+    assert traces[0].workflow_node_label == "Retrieve Context"
+    assert traces[0].group_id == "group-1"
+    assert traces[0].group_run_id == "group-run-1"
+
+
 def test_trace_snapshot_payload_previews_redact_sensitive_values() -> None:
     traces = memory_trace_snapshots_from_events(
         [

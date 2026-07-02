@@ -17,6 +17,7 @@ from .approval_snapshot_merging import (
 )
 from .approvals import approval_card_from_payload
 from .contracts import ApprovalCardSnapshot, PublicRunEvent
+from .event_context import run_event_context_payload
 
 _PLANNER_TRACE_KEYS = (
     "source",
@@ -54,7 +55,7 @@ def approval_snapshots_from_events(
         approval = approval_card_from_payload(
             approval_payload,
             run_id=event.run_id,
-            group_run_id=group_run_id or _group_run_id(event.payload),
+            group_run_id=group_run_id or _group_run_id(approval_payload),
         )
         strong_keys, weak_key = approval_correlation_keys(approval_payload, approval)
         active_index = correlation.active_index(
@@ -139,6 +140,9 @@ def merge_trace_context_into_approval(source: dict[str, Any], payload: dict[str,
     context = {
         key: payload.get(key)
         for key in (
+            "source_run_id",
+            "source_runnable_id",
+            "source_runnable_name",
             "group_id",
             "group_run_id",
             "run_group_id",
@@ -165,9 +169,10 @@ def merge_trace_context_into_approval(source: dict[str, Any], payload: dict[str,
 
 
 def _approval_required_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
-    payload = dict(event.payload)
+    raw_payload = dict(event.payload)
+    payload = run_event_context_payload(event, raw_payload)
     pending = payload.get("pending_approval") or payload.get("approval")
-    source = dict(pending) if isinstance(pending, Mapping) else payload
+    source = dict(pending) if isinstance(pending, Mapping) else raw_payload
     if not source and event.detail:
         source = {"tool": event.detail}
     if not source:
@@ -181,9 +186,10 @@ def _approval_required_payload_from_event(event: PublicRunEvent) -> dict[str, An
 
 
 def _approval_resolution_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
-    payload = dict(event.payload)
+    raw_payload = dict(event.payload)
+    payload = run_event_context_payload(event, raw_payload)
     pending = payload.get("pending_approval") or payload.get("approval")
-    source = dict(pending) if isinstance(pending, Mapping) else payload
+    source = dict(pending) if isinstance(pending, Mapping) else raw_payload
     if not source and event.detail:
         source = {"tool": event.detail}
     if not source:

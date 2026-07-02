@@ -9,6 +9,7 @@ from apps.shell.agent.runtime.events import redact_secrets
 
 from .artifacts import artifact_snapshot_from_payload
 from .contracts import ArtifactSnapshot, PublicRunEvent
+from .event_context import run_event_context_payload
 
 
 def artifact_snapshots_from_events(events: list[PublicRunEvent]) -> list[ArtifactSnapshot]:
@@ -29,7 +30,7 @@ def artifact_snapshots_from_events(events: list[PublicRunEvent]) -> list[Artifac
 
 
 def artifact_payloads_from_tool_completed_event(event: PublicRunEvent) -> list[dict[str, Any]]:
-    payload = dict(event.payload)
+    payload = run_event_context_payload(event)
     result = payload.get("result")
     result_payload = dict(result) if isinstance(result, Mapping) else {}
     raw_artifacts = result_payload.get("artifacts")
@@ -66,7 +67,7 @@ def artifact_payloads_from_tool_completed_event(event: PublicRunEvent) -> list[d
 
 
 def artifact_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
-    payload = dict(event.payload)
+    payload = run_event_context_payload(event)
     if event.event_type in {"tool.completed", "agent.tool.completed"}:
         payloads = artifact_payloads_from_tool_completed_event(event)
         return payloads[0] if payloads else {}

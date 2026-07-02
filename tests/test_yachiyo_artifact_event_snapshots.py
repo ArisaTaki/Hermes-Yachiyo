@@ -74,6 +74,45 @@ def test_artifact_snapshots_from_events_preserve_runtime_trace_context() -> None
     assert artifact.preview_text == "done"
 
 
+def test_artifact_snapshots_from_events_use_top_level_run_context() -> None:
+    artifacts = artifact_snapshots_from_events(
+        [
+            PublicRunEvent(
+                event_id="evt-top-level-context",
+                run_id="child-run-1",
+                sequence=1,
+                event_type="artifact.created",
+                source_runnable_id="agent-writer",
+                source_runnable_name="Writer",
+                workflow_id="workflow-1",
+                workflow_run_id="workflow-run-1",
+                workflow_node_id="report",
+                workflow_node_label="Report",
+                group_id="group-1",
+                group_run_id="group-run-1",
+                payload={
+                    "artifact": {
+                        "kind": "markdown",
+                        "path": "reports/final.md",
+                    },
+                    "source_tool": "artifact.write",
+                },
+            )
+        ]
+    )
+
+    assert len(artifacts) == 1
+    artifact = artifacts[0]
+    assert artifact.source_runnable_id == "agent-writer"
+    assert artifact.source_runnable_name == "Writer"
+    assert artifact.workflow_id == "workflow-1"
+    assert artifact.workflow_run_id == "workflow-run-1"
+    assert artifact.workflow_node_id == "report"
+    assert artifact.workflow_node_label == "Report"
+    assert artifact.group_id == "group-1"
+    assert artifact.group_run_id == "group-run-1"
+
+
 def test_workflow_node_artifact_payload_defaults_without_nested_artifact() -> None:
     event = PublicRunEvent(
         event_id="evt-workflow-artifact",

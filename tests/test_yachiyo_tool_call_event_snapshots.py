@@ -76,6 +76,42 @@ def test_tool_call_payload_from_event_preserves_approval_trace_context() -> None
     }
 
 
+def test_tool_call_payload_from_event_uses_top_level_run_context() -> None:
+    payload = tool_call_payload_from_event(
+        PublicRunEvent(
+            run_id="run-tool-context",
+            sequence=8,
+            event_type="tool.requested",
+            detail="workspace.read",
+            source_run_id="child-run-1",
+            source_runnable_id="agent-1",
+            source_runnable_name="Planner",
+            workflow_id="workflow-1",
+            workflow_run_id="workflow-run-1",
+            workflow_node_id="read",
+            workflow_node_label="Read Files",
+            group_id="group-1",
+            group_run_id="group-run-1",
+            payload={
+                "tool_call_id": "call-2",
+                "input_preview": {"path": "README.md"},
+            },
+        )
+    )
+
+    assert payload["source_run_id"] == "child-run-1"
+    assert payload["source_runnable_id"] == "agent-1"
+    assert payload["source_runnable_name"] == "Planner"
+    assert payload["workflow_id"] == "workflow-1"
+    assert payload["workflow_run_id"] == "workflow-run-1"
+    assert payload["workflow_node_id"] == "read"
+    assert payload["workflow_node_label"] == "Read Files"
+    assert payload["group_id"] == "group-1"
+    assert payload["group_run_id"] == "group-run-1"
+    assert payload["input_preview"]["workflow_run_id"] == "workflow-run-1"
+    assert payload["input_preview"]["group_run_id"] == "group-run-1"
+
+
 def test_tool_call_snapshots_from_events_preserve_planner_trace_context() -> None:
     calls = tool_call_snapshots_from_events(
         [

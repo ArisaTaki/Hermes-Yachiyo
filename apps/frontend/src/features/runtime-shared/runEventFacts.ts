@@ -188,7 +188,7 @@ export function mergeApprovalSnapshots(
 
 function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | null {
   if (!isApprovalRunEvent(event.event_type)) return null;
-  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  const payload = publicRunEventPayloadWithContext(event);
   const source = objectPreview(payload.pending_approval)
     || objectPreview(payload.approval)
     || payload;
@@ -273,7 +273,7 @@ function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | nul
 
 function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
   if (!isToolRunEvent(event.event_type)) return null;
-  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  const payload = publicRunEventPayloadWithContext(event);
   const approval = objectPreview(payload.pending_approval)
     || objectPreview(payload.approval)
     || {};
@@ -372,7 +372,7 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
 
 function artifactFromRunEvent(event: PublicRunEvent): Record<string, unknown> | null {
   if (!isArtifactRunEvent(event.event_type)) return null;
-  const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
+  const payload = publicRunEventPayloadWithContext(event);
   let artifactPayload: Record<string, unknown> | null = null;
   if (event.event_type === 'artifact.created' || event.event_type === 'agent.artifact.write') {
     artifactPayload = { ...(objectPreview(payload.artifact) || payload) };
@@ -1105,6 +1105,82 @@ function objectPreview(value: unknown): Record<string, unknown> | null {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
     : null;
+}
+
+function publicRunEventPayloadWithContext(event: PublicRunEvent): Record<string, unknown> {
+  return {
+    ...(objectPreview(event.payload) || {}),
+    ...publicRunEventContextRecord(event),
+  };
+}
+
+function publicRunEventContextRecord(event: PublicRunEvent): Record<string, unknown> {
+  const context: Record<string, unknown> = {};
+  setPublicRunEventContextValue(context, 'parent_run_id', event.parent_run_id);
+  setPublicRunEventContextValue(context, 'source_run_id', event.source_run_id);
+  setPublicRunEventContextValue(
+    context,
+    'source_runnable_id',
+    publicRunEventContextString(event.source_runnable_id, event.member_agent_id, event.agent_id),
+  );
+  setPublicRunEventContextValue(
+    context,
+    'source_runnable_name',
+    publicRunEventContextString(event.source_runnable_name, event.member_agent_name, event.agent_name),
+  );
+  setPublicRunEventContextValue(context, 'workflow_id', event.workflow_id);
+  setPublicRunEventContextValue(context, 'workflow_run_id', event.workflow_run_id);
+  setPublicRunEventContextValue(context, 'workflow_node_id', event.workflow_node_id);
+  setPublicRunEventContextValue(context, 'workflow_node_label', event.workflow_node_label);
+  setPublicRunEventContextValue(context, 'group_id', event.group_id);
+  setPublicRunEventContextValue(
+    context,
+    'group_run_id',
+    publicRunEventContextString(event.group_run_id, event.run_group_id),
+  );
+  setPublicRunEventContextValue(
+    context,
+    'run_group_id',
+    publicRunEventContextString(event.run_group_id, event.group_run_id),
+  );
+  setPublicRunEventContextValue(
+    context,
+    'agent_id',
+    publicRunEventContextString(event.agent_id, event.member_agent_id),
+  );
+  setPublicRunEventContextValue(
+    context,
+    'agent_name',
+    publicRunEventContextString(event.agent_name, event.member_agent_name),
+  );
+  setPublicRunEventContextValue(
+    context,
+    'member_agent_id',
+    publicRunEventContextString(event.member_agent_id, event.agent_id),
+  );
+  setPublicRunEventContextValue(
+    context,
+    'member_agent_name',
+    publicRunEventContextString(event.member_agent_name, event.agent_name),
+  );
+  return context;
+}
+
+function setPublicRunEventContextValue(
+  context: Record<string, unknown>,
+  key: string,
+  value: unknown,
+) {
+  const text = publicRunEventContextString(value);
+  if (text) context[key] = text;
+}
+
+function publicRunEventContextString(...values: unknown[]): string {
+  for (const value of values) {
+    const text = typeof value === 'string' ? value.trim() : '';
+    if (text) return text;
+  }
+  return '';
 }
 
 function publicRunEventPayloadString(payload: Record<string, unknown>, key: string): string {

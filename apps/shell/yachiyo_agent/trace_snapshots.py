@@ -8,6 +8,7 @@ from typing import Any
 from apps.shell.agent.runtime.events import redact_run_event_payload, redact_secrets
 
 from .contracts import MemoryTraceSnapshot, PublicRunEvent, SkillTraceSnapshot
+from .event_context import run_event_context_payload
 
 
 def memory_trace_snapshots_from_events(events: list[PublicRunEvent]) -> list[MemoryTraceSnapshot]:
@@ -35,7 +36,7 @@ def skill_trace_snapshots_from_events(events: list[PublicRunEvent]) -> list[Skil
 def memory_trace_snapshot_from_event(event: PublicRunEvent) -> MemoryTraceSnapshot | None:
     if not event.event_type.startswith("memory."):
         return None
-    payload = dict(event.payload)
+    payload = run_event_context_payload(event)
     result = _nested_mapping(payload, "result")
     memories = _mapping_items(payload.get("memories")) or _mapping_items(result.get("memories"))
     first_memory = memories[0] if memories else {}
@@ -79,14 +80,14 @@ def memory_trace_snapshot_from_event(event: PublicRunEvent) -> MemoryTraceSnapsh
         detail=" · ".join(part for part in detail_parts if part),
         payload_preview=_trace_payload_preview(payload),
         created_at=event.created_at,
-        **_trace_context_kwargs(payload),
+        **_trace_context_kwargs(event, payload),
     )
 
 
 def skill_trace_snapshot_from_event(event: PublicRunEvent) -> SkillTraceSnapshot | None:
     if not event.event_type.startswith("skill."):
         return None
-    payload = dict(event.payload)
+    payload = run_event_context_payload(event)
     result = _nested_mapping(payload, "result")
     skill = _nested_mapping(payload, "skill") or _nested_mapping(result, "skill")
     skill_id = _optional_text(result.get("skill_id") or skill.get("skill_id") or payload.get("skill_id"))
@@ -116,31 +117,51 @@ def skill_trace_snapshot_from_event(event: PublicRunEvent) -> SkillTraceSnapshot
         detail=" · ".join(part for part in detail_parts if part),
         payload_preview=_trace_payload_preview(payload),
         created_at=event.created_at,
-        **_trace_context_kwargs(payload),
+        **_trace_context_kwargs(event, payload),
     )
 
 
-def _trace_context_kwargs(payload: Mapping[str, Any]) -> dict[str, Any]:
+def _trace_context_kwargs(
+    event: PublicRunEvent,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
     return {
-        "source_run_id": _optional_text(payload.get("source_run_id")),
+        "source_run_id": _optional_text(event.source_run_id or payload.get("source_run_id")),
         "source_runnable_id": _optional_text(
-            payload.get("source_runnable_id")
+            event.source_runnable_id
+            or event.member_agent_id
+            or event.agent_id
+            or payload.get("source_runnable_id")
             or payload.get("source_agent_id")
             or payload.get("member_agent_id")
             or payload.get("agent_id")
         ),
         "source_runnable_name": _optional_text(
-            payload.get("source_runnable_name")
+            event.source_runnable_name
+            or event.member_agent_name
+            or event.agent_name
+            or payload.get("source_runnable_name")
             or payload.get("source_agent_name")
             or payload.get("member_agent_name")
             or payload.get("agent_name")
         ),
-        "workflow_id": _optional_text(payload.get("workflow_id")),
-        "workflow_run_id": _optional_text(payload.get("workflow_run_id")),
-        "workflow_node_id": _optional_text(payload.get("workflow_node_id")),
-        "workflow_node_label": _optional_text(payload.get("workflow_node_label")),
-        "group_id": _optional_text(payload.get("group_id")),
-        "group_run_id": _optional_text(payload.get("group_run_id") or payload.get("run_group_id")),
+        "workflow_id": _optional_text(event.workflow_id or payload.get("workflow_id")),
+        "workflow_run_id": _optional_text(
+            event.workflow_run_id or payload.get("workflow_run_id")
+        ),
+        "workflow_node_id": _optional_text(
+            event.workflow_node_id or payload.get("workflow_node_id")
+        ),
+        "workflow_node_label": _optional_text(
+            event.workflow_node_label or payload.get("workflow_node_label")
+        ),
+        "group_id": _optional_text(event.group_id or payload.get("group_id")),
+        "group_run_id": _optional_text(
+            event.group_run_id
+            or event.run_group_id
+            or payload.get("group_run_id")
+            or payload.get("run_group_id")
+        ),
     }
 
 

@@ -9,6 +9,7 @@ from typing import Any
 from apps.shell.agent.runtime.events import redact_secrets
 
 from .contracts import PublicRunEvent, ToolCallSnapshot
+from .event_context import run_event_context_payload
 from .tool_call_payload_snapshots import (
     tool_call_snapshot_from_payload,
     tool_call_status_is_terminal,
@@ -82,7 +83,7 @@ def tool_call_payloads_from_event(event: PublicRunEvent) -> list[dict[str, Any]]
 
 
 def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
-    payload = dict(event.payload)
+    payload = run_event_context_payload(event)
     if event.event_type == _TOOL_INPUT_RESOLUTION_EVENT_TYPE:
         payload = tool_input_resolution_payload(payload)
     approval = _nested_mapping(payload, "pending_approval") or _nested_mapping(payload, "approval")
@@ -140,7 +141,7 @@ def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
 
 
 def daily_desktop_intent_step_payloads(event: PublicRunEvent) -> list[dict[str, Any]]:
-    payload = event.payload
+    payload = run_event_context_payload(event)
     steps = payload.get("steps")
     if not isinstance(steps, list):
         return []

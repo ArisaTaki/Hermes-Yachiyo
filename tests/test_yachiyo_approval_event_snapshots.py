@@ -112,6 +112,46 @@ def test_approval_event_mapper_projects_workflow_group_context() -> None:
     }
 
 
+def test_approval_event_mapper_uses_top_level_run_context() -> None:
+    approvals = approval_snapshots_from_events(
+        [
+            PublicRunEvent(
+                run_id="child-run-1",
+                sequence=1,
+                event_type="workflow.node.approval_required",
+                created_at="2026-06-15T00:00:00Z",
+                source_runnable_id="agent-reviewer",
+                source_runnable_name="Reviewer",
+                workflow_id="workflow-1",
+                workflow_run_id="workflow-run-1",
+                workflow_node_id="review",
+                workflow_node_label="Review Gate",
+                group_id="group-1",
+                group_run_id="group-run-1",
+                payload={
+                    "pending_approval": {
+                        "approval_id": "approval-top-level-context",
+                        "input_preview": {"notes": "needs review"},
+                    },
+                },
+            )
+        ]
+    )
+
+    assert len(approvals) == 1
+    approval = approvals[0]
+    assert approval.source_runnable_id == "agent-reviewer"
+    assert approval.source_runnable_name == "Reviewer"
+    assert approval.workflow_id == "workflow-1"
+    assert approval.workflow_run_id == "workflow-run-1"
+    assert approval.workflow_node_id == "review"
+    assert approval.workflow_node_label == "Review Gate"
+    assert approval.group_id == "group-1"
+    assert approval.group_run_id == "group-run-1"
+    assert approval.input_preview["workflow_run_id"] == "workflow-run-1"
+    assert approval.input_preview["group_run_id"] == "group-run-1"
+
+
 def test_merge_approval_snapshot_lists_preserves_order_and_fills_resolution() -> None:
     pending = approval_card_from_payload(
         {
