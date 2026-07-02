@@ -3254,6 +3254,83 @@ def test_auto_replan_ui_observed_click_uses_observed_center_after_semantic_failu
     assert all("continue_to_model" not in request for request in requests)
 
 
+def test_auto_replan_ui_continuation_accepts_observed_click_fallback_success() -> None:
+    payload = {
+        "request_id": "replan-ui-click-continuation",
+        "trigger": "tool_failure",
+        "decision_id": "decision-ui-click-continuation",
+        "plan_id": "plan-ui-click-continuation",
+        "source_step_id": "play-media-search-result",
+        "source_tool_name": "app.focus_and_click_ui_element",
+        "target_capability_id": "desktop.ui_operation",
+        "input_preview": {
+            "app_name": "Music",
+            "target": "first result",
+            "role_filter": "",
+            "limit": 80,
+            "click_count": 1,
+        },
+    }
+    planned = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Music",
+                "target": "first result",
+                "role_filter": "",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+            "step_id": "play-media-search-result",
+            "capability_id": "desktop.ui_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"app_name": "Music", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+            "step_id": "verify-media-playback",
+            "capability_id": "desktop.app_discovery",
+        },
+    ]
+
+    requests = custom_api_agent_module._auto_replan_ui_continuation_requests(
+        [payload],
+        planned,
+        ["app.focus_and_click_ui_element", "desktop.safe_click", "desktop.ui_elements"],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.safe_click",
+                input_preview={"x": 260, "y": 360},
+                result={"ok": True},
+                planning_reason="planner_replan_ui_observed_action",
+                replan_request_id="replan-ui-click-continuation",
+                action_target={
+                    "kind": "desktop_observed_action",
+                    "action": "click",
+                    "target": "first result",
+                    "role_filter": "",
+                    "app_name": "Music",
+                },
+            )
+        ],
+        tool_timeline_start=0,
+        planning_reason="planner_replan_ui_continuation",
+    )
+
+    assert [request["tool"] for request in requests] == ["desktop.ui_elements"]
+    assert requests[0]["planning_reason"] == "planner_replan_ui_continuation"
+    assert requests[0]["replan_request_id"] == "replan-ui-click-continuation"
+    assert requests[0]["step_id"] == "verify-media-playback"
+    assert requests[0]["planner_step_id"] == "verify-media-playback"
+    assert requests[0]["capability_id"] == "desktop.app_discovery"
+
+
 def test_auto_replan_ui_continuation_runs_remaining_plan_after_retry() -> None:
     payload = {
         "request_id": "replan-ui-continuation",

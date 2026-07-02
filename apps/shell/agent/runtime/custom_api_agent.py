@@ -10286,24 +10286,56 @@ def _replan_ui_observed_action_retry_succeeded(
     source_tool = _replan_source_tool_name(payload)
     if not source_tool:
         return False
+    target = _replan_ui_observed_action_target(payload)
+    target_action = str(target.get("target_action") or "").strip()
     request_id = str(payload.get("request_id") or "").strip()
     for event in reversed(timeline):
         if str(event.get("event") or "").strip() != "agent.tool.call":
             continue
-        if str(event.get("detail") or "").strip() != source_tool:
-            continue
         result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
         if result.get("ok") is not True:
             continue
+        tool_name = str(event.get("detail") or "").strip()
         event_request_id = str(event.get("replan_request_id") or "").strip()
-        if request_id and event_request_id == request_id:
-            return True
-        if (
-            str(event.get("planning_reason") or "").strip()
-            == "planner_replan_ui_observed_action"
+        planning_reason = str(event.get("planning_reason") or "").strip()
+        if tool_name == source_tool and (
+            (request_id and event_request_id == request_id)
+            or planning_reason == "planner_replan_ui_observed_action"
         ):
             return True
+        if not (request_id and event_request_id == request_id):
+            continue
+        if not _replan_ui_observed_action_fallback_succeeded(
+            source_tool,
+            tool_name,
+            target_action,
+            event,
+        ):
+            continue
+        return True
     return False
+
+
+def _replan_ui_observed_action_fallback_succeeded(
+    source_tool: str,
+    tool_name: str,
+    target_action: str,
+    event: Mapping[str, Any],
+) -> bool:
+    if target_action != "click":
+        return False
+    if source_tool not in {
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "desktop.click_ui_element",
+    }:
+        return False
+    if tool_name not in {"desktop.safe_click", "desktop.click"}:
+        return False
+    action_target = (
+        event.get("action_target") if isinstance(event.get("action_target"), Mapping) else {}
+    )
+    return str(action_target.get("action") or "").strip() == "click"
 
 
 def _replan_ui_continuation_slice(
