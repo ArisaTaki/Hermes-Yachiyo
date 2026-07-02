@@ -1601,6 +1601,96 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
     assert recovery.recovery_event_ids == ["event-1", "event-2", "event-3", "event-4"]
 
 
+def test_run_timeline_snapshot_projects_explicit_replan_recovery_update() -> None:
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "status": "completed",
+            "events": [
+                {
+                    "event_id": "event-1",
+                    "sequence": 1,
+                    "event_type": "agent.replan.requested",
+                    "payload": {
+                        "request_id": "replan-1",
+                        "trigger": "tool_failure",
+                        "run_id": "run-1",
+                        "task_id": "task-1",
+                        "decision_id": "decision-1",
+                        "plan_id": "plan-1",
+                        "core_id": "task-core-1",
+                        "source_step_id": "open-selected-discovered-app",
+                        "source_tool_name": "app.open",
+                        "target_capability_id": "desktop.app_control",
+                        "fallback_tools": ["desktop.list_apps"],
+                        "failure_detail": "app_resolution_failed",
+                    },
+                },
+                {
+                    "event_id": "event-2",
+                    "sequence": 2,
+                    "event_type": "agent.replan.recovery.updated",
+                    "payload": {
+                        "request_id": "replan-1",
+                        "trigger": "tool_failure",
+                        "run_id": "run-1",
+                        "task_id": "task-1",
+                        "decision_id": "decision-1",
+                        "plan_id": "plan-1",
+                        "core_id": "task-core-1",
+                        "source_step_id": "open-selected-discovered-app",
+                        "source_tool_name": "app.open",
+                        "selected_step_id": "open-selected-discovered-app",
+                        "selected_tool_name": "desktop.list_apps",
+                        "target_capability_id": "desktop.app_control",
+                        "fallback_tools": ["desktop.list_apps"],
+                        "planning_reason": "planner_replan_runtime_recovery_action",
+                        "recovery_action_label": "Rediscover app",
+                        "permission_target": "app_discovery",
+                        "risk_level": "low",
+                        "status": "completed",
+                        "tool_status": "completed",
+                        "todo_status": "completed",
+                        "checkpoint_status": "completed",
+                        "action_target": {
+                            "action": "open_app",
+                            "app_name": "Preview",
+                        },
+                        "observation_evidence": {
+                            "source_tool": "desktop.list_apps",
+                            "matched_app": "Preview",
+                        },
+                        "result_preview": {
+                            "ok": True,
+                            "summary": "Found Preview",
+                        },
+                    },
+                },
+            ],
+        }
+    )
+
+    recovery = snapshot.replan_recoveries[0]
+    assert recovery.request_id == "replan-1"
+    assert recovery.status == "completed"
+    assert recovery.source_tool_name == "app.open"
+    assert recovery.selected_tool_name == "desktop.list_apps"
+    assert recovery.recovery_action_label == "Rediscover app"
+    assert recovery.permission_target == "app_discovery"
+    assert recovery.risk_level == "low"
+    assert recovery.action_target == {"action": "open_app", "app_name": "Preview"}
+    assert recovery.observation_evidence == {
+        "source_tool": "desktop.list_apps",
+        "matched_app": "Preview",
+    }
+    assert recovery.tool_status == "completed"
+    assert recovery.todo_status == "completed"
+    assert recovery.checkpoint_status == "completed"
+    assert recovery.result_preview == {"ok": True, "summary": "Found Preview"}
+    assert recovery.recovery_event_ids == ["event-1", "event-2"]
+
+
 def test_run_timeline_snapshot_synthesizes_scoped_workflow_replan_event() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",

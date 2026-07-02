@@ -100,6 +100,9 @@ def replan_recovery_snapshots_from_events(
         if planner_event_type == "agent.desktop.intent_planned":
             _apply_planned_event(records, order, event, payload)
             continue
+        if planner_event_type == "agent.replan.recovery.updated":
+            _apply_recovery_update_event(records, order, event, payload)
+            continue
         if _is_runtime_tool_event(event):
             _apply_tool_event(records, order, event)
             continue
@@ -358,6 +361,87 @@ def _apply_task_update_event(
     _mark_event(record, event)
 
 
+def _apply_recovery_update_event(
+    records: dict[str, _RecoveryRecord],
+    order: list[str],
+    event: PublicRunEvent,
+    payload: Mapping[str, Any],
+) -> None:
+    record = _matching_record(records, order, event, payload, create_if_referenced=True)
+    if record is None:
+        return
+    status = _text(payload.get("status"))
+    _advance_status(record, status)
+    record.run_id = _first_text(record.run_id, payload.get("run_id"), event.run_id)
+    record.task_id = _first_text(record.task_id, payload.get("task_id"))
+    record.group_run_id = _first_text(
+        record.group_run_id,
+        payload.get("group_run_id"),
+        payload.get("run_group_id"),
+        event.group_run_id,
+    )
+    record.workflow_run_id = _first_text(
+        record.workflow_run_id,
+        payload.get("workflow_run_id"),
+        event.workflow_run_id,
+    )
+    record.decision_id = _first_text(record.decision_id, payload.get("decision_id"))
+    record.plan_id = _first_text(record.plan_id, payload.get("plan_id"))
+    record.core_id = _first_text(record.core_id, payload.get("core_id"))
+    record.source_step_id = _first_text(
+        record.source_step_id,
+        payload.get("source_step_id"),
+        payload.get("step_id"),
+        payload.get("planner_step_id"),
+    )
+    record.source_tool_name = _first_text(
+        record.source_tool_name,
+        payload.get("source_tool_name"),
+    )
+    record.target_capability_id = _first_text(
+        record.target_capability_id,
+        payload.get("target_capability_id"),
+        payload.get("capability_id"),
+    )
+    record.selected_step_id = _first_text(
+        record.selected_step_id,
+        payload.get("selected_step_id"),
+        payload.get("step_id"),
+        payload.get("planner_step_id"),
+    )
+    selected_tool = _first_text(
+        record.selected_tool_name,
+        payload.get("selected_tool_name"),
+        payload.get("tool_name"),
+        payload.get("tool"),
+    )
+    record.selected_tool_name = selected_tool or None
+    record.planning_reason = _first_text(
+        payload.get("planning_reason"),
+        payload.get("reason"),
+        record.planning_reason,
+    )
+    _extend_unique(record.fallback_tools, _string_list(payload.get("fallback_tools")))
+    if selected_tool and selected_tool not in record.fallback_tools:
+        record.fallback_tools.append(selected_tool)
+    record.tool_status = _first_text(payload.get("tool_status"), status, record.tool_status)
+    record.todo_status = _first_text(payload.get("todo_status"), record.todo_status)
+    record.checkpoint_status = _first_text(
+        payload.get("checkpoint_status"),
+        record.checkpoint_status,
+    )
+    result_preview = _mapping(payload.get("result_preview"))
+    if result_preview:
+        record.result_preview.update(result_preview)
+    record.failure_detail = _first_text(
+        record.failure_detail,
+        payload.get("failure_detail"),
+    )
+    _apply_recovery_action_metadata(record, payload, selected_tool=selected_tool)
+    _apply_observed_action_metadata(record, payload)
+    _mark_event(record, event)
+
+
 def _matching_record(
     records: dict[str, _RecoveryRecord],
     order: list[str],
@@ -462,6 +546,8 @@ def _planner_event_type(event: PublicRunEvent) -> str:
     event_type = _text(event.event_type)
     if event_type.endswith(".replan.requested"):
         return "agent.replan.requested"
+    if event_type.endswith(".replan.recovery.updated"):
+        return "agent.replan.recovery.updated"
     if event_type.endswith(".desktop.intent_planned"):
         return "agent.desktop.intent_planned"
     return _SCOPED_PLANNER_EVENT_TYPES.get(event_type, event_type)
@@ -702,6 +788,9 @@ _SCOPED_PLANNER_EVENT_TYPES = {
     "group.run.replan.requested": "agent.replan.requested",
     "workflow.replan.requested": "agent.replan.requested",
     "workflow.run.replan.requested": "agent.replan.requested",
+    "group.run.replan.recovery.updated": "agent.replan.recovery.updated",
+    "workflow.replan.recovery.updated": "agent.replan.recovery.updated",
+    "workflow.run.replan.recovery.updated": "agent.replan.recovery.updated",
     "group.run.desktop.intent_planned": "agent.desktop.intent_planned",
     "workflow.desktop.intent_planned": "agent.desktop.intent_planned",
     "workflow.run.desktop.intent_planned": "agent.desktop.intent_planned",

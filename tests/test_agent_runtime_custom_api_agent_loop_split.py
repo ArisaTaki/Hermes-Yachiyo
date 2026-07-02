@@ -197,6 +197,7 @@ _PLANNER_EVENT_TYPES = {
     "agent.plan.step",
     "agent.plan.selection",
     "agent.replan.requested",
+    "agent.replan.recovery.updated",
     "agent.task_core.created",
     "agent.task.workspace_item.updated",
     "agent.task.todo.updated",
@@ -25839,6 +25840,136 @@ def test_runtime_tool_runner_projects_task_progress_from_tool_result() -> None:
         "agent.task.checkpoint.updated",
     ]
     assert run_events[1]["payload"]["decision_id"] == "decision-1"
+
+
+def test_runtime_tool_runner_emits_replan_recovery_update_from_task_context() -> None:
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = []
+    messages = [
+        {"role": "system", "content": "Use tools."},
+        {"role": "user", "content": "打开 PDF 阅读器"},
+    ]
+    run_events: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_value: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool = str(tool_request.get("tool") or "")
+        result = {
+            "ok": True,
+            "action": tool,
+            "summary": "Found Preview in installed apps.",
+        }
+        timeline_value.append(
+            _timeline(
+                "agent.tool.call",
+                tool,
+                input_preview=dict(tool_request.get("input") or {}),
+                result=result,
+            )
+        )
+        return result
+
+    runner = RuntimeToolRequestRunner(
+        normalize_tool_name=normalize_tool_name,
+        input_preview=tool_input_preview,
+        run_budget=lambda _run_id, _timeline_value: budget,
+        user_goal_from_messages=lambda value: str(value[1].get("content") or ""),
+        goal_disallows_tool=lambda _goal, _tool: "",
+        timeline_factory=_timeline,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+        tool_loop_projection=RuntimeToolLoopProjectionBuilder(),
+        pending_approval_builder=NoopPendingApprovalBuilder(),
+        call_agent_tool=call_agent_tool,
+    )
+
+    runner.run(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": "pdf", "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_replan_runtime_recovery_action",
+                "decision_id": "decision-1",
+                "plan_id": "runtime-plan-1",
+                "core_id": "task-core-1",
+                "workspace_id": "task-workspace-1",
+                "step_id": "open-selected-discovered-app",
+                "planner_step_id": "open-selected-discovered-app",
+                "capability_id": "desktop.app_control",
+                "replan_request_id": "replan-app-resolution",
+                "replan_trigger": "tool_failure",
+                "recovery_action_label": "Rediscover app",
+                "permission_target": "app_discovery",
+                "risk_level": "low",
+                "action_target": {
+                    "action": "open_app",
+                    "app_name": "Preview",
+                },
+                "observation_evidence": {
+                    "source_tool": "desktop.list_apps",
+                    "matched_app": "Preview",
+                },
+                "task_todo": {
+                    "todo_id": "todo-open-selected-app",
+                    "title": "Open selected discovered app",
+                    "status": "blocked",
+                    "step_id": "open-selected-discovered-app",
+                    "tool_name": "app.open",
+                },
+                "task_checkpoints": [
+                    {
+                        "checkpoint_id": "checkpoint-open-selected-app",
+                        "title": "Verify selected app opened",
+                        "status": "blocked",
+                        "after_step_id": "open-selected-discovered-app",
+                    }
+                ],
+            }
+        ],
+        ["desktop.list_apps"],
+        broker={},
+        messages=messages,
+        timeline=timeline,
+        artifacts=[],
+        next_iteration=1,
+        run_id="run-replan-recovery-update",
+        budget=budget,
+    )
+
+    recovery_event = next(
+        event for event in timeline if event["event"] == "agent.replan.recovery.updated"
+    )
+    assert recovery_event["request_id"] == "replan-app-resolution"
+    assert recovery_event["status"] == "completed"
+    assert recovery_event["source_step_id"] == "open-selected-discovered-app"
+    assert recovery_event["source_tool_name"] == "app.open"
+    assert recovery_event["selected_tool_name"] == "desktop.list_apps"
+    assert recovery_event["planning_reason"] == "planner_replan_runtime_recovery_action"
+    assert recovery_event["recovery_action_label"] == "Rediscover app"
+    assert recovery_event["permission_target"] == "app_discovery"
+    assert recovery_event["risk_level"] == "low"
+    assert recovery_event["todo_status"] == "completed"
+    assert recovery_event["checkpoint_status"] == "completed"
+    assert recovery_event["action_target"] == {"action": "open_app", "app_name": "Preview"}
+    assert recovery_event["observation_evidence"] == {
+        "source_tool": "desktop.list_apps",
+        "matched_app": "Preview",
+    }
+    assert recovery_event["result_preview"] == {
+        "ok": True,
+        "action": "desktop.list_apps",
+        "summary": "Found Preview in installed apps.",
+    }
+    assert run_events[-1]["event_type"] == "agent.replan.recovery.updated"
+    assert run_events[-1]["payload"]["request_id"] == "replan-app-resolution"
 
 
 def test_runtime_tool_runner_passes_resolved_foreground_app_to_ui_readback() -> None:
