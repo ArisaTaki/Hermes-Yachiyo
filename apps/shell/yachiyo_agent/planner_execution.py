@@ -82,6 +82,10 @@ def planner_execution_tool_requests(
         normalized_requests,
         allowed,
     )
+    normalized_requests = _defer_semantic_ui_types_to_observation(
+        normalized_requests,
+        allowed,
+    )
     return _drop_redundant_execution_verification_requests(normalized_requests)
 
 
@@ -249,6 +253,7 @@ def _unknown_app_ui_observation_request(
     observe["continue_to_model"] = True
     observe["deferred_tool"] = str(request.get("tool") or "").strip()
     observe["deferred_input"] = dict(payload)
+    observe["deferred_context"] = _deferred_request_context(request)
     _inherit_request_context_without_step(observe, request)
     return observe
 
@@ -372,7 +377,7 @@ def _defer_semantic_ui_clicks_to_observation(
         if not _should_defer_semantic_ui_click_request(request):
             normalized.append(request)
             continue
-        if _has_recent_ui_observation_for_click(normalized, request):
+        if _has_recent_ui_observation_for_action(normalized, request):
             normalized.append(request)
             continue
         observation = _semantic_ui_click_observation_request(request, allowed)
@@ -406,9 +411,124 @@ def _should_defer_semantic_ui_click_request(request: Mapping[str, Any]) -> bool:
     return bool(str(payload.get("target") or "").strip())
 
 
-def _has_recent_ui_observation_for_click(
+def _defer_semantic_ui_types_to_observation(
+    requests: list[dict[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    if not requests or not {"desktop.ui_elements", "desktop.read_ui"}.intersection(allowed):
+        return requests
+    normalized: list[dict[str, Any]] = []
+    skip_indexes: set[int] = set()
+    for index, request in enumerate(requests):
+        if index in skip_indexes:
+            continue
+        if not _should_defer_semantic_ui_type_request(request):
+            normalized.append(request)
+            continue
+        if _has_later_mutation_before_verification(requests, index):
+            normalized.append(request)
+            continue
+        if _has_recent_ui_observation_for_action(normalized, request):
+            normalized.append(request)
+            continue
+        observation = _semantic_ui_type_observation_request(request, allowed)
+        if not observation:
+            normalized.append(request)
+            continue
+        prepare = _semantic_ui_type_observation_prepare_request(request, allowed)
+        if _semantic_ui_type_requires_prepare(request) and not prepare:
+            normalized.append(request)
+            continue
+        if prepare and not _last_request_matches_tool_and_input(normalized, prepare):
+            normalized.append(prepare)
+        normalized.append(observation)
+        after_type = requests[index + 1] if index + 1 < len(requests) else {}
+        if _is_execution_verification_request(after_type):
+            skip_indexes.add(index + 1)
+    return normalized
+
+
+def _should_defer_semantic_ui_type_request(request: Mapping[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in {
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "desktop.type_into_ui_element",
+    }:
+        return False
+    if str(request.get("source") or "").strip() != "runtime_planner":
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return bool(
+        str(payload.get("target") or "").strip()
+        and str(payload.get("text") or "").strip()
+    )
+
+
+def _has_later_mutation_before_verification(
+    requests: list[dict[str, Any]],
+    index: int,
+) -> bool:
+    for later_request in requests[index + 1 :]:
+        later_tool = str(later_request.get("tool") or "").strip()
+        if later_tool in _EXECUTION_VERIFICATION_TOOLS:
+            return False
+        if later_tool in _EXECUTION_MUTATION_TOOLS or _tool_continues_foreground_operation_chain(
+            later_tool
+        ):
+            return True
+    return False
+
+
+def _semantic_ui_type_observation_request(
+    type_request: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    payload = type_request.get("input") if isinstance(type_request.get("input"), Mapping) else {}
+    observe_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed)
+    if not observe_tool:
+        return {}
+    observe_payload = {
+        key: payload[key]
+        for key in ("app_name", "role_filter", "limit")
+        if key in payload and payload[key] not in (None, "")
+    }
+    if "limit" not in observe_payload:
+        observe_payload["limit"] = 80
+    observe = _request(
+        observe_tool,
+        observe_payload,
+        planning_reason=str(
+            type_request.get("planning_reason") or "planner_desktop_operation"
+        ).strip()
+        or "planner_desktop_operation",
+    )
+    observe["continue_to_model"] = True
+    observe["deferred_tool"] = str(type_request.get("tool") or "").strip()
+    observe["deferred_input"] = dict(payload)
+    observe["deferred_context"] = _deferred_request_context(type_request)
+    _inherit_request_context_without_step(observe, type_request)
+    return observe
+
+
+def _semantic_ui_type_observation_prepare_request(
+    type_request: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    tool_name = str(type_request.get("tool") or "").strip()
+    if not tool_name.startswith("app.open_and_") and not tool_name.startswith("app.focus_and_"):
+        return {}
+    return _unknown_app_ui_observation_prepare_request(tool_name, type_request, allowed)
+
+
+def _semantic_ui_type_requires_prepare(type_request: Mapping[str, Any]) -> bool:
+    tool_name = str(type_request.get("tool") or "").strip()
+    return tool_name.startswith("app.open_and_") or tool_name.startswith("app.focus_and_")
+
+
+def _has_recent_ui_observation_for_action(
     previous_requests: list[dict[str, Any]],
-    click_request: Mapping[str, Any],
+    action_request: Mapping[str, Any],
 ) -> bool:
     skipped_prepare = False
     for previous in reversed(previous_requests):
@@ -416,22 +536,22 @@ def _has_recent_ui_observation_for_click(
         if (
             not skipped_prepare
             and previous_tool in {"app.open", "app.focus", "desktop.open_app", "desktop.focus_app"}
-            and _prepare_request_matches_click_target(previous, click_request)
+            and _prepare_request_matches_action_target(previous, action_request)
         ):
             skipped_prepare = True
             continue
-        return _ui_observation_matches_click_target(previous, click_request)
+        return _ui_observation_matches_action_target(previous, action_request)
     return False
 
 
-def _prepare_request_matches_click_target(
+def _prepare_request_matches_action_target(
     prepare_request: Mapping[str, Any],
-    click_request: Mapping[str, Any],
+    action_request: Mapping[str, Any],
 ) -> bool:
-    click_payload = (
-        click_request.get("input") if isinstance(click_request.get("input"), Mapping) else {}
+    action_payload = (
+        action_request.get("input") if isinstance(action_request.get("input"), Mapping) else {}
     )
-    app_name = str(click_payload.get("app_name") or "").strip()
+    app_name = str(action_payload.get("app_name") or "").strip()
     if not app_name:
         return True
     prepare_payload = (
@@ -440,24 +560,24 @@ def _prepare_request_matches_click_target(
     return str(prepare_payload.get("app_name") or "").strip() == app_name
 
 
-def _ui_observation_matches_click_target(
+def _ui_observation_matches_action_target(
     observation_request: Mapping[str, Any],
-    click_request: Mapping[str, Any],
+    action_request: Mapping[str, Any],
 ) -> bool:
     observation_tool = str(observation_request.get("tool") or "").strip()
     if observation_tool not in {"desktop.ui_elements", "desktop.read_ui", "desktop.inspect_app"}:
         return False
-    click_payload = (
-        click_request.get("input") if isinstance(click_request.get("input"), Mapping) else {}
+    action_payload = (
+        action_request.get("input") if isinstance(action_request.get("input"), Mapping) else {}
     )
     observation_payload = (
         observation_request.get("input")
         if isinstance(observation_request.get("input"), Mapping)
         else {}
     )
-    click_app_name = str(click_payload.get("app_name") or "").strip()
+    action_app_name = str(action_payload.get("app_name") or "").strip()
     observation_app_name = str(observation_payload.get("app_name") or "").strip()
-    if click_app_name and observation_app_name and click_app_name != observation_app_name:
+    if action_app_name and observation_app_name and action_app_name != observation_app_name:
         return False
     return True
 

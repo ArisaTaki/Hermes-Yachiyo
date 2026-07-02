@@ -288,6 +288,8 @@ def test_runtime_planner_defers_unknown_app_ui_operation_until_ui_observed() -> 
     assert requests[2]["continue_to_model"] is True
     assert requests[2]["deferred_tool"] == "app.open_and_click_ui_element"
     assert requests[2]["deferred_input"]["target"] == "登录"
+    assert requests[2]["deferred_context"]["step_id"] == "operate-foreground-ui"
+    assert requests[2]["deferred_context"]["capability_id"] == "desktop.ui_operation"
     assert "step_id" not in requests[2]
     assert {request["decision_id"] for request in requests} == {decision.decision_id}
     assert payload["selection_reason"] == "runtime_planner_full_plan_execution"
@@ -21765,6 +21767,231 @@ def test_custom_api_agent_loop_observes_generic_desktop_click_target_before_defa
     assert observed_click_request["step_id"] == "operate-foreground-ui"
     assert observed_click_request["capability_id"] == "desktop.ui_operation"
     assert observed_click_request["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "semantic_ui_tool",
+    }
+    assert not any(event["event"] == "agent.model.response" for event in timeline)
+
+
+def test_runtime_planner_generic_desktop_type_execution_observes_target_before_type() -> None:
+    allowed_tools = ["app.open", "desktop.type_into_ui_element", "desktop.ui_elements"]
+
+    requests = planner_tool_requests(
+        "打开 PixelForge 在搜索框输入 hello",
+        allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    execution_requests = planner_execution_tool_requests(requests, allowed_tools)
+
+    assert [request["tool"] for request in execution_requests] == [
+        "app.open",
+        "desktop.ui_elements",
+    ]
+    observation_request = execution_requests[-1]
+    assert observation_request["continue_to_model"] is True
+    assert observation_request["deferred_tool"] == "desktop.type_into_ui_element"
+    assert observation_request["deferred_input"] == {
+        "target": "搜索框",
+        "text": "hello",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert observation_request["deferred_context"]["step_id"] == "operate-foreground-ui"
+    assert observation_request["deferred_context"]["capability_id"] == "desktop.ui_operation"
+    assert observation_request["input"] == {"role_filter": "text", "limit": 80}
+
+
+def test_runtime_planner_keeps_type_before_submit_order_without_deferred_observation() -> None:
+    allowed_tools = [
+        "app.open",
+        "desktop.type_into_ui_element",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+
+    requests = planner_tool_requests(
+        "打开 PixelForge 在搜索框输入 hello 并提交",
+        allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    execution_requests = planner_execution_tool_requests(requests, allowed_tools)
+
+    assert [request["tool"] for request in execution_requests] == [
+        "app.open",
+        "desktop.type_into_ui_element",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    assert all("deferred_tool" not in request for request in execution_requests)
+
+
+def test_custom_api_agent_loop_observes_generic_desktop_type_target_before_default_type(
+    monkeypatch,
+) -> None:
+    def fail_legacy_daily_planner(*_args, **_kwargs):
+        raise AssertionError("legacy desktop planner should not run for generic observed type")
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
+        fail_legacy_daily_planner,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
+        fail_legacy_daily_planner,
+    )
+
+    allowed_tools = ["app.open", "desktop.type_into_ui_element", "desktop.ui_elements"]
+    budget = FakeBudget()
+    tool_batches: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_batches.append([dict(request) for request in tool_requests])
+        batch_index = len(tool_batches)
+        for request in tool_requests:
+            tool = str(request.get("tool") or "")
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if batch_index == 1:
+                if tool == "app.open":
+                    result = {
+                        "ok": True,
+                        "action": "app.open",
+                        "data": {"app_name": payload["app_name"]},
+                    }
+                elif tool == "desktop.ui_elements":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {
+                            "elements": [
+                                {
+                                    "role": "text field",
+                                    "label": "搜索框",
+                                    "center": {"x": 300, "y": 120},
+                                }
+                            ],
+                            "count": 1,
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected initial generic type tool: {tool}")
+            elif batch_index == 2:
+                if tool == "desktop.type_into_ui_element":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.type_into_ui_element",
+                        "data": {
+                            "target": payload["target"],
+                            "text": payload["text"],
+                        },
+                    }
+                elif tool == "desktop.ui_elements":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {
+                            "elements": [
+                                {
+                                    "role": "text field",
+                                    "label": "搜索框",
+                                    "value": "hello",
+                                }
+                            ],
+                            "count": 1,
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected observed generic type tool: {tool}")
+            else:
+                raise AssertionError(f"unexpected tool batch {batch_index}: {tool}")
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool,
+                    input_preview=payload,
+                    result=result,
+                    **{
+                        key: request[key]
+                        for key in (
+                            "planning_reason",
+                            "decision_id",
+                            "plan_id",
+                            "core_id",
+                            "task_id",
+                            "step_id",
+                            "planner_step_id",
+                            "capability_id",
+                            "followup_target",
+                            "action_target",
+                            "observation_evidence",
+                        )
+                        if key in request
+                    },
+                )
+            )
+            messages_arg.append({"role": "user", "content": f"Tool result for {tool}: {result}"})
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": allowed_tools}},
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use runtime planner desktop tools with observed UI typing.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("generic desktop type observation should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "打开 PixelForge 在搜索框输入 hello",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-planner-generic-observe-type",
+    )
+
+    assert "搜索框" in str(result)
+    assert [[request["tool"] for request in batch] for batch in tool_batches] == [
+        ["app.open", "desktop.ui_elements"],
+        ["desktop.type_into_ui_element", "desktop.ui_elements"],
+    ]
+    observation_request = tool_batches[0][-1]
+    assert observation_request["continue_to_model"] is True
+    assert observation_request["deferred_tool"] == "desktop.type_into_ui_element"
+    observed_type_request = tool_batches[1][0]
+    assert observed_type_request["input"] == {
+        "target": "搜索框",
+        "text": "hello",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert observed_type_request["step_id"] == "operate-foreground-ui"
+    assert observed_type_request["capability_id"] == "desktop.ui_operation"
+    assert observed_type_request["observation_evidence"] == {
         "source_tool": "desktop.ui_elements",
         "strategy": "semantic_ui_tool",
     }
