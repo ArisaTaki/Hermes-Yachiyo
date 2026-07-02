@@ -1,5 +1,10 @@
 import { RuntimeTimelineEventList, type RuntimeTimelineEventRecord } from './RuntimeTimelineEventList';
 import { runtimeToolDisplayLabelOrName } from '../approval';
+import {
+  runtimeEventIsDesktopIntent,
+  runtimeEventIsDesktopPermissionRecovery,
+  runtimeEventIsDesktopReadinessRecovered,
+} from '../desktopEvents';
 
 export type RuntimeTimelineEventSnapshot = {
   event_id?: string | null;
@@ -55,27 +60,27 @@ export function runtimeTimelineSummaryEvents(
 export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): string {
   const title = String(event.title || '').trim();
   const type = String(event.event_type || '').trim();
-  if (runtimeTimelineIsDesktopIntentEvent(type, 'planned')) {
+  if (runtimeEventIsDesktopIntent(type, 'planned')) {
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `准备执行 · ${toolLabel}` : '准备执行桌面动作';
   }
-  if (runtimeTimelineIsDesktopIntentEvent(type, 'approval_required')) {
+  if (runtimeEventIsDesktopIntent(type, 'approval_required')) {
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `等待审批 · ${toolLabel}` : '等待审批桌面动作';
   }
-  if (runtimeTimelineIsDesktopIntentEvent(type, 'completed')) {
+  if (runtimeEventIsDesktopIntent(type, 'completed')) {
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `已执行 · ${toolLabel}` : '已执行桌面动作';
   }
-  if (type === 'agent.desktop.permission_recovery') {
+  if (runtimeEventIsDesktopPermissionRecovery(type)) {
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `权限恢复 · ${toolLabel}` : '桌面权限恢复';
   }
-  if (type === 'agent.desktop.readiness_recovered') {
+  if (runtimeEventIsDesktopReadinessRecovered(type)) {
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `桌面就绪已恢复 · ${toolLabel}` : '桌面就绪已恢复';
   }
-  if (runtimeTimelineIsDesktopIntentEvent(type, 'unavailable')) {
+  if (runtimeEventIsDesktopIntent(type, 'unavailable')) {
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';
   }
@@ -104,7 +109,7 @@ function runtimeTimelineEventDetail(event: RuntimeTimelineEventSnapshot): string
     const contentSnapshotDetail = runtimeTimelineContentSnapshotDetail(event);
     if (contentSnapshotDetail) return contentSnapshotDetail;
   }
-  if (runtimeTimelineIsDesktopIntentEvent(type, 'completed')) {
+  if (runtimeEventIsDesktopIntent(type, 'completed')) {
     const toolChainDetail = runtimeTimelineDesktopToolChainDetail(event);
     if (toolChainDetail) return toolChainDetail;
   }
@@ -395,13 +400,6 @@ function runtimeTimelineRecordNumberString(record: Record<string, unknown>, key:
 function runtimeTimelineRecordArrayLength(record: Record<string, unknown>, key: string): number {
   const value = record[key];
   return Array.isArray(value) ? value.length : 0;
-}
-
-function runtimeTimelineIsDesktopIntentEvent(type: string, suffix: string): boolean {
-  return type === `agent.desktop.intent_${suffix}`
-    || type === `group.run.desktop.intent_${suffix}`
-    || type === `workflow.desktop.intent_${suffix}`
-    || type === `workflow.run.desktop.intent_${suffix}`;
 }
 
 function runtimeTimelineLooksInternalLabel(value: string): boolean {

@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { UiIcon } from '../../../components/UiIcon';
 import type { RuntimeImageArtifactPointSelection } from '../../runtime-shared/components/RuntimeReadableArtifactPreview';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
+import { runtimeEventIsDesktopReadinessRecovered } from '../../runtime-shared/desktopEvents';
 import {
   runtimeToolRecoveryActionWithInputPatch,
   runtimeToolRecoveryActionsFromRecords,
@@ -783,7 +784,7 @@ function latestReadinessRecoverySequence(events: AgentTaskSnapshot['recent_event
   return Math.max(
     0,
     ...(events || [])
-      .filter((event) => String(event.event_type || '').trim() === 'agent.desktop.readiness_recovered')
+      .filter((event) => runtimeEventIsDesktopReadinessRecovered(String(event.event_type || '').trim()))
       .map((event) => Number(event.sequence) || 0),
   );
 }
@@ -793,7 +794,7 @@ function recoveryEventSurvivesReadinessRecovery(
   recoveryBoundary: number,
 ): boolean {
   const eventType = String(event.event_type || '').trim();
-  if (eventType === 'agent.desktop.readiness_recovered') return false;
+  if (runtimeEventIsDesktopReadinessRecovered(eventType)) return false;
   if (!recoveryBoundary) return true;
   if ((Number(event.sequence) || 0) > recoveryBoundary) return true;
   if (permissionTargetsFromEvent(event).length) return true;

@@ -1,4 +1,9 @@
 import type { ApprovalCardSnapshot, PublicRunEvent, ToolCallSnapshot } from './types';
+import {
+  runtimeEventIsDailyDesktopToolEvent,
+  runtimeEventIsDesktopIntent,
+  runtimeEventIsDesktopPermissionRecovery,
+} from './desktopEvents';
 import { publicRunEventIsSecret } from './runEvents';
 
 type ApprovalReplayCorrelationKeys = {
@@ -8,12 +13,6 @@ type ApprovalReplayCorrelationKeys = {
 
 type ApprovalReplayWeakIndex = number | 'ambiguous';
 
-const DAILY_DESKTOP_INTENT_TOOL_EVENTS = new Set([
-  'agent.desktop.intent_approval_required',
-  'agent.desktop.intent_completed',
-  'agent.desktop.permission_recovery',
-  'agent.desktop.intent_unavailable',
-]);
 const TOOL_INPUT_RESOLUTION_EVENT_TYPE = 'agent.tool.input_resolved';
 const PLANNER_TRACE_KEYS = [
   'source',
@@ -51,7 +50,7 @@ export function toolCallsFromRunEventReplay(events: PublicRunEvent[]): ToolCallS
     if (!toolCall) return;
     const key = toolCallCorrelationKey(event, toolCall);
     const activeIndex = key ? activeByKey.get(key) : undefined;
-    const mergeIndex = activeIndex === undefined && isDailyDesktopIntentToolEvent(event.event_type)
+    const mergeIndex = activeIndex === undefined && runtimeEventIsDailyDesktopToolEvent(event.event_type)
       ? latestMatchingToolCallIndex(calls, toolCall)
       : activeIndex;
     if (mergeIndex === undefined) {
@@ -741,7 +740,7 @@ function isArtifactRunEvent(eventType: string): boolean {
 }
 
 function isToolRunEvent(eventType: string): boolean {
-  if (isDailyDesktopIntentToolEvent(eventType)) return true;
+  if (runtimeEventIsDailyDesktopToolEvent(eventType)) return true;
   return [
     'agent.tool.call',
     'agent.tool.denied',
@@ -794,10 +793,10 @@ function toolStatusFromRunEventPayload(
   payload: Record<string, unknown>,
   outputPreview: Record<string, unknown>,
 ): string {
-  if (isDesktopIntentEvent(eventType, 'approval_required')) return 'waiting_approval';
-  if (eventType === 'agent.desktop.permission_recovery') return 'blocked';
-  if (isDesktopIntentEvent(eventType, 'unavailable')) return 'blocked';
-  if (isDesktopIntentEvent(eventType, 'completed')) {
+  if (runtimeEventIsDesktopIntent(eventType, 'approval_required')) return 'waiting_approval';
+  if (runtimeEventIsDesktopPermissionRecovery(eventType)) return 'blocked';
+  if (runtimeEventIsDesktopIntent(eventType, 'unavailable')) return 'blocked';
+  if (runtimeEventIsDesktopIntent(eventType, 'completed')) {
     if (toolCallForegroundLockBusy(outputPreview) || outputPreview.foreground_lock_busy === true) return 'blocked';
     if (outputPreview.approval_required === true) return 'waiting_approval';
     if (outputPreview.ok === false) return 'failed';
@@ -815,7 +814,7 @@ function dailyDesktopIntentOutputPreview(
 ): Record<string, unknown> | undefined {
   const result = objectPreview(payload.result);
   if (result) return result;
-  if (isDesktopIntentEvent(eventType, 'unavailable')) {
+  if (runtimeEventIsDesktopIntent(eventType, 'unavailable')) {
     return pickPresentRecord(payload, [
       'reason',
       'blocked_by',
@@ -824,7 +823,7 @@ function dailyDesktopIntentOutputPreview(
       'allowed_tools',
     ]);
   }
-  if (eventType === 'agent.desktop.permission_recovery') {
+  if (runtimeEventIsDesktopPermissionRecovery(eventType)) {
     return pickPresentRecord(payload, [
       'permission_targets',
       'affected_tools',
@@ -833,7 +832,7 @@ function dailyDesktopIntentOutputPreview(
       'status',
     ]);
   }
-  if (isDesktopIntentEvent(eventType, 'approval_required')) {
+  if (runtimeEventIsDesktopIntent(eventType, 'approval_required')) {
     return pickPresentRecord(payload, [
       'reason',
       'approval_id',
@@ -850,20 +849,6 @@ function pickPresentRecord(source: Record<string, unknown>, keys: string[]): Rec
     if (traceContextValuePresent(source[key])) result[key] = source[key];
   });
   return Object.keys(result).length ? result : undefined;
-}
-
-function isDailyDesktopIntentToolEvent(eventType: string): boolean {
-  return DAILY_DESKTOP_INTENT_TOOL_EVENTS.has(eventType)
-    || isDesktopIntentEvent(eventType, 'approval_required')
-    || isDesktopIntentEvent(eventType, 'completed')
-    || isDesktopIntentEvent(eventType, 'unavailable');
-}
-
-function isDesktopIntentEvent(eventType: string, suffix: string): boolean {
-  return eventType === `agent.desktop.intent_${suffix}`
-    || eventType === `group.run.desktop.intent_${suffix}`
-    || eventType === `workflow.desktop.intent_${suffix}`
-    || eventType === `workflow.run.desktop.intent_${suffix}`;
 }
 
 function toolCallForegroundLockBusy(payload: Record<string, unknown>): boolean {

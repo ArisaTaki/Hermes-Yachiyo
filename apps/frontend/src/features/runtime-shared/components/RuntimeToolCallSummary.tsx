@@ -1,5 +1,9 @@
 import type { PublicRunEvent, ToolCallSnapshot } from '../types';
 import { runtimeToolDisplayLabelOrName, runtimeToolFamily } from '../approval';
+import {
+  runtimeEventIsDesktopIntent,
+  runtimeEventIsDesktopPermissionRecovery,
+} from '../desktopEvents';
 import { publicRunEventIsSecret } from '../runEvents';
 
 export type RuntimeToolCallSummaryItem = {
@@ -160,10 +164,11 @@ export function summarizeRuntimeToolCalls(
 function runtimeToolEventIsVisible(eventType: string): boolean {
   return (
     TOOL_EVENT_TYPES.has(eventType)
-    || runtimeToolIsDesktopIntentEvent(eventType, 'planned')
-    || runtimeToolIsDesktopIntentEvent(eventType, 'approval_required')
-    || runtimeToolIsDesktopIntentEvent(eventType, 'completed')
-    || runtimeToolIsDesktopIntentEvent(eventType, 'unavailable')
+    || runtimeEventIsDesktopIntent(eventType, 'planned')
+    || runtimeEventIsDesktopIntent(eventType, 'approval_required')
+    || runtimeEventIsDesktopIntent(eventType, 'completed')
+    || runtimeEventIsDesktopPermissionRecovery(eventType)
+    || runtimeEventIsDesktopIntent(eventType, 'unavailable')
     || eventType.startsWith('skill.dispatch.')
     || eventType.startsWith('memory.write.')
   );
@@ -239,19 +244,12 @@ function runtimeToolStatusFromEvent(event: PublicRunEvent): string {
   }
   if (eventType === 'tool.started') return 'running';
   if (eventType === 'tool.requested') return 'queued';
-  if (runtimeToolIsDesktopIntentEvent(eventType, 'planned')) return 'planned';
-  if (runtimeToolIsDesktopIntentEvent(eventType, 'approval_required')) return 'waiting_approval';
-  if (eventType === 'agent.desktop.permission_recovery') return 'waiting_approval';
-  if (runtimeToolIsDesktopIntentEvent(eventType, 'completed')) return 'completed';
-  if (runtimeToolIsDesktopIntentEvent(eventType, 'unavailable')) return 'unavailable';
+  if (runtimeEventIsDesktopIntent(eventType, 'planned')) return 'planned';
+  if (runtimeEventIsDesktopIntent(eventType, 'approval_required')) return 'waiting_approval';
+  if (runtimeEventIsDesktopPermissionRecovery(eventType)) return 'waiting_approval';
+  if (runtimeEventIsDesktopIntent(eventType, 'completed')) return 'completed';
+  if (runtimeEventIsDesktopIntent(eventType, 'unavailable')) return 'unavailable';
   return 'running';
-}
-
-function runtimeToolIsDesktopIntentEvent(eventType: string, suffix: string): boolean {
-  return eventType === `agent.desktop.intent_${suffix}`
-    || eventType === `group.run.desktop.intent_${suffix}`
-    || eventType === `workflow.desktop.intent_${suffix}`
-    || eventType === `workflow.run.desktop.intent_${suffix}`;
 }
 
 function normalizeRuntimeToolStatus(status: string): string {
