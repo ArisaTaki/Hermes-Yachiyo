@@ -6340,7 +6340,8 @@ def _file_open_with_app_discovery_steps(
     }
     if selection:
         open_preview["selection"] = selection
-    return [
+    open_step_id = "open-discovered-file-with-app"
+    steps = [
         _step(
             intent,
             "discover-file-open-target",
@@ -6352,7 +6353,7 @@ def _file_open_with_app_discovery_steps(
         ),
         _step(
             intent,
-            "open-discovered-file-with-app",
+            open_step_id,
             "Open discovered file with app",
             "file.desktop_access",
             _first_allowed(("desktop.open_path_with_app", "app.open_path_with_app"), allowed),
@@ -6364,6 +6365,10 @@ def _file_open_with_app_discovery_steps(
                 "file path and opens it with the requested app."
             ),
         ),
+    ]
+    return [
+        *steps,
+        *_dynamic_file_open_verification_steps(intent, allowed, depends_on=open_step_id),
     ]
 
 
@@ -6392,7 +6397,8 @@ def _file_open_with_selected_app_discovery_steps(
     }
     if selection:
         open_preview["selection"] = selection
-    return [
+    open_step_id = "open-discovered-file-with-app"
+    steps = [
         _step(
             intent,
             "discover-file-open-target",
@@ -6413,7 +6419,7 @@ def _file_open_with_selected_app_discovery_steps(
         ),
         _step(
             intent,
-            "open-discovered-file-with-app",
+            open_step_id,
             "Open discovered file with selected app",
             "file.desktop_access",
             _first_allowed(("desktop.open_path_with_app", "app.open_path_with_app"), allowed),
@@ -6425,6 +6431,42 @@ def _file_open_with_selected_app_discovery_steps(
                 "selects both the file path and the matching app, then opens the file with that app."
             ),
         ),
+    ]
+    return [
+        *steps,
+        *_dynamic_file_open_verification_steps(intent, allowed, depends_on=open_step_id),
+    ]
+
+
+def _dynamic_file_open_verification_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    *,
+    depends_on: str,
+) -> list[ToolPlanStepSnapshot]:
+    verify_tool = _first_allowed(
+        ("desktop.active_window", "desktop.ui_elements", "screen.capture"),
+        allowed,
+    )
+    if not verify_tool:
+        return []
+    input_preview: dict[str, Any] = {}
+    if verify_tool in {"desktop.ui_elements", "desktop.read_ui"}:
+        input_preview = {"limit": 80}
+    elif verify_tool == "screen.capture":
+        input_preview = {"reason": "verify opened file"}
+    return [
+        _step(
+            intent,
+            "verify-opened-file",
+            "Verify opened file",
+            "desktop.visual_verification",
+            verify_tool,
+            input_preview=input_preview,
+            depends_on=[depends_on],
+            action="verify",
+            reason="Observe the foreground app/window after opening the selected file.",
+        )
     ]
 
 

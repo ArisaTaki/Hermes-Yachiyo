@@ -2317,8 +2317,10 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
                 "include_metadata": True,
             },
             "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
+            "planning_reason": "planner_prefetch_file_open_target",
             "continue_to_model": True,
+            "step_id": "discover-file-open-target",
+            "capability_id": "file.workspace_read",
         },
         {
             "protocol": "json_fallback",
@@ -2327,6 +2329,8 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
             "continue_to_model": True,
+            "step_id": "discover_apps-desktop-state",
+            "capability_id": "desktop.app_discovery",
         },
     ]
 
@@ -3085,6 +3089,56 @@ def test_planner_selection_payload_surfaces_dynamic_file_open_target() -> None:
     }
     assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == payload[
         "followup_target"
+    ]
+
+
+def test_runtime_planner_verifies_dynamic_file_open_when_available() -> None:
+    prompt = "找一个能编辑 PDF 的本机应用并打开最近的 PDF"
+    allowed_tools = [
+        "workspace.list",
+        "desktop.list_apps",
+        "desktop.open_path_with_app",
+        "desktop.active_window",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-file-open-target",
+        "discover_apps-desktop-state",
+        "open-discovered-file-with-app",
+        "verify-opened-file",
+    ]
+    verify_opened = _step_by_id(decision, "verify-opened-file")
+    assert verify_opened.tool_name == "desktop.active_window"
+    assert verify_opened.capability_id == "desktop.visual_verification"
+    assert verify_opened.depends_on == ["open-discovered-file-with-app"]
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {
+                "path": "Downloads",
+                "pattern": "*.pdf",
+                "file_type": "pdf",
+                "include_metadata": True,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_file_open_target",
+            "continue_to_model": True,
+            "step_id": "discover-file-open-target",
+            "capability_id": "file.workspace_read",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "pdf", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+            "step_id": "discover_apps-desktop-state",
+            "capability_id": "desktop.app_discovery",
+        },
     ]
 
 

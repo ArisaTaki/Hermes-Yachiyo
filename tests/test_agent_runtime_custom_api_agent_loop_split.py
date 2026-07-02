@@ -3886,10 +3886,16 @@ def test_model_followup_pending_plan_resolves_dynamic_file_and_app_candidates() 
                         "selection_source": "workspace.list",
                         "selection": "最近",
                     },
+                },
+                {
+                    "step_id": "verify-opened-file",
+                    "tool_name": "desktop.active_window",
+                    "capability_id": "desktop.visual_verification",
+                    "input_preview": {},
                 }
             ],
         },
-        ["desktop.open_path_with_app"],
+        ["desktop.open_path_with_app", "desktop.active_window"],
         generated_content="我会用 PDF Expert 打开最近的 PDF。",
     )
 
@@ -3918,7 +3924,20 @@ def test_model_followup_pending_plan_resolves_dynamic_file_and_app_candidates() 
             "plan_id": "plan-pdf",
             "intent_kind": "desktop_operation",
             "planner_step_id": "open-discovered-file-with-app",
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_model_followup_context",
+            "step_id": "verify-opened-file",
+            "capability_id": "desktop.visual_verification",
+            "decision_id": "decision-pdf",
+            "plan_id": "plan-pdf",
+            "intent_kind": "desktop_operation",
+            "planner_step_id": "verify-opened-file",
+        },
     ]
 
 
