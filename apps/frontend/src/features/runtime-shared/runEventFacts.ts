@@ -306,11 +306,7 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
   const policyReason = publicRunEventPayloadString(payload, 'policy_reason')
     || publicRunEventPayloadString(approval, 'policy_reason')
     || publicRunEventPayloadString(approval, 'reason');
-  const outputPreview = dailyDesktopIntentOutputPreview(event.event_type, payload)
-    || objectPreview(payload.output_preview)
-    || objectPreview(payload.output)
-    || objectPreview(payload.result)
-    || (payload.error !== undefined ? { error: payload.error } : {});
+  const outputPreview = toolCallOutputPreviewFromPayload(event.event_type, payload);
   const status = toolStatusFromRunEventPayload(event.event_type, payload, outputPreview);
   const toolName = publicRunEventPayloadString(payload, 'tool_name')
     || publicRunEventPayloadString(payload, 'tool')
@@ -841,6 +837,61 @@ function dailyDesktopIntentOutputPreview(
     ]);
   }
   return undefined;
+}
+
+function toolCallOutputPreviewFromPayload(
+  eventType: string,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  const preview = dailyDesktopIntentOutputPreview(eventType, payload)
+    || objectPreview(payload.output_preview)
+    || objectPreview(payload.output)
+    || objectPreview(payload.result)
+    || {};
+  const recoveryPreview = toolCallRecoveryOutputPreview(eventType, payload);
+  const outputPreview = {
+    ...recoveryPreview,
+    ...preview,
+  };
+  if (payload.error !== undefined && outputPreview.error === undefined) {
+    outputPreview.error = payload.error;
+  }
+  return outputPreview;
+}
+
+function toolCallRecoveryOutputPreview(
+  eventType: string,
+  payload: Record<string, unknown>,
+): Record<string, unknown> {
+  if (
+    eventType !== 'agent.tool.skipped'
+    && eventType !== 'tool.skipped'
+    && !runtimeEventIsDesktopIntent(eventType, 'unavailable')
+    && !runtimeEventIsDesktopPermissionRecovery(eventType)
+  ) {
+    return {};
+  }
+  return pickPresentRecord(payload, [
+    'reason',
+    'hint',
+    'skipped',
+    'blocked_by',
+    'blocked_summary',
+    'blocked_by_app_resolution',
+    'blocked_by_runtime_readiness',
+    'blocked_by_user_goal',
+    'blocking_condition',
+    'blocking_conditions',
+    'source_summary',
+    'source_tool',
+    'recommended_tools',
+    'allowed_tools',
+    'recovery_hints',
+    'recovery_actions',
+    'permission_targets',
+    'missing_permissions',
+    'affected_tools',
+  ]) || {};
 }
 
 function pickPresentRecord(source: Record<string, unknown>, keys: string[]): Record<string, unknown> | undefined {

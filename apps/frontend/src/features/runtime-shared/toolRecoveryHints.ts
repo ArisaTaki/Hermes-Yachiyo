@@ -3,7 +3,11 @@ export function runtimeToolRecoveryHintsFromRecords(sources: Array<Record<string
 }
 
 export function runtimeToolRecoveryHintsFromRecord(source: Record<string, unknown>): string[] {
-  const explicitHints = stringList(source.recovery_hints);
+  const data = objectValue(source.data);
+  const explicitHints = uniqueStrings([
+    ...stringList(source.recovery_hints),
+    ...stringList(data.recovery_hints),
+  ]);
   if (explicitHints.length) return explicitHints;
 
   const error = String(source.error || '').trim();
@@ -35,10 +39,20 @@ function blockingConditionRecoveryHints(source: Record<string, unknown>): string
 }
 
 function permissionRecoveryHints(source: Record<string, unknown>): string[] {
-  if (source.permission_error !== true && !source.permission_targets && !source.missing_permissions) return [];
+  const data = objectValue(source.data);
+  if (
+    source.permission_error !== true
+    && data.permission_error !== true
+    && !source.permission_targets
+    && !source.missing_permissions
+    && !data.permission_targets
+    && !data.missing_permissions
+  ) return [];
   const targets = uniqueStrings([
     ...stringList(source.permission_targets),
     ...stringList(source.missing_permissions),
+    ...stringList(data.permission_targets),
+    ...stringList(data.missing_permissions),
   ]);
   return targets
     .map((target) => PERMISSION_RECOVERY_HINTS[target] || '')

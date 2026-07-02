@@ -211,7 +211,11 @@ export function runtimeToolRecoveryActionsFromRecord(
   source: Record<string, unknown>,
   retryContext: RuntimeToolRecoveryRetryContext = {},
 ): RuntimeToolRecoveryAction[] {
-  const rawActions = Array.isArray(source.recovery_actions) ? source.recovery_actions : [];
+  const data = objectValue(source.data);
+  const rawActions = [
+    ...(Array.isArray(source.recovery_actions) ? source.recovery_actions : []),
+    ...(Array.isArray(data.recovery_actions) ? data.recovery_actions : []),
+  ];
   return rawActions.flatMap((rawAction) => {
     const action = objectValue(rawAction);
     const tool = String(action.tool || '').trim();
