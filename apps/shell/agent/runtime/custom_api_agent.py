@@ -1504,9 +1504,11 @@ class RuntimeCustomApiAgentLoop:
                     allowed_tools,
                 )
                 execution_requests = _drop_trailing_daily_desktop_verify_requests(execution_requests)
+                has_approval_plan_tool = self._has_approval_plan_tool(execution_requests)
                 if execution_requests and (
-                    not self._has_approval_plan_tool(execution_requests)
+                    not has_approval_plan_tool
                     or _direct_action_with_active_window_verification(execution_requests)
+                    or runtime_trace_metadata is not None
                 ):
                     return (
                         selection.decision,
@@ -7333,6 +7335,8 @@ def _runtime_planner_should_trace_tool_requests(decision: Any | None) -> bool:
         if str(getattr(step, "tool_name", "") or "").strip()
         and str(getattr(step, "step_id", "") or "").strip()
     ]
+    if any(bool(getattr(step, "approval_required", False)) for step in observable_steps):
+        return True
     return len(observable_steps) > 1
 
 

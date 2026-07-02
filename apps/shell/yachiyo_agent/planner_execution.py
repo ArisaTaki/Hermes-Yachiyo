@@ -667,6 +667,60 @@ def _annotate_request_trace(
         request["tool_plan_id"] = tool_plan_id
     if intent_kind:
         request["intent_kind"] = intent_kind
+    request.update(_runtime_trace_metadata_for_step(decision, step_id))
+
+
+_RUNTIME_TRACE_TEXT_KEYS = (
+    "runtime_doctrine",
+    "runtime_stage",
+    "runtime_role",
+)
+
+_RUNTIME_TRACE_BOOL_KEYS = (
+    "requires_observation",
+    "requires_post_action_verification",
+)
+
+
+def _runtime_trace_metadata_for_step(decision: Any, step_id: str) -> dict[str, Any]:
+    clean_step_id = str(step_id or "").strip()
+    if not clean_step_id:
+        return {}
+    task_core = getattr(getattr(decision, "plan", None), "task_core", None)
+    if task_core is None:
+        return {}
+    for todo in list(getattr(task_core, "todos", []) or []):
+        if str(getattr(todo, "step_id", "") or "").strip() == clean_step_id:
+            metadata = _runtime_trace_metadata_from_mapping(getattr(todo, "metadata", {}))
+            if metadata:
+                return metadata
+    for checkpoint in list(getattr(task_core, "checkpoints", []) or []):
+        if str(getattr(checkpoint, "after_step_id", "") or "").strip() == clean_step_id:
+            metadata = _runtime_trace_metadata_from_mapping(getattr(checkpoint, "payload", {}))
+            if metadata:
+                return metadata
+    workspace = getattr(task_core, "workspace", None)
+    for item in list(getattr(workspace, "items", []) or []):
+        if str(getattr(item, "source_step_id", "") or "").strip() == clean_step_id:
+            metadata = _runtime_trace_metadata_from_mapping(getattr(item, "metadata", {}))
+            if metadata:
+                return metadata
+    return {}
+
+
+def _runtime_trace_metadata_from_mapping(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    payload: dict[str, Any] = {}
+    for key in _RUNTIME_TRACE_TEXT_KEYS:
+        item = str(value.get(key) or "").strip()
+        if item:
+            payload[key] = item
+    for key in _RUNTIME_TRACE_BOOL_KEYS:
+        item = value.get(key)
+        if isinstance(item, bool):
+            payload[key] = item
+    return payload
 
 
 def _orchestration_request(decision: Any, orchestration_kind: str) -> dict[str, Any]:

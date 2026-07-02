@@ -28314,6 +28314,13 @@ def test_planner_tool_requests_optionally_include_runtime_plan_trace() -> None:
     assert traced_requests[1]["decision_id"].startswith("decision-")
     assert traced_requests[1]["plan_id"].startswith("runtime-plan-")
     assert traced_requests[1]["tool_plan_id"].startswith("tool-plan-")
+    assert [request["runtime_stage"] for request in traced_requests] == [
+        "discover",
+        "operate",
+        "verify",
+    ]
+    assert traced_requests[1]["runtime_role"] == "click_ui"
+    assert traced_requests[1]["requires_post_action_verification"] is True
 
 
 def test_runtime_execution_envelope_projects_decision_into_executable_requests() -> None:
