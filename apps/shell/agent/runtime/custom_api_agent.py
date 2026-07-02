@@ -5469,6 +5469,14 @@ def _auto_deferred_observed_ui_followup_requests(
             target_label,
             role_filter,
         ):
+            retry_request = _deferred_observed_ui_observation_retry_request(
+                request,
+                target,
+                allowed,
+                timeline,
+            )
+            if retry_request:
+                return [retry_request]
             continue
         observation_source = _latest_desktop_observation_tool(timeline)
         if observation_source:
@@ -5523,6 +5531,65 @@ def _deferred_observed_ui_continuation_requests(
             continue
         continuation.append(next_request)
     return continuation
+
+
+def _deferred_observed_ui_observation_retry_request(
+    request: Mapping[str, Any],
+    target: Mapping[str, Any],
+    allowed: set[str],
+    timeline: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if "desktop.read_ui" not in allowed:
+        return {}
+    if str(request.get("tool") or "").strip() == "desktop.read_ui":
+        return {}
+    latest_observation = _latest_desktop_observation_event(timeline)
+    if str(latest_observation.get("tool") or "").strip() != "desktop.ui_elements":
+        return {}
+    payload = {
+        key: value
+        for key, value in {
+            "app_name": target.get("app_name"),
+            "role_filter": target.get("role_filter"),
+            "limit": target.get("limit"),
+        }.items()
+        if value not in (None, "", [], {})
+    }
+    if "limit" not in payload:
+        payload["limit"] = 80
+    retry = _request_like(
+        "desktop.read_ui",
+        payload,
+        source=str(request.get("source") or "runtime_planner").strip(),
+        planning_reason=str(
+            request.get("planning_reason") or "planner_retry_deferred_ui_observation"
+        ).strip()
+        or "planner_retry_deferred_ui_observation",
+    )
+    retry["continue_to_model"] = True
+    retry["deferred_tool"] = str(request.get("deferred_tool") or "").strip()
+    raw_input = request.get("deferred_input")
+    if isinstance(raw_input, Mapping):
+        retry["deferred_input"] = dict(raw_input)
+    raw_context = request.get("deferred_context")
+    if isinstance(raw_context, Mapping):
+        retry["deferred_context"] = dict(raw_context)
+    raw_continuation = request.get("deferred_continuation")
+    if isinstance(raw_continuation, list):
+        retry["deferred_continuation"] = [
+            dict(item) for item in raw_continuation if isinstance(item, Mapping)
+        ]
+    for key, value in _request_observability_metadata(request).items():
+        retry.setdefault(key, value)
+    request_id = str(request.get("request_id") or "").strip()
+    if request_id:
+        retry["request_id"] = f"{request_id}:retry:desktop.read_ui"
+    retry["observation_retry"] = {
+        "from_tool": "desktop.ui_elements",
+        "reason": "target_not_found",
+        "target": str(target.get("target") or "").strip(),
+    }
+    return retry
 
 
 def _deferred_observed_ui_target_from_request(
@@ -9240,6 +9307,16 @@ def _latest_desktop_observation_tool(timeline: list[dict[str, Any]]) -> str:
         if _desktop_observation_result_elements(tool_name, result):
             return tool_name
     return ""
+
+
+def _latest_desktop_observation_event(timeline: list[dict[str, Any]]) -> dict[str, Any]:
+    for event in reversed(timeline):
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        tool_name = str(event.get("detail") or "").strip()
+        if tool_name in {"desktop.read_ui", "desktop.ui_elements", "desktop.inspect_app"}:
+            return {**dict(event), "tool": tool_name}
+    return {}
 
 
 def _latest_desktop_observation_follows_search_submission(

@@ -6467,6 +6467,76 @@ def test_auto_deferred_observed_ui_followup_ignores_unmatched_target() -> None:
     assert requests == []
 
 
+def test_auto_deferred_observed_ui_followup_retries_unmatched_ui_elements_with_read_ui() -> None:
+    requests = custom_api_agent_module._auto_deferred_observed_ui_followup_requests(
+        [
+            {
+                "tool": "desktop.ui_elements",
+                "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
+                "deferred_tool": "desktop.click_ui_element",
+                "deferred_input": {
+                    "target": "导出",
+                    "role_filter": "button",
+                    "click_count": 1,
+                    "limit": 80,
+                },
+                "request_id": "runtime-plan-ui:request:3:desktop.ui_elements",
+                "decision_id": "decision-ui",
+                "plan_id": "runtime-plan-ui",
+                "intent_kind": "desktop_operation",
+            }
+        ],
+        [
+            "desktop.ui_elements",
+            "desktop.read_ui",
+            "desktop.click_ui_element",
+        ],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.ui_elements",
+                input_preview={"role_filter": "button", "limit": 80},
+                result={
+                    "ok": True,
+                    "data": {
+                        "elements": [{"role": "button", "label": "注册"}],
+                    },
+                },
+            )
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.read_ui",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+            "deferred_tool": "desktop.click_ui_element",
+            "deferred_input": {
+                "target": "导出",
+                "role_filter": "button",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "decision_id": "decision-ui",
+            "plan_id": "runtime-plan-ui",
+            "intent_kind": "desktop_operation",
+            "request_id": (
+                "runtime-plan-ui:request:3:desktop.ui_elements:retry:desktop.read_ui"
+            ),
+            "observation_retry": {
+                "from_tool": "desktop.ui_elements",
+                "reason": "target_not_found",
+                "target": "导出",
+            },
+        }
+    ]
+
+
 def test_model_followup_pending_plan_promotes_model_terminal_command() -> None:
     requests = custom_api_agent_module._model_followup_pending_plan_requests(
         {
@@ -21768,6 +21838,191 @@ def test_custom_api_agent_loop_observes_generic_desktop_click_target_before_defa
     assert observed_click_request["capability_id"] == "desktop.ui_operation"
     assert observed_click_request["observation_evidence"] == {
         "source_tool": "desktop.ui_elements",
+        "strategy": "semantic_ui_tool",
+    }
+    assert not any(event["event"] == "agent.model.response" for event in timeline)
+
+
+def test_custom_api_agent_loop_retries_unmatched_ui_elements_with_read_ui_before_click(
+    monkeypatch,
+) -> None:
+    def fail_legacy_daily_planner(*_args, **_kwargs):
+        raise AssertionError("legacy desktop planner should not run for observed click retry")
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
+        fail_legacy_daily_planner,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
+        fail_legacy_daily_planner,
+    )
+
+    allowed_tools = [
+        "app.open",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+    ]
+    budget = FakeBudget()
+    tool_batches: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_batches.append([dict(request) for request in tool_requests])
+        batch_index = len(tool_batches)
+        for request in tool_requests:
+            tool = str(request.get("tool") or "")
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if batch_index == 1:
+                if tool == "app.open":
+                    result = {
+                        "ok": True,
+                        "action": "app.open",
+                        "data": {"app_name": payload["app_name"]},
+                    }
+                elif tool == "desktop.ui_elements":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {
+                            "elements": [{"role": "button", "label": "取消"}],
+                            "count": 1,
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected initial retry click tool: {tool}")
+            elif batch_index == 2:
+                if tool == "desktop.read_ui":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.read_ui",
+                        "data": {
+                            "elements": [
+                                {
+                                    "role": "button",
+                                    "label": "导出",
+                                    "center": {"x": 320, "y": 180},
+                                }
+                            ],
+                            "count": 1,
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected retry observation tool: {tool}")
+            elif batch_index == 3:
+                if tool == "desktop.click_ui_element":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.click_ui_element",
+                        "data": {
+                            "target": payload["target"],
+                            "x": 320,
+                            "y": 180,
+                            "click_count": payload.get("click_count"),
+                        },
+                    }
+                elif tool == "desktop.read_ui":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.read_ui",
+                        "data": {
+                            "elements": [{"role": "heading", "label": "导出设置"}],
+                            "count": 1,
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected retry click followup tool: {tool}")
+            else:
+                raise AssertionError(f"unexpected tool batch {batch_index}: {tool}")
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool,
+                    input_preview=payload,
+                    result=result,
+                    **{
+                        key: request[key]
+                        for key in (
+                            "planning_reason",
+                            "decision_id",
+                            "plan_id",
+                            "core_id",
+                            "task_id",
+                            "step_id",
+                            "planner_step_id",
+                            "capability_id",
+                            "followup_target",
+                            "action_target",
+                            "observation_evidence",
+                            "observation_retry",
+                        )
+                        if key in request
+                    },
+                )
+            )
+            messages_arg.append({"role": "user", "content": f"Tool result for {tool}: {result}"})
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": allowed_tools}},
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Retry UI observation before using the model.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("observed click retry should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "打开 PixelForge 并点击导出按钮",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-planner-generic-observe-click-retry",
+    )
+
+    assert "导出" in str(result)
+    assert [[request["tool"] for request in batch] for batch in tool_batches] == [
+        ["app.open", "desktop.ui_elements"],
+        ["desktop.read_ui"],
+        ["desktop.click_ui_element", "desktop.read_ui"],
+    ]
+    retry_request = tool_batches[1][0]
+    assert retry_request["continue_to_model"] is True
+    assert retry_request["deferred_tool"] == "desktop.click_ui_element"
+    assert retry_request["observation_retry"] == {
+        "from_tool": "desktop.ui_elements",
+        "reason": "target_not_found",
+        "target": "导出",
+    }
+    observed_click_request = tool_batches[2][0]
+    assert observed_click_request["observation_evidence"] == {
+        "source_tool": "desktop.read_ui",
         "strategy": "semantic_ui_tool",
     }
     assert not any(event["event"] == "agent.model.response" for event in timeline)
