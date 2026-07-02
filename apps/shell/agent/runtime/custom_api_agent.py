@@ -22,6 +22,7 @@ from apps.shell.agent.runtime.desktop_tool_labels import (
 )
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.runtime.followup_content_snapshot import (
+    followup_content_snapshot_for_tool_call,
     followup_content_snapshots,
     latest_followup_content_snapshot,
 )
@@ -4894,6 +4895,21 @@ def _model_replan_followup_context_payload(
             value = str(recovery_targets[0].get(key) or "").strip()
             if value:
                 payload[key] = value
+    recovery_observations = _runtime_replan_recovery_observations(
+        requests,
+        timeline or [],
+    )
+    if recovery_observations:
+        payload["recovery_observations"] = recovery_observations
+        payload["content_snapshots"] = recovery_observations
+        payload["content_snapshot"] = recovery_observations[-1]
+        payload["recovery_observation_tools"] = _ordered_text_list(
+            [
+                str(observation.get("source_tool") or "").strip()
+                for observation in recovery_observations
+                if str(observation.get("source_tool") or "").strip()
+            ]
+        )
     for key in ("request_id", "decision_id", "plan_id", "core_id", "run_id", "task_id"):
         value = str((replan_payloads[0] if replan_payloads else {}).get(key) or "").strip()
         if value:
@@ -5035,6 +5051,87 @@ def _runtime_replan_recovery_targets(
     return targets
 
 
+def _runtime_replan_recovery_observations(
+    requests: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    request_ids = {
+        str(request.get("request_id") or "").strip()
+        for request in requests
+        if isinstance(request, Mapping) and str(request.get("request_id") or "").strip()
+    }
+    if not request_ids or not timeline:
+        return []
+    observations: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str]] = set()
+    for event in timeline:
+        if not _runtime_replan_recovery_tool_event(event, request_ids):
+            continue
+        tool_name = str(event.get("detail") or event.get("tool") or "").strip()
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        input_preview = (
+            event.get("input_preview")
+            if isinstance(event.get("input_preview"), dict)
+            else {}
+        )
+        snapshot = followup_content_snapshot_for_tool_call(
+            tool_name,
+            result,
+            input_preview,
+        )
+        if not snapshot:
+            continue
+        _attach_replan_observation_trace(snapshot, event)
+        signature = (
+            str(snapshot.get("source_tool") or "").strip(),
+            str(snapshot.get("replan_request_id") or "").strip(),
+            str(snapshot.get("text") or snapshot.get("summary") or snapshot.get("path") or "").strip(),
+        )
+        if signature in seen:
+            continue
+        seen.add(signature)
+        observations.append(snapshot)
+    return observations[-6:]
+
+
+def _runtime_replan_recovery_tool_event(
+    event: Mapping[str, Any],
+    request_ids: set[str],
+) -> bool:
+    if not isinstance(event, Mapping):
+        return False
+    if str(event.get("event") or "").strip() != "agent.tool.call":
+        return False
+    replan_request_id = str(event.get("replan_request_id") or "").strip()
+    if replan_request_id:
+        return replan_request_id in request_ids
+    return str(event.get("planning_reason") or "").strip() == (
+        "planner_verification_recovery_observation"
+    )
+
+
+def _attach_replan_observation_trace(
+    snapshot: dict[str, Any],
+    event: Mapping[str, Any],
+) -> None:
+    for key in (
+        "replan_request_id",
+        "replan_trigger",
+        "target_app_name",
+        "target_app_query",
+        "target_search_text",
+        "runtime_stage",
+        "runtime_role",
+    ):
+        value = str(event.get(key) or "").strip()
+        if value:
+            snapshot[key] = value
+    for key in ("replan_triggers", "replan_signal_ids"):
+        values = _string_list(event.get(key))
+        if values:
+            snapshot[key] = values
+
+
 def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
     requests = [
         request
@@ -5068,6 +5165,9 @@ def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
             ]
             if parts:
                 lines.append(f"- {'; '.join(parts)}")
+    snapshot_text = _followup_content_snapshots_message(payload)
+    if snapshot_text:
+        lines.append(snapshot_text.strip())
     capability_recovery = [
         item
         for item in payload.get("capability_recovery", [])
@@ -11268,10 +11368,13 @@ def _followup_content_snapshot_message(value: Any) -> str:
             else "Observed content snapshot"
         )
         return f"\n\n{label}:\n{text}\n\n"
+    summary = str(value.get("summary") or "").strip()
+    if summary:
+        return f"\n\nObserved context summary:\n{summary}\n\n"
     if value.get("ok") is False:
-        summary = str(value.get("summary") or value.get("error") or "").strip()
-        if summary:
-            return f"\n\nObservation status: {summary}\n\n"
+        error_summary = str(value.get("error") or "").strip()
+        if error_summary:
+            return f"\n\nObservation status: {error_summary}\n\n"
     return ""
 
 
@@ -11302,6 +11405,9 @@ def _followup_content_snapshot_body(value: dict[str, Any]) -> str:
     text = str(value.get("text") or "").strip()
     if text:
         return text
+    summary = str(value.get("summary") or "").strip()
+    if summary:
+        return summary
     if value.get("ok") is False:
         return str(value.get("summary") or value.get("error") or "").strip()
     return ""

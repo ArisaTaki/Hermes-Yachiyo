@@ -12,8 +12,11 @@ FOLLOWUP_CONTENT_SNAPSHOT_TOOLS: frozenset[str] = frozenset(
         "browser.open_url_and_extract_text",
         "clipboard.read",
         "data.analyze",
+        "desktop.active_window",
         "desktop.read_ui",
         "desktop.list_apps",
+        "desktop.list_windows",
+        "desktop.windows",
         "desktop.ui_elements",
         "file.read",
         "screen.capture",
@@ -75,6 +78,10 @@ def followup_content_snapshot_for_tool_call(
             input_preview,
             source_tool=tool_name,
         )
+    if tool_name == "desktop.active_window":
+        return desktop_active_window_content_snapshot(result, input_preview)
+    if tool_name in {"desktop.list_windows", "desktop.windows"}:
+        return desktop_windows_content_snapshot(result, input_preview, source_tool=tool_name)
     if tool_name == "screen.capture":
         return screen_capture_content_snapshot(result, input_preview)
     if tool_name in {"browser.extract_text", "browser.open_url_and_extract_text"}:
@@ -123,6 +130,79 @@ def desktop_ui_elements_content_snapshot(
     }
     if lines:
         snapshot["text"] = "\n".join(lines)
+    if not result.get("ok"):
+        _add_failure_fields(snapshot, result)
+    return _compact_snapshot(snapshot)
+
+
+def desktop_active_window_content_snapshot(
+    result: dict[str, Any],
+    input_preview: dict[str, Any],
+) -> dict[str, Any]:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    app_name = str(
+        data.get("app_name")
+        or data.get("frontmost_app")
+        or result.get("app_name")
+        or input_preview.get("app_name")
+        or ""
+    ).strip()
+    title = str(
+        data.get("title")
+        or data.get("window_title")
+        or result.get("title")
+        or ""
+    ).strip()
+    snapshot: dict[str, Any] = {
+        "source_tool": "desktop.active_window",
+        "ok": bool(result.get("ok")),
+        "app_name": app_name,
+        "title": title,
+    }
+    if app_name or title:
+        snapshot["text"] = "Active window: " + " - ".join(
+            part for part in (app_name, title) if part
+        )
+    if not result.get("ok"):
+        _add_failure_fields(snapshot, result)
+    return _compact_snapshot(snapshot)
+
+
+def desktop_windows_content_snapshot(
+    result: dict[str, Any],
+    input_preview: dict[str, Any],
+    *,
+    source_tool: str = "desktop.list_windows",
+) -> dict[str, Any]:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    windows = data.get("windows") if isinstance(data.get("windows"), list) else result.get("windows")
+    if not isinstance(windows, list):
+        windows = []
+    window_candidates = _desktop_window_candidates(windows)
+    app_name = str(data.get("app_name") or input_preview.get("app_name") or result.get("app_name") or "").strip()
+    lines = []
+    for window in window_candidates:
+        title = str(window.get("title") or "").strip()
+        candidate_app = str(window.get("app_name") or "").strip()
+        if title and candidate_app:
+            lines.append(f"- {candidate_app}: {title}")
+        elif title:
+            lines.append(f"- {title}")
+        elif candidate_app:
+            lines.append(f"- {candidate_app}")
+    snapshot: dict[str, Any] = {
+        "source_tool": source_tool,
+        "ok": bool(result.get("ok")),
+        "app_name": app_name,
+        "window_count": len(windows),
+        "truncated": len(windows) > 24 or bool(data.get("truncated") or result.get("truncated")),
+    }
+    if window_candidates:
+        snapshot["windows"] = window_candidates
+    if lines:
+        snapshot["text"] = (
+            f"Open windows for {app_name}:\n" if app_name else "Open windows:\n"
+        ) + "\n".join(lines)
     if not result.get("ok"):
         _add_failure_fields(snapshot, result)
     return _compact_snapshot(snapshot)
@@ -450,6 +530,38 @@ def _desktop_list_app_candidates(apps: list[Any]) -> list[dict[str, Any]]:
             value = app.get(source_key)
             if value not in (None, ""):
                 candidate[target_key] = value
+        candidates.append(candidate)
+    return candidates
+
+
+def _desktop_window_candidates(windows: list[Any]) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    for window in windows[:24]:
+        if not isinstance(window, dict):
+            continue
+        title = str(
+            window.get("title")
+            or window.get("window_title")
+            or window.get("name")
+            or ""
+        ).strip()
+        app_name = str(
+            window.get("app_name")
+            or window.get("app")
+            or window.get("owner_name")
+            or ""
+        ).strip()
+        if not title and not app_name:
+            continue
+        candidate: dict[str, Any] = {}
+        if app_name:
+            candidate["app_name"] = app_name
+        if title:
+            candidate["title"] = title
+        for key in ("window_id", "id", "is_minimized", "is_visible"):
+            value = window.get(key)
+            if value not in (None, ""):
+                candidate[key] = value
         candidates.append(candidate)
     return candidates
 

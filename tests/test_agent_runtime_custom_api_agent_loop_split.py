@@ -2770,6 +2770,22 @@ def test_custom_api_agent_loop_continues_after_verification_recovery_observation
                     tool,
                     input_preview=payload,
                     result=result,
+                    **{
+                        key: request[key]
+                        for key in (
+                            "planning_reason",
+                            "replan_request_id",
+                            "replan_trigger",
+                            "target_app_name",
+                            "target_app_query",
+                            "target_search_text",
+                            "runtime_stage",
+                            "runtime_role",
+                            "replan_triggers",
+                            "replan_signal_ids",
+                        )
+                        if key in request
+                    },
                 )
             )
             messages_arg.append({"role": "user", "content": f"Tool result for {tool}: {result}"})
@@ -2835,6 +2851,26 @@ def test_custom_api_agent_loop_continues_after_verification_recovery_observation
     assert str(result) == "model fallback"
     assert any(event["event"] == "agent.model.followup_context" for event in timeline)
     assert "post-action verification did not confirm" in str(model_calls[0])
+    assert "Observed context snapshots:" in str(model_calls[0])
+    assert "Active window: Figma - Logo templates" in str(model_calls[0])
+    assert "Open windows for Figma" in str(model_calls[0])
+    assert "Screen image captured at verify.png" in str(model_calls[0])
+    followup_context = [
+        event for event in timeline if event["event"] == "agent.model.followup_context"
+    ][0]
+    assert [item["source_tool"] for item in followup_context["recovery_observations"]] == [
+        "desktop.active_window",
+        "desktop.list_windows",
+        "desktop.ui_elements",
+        "screen.capture",
+    ]
+    assert followup_context["content_snapshot"]["source_tool"] == "screen.capture"
+    assert followup_context["recovery_observation_tools"] == [
+        "desktop.active_window",
+        "desktop.list_windows",
+        "desktop.ui_elements",
+        "screen.capture",
+    ]
     recovery_plan_events = [
         event
         for event in timeline
