@@ -1479,6 +1479,7 @@ class RuntimeCustomApiAgentLoop:
             selection: DirectToolSelection = planner_first_direct_tool_selection(
                 planning_context,
                 allowed_tools,
+                metadata={"runtime_planner_execution_context": True},
                 legacy_tool_requests=daily_desktop_intent_tool_requests,
                 legacy_postprocess=lambda requests: [
                     self._approval_hotkey_request_for_safe_shortcut(

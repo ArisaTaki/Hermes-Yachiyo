@@ -2241,10 +2241,18 @@ async def test_yachiyo_task_route_executes_app_find_sequence_without_model(
         ]
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
+        assert "agent.task.workspace_item.updated" in event_types
+        assert "agent.task.todo.updated" in event_types
+        assert "agent.task.checkpoint.updated" in event_types
         assert "agent.desktop.intent_completed" in event_types
         assert "agent.desktop.intent_approval_required" not in event_types
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
+        todo_events = [
+            event for event in events["events"] if event["event_type"] == "agent.task.todo.updated"
+        ]
+        assert any(event["payload"]["status"] == "completed" for event in todo_events)
+        assert all(event["payload"]["core_id"].startswith("task-core-") for event in todo_events)
         assert assistant.task_id == started["task_id"]
         assert assistant.status == MessageStatus.COMPLETED
         assert assistant.content == started["summary"]

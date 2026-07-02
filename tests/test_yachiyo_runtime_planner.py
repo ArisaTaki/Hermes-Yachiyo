@@ -28340,6 +28340,40 @@ def test_planner_tool_requests_optionally_include_runtime_plan_trace() -> None:
     assert traced_requests[1]["requires_post_action_verification"] is True
 
 
+def test_planner_first_direct_selection_can_include_task_execution_context() -> None:
+    allowed_tools = [
+        "desktop.inspect_app",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+
+    selection = planner_first_direct_tool_selection(
+        "打开 PixelForge 并点击导出",
+        allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert [request["step_id"] for request in selection.requests] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    operation_request = selection.requests[1]
+    assert operation_request["capability_id"] == "desktop.ui_operation"
+    assert operation_request["runtime_stage"] == "operate"
+    assert operation_request["runtime_role"] == "click_ui"
+    assert operation_request["requires_post_action_verification"] is True
+    assert operation_request["core_id"].startswith("task-core-")
+    assert operation_request["workspace_id"].startswith("task-workspace-")
+    assert operation_request["task_todo"]["step_id"] == "operate-foreground-ui"
+    assert operation_request["task_todo"]["tool_name"] == "app.open_and_click_ui_element"
+    assert operation_request["task_checkpoints"][0]["after_step_id"] == "operate-foreground-ui"
+    assert operation_request["task_workspace_items"][0]["source_step_id"] == "operate-foreground-ui"
+    assert operation_request["replan_signal_ids"]
+    assert operation_request["replan_triggers"] == ["verification_failed"]
+
+
 def test_runtime_execution_envelope_projects_decision_into_executable_requests() -> None:
     allowed_tools = [
         "desktop.inspect_app",

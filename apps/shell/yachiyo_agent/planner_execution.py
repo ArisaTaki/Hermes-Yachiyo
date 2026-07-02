@@ -413,6 +413,7 @@ def planner_decision_and_tool_requests(
         requests,
         decision,
         include_trace=_request_trace_enabled(metadata),
+        include_execution_context=_request_execution_context_enabled(metadata),
     )
     return decision, requests
 
@@ -436,6 +437,7 @@ def planner_direct_decision_and_tool_requests(
         requests,
         decision,
         include_trace=_request_trace_enabled(metadata),
+        include_execution_context=_request_execution_context_enabled(metadata),
     )
     return decision, requests
 
@@ -458,6 +460,7 @@ def planner_tool_requests_for_decision(
         requests,
         decision,
         include_trace=True,
+        include_execution_context=True,
     )
     if not execution_normalized:
         return requests
@@ -590,11 +593,22 @@ def _request_trace_enabled(metadata: Mapping[str, Any] | None) -> bool:
     )
 
 
+def _request_execution_context_enabled(metadata: Mapping[str, Any] | None) -> bool:
+    if not isinstance(metadata, Mapping):
+        return False
+    return bool(
+        _request_trace_enabled(metadata)
+        or metadata.get("runtime_planner_execution_context")
+        or metadata.get("yachiyo_runtime_execution_context")
+    )
+
+
 def _annotated_tool_requests_for_decision(
     requests: list[dict[str, Any]],
     decision: Any,
     *,
     include_trace: bool = False,
+    include_execution_context: bool = False,
 ) -> list[dict[str, Any]]:
     if not requests:
         return []
@@ -617,6 +631,7 @@ def _annotated_tool_requests_for_decision(
                 decision,
                 step,
                 include_trace=include_trace,
+                include_execution_context=include_execution_context,
             )
         annotated.append(next_request)
     return annotated
@@ -644,13 +659,15 @@ def _annotate_request_trace(
     step: Any,
     *,
     include_trace: bool = True,
+    include_execution_context: bool = False,
 ) -> None:
+    if not include_trace and not include_execution_context:
+        return
     step_id = str(getattr(step, "step_id", "") or "").strip()
     capability_id = str(getattr(step, "capability_id", "") or "").strip()
-    if not include_trace:
-        return
     if step_id:
         request["step_id"] = step_id
+        request.setdefault("planner_step_id", step_id)
     if capability_id:
         request["capability_id"] = capability_id
     decision_id = str(getattr(decision, "decision_id", "") or "").strip()
@@ -669,6 +686,7 @@ def _annotate_request_trace(
     if intent_kind:
         request["intent_kind"] = intent_kind
     request.update(_runtime_trace_metadata_for_step(decision, step_id))
+    request.update(_task_execution_context_for_step(decision, step_id))
 
 
 _RUNTIME_TRACE_TEXT_KEYS = (
@@ -722,6 +740,97 @@ def _runtime_trace_metadata_from_mapping(value: Any) -> dict[str, Any]:
         if isinstance(item, bool):
             payload[key] = item
     return payload
+
+
+def _task_execution_context_for_step(decision: Any, step_id: str) -> dict[str, Any]:
+    clean_step_id = str(step_id or "").strip()
+    if not clean_step_id:
+        return {}
+    task_core = getattr(getattr(decision, "plan", None), "task_core", None)
+    if task_core is None:
+        return {}
+
+    payload: dict[str, Any] = {}
+    core_id = str(getattr(task_core, "core_id", "") or "").strip()
+    if core_id:
+        payload["core_id"] = core_id
+    workspace = getattr(task_core, "workspace", None)
+    workspace_id = str(getattr(workspace, "workspace_id", "") or "").strip()
+    if workspace_id:
+        payload["workspace_id"] = workspace_id
+
+    todo = _task_todo_for_step(task_core, clean_step_id)
+    if todo:
+        payload["task_todo"] = todo
+    checkpoints = _task_checkpoints_for_step(task_core, clean_step_id)
+    if checkpoints:
+        payload["task_checkpoints"] = checkpoints
+    workspace_items = _task_workspace_items_for_step(workspace, clean_step_id)
+    if workspace_items:
+        payload["task_workspace_items"] = workspace_items
+
+    replan_metadata = _task_replan_metadata_for_step(task_core, clean_step_id)
+    if replan_metadata:
+        payload.update(replan_metadata)
+    return payload
+
+
+def _task_todo_for_step(task_core: Any, step_id: str) -> dict[str, Any]:
+    for todo in list(getattr(task_core, "todos", []) or []):
+        if str(getattr(todo, "step_id", "") or "").strip() == step_id:
+            return _snapshot_payload(todo)
+    return {}
+
+
+def _task_checkpoints_for_step(task_core: Any, step_id: str) -> list[dict[str, Any]]:
+    return [
+        payload
+        for checkpoint in list(getattr(task_core, "checkpoints", []) or [])
+        if str(getattr(checkpoint, "after_step_id", "") or "").strip() == step_id
+        for payload in [_snapshot_payload(checkpoint)]
+        if payload
+    ]
+
+
+def _task_workspace_items_for_step(workspace: Any, step_id: str) -> list[dict[str, Any]]:
+    return [
+        payload
+        for item in list(getattr(workspace, "items", []) or [])
+        if str(getattr(item, "source_step_id", "") or "").strip() == step_id
+        for payload in [_snapshot_payload(item)]
+        if payload
+    ]
+
+
+def _task_replan_metadata_for_step(task_core: Any, step_id: str) -> dict[str, list[str]]:
+    signal_ids: list[str] = []
+    triggers: list[str] = []
+    for signal in list(getattr(task_core, "replan_signals", []) or []):
+        if str(getattr(signal, "source_step_id", "") or "").strip() != step_id:
+            continue
+        signal_id = str(getattr(signal, "signal_id", "") or "").strip()
+        trigger = str(getattr(signal, "trigger", "") or "").strip()
+        if signal_id and signal_id not in signal_ids:
+            signal_ids.append(signal_id)
+        if trigger and trigger not in triggers:
+            triggers.append(trigger)
+    return {
+        key: value
+        for key, value in {
+            "replan_signal_ids": signal_ids,
+            "replan_triggers": triggers,
+        }.items()
+        if value
+    }
+
+
+def _snapshot_payload(value: Any) -> dict[str, Any]:
+    if isinstance(value, Mapping):
+        return dict(value)
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        return model_dump(mode="json")
+    return {}
 
 
 def _orchestration_request(decision: Any, orchestration_kind: str) -> dict[str, Any]:

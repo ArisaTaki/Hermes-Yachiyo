@@ -243,20 +243,24 @@ def test_runtime_planner_runtime_requests_trace_multistep_desktop_plan() -> None
     assert payload["decision_id"] == decision.decision_id
 
 
-def test_runtime_planner_runtime_requests_keep_single_step_desktop_plan_light() -> None:
+def test_runtime_planner_runtime_requests_keep_single_step_desktop_plan_with_context() -> None:
     loop = _private_runtime_loop()
-    _decision, requests, payload = loop._runtime_planner_tool_requests(
+    decision, requests, payload = loop._runtime_planner_tool_requests(
         "按 Command+Option+P",
         ["desktop.hotkey"],
     )
 
+    assert decision is not None
     assert [request["tool"] for request in requests] == ["desktop.hotkey"]
     assert requests[0]["step_id"] == "operate-foreground-ui"
-    assert "decision_id" not in requests[0]
-    assert "plan_id" not in requests[0]
-    assert "tool_plan_id" not in requests[0]
-    assert "intent_kind" not in requests[0]
-    assert payload["selection_reason"] == "runtime_planner_direct"
+    assert requests[0]["decision_id"] == decision.decision_id
+    assert requests[0]["plan_id"] == decision.plan.plan_id
+    assert requests[0]["tool_plan_id"] == decision.plan.tool_plan.plan_id
+    assert requests[0]["intent_kind"] == "desktop_operation"
+    assert requests[0]["core_id"] == decision.plan.task_core.core_id
+    assert requests[0]["workspace_id"] == decision.plan.task_core.workspace.workspace_id
+    assert requests[0]["task_todo"]["step_id"] == "operate-foreground-ui"
+    assert payload["selection_reason"] == "runtime_planner_full_plan_execution"
 
 
 def test_recovery_actions_projects_retry_input_contract_fields() -> None:
