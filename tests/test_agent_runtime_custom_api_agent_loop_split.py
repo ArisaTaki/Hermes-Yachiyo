@@ -4939,6 +4939,30 @@ def test_model_followup_context_surfaces_pending_execution_requests() -> None:
     assert pending_requests[0]["step_id"] == "extract-report-file-context"
     assert pending_requests[0]["planning_reason"] == "planner_prefetch_report_context"
 
+    preferred_requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            "planning_reason": "planner_prefetch_report_context",
+            "pending_plan_steps": [
+                {
+                    "step_id": "legacy-terminal-step",
+                    "tool_name": "terminal.run",
+                    "input_preview": {"operation": "legacy_operation"},
+                }
+            ],
+            "pending_execution_requests": payload["pending_execution_requests"],
+        },
+        ["terminal.run", "artifact.write"],
+        generated_content=(
+            "```bash\n"
+            "python scripts/extract_report.py ~/Downloads/report.pdf\n"
+            "```"
+        ),
+    )
+    assert preferred_requests[0]["request_id"] == (
+        "runtime-plan-report:request:2:terminal.run"
+    )
+    assert preferred_requests[0]["step_id"] == "extract-report-file-context"
+
 
 def test_model_followup_pending_plan_promotes_model_terminal_command() -> None:
     requests = custom_api_agent_module._model_followup_pending_plan_requests(

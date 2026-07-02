@@ -10464,10 +10464,8 @@ def _model_followup_pending_plan_requests(
 ) -> list[dict[str, Any]]:
     if not isinstance(followup_context, Mapping):
         return []
-    raw_steps = followup_context.get("pending_plan_steps")
-    if not isinstance(raw_steps, list):
-        raw_steps = followup_context.get("pending_execution_requests")
-    if not isinstance(raw_steps, list):
+    raw_steps = _model_followup_pending_trace_items(followup_context)
+    if not raw_steps:
         return []
     allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
     planning_reason = str(
@@ -10543,10 +10541,8 @@ def _model_followup_requests_with_pending_plan_metadata(
 ) -> list[dict[str, Any]]:
     if not requests or not isinstance(followup_context, Mapping):
         return requests
-    raw_steps = followup_context.get("pending_plan_steps")
-    if not isinstance(raw_steps, list):
-        raw_steps = followup_context.get("pending_execution_requests")
-    if not isinstance(raw_steps, list):
+    raw_steps = _model_followup_pending_trace_items(followup_context)
+    if not raw_steps:
         return requests
     steps = [step for step in raw_steps if isinstance(step, Mapping)]
     if not steps:
@@ -10588,6 +10584,22 @@ def _model_followup_requests_with_pending_plan_metadata(
             )
         annotated.append(item)
     return annotated
+
+
+def _model_followup_pending_trace_items(
+    followup_context: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    pending_execution_requests = followup_context.get("pending_execution_requests")
+    if isinstance(pending_execution_requests, list):
+        return [
+            request
+            for request in pending_execution_requests
+            if isinstance(request, Mapping)
+        ]
+    pending_plan_steps = followup_context.get("pending_plan_steps")
+    if isinstance(pending_plan_steps, list):
+        return [step for step in pending_plan_steps if isinstance(step, Mapping)]
+    return []
 
 
 def _next_matching_model_followup_pending_step(
