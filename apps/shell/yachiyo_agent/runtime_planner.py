@@ -22770,12 +22770,19 @@ def _explicit_named_app_descriptor(description: str) -> bool:
         return False
     return bool(
         re.match(
-            r"^(?:叫|名叫|叫做|名称是|名字是)\s*[^。！？!?，,]{1,80}(?:的)?$",
+            r"^(?:一个|一款|这个|那个)?"
+            r"(?:(?:我(?:的)?(?:电脑|mac|机器|系统)?|本机|本地)(?:上|里|中|内)?(?:的)?\s*)?"
+            r"(?:(?:我)?(?:刚|新)?装(?:的)?|刚安装(?:的)?|新安装(?:的)?|安装(?:的)?)?\s*"
+            r"(?:叫|名叫|叫做|名称是|名字是)\s*[^。！？!?，,]{1,80}(?:的)?"
+            r"(?:应用(?:程序)?|app|软件|工具|程序)?$",
             value,
             flags=re.IGNORECASE,
         )
         or re.match(
-            r"^(?:called|named)\s+[A-Za-z][A-Za-z0-9 ._-]{1,80}$",
+            r"^(?:(?:an?|the)\s+)?"
+            r"(?:(?:new|unknown|installed|local|unmentioned|unfamiliar)\s+)*"
+            r"(?:(?:app|application|software|tool|program)\s+)?"
+            r"(?:called|named)\s+[A-Za-z][A-Za-z0-9 ._-]{1,80}$",
             value,
             flags=re.IGNORECASE,
         )
