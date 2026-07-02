@@ -11981,6 +11981,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and _web_search_query(text)
     ):
         score -= 0.36
+    if intent.kind == "desktop_operation" and intent.inputs.get("screen_capture_hint"):
+        score += 0.44
     if intent.kind == "desktop_operation" and "window_list_hint" in intent.inputs:
         score += 0.2
     if intent.kind == "media_playback" and _contains_any(
@@ -12211,6 +12213,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     if intent.kind == "report_generation":
         if _contains_any(text, ["report", "summary", "报告", "总结", "文档", "输出", "生成"]):
             score += 0.04
+        if (
+            screen_capture_hint(text) is not None
+            and str(intent.inputs.get("context_source") or "").strip() == "visible_text"
+            and not _contains_any(text, ["report", "summary", "报告", "总结", "摘要"])
+        ):
+            score -= 0.48
         if _foreground_app_search_hint(text):
             score -= 0.32
         if _looks_like_schedule_request(text):

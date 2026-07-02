@@ -12400,12 +12400,40 @@ def test_runtime_planner_does_not_treat_current_screen_as_app_name() -> None:
         "看一下我现在的界面",
         allowed_tools=["desktop.list_apps", "app.focus", "screen.capture"],
     )
+    save_artifact_capture = RuntimePlanner().decision(
+        "帮我截取当前屏幕并保存成 artifact",
+        allowed_tools=["desktop.ui_elements", "screen.capture", "artifact.write"],
+    )
+    shorthand_save_capture = RuntimePlanner().decision(
+        "截屏并保存成 artifact",
+        allowed_tools=["desktop.list_apps", "app.focus", "screen.capture", "artifact.write"],
+    )
     assert current_interface.selected_intent.inputs["app_name_hint"] == ""
     assert current_interface.selected_intent.inputs["screen_capture_hint"] == {
         "reason": "user asked to capture the screen",
     }
     assert [step.step_id for step in current_interface.plan.tool_plan.steps] == [
         "capture-screen"
+    ]
+    for capture_decision in (save_artifact_capture, shorthand_save_capture):
+        assert capture_decision.selected_intent.kind == "desktop_operation"
+        assert capture_decision.selected_intent.inputs["app_name_hint"] == ""
+        assert capture_decision.selected_intent.inputs["operation_hint"] == "capture_screen"
+        assert [step.step_id for step in capture_decision.plan.tool_plan.steps] == [
+            "capture-screen"
+        ]
+        assert _step_by_id(capture_decision, "capture-screen").tool_name == "screen.capture"
+    assert planner_tool_requests(
+        "帮我截取当前屏幕并保存成 artifact",
+        ["desktop.ui_elements", "screen.capture", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the screen"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        }
     ]
 
 

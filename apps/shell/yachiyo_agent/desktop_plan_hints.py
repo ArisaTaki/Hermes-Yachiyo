@@ -2070,6 +2070,19 @@ def _clean_ui_app_name_hint(value: str) -> str:
         app,
         flags=re.IGNORECASE,
     ).strip()
+    app = re.split(
+        r"\s*(?:并|然后|再|接着|之后|后|,|，)?\s*"
+        r"(?:保存(?:成|为)?|导出|输出|写入|生成)",
+        app,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip()
+    app = re.split(
+        r"\s*(?:and\s+then|then|and)?\s*(?:save|export|output|write)\b",
+        app,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip()
     app = re.sub(r"\s*(?:的)$", "", app).strip()
     if re.fullmatch(
         r"(?:当前|现在|这个|前台|该)?"
