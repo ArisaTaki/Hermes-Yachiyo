@@ -4834,6 +4834,112 @@ def test_model_followup_context_instructs_pending_report_plan_steps() -> None:
     assert payload["task_core"]["core_id"] == "core-report"
 
 
+def test_model_followup_context_surfaces_pending_execution_requests() -> None:
+    payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "workspace.list",
+                "planning_reason": "planner_prefetch_report_context",
+                "continue_to_model": True,
+            }
+        ],
+        {
+            "intent_kind": "report_generation",
+            "artifacts_expected": ["report.md"],
+            "decision_id": "decision-report",
+            "plan_id": "runtime-plan-report",
+            "yachiyo_execution_envelope": {
+                "envelope_id": "execution-envelope-runtime-plan-report",
+                "decision_id": "decision-report",
+                "plan_id": "runtime-plan-report",
+                "intent_kind": "report_generation",
+                "requests": [
+                    {
+                        "request_id": "runtime-plan-report:request:1:workspace.list",
+                        "step_id": "inspect-report-file-scope",
+                        "tool_name": "workspace.list",
+                        "capability_id": "file.workspace_read",
+                        "input": {"path": "~/Downloads", "pattern": "*.pdf"},
+                        "planning_reason": "planner_full_plan_report_generation",
+                        "status": "planned",
+                        "runtime_stage": "discover",
+                        "runtime_role": "observe",
+                        "requires_observation": True,
+                    },
+                    {
+                        "request_id": "runtime-plan-report:request:2:terminal.run",
+                        "step_id": "extract-report-file-context",
+                        "tool_name": "terminal.run",
+                        "capability_id": "terminal.execution",
+                        "input": {
+                            "path": "~/Downloads/report.pdf",
+                            "operation": "extract_text_for_report",
+                        },
+                        "planning_reason": "planner_full_plan_report_generation",
+                        "approval_required": True,
+                        "depends_on": ["inspect-report-file-scope"],
+                        "status": "planned",
+                        "runtime_stage": "operate",
+                        "runtime_role": "execute",
+                    },
+                    {
+                        "request_id": "runtime-plan-report:request:3:artifact.write",
+                        "step_id": "write-report-artifact",
+                        "tool_name": "artifact.write",
+                        "capability_id": "artifact.write",
+                        "input": {"path": "report.md", "body_source": "local_file_context"},
+                        "planning_reason": "planner_full_plan_report_generation",
+                        "depends_on": ["extract-report-file-context"],
+                        "status": "planned",
+                        "runtime_stage": "produce",
+                        "runtime_role": "artifact",
+                    },
+                ],
+            },
+        },
+        allowed_tools=["workspace.list", "terminal.run", "artifact.write"],
+        timeline=[
+            _timeline(
+                "agent.tool.call",
+                "workspace.list",
+                input_preview={"path": "~/Downloads", "pattern": "*.pdf"},
+                result={"ok": True, "entries": [{"name": "report.pdf", "type": "file"}]},
+            )
+        ],
+    )
+    message = custom_api_agent_module._model_followup_context_message(payload)
+
+    assert [request["request_id"] for request in payload["pending_execution_requests"]] == [
+        "runtime-plan-report:request:2:terminal.run",
+        "runtime-plan-report:request:3:artifact.write",
+    ]
+    assert payload["pending_execution_requests"][0]["approval_required"] is True
+    assert payload["pending_execution_requests"][0]["depends_on"] == [
+        "inspect-report-file-scope"
+    ]
+    assert payload["pending_execution_requests"][1]["runtime_stage"] == "produce"
+    assert "Continue the pending Runtime execution requests in order" in message
+    assert "runtime-plan-report:request:2:terminal.run via terminal.run" in message
+    assert "approval required" in message
+
+    pending_requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            "planning_reason": "planner_prefetch_report_context",
+            "pending_execution_requests": payload["pending_execution_requests"],
+        },
+        ["terminal.run", "artifact.write"],
+        generated_content=(
+            "```bash\n"
+            "python scripts/extract_report.py ~/Downloads/report.pdf\n"
+            "```"
+        ),
+    )
+    assert pending_requests[0]["tool"] == "terminal.run"
+    assert pending_requests[0]["request_id"] == "runtime-plan-report:request:2:terminal.run"
+    assert pending_requests[0]["step_id"] == "extract-report-file-context"
+    assert pending_requests[0]["planning_reason"] == "planner_prefetch_report_context"
+
+
 def test_model_followup_pending_plan_promotes_model_terminal_command() -> None:
     requests = custom_api_agent_module._model_followup_pending_plan_requests(
         {

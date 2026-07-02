@@ -359,11 +359,33 @@ def _is_public_failure_event(event: PublicRunEvent) -> bool:
     result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
     result_ok = result.get("ok") if isinstance(result, Mapping) else None
     event_type = _text(event.event_type).lower()
+    if _approval_waiting_failure_placeholder(payload, result):
+        return False
     if result_ok is False:
         return True
     if status in {"failed", "failure", "error", "unavailable", "cancelled", "rejected"}:
         return True
     return event_type.endswith(".failed") or event_type.endswith("_failed")
+
+
+def _approval_waiting_failure_placeholder(
+    payload: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> bool:
+    status = _text(
+        payload.get("status")
+        or payload.get("tool_status")
+        or payload.get("run_status")
+        or ""
+    ).lower()
+    if status in {"approval_required", "waiting_approval", "pending_approval"}:
+        return True
+    if bool(payload.get("approval_required")):
+        return True
+    if bool(result.get("approval_required")):
+        return True
+    pending_approval = payload.get("pending_approval")
+    return isinstance(pending_approval, Mapping) and bool(pending_approval)
 
 
 def _failure_trigger(event: PublicRunEvent) -> str:

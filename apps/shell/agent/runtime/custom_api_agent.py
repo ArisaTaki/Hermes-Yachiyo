@@ -49,6 +49,7 @@ from apps.shell.yachiyo_agent.planner_projection import (
     planner_selection_payload,
     runtime_planner_decision,
 )
+from apps.shell.yachiyo_agent.runtime_execution import runtime_execution_envelope_payload
 from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_OPERATING_MANUAL
 
 _DIRECT_DAILY_DESKTOP_TOOLS = {
@@ -1517,18 +1518,26 @@ class RuntimeCustomApiAgentLoop:
                     or _direct_action_with_active_window_verification(execution_requests)
                     or runtime_trace_metadata is not None
                 ):
+                    selection_payload = planner_selection_payload(
+                        decision=selection.decision,
+                        planner_requests=full_plan_requests,
+                        legacy_requests=[],
+                        selected_requests=execution_requests,
+                        selected_source="runtime_planner",
+                        selected_reason="runtime_planner_full_plan_execution",
+                        metadata=runtime_trace_metadata,
+                    )
+                    if _tool_requests_include_model_followup(execution_requests):
+                        selection_payload = _selection_payload_with_runtime_execution_envelope(
+                            selection_payload,
+                            selection.decision,
+                            allowed_tools,
+                            full_plan=True,
+                        )
                     return (
                         selection.decision,
                         execution_requests,
-                        planner_selection_payload(
-                            decision=selection.decision,
-                            planner_requests=full_plan_requests,
-                            legacy_requests=[],
-                            selected_requests=execution_requests,
-                            selected_source="runtime_planner",
-                            selected_reason="runtime_planner_full_plan_execution",
-                            metadata=runtime_trace_metadata,
-                        ),
+                        selection_payload,
                     )
             execution_requests = planner_execution_tool_requests(
                 selection.requests,
@@ -1575,6 +1584,17 @@ class RuntimeCustomApiAgentLoop:
                     "execution_tools": execution_tools,
                     "execution_request_count": len(execution_requests),
                 }
+            if (
+                selection.selected_source == "runtime_planner"
+                and selection.decision is not None
+                and _tool_requests_include_model_followup(execution_requests)
+            ):
+                event_payload = _selection_payload_with_runtime_execution_envelope(
+                    event_payload,
+                    selection.decision,
+                    allowed_tools,
+                    full_plan=True,
+                )
             return selection.decision, execution_requests, event_payload
         except Exception:
             return None, [], {}
@@ -4710,6 +4730,13 @@ def _model_followup_context_payload(
     )
     if pending_plan_steps:
         payload["pending_plan_steps"] = pending_plan_steps
+    pending_execution_requests = _model_followup_pending_execution_requests(
+        selection_payload,
+        content_requests,
+        allowed,
+    )
+    if pending_execution_requests:
+        payload["pending_execution_requests"] = pending_execution_requests
     task_core_payload = _model_followup_task_core_payload(selection_payload)
     if task_core_payload:
         payload["task_core"] = task_core_payload
@@ -4766,6 +4793,126 @@ def _model_followup_pending_plan_steps(
         if len(pending_steps) >= 5:
             break
     return pending_steps
+
+
+def _model_followup_pending_execution_requests(
+    selection_payload: Mapping[str, Any],
+    content_requests: list[dict[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    requests = _selection_execution_envelope_requests(selection_payload)
+    observation_tools = [
+        str(request.get("tool") or "").strip()
+        for request in content_requests
+        if str(request.get("tool") or "").strip()
+    ]
+    if not requests or not observation_tools:
+        return []
+
+    start_index = _pending_execution_request_start_index(requests, observation_tools)
+    if start_index <= 0:
+        return []
+
+    pending_requests: list[dict[str, Any]] = []
+    for request in requests[start_index:]:
+        request_payload = _model_followup_execution_request_payload(request, allowed)
+        if not request_payload:
+            continue
+        pending_requests.append(request_payload)
+        if len(pending_requests) >= 5:
+            break
+    return pending_requests
+
+
+def _selection_execution_envelope_requests(
+    selection_payload: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    for key in (
+        "yachiyo_execution_envelope",
+        "execution_envelope",
+        "runtime_execution_envelope",
+    ):
+        envelope = selection_payload.get(key)
+        if not isinstance(envelope, Mapping):
+            continue
+        requests = envelope.get("requests")
+        if not isinstance(requests, list):
+            continue
+        return [request for request in requests if isinstance(request, Mapping)]
+    return []
+
+
+def _pending_execution_request_start_index(
+    requests: list[Mapping[str, Any]],
+    observation_tools: list[str],
+) -> int:
+    cursor = 0
+    last_match = -1
+    for observed_tool in observation_tools:
+        for index in range(cursor, len(requests)):
+            tool_name = str(
+                requests[index].get("tool_name")
+                or requests[index].get("tool")
+                or ""
+            ).strip()
+            if tool_name != observed_tool:
+                continue
+            last_match = index
+            cursor = index + 1
+            break
+    return last_match + 1 if last_match >= 0 else 0
+
+
+def _model_followup_execution_request_payload(
+    request: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    status = str(request.get("status") or "planned").strip()
+    if status not in {"", "planned"}:
+        return {}
+    tool_name = str(request.get("tool_name") or request.get("tool") or "").strip()
+    if not tool_name or (allowed and tool_name not in allowed):
+        return {}
+    payload: dict[str, Any] = {
+        "request_id": str(request.get("request_id") or "").strip(),
+        "step_id": str(request.get("step_id") or "").strip(),
+        "tool_name": tool_name,
+        "capability_id": str(request.get("capability_id") or "").strip(),
+        "input_preview": (
+            dict(request.get("input"))
+            if isinstance(request.get("input"), Mapping)
+            else {}
+        ),
+        "planning_reason": str(request.get("planning_reason") or "").strip(),
+        "status": status or "planned",
+    }
+    for key in (
+        "runtime_doctrine",
+        "runtime_stage",
+        "runtime_role",
+        "source",
+    ):
+        value = str(request.get(key) or "").strip()
+        if value:
+            payload[key] = value
+    for key in (
+        "approval_required",
+        "continue_to_model",
+        "requires_observation",
+        "requires_post_action_verification",
+    ):
+        if bool(request.get(key)):
+            payload[key] = True
+    for key in (
+        "depends_on",
+        "fallback_tools",
+        "replan_triggers",
+        "replan_signal_ids",
+    ):
+        values = _string_list(request.get(key))
+        if values:
+            payload[key] = values
+    return {key: value for key, value in payload.items() if value not in ("", [], {})}
 
 
 def _selection_tool_plan_steps(selection_payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
@@ -6763,6 +6910,9 @@ def _model_followup_context_message(payload: dict[str, Any]) -> str:
 
 
 def _model_followup_pending_plan_instruction(payload: Mapping[str, Any]) -> str:
+    execution_instruction = _model_followup_pending_execution_request_instruction(payload)
+    if execution_instruction:
+        return execution_instruction
     steps = payload.get("pending_plan_steps")
     if not isinstance(steps, list):
         return ""
@@ -6819,6 +6969,70 @@ def _model_followup_pending_plan_instruction(payload: Mapping[str, Any]) -> str:
         + ". If a pending terminal.execution step only has an abstract operation, synthesize a concrete, "
         "safe command from the observed files and request approval through the normal tool/policy gate. "
         "Do not skip directly to final prose while an available tool step is still pending."
+        + patch_instruction
+    )
+
+
+def _model_followup_pending_execution_request_instruction(
+    payload: Mapping[str, Any],
+) -> str:
+    requests = payload.get("pending_execution_requests")
+    if not isinstance(requests, list):
+        return ""
+    normalized_requests = [
+        request
+        for request in requests
+        if isinstance(request, Mapping)
+        and (
+            str(request.get("request_id") or "").strip()
+            or str(request.get("step_id") or "").strip()
+            or str(request.get("tool_name") or "").strip()
+        )
+    ]
+    if not normalized_requests:
+        return ""
+    items = []
+    for index, request in enumerate(normalized_requests, start=1):
+        request_id = str(request.get("request_id") or "").strip() or f"request-{index}"
+        tool_name = str(request.get("tool_name") or "").strip() or "available tool"
+        step_id = str(request.get("step_id") or "").strip()
+        stage = str(request.get("runtime_stage") or "").strip()
+        role = str(request.get("runtime_role") or "").strip()
+        approval = " approval required" if bool(request.get("approval_required")) else ""
+        preview = (
+            request.get("input_preview")
+            if isinstance(request.get("input_preview"), Mapping)
+            else {}
+        )
+        preview_text = _model_followup_input_preview_text(preview)
+        detail = f"[{index}] {request_id} via {tool_name}"
+        if step_id:
+            detail = f"{detail} step={step_id!r}"
+        if stage or role or approval:
+            stage_text = stage or "planned"
+            role_text = f" role={role}" if role else ""
+            detail = f"{detail} ({stage_text}{role_text}{approval})"
+        if preview_text:
+            detail = f"{detail} input_preview={preview_text}"
+        items.append(detail)
+    patch_instruction = ""
+    if any(
+        str(request.get("tool_name") or "").strip() == "workspace.write_patch"
+        or str(request.get("capability_id") or "").strip() == "file.workspace_write"
+        for request in normalized_requests
+    ):
+        patch_instruction = (
+            " For workspace.write_patch requests, generate a concrete single-file UTF-8 "
+            "unified diff from the observed workspace and diagnostic results, then call "
+            "workspace.write_patch with path and patch."
+        )
+    return (
+        "Continue the pending Runtime execution requests in order before giving a final answer: "
+        + "; ".join(items)
+        + ". Respect approval_required through the normal tool/policy gate. If a pending "
+        "terminal.run request only has an abstract operation, synthesize a concrete, safe command "
+        "from the observed files and request approval through the normal gate. Do not skip directly "
+        "to final prose while an available execution request is still pending."
         + patch_instruction
     )
 
@@ -7655,6 +7869,44 @@ def _runtime_planner_request_trace_metadata(
     if not _runtime_planner_should_trace_tool_requests(decision):
         return None
     return {"runtime_planner_request_trace": True}
+
+
+def _selection_payload_with_runtime_execution_envelope(
+    payload: Mapping[str, Any],
+    decision: Any | None,
+    allowed_tools: Iterable[str],
+    *,
+    full_plan: bool = False,
+) -> dict[str, Any]:
+    enriched = dict(payload)
+    envelope = runtime_execution_envelope_payload(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=full_plan,
+    )
+    if not envelope:
+        return enriched
+    requests = envelope.get("requests") if isinstance(envelope.get("requests"), list) else []
+    tool_names = [
+        str(request.get("tool_name") or "").strip()
+        for request in requests
+        if isinstance(request, Mapping) and str(request.get("tool_name") or "").strip()
+    ]
+    enriched["yachiyo_execution_envelope"] = envelope
+    enriched["yachiyo_execution_request_count"] = len(tool_names)
+    if tool_names:
+        enriched["yachiyo_execution_requests"] = tool_names
+    if full_plan:
+        enriched["yachiyo_execution_projection"] = "full_plan"
+    return enriched
+
+
+def _tool_requests_include_model_followup(requests: Iterable[Mapping[str, Any]]) -> bool:
+    return any(
+        bool(request.get("continue_to_model"))
+        for request in requests
+        if isinstance(request, Mapping)
+    )
 
 
 def _runtime_planner_should_trace_tool_requests(decision: Any | None) -> bool:
@@ -10214,6 +10466,8 @@ def _model_followup_pending_plan_requests(
         return []
     raw_steps = followup_context.get("pending_plan_steps")
     if not isinstance(raw_steps, list):
+        raw_steps = followup_context.get("pending_execution_requests")
+    if not isinstance(raw_steps, list):
         return []
     allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
     planning_reason = str(
@@ -10249,6 +10503,7 @@ def _attach_model_followup_pending_plan_trace_metadata(
     followup_context: Mapping[str, Any],
 ) -> None:
     for key in (
+        "request_id",
         "decision_id",
         "plan_id",
         "tool_plan_id",
@@ -10268,6 +10523,18 @@ def _attach_model_followup_pending_plan_trace_metadata(
         request.get("planner_step_id") or ""
     ).strip():
         request["planner_step_id"] = str(request.get("step_id") or "").strip()
+    for key in (
+        "runtime_doctrine",
+        "runtime_stage",
+        "runtime_role",
+        "requires_observation",
+        "requires_post_action_verification",
+    ):
+        if key in request:
+            continue
+        value = step.get(key)
+        if value not in (None, "", [], {}):
+            request[key] = value
 
 
 def _model_followup_requests_with_pending_plan_metadata(
@@ -10277,6 +10544,8 @@ def _model_followup_requests_with_pending_plan_metadata(
     if not requests or not isinstance(followup_context, Mapping):
         return requests
     raw_steps = followup_context.get("pending_plan_steps")
+    if not isinstance(raw_steps, list):
+        raw_steps = followup_context.get("pending_execution_requests")
     if not isinstance(raw_steps, list):
         return requests
     steps = [step for step in raw_steps if isinstance(step, Mapping)]
