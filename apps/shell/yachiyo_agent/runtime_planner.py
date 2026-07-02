@@ -20305,6 +20305,17 @@ def _safe_type_text_operation_tool(
     return _first_allowed(("desktop.type_text",), allowed)
 
 
+def _safe_type_text_operation_candidates(
+    app_name: str,
+    mode: str,
+) -> tuple[str, ...]:
+    candidates: list[str] = ["desktop.safe_type_text"]
+    if str(app_name or "").strip():
+        candidates.extend(app_foreground_tool_candidates(mode, "safe_type_text"))
+    candidates.append("desktop.type_text")
+    return tuple(candidates)
+
+
 def _app_search_submit_operation_tool(allowed: set[str] | None) -> str | None:
     return _first_allowed(("desktop.search_submit", "desktop.submit_foreground"), allowed)
 
