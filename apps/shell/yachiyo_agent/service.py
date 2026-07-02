@@ -18,6 +18,7 @@ from .contracts import (
     PlannerDecisionSnapshot,
     PublicRunEvent,
     ReadinessSnapshot,
+    RuntimeExecutionEnvelopeSnapshot,
     RunEventPageSnapshot,
     RunTimelineSnapshot,
     StartChatTaskRequest,
@@ -25,6 +26,7 @@ from .contracts import (
 from .events import public_run_event_from_payload, public_run_event_page_from_payload
 from .planner_projection import planner_enriched_chat_request
 from .ports import ChatTaskStarter, RuntimePort
+from .runtime_execution import runtime_execution_envelope_from_decision
 from .runtime_planner import RuntimePlanner
 from .run_snapshots import run_timeline_snapshot_from_payload
 from .start_event_enrichment import start_payload_with_planner_events
@@ -76,6 +78,38 @@ class YachiyoAgentService:
             allowed_tools=allowed_tools,
             metadata=metadata,
         )
+
+    def plan_chat_execution(
+        self,
+        prompt: str,
+        *,
+        allowed_tools: Iterable[str] | None = None,
+        metadata: Mapping[str, Any] | None = None,
+        direct: bool = False,
+    ) -> RuntimeExecutionEnvelopeSnapshot:
+        port_planner = getattr(self._runtime_port, "plan_chat_execution", None)
+        if callable(port_planner):
+            payload = port_planner(
+                prompt,
+                allowed_tools=allowed_tools,
+                metadata=metadata or {},
+                direct=direct,
+            )
+            if payload is not None:
+                return RuntimeExecutionEnvelopeSnapshot.model_validate(payload)
+        decision = self.plan_chat_task(
+            prompt,
+            allowed_tools=allowed_tools,
+            metadata=metadata,
+        )
+        envelope = runtime_execution_envelope_from_decision(
+            decision,
+            allowed_tools=allowed_tools,
+            direct=direct,
+        )
+        if envelope is None:
+            raise ValueError("Unable to build Yachiyo chat execution plan")
+        return envelope
 
     def start_chat_task(
         self,

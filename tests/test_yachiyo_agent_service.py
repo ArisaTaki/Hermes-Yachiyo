@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from apps.shell.yachiyo_agent import ApprovalDecision, StartChatTaskRequest, YachiyoAgentService
+from apps.shell.yachiyo_agent import (
+    AgentStudioService,
+    ApprovalDecision,
+    StartChatTaskRequest,
+    YachiyoAgentService,
+)
 
 
 class _FakeRuntimePort:
@@ -161,6 +166,19 @@ class _BareStartTaskRuntimePort(_FakeRuntimePort):
             session_id=str(request.get("conversation_id") or ""),
             events=events,
         )
+
+
+class _FakeStudioExecutionPort:
+    def list_tool_catalog(self) -> dict[str, Any]:
+        return {
+            "tools": [
+                {"tool_name": "workspace.read", "capability_id": "workspace.file_read"},
+                {"tool_name": "data.analyze", "capability_id": "data.analysis"},
+                {"tool_name": "terminal.run", "capability_id": "terminal.execute"},
+                {"tool_name": "artifact.write", "capability_id": "artifact.output"},
+            ],
+            "capabilities": {},
+        }
 
 
 class _PagedRuntimePort(_FakeRuntimePort):
@@ -568,6 +586,41 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     assert task.task_core is not None
     assert task.task_core.workspace.workspace_id == metadata["yachiyo_task_core"]["workspace"]["workspace_id"]
     assert [todo.step_id for todo in task.task_core.todos] == ["analyze-data-file"]
+
+
+def test_yachiyo_agent_service_plans_shared_chat_execution_envelope() -> None:
+    service = YachiyoAgentService(_FakeRuntimePort())
+
+    envelope = service.plan_chat_execution(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+
+    assert envelope.intent_kind == "data_analysis"
+    assert envelope.task_core is not None
+    assert envelope.task_core.workspace.workspace_id.startswith("task-workspace-")
+    assert [request.tool_name for request in envelope.requests] == ["data.analyze"]
+    request = envelope.requests[0]
+    assert request.step_id == "analyze-data-file"
+    assert request.capability_id == "data.analysis"
+    assert request.replan_signal_ids
+    assert envelope.replan_signal_count == len(envelope.task_core.replan_signals)
+
+
+def test_agent_studio_service_plans_shared_execution_envelope() -> None:
+    service = AgentStudioService(_FakeStudioExecutionPort())
+
+    envelope = service.plan_execution(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+
+    assert envelope.intent_kind == "data_analysis"
+    assert envelope.task_core is not None
+    assert envelope.requests[0].tool_name == "data.analyze"
+    assert envelope.requests[0].step_id == "analyze-data-file"
+    assert envelope.requests[0].capability_id == "data.analysis"
+    assert envelope.requests[0].replan_signal_ids
 
 
 def test_yachiyo_agent_service_enriches_bare_chat_start_payload_with_planner_events() -> None:
