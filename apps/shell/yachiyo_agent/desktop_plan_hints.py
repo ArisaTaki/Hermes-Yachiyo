@@ -443,6 +443,8 @@ def screen_capture_hint(text: str) -> dict[str, Any] | None:
     lowered = value.lower()
     if re.search(r"(?:截图工具|截图面板|屏幕截图工具|screenshot\s*(?:tool|toolbar|panel))", value, flags=re.IGNORECASE):
         return None
+    if _looks_like_screenshot_file_reference(value, lowered):
+        return None
     if (
         click_target_hint(value) is not None
         and _explicit_find_click_target_requested(value)
@@ -456,6 +458,33 @@ def screen_capture_hint(text: str) -> dict[str, Any] | None:
     if app_name:
         payload["app_name"] = app_name
     return payload
+
+
+def _looks_like_screenshot_file_reference(value: str, lowered: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:最近|最新|上一张|上一个|下载(?:文件夹|目录)?|桌面|文件夹|目录)"
+            r".{0,18}(?:截图|截屏)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:截图|截屏).{0,18}"
+            r"(?:文件|图片|照片|重命名|改名|整理|移动|归档|删除|复制|压缩)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:recent|latest|downloads?|desktop|folder|directory).{0,24}"
+            r"(?:screenshot|screen\s*shot)",
+            lowered,
+        )
+        or re.search(
+            r"(?:screenshot|screen\s*shot).{0,24}"
+            r"(?:file|image|photo|rename|move|organize|archive|delete|copy|compress)",
+            lowered,
+        )
+    )
 
 
 def app_management_hint(text: str) -> dict[str, str] | None:

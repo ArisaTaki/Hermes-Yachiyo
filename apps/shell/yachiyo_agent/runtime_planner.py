@@ -535,6 +535,13 @@ class TaskIntentRouter:
                 and not _generic_followup_compose_text_hint(text)
             ):
                 foreground_compose_text = ""
+        if (
+            str((safe_shortcut or {}).get("action") or "").strip()
+            in {"screenshot_selection", "screenshot_toolbar"}
+            and str((app_capability or {}).get("query") or "").strip() == "screenshot"
+        ):
+            app_capability = {}
+            desktop_discovery = None
         if control_presence_inspection:
             desktop_discovery = None
         if str((foreground_management or {}).get("action") or "").strip() == "show_all_apps":
@@ -1577,6 +1584,8 @@ class TaskIntentRouter:
             or app_write_current_page_context
             or artifact_context_source
         )
+        if context_source == "current_page_content":
+            return _empty_intent("report_generation", text)
         file_context = {} if artifact_context_source else _report_file_context_hint(text)
         if score <= 0 and transform_target:
             score = 0.24
@@ -12014,8 +12023,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and _web_search_query(text)
     ):
         score -= 0.36
+    current_page_action = _browser_current_page_hint(text)
+    current_page_action_kind = str(current_page_action.get("browser_action") or "").strip()
     if intent.kind == "desktop_operation" and intent.inputs.get("screen_capture_hint"):
         score += 0.44
+        if current_page_action_kind == "screenshot":
+            score -= 0.58
     if intent.kind == "desktop_operation" and "window_list_hint" in intent.inputs:
         score += 0.2
     if intent.kind == "media_playback" and _contains_any(
@@ -12184,6 +12197,12 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.34
         if app_scoped_ui_operation:
             score -= 0.38
+    if (
+        intent.kind == "web_research"
+        and str(intent.inputs.get("browser_action") or "").strip() == "screenshot"
+        and current_page_action_kind == "screenshot"
+    ):
+        score += 0.34
     if (
         intent.kind == "web_research"
         and str(intent.inputs.get("browser_action") or "").strip()
