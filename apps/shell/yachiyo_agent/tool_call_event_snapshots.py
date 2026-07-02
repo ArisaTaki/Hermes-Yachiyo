@@ -266,6 +266,8 @@ def merge_tool_call_snapshots(
 ) -> ToolCallSnapshot:
     output_preview = dict(current.output_preview)
     output_preview.update(next_call.output_preview)
+    metadata = dict(current.metadata)
+    metadata.update(next_call.metadata)
     completed_at = next_call.completed_at or current.completed_at
     if tool_call_status_is_terminal(next_call.status) and not completed_at:
         completed_at = next_call.started_at or current.completed_at
@@ -297,6 +299,7 @@ def merge_tool_call_snapshots(
         risk_level=current.risk_level or next_call.risk_level,
         input_preview=_merge_input_previews(current.input_preview, next_call.input_preview),
         output_preview=output_preview,
+        metadata=metadata,
         foreground_lock_busy=current.foreground_lock_busy or next_call.foreground_lock_busy,
         foreground_lock_holder=current.foreground_lock_holder or next_call.foreground_lock_holder,
         approval_id=current.approval_id or next_call.approval_id,

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
@@ -41,6 +41,12 @@ _TOOL_REQUEST_TRACE_BOOL_KEYS = (
 _TOOL_REQUEST_TRACE_LIST_KEYS = (
     "replan_triggers",
     "replan_signal_ids",
+)
+
+_TOOL_REQUEST_TRACE_MAPPING_KEYS = (
+    "followup_target",
+    "action_target",
+    "observation_evidence",
 )
 
 _INPUT_PREVIEW_TRACE_KEYS = (
@@ -88,6 +94,10 @@ def _tool_request_trace_payload(tool_request: dict[str, Any]) -> dict[str, Any]:
         values = _string_list(tool_request.get(key))
         if values:
             payload[key] = values
+    for key in _TOOL_REQUEST_TRACE_MAPPING_KEYS:
+        value = tool_request.get(key)
+        if isinstance(value, Mapping) and value:
+            payload[key] = dict(value)
     return payload
 
 

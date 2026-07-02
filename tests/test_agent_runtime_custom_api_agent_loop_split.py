@@ -31,7 +31,9 @@ from apps.shell.agent.runtime.tool_requests import normalize_tool_name
 from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES, PolicyGate
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
+from apps.shell.yachiyo_agent.contracts import PublicRunEvent
 from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
+from apps.shell.yachiyo_agent.tool_call_snapshots import tool_call_snapshots_from_events
 from apps.shell.yachiyo_agent.planner_execution import (
     planner_execution_tool_requests,
     planner_direct_tool_requests,
@@ -25118,6 +25120,16 @@ def test_runtime_tool_executor_preserves_dov_replan_trace_fields() -> None:
             "requires_post_action_verification": False,
             "replan_triggers": ["verification_failed"],
             "replan_signal_ids": ["replan-verify"],
+            "action_target": {
+                "action": "click",
+                "label": "Open result",
+                "app_name": "Music",
+            },
+            "observation_evidence": {
+                "strategy": "observed_center_fallback",
+                "observed_center": {"x": 180, "y": 90},
+                "source_tool": "desktop.ui_elements",
+            },
         },
         ["desktop.ui_elements"],
         broker,
@@ -25134,17 +25146,48 @@ def test_runtime_tool_executor_preserves_dov_replan_trace_fields() -> None:
     assert tool_call["requires_post_action_verification"] is False
     assert tool_call["replan_triggers"] == ["verification_failed"]
     assert tool_call["replan_signal_ids"] == ["replan-verify"]
+    assert tool_call["action_target"]["label"] == "Open result"
+    assert tool_call["observation_evidence"]["observed_center"] == {"x": 180, "y": 90}
 
     completed = next(
         event for event in run_events if event["event_type"] == "tool.completed"
     )
     assert completed["payload"]["runtime_stage"] == "verify"
     assert completed["payload"]["replan_triggers"] == ["verification_failed"]
+    assert completed["payload"]["action_target"]["app_name"] == "Music"
+    assert completed["payload"]["observation_evidence"]["strategy"] == "observed_center_fallback"
     agent_tool_call = next(
         event for event in run_events if event["event_type"] == "agent.tool.call"
     )
     assert agent_tool_call["payload"]["runtime_doctrine"] == "discover_operate_verify"
     assert agent_tool_call["payload"]["replan_signal_ids"] == ["replan-verify"]
+    assert agent_tool_call["payload"]["action_target"]["action"] == "click"
+    assert agent_tool_call["payload"]["observation_evidence"]["source_tool"] == "desktop.ui_elements"
+    snapshots = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                event_id=f"event-{index}",
+                run_id=event["run_id"],
+                sequence=index,
+                event_type=event["event_type"],
+                payload=event["payload"],
+            )
+            for index, event in enumerate(run_events, start=1)
+        ]
+    )
+    completed_snapshot = next(
+        snapshot for snapshot in snapshots if snapshot.status == "completed"
+    )
+    assert completed_snapshot.metadata["action_target"] == {
+        "action": "click",
+        "label": "Open result",
+        "app_name": "Music",
+    }
+    assert completed_snapshot.metadata["observation_evidence"] == {
+        "strategy": "observed_center_fallback",
+        "observed_center": {"x": 180, "y": 90},
+        "source_tool": "desktop.ui_elements",
+    }
 
 
 def test_runtime_tool_runner_skips_unresolved_selected_discovered_app() -> None:
