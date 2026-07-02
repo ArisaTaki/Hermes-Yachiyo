@@ -390,15 +390,15 @@ function defaultChildRunStatus(_childRunId: string, eventStatus: string): string
 function defaultEventTone(event: RuntimeTimelineEventRecord): string {
   const name = defaultEventName(event);
   const status = defaultEventStatus(event);
-  if (status === 'failed' || status === 'cancelled' || name.includes('failed') || name.includes('cancelled')) return 'danger';
+  if (status === 'failed' || status === 'cancelled' || status === 'blocked' || name.includes('failed') || name.includes('cancelled')) return 'danger';
   if (status === 'completed' || name.includes('completed')) return 'ready';
-  if (status === 'approval_required' || name.includes('approval')) return 'approval';
+  if (status === 'approval_required' || status === 'waiting_approval' || name.includes('approval')) return 'approval';
   if (status === 'running' || status === 'processing') return 'running';
   return 'neutral';
 }
 
 function defaultStatusTone(status: string): string {
-  if (status === 'failed' || status === 'cancelled') return 'danger';
+  if (status === 'failed' || status === 'cancelled' || status === 'blocked') return 'danger';
   if (status === 'completed') return 'ready';
   if (status === 'approval_required' || status === 'waiting_approval') return 'approval';
   if (status === 'running' || status === 'processing') return 'running';
@@ -441,6 +441,12 @@ function runtimeEventMetadata(
     { label: 'replan', value: runtimeContext.replanTrigger || runtimeContext.replanTriggers.join(', ') },
     { label: 'replan id', value: runtimeContext.replanRequestId },
     { label: 'signals', value: runtimeContext.replanSignalIds.join(', ') },
+    { label: 'recovery', value: runtimeEventString(event, payload, 'recovery_action_label') },
+    { label: 'selected', value: runtimeEventString(event, payload, 'selected_tool_name') },
+    { label: 'source tool', value: runtimeEventString(event, payload, 'source_tool_name') },
+    { label: 'todo', value: runtimeEventString(event, payload, 'todo_status') },
+    { label: 'checkpoint', value: runtimeEventString(event, payload, 'checkpoint_status') },
+    { label: 'risk', value: runtimeEventString(event, payload, 'risk_level') },
     { label: 'action', value: observedContext.actionTarget },
     { label: 'observed', value: observedContext.observationEvidence },
     { label: 'center', value: observedContext.observedCenter },

@@ -84,6 +84,18 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
     const toolLabel = runtimeTimelinePlannedDesktopToolLabel(event);
     return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';
   }
+  if (runtimeTimelineEventIsReplanRecoveryUpdate(type)) {
+    const status = runtimeTimelineRecoveryUpdateStatus(event);
+    const toolLabel = runtimeTimelineRecoveryUpdateToolLabel(event);
+    const prefix = status === 'completed'
+      ? '恢复完成'
+      : status === 'blocked'
+        ? '恢复受阻'
+        : status === 'waiting_approval'
+          ? '恢复待审批'
+          : '恢复状态';
+    return toolLabel ? `${prefix} · ${toolLabel}` : prefix;
+  }
   if (type === 'agent.tool.policy_decision' || type === 'tool.policy_decision') {
     return runtimeTimelinePolicyDecisionLabel(event);
   }
@@ -131,6 +143,10 @@ function runtimeTimelineEventDetail(event: RuntimeTimelineEventSnapshot): string
   if (runtimeEventIsDesktopReadinessRecovered(type)) {
     const recoveredDetail = runtimeTimelineReadinessRecoveredDetail(event);
     if (recoveredDetail) return recoveredDetail;
+  }
+  if (runtimeTimelineEventIsReplanRecoveryUpdate(type)) {
+    const recoveryDetail = runtimeTimelineReplanRecoveryUpdateDetail(event);
+    if (recoveryDetail) return recoveryDetail;
   }
   const detail = String(event.detail || '').trim();
   if (!detail) return '';
@@ -226,6 +242,7 @@ function runtimeTimelineEventTypeLabel(type: string): string {
     || type === 'workflow.replan.requested'
     || type === 'workflow.run.replan.requested'
   ) return 'Planner 重规划';
+  if (runtimeTimelineEventIsReplanRecoveryUpdate(type)) return 'Runtime 恢复状态';
   if (
     type === 'agent.plan.created'
     || type === 'group.run.plan.created'
@@ -343,6 +360,65 @@ function runtimeTimelinePlannedDesktopToolLabel(event: RuntimeTimelineEventSnaps
   ).trim();
   if (!tool || runtimeTimelineLooksRuntimeId(tool)) return '';
   return runtimeToolDisplayLabelOrName(tool);
+}
+
+function runtimeTimelineEventIsReplanRecoveryUpdate(type: string): boolean {
+  return (
+    type === 'agent.replan.recovery.updated'
+    || type === 'group.run.replan.recovery.updated'
+    || type === 'workflow.replan.recovery.updated'
+    || type === 'workflow.run.replan.recovery.updated'
+  );
+}
+
+function runtimeTimelineRecoveryUpdateStatus(event: RuntimeTimelineEventSnapshot): string {
+  const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+  const payload = runtimeTimelineRecordObject(record, 'payload');
+  return runtimeTimelineFirstRecordString(
+    ['status', 'tool_status', 'checkpoint_status', 'todo_status'],
+    record,
+    payload,
+  );
+}
+
+function runtimeTimelineRecoveryUpdateToolLabel(event: RuntimeTimelineEventSnapshot): string {
+  const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+  const payload = runtimeTimelineRecordObject(record, 'payload');
+  const tool = runtimeTimelineFirstRecordString(
+    ['selected_tool_name', 'tool_name', 'tool'],
+    record,
+    payload,
+  );
+  return tool ? runtimeToolDisplayLabelOrName(tool) : '';
+}
+
+function runtimeTimelineReplanRecoveryUpdateDetail(event: RuntimeTimelineEventSnapshot): string {
+  const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+  const payload = runtimeTimelineRecordObject(record, 'payload');
+  const resultPreview = runtimeTimelineRecordObject(payload, 'result_preview');
+  const label = runtimeTimelineFirstRecordString(
+    ['recovery_action_label', 'planning_reason'],
+    record,
+    payload,
+  );
+  const sourceTool = runtimeTimelineFirstRecordString(['source_tool_name'], record, payload);
+  const todoStatus = runtimeTimelineFirstRecordString(['todo_status'], record, payload);
+  const checkpointStatus = runtimeTimelineFirstRecordString(['checkpoint_status'], record, payload);
+  const permissionTarget = runtimeTimelineFirstRecordString(['permission_target'], record, payload);
+  const riskLevel = runtimeTimelineFirstRecordString(['risk_level'], record, payload);
+  const resultSummary = runtimeTimelineFirstRecordString(
+    ['summary', 'error', 'hint'],
+    resultPreview,
+  );
+  return [
+    label,
+    sourceTool ? `source ${runtimeToolDisplayLabelOrName(sourceTool)}` : '',
+    todoStatus ? `todo ${todoStatus}` : '',
+    checkpointStatus ? `checkpoint ${checkpointStatus}` : '',
+    permissionTarget ? `permission ${permissionTarget}` : '',
+    riskLevel ? `risk ${riskLevel}` : '',
+    resultSummary,
+  ].filter(Boolean).join(' · ');
 }
 
 function runtimeTimelineDesktopToolChainDetail(event: RuntimeTimelineEventSnapshot): string {
@@ -588,6 +664,7 @@ function runtimeTimelineStatusLabel(status: string): string {
   if (status === 'approval_required' || status === 'waiting_approval') return '待审批';
   if (status === 'completed') return '已完成';
   if (status === 'failed') return '失败';
+  if (status === 'blocked') return '受阻';
   if (status === 'cancelled') return '已取消';
   return status;
 }

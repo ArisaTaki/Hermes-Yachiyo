@@ -56,6 +56,9 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
     || name === 'workflow.replan.requested'
     || name === 'workflow.run.replan.requested'
   ) return detail ? `Planner 重规划 · ${detail}` : 'Planner 重规划';
+  if (timelineEventIsReplanRecoveryUpdate(name)) {
+    return replanRecoveryUpdateTitle(event, detail);
+  }
   if (
     name === 'agent.plan.created'
     || name === 'group.run.plan.created'
@@ -200,6 +203,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
   if (
     status === 'failed'
     || status === 'cancelled'
+    || status === 'blocked'
     || name.includes('failed')
     || name.includes('cancelled')
     || name.includes('timeout')
@@ -207,7 +211,7 @@ export function timelineEventTone(event: Record<string, unknown>): string {
     || name.includes('rejected')
   ) return 'danger';
   if (status === 'completed' || name.includes('completed')) return 'ready';
-  if (status === 'approval_required' || name.includes('approval')) return 'approval';
+  if (status === 'approval_required' || status === 'waiting_approval' || name.includes('approval')) return 'approval';
   if (status === 'running' || status === 'processing' || name.includes('resumed')) return 'running';
   if (name === 'group.artifact.created' || name === 'group.shared_artifact.created') return 'ready';
   if (name === 'group.run.started') return 'running';
@@ -236,12 +240,14 @@ export function timelineEventTone(event: Record<string, unknown>): string {
     || name === 'agent.plan.step'
     || name === 'agent.plan.selection'
     || name === 'agent.replan.requested'
+    || name === 'agent.replan.recovery.updated'
     || name === 'agent.task_core.created'
     || name === 'agent.task.workspace_item.updated'
     || name === 'agent.task.todo.updated'
     || name === 'agent.task.checkpoint.updated'
     || name === 'group.run.intent.selected'
     || name === 'group.run.replan.requested'
+    || name === 'group.run.replan.recovery.updated'
     || name === 'group.run.plan.created'
     || name === 'group.run.plan.step'
     || name === 'group.run.plan.selection'
@@ -253,6 +259,8 @@ export function timelineEventTone(event: Record<string, unknown>): string {
     || name === 'workflow.run.intent.selected'
     || name === 'workflow.replan.requested'
     || name === 'workflow.run.replan.requested'
+    || name === 'workflow.replan.recovery.updated'
+    || name === 'workflow.run.replan.recovery.updated'
     || name === 'workflow.plan.created'
     || name === 'workflow.run.plan.created'
     || name === 'workflow.plan.step'
@@ -296,6 +304,38 @@ function policyDecisionTitle(event: Record<string, unknown>, detail: string): st
     ? '策略拦截'
     : '策略放行';
   return toolLabel ? `${prefix} · ${toolLabel}` : prefix;
+}
+
+function timelineEventIsReplanRecoveryUpdate(type: string): boolean {
+  return (
+    type === 'agent.replan.recovery.updated'
+    || type === 'group.run.replan.recovery.updated'
+    || type === 'workflow.replan.recovery.updated'
+    || type === 'workflow.run.replan.recovery.updated'
+  );
+}
+
+function replanRecoveryUpdateTitle(event: Record<string, unknown>, detail: string): string {
+  const payload = timelineRecord(event.payload);
+  const status = timelineFirstString(
+    ['status', 'tool_status', 'checkpoint_status', 'todo_status'],
+    event,
+    payload,
+  );
+  const tool = timelineFirstString(['selected_tool_name', 'tool_name', 'tool'], event, payload);
+  const toolLabel = tool ? runtimeToolDisplayLabelOrName(tool) : '';
+  const prefix = status === 'completed'
+    ? '恢复完成'
+    : status === 'blocked'
+      ? '恢复受阻'
+      : status === 'waiting_approval'
+        ? '恢复待审批'
+        : '恢复状态';
+  return toolLabel
+    ? `${prefix} · ${toolLabel}`
+    : detail
+      ? `${prefix} · ${detail}`
+      : prefix;
 }
 
 function plannerSelectionTimelineDetail(event: Record<string, unknown>, fallback: string): string {
@@ -467,6 +507,16 @@ function timelineString(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
 }
 
+function timelineFirstString(keys: string[], ...records: Array<Record<string, unknown>>): string {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = timelineString(record[key]);
+      if (value) return value;
+    }
+  }
+  return '';
+}
+
 function timelineCoordinate(value: unknown): string {
   if (typeof value === 'number' && Number.isFinite(value)) return String(Math.round(value));
   return timelineString(value);
@@ -475,6 +525,10 @@ function timelineCoordinate(value: unknown): string {
 export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
   const payload = event.payload && typeof event.payload === 'object' ? event.payload : {};
   if (publicRunEventIsSecret(event)) return event.detail || event.title || '';
+  if (timelineEventIsReplanRecoveryUpdate(event.event_type)) {
+    const recoverySummary = publicRunEventReplanRecoveryUpdateSummary(payload);
+    if (recoverySummary) return recoverySummary;
+  }
   if (event.event_type === 'agent.model.followup_context') {
     const contentSnapshotSummary = publicRunEventContentSnapshotSummary(payload);
     if (contentSnapshotSummary) return contentSnapshotSummary;
@@ -651,6 +705,32 @@ function publicRunEventPlannerSelectionSummary(payload: Record<string, unknown>)
     || publicRunEventPayloadString(payload, 'entrypoint_source');
   const surface = publicRunEventPayloadString(payload, 'launcher_surface');
   return [role, entrypoint, surface].filter(Boolean).join(' · ');
+}
+
+function publicRunEventReplanRecoveryUpdateSummary(payload: Record<string, unknown>): string {
+  const resultPreview = publicRunEventPayloadRecord(payload, 'result_preview');
+  const sourceTool = publicRunEventPayloadString(payload, 'source_tool_name');
+  const selectedTool = publicRunEventPayloadString(payload, 'selected_tool_name')
+    || publicRunEventPayloadString(payload, 'tool_name')
+    || publicRunEventPayloadString(payload, 'tool');
+  const todoStatus = publicRunEventPayloadString(payload, 'todo_status');
+  const checkpointStatus = publicRunEventPayloadString(payload, 'checkpoint_status');
+  const permissionTarget = publicRunEventPayloadString(payload, 'permission_target');
+  const riskLevel = publicRunEventPayloadString(payload, 'risk_level');
+  const resultSummary = publicRunEventPayloadString(resultPreview, 'summary')
+    || publicRunEventPayloadString(resultPreview, 'error')
+    || publicRunEventPayloadString(resultPreview, 'hint');
+  return [
+    publicRunEventPayloadString(payload, 'recovery_action_label')
+      || publicRunEventPayloadString(payload, 'planning_reason'),
+    selectedTool ? `selected ${runtimeToolDisplayLabelOrName(selectedTool)}` : '',
+    sourceTool ? `source ${runtimeToolDisplayLabelOrName(sourceTool)}` : '',
+    todoStatus ? `todo ${todoStatus}` : '',
+    checkpointStatus ? `checkpoint ${checkpointStatus}` : '',
+    permissionTarget ? `permission ${permissionTarget}` : '',
+    riskLevel ? `risk ${riskLevel}` : '',
+    resultSummary,
+  ].filter(Boolean).join(' · ');
 }
 
 function publicRunEventArtifactSummary(payload: Record<string, unknown>): string {
