@@ -36,6 +36,7 @@ def public_pending_approval(value: Any) -> dict[str, Any]:
         public_input_preview = approval_input_preview(input_preview)
     else:
         public_input_preview = approval_input_preview(raw.get("input") or {})
+    preview_record = public_input_preview if isinstance(public_input_preview, dict) else {}
     snapshot = {
         "approval_id": str(raw.get("approval_id") or ""),
         "tool": str(raw.get("tool") or ""),
@@ -61,12 +62,22 @@ def public_pending_approval(value: Any) -> dict[str, Any]:
         "source_run_id",
         "source_runnable_id",
         "source_runnable_name",
+        "member_agent_id",
+        "member_agent_name",
+        "agent_id",
+        "agent_name",
+        "core_id",
+        "workspace_id",
+        "task_id",
     ):
-        text = str(raw.get(key) or "").strip()
+        text = str(raw.get(key) or tool_request.get(key) or preview_record.get(key) or "").strip()
         if text:
             snapshot[key] = text
     for key in (
+        "source",
+        "planning_reason",
         "step_id",
+        "planner_step_id",
         "capability_id",
         "decision_id",
         "plan_id",
@@ -74,10 +85,27 @@ def public_pending_approval(value: Any) -> dict[str, Any]:
         "intent_kind",
         "replan_request_id",
         "replan_trigger",
+        "runtime_doctrine",
+        "runtime_stage",
+        "runtime_role",
     ):
-        text = str(raw.get(key) or tool_request.get(key) or "").strip()
+        text = str(raw.get(key) or tool_request.get(key) or preview_record.get(key) or "").strip()
         if text:
             snapshot[key] = text
+    for key in ("requires_observation", "requires_post_action_verification"):
+        value = raw.get(key)
+        if value is None:
+            value = tool_request.get(key)
+        if value is None:
+            value = preview_record.get(key)
+        if isinstance(value, bool):
+            snapshot[key] = value
+    for key in ("replan_triggers", "replan_signal_ids"):
+        value = raw.get(key) or tool_request.get(key) or preview_record.get(key)
+        if isinstance(value, list):
+            items = [str(item).strip() for item in value if str(item).strip()]
+            if items:
+                snapshot[key] = items
     if risk_level:
         snapshot["risk_level"] = risk_level
     if policy_reason:

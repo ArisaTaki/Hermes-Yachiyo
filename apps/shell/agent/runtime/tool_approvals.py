@@ -16,6 +16,48 @@ from apps.shell.agent.runtime.tool_requests import (
 from apps.shell.agent.runtime.events import tool_input_preview as _tool_input_preview
 from packages.security import redact_api_error_text
 
+_PENDING_APPROVAL_CONTEXT_TEXT_KEYS = (
+    "source_run_id",
+    "source_runnable_id",
+    "source_runnable_name",
+    "member_agent_id",
+    "member_agent_name",
+    "agent_id",
+    "agent_name",
+    "workflow_id",
+    "workflow_run_id",
+    "workflow_node_id",
+    "workflow_node_label",
+    "group_id",
+    "group_run_id",
+    "run_group_id",
+    "core_id",
+    "workspace_id",
+    "task_id",
+    "source",
+    "planning_reason",
+    "decision_id",
+    "plan_id",
+    "tool_plan_id",
+    "intent_kind",
+    "step_id",
+    "planner_step_id",
+    "capability_id",
+    "replan_request_id",
+    "replan_trigger",
+    "runtime_doctrine",
+    "runtime_stage",
+    "runtime_role",
+)
+_PENDING_APPROVAL_CONTEXT_BOOL_KEYS = (
+    "requires_observation",
+    "requires_post_action_verification",
+)
+_PENDING_APPROVAL_CONTEXT_LIST_KEYS = (
+    "replan_triggers",
+    "replan_signal_ids",
+)
+
 
 class ToolPendingApprovalBuilder:
     """Builds private pending-approval payloads for tool approvals."""
@@ -33,16 +75,22 @@ class ToolPendingApprovalBuilder:
         remaining_tool_requests: list[dict[str, Any]],
     ) -> dict[str, Any]:
         raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        context = _pending_approval_context(tool_request)
+        input_preview = _pending_approval_input_preview(
+            _tool_input_preview(raw_input),
+            context,
+        )
         return {
             "approval_id": str(self._approval_id_factory()),
             "tool": normalize_tool_name(tool_request.get("tool")),
             "input": deepcopy(raw_input),
-            "input_preview": _tool_input_preview(raw_input),
+            "input_preview": input_preview,
             "requested_at": str(self._now()),
             "messages": deepcopy(messages),
             "tool_request": deepcopy(tool_request),
             "remaining_tool_requests": deepcopy(remaining_tool_requests),
             "next_iteration": normalize_tool_iteration(next_iteration),
+            **context,
         }
 
 
@@ -133,6 +181,37 @@ class ToolApprovalResumeContext:
             remaining_requests=remaining_requests,
             next_iteration=next_iteration,
         )
+
+
+def _pending_approval_context(tool_request: dict[str, Any]) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    for key in _PENDING_APPROVAL_CONTEXT_TEXT_KEYS:
+        value = str(tool_request.get(key) or "").strip()
+        if value:
+            context[key] = value
+    for key in _PENDING_APPROVAL_CONTEXT_BOOL_KEYS:
+        value = tool_request.get(key)
+        if isinstance(value, bool):
+            context[key] = value
+    for key in _PENDING_APPROVAL_CONTEXT_LIST_KEYS:
+        value = tool_request.get(key)
+        if isinstance(value, list):
+            items = [str(item).strip() for item in value if str(item).strip()]
+            if items:
+                context[key] = items
+    return context
+
+
+def _pending_approval_input_preview(
+    input_preview: Any,
+    context: dict[str, Any],
+) -> Any:
+    if not isinstance(input_preview, dict) or not context:
+        return input_preview
+    preview = dict(input_preview)
+    for key, value in context.items():
+        preview.setdefault(key, deepcopy(value))
+    return preview
 
 
 @dataclass(frozen=True)

@@ -78,3 +78,70 @@ def test_tool_pending_approval_builder_snapshots_private_payloads() -> None:
     assert pending["messages"][0]["meta"]["turn"] == 1
     assert pending["tool_request"]["input"]["command"] == "printf ok"
     assert pending["remaining_tool_requests"][0]["input"]["content"] == "ok"
+
+
+def test_tool_pending_approval_builder_preserves_runtime_context() -> None:
+    builder = ToolPendingApprovalBuilder(
+        approval_id_factory=lambda: "approval_context",
+        now=lambda: "2026-06-15T10:00:00Z",
+    )
+    tool_request = {
+        "tool": "desktop.click_ui_element",
+        "input": {"label": "Save"},
+        "source": "runtime_planner",
+        "planning_reason": "planner_selected_foreground_operation",
+        "decision_id": "decision-1",
+        "plan_id": "runtime-plan-1",
+        "tool_plan_id": "tool-plan-1",
+        "intent_kind": "desktop_operation",
+        "step_id": "save-file",
+        "capability_id": "desktop.ui_operation",
+        "core_id": "core-1",
+        "workspace_id": "workspace-1",
+        "task_id": "task-1",
+        "group_id": "group-1",
+        "group_run_id": "group-run-1",
+        "workflow_id": "workflow-1",
+        "workflow_run_id": "workflow-run-1",
+        "workflow_node_id": "review",
+        "workflow_node_label": "Review Save",
+        "runtime_stage": "operate",
+        "runtime_role": "click_ui",
+        "requires_post_action_verification": True,
+        "replan_triggers": ["ui_not_found"],
+    }
+
+    pending = builder.build(
+        tool_request,
+        messages=[{"role": "user", "content": "save"}],
+        next_iteration=2,
+        remaining_tool_requests=[],
+    )
+
+    for key in (
+        "source",
+        "planning_reason",
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "intent_kind",
+        "step_id",
+        "capability_id",
+        "core_id",
+        "workspace_id",
+        "task_id",
+        "group_id",
+        "group_run_id",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "runtime_stage",
+        "runtime_role",
+    ):
+        assert pending[key] == tool_request[key]
+        assert pending["input_preview"][key] == tool_request[key]
+    assert pending["requires_post_action_verification"] is True
+    assert pending["input_preview"]["requires_post_action_verification"] is True
+    assert pending["replan_triggers"] == ["ui_not_found"]
+    assert pending["input_preview"]["replan_triggers"] == ["ui_not_found"]

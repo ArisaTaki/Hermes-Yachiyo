@@ -2842,6 +2842,9 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
         workflow_node_label="Review Gate",
         group_id="group-1",
         group_run_id="group-run-1",
+        core_id="core-1",
+        workspace_id="workspace-1",
+        task_id="task-1",
         step_id="review-step",
         capability_id="workflow.approval",
         decision_id="decision-1",
@@ -2876,6 +2879,9 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
         "workflow_node_label",
         "group_id",
         "group_run_id",
+        "core_id",
+        "workspace_id",
+        "task_id",
         "source",
         "planning_reason",
         "step_id",
@@ -2901,6 +2907,9 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["workflow_node_id"] == "review"
     assert payload["source_runnable_name"] == "Planner"
     assert payload["group_run_id"] == "group-run-1"
+    assert payload["core_id"] == "core-1"
+    assert payload["workspace_id"] == "workspace-1"
+    assert payload["task_id"] == "task-1"
     assert payload["step_id"] == "review-step"
     assert payload["capability_id"] == "workflow.approval"
     assert payload["plan_id"] == "runtime-plan-1"
@@ -2919,6 +2928,19 @@ def test_public_pending_approval_projects_runtime_planner_trace_fields() -> None
                 "plan_id": "runtime-plan-1",
                 "tool_plan_id": "tool-plan-1",
                 "intent_kind": "desktop_operation",
+                "core_id": "core-1",
+                "workspace_id": "workspace-1",
+                "task_id": "task-1",
+                "group_id": "group-1",
+                "group_run_id": "group-run-1",
+                "workflow_id": "workflow-1",
+                "workflow_run_id": "workflow-run-1",
+                "workflow_node_id": "review",
+                "workflow_node_label": "Review Save",
+                "runtime_stage": "operate",
+                "runtime_role": "click_ui",
+                "requires_post_action_verification": True,
+                "replan_triggers": ["ui_not_found"],
                 "replan_request_id": "replan-1",
                 "replan_trigger": "ui_not_found",
             },
@@ -2931,6 +2953,19 @@ def test_public_pending_approval_projects_runtime_planner_trace_fields() -> None
     assert snapshot["plan_id"] == "runtime-plan-1"
     assert snapshot["tool_plan_id"] == "tool-plan-1"
     assert snapshot["intent_kind"] == "desktop_operation"
+    assert snapshot["core_id"] == "core-1"
+    assert snapshot["workspace_id"] == "workspace-1"
+    assert snapshot["task_id"] == "task-1"
+    assert snapshot["group_id"] == "group-1"
+    assert snapshot["group_run_id"] == "group-run-1"
+    assert snapshot["workflow_id"] == "workflow-1"
+    assert snapshot["workflow_run_id"] == "workflow-run-1"
+    assert snapshot["workflow_node_id"] == "review"
+    assert snapshot["workflow_node_label"] == "Review Save"
+    assert snapshot["runtime_stage"] == "operate"
+    assert snapshot["runtime_role"] == "click_ui"
+    assert snapshot["requires_post_action_verification"] is True
+    assert snapshot["replan_triggers"] == ["ui_not_found"]
     assert snapshot["replan_request_id"] == "replan-1"
     assert snapshot["replan_trigger"] == "ui_not_found"
 
