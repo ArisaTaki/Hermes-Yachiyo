@@ -5473,6 +5473,11 @@ def _annotate_deferred_observed_ui_followup_requests(
         tool_name=tool_name,
         index=index,
     )
+    deferred_context = (
+        source_request.get("deferred_context")
+        if isinstance(source_request.get("deferred_context"), Mapping)
+        else {}
+    )
     annotated: list[dict[str, Any]] = []
     for request_index, request in enumerate(requests):
         item = dict(request)
@@ -5498,6 +5503,20 @@ def _annotate_deferred_observed_ui_followup_requests(
             if value in (None, "", [], {}) or key in item:
                 continue
             item[key] = value
+        for key in (
+            "step_id",
+            "planner_step_id",
+            "capability_id",
+            "task_todo",
+            "task_checkpoints",
+            "task_workspace_items",
+        ):
+            value = deferred_context.get(key)
+            if value in (None, "", [], {}) or key in item:
+                continue
+            item[key] = value
+        if item.get("step_id") and not item.get("planner_step_id"):
+            item["planner_step_id"] = str(item.get("step_id") or "").strip()
         item.setdefault("runtime_stage", "operate" if request_index == 0 else "verify")
         item.setdefault("runtime_role", _deferred_ui_runtime_role(tool_name))
         annotated.append(item)
@@ -10158,6 +10177,9 @@ def _replan_ui_next_result_click_request(
     for request in planned_tool_requests:
         if not isinstance(request, Mapping):
             continue
+        deferred_click = _replan_ui_deferred_result_click_request(request)
+        if deferred_click:
+            return deferred_click
         tool_name = str(request.get("tool") or "").strip()
         if tool_name not in {
             "app.open_and_click_ui_element",
@@ -10175,6 +10197,50 @@ def _replan_ui_next_result_click_request(
             return dict(request)
         return {}
     return {}
+
+
+def _replan_ui_deferred_result_click_request(request: Mapping[str, Any]) -> dict[str, Any]:
+    tool_name = str(request.get("deferred_tool") or "").strip()
+    if tool_name not in {
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "desktop.click_ui_element",
+    }:
+        return {}
+    payload = (
+        request.get("deferred_input")
+        if isinstance(request.get("deferred_input"), Mapping)
+        else {}
+    )
+    target = str(payload.get("target") or "").strip()
+    if not target:
+        return {}
+    if not (_observed_desktop_target_ordinal(target) or "result" in target.casefold()):
+        return {}
+    item = {
+        key: value
+        for key, value in request.items()
+        if key
+        not in {
+            "tool",
+            "input",
+            "deferred_tool",
+            "deferred_input",
+            "deferred_context",
+            "continue_to_model",
+        }
+    }
+    item["tool"] = tool_name
+    item["input"] = dict(payload)
+    deferred_context = (
+        request.get("deferred_context")
+        if isinstance(request.get("deferred_context"), Mapping)
+        else {}
+    )
+    for key, value in deferred_context.items():
+        if value not in (None, "", [], {}):
+            item[key] = value
+    return item
 
 
 def _replan_ui_search_result_observation_request(
@@ -14401,6 +14467,7 @@ def _visible_daily_desktop_completed_steps(
         if (
             tool_name in _DAILY_DESKTOP_VERIFY_TOOLS
             and index > last_primary
+            and not _is_deferred_observed_ui_request(step)
             and not _is_requested_ui_readback(completed_steps, index, first_primary, last_primary)
             and not _is_preserved_active_window_verification(completed_steps, index)
             and not _is_preserved_runtime_planner_verification(
@@ -14412,6 +14479,14 @@ def _visible_daily_desktop_completed_steps(
             continue
         visible_steps.append(step)
     return visible_steps or completed_steps
+
+
+def _is_deferred_observed_ui_request(step: Mapping[str, Any]) -> bool:
+    return bool(
+        isinstance(step, Mapping)
+        and str(step.get("deferred_tool") or "").strip()
+        and isinstance(step.get("deferred_input"), Mapping)
+    )
 
 
 def _is_daily_desktop_discovery_completed_step(step: dict[str, Any]) -> bool:

@@ -74,6 +74,10 @@ def planner_execution_tool_requests(
         normalized_requests = _collapse_app_foreground_direct_requests(normalized_requests, allowed)
     normalized_requests = _drop_redundant_app_foreground_prepare_requests(normalized_requests)
     normalized_requests = _drop_redundant_post_inspect_app_prepare_requests(normalized_requests)
+    normalized_requests = _defer_search_result_clicks_to_observation(
+        normalized_requests,
+        allowed,
+    )
     return _drop_redundant_execution_verification_requests(normalized_requests)
 
 
@@ -243,6 +247,127 @@ def _unknown_app_ui_observation_request(
     observe["deferred_input"] = dict(payload)
     _inherit_request_context_without_step(observe, request)
     return observe
+
+
+def _defer_search_result_clicks_to_observation(
+    requests: list[dict[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    if not requests or not {"desktop.ui_elements", "desktop.read_ui"}.intersection(allowed):
+        return requests
+    normalized: list[dict[str, Any]] = []
+    skip_indexes: set[int] = set()
+    for index, request in enumerate(requests):
+        if index in skip_indexes:
+            continue
+        normalized.append(request)
+        if str(request.get("tool") or "").strip() != "desktop.search_submit":
+            continue
+        next_request = requests[index + 1] if index + 1 < len(requests) else {}
+        if not _is_search_result_click_request(next_request):
+            continue
+        observation = _search_result_observation_request(next_request, allowed)
+        if not observation:
+            continue
+        normalized.append(observation)
+        skip_indexes.add(index + 1)
+        after_click = requests[index + 2] if index + 2 < len(requests) else {}
+        if _is_execution_verification_request(after_click):
+            skip_indexes.add(index + 2)
+    return normalized
+
+
+def _is_search_result_click_request(request: Mapping[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in {
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "desktop.click_ui_element",
+    }:
+        return False
+    if str(request.get("source") or "").strip() != "runtime_planner":
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    target = str(payload.get("target") or "").strip()
+    if not target:
+        return False
+    return bool(
+        _search_result_target_is_ordinal(target)
+        or "result" in target.casefold()
+        or "结果" in target
+    )
+
+
+def _is_execution_verification_request(request: Mapping[str, Any]) -> bool:
+    if not isinstance(request, Mapping):
+        return False
+    return str(request.get("tool") or "").strip() in _EXECUTION_VERIFICATION_TOOLS
+
+
+def _search_result_target_is_ordinal(target: str) -> bool:
+    clean = str(target or "").strip().casefold()
+    if clean in {
+        "first result",
+        "first item",
+        "top result",
+        "第一个结果",
+        "第1个结果",
+        "第一项",
+        "第一个",
+        "首个结果",
+    }:
+        return True
+    return bool(
+        re.fullmatch(r"(?:result|item)\s*\d+", clean)
+        or re.fullmatch(r"第\s*\d+\s*(?:个)?(?:结果|项目|项)?", clean)
+    )
+
+
+def _search_result_observation_request(
+    click_request: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    payload = click_request.get("input") if isinstance(click_request.get("input"), Mapping) else {}
+    observe_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed)
+    if not observe_tool:
+        return {}
+    observe_payload = {
+        key: payload[key]
+        for key in ("app_name", "role_filter", "limit")
+        if key in payload and payload[key] not in (None, "")
+    }
+    if "limit" not in observe_payload:
+        observe_payload["limit"] = 80
+    observe = _request(
+        observe_tool,
+        observe_payload,
+        planning_reason=str(
+            click_request.get("planning_reason") or "planner_desktop_operation"
+        ).strip()
+        or "planner_desktop_operation",
+    )
+    observe["continue_to_model"] = True
+    observe["deferred_tool"] = str(click_request.get("tool") or "").strip()
+    observe["deferred_input"] = dict(payload)
+    observe["deferred_context"] = _deferred_request_context(click_request)
+    _inherit_request_context_without_step(observe, click_request)
+    return observe
+
+
+def _deferred_request_context(source: Mapping[str, Any]) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    for key in (
+        "step_id",
+        "planner_step_id",
+        "capability_id",
+        "task_todo",
+        "task_checkpoints",
+        "task_workspace_items",
+    ):
+        value = source.get(key)
+        if value not in (None, "", [], {}):
+            context[key] = value
+    return context
 
 
 _REQUEST_CONTEXT_WITHOUT_STEP_KEYS = (
