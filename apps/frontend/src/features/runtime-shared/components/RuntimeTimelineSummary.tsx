@@ -105,9 +105,20 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
 
 function runtimeTimelineEventDetail(event: RuntimeTimelineEventSnapshot): string {
   const type = String(event.event_type || '').trim();
+  const recoveryTargetDetail = runtimeTimelineRecoveryTargetDetail(event);
+  if (recoveryTargetDetail && (
+    runtimeEventIsDesktopIntent(type, 'planned')
+    || type === 'agent.replan.requested'
+    || type === 'group.run.replan.requested'
+    || type === 'workflow.replan.requested'
+    || type === 'workflow.run.replan.requested'
+  )) {
+    return recoveryTargetDetail;
+  }
   if (type === 'agent.model.followup_context') {
     const contentSnapshotDetail = runtimeTimelineContentSnapshotDetail(event);
     if (contentSnapshotDetail) return contentSnapshotDetail;
+    if (recoveryTargetDetail) return recoveryTargetDetail;
   }
   if (runtimeEventIsDesktopIntent(type, 'completed')) {
     const toolChainDetail = runtimeTimelineDesktopToolChainDetail(event);
@@ -119,6 +130,42 @@ function runtimeTimelineEventDetail(event: RuntimeTimelineEventSnapshot): string
   if (runtimeTimelineLooksInternalLabel(detail)) return '';
   if (runtimeTimelineLooksRuntimeId(detail)) return '';
   return detail;
+}
+
+function runtimeTimelineRecoveryTargetDetail(event: RuntimeTimelineEventSnapshot): string {
+  const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+  const payload = record.payload && typeof record.payload === 'object' && !Array.isArray(record.payload)
+    ? record.payload as Record<string, unknown>
+    : {};
+  const metadata = payload.metadata && typeof payload.metadata === 'object' && !Array.isArray(payload.metadata)
+    ? payload.metadata as Record<string, unknown>
+    : {};
+  const inputPreview = payload.input_preview && typeof payload.input_preview === 'object' && !Array.isArray(payload.input_preview)
+    ? payload.input_preview as Record<string, unknown>
+    : {};
+  const appName = runtimeTimelineFirstRecordString(
+    ['target_app_name', 'expected_app_name', 'resolved_app_name', 'discovered_app_name', 'requested_app_name', 'app_name'],
+    record,
+    payload,
+    metadata,
+    inputPreview,
+  );
+  const appQuery = runtimeTimelineFirstRecordString(
+    ['target_app_query', 'app_query', 'query'],
+    record,
+    payload,
+    metadata,
+    inputPreview,
+  );
+  const searchText = runtimeTimelineFirstRecordString(
+    ['target_search_text', 'search_text', 'text', 'value'],
+    record,
+    payload,
+    metadata,
+    inputPreview,
+  );
+  const parts = [appName, appQuery && appQuery !== appName ? appQuery : '', searchText].filter(Boolean);
+  return parts.length ? `恢复目标 · ${parts.join(' · ')}` : '';
 }
 
 function runtimeTimelinePolicyDecisionLabel(event: RuntimeTimelineEventSnapshot): string {
@@ -389,6 +436,19 @@ function runtimeTimelineContentSnapshotRecordDetail(record: Record<string, unkno
 function runtimeTimelineRecordString(record: Record<string, unknown>, key: string): string {
   const value = record[key];
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function runtimeTimelineFirstRecordString(
+  keys: string[],
+  ...records: Array<Record<string, unknown>>
+): string {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = runtimeTimelineRecordString(record, key);
+      if (value) return value;
+    }
+  }
+  return '';
 }
 
 function runtimeTimelineRecordNumberString(record: Record<string, unknown>, key: string): string {

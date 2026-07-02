@@ -427,6 +427,9 @@ export function runEventReplayToTimelineEvent(event: PublicRunEvent): Record<str
     workflow_node_id: payload.workflow_node_id,
     workflow_node_kind: payload.workflow_node_kind,
     workflow_node_label: payload.workflow_node_label,
+    target_app_name: payload.target_app_name,
+    target_app_query: payload.target_app_query,
+    target_search_text: payload.target_search_text,
     ...publicRunEventWorkflowStepPayload(payload),
     payload,
   };

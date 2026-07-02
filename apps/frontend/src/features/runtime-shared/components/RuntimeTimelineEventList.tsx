@@ -67,6 +67,7 @@ export function RuntimeTimelineEventList({
           const traceContext = runtimeEventTraceContext(event, payloadRecord);
           const plannerContext = runtimeEventPlannerContext(event, payloadRecord);
           const runtimeContext = runtimeEventRuntimeContext(event, payloadRecord);
+          const recoveryTarget = runtimeEventRecoveryTarget(event, payloadRecord);
           const contentSnapshots = eventIsSecret ? [] : runtimeEventContentSnapshots(payloadRecord);
           const capabilityRecovery = eventIsSecret ? [] : runtimeEventCapabilityRecovery(payloadRecord);
           const eventMetadata = runtimeEventMetadata(
@@ -75,6 +76,7 @@ export function RuntimeTimelineEventList({
             traceContext,
             plannerContext,
             runtimeContext,
+            recoveryTarget,
             eventSequence,
             eventRunId,
           );
@@ -104,6 +106,9 @@ export function RuntimeTimelineEventList({
               data-run-event-replan-request-id={runtimeContext.replanRequestId}
               data-run-event-replan-signal-ids={runtimeContext.replanSignalIds.join(',')}
               data-run-event-replan-trigger={runtimeContext.replanTrigger || runtimeContext.replanTriggers[0] || ''}
+              data-run-event-recovery-target-app={recoveryTarget.targetAppName}
+              data-run-event-recovery-target-query={recoveryTarget.targetAppQuery}
+              data-run-event-recovery-target-text={recoveryTarget.targetSearchText}
               data-run-event-runnable-kind={plannerContext.runnableKind}
               data-run-event-selection-role={plannerContext.selectionRole}
               data-run-event-selection-source={plannerContext.selectionSource}
@@ -405,6 +410,7 @@ function runtimeEventMetadata(
   traceContext: RuntimeTimelineTraceContext,
   plannerContext: RuntimeTimelinePlannerContext,
   runtimeContext: RuntimeTimelineRuntimeContext,
+  recoveryTarget: RuntimeTimelineRecoveryTarget,
   eventSequence: string,
   eventRunId: string,
 ): Array<{ label: string; value: string }> {
@@ -429,6 +435,9 @@ function runtimeEventMetadata(
     { label: 'replan', value: runtimeContext.replanTrigger || runtimeContext.replanTriggers.join(', ') },
     { label: 'replan id', value: runtimeContext.replanRequestId },
     { label: 'signals', value: runtimeContext.replanSignalIds.join(', ') },
+    { label: 'target app', value: recoveryTarget.targetAppName },
+    { label: 'target query', value: recoveryTarget.targetAppQuery },
+    { label: 'target text', value: recoveryTarget.targetSearchText },
     { label: 'artifact', value: runtimeEventString(event, payload, 'artifact_id') },
     { label: 'memory', value: runtimeEventMemoryId(event, payload) },
     { label: 'skill', value: runtimeEventSkillId(event, payload) },
@@ -496,6 +505,12 @@ type RuntimeTimelineRuntimeContext = {
   runtimeRole: string;
   runtimeStage: string;
   stepId: string;
+};
+
+type RuntimeTimelineRecoveryTarget = {
+  targetAppName: string;
+  targetAppQuery: string;
+  targetSearchText: string;
 };
 
 function runtimeEventTraceContext(
@@ -582,6 +597,38 @@ function runtimeEventRuntimeContext(
       'source_step_id',
       'after_step_id',
       'latest_replan_step_id',
+    ),
+  };
+}
+
+function runtimeEventRecoveryTarget(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+): RuntimeTimelineRecoveryTarget {
+  return {
+    targetAppName: runtimeEventContextString(
+      event,
+      payload,
+      'target_app_name',
+      'expected_app_name',
+      'resolved_app_name',
+      'discovered_app_name',
+      'requested_app_name',
+    ),
+    targetAppQuery: runtimeEventContextString(
+      event,
+      payload,
+      'target_app_query',
+      'app_query',
+      'query',
+    ),
+    targetSearchText: runtimeEventContextString(
+      event,
+      payload,
+      'target_search_text',
+      'search_text',
+      'text',
+      'value',
     ),
   };
 }
