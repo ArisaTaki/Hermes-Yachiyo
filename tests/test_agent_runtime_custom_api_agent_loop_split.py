@@ -263,6 +263,41 @@ def test_runtime_planner_runtime_requests_keep_single_step_desktop_plan_with_con
     assert payload["selection_reason"] == "runtime_planner_full_plan_execution"
 
 
+def test_runtime_planner_defers_unknown_app_ui_operation_until_ui_observed() -> None:
+    loop = _private_runtime_loop()
+    decision, requests, payload = loop._runtime_planner_tool_requests(
+        "打开 PixelForge 点击登录",
+        [
+            "desktop.list_apps",
+            "app.open",
+            "app.open_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert decision is not None
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["step_id"] == "discover-desktop-state"
+    assert requests[1]["input"] == {"app_name": "PixelForge"}
+    assert requests[2]["input"] == {"role_filter": "button", "limit": 80}
+    assert requests[2]["continue_to_model"] is True
+    assert requests[2]["deferred_tool"] == "app.open_and_click_ui_element"
+    assert requests[2]["deferred_input"]["target"] == "登录"
+    assert "step_id" not in requests[2]
+    assert {request["decision_id"] for request in requests} == {decision.decision_id}
+    assert payload["selection_reason"] == "runtime_planner_full_plan_execution"
+    assert payload["yachiyo_execution_requests"] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+    ]
+    assert payload["yachiyo_execution_envelope"]["requests"][-1]["continue_to_model"] is True
+
+
 def test_recovery_actions_projects_retry_input_contract_fields() -> None:
     retry_input_schema = {
         "type": "object",

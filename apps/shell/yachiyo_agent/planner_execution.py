@@ -62,6 +62,10 @@ def planner_execution_tool_requests(
         return []
     normalized_requests = _expand_inspect_app_execution_requests(normalized_requests, allowed)
     normalized_requests = _prepend_unknown_app_discovery_requests(normalized_requests, allowed)
+    normalized_requests = _defer_unknown_app_ui_element_operations_to_observation(
+        normalized_requests,
+        allowed,
+    )
     normalized_requests = _append_unknown_app_post_execution_verification(
         normalized_requests,
         allowed,
@@ -130,6 +134,144 @@ def _request_needs_app_discovery_first(
     if str(input_resolution.get("source_tool") or "").strip() == "desktop.list_apps":
         return False
     return not is_legacy_app_name_hint(app_name)
+
+
+def _defer_unknown_app_ui_element_operations_to_observation(
+    requests: list[dict[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    if not requests or not {"desktop.ui_elements", "desktop.read_ui"}.intersection(allowed):
+        return requests
+    normalized: list[dict[str, Any]] = []
+    for request in requests:
+        tool_name = str(request.get("tool") or "").strip()
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        if not _should_defer_unknown_app_ui_element_operation(tool_name, payload, request):
+            normalized.append(request)
+            continue
+        prepare_request = _unknown_app_ui_observation_prepare_request(
+            tool_name,
+            request,
+            allowed,
+        )
+        if not prepare_request:
+            normalized.append(request)
+            continue
+        normalized.append(prepare_request)
+        normalized.append(
+            _unknown_app_ui_observation_request(
+                request,
+                allowed,
+            )
+        )
+        return normalized
+    return normalized
+
+
+def _should_defer_unknown_app_ui_element_operation(
+    tool_name: str,
+    payload: Mapping[str, Any],
+    request: Mapping[str, Any],
+) -> bool:
+    if tool_name not in {
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+    }:
+        return False
+    if str(request.get("source") or "").strip() != "runtime_planner":
+        return False
+    if not _request_targets_unknown_discovered_app(tool_name, payload, request):
+        return False
+    target = str(payload.get("target") or "").strip()
+    text = str(payload.get("text") or "").strip()
+    return bool(target or text)
+
+
+def _unknown_app_ui_observation_prepare_request(
+    tool_name: str,
+    request: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    app_name = str(payload.get("app_name") or "").strip()
+    if not app_name:
+        return {}
+    mode = "focus" if tool_name.startswith("app.focus_and_") else "open"
+    prepare_tool = _first_allowed(
+        app_control_tool_candidates(mode),
+        allowed,
+    )
+    if not prepare_tool:
+        return {}
+    prepare = _request(
+        prepare_tool,
+        {"app_name": app_name},
+        planning_reason=str(
+            request.get("planning_reason") or "planner_desktop_operation"
+        ).strip()
+        or "planner_desktop_operation",
+    )
+    _inherit_request_context_without_step(prepare, request)
+    return prepare
+
+
+def _unknown_app_ui_observation_request(
+    request: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    observe_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed)
+    observe_payload = {
+        key: payload[key]
+        for key in ("role_filter", "limit")
+        if key in payload and payload[key] not in (None, "")
+    }
+    if "limit" not in observe_payload:
+        observe_payload["limit"] = 80
+    observe = _request(
+        observe_tool,
+        observe_payload,
+        planning_reason=str(
+            request.get("planning_reason") or "planner_desktop_operation"
+        ).strip()
+        or "planner_desktop_operation",
+    )
+    observe["continue_to_model"] = True
+    observe["deferred_tool"] = str(request.get("tool") or "").strip()
+    observe["deferred_input"] = dict(payload)
+    _inherit_request_context_without_step(observe, request)
+    return observe
+
+
+_REQUEST_CONTEXT_WITHOUT_STEP_KEYS = (
+    "request_id",
+    "decision_id",
+    "plan_id",
+    "tool_plan_id",
+    "intent_kind",
+    "core_id",
+    "workspace_id",
+    "task_id",
+    "run_id",
+    "runtime_doctrine",
+    "requires_observation",
+    "requires_post_action_verification",
+    "replan_signal_ids",
+    "replan_triggers",
+)
+
+
+def _inherit_request_context_without_step(
+    target: dict[str, Any],
+    source: Mapping[str, Any],
+) -> None:
+    for key in _REQUEST_CONTEXT_WITHOUT_STEP_KEYS:
+        value = source.get(key)
+        if value in (None, "", [], {}):
+            continue
+        target[key] = value
 
 
 def _tool_uses_app_name_for_foreground_execution(tool_name: str) -> bool:
