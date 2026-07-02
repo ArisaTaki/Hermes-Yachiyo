@@ -77,6 +77,19 @@ def task_replan_request_from_failure(
         clean_trigger,
         failure_detail,
     )
+    matched_step_id = _text(getattr(step, "step_id", "") if step is not None else "")
+    task_context = _task_core_replan_context(
+        decision,
+        source_step,
+        matched_step_id=matched_step_id,
+    )
+    request_metadata = {
+        **dict(metadata or {}),
+        **_signal_metadata(signal),
+        "original_intent_kind": _text(decision.selected_intent.kind),
+    }
+    if task_context:
+        request_metadata["task_core_context"] = task_context
     return TaskReplanRequestSnapshot(
         request_id=request_id,
         trigger=clean_trigger,
@@ -101,12 +114,9 @@ def task_replan_request_from_failure(
             target_capability_id=target_capability,
             failure_detail=failure_detail,
             fallback_tools=fallback_tools,
+            task_context=task_context,
         ),
-        metadata={
-            **dict(metadata or {}),
-            **_signal_metadata(signal),
-            "original_intent_kind": _text(decision.selected_intent.kind),
-        },
+        metadata=request_metadata,
         created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     )
 
@@ -243,6 +253,7 @@ def _replan_prompt(
     target_capability_id: str,
     failure_detail: str,
     fallback_tools: list[str],
+    task_context: Mapping[str, Any] | None = None,
 ) -> str:
     parts = [
         decision.prompt,
@@ -260,11 +271,221 @@ def _replan_prompt(
         parts.append(f"- failure_detail: {failure_detail}")
     if fallback_tools:
         parts.append(f"- preferred_fallback_tools: {', '.join(fallback_tools)}")
+    task_lines = _task_core_replan_prompt_lines(task_context or {})
+    if task_lines:
+        parts.extend(["", "Task workspace context:", *task_lines])
     parts.append(
         "Continue from the existing task workspace. Do not restart completed steps; "
         "inspect current state, choose the next safe observable action, and keep approval gates."
     )
     return "\n".join(parts)
+
+
+def _task_core_replan_context(
+    decision: PlannerDecisionSnapshot,
+    source_step_id: str,
+    *,
+    matched_step_id: str = "",
+) -> dict[str, Any]:
+    task_core = getattr(decision.plan, "task_core", None)
+    if task_core is None:
+        return {}
+    workspace = getattr(task_core, "workspace", None)
+    context = {
+        "core_id": _text(getattr(task_core, "core_id", "")),
+        "workspace_id": _text(getattr(workspace, "workspace_id", "")),
+        "workspace_title": _text(getattr(workspace, "title", "")),
+        "source_step_id": _text(source_step_id),
+        "planner_step_id": _text(matched_step_id),
+    }
+    source_step = _text(source_step_id)
+    plan_step = _text(matched_step_id or source_step_id)
+    workspace_items = _context_rows(
+        getattr(workspace, "items", []) or [],
+        focus=lambda item: _text(getattr(item, "source_step_id", "")) in {source_step, plan_step},
+        include=lambda item: _text(getattr(item, "kind", "")) in {"input", "artifact"},
+        serialize=lambda item: {
+            "item_id": _text(getattr(item, "item_id", "")),
+            "title": _text(getattr(item, "title", "")),
+            "kind": _text(getattr(item, "kind", "")),
+            "path": _text(getattr(item, "path", "")),
+            "status": _text(getattr(item, "status", "")),
+            "source_step_id": _text(getattr(item, "source_step_id", "")),
+        },
+        limit=8,
+    )
+    todos = _context_rows(
+        getattr(task_core, "todos", []) or [],
+        focus=lambda item: _text(getattr(item, "step_id", "")) == plan_step,
+        include=lambda item: _text(getattr(item, "status", ""))
+        in {"blocked", "in_progress", "pending", "waiting_approval"},
+        serialize=lambda item: {
+            "todo_id": _text(getattr(item, "todo_id", "")),
+            "title": _text(getattr(item, "title", "")),
+            "status": _text(getattr(item, "status", "")),
+            "step_id": _text(getattr(item, "step_id", "")),
+            "tool_name": _text(getattr(item, "tool_name", "")),
+            "capability_id": _text(getattr(item, "capability_id", "")),
+            "approval_required": bool(getattr(item, "approval_required", False)),
+        },
+        limit=8,
+    )
+    checkpoints = _context_rows(
+        getattr(task_core, "checkpoints", []) or [],
+        focus=lambda item: _text(getattr(item, "after_step_id", "")) == plan_step,
+        include=lambda item: _text(getattr(item, "status", ""))
+        in {"blocked", "planned", "ready", "waiting_approval"},
+        serialize=lambda item: {
+            "checkpoint_id": _text(getattr(item, "checkpoint_id", "")),
+            "title": _text(getattr(item, "title", "")),
+            "status": _text(getattr(item, "status", "")),
+            "after_step_id": _text(getattr(item, "after_step_id", "")),
+            "verifies": _text_list(getattr(item, "verifies", []), limit=6),
+        },
+        limit=5,
+    )
+    replan_signals = _context_rows(
+        getattr(task_core, "replan_signals", []) or [],
+        focus=lambda item: _text(getattr(item, "source_step_id", "")) == plan_step,
+        include=lambda _item: True,
+        serialize=lambda item: {
+            "signal_id": _text(getattr(item, "signal_id", "")),
+            "trigger": _text(getattr(item, "trigger", "")),
+            "source_step_id": _text(getattr(item, "source_step_id", "")),
+            "target": _text(getattr(item, "target", "")),
+            "fallback_tools": _text_list(getattr(item, "fallback_tools", []), limit=6),
+        },
+        limit=5,
+    )
+    if workspace_items:
+        context["workspace_items"] = workspace_items
+    if todos:
+        context["todos"] = todos
+    if checkpoints:
+        context["checkpoints"] = checkpoints
+    if replan_signals:
+        context["replan_signals"] = replan_signals
+    return {key: value for key, value in context.items() if value not in ("", [], {})}
+
+
+def _context_rows(
+    values: Any,
+    *,
+    focus: Any,
+    include: Any,
+    serialize: Any,
+    limit: int,
+) -> list[dict[str, Any]]:
+    items = list(values or [])
+    ordered = [*filter(focus, items), *filter(include, items)]
+    rows: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in ordered:
+        key = _context_item_key(item)
+        if key in seen:
+            continue
+        row = _compact_mapping(serialize(item))
+        if row:
+            rows.append(row)
+            seen.add(key)
+        if len(rows) >= limit:
+            break
+    return rows
+
+
+def _context_item_key(item: Any) -> str:
+    for attribute in (
+        "item_id",
+        "todo_id",
+        "checkpoint_id",
+        "signal_id",
+        "step_id",
+        "source_step_id",
+    ):
+        value = _text(getattr(item, attribute, ""))
+        if value:
+            return f"{attribute}:{value}"
+    return str(id(item))
+
+
+def _task_core_replan_prompt_lines(context: Mapping[str, Any]) -> list[str]:
+    if not context:
+        return []
+    lines: list[str] = []
+    workspace_title = _text(context.get("workspace_title"))
+    workspace_id = _text(context.get("workspace_id"))
+    if workspace_title or workspace_id:
+        label = workspace_title or workspace_id
+        suffix = f" ({workspace_id})" if workspace_title and workspace_id else ""
+        lines.append(f"- workspace: {label}{suffix}")
+    source_step_id = _text(context.get("source_step_id"))
+    if source_step_id:
+        lines.append(f"- source_step: {source_step_id}")
+    planner_step_id = _text(context.get("planner_step_id"))
+    if planner_step_id and planner_step_id != source_step_id:
+        lines.append(f"- planner_step: {planner_step_id}")
+    _append_context_rows(
+        lines,
+        "workspace_items",
+        context.get("workspace_items"),
+        _workspace_item_prompt_label,
+    )
+    _append_context_rows(lines, "todos", context.get("todos"), _todo_prompt_label)
+    _append_context_rows(
+        lines,
+        "checkpoints",
+        context.get("checkpoints"),
+        _checkpoint_prompt_label,
+    )
+    _append_context_rows(
+        lines,
+        "replan_signals",
+        context.get("replan_signals"),
+        _replan_signal_prompt_label,
+    )
+    return lines
+
+
+def _append_context_rows(
+    lines: list[str],
+    label: str,
+    rows: Any,
+    formatter: Any,
+) -> None:
+    if not isinstance(rows, list):
+        return
+    rendered = [formatter(row) for row in rows if isinstance(row, Mapping)]
+    rendered = [row for row in rendered if row]
+    if rendered:
+        lines.append(f"- {label}: {'; '.join(rendered)}")
+
+
+def _workspace_item_prompt_label(row: Mapping[str, Any]) -> str:
+    return _joined_label(
+        row.get("kind"),
+        row.get("status"),
+        row.get("path") or row.get("title"),
+    )
+
+
+def _todo_prompt_label(row: Mapping[str, Any]) -> str:
+    return _joined_label(row.get("step_id"), row.get("status"), row.get("tool_name"))
+
+
+def _checkpoint_prompt_label(row: Mapping[str, Any]) -> str:
+    return _joined_label(row.get("after_step_id"), row.get("status"), row.get("title"))
+
+
+def _replan_signal_prompt_label(row: Mapping[str, Any]) -> str:
+    return _joined_label(row.get("source_step_id"), row.get("trigger"), row.get("target"))
+
+
+def _joined_label(*parts: Any) -> str:
+    return " · ".join(_text(part) for part in parts if _text(part))
+
+
+def _compact_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {key: item for key, item in value.items() if item not in ("", [], {})}
 
 
 def _signal_metadata(signal: ReplanSignalSnapshot | None) -> dict[str, Any]:
@@ -283,6 +504,19 @@ def _optional_text(value: Any) -> str | None:
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _text_list(value: Any, *, limit: int) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        clean = _text(item)
+        if clean:
+            result.append(clean)
+        if len(result) >= limit:
+            break
+    return result
 
 
 def _stable_id(prefix: str, *parts: str) -> str:

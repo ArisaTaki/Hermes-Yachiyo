@@ -1774,6 +1774,23 @@ def test_runtime_planner_builds_replan_request_from_failed_step() -> None:
     assert payload["fallback_tools"] == ["terminal.run"]
     assert "unsupported chart type" in payload["failure_detail"]
     assert "Continue from the existing task workspace" in payload["replan_prompt"]
+    task_context = payload["metadata"]["task_core_context"]
+    assert task_context["core_id"] == decision.plan.task_core.core_id
+    assert task_context["workspace_id"] == decision.plan.task_core.workspace.workspace_id
+    assert task_context["workspace_title"] == "Data Analysis Workspace"
+    assert task_context["source_step_id"] == "run-analysis"
+    assert task_context["planner_step_id"] == "analyze-data-file"
+    assert any(
+        item["kind"] == "input" and item["path"] == "sales.csv"
+        for item in task_context["workspace_items"]
+    )
+    assert task_context["todos"][0]["step_id"] == "analyze-data-file"
+    assert task_context["checkpoints"][0]["after_step_id"] == "analyze-data-file"
+    assert task_context["replan_signals"][0]["fallback_tools"] == ["terminal.run"]
+    assert "Task workspace context:" in payload["replan_prompt"]
+    assert "- planner_step: analyze-data-file" in payload["replan_prompt"]
+    assert "input · planned · sales.csv" in payload["replan_prompt"]
+    assert "analyze-data-file · pending · data.analyze" in payload["replan_prompt"]
     assert run_event is not None
     assert run_event[0] == "agent.replan.requested"
     assert run_event[1]["request_id"] == payload["request_id"]
