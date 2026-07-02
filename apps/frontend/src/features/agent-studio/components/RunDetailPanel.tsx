@@ -401,9 +401,10 @@ export function RunDetailPanel({
               sourceLabel={toolCallSource}
               toolCalls={selectedRunToolCalls}
               onRunRecoveryAction={onRunToolRecoveryAction}
-              recoveryActionInputPatch={(_, action) => runRecoveryInputPatchForAction(
+              recoveryActionInputPatch={(toolCall, action) => runRecoveryInputPatchForAction(
                 action,
                 selectedRunRecoveryCoordinate,
+                toolCall,
               )}
               recoveryActionDisabled={busy}
             />
@@ -541,12 +542,58 @@ function runRecoveryScreenPointContractFromToolCalls(
 function runRecoveryInputPatchForAction(
   action: RuntimeToolRecoveryAction,
   coordinate: RunRecoveryCoordinate | null,
+  toolCall: ToolCallSnapshot,
 ): Record<string, unknown> | null {
-  if (!coordinate || action.retry_input_source !== 'screen_capture_artifact') return null;
+  if (action.retry_input_source !== 'screen_capture_artifact') return null;
+  const observedCoordinate = runRecoveryObservedCoordinateFromToolCall(toolCall);
+  const patchCoordinate = coordinate || observedCoordinate;
+  if (!patchCoordinate) return null;
   const inputPatch: Record<string, unknown> = {};
-  if (runRecoveryActionNeedsRetryField(action, 'x')) inputPatch.x = coordinate.x;
-  if (runRecoveryActionNeedsRetryField(action, 'y')) inputPatch.y = coordinate.y;
+  if (runRecoveryActionNeedsRetryField(action, 'x')) inputPatch.x = patchCoordinate.x;
+  if (runRecoveryActionNeedsRetryField(action, 'y')) inputPatch.y = patchCoordinate.y;
   return Object.keys(inputPatch).length ? inputPatch : null;
+}
+
+function runRecoveryObservedCoordinateFromToolCall(
+  toolCall: ToolCallSnapshot,
+): Pick<RunRecoveryCoordinate, 'x' | 'y'> | null {
+  const observationEvidence = runRecoveryToolCallObservationEvidence(toolCall);
+  const center = objectValue(observationEvidence.observed_center);
+  const legacyCenter = objectValue(observationEvidence.center);
+  const point = objectValue(observationEvidence.point);
+  const x = runRecoveryCoordinateValue(center.x ?? legacyCenter.x ?? point.x ?? observationEvidence.x);
+  const y = runRecoveryCoordinateValue(center.y ?? legacyCenter.y ?? point.y ?? observationEvidence.y);
+  return x !== null && y !== null ? { x, y } : null;
+}
+
+function runRecoveryToolCallObservationEvidence(toolCall: ToolCallSnapshot): Record<string, unknown> {
+  const records = [
+    objectValue(toolCall.metadata),
+    objectValue(toolCall.input_preview),
+    objectValue(toolCall.output_preview),
+  ];
+  const seen = new Set<Record<string, unknown>>(records);
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    const nested = objectValue(record.observation_evidence);
+    if (Object.keys(nested).length) return nested;
+    for (const key of ['metadata', 'result', 'data']) {
+      const value = objectValue(record[key]);
+      if (!Object.keys(value).length || seen.has(value)) continue;
+      records.push(value);
+      seen.add(value);
+    }
+  }
+  return {};
+}
+
+function runRecoveryCoordinateValue(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim()) {
+    const numeric = Number(value.trim());
+    return Number.isFinite(numeric) ? numeric : null;
+  }
+  return null;
 }
 
 function runRecoveryActionNeedsRetryField(action: RuntimeToolRecoveryAction, field: string): boolean {
