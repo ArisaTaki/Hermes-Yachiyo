@@ -4465,6 +4465,22 @@ def test_auto_followup_dispatches_observed_desktop_click_action() -> None:
         "strategy": "post_action_observation",
     }
 
+    safe_level_click = custom_api_agent_module._auto_discovered_followup_requests(
+        selection_payload,
+        ["desktop.read_ui", "desktop.safe_click", "desktop.click"],
+        timeline,
+    )
+    assert [request["tool"] for request in safe_level_click] == [
+        "desktop.safe_click",
+        "desktop.read_ui",
+    ]
+    assert safe_level_click[0]["input"] == {"x": 120, "y": 240}
+    assert safe_level_click[0]["observation_evidence"] == {
+        "source_tool": "desktop.read_ui",
+        "strategy": "observed_center",
+        "center": {"x": 120, "y": 240},
+    }
+
     low_level_click = custom_api_agent_module._auto_discovered_followup_requests(
         selection_payload,
         ["desktop.read_ui", "desktop.click"],
@@ -4643,6 +4659,45 @@ def test_auto_followup_dispatches_observed_desktop_type_action() -> None:
             "tool": "desktop.read_ui",
             "input": {"role_filter": "text field", "limit": 80},
             "action": "verify_after_action",
+        },
+    ]
+    safe_level_type = custom_api_agent_module._auto_discovered_followup_requests(
+        selection_payload,
+        ["desktop.read_ui", "desktop.safe_click", "desktop.type"],
+        timeline,
+    )
+    assert [
+        {
+            "tool": request["tool"],
+            "input": request["input"],
+            "evidence": request["observation_evidence"],
+        }
+        for request in safe_level_type
+    ] == [
+        {
+            "tool": "desktop.safe_click",
+            "input": {"x": 44, "y": 88},
+            "evidence": {
+                "source_tool": "desktop.read_ui",
+                "strategy": "observed_center",
+                "center": {"x": 44, "y": 88},
+            },
+        },
+        {
+            "tool": "desktop.type",
+            "input": {"text": "hello"},
+            "evidence": {
+                "source_tool": "desktop.read_ui",
+                "strategy": "focused_after_observed_target",
+            },
+        },
+        {
+            "tool": "desktop.read_ui",
+            "input": {"role_filter": "text field", "limit": 80},
+            "evidence": {
+                "source_tool": "desktop.read_ui",
+                "strategy": "post_action_observation",
+            },
         },
     ]
     low_level_type = custom_api_agent_module._auto_discovered_followup_requests(
@@ -18759,6 +18814,82 @@ def test_auto_discovered_app_search_followup_types_submits_and_verifies() -> Non
     }
     assert result_click_requests[3]["input_resolution"]["resolved_app_name"] == "Figma"
 
+    observed_result_click_requests = custom_api_agent_module._auto_discovered_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "image",
+                "target_action": "app_search",
+                "app_search": {
+                    "query": "logo 模板",
+                    "target": "搜索",
+                    "submit": True,
+                    "result_selection": {
+                        "action": "click",
+                        "input": {
+                            "target": "第一个结果",
+                            "role_filter": "",
+                            "limit": 80,
+                            "click_count": 1,
+                        },
+                    },
+                },
+            }
+        },
+        ["desktop.safe_click", "desktop.click", "desktop.ui_elements"],
+        [
+            *timeline,
+            _timeline(
+                "agent.tool.call",
+                "desktop.search_submit",
+                input_preview={},
+                result={"ok": True, "action": "desktop.search_submit"},
+            ),
+            _timeline(
+                "agent.tool.call",
+                "desktop.ui_elements",
+                input_preview={},
+                result={
+                    "ok": True,
+                    "data": {
+                        "elements": [
+                            {
+                                "role": "text field",
+                                "description": "搜索",
+                                "center": {"x": 200, "y": 120},
+                            },
+                            {
+                                "role": "link",
+                                "label": "Logo template gallery",
+                                "center": {"x": 320, "y": 460},
+                            },
+                        ]
+                    },
+                },
+            ),
+        ],
+    )
+
+    assert [request["tool"] for request in observed_result_click_requests] == [
+        "desktop.safe_click",
+        "desktop.ui_elements",
+    ]
+    assert observed_result_click_requests[0]["input"] == {"x": 320, "y": 460}
+    assert observed_result_click_requests[0]["planning_reason"] == (
+        "planner_followup_app_search_observed_result"
+    )
+    assert observed_result_click_requests[0]["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "click",
+        "target": "第一个结果",
+        "role_filter": "",
+    }
+    assert observed_result_click_requests[0]["observation_evidence"] == {
+        "source_tool": "desktop.read_ui",
+        "strategy": "observed_center",
+        "center": {"x": 320, "y": 460},
+    }
+
     key_confirm_requests = custom_api_agent_module._auto_discovered_app_followup_requests(
         {
             "followup_target": {
@@ -18808,6 +18939,213 @@ def test_auto_discovered_app_search_followup_types_submits_and_verifies() -> Non
     ]
     assert key_confirm_requests[2]["input"] == {"action": "arrow_down", "repeat_count": 1}
     assert key_confirm_requests[3]["input"] == {"action": "confirm"}
+
+
+def test_custom_api_agent_loop_clicks_observed_app_search_result_without_model(
+    monkeypatch,
+) -> None:
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = []
+    tool_runs: list[list[str]] = []
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+        "desktop.safe_click",
+    ]
+    initial_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "image", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        }
+    ]
+    selection_payload = {
+        "selected_source": "runtime_planner",
+        "followup_target": {
+            "kind": "desktop_discovered_app_action",
+            "app_query": "image",
+            "target_action": "app_search",
+            "safe_shortcut_action": "find",
+            "app_search": {
+                "query": "logo 模板",
+                "submit": True,
+                "result_selection": {
+                    "action": "click",
+                    "input": {
+                        "target": "第一个结果",
+                        "role_filter": "",
+                        "limit": 80,
+                        "click_count": 1,
+                    },
+                },
+            },
+            "post_action_observation": {
+                "tool": "desktop.ui_elements",
+                "input": {},
+                "continue_to_model": True,
+            },
+        },
+    }
+
+    monkeypatch.setattr(
+        RuntimeCustomApiAgentLoop,
+        "_runtime_planner_tool_requests",
+        lambda _self, _planning_context, _allowed_tools: (
+            None,
+            initial_requests,
+            selection_payload,
+        ),
+    )
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append([str(request.get("tool") or "") for request in tool_requests])
+        for request in tool_requests:
+            tool = str(request.get("tool") or "")
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if tool == "desktop.list_apps":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Found Figma",
+                    "data": {
+                        "query": "image",
+                        "apps": [
+                            {
+                                "name": "Figma",
+                                "path": "/Applications/Figma.app",
+                                "match_score": 94,
+                            }
+                        ],
+                    },
+                }
+            elif tool == "app.open_and_safe_shortcut":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Opened search in Figma",
+                    "data": {"app_name": payload.get("app_name")},
+                }
+            elif tool == "desktop.safe_type_text":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Typed search query",
+                    "data": {"text": payload.get("text")},
+                }
+            elif tool == "desktop.search_submit":
+                result = {"ok": True, "action": tool, "summary": "Submitted search"}
+            elif tool == "desktop.safe_click":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Clicked first result",
+                    "data": {"x": payload.get("x"), "y": payload.get("y")},
+                }
+            elif tool == "desktop.ui_elements":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "data": {
+                        "elements": [
+                            {
+                                "role": "text field",
+                                "description": "搜索",
+                                "center": {"x": 200, "y": 120},
+                            },
+                            {
+                                "role": "link",
+                                "label": "Logo template gallery",
+                                "center": {"x": 320, "y": 460},
+                            },
+                        ]
+                    },
+                }
+            else:
+                raise AssertionError(f"unexpected tool: {tool}")
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool,
+                    input_preview=payload,
+                    result=result,
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": allowed_tools},
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed: [{"name": tool} for tool in allowed],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=2,
+        operating_doctrine="Use runtime planner direct desktop execution.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("observed app search result should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "用设计工具搜索 logo 模板并点击第一个结果",
+        broker={},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-observed-result",
+    )
+
+    assert result
+    assert budget.claims == 0
+    assert tool_runs == [
+        ["desktop.list_apps"],
+        [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+        ["desktop.safe_click", "desktop.ui_elements"],
+    ]
+    safe_click_event = next(
+        event for event in timeline if event.get("detail") == "desktop.safe_click"
+    )
+    assert safe_click_event["input_preview"] == {"x": 320, "y": 460}
+    completed = next(
+        event for event in timeline if event["event"] == "agent.desktop.intent_completed"
+    )
+    assert "desktop.safe_click" in completed["tools"]
 
 
 def test_auto_discovered_app_generated_write_followup_returns_to_model() -> None:

@@ -734,6 +734,7 @@ class RuntimeCustomApiAgentLoop:
                             run_id=run_id,
                         )
                         auto_tool_timeline_start = len(timeline)
+                        auto_discovered_app_approval_requests = auto_discovered_app_requests
                         try:
                             self._run_tool_requests(
                                 auto_discovered_app_requests,
@@ -752,6 +753,59 @@ class RuntimeCustomApiAgentLoop:
                                 tool_timeline_start=auto_tool_timeline_start,
                                 run_id=run_id,
                             )
+                            auto_observed_result_requests = (
+                                _auto_discovered_app_search_observed_result_requests(
+                                    followup_selection_payload,
+                                    allowed_tools,
+                                    timeline,
+                                )
+                            )
+                            if auto_observed_result_requests:
+                                auto_discovered_app_approval_requests = [
+                                    *auto_discovered_app_requests,
+                                    *auto_observed_result_requests,
+                                ]
+                                self._record_auto_model_followup_app_write_plan(
+                                    auto_observed_result_requests,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                )
+                                self._record_desktop_permission_preflight(
+                                    auto_observed_result_requests,
+                                    broker,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                )
+                                self._record_desktop_tool_policy_decisions(
+                                    auto_observed_result_requests,
+                                    allowed_tools=allowed_tools,
+                                    agent=agent,
+                                    run_id=run_id,
+                                )
+                                observed_tool_timeline_start = len(timeline)
+                                self._run_tool_requests(
+                                    auto_observed_result_requests,
+                                    allowed_tools,
+                                    broker,
+                                    messages,
+                                    timeline,
+                                    artifacts,
+                                    next_iteration=start_iteration,
+                                    run_id=run_id,
+                                    budget=budget,
+                                )
+                                self._record_runtime_planner_task_progress_events(
+                                    runtime_planner_decision,
+                                    timeline=timeline,
+                                    tool_timeline_start=observed_tool_timeline_start,
+                                    run_id=run_id,
+                                )
+                                auto_discovered_app_requests = [
+                                    *_tool_requests_without_model_followup(
+                                        auto_discovered_app_requests
+                                    ),
+                                    *auto_observed_result_requests,
+                                ]
                         except AgentApprovalRequired as exc:
                             self._record_runtime_planner_task_progress_events(
                                 runtime_planner_decision,
@@ -766,19 +820,19 @@ class RuntimeCustomApiAgentLoop:
                             )
                             planned_tool = str(
                                 pending_approval.get("tool")
-                                or auto_discovered_app_requests[0].get("tool")
+                                or auto_discovered_app_approval_requests[0].get("tool")
                                 or ""
                             )
                             approval_request = self._planned_request_for_tool(
-                                auto_discovered_app_requests,
+                                auto_discovered_app_approval_requests,
                                 planned_tool,
                             )
                             planned_input = self._pending_approval_input_preview(
                                 pending_approval,
                                 approval_request,
                                 (
-                                    auto_discovered_app_requests[0]
-                                    if auto_discovered_app_requests
+                                    auto_discovered_app_approval_requests[0]
+                                    if auto_discovered_app_approval_requests
                                     else {}
                                 ),
                             )
@@ -7659,6 +7713,7 @@ def _auto_discovered_followup_requests(
 ) -> list[dict[str, Any]]:
     for factory in (
         _auto_desktop_observed_action_followup_requests,
+        _auto_discovered_app_search_observed_result_requests,
         _auto_discovered_app_followup_requests,
         _auto_discovered_media_playback_followup_requests,
     ):
@@ -7666,6 +7721,81 @@ def _auto_discovered_followup_requests(
         if requests:
             return requests
     return []
+
+
+def _auto_discovered_app_search_observed_result_requests(
+    selection_payload: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    planning_reason: str = "planner_followup_app_search_observed_result",
+) -> list[dict[str, Any]]:
+    target = (
+        selection_payload.get("followup_target")
+        if isinstance(selection_payload.get("followup_target"), Mapping)
+        else {}
+    )
+    if str(target.get("kind") or "").strip() != "desktop_discovered_app_action":
+        return []
+    if str(target.get("target_action") or "").strip() != "app_search":
+        return []
+    if not _latest_desktop_observation_succeeded(timeline):
+        return []
+    if not _latest_desktop_observation_follows_search_submission(timeline):
+        return []
+    app_search = _discovered_app_search_payload(target)
+    result_selection = _discovered_app_search_result_selection(app_search)
+    if str(result_selection.get("action") or "").strip() != "click":
+        return []
+    observed_target = _observed_action_target_from_app_search_result_selection(
+        result_selection,
+    )
+    if not observed_target:
+        return []
+    requests = _auto_desktop_observed_action_followup_requests(
+        {"followup_target": observed_target},
+        allowed_tools,
+        timeline,
+        planning_reason=planning_reason,
+    )
+    return _annotate_auto_followup_requests_from_tool_plan(requests, selection_payload)
+
+
+def _observed_action_target_from_app_search_result_selection(
+    result_selection: Mapping[str, Any],
+) -> dict[str, Any]:
+    raw_input = (
+        result_selection.get("input")
+        if isinstance(result_selection.get("input"), Mapping)
+        else {}
+    )
+    target_label = str(
+        raw_input.get("target")
+        or result_selection.get("target")
+        or "first result"
+    ).strip()
+    if not target_label:
+        return {}
+    role_filter = str(
+        raw_input.get("role_filter")
+        or result_selection.get("role_filter")
+        or ""
+    ).strip()
+    return {
+        "kind": "desktop_observed_action",
+        "target_action": "click",
+        "target": target_label,
+        "role_filter": role_filter,
+        "click_count": _clean_model_followup_int(
+            raw_input.get("click_count", result_selection.get("click_count")),
+            default=1,
+        ),
+        "limit": _clean_model_followup_int(
+            raw_input.get("limit", result_selection.get("limit")),
+            default=80,
+        ),
+        "observation_source": "desktop.read_ui",
+    }
 
 
 def _auto_desktop_observed_action_followup_requests(
@@ -7743,7 +7873,8 @@ def _auto_desktop_observed_click_requests(
             role_filter=role_filter,
             planning_reason=planning_reason,
         )
-    if "desktop.click" not in allowed:
+    low_level_tool = _first_allowed_tool(("desktop.safe_click", "desktop.click"), allowed)
+    if not low_level_tool:
         return []
     center = _latest_desktop_observation_match_center(
         timeline,
@@ -7754,12 +7885,8 @@ def _auto_desktop_observed_click_requests(
         return []
     request = _with_observed_action_metadata(
         _request_like(
-            "desktop.click",
-            {
-                "x": center["x"],
-                "y": center["y"],
-                "click_count": click_count,
-            },
+            low_level_tool,
+            _observed_click_input(low_level_tool, center, click_count),
             source="runtime_planner",
             planning_reason=planning_reason,
         ),
@@ -7899,7 +8026,10 @@ def _auto_desktop_observed_type_requests(
             role_filter=role_filter,
             evidence={"strategy": "semantic_ui_tool"},
         )
-    elif "desktop.click" in allowed:
+    else:
+        low_level_tool = _first_allowed_tool(("desktop.safe_click", "desktop.click"), allowed)
+        if not low_level_tool:
+            return []
         center = _latest_desktop_observation_match_center(
             timeline,
             execution_target,
@@ -7909,8 +8039,8 @@ def _auto_desktop_observed_type_requests(
             return []
         click_request = _with_observed_action_metadata(
             _request_like(
-                "desktop.click",
-                {"x": center["x"], "y": center["y"], "click_count": 1},
+                low_level_tool,
+                _observed_click_input(low_level_tool, center, 1),
                 source="runtime_planner",
                 planning_reason=planning_reason,
             ),
@@ -7920,8 +8050,6 @@ def _auto_desktop_observed_type_requests(
             role_filter=role_filter,
             evidence={"strategy": "observed_center", "center": center},
         )
-    else:
-        return []
     requests = [
         click_request,
         _with_observed_action_metadata(
@@ -7948,6 +8076,17 @@ def _auto_desktop_observed_type_requests(
     )
 
 
+def _observed_click_input(
+    tool_name: str,
+    center: Mapping[str, Any],
+    click_count: int,
+) -> dict[str, Any]:
+    payload = {"x": center["x"], "y": center["y"]}
+    if str(tool_name or "").strip() == "desktop.click":
+        payload["click_count"] = click_count
+    return payload
+
+
 def _latest_desktop_observation_succeeded(timeline: list[dict[str, Any]]) -> bool:
     for event in reversed(timeline):
         if str(event.get("event") or "").strip() != "agent.tool.call":
@@ -7957,6 +8096,35 @@ def _latest_desktop_observation_succeeded(timeline: list[dict[str, Any]]) -> boo
             continue
         result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
         return result.get("ok") is True
+    return False
+
+
+def _latest_desktop_observation_follows_search_submission(
+    timeline: list[dict[str, Any]],
+) -> bool:
+    latest_observation_index = -1
+    for index in range(len(timeline) - 1, -1, -1):
+        event = timeline[index]
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        tool_name = str(event.get("detail") or "").strip()
+        if tool_name not in {"desktop.read_ui", "desktop.ui_elements"}:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is True:
+            latest_observation_index = index
+        break
+    if latest_observation_index <= 0:
+        return False
+    for event in reversed(timeline[:latest_observation_index]):
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        tool_name = str(event.get("detail") or "").strip()
+        if tool_name in {"desktop.search_submit", "desktop.submit_foreground"}:
+            result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+            return result.get("ok") is not False
+        if tool_name in {"desktop.list_apps", "desktop.running_apps"}:
+            return False
     return False
 
 
@@ -8084,6 +8252,19 @@ def _tool_requests_include_model_followup(requests: Iterable[Mapping[str, Any]])
     )
 
 
+def _tool_requests_without_model_followup(
+    requests: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    cleaned: list[dict[str, Any]] = []
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        item = dict(request)
+        item.pop("continue_to_model", None)
+        cleaned.append(item)
+    return cleaned
+
+
 def _runtime_planner_should_trace_tool_requests(decision: Any | None) -> bool:
     steps = getattr(
         getattr(getattr(decision, "plan", None), "tool_plan", None),
@@ -8163,10 +8344,27 @@ def _latest_desktop_observation_match_center(
     elements = _latest_desktop_observation_elements(timeline)
     if not elements:
         return {}
+    ordinal = _observed_desktop_target_ordinal(target)
+    if ordinal:
+        matches = _ordinal_observed_desktop_elements(elements, ordinal, role_filter)
+        if matches:
+            center = (
+                matches[0].get("center")
+                if isinstance(matches[0].get("center"), Mapping)
+                else {}
+            )
+            x = center.get("x")
+            y = center.get("y")
+            if x is not None and y is not None:
+                return {"x": x, "y": y}
     matches = _matching_observed_desktop_elements(elements, target, role_filter)
     if not matches:
         return {}
-    center = matches[0].get("center") if isinstance(matches[0].get("center"), Mapping) else {}
+    center = (
+        matches[0].get("center")
+        if isinstance(matches[0].get("center"), Mapping)
+        else {}
+    )
     x = center.get("x")
     y = center.get("y")
     if x is None or y is None:
@@ -8190,6 +8388,99 @@ def _latest_desktop_observation_elements(timeline: list[dict[str, Any]]) -> list
             elements = result.get("elements") if isinstance(result.get("elements"), list) else []
         return elements
     return []
+
+
+def _observed_desktop_target_ordinal(target: str) -> int:
+    normalized = _normalize_observed_desktop_text(target)
+    if normalized in {
+        "first result",
+        "first item",
+        "top result",
+        "第一个结果",
+        "第1个结果",
+        "第一项",
+        "第一个",
+        "首个结果",
+    }:
+        return 1
+    match = re.fullmatch(r"(?:result|item)\s*(\d+)", normalized)
+    if match:
+        return max(1, int(match.group(1)))
+    match = re.fullmatch(r"第\s*(\d+)\s*(?:个)?(?:结果|项目|项)?", normalized)
+    if match:
+        return max(1, int(match.group(1)))
+    return 0
+
+
+def _ordinal_observed_desktop_elements(
+    elements: list[Any],
+    ordinal: int,
+    role_filter: str,
+) -> list[dict[str, Any]]:
+    candidates: list[dict[str, Any]] = []
+    normalized_filter = _normalize_observed_desktop_text(role_filter)
+    for raw_element in elements:
+        if not isinstance(raw_element, Mapping):
+            continue
+        element = dict(raw_element)
+        if element.get("enabled") is False:
+            continue
+        center = element.get("center") if isinstance(element.get("center"), Mapping) else {}
+        if center.get("x") is None or center.get("y") is None:
+            continue
+        searchable = _normalize_observed_desktop_text(
+            " ".join(
+                str(element.get(key) or "")
+                for key in ("role", "subrole", "name", "description", "value", "label")
+            )
+        )
+        if normalized_filter:
+            if normalized_filter not in searchable:
+                continue
+        elif not _observed_desktop_element_looks_actionable_result(element, searchable):
+            continue
+        candidates.append(element)
+    index = max(0, ordinal - 1)
+    return candidates[index : index + 1]
+
+
+def _observed_desktop_element_looks_actionable_result(
+    element: Mapping[str, Any],
+    searchable: str,
+) -> bool:
+    if not searchable:
+        return False
+    if any(
+        token in searchable
+        for token in (
+            "text field",
+            "search field",
+            "toolbar",
+            "menu bar",
+            "window",
+        )
+    ):
+        return False
+    if any(
+        token in searchable
+        for token in (
+            "button",
+            "link",
+            "row",
+            "cell",
+            "group",
+            "static text",
+            "image",
+        )
+    ):
+        return True
+    label = str(
+        element.get("name")
+        or element.get("description")
+        or element.get("label")
+        or ""
+    ).strip()
+    return bool(label)
 
 
 def _matching_observed_desktop_elements(
@@ -9587,11 +9878,15 @@ def _discovered_app_type_text_request(
     planning_reason: str,
 ) -> dict[str, Any]:
     if "desktop.safe_type_text" in allowed:
-        return _request_like(
-            "desktop.safe_type_text",
-            {"text": text},
-            source=source,
-            planning_reason=planning_reason,
+        return _with_discovered_app_resolution(
+            _request_like(
+                "desktop.safe_type_text",
+                {"text": text},
+                source=source,
+                planning_reason=planning_reason,
+            ),
+            app_query,
+            app_name,
         )
     if "app.focus_and_safe_type_text" in allowed:
         return _with_discovered_app_resolution(
