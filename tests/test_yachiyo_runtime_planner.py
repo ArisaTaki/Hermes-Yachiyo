@@ -29103,6 +29103,65 @@ def test_planner_first_direct_selection_can_include_task_execution_context() -> 
     assert operation_request["replan_triggers"] == ["verification_failed"]
 
 
+def test_runtime_planner_execution_keeps_open_and_focus_verification_steps() -> None:
+    open_allowed_tools = ["desktop.list_apps", "app.open", "desktop.active_window"]
+    open_selection = planner_first_direct_tool_selection(
+        "打开 PixelForge",
+        open_allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    open_envelope = runtime_execution_envelope_from_decision(
+        open_selection.decision,
+        allowed_tools=open_allowed_tools,
+    )
+
+    assert [request["tool"] for request in open_selection.requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert open_envelope is not None
+    assert [request.tool_name for request in open_envelope.requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert open_envelope.requests[-1].runtime_stage == "verify"
+    assert open_envelope.requests[-1].depends_on == ["open-or-focus-app"]
+
+    focus_allowed_tools = [
+        "desktop.list_apps",
+        "desktop.windows",
+        "app.focus_window",
+        "desktop.active_window",
+    ]
+    focus_selection = planner_first_direct_tool_selection(
+        "切到 Slack 的 General 窗口",
+        focus_allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    focus_envelope = runtime_execution_envelope_from_decision(
+        focus_selection.decision,
+        allowed_tools=focus_allowed_tools,
+    )
+
+    assert [request["tool"] for request in focus_selection.requests] == [
+        "desktop.list_apps",
+        "desktop.windows",
+        "app.focus_window",
+        "desktop.active_window",
+    ]
+    assert focus_envelope is not None
+    assert [request.tool_name for request in focus_envelope.requests] == [
+        "desktop.list_apps",
+        "desktop.windows",
+        "app.focus_window",
+        "desktop.active_window",
+    ]
+    assert focus_envelope.requests[-1].runtime_stage == "verify"
+    assert focus_envelope.requests[-1].depends_on == ["focus-app-window"]
+
+
 def test_runtime_execution_envelope_projects_decision_into_executable_requests() -> None:
     allowed_tools = [
         "desktop.inspect_app",
