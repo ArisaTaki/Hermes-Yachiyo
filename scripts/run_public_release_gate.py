@@ -207,6 +207,8 @@ def run_public_release_gate(
         else "needs_release_evidence"
     )
     ok = not failed and (release_ready or not require_release_ready)
+    next_actions = _next_actions(check_results, release_smoke=release_smoke)
+    external_requirements = _external_requirements(next_actions)
     return {
         "ok": ok,
         "release_ready": release_ready,
@@ -218,9 +220,11 @@ def run_public_release_gate(
         "passed_count": sum(1 for item in check_results if item["status"] == "passed"),
         "failed_count": len(failed),
         "release_blocker_count": release_blocker_count,
+        "external_requirement_count": len(external_requirements),
+        "external_requirements": external_requirements,
         "checks": check_results,
         "release_smoke": release_smoke,
-        "next_actions": _next_actions(check_results, release_smoke=release_smoke),
+        "next_actions": next_actions,
     }
 
 
@@ -672,6 +676,95 @@ def _next_actions(
     return actions
 
 
+def _external_requirements(actions: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    requirements: dict[str, dict[str, Any]] = {}
+    for action in actions:
+        action_id = str(action.get("id") or "").strip()
+        if action_id == "public_demo_real_desktop":
+            _merge_external_requirement(
+                requirements,
+                requirement_id="real_desktop_smoke_opt_in",
+                label="Real desktop smoke opt-in",
+                kind="desktop_operation",
+                action=action,
+            )
+        elif action_id == "public_demo_provider":
+            _merge_external_requirement(
+                requirements,
+                requirement_id="provider_smoke_credentials",
+                label="Provider Workflow smoke credentials",
+                kind="provider_credentials",
+                action=action,
+            )
+    order = {
+        "real_desktop_smoke_opt_in": 0,
+        "provider_smoke_credentials": 1,
+    }
+    return sorted(
+        requirements.values(),
+        key=lambda item: order.get(str(item.get("id") or ""), 99),
+    )
+
+
+def _merge_external_requirement(
+    requirements: dict[str, dict[str, Any]],
+    *,
+    requirement_id: str,
+    label: str,
+    kind: str,
+    action: Mapping[str, Any],
+) -> None:
+    requirement = requirements.setdefault(
+        requirement_id,
+        {
+            "id": requirement_id,
+            "label": label,
+            "kind": kind,
+            "status": "missing",
+            "missing_required_flow_ids": [],
+            "missing_env": [],
+            "blocking_conditions": [],
+            "commands": [],
+            "release_blockers": [],
+        },
+    )
+    _append_unique(
+        requirement["missing_required_flow_ids"],
+        _string_list(action.get("missing_required_flow_ids")),
+    )
+    command = str(action.get("command") or "").strip()
+    if command:
+        _append_unique(requirement["commands"], [command])
+    blockers = _dict_list(action.get("release_blockers"))
+    if blockers:
+        requirement["release_blockers"].extend(blockers)
+    for blocker in blockers:
+        evidence_summary = _dict(blocker.get("evidence_summary"))
+        _append_unique(
+            requirement["missing_env"],
+            _string_list(evidence_summary.get("missing_env")),
+        )
+        structured_conditions = [
+            *_string_list(evidence_summary.get("blocking_conditions")),
+            *_string_list(evidence_summary.get("blocking_condition")),
+        ]
+        _append_unique(
+            requirement["blocking_conditions"],
+            structured_conditions,
+        )
+        reason = str(blocker.get("reason") or "").strip()
+        if reason and not structured_conditions:
+            _append_unique(requirement["blocking_conditions"], [reason])
+
+
+def _append_unique(target: list[Any], values: Sequence[Any]) -> None:
+    for value in values:
+        if value in (None, "", [], {}):
+            continue
+        if value not in target:
+            target.append(value)
+
+
 PUBLIC_DEMO_FLOW_FLAGS: dict[str, tuple[str, str]] = {
     "real_desktop_app_open": ("real_desktop", "--include-real-desktop-open"),
     "real_desktop_ui_inspection": ("real_desktop", "--include-real-desktop-ui-inspection"),
@@ -833,6 +926,29 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         missing_items = _string_list(release_smoke.get("missing_item_ids"))
         if missing_items:
             lines.append(f"Missing user paths: {', '.join(f'`{item}`' for item in missing_items)}")
+    external_requirements = _dict_list(summary.get("external_requirements"))
+    if external_requirements:
+        lines.extend(["", "## External Requirements", ""])
+        for requirement in external_requirements:
+            lines.append(f"- `{requirement.get('id')}` - {requirement.get('label')}")
+            missing_flows = _string_list(requirement.get("missing_required_flow_ids"))
+            if missing_flows:
+                lines.append(
+                    "  Missing demo flows: "
+                    + ", ".join(f"`{item}`" for item in missing_flows)
+                )
+            missing_env = _string_list(requirement.get("missing_env"))
+            if missing_env:
+                lines.append(
+                    "  Missing env: "
+                    + ", ".join(f"`{item}`" for item in missing_env)
+                )
+            blocking_conditions = _string_list(requirement.get("blocking_conditions"))
+            if blocking_conditions:
+                lines.append(
+                    "  Conditions: "
+                    + ", ".join(f"`{item}`" for item in blocking_conditions)
+                )
     actions = _dict_list(summary.get("next_actions"))
     if actions:
         lines.extend(["", "## Next Actions", ""])

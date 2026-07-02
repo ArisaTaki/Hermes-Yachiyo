@@ -518,6 +518,11 @@ def test_public_release_gate_does_not_double_count_public_demo_release_smoke_blo
     ]
     assert summary["release_smoke"]["missing_item_ids"] == ["public_demo"]
     assert summary["release_blocker_count"] == len(public_demo["release_blockers"]) == 3
+    assert summary["external_requirement_count"] == 2
+    assert [item["id"] for item in summary["external_requirements"]] == [
+        "real_desktop_smoke_opt_in",
+        "provider_smoke_credentials",
+    ]
 
 
 def test_public_release_gate_keeps_more_informative_public_demo_blocker(
@@ -608,6 +613,19 @@ def test_public_release_gate_keeps_more_informative_public_demo_blocker(
         "OHA_YACHIYO_SMOKE_BASE_URL",
         "OHA_YACHIYO_SMOKE_MODEL",
     ]
+    provider_requirement = next(
+        item
+        for item in summary["external_requirements"]
+        if item["id"] == "provider_smoke_credentials"
+    )
+    assert provider_requirement["missing_env"] == [
+        "OHA_YACHIYO_SMOKE_BASE_URL",
+        "OHA_YACHIYO_SMOKE_MODEL",
+    ]
+    markdown = gate.render_markdown(summary)
+    assert "## External Requirements" in markdown
+    assert "`provider_smoke_credentials`" in markdown
+    assert "`OHA_YACHIYO_SMOKE_BASE_URL`" in markdown
 
 
 def test_public_release_gate_passes_granular_real_desktop_demo_flags(
