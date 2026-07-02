@@ -28292,6 +28292,20 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     assert projected_requests[1]["step_id"] == "operate-foreground-ui"
     assert projected_requests[1]["capability_id"] == "desktop.ui_operation"
     assert projected_requests[1]["approval_required"] is True
+    assert projected_requests[1]["decision_id"] == decision.decision_id
+    assert projected_requests[1]["plan_id"] == decision.plan.plan_id
+    assert projected_requests[1]["core_id"] == decision.plan.task_core.core_id
+    assert (
+        projected_requests[1]["workspace_id"]
+        == decision.plan.task_core.workspace.workspace_id
+    )
+    assert projected_requests[1]["task_todo"]["step_id"] == "operate-foreground-ui"
+    assert projected_requests[1]["task_todo"]["tool_name"] == "app.open_and_click_ui_element"
+    assert projected_requests[1]["task_checkpoints"][0]["after_step_id"] == "operate-foreground-ui"
+    assert (
+        projected_requests[1]["task_workspace_items"][0]["source_step_id"]
+        == "operate-foreground-ui"
+    )
 
 
 def test_yachiyo_agent_service_uses_fake_runtime_planner_port() -> None:

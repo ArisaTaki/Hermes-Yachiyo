@@ -107,7 +107,7 @@ def runtime_execution_requests_from_envelope_payload(
     for request in requests:
         if not isinstance(request, Mapping):
             continue
-        projected_request = _tool_request_from_execution_request(request)
+        projected_request = _tool_request_from_execution_request(request, envelope=envelope)
         tool_name = str(projected_request.get("tool") or "").strip()
         if not tool_name:
             continue
@@ -157,7 +157,11 @@ def _execution_request_snapshot(
     )
 
 
-def _tool_request_from_execution_request(request: Mapping[str, Any]) -> dict[str, Any]:
+def _tool_request_from_execution_request(
+    request: Mapping[str, Any],
+    *,
+    envelope: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
     request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     payload: dict[str, Any] = {
         "protocol": str(request.get("protocol") or "json_fallback"),
@@ -181,7 +185,97 @@ def _tool_request_from_execution_request(request: Mapping[str, Any]) -> dict[str
         value = request.get(key)
         if value not in (None, "", [], {}):
             payload[key] = value
+    if isinstance(envelope, Mapping):
+        _apply_envelope_task_context(payload, envelope)
     return payload
+
+
+def _apply_envelope_task_context(
+    payload: dict[str, Any],
+    envelope: Mapping[str, Any],
+) -> None:
+    for key in ("decision_id", "plan_id", "intent_kind"):
+        value = envelope.get(key)
+        if key not in payload and value not in (None, "", [], {}):
+            payload[key] = value
+
+    task_core = _task_core_payload(envelope)
+    if not task_core:
+        return
+    if "core_id" not in payload:
+        core_id = str(task_core.get("core_id") or "").strip()
+        if core_id:
+            payload["core_id"] = core_id
+    workspace_id = _task_workspace_id(task_core)
+    if workspace_id and "workspace_id" not in payload:
+        payload["workspace_id"] = workspace_id
+
+    step_id = str(payload.get("step_id") or payload.get("planner_step_id") or "").strip()
+    if not step_id:
+        return
+
+    todo = _task_todo_for_step(task_core, step_id)
+    if todo and "task_todo" not in payload:
+        payload["task_todo"] = todo
+    checkpoints = _task_checkpoints_for_step(task_core, step_id)
+    if checkpoints and "task_checkpoints" not in payload:
+        payload["task_checkpoints"] = checkpoints
+    workspace_items = _task_workspace_items_for_step(task_core, step_id)
+    if workspace_items and "task_workspace_items" not in payload:
+        payload["task_workspace_items"] = workspace_items
+
+
+def _task_core_payload(envelope: Mapping[str, Any]) -> Mapping[str, Any]:
+    task_core = envelope.get("task_core")
+    return task_core if isinstance(task_core, Mapping) else {}
+
+
+def _task_workspace_id(task_core: Mapping[str, Any]) -> str:
+    workspace = task_core.get("workspace")
+    if not isinstance(workspace, Mapping):
+        return ""
+    return str(workspace.get("workspace_id") or "").strip()
+
+
+def _task_todo_for_step(
+    task_core: Mapping[str, Any],
+    step_id: str,
+) -> dict[str, Any]:
+    for todo in _mapping_list(task_core.get("todos")):
+        if str(todo.get("step_id") or "").strip() == step_id:
+            return dict(todo)
+    return {}
+
+
+def _task_checkpoints_for_step(
+    task_core: Mapping[str, Any],
+    step_id: str,
+) -> list[dict[str, Any]]:
+    return [
+        dict(checkpoint)
+        for checkpoint in _mapping_list(task_core.get("checkpoints"))
+        if str(checkpoint.get("after_step_id") or "").strip() == step_id
+    ]
+
+
+def _task_workspace_items_for_step(
+    task_core: Mapping[str, Any],
+    step_id: str,
+) -> list[dict[str, Any]]:
+    workspace = task_core.get("workspace")
+    if not isinstance(workspace, Mapping):
+        return []
+    return [
+        dict(item)
+        for item in _mapping_list(workspace.get("items"))
+        if str(item.get("source_step_id") or "").strip() == step_id
+    ]
+
+
+def _mapping_list(value: Any) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
 
 
 def _allowed_tools(

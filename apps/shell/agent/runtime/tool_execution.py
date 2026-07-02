@@ -6,6 +6,7 @@ from collections.abc import Callable
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
+from apps.shell.agent.runtime.task_progress import append_task_progress_events_for_tool_result
 from packages.security import redact_api_error_text
 
 _TOOL_REQUEST_TRACE_KEYS = (
@@ -731,6 +732,18 @@ class RuntimeToolRequestRunner:
                             **trace_payload,
                         },
                     )
+                append_task_progress_events_for_tool_result(
+                    tool_request={**tool_request, "tool": tool_name},
+                    tool_event={
+                        "event": "agent.tool.skipped",
+                        "detail": tool_name,
+                        "result": runtime_skip,
+                    },
+                    timeline=timeline,
+                    timeline_factory=self._timeline,
+                    append_run_event=self._append_run_event,
+                    run_id=run_id,
+                )
                 self._tool_loop_projection.append_tool_result_message(
                     messages,
                     {**tool_request, "tool": tool_name},
@@ -770,6 +783,18 @@ class RuntimeToolRequestRunner:
                             **trace_payload,
                         },
                     )
+                append_task_progress_events_for_tool_result(
+                    tool_request={**tool_request, "tool": tool_name},
+                    tool_event={
+                        "event": "agent.tool.skipped",
+                        "detail": tool_name,
+                        "result": tool_result,
+                    },
+                    timeline=timeline,
+                    timeline_factory=self._timeline,
+                    append_run_event=self._append_run_event,
+                    run_id=run_id,
+                )
                 self._tool_loop_projection.append_tool_result_message(
                     messages,
                     {**tool_request, "tool": tool_name},
@@ -786,6 +811,18 @@ class RuntimeToolRequestRunner:
                 budget=budget,
             )
             if tool_result.get("approval_required"):
+                append_task_progress_events_for_tool_result(
+                    tool_request={**tool_request, "tool": tool_name},
+                    tool_event={
+                        "event": "agent.tool.call",
+                        "detail": tool_name,
+                        "result": tool_result,
+                    },
+                    timeline=timeline,
+                    timeline_factory=self._timeline,
+                    append_run_event=self._append_run_event,
+                    run_id=run_id,
+                )
                 pending_approval = self._pending_approval_builder.build(
                     tool_request,
                     messages=messages,
@@ -813,11 +850,35 @@ class RuntimeToolRequestRunner:
                         **trace_payload,
                     )
                 )
+                append_task_progress_events_for_tool_result(
+                    tool_request={**tool_request, "tool": tool_name},
+                    tool_event={
+                        "event": "agent.tool.failed",
+                        "detail": tool_name,
+                        "result": tool_result,
+                    },
+                    timeline=timeline,
+                    timeline_factory=self._timeline,
+                    append_run_event=self._append_run_event,
+                    run_id=run_id,
+                )
                 raise AgentRuntimeError(fatal_failure)
             self._tool_loop_projection.append_tool_result_message(
                 messages,
                 tool_request,
                 tool_result,
+            )
+            append_task_progress_events_for_tool_result(
+                tool_request={**tool_request, "tool": tool_name},
+                tool_event={
+                    "event": "agent.tool.call",
+                    "detail": tool_name,
+                    "result": tool_result,
+                },
+                timeline=timeline,
+                timeline_factory=self._timeline,
+                append_run_event=self._append_run_event,
+                run_id=run_id,
             )
             previous_readiness_blocker = foreground_readiness_blocker
             next_readiness_blocker = _updated_foreground_readiness_blocker(

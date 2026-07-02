@@ -20536,6 +20536,129 @@ def test_runtime_tool_runner_skips_unresolved_selected_discovered_app() -> None:
     assert run_events[-1]["payload"]["result"]["error"] == "app_resolution_failed"
 
 
+def test_runtime_tool_runner_projects_task_progress_from_tool_result() -> None:
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = []
+    messages = [
+        {"role": "system", "content": "Use tools."},
+        {"role": "user", "content": "检查 PixelForge"},
+    ]
+    run_events: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_value: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        result = {
+            "ok": True,
+            "action": tool,
+            "summary": "PixelForge is open and ready.",
+        }
+        timeline_value.append(
+            _timeline(
+                "agent.tool.call",
+                tool,
+                input_preview=dict(payload),
+                result=result,
+            )
+        )
+        return result
+
+    runner = RuntimeToolRequestRunner(
+        normalize_tool_name=normalize_tool_name,
+        input_preview=tool_input_preview,
+        run_budget=lambda _run_id, _timeline_value: budget,
+        user_goal_from_messages=lambda value: str(value[1].get("content") or ""),
+        goal_disallows_tool=lambda _goal, _tool: "",
+        timeline_factory=_timeline,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+        tool_loop_projection=RuntimeToolLoopProjectionBuilder(),
+        pending_approval_builder=NoopPendingApprovalBuilder(),
+        call_agent_tool=call_agent_tool,
+    )
+
+    runner.run(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.inspect_app",
+                "input": {"app_name": "PixelForge"},
+                "source": "runtime_planner",
+                "decision_id": "decision-1",
+                "plan_id": "runtime-plan-1",
+                "core_id": "task-core-1",
+                "workspace_id": "task-workspace-1",
+                "step_id": "inspect-app",
+                "capability_id": "desktop.app_discovery",
+                "task_todo": {
+                    "todo_id": "todo-inspect",
+                    "title": "Inspect PixelForge",
+                    "status": "pending",
+                    "step_id": "inspect-app",
+                    "tool_name": "desktop.inspect_app",
+                },
+                "task_checkpoints": [
+                    {
+                        "checkpoint_id": "checkpoint-inspect",
+                        "title": "Verify PixelForge inspection",
+                        "status": "planned",
+                        "after_step_id": "inspect-app",
+                    }
+                ],
+                "task_workspace_items": [
+                    {
+                        "item_id": "workspace-input-inspect",
+                        "title": "inspect-app.input.json",
+                        "kind": "scratch",
+                        "status": "planned",
+                        "source_step_id": "inspect-app",
+                    }
+                ],
+            }
+        ],
+        ["desktop.inspect_app"],
+        broker={},
+        messages=messages,
+        timeline=timeline,
+        artifacts=[],
+        next_iteration=1,
+        run_id="run-task-progress",
+        budget=budget,
+    )
+
+    workspace_event = next(
+        event for event in timeline if event["event"] == "agent.task.workspace_item.updated"
+    )
+    todo_event = next(event for event in timeline if event["event"] == "agent.task.todo.updated")
+    checkpoint_event = next(
+        event for event in timeline if event["event"] == "agent.task.checkpoint.updated"
+    )
+    assert workspace_event["workspace_item_id"] == "workspace-input-inspect"
+    assert workspace_event["status"] == "completed"
+    assert todo_event["todo_id"] == "todo-inspect"
+    assert todo_event["status"] == "completed"
+    assert todo_event["result_preview"] == {
+        "ok": True,
+        "action": "desktop.inspect_app",
+        "summary": "PixelForge is open and ready.",
+    }
+    assert checkpoint_event["checkpoint_id"] == "checkpoint-inspect"
+    assert checkpoint_event["status"] == "completed"
+    assert [event["event_type"] for event in run_events] == [
+        "agent.task.workspace_item.updated",
+        "agent.task.todo.updated",
+        "agent.task.checkpoint.updated",
+    ]
+    assert run_events[1]["payload"]["decision_id"] == "decision-1"
+
+
 def test_runtime_tool_runner_passes_resolved_foreground_app_to_ui_readback() -> None:
     budget = FakeBudget()
     timeline: list[dict[str, Any]] = []
