@@ -137,6 +137,9 @@ def test_approval_event_mapper_uses_top_level_run_context() -> None:
                 workflow_node_label="Review Gate",
                 group_id="group-1",
                 group_run_id="group-run-1",
+                core_id="core-1",
+                workspace_id="workspace-1",
+                task_id="task-1",
                 payload={
                     "pending_approval": {
                         "approval_id": "approval-top-level-context",
@@ -157,8 +160,14 @@ def test_approval_event_mapper_uses_top_level_run_context() -> None:
     assert approval.workflow_node_label == "Review Gate"
     assert approval.group_id == "group-1"
     assert approval.group_run_id == "group-run-1"
+    assert approval.core_id == "core-1"
+    assert approval.workspace_id == "workspace-1"
+    assert approval.task_id == "task-1"
     assert approval.input_preview["workflow_run_id"] == "workflow-run-1"
     assert approval.input_preview["group_run_id"] == "group-run-1"
+    assert approval.input_preview["core_id"] == "core-1"
+    assert approval.input_preview["workspace_id"] == "workspace-1"
+    assert approval.input_preview["task_id"] == "task-1"
 
 
 def test_approval_event_mapper_projects_scoped_desktop_intent_approval() -> None:

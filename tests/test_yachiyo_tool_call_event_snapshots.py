@@ -92,6 +92,9 @@ def test_tool_call_payload_from_event_uses_top_level_run_context() -> None:
             workflow_node_label="Read Files",
             group_id="group-1",
             group_run_id="group-run-1",
+            core_id="core-1",
+            workspace_id="workspace-1",
+            task_id="task-1",
             payload={
                 "tool_call_id": "call-2",
                 "input_preview": {"path": "README.md"},
@@ -108,8 +111,47 @@ def test_tool_call_payload_from_event_uses_top_level_run_context() -> None:
     assert payload["workflow_node_label"] == "Read Files"
     assert payload["group_id"] == "group-1"
     assert payload["group_run_id"] == "group-run-1"
+    assert payload["core_id"] == "core-1"
+    assert payload["workspace_id"] == "workspace-1"
+    assert payload["task_id"] == "task-1"
     assert payload["input_preview"]["workflow_run_id"] == "workflow-run-1"
     assert payload["input_preview"]["group_run_id"] == "group-run-1"
+    assert payload["input_preview"]["core_id"] == "core-1"
+    assert payload["input_preview"]["workspace_id"] == "workspace-1"
+    assert payload["input_preview"]["task_id"] == "task-1"
+
+
+def test_daily_desktop_intent_step_payloads_preserve_top_level_task_core_context() -> None:
+    calls = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                run_id="run-desktop-steps",
+                sequence=1,
+                event_type="agent.desktop.intent_completed",
+                detail="open_browser",
+                core_id="core-desktop",
+                workspace_id="workspace-desktop",
+                task_id="task-desktop",
+                payload={
+                    "steps": [
+                        {
+                            "tool": "app.open",
+                            "input_preview": {"app_name": "Safari"},
+                            "result": {"ok": True},
+                        }
+                    ],
+                },
+            )
+        ]
+    )
+
+    assert len(calls) == 1
+    assert calls[0].core_id == "core-desktop"
+    assert calls[0].workspace_id == "workspace-desktop"
+    assert calls[0].task_id == "task-desktop"
+    assert calls[0].input_preview["core_id"] == "core-desktop"
+    assert calls[0].input_preview["workspace_id"] == "workspace-desktop"
+    assert calls[0].input_preview["task_id"] == "task-desktop"
 
 
 def test_tool_call_snapshots_from_events_preserve_planner_trace_context() -> None:

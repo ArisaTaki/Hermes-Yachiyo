@@ -21,6 +21,9 @@ def run_event_context(event: PublicRunEvent) -> dict[str, Any]:
     context: dict[str, Any] = {}
     _set(context, "parent_run_id", event.parent_run_id)
     _set(context, "source_run_id", event.source_run_id)
+    _set(context, "core_id", event.core_id)
+    _set(context, "workspace_id", event.workspace_id)
+    _set(context, "task_id", event.task_id)
     _set(
         context,
         "source_runnable_id",

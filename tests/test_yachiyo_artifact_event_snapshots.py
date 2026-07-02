@@ -96,6 +96,9 @@ def test_artifact_snapshots_from_events_use_top_level_run_context() -> None:
                 workflow_node_label="Report",
                 group_id="group-1",
                 group_run_id="group-run-1",
+                core_id="core-1",
+                workspace_id="workspace-1",
+                task_id="task-1",
                 payload={
                     "artifact": {
                         "kind": "markdown",
@@ -117,6 +120,9 @@ def test_artifact_snapshots_from_events_use_top_level_run_context() -> None:
     assert artifact.workflow_node_label == "Report"
     assert artifact.group_id == "group-1"
     assert artifact.group_run_id == "group-run-1"
+    assert artifact.core_id == "core-1"
+    assert artifact.workspace_id == "workspace-1"
+    assert artifact.task_id == "task-1"
 
 
 def test_workflow_node_artifact_payload_defaults_without_nested_artifact() -> None:

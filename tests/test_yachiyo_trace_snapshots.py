@@ -97,6 +97,9 @@ def test_trace_snapshot_mappers_use_top_level_run_context() -> None:
                 workflow_node_label="Retrieve Context",
                 group_id="group-1",
                 group_run_id="group-run-1",
+                core_id="core-1",
+                workspace_id="workspace-1",
+                task_id="task-1",
                 payload={
                     "memories": [
                         {
@@ -119,6 +122,9 @@ def test_trace_snapshot_mappers_use_top_level_run_context() -> None:
     assert traces[0].workflow_node_label == "Retrieve Context"
     assert traces[0].group_id == "group-1"
     assert traces[0].group_run_id == "group-run-1"
+    assert traces[0].core_id == "core-1"
+    assert traces[0].workspace_id == "workspace-1"
+    assert traces[0].task_id == "task-1"
 
 
 def test_trace_snapshot_payload_previews_redact_sensitive_values() -> None:

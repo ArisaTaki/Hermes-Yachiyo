@@ -1326,6 +1326,9 @@ function publicRunEventContextRecord(event: PublicRunEvent): Record<string, unkn
   const context: Record<string, unknown> = {};
   setPublicRunEventContextValue(context, 'parent_run_id', event.parent_run_id);
   setPublicRunEventContextValue(context, 'source_run_id', event.source_run_id);
+  setPublicRunEventContextValue(context, 'core_id', event.core_id);
+  setPublicRunEventContextValue(context, 'workspace_id', event.workspace_id);
+  setPublicRunEventContextValue(context, 'task_id', event.task_id);
   setPublicRunEventContextValue(
     context,
     'source_runnable_id',
