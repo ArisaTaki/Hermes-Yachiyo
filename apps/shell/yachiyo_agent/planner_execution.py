@@ -122,6 +122,8 @@ def _prepend_unknown_app_discovery_requests(
                     )
                 )
                 discovered_queries.add(query_key)
+            if query_key:
+                request = _request_with_desktop_app_selection_source(request, app_name)
         normalized.append(request)
     return normalized
 
@@ -146,6 +148,24 @@ def _request_needs_app_discovery_first(
     if str(input_resolution.get("source_tool") or "").strip() == "desktop.list_apps":
         return False
     return not is_legacy_app_name_hint(app_name)
+
+
+def _request_with_desktop_app_selection_source(
+    request: dict[str, Any],
+    app_name: str,
+) -> dict[str, Any]:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    clean_app_name = str(app_name or payload.get("app_name") or "").strip()
+    if not clean_app_name:
+        return request
+    return {
+        **request,
+        "input": {
+            **dict(payload),
+            "selection_source": "desktop.list_apps",
+            "query": clean_app_name,
+        },
+    }
 
 
 def _defer_unknown_app_ui_element_operations_to_observation(
@@ -225,6 +245,8 @@ def _unknown_app_ui_observation_prepare_request(
         ).strip()
         or "planner_desktop_operation",
     )
+    if _request_targets_unknown_discovered_app(tool_name, payload, request):
+        prepare = _request_with_desktop_app_selection_source(prepare, app_name)
     _inherit_request_context_without_step(prepare, request)
     return prepare
 

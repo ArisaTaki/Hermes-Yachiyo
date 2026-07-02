@@ -29120,6 +29120,11 @@ def test_runtime_planner_execution_keeps_open_and_focus_verification_steps() -> 
         "app.open",
         "desktop.active_window",
     ]
+    assert open_selection.requests[1]["input"] == {
+        "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
+    }
     assert open_envelope is not None
     assert [request.tool_name for request in open_envelope.requests] == [
         "desktop.list_apps",
@@ -29160,6 +29165,28 @@ def test_runtime_planner_execution_keeps_open_and_focus_verification_steps() -> 
     ]
     assert focus_envelope.requests[-1].runtime_stage == "verify"
     assert focus_envelope.requests[-1].depends_on == ["focus-app-window"]
+
+    click_allowed_tools = [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.ui_elements",
+        "app.focus_and_click_ui_element",
+    ]
+    click_selection = planner_first_direct_tool_selection(
+        "在一个我没提过的新应用 PixelForge 点击 Export",
+        click_allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    assert [request["tool"] for request in click_selection.requests] == [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.ui_elements",
+    ]
+    assert click_selection.requests[1]["input"] == {
+        "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
+    }
 
 
 def test_runtime_execution_envelope_projects_decision_into_executable_requests() -> None:

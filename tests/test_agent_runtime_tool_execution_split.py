@@ -1262,6 +1262,98 @@ def test_runtime_tool_request_runner_records_discovered_app_name_resolution() ->
     assert ("run-1", "agent.tool.input_resolved", resolution_payload) in run_events
 
 
+def test_runtime_tool_request_runner_resolves_named_app_marked_from_discovery() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        ToolDescriptorRegistry.validate_payload(tool_name, payload)
+        calls.append((tool_name, payload))
+        if tool_name == "desktop.list_apps":
+            result = {
+                "ok": True,
+                "action": "desktop.list_apps",
+                "data": {
+                    "query": payload["query"],
+                    "best_match": {
+                        "name": "Pixel Forge Pro",
+                        "path": "/Applications/Pixel Forge Pro.app",
+                        "match_score": 91,
+                        "match_confidence": "high",
+                    },
+                },
+            }
+        else:
+            result = {
+                "ok": True,
+                "action": tool_name,
+                "data": {"app_name": payload["app_name"]},
+            }
+        timeline_arg.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+    messages = [{"role": "user", "content": "打开 PixelForge"}]
+
+    runner.run(
+        [
+            {"tool": "desktop.list_apps", "input": {"query": "PixelForge", "limit": 20}},
+            {
+                "tool": "app.open",
+                "input": {
+                    "app_name": "PixelForge",
+                    "selection_source": "desktop.list_apps",
+                    "query": "PixelForge",
+                },
+            },
+        ],
+        ["desktop.list_apps", "app.open"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-named-discovered-app",
+        budget=FakeBudget(),
+    )
+
+    assert calls == [
+        ("desktop.list_apps", {"query": "PixelForge", "limit": 20}),
+        ("app.open", {"app_name": "Pixel Forge Pro"}),
+    ]
+    resolution_payload = {
+        "tool": "app.open",
+        "field": "app_name",
+        "requested_app_name": "PixelForge",
+        "resolved_app_name": "Pixel Forge Pro",
+        "source_tool": "desktop.list_apps",
+        "resolved_app_path": "/Applications/Pixel Forge Pro.app",
+        "app_resolution_score": "91",
+        "app_resolution_confidence": "high",
+    }
+    assert [
+        event for event in timeline if event["event"] == "agent.tool.input_resolved"
+    ] == [
+        {
+            "event": "agent.tool.input_resolved",
+            "detail": "app.open",
+            **resolution_payload,
+        }
+    ]
+    assert ("run-named-discovered-app", "agent.tool.input_resolved", resolution_payload) in run_events
+
+
 def test_runtime_tool_request_runner_resolves_selected_discovered_app_placeholder() -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
     run_events: list[tuple[str, str, dict[str, Any]]] = []

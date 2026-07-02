@@ -18951,31 +18951,27 @@ def test_custom_api_agent_loop_executes_named_app_scope_without_model_or_legacy_
     )
 
     assert result == "已切到 SuperData Studio 并输入文字（5 个字符）。"
-    assert tool_runs == [
-        [
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.list_apps",
-                "input": {"query": "SuperData Studio", "limit": 20},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
-            {
-                "protocol": "json_fallback",
-                "tool": "app.focus_and_safe_type_text",
-                "input": {"app_name": "SuperData Studio", "text": "hello"},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.ui_elements",
-                "input": {},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
-        ]
+    assert [[request["tool"] for request in run] for run in tool_runs] == [
+        ["desktop.list_apps", "app.focus_and_safe_type_text", "desktop.ui_elements"]
     ]
+    assert [request["source"] for request in tool_runs[0]] == [
+        "runtime_planner",
+        "runtime_planner",
+        "runtime_planner",
+    ]
+    assert [request["planning_reason"] for request in tool_runs[0]] == [
+        "planner_desktop_operation",
+        "planner_desktop_operation",
+        "planner_desktop_operation",
+    ]
+    assert tool_runs[0][0]["input"] == {"query": "SuperData Studio", "limit": 20}
+    assert tool_runs[0][1]["input"] == {
+        "app_name": "SuperData Studio",
+        "text": "hello",
+        "selection_source": "desktop.list_apps",
+        "query": "SuperData Studio",
+    }
+    assert tool_runs[0][2]["input"] == {}
     selection_events = [
         event for event in timeline if event["event"] == "agent.plan.selection"
     ]
