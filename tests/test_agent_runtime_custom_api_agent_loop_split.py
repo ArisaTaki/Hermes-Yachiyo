@@ -22618,23 +22618,35 @@ def test_runtime_planner_media_query_execution_observes_results_before_click() -
     assert [request["tool"] for request in execution_requests] == [
         "desktop.list_apps",
         "app.open",
-        "app.focus_and_type_into_ui_element",
-        "desktop.search_submit",
         "desktop.ui_elements",
     ]
     observation_request = execution_requests[-1]
     assert observation_request["continue_to_model"] is True
-    assert observation_request["deferred_tool"] == "app.focus_and_click_ui_element"
+    assert observation_request["deferred_tool"] == "app.focus_and_type_into_ui_element"
     assert observation_request["deferred_input"] == {
+        "app_name": "Music",
+        "target": "search 搜索",
+        "text": "超时空辉夜姬",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert [request["tool"] for request in observation_request["deferred_continuation"]] == [
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    assert observation_request["deferred_continuation"][1]["deferred_tool"] == (
+        "app.focus_and_click_ui_element"
+    )
+    assert observation_request["deferred_continuation"][1]["deferred_input"] == {
         "app_name": "Music",
         "target": "first result",
         "role_filter": "",
         "limit": 80,
         "click_count": 1,
     }
-    assert observation_request["deferred_context"] == {}
     assert observation_request["input"] == {
         "app_name": "Music",
+        "role_filter": "text",
         "limit": 80,
     }
 
@@ -22712,9 +22724,9 @@ def test_custom_api_agent_loop_observes_media_search_results_before_default_clic
                         "data": {
                             "elements": [
                                 {
-                                    "role": "AXStaticText",
-                                    "name": "超时空辉夜姬 - Apple Music",
-                                    "center": {"x": 260, "y": 360},
+                                    "role": "text field",
+                                    "label": "search 搜索",
+                                    "center": {"x": 120, "y": 88},
                                 }
                             ],
                             "count": 1,
@@ -22723,6 +22735,52 @@ def test_custom_api_agent_loop_observes_media_search_results_before_default_clic
                 else:
                     raise AssertionError(f"unexpected initial media tool: {tool}")
             elif batch_index == 2:
+                if tool == "app.focus_and_type_into_ui_element":
+                    result = {
+                        "ok": True,
+                        "action": "app.focus_and_type_into_ui_element",
+                        "data": {
+                            "app_name": payload.get("app_name"),
+                            "target": payload.get("target"),
+                            "text": payload.get("text"),
+                        },
+                    }
+                elif tool == "desktop.search_submit":
+                    result = {"ok": True, "action": "desktop.search_submit"}
+                elif tool == "desktop.ui_elements":
+                    if tool_batches[-1].index(request) == 1:
+                        result = {
+                            "ok": True,
+                            "action": "desktop.ui_elements",
+                            "data": {
+                                "elements": [
+                                    {
+                                        "role": "text field",
+                                        "label": "search 搜索",
+                                        "value": "超时空辉夜姬",
+                                    }
+                                ],
+                                "count": 1,
+                            },
+                        }
+                    else:
+                        result = {
+                            "ok": True,
+                            "action": "desktop.ui_elements",
+                            "data": {
+                                "elements": [
+                                    {
+                                        "role": "AXStaticText",
+                                        "name": "超时空辉夜姬 - Apple Music",
+                                        "center": {"x": 260, "y": 360},
+                                    }
+                                ],
+                                "count": 1,
+                            },
+                        }
+                else:
+                    raise AssertionError(f"unexpected observed media result tool: {tool}")
+            elif batch_index == 3:
                 if tool == "app.focus_and_click_ui_element":
                     result = {
                         "ok": True,
@@ -22820,8 +22878,13 @@ def test_custom_api_agent_loop_observes_media_search_results_before_default_clic
     assert "Music" in str(result)
     assert [[request["tool"] for request in batch] for batch in tool_batches] == [
         [
+            "desktop.list_apps",
             "app.open",
+            "desktop.ui_elements",
+        ],
+        [
             "app.focus_and_type_into_ui_element",
+            "desktop.ui_elements",
             "desktop.search_submit",
             "desktop.ui_elements",
         ],
@@ -22829,8 +22892,10 @@ def test_custom_api_agent_loop_observes_media_search_results_before_default_clic
     ]
     observation_request = tool_batches[0][-1]
     assert observation_request["continue_to_model"] is True
-    assert observation_request["deferred_tool"] == "app.focus_and_click_ui_element"
-    observed_click_request = tool_batches[1][0]
+    assert observation_request["deferred_tool"] == "app.focus_and_type_into_ui_element"
+    result_observation_request = tool_batches[1][-1]
+    assert result_observation_request["deferred_tool"] == "app.focus_and_click_ui_element"
+    observed_click_request = tool_batches[2][0]
     assert observed_click_request["input"]["target"] == "first result"
     assert observed_click_request["step_id"] == "play-media-search-result"
     assert observed_click_request["capability_id"] == "desktop.ui_operation"

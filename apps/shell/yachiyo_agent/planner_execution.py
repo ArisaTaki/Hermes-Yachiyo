@@ -499,8 +499,6 @@ def _semantic_ui_type_deferred_continuation(
         if _is_execution_verification_request(later_request):
             if not saw_mutation:
                 return [], set()
-            if _is_deferred_observation_request(later_request):
-                return [], set()
             continuation.append(dict(later_request))
             continuation_indexes.add(later_index)
             return continuation, continuation_indexes
@@ -513,14 +511,6 @@ def _semantic_ui_type_deferred_continuation(
         continuation.append(dict(later_request))
         continuation_indexes.add(later_index)
     return (continuation, continuation_indexes) if saw_mutation else ([], set())
-
-
-def _is_deferred_observation_request(request: Mapping[str, Any]) -> bool:
-    return bool(
-        isinstance(request, Mapping)
-        and str(request.get("deferred_tool") or "").strip()
-        and isinstance(request.get("deferred_input"), Mapping)
-    )
 
 
 def _semantic_ui_type_observation_request(

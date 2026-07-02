@@ -1082,6 +1082,110 @@ class RuntimeCustomApiAgentLoop:
                             tool_timeline_start=auto_tool_timeline_start,
                             run_id=run_id,
                         )
+                        nested_deferred_observed_ui_requests = (
+                            _auto_deferred_observed_ui_followup_requests(
+                                auto_deferred_observed_ui_requests,
+                                allowed_tools,
+                                timeline,
+                            )
+                        )
+                        nested_deferred_observed_ui_requests = _drop_completed_auto_followup_prefix(
+                            nested_deferred_observed_ui_requests,
+                            timeline,
+                            tool_timeline_start=auto_tool_timeline_start,
+                        )
+                        if nested_deferred_observed_ui_requests:
+                            self._record_auto_model_followup_app_write_plan(
+                                nested_deferred_observed_ui_requests,
+                                timeline=timeline,
+                                run_id=run_id,
+                            )
+                            self._record_desktop_permission_preflight(
+                                nested_deferred_observed_ui_requests,
+                                broker,
+                                timeline=timeline,
+                                run_id=run_id,
+                            )
+                            self._record_desktop_tool_policy_decisions(
+                                nested_deferred_observed_ui_requests,
+                                allowed_tools=allowed_tools,
+                                agent=agent,
+                                run_id=run_id,
+                            )
+                            nested_tool_timeline_start = len(timeline)
+                            try:
+                                self._run_tool_requests(
+                                    nested_deferred_observed_ui_requests,
+                                    allowed_tools,
+                                    broker,
+                                    messages,
+                                    timeline,
+                                    artifacts,
+                                    next_iteration=start_iteration,
+                                    run_id=run_id,
+                                    budget=budget,
+                                )
+                            except AgentApprovalRequired as exc:
+                                self._record_runtime_planner_task_progress_events(
+                                    runtime_planner_decision,
+                                    timeline=timeline,
+                                    tool_timeline_start=nested_tool_timeline_start,
+                                    run_id=run_id,
+                                )
+                                pending_approval = (
+                                    exc.pending_approval
+                                    if isinstance(exc.pending_approval, dict)
+                                    else {}
+                                )
+                                planned_tool = str(
+                                    pending_approval.get("tool")
+                                    or nested_deferred_observed_ui_requests[0].get("tool")
+                                    or ""
+                                )
+                                approval_request = self._planned_request_for_tool(
+                                    nested_deferred_observed_ui_requests,
+                                    planned_tool,
+                                )
+                                planned_input = self._pending_approval_input_preview(
+                                    pending_approval,
+                                    approval_request,
+                                    (
+                                        nested_deferred_observed_ui_requests[0]
+                                        if nested_deferred_observed_ui_requests
+                                        else {}
+                                    ),
+                                )
+                                self._record_desktop_intent_approval_required(
+                                    planned_tool,
+                                    planned_input,
+                                    pending_approval=exc.pending_approval,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                    planned_request=approval_request,
+                                    source=self._approval_event_source(
+                                        approval_request,
+                                        planned_tool,
+                                    ),
+                                    planning_reason=self._approval_event_planning_reason(
+                                        approval_request,
+                                        planned_tool,
+                                    ),
+                                )
+                                raise
+                            self._record_runtime_planner_task_progress_events(
+                                runtime_planner_decision,
+                                timeline=timeline,
+                                tool_timeline_start=nested_tool_timeline_start,
+                                run_id=run_id,
+                            )
+                            direct_result = self._direct_daily_desktop_sequence_result(
+                                nested_deferred_observed_ui_requests,
+                                timeline,
+                                tool_timeline_start=nested_tool_timeline_start,
+                                run_id=run_id,
+                            )
+                            if direct_result:
+                                return direct_result
                         direct_result = self._direct_daily_desktop_sequence_result(
                             auto_deferred_observed_ui_requests,
                             timeline,
