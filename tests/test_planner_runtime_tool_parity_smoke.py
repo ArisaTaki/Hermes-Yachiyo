@@ -49,7 +49,12 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
         "app.open_and_safe_shortcut",
     ]
     assert case_by_id["capability_media_app_playback"]["request_tools"] == [
-        "desktop.list_apps"
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "media.music_app_open_and_play",
+        "desktop.ui_elements",
     ]
     assert case_by_id["clipboard_send_to_slack"]["request_tools"] == [
         "app.focus",
