@@ -191,7 +191,11 @@ def run_public_release_gate(
         else {}
     )
     release_smoke_blockers = _release_smoke_blockers(release_smoke)
-    release_blocker_count = len(demo_release_blockers) + len(release_smoke_blockers)
+    effective_release_smoke_blockers = _effective_release_smoke_blockers(
+        release_smoke_blockers,
+        check_results=check_results,
+    )
+    release_blocker_count = len(demo_release_blockers) + len(effective_release_smoke_blockers)
     release_ready = not failed and release_blocker_count == 0 and not plan_only
     status = (
         "planned"
@@ -587,6 +591,24 @@ def _release_smoke_blockers(assessment: Mapping[str, Any]) -> list[dict[str, Any
             "status": str(assessment.get("status") or "failed"),
             "reason": "release-smoke summary did not pass",
         }
+    ]
+
+
+def _effective_release_smoke_blockers(
+    blockers: Sequence[Mapping[str, Any]],
+    *,
+    check_results: Sequence[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    public_demo_expanded = any(
+        check.get("id") == "public_demo" and _dict_list(check.get("release_blockers"))
+        for check in check_results
+    )
+    if not public_demo_expanded:
+        return [dict(blocker) for blocker in blockers]
+    return [
+        dict(blocker)
+        for blocker in blockers
+        if str(blocker.get("id") or "").strip() != "public_demo"
     ]
 
 

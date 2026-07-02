@@ -454,6 +454,72 @@ def test_public_release_gate_accepts_existing_public_demo_reports(
     assert "--include-real-desktop-interaction" in desktop_action["command"]
 
 
+def test_public_release_gate_does_not_double_count_public_demo_release_smoke_blocker(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    report_path = tmp_path / "tmp" / "public-demo.json"
+    passed_flow_ids = set(gate._public_demo_required_flow_ids([]))
+    missing_flow_ids = {
+        "real_desktop_ui_inspection",
+        "real_desktop_interaction",
+        "workflow_provider",
+    }
+    passed_flow_ids.difference_update(missing_flow_ids)
+    _write_public_demo_batch_report(
+        report_path,
+        passed_flow_ids=passed_flow_ids,
+        failed_flow_ids=missing_flow_ids,
+    )
+
+    def fake_run(command):
+        command = list(command)
+        if "scripts/summarize_release_smoke.py" in command:
+            output_json = command[command.index("--output-json") + 1]
+            output_path = gate._resolve_path(Path(output_json))
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            output_path.write_text(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "status": "incomplete",
+                        "item_count": 9,
+                        "passed_count": 8,
+                        "missing_count": 1,
+                        "missing_item_ids": ["public_demo"],
+                        "items": [],
+                        "next_actions": [
+                            {
+                                "id": "public_demo",
+                                "command": "python scripts/run_public_demo_smokes.py --full-demo",
+                            }
+                        ],
+                    }
+                ),
+                encoding="utf-8",
+            )
+        return _completed(command)
+
+    monkeypatch.setattr(gate, "_run_command", fake_run)
+
+    summary = gate.run_public_release_gate(
+        tmp_dir="tmp/gate",
+        include_public_demo=False,
+        include_diagnostics_bundle=False,
+        public_demo_reports=["tmp/public-demo.json"],
+    )
+
+    public_demo = next(item for item in summary["checks"] if item["id"] == "public_demo")
+    assert public_demo["missing_required_flow_ids"] == [
+        "real_desktop_ui_inspection",
+        "real_desktop_interaction",
+        "workflow_provider",
+    ]
+    assert summary["release_smoke"]["missing_item_ids"] == ["public_demo"]
+    assert summary["release_blocker_count"] == len(public_demo["release_blockers"]) == 3
+
+
 def test_public_release_gate_keeps_more_informative_public_demo_blocker(
     tmp_path,
     monkeypatch,
