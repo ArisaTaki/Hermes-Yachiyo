@@ -9,11 +9,13 @@ from apps.shell.agent.runtime.events import redact_json_value
 
 from .contracts import (
     PublicRunEvent,
+    ReplanSignalSnapshot,
     TaskCheckpointSnapshot,
     TaskCoreSnapshot,
     TaskTodoItemSnapshot,
     TaskWorkspaceItemSnapshot,
     TaskWorkspaceSnapshot,
+    ToolPlanStepSnapshot,
 )
 
 
@@ -23,11 +25,15 @@ def task_core_snapshot_from_payload(
     events: Iterable[PublicRunEvent] | None = None,
 ) -> TaskCoreSnapshot | None:
     """Project the DeepAgent-style task core from planner metadata or events."""
-    for candidate in _task_core_candidates(payload, events or []):
+    event_list = list(events or [])
+    for candidate in _task_core_candidates(payload, event_list):
         snapshot = _task_core_snapshot_from_candidate(candidate)
         if snapshot is not None:
-            return _task_core_with_event_progress(snapshot, events or [])
-    return None
+            return _task_core_with_event_progress(snapshot, event_list)
+    fallback = _task_core_from_public_events(payload, event_list)
+    if fallback is None:
+        return None
+    return _task_core_with_event_progress(fallback, event_list)
 
 
 def _task_core_candidates(
@@ -123,6 +129,405 @@ def _task_core_snapshot_from_candidate(candidate: Any) -> TaskCoreSnapshot | Non
         return TaskCoreSnapshot.model_validate(redacted)
     except ValueError:
         return None
+
+
+def _task_core_from_public_events(
+    payload: Mapping[str, Any],
+    events: Iterable[PublicRunEvent],
+) -> TaskCoreSnapshot | None:
+    event_list = [
+        event
+        for event in events
+        if event.visibility == "user" and event.sensitivity == "public"
+    ]
+    if not event_list:
+        return None
+    steps = _tool_plan_steps_from_raw_payload(payload)
+    _extend_unique_tool_plan_steps(steps, _tool_plan_steps_from_events(event_list))
+    task_updates = _explicit_task_update_maps(event_list)
+    replan_signals = _replan_signals_from_events(event_list)
+    if not steps and not _has_explicit_task_updates(task_updates) and not replan_signals:
+        return None
+
+    base_id = _task_core_base_id(payload, event_list)
+    core_id = _text(payload.get("core_id") or f"task-core:{base_id}")
+    title = _task_core_title(payload, event_list)
+    workspace = TaskWorkspaceSnapshot(
+        workspace_id=_text(payload.get("workspace_id") or f"task-workspace:{base_id}"),
+        title=f"{title} Workspace" if title else "Task Workspace",
+        summary="Public task workspace reconstructed from planner and runtime events.",
+        items=_workspace_items_from_updates(task_updates),
+        context={
+            key: value
+            for key, value in {
+                "task_id": _text(payload.get("task_id")),
+                "run_id": _text(payload.get("run_id")),
+                "source": "public_run_events",
+            }.items()
+            if value
+        },
+        source="public_run_events",
+    )
+    return TaskCoreSnapshot(
+        core_id=core_id,
+        workspace=workspace,
+        todos=_todos_from_steps_and_updates(steps, task_updates),
+        checkpoints=_checkpoints_from_steps_and_updates(steps, task_updates),
+        replan_signals=[
+            *replan_signals,
+            *_replan_signals_from_steps(steps, replan_signals),
+        ],
+        source="public_run_events",
+    )
+
+
+def _tool_plan_steps_from_events(events: Iterable[PublicRunEvent]) -> list[ToolPlanStepSnapshot]:
+    steps: list[ToolPlanStepSnapshot] = []
+    seen_step_ids: set[str] = set()
+    for event in events:
+        payload = event.payload if isinstance(event.payload, Mapping) else {}
+        if _planner_event_type(event) == "agent.plan.created":
+            plan = payload.get("plan") if isinstance(payload.get("plan"), Mapping) else {}
+            tool_plan = (
+                plan.get("tool_plan")
+                if isinstance(plan.get("tool_plan"), Mapping)
+                else {}
+            )
+            raw_steps = tool_plan.get("steps")
+            if isinstance(raw_steps, list):
+                for raw_step in raw_steps:
+                    _append_tool_plan_step(steps, seen_step_ids, raw_step)
+        if _planner_event_type(event) != "agent.plan.step":
+            continue
+        raw_step = payload.get("step") if isinstance(payload.get("step"), Mapping) else payload
+        _append_tool_plan_step(steps, seen_step_ids, raw_step)
+    return steps
+
+
+def _tool_plan_steps_from_raw_payload(payload: Mapping[str, Any]) -> list[ToolPlanStepSnapshot]:
+    steps: list[ToolPlanStepSnapshot] = []
+    seen_step_ids: set[str] = set()
+    for event_payload in _raw_public_event_payloads(payload):
+        plan = event_payload.get("plan") if isinstance(event_payload.get("plan"), Mapping) else {}
+        tool_plan = (
+            plan.get("tool_plan")
+            if isinstance(plan.get("tool_plan"), Mapping)
+            else {}
+        )
+        raw_steps = tool_plan.get("steps")
+        if isinstance(raw_steps, list):
+            for raw_step in raw_steps:
+                _append_tool_plan_step(steps, seen_step_ids, raw_step)
+        raw_step = event_payload.get("step")
+        if isinstance(raw_step, Mapping):
+            _append_tool_plan_step(steps, seen_step_ids, raw_step)
+    return steps
+
+
+def _extend_unique_tool_plan_steps(
+    target: list[ToolPlanStepSnapshot],
+    source: list[ToolPlanStepSnapshot],
+) -> None:
+    seen = {_text(step.step_id) for step in target if _text(step.step_id)}
+    for step in source:
+        step_id = _text(step.step_id)
+        if step_id and step_id in seen:
+            continue
+        if step_id:
+            seen.add(step_id)
+        target.append(step)
+
+
+def _task_core_base_id(payload: Mapping[str, Any], events: Iterable[PublicRunEvent]) -> str:
+    for event in events:
+        event_payload = event.payload if isinstance(event.payload, Mapping) else {}
+        if _planner_event_type(event) == "agent.replan.requested":
+            core_id = _text(event_payload.get("core_id"))
+            if core_id.startswith("task-core:"):
+                return core_id.removeprefix("task-core:")
+            if core_id:
+                return core_id
+        if _planner_event_type(event) == "agent.plan.created":
+            plan = event_payload.get("plan") if isinstance(event_payload.get("plan"), Mapping) else {}
+            intent = plan.get("intent") if isinstance(plan.get("intent"), Mapping) else {}
+            intent_id = _text(intent.get("intent_id"))
+            if intent_id:
+                return intent_id
+        if _planner_event_type(event) == "agent.intent.selected":
+            intent = (
+                event_payload.get("intent")
+                if isinstance(event_payload.get("intent"), Mapping)
+                else {}
+            )
+            intent_id = _text(intent.get("intent_id"))
+            if intent_id:
+                return intent_id
+    return _text(payload.get("task_id") or payload.get("run_id") or "events")
+
+
+def _append_tool_plan_step(
+    steps: list[ToolPlanStepSnapshot],
+    seen_step_ids: set[str],
+    raw_step: Any,
+) -> None:
+    if not isinstance(raw_step, Mapping):
+        return
+    try:
+        step = ToolPlanStepSnapshot.model_validate(raw_step)
+    except ValueError:
+        return
+    step_id = _text(step.step_id)
+    if step_id and step_id in seen_step_ids:
+        return
+    if step_id:
+        seen_step_ids.add(step_id)
+    steps.append(step)
+
+
+def _task_core_title(payload: Mapping[str, Any], events: Iterable[PublicRunEvent]) -> str:
+    title = _text(payload.get("title") or payload.get("user_goal") or payload.get("objective"))
+    if title:
+        return title
+    for event in events:
+        event_payload = event.payload if isinstance(event.payload, Mapping) else {}
+        if _planner_event_type(event) != "agent.intent.selected":
+            continue
+        intent = event_payload.get("intent") if isinstance(event_payload.get("intent"), Mapping) else {}
+        title = _text(intent.get("title") or intent.get("user_goal"))
+        if title:
+            return title
+    return "Yachiyo Task"
+
+
+def _workspace_items_from_updates(
+    task_updates: Mapping[str, Mapping[str, Mapping[str, Any]]],
+) -> list[TaskWorkspaceItemSnapshot]:
+    items: list[TaskWorkspaceItemSnapshot] = []
+    seen: set[str] = set()
+    for update in _unique_task_updates(
+        task_updates.get("workspace_by_id", {}),
+        task_updates.get("workspace_by_step", {}),
+    ):
+        item_id = _text(
+            update.get("item_id")
+            or update.get("workspace_item_id")
+            or update.get("path")
+            or update.get("source_step_id")
+        )
+        if not item_id or item_id in seen:
+            continue
+        seen.add(item_id)
+        items.append(
+            TaskWorkspaceItemSnapshot(
+                item_id=item_id,
+                title=_text(update.get("title") or update.get("path") or item_id),
+                kind=_text(update.get("kind") or "other"),
+                path=_optional_text(update.get("path")),
+                description=_text(update.get("description")),
+                source_step_id=_optional_text(update.get("source_step_id")),
+                status=_text(update.get("status") or "planned"),
+                metadata=_mapping(update.get("metadata")),
+            )
+        )
+    return items
+
+
+def _todos_from_steps_and_updates(
+    steps: list[ToolPlanStepSnapshot],
+    task_updates: Mapping[str, Mapping[str, Mapping[str, Any]]],
+) -> list[TaskTodoItemSnapshot]:
+    todos: list[TaskTodoItemSnapshot] = []
+    seen: set[str] = set()
+    seen_steps: set[str] = set()
+    for step in steps:
+        step_id = _text(step.step_id)
+        todo_id = f"todo:{step_id or len(todos) + 1}"
+        seen.add(todo_id)
+        if step_id:
+            seen_steps.add(step_id)
+        todos.append(
+            TaskTodoItemSnapshot(
+                todo_id=todo_id,
+                title=step.title,
+                capability_id=step.capability_id,
+                step_id=step.step_id,
+                tool_name=step.tool_name,
+                approval_required=step.approval_required,
+                depends_on=list(step.depends_on),
+                reason=step.reason,
+                metadata={
+                    "action": step.action,
+                    "risk_level": step.risk_level,
+                    "source": "plan_step",
+                },
+            )
+        )
+    for update in _unique_task_updates(
+        task_updates.get("todo_by_id", {}),
+        task_updates.get("todo_by_step", {}),
+    ):
+        todo_id = _text(update.get("todo_id") or update.get("step_id"))
+        step_id = _text(update.get("step_id"))
+        if not todo_id or todo_id in seen or (step_id and step_id in seen_steps):
+            continue
+        seen.add(todo_id)
+        todos.append(
+            TaskTodoItemSnapshot(
+                todo_id=todo_id,
+                title=_text(update.get("title") or update.get("tool_name") or todo_id),
+                status=_text(update.get("status") or "pending"),
+                capability_id=_text(update.get("capability_id")),
+                step_id=_optional_text(update.get("step_id")),
+                tool_name=_optional_text(update.get("tool_name")),
+                approval_required=bool(update.get("approval_required", False)),
+                depends_on=_string_list(update.get("depends_on")),
+                reason=_text(update.get("reason")),
+                metadata=_mapping(update.get("metadata")),
+            )
+        )
+    return todos
+
+
+def _checkpoints_from_steps_and_updates(
+    steps: list[ToolPlanStepSnapshot],
+    task_updates: Mapping[str, Mapping[str, Mapping[str, Any]]],
+) -> list[TaskCheckpointSnapshot]:
+    checkpoints: list[TaskCheckpointSnapshot] = []
+    seen: set[str] = set()
+    seen_steps: set[str] = set()
+    for step in steps:
+        step_id = _text(step.step_id)
+        checkpoint_id = f"checkpoint:{step_id or len(checkpoints) + 1}"
+        seen.add(checkpoint_id)
+        if step_id:
+            seen_steps.add(step_id)
+        checkpoints.append(
+            TaskCheckpointSnapshot(
+                checkpoint_id=checkpoint_id,
+                title=f"Verify {step.title}",
+                after_step_id=step.step_id,
+                depends_on=list(step.depends_on),
+                verifies=_string_list(step.input_preview.get("expected_outputs")),
+                payload={
+                    "tool_name": step.tool_name or "",
+                    "capability_id": step.capability_id,
+                    "source": "plan_step",
+                },
+            )
+        )
+    for update in _unique_task_updates(
+        task_updates.get("checkpoint_by_id", {}),
+        task_updates.get("checkpoint_by_step", {}),
+    ):
+        checkpoint_id = _text(update.get("checkpoint_id") or update.get("after_step_id"))
+        after_step_id = _text(update.get("after_step_id"))
+        if (
+            not checkpoint_id
+            or checkpoint_id in seen
+            or (after_step_id and after_step_id in seen_steps)
+        ):
+            continue
+        seen.add(checkpoint_id)
+        checkpoints.append(
+            TaskCheckpointSnapshot(
+                checkpoint_id=checkpoint_id,
+                title=_text(update.get("title") or checkpoint_id),
+                status=_text(update.get("status") or "planned"),
+                after_step_id=_optional_text(update.get("after_step_id")),
+                depends_on=_string_list(update.get("depends_on")),
+                verifies=_string_list(update.get("verifies")),
+                replan_on_failure=bool(update.get("replan_on_failure", True)),
+                payload=_mapping(update.get("payload")),
+            )
+        )
+    return checkpoints
+
+
+def _replan_signals_from_events(
+    events: Iterable[PublicRunEvent],
+) -> list[ReplanSignalSnapshot]:
+    signals: list[ReplanSignalSnapshot] = []
+    seen: set[str] = set()
+    for event in events:
+        if _planner_event_type(event) != "agent.replan.requested":
+            continue
+        payload = event.payload if isinstance(event.payload, Mapping) else {}
+        request = payload.get("request") if isinstance(payload.get("request"), Mapping) else payload
+        source_step_id = _text(request.get("source_step_id"))
+        signal_id = _text(
+            request.get("signal_id")
+            or request.get("request_id")
+            or f"replan:{source_step_id or event.sequence}"
+        )
+        if not signal_id or signal_id in seen:
+            continue
+        seen.add(signal_id)
+        signals.append(
+            ReplanSignalSnapshot(
+                signal_id=signal_id,
+                trigger=_text(request.get("trigger") or "tool_failure"),
+                source_step_id=_optional_text(source_step_id),
+                condition=_text(request.get("condition") or request.get("failure_detail")),
+                target=_text(request.get("target") or request.get("target_capability_id")),
+                fallback_tools=_string_list(request.get("fallback_tools")),
+                reason=_text(request.get("reason")),
+            )
+        )
+    return signals
+
+
+def _replan_signals_from_steps(
+    steps: list[ToolPlanStepSnapshot],
+    existing_signals: list[ReplanSignalSnapshot],
+) -> list[ReplanSignalSnapshot]:
+    existing_by_step = {
+        _text(signal.source_step_id)
+        for signal in existing_signals
+        if _text(signal.source_step_id)
+    }
+    signals: list[ReplanSignalSnapshot] = []
+    for step in steps:
+        step_id = _text(step.step_id)
+        if not step_id or step_id in existing_by_step:
+            continue
+        if not step.fallback_tools and step.status != "unavailable" and step.tool_name:
+            continue
+        signals.append(
+            ReplanSignalSnapshot(
+                signal_id=f"replan:{step_id}",
+                trigger="tool_unavailable" if step.status == "unavailable" else "tool_failure",
+                source_step_id=step_id,
+                condition="public runtime observation failed or contradicted the plan",
+                target=step.capability_id,
+                fallback_tools=list(step.fallback_tools),
+                reason="Continue from the reconstructed task workspace.",
+            )
+        )
+    return signals
+
+
+def _unique_task_updates(
+    *maps: Mapping[str, Mapping[str, Any]],
+) -> list[Mapping[str, Any]]:
+    updates: list[Mapping[str, Any]] = []
+    seen: set[str] = set()
+    for update_map in maps:
+        for key, update in update_map.items():
+            identity = _text(
+                update.get("item_id")
+                or update.get("todo_id")
+                or update.get("checkpoint_id")
+                or update.get("source_step_id")
+                or update.get("step_id")
+                or update.get("after_step_id")
+                or key
+            )
+            if identity and identity in seen:
+                continue
+            if identity:
+                seen.add(identity)
+            updates.append(update)
+    return updates
 
 
 def _task_core_with_event_progress(
@@ -806,3 +1211,56 @@ def _event_step_ids(payload: Mapping[str, Any]) -> list[str]:
 
 def _event_tool_name(payload: Mapping[str, Any]) -> str:
     return str(payload.get("tool_name") or payload.get("tool") or "").strip()
+
+
+_SCOPED_PLANNER_EVENT_TYPES = {
+    "group.run.plan.created": "agent.plan.created",
+    "group.run.plan.step": "agent.plan.step",
+    "group.run.task_core.created": "agent.task_core.created",
+    "group.run.replan.requested": "agent.replan.requested",
+    "group.run.task.workspace_item.updated": "agent.task.workspace_item.updated",
+    "group.run.task.todo.updated": "agent.task.todo.updated",
+    "group.run.task.checkpoint.updated": "agent.task.checkpoint.updated",
+    "workflow.plan.created": "agent.plan.created",
+    "workflow.plan.step": "agent.plan.step",
+    "workflow.task_core.created": "agent.task_core.created",
+    "workflow.replan.requested": "agent.replan.requested",
+    "workflow.task.workspace_item.updated": "agent.task.workspace_item.updated",
+    "workflow.task.todo.updated": "agent.task.todo.updated",
+    "workflow.task.checkpoint.updated": "agent.task.checkpoint.updated",
+    "workflow.run.plan.created": "agent.plan.created",
+    "workflow.run.plan.step": "agent.plan.step",
+    "workflow.run.task_core.created": "agent.task_core.created",
+    "workflow.run.replan.requested": "agent.replan.requested",
+    "workflow.run.task.workspace_item.updated": "agent.task.workspace_item.updated",
+    "workflow.run.task.todo.updated": "agent.task.todo.updated",
+    "workflow.run.task.checkpoint.updated": "agent.task.checkpoint.updated",
+}
+
+
+def _planner_event_type(event: PublicRunEvent) -> str:
+    payload = event.payload if isinstance(event.payload, Mapping) else {}
+    explicit = _text(payload.get("planner_event_type"))
+    if explicit:
+        return explicit
+    event_type = _text(event.event_type)
+    return _SCOPED_PLANNER_EVENT_TYPES.get(event_type, event_type)
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [_text(item) for item in value if _text(item)]
+
+
+def _optional_text(value: Any) -> str | None:
+    text = _text(value)
+    return text or None
+
+
+def _text(value: Any) -> str:
+    return str(value or "").strip()

@@ -145,7 +145,16 @@ def _runtime_plan_from_event(
     plan_payload = plan_event.payload.get("plan")
     if isinstance(plan_payload, Mapping):
         try:
-            return RuntimePlanSnapshot.model_validate(plan_payload)
+            plan = RuntimePlanSnapshot.model_validate(plan_payload)
+            if plan.task_core is None:
+                task_core = _minimal_task_core_from_events(
+                    intent,
+                    events,
+                    list(plan.tool_plan.steps),
+                )
+                if task_core is not None:
+                    return plan.model_copy(update={"task_core": task_core})
+            return plan
         except ValueError:
             pass
     steps = _tool_plan_steps_from_events(events)
