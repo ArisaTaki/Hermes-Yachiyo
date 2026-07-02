@@ -9,7 +9,7 @@ from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeE
 from apps.shell.agent.runtime.task_progress import append_task_progress_events_for_tool_result
 from packages.security import redact_api_error_text
 
-_TOOL_REQUEST_TRACE_KEYS = (
+_TOOL_REQUEST_TRACE_TEXT_KEYS = (
     "source",
     "planning_reason",
     "decision_id",
@@ -21,6 +21,19 @@ _TOOL_REQUEST_TRACE_KEYS = (
     "capability_id",
     "replan_request_id",
     "replan_trigger",
+    "runtime_doctrine",
+    "runtime_stage",
+    "runtime_role",
+)
+
+_TOOL_REQUEST_TRACE_BOOL_KEYS = (
+    "requires_observation",
+    "requires_post_action_verification",
+)
+
+_TOOL_REQUEST_TRACE_LIST_KEYS = (
+    "replan_triggers",
+    "replan_signal_ids",
 )
 
 
@@ -30,10 +43,18 @@ def _default_allows_tool(tool_name: str, allowed_tools: list[str]) -> bool:
 
 def _tool_request_trace_payload(tool_request: dict[str, Any]) -> dict[str, Any]:
     payload: dict[str, Any] = {}
-    for key in _TOOL_REQUEST_TRACE_KEYS:
+    for key in _TOOL_REQUEST_TRACE_TEXT_KEYS:
         value = str(tool_request.get(key) or "").strip()
         if value:
             payload[key] = value
+    for key in _TOOL_REQUEST_TRACE_BOOL_KEYS:
+        value = tool_request.get(key)
+        if isinstance(value, bool):
+            payload[key] = value
+    for key in _TOOL_REQUEST_TRACE_LIST_KEYS:
+        values = _string_list(tool_request.get(key))
+        if values:
+            payload[key] = values
     return payload
 
 

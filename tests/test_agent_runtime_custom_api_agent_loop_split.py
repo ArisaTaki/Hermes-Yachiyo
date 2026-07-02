@@ -20495,6 +20495,76 @@ def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_bef
     assert non_planner_run_events[-1]["payload"]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
 
 
+def test_runtime_tool_executor_preserves_dov_replan_trace_fields() -> None:
+    budget = FakeBudget()
+    order: list[str] = []
+    timeline: list[dict[str, Any]] = []
+    run_events: list[dict[str, Any]] = []
+    broker = RecordingDesktopBroker(order)
+    tool_call_events = RecordingToolCallEvents(run_events)
+    executor = RuntimeToolCallExecutor(
+        normalize_tool_name=normalize_tool_name,
+        input_preview=tool_input_preview,
+        run_budget=lambda _run_id, _timeline_value: budget,
+        validate_tool_payload=lambda _tool_name, _payload: None,
+        limit_tool_result=lambda value: value,
+        timeline_factory=_timeline,
+        tool_call_events=tool_call_events,
+        trace_events=NoopTraceEvents(),
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+        allows_tool=PolicyGate.allows_tool,
+    )
+
+    result = executor.execute(
+        {
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "decision_id": "decision-dov",
+            "plan_id": "runtime-plan-dov",
+            "tool_plan_id": "tool-plan-dov",
+            "intent_kind": "desktop_operation",
+            "step_id": "verify-desktop-result",
+            "capability_id": "desktop.visual_verification",
+            "runtime_doctrine": "discover_operate_verify",
+            "runtime_stage": "verify",
+            "runtime_role": "verify_result",
+            "requires_observation": True,
+            "requires_post_action_verification": False,
+            "replan_triggers": ["verification_failed"],
+            "replan_signal_ids": ["replan-verify"],
+        },
+        ["desktop.ui_elements"],
+        broker,
+        timeline,
+        run_id="run-dov-trace",
+        budget=budget,
+    )
+
+    assert result["ok"] is True
+    tool_call = next(event for event in timeline if event["event"] == "agent.tool.call")
+    assert tool_call["runtime_stage"] == "verify"
+    assert tool_call["runtime_role"] == "verify_result"
+    assert tool_call["requires_observation"] is True
+    assert tool_call["requires_post_action_verification"] is False
+    assert tool_call["replan_triggers"] == ["verification_failed"]
+    assert tool_call["replan_signal_ids"] == ["replan-verify"]
+
+    completed = next(
+        event for event in run_events if event["event_type"] == "tool.completed"
+    )
+    assert completed["payload"]["runtime_stage"] == "verify"
+    assert completed["payload"]["replan_triggers"] == ["verification_failed"]
+    agent_tool_call = next(
+        event for event in run_events if event["event_type"] == "agent.tool.call"
+    )
+    assert agent_tool_call["payload"]["runtime_doctrine"] == "discover_operate_verify"
+    assert agent_tool_call["payload"]["replan_signal_ids"] == ["replan-verify"]
+
+
 def test_runtime_tool_runner_skips_unresolved_selected_discovered_app() -> None:
     budget = FakeBudget()
     timeline: list[dict[str, Any]] = []
