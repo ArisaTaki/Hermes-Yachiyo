@@ -328,6 +328,49 @@ def test_runtime_planner_file_access_opens_path_with_requested_app() -> None:
     assert decision.plan.tool_plan.steps[0].action == "open_path_with_app"
 
 
+def test_runtime_planner_keeps_generic_media_search_plan_over_legacy_open() -> None:
+    loop = _private_runtime_loop()
+    decision, requests, payload = loop._runtime_planner_tool_requests(
+        "帮我打开 Spotify 播放周杰伦",
+        [
+            "desktop.list_apps",
+            "app.open",
+            "app.focus_and_type_into_ui_element",
+            "desktop.search_submit",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert decision is not None
+    assert decision.selected_intent.kind == "media_playback"
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+    ]
+    assert requests[2]["input"] == {
+        "app_name": "Spotify",
+        "target": "search 搜索",
+        "text": "周杰伦",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert requests[-1]["input"] == {
+        "app_name": "Spotify",
+        "target": "first result",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+    assert {request["planning_reason"] for request in requests} == {
+        "planner_fallback_media_playback"
+    }
+    assert payload["selection_reason"] == "runtime_planner_full_plan_execution"
+
+
 def test_runtime_loop_auto_executes_deferred_ui_action_after_observation() -> None:
     budget = FakeBudget()
     timeline: list[dict[str, Any]] = []
