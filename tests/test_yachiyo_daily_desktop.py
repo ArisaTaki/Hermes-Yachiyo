@@ -183,8 +183,33 @@ def test_planner_first_daily_desktop_entrypoint_discovers_apps_by_capability() -
             "input": {"query": "markdown", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "markdown",
+                "action": "new_document",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "周报"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
     assert planner_first_daily_desktop_entrypoint_requests(
@@ -198,7 +223,26 @@ def test_planner_first_daily_desktop_entrypoint_discovers_apps_by_capability() -
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
             "continue_to_model": True,
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "image",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        },
     ]
 
     assert planner_first_daily_desktop_entrypoint_requests(
@@ -216,8 +260,26 @@ def test_planner_first_daily_desktop_entrypoint_discovers_apps_by_capability() -
             "input": {"query": "document", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "document",
+                "action": "new_document",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
 
@@ -358,24 +420,57 @@ def test_planner_first_daily_desktop_entrypoint_discovers_generic_communication_
         "desktop.submit_foreground",
     ]
 
-    for prompt, query in (
-        ("用任意可用的邮件应用给 Alice 发邮件说明项目进度", "mail"),
-        ("用默认邮件应用给 Alice 发邮件说明项目进度", "mail"),
-        ("用任意可用的聊天应用给 Alice 发消息说明项目进度", "messaging"),
+    for prompt, query, recipient_target, body_target in (
+        ("用任意可用的邮件应用给 Alice 发邮件说明项目进度", "mail", "To", "message body"),
+        ("用默认邮件应用给 Alice 发邮件说明项目进度", "mail", "To", "message body"),
+        ("用任意可用的聊天应用给 Alice 发消息说明项目进度", "messaging", "recipient", "message"),
     ):
-        assert planner_first_daily_desktop_entrypoint_requests(
+        requests = planner_first_daily_desktop_entrypoint_requests(
             prompt,
             allowed_tools=allowed_tools,
-        ) == [
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.list_apps",
-                "input": {"query": query, "limit": 20},
-                "source": "runtime_planner",
-                "planning_reason": "planner_prefetch_communication_surface",
-                "continue_to_model": True,
-            }
+        )
+
+        assert [request["tool"] for request in requests] == [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.inspect_app",
+            "app.focus_and_type_into_ui_element",
+            "desktop.search_submit",
+            "app.focus_and_type_into_ui_element",
+            "desktop.submit_foreground",
         ]
+        assert {request["source"] for request in requests} == {"runtime_planner"}
+        assert {
+            request["planning_reason"] for request in requests
+        } == {"planner_fallback_communication_send"}
+        assert requests[0]["input"] == {"query": query, "limit": 20}
+        assert requests[1]["input"] == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": query,
+            "action": "new_message",
+        }
+        assert requests[2]["input"]["app_name"] == "<selected app from desktop.list_apps>"
+        assert requests[3]["input"] == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "target": recipient_target,
+            "text": "Alice",
+            "role_filter": "text",
+            "limit": 80,
+            "selection_source": "desktop.list_apps",
+            "query": query,
+        }
+        assert requests[4]["input"] == {}
+        assert requests[5]["input"] == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "target": body_target,
+            "text": "说明项目进度",
+            "role_filter": "text",
+            "limit": 80,
+            "selection_source": "desktop.list_apps",
+            "query": query,
+        }
+        assert requests[6]["input"] == {"action": "send"}
 
 
 def test_planner_first_daily_desktop_entrypoint_routes_browser_url_click_sequence() -> None:
@@ -1725,7 +1820,39 @@ def test_planner_first_daily_desktop_entrypoint_verifies_simple_media_playback()
             "input": {"query": "music", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
-            "continue_to_model": True,
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "music",
+                "action": "find",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "lo-fi beats"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
         },
     ]
 
