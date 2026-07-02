@@ -626,6 +626,7 @@ def test_public_release_gate_keeps_more_informative_public_demo_blocker(
     assert "## External Requirements" in markdown
     assert "`provider_smoke_credentials`" in markdown
     assert "`OHA_YACHIYO_SMOKE_BASE_URL`" in markdown
+    assert "scripts/run_public_demo_smokes.py --include-provider-workflow" in markdown
 
 
 def test_public_release_gate_passes_granular_real_desktop_demo_flags(

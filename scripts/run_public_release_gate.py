@@ -949,6 +949,9 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
                     "  Conditions: "
                     + ", ".join(f"`{item}`" for item in blocking_conditions)
                 )
+            commands = _string_list(requirement.get("commands"))
+            for command in commands:
+                lines.extend(["", "```bash", command, "```", ""])
     actions = _dict_list(summary.get("next_actions"))
     if actions:
         lines.extend(["", "## Next Actions", ""])
