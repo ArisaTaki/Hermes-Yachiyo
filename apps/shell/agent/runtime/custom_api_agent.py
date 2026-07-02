@@ -472,9 +472,10 @@ class RuntimeCustomApiAgentLoop:
                         timeline,
                     )
                     auto_replan_recovery_requests = (
-                        _auto_replan_recovery_requests(
+                        _auto_replan_recovery_requests_with_task_context(
                             replan_payloads,
                             allowed_tools,
+                            timeline,
                         )
                     )
                     if auto_replan_recovery_requests:
@@ -7644,6 +7645,89 @@ def _auto_replan_recovery_requests(
             ),
         ]
     )
+
+
+def _auto_replan_recovery_requests_with_task_context(
+    replan_payloads: list[dict[str, Any]],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    requests = _auto_replan_recovery_requests(replan_payloads, allowed_tools)
+    if not requests:
+        return []
+    task_core = _runtime_replan_task_core_payload(replan_payloads, timeline)
+    if not task_core:
+        return requests
+    return [
+        _replan_recovery_request_with_task_context(request, task_core)
+        for request in requests
+    ]
+
+
+def _replan_recovery_request_with_task_context(
+    request: dict[str, Any],
+    task_core: Mapping[str, Any],
+) -> dict[str, Any]:
+    step_id = str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+    if not step_id:
+        return request
+    enriched = dict(request)
+    core_id = str(task_core.get("core_id") or "").strip()
+    if core_id:
+        enriched.setdefault("core_id", core_id)
+    workspace = task_core.get("workspace") if isinstance(task_core.get("workspace"), Mapping) else {}
+    workspace_id = str(workspace.get("workspace_id") or "").strip()
+    if workspace_id:
+        enriched.setdefault("workspace_id", workspace_id)
+    todo = _task_core_todo_for_step(task_core, step_id)
+    if todo and "task_todo" not in enriched:
+        enriched["task_todo"] = todo
+    checkpoints = _task_core_checkpoints_for_step(task_core, step_id)
+    if checkpoints and "task_checkpoints" not in enriched:
+        enriched["task_checkpoints"] = checkpoints
+    workspace_items = _task_core_workspace_items_for_step(task_core, step_id)
+    if workspace_items and "task_workspace_items" not in enriched:
+        enriched["task_workspace_items"] = workspace_items
+    return enriched
+
+
+def _task_core_todo_for_step(
+    task_core: Mapping[str, Any],
+    step_id: str,
+) -> dict[str, Any]:
+    for todo in _mapping_list(task_core.get("todos")):
+        if str(todo.get("step_id") or "").strip() == step_id:
+            return dict(todo)
+    return {}
+
+
+def _task_core_checkpoints_for_step(
+    task_core: Mapping[str, Any],
+    step_id: str,
+) -> list[dict[str, Any]]:
+    return [
+        dict(checkpoint)
+        for checkpoint in _mapping_list(task_core.get("checkpoints"))
+        if str(checkpoint.get("after_step_id") or "").strip() == step_id
+    ]
+
+
+def _task_core_workspace_items_for_step(
+    task_core: Mapping[str, Any],
+    step_id: str,
+) -> list[dict[str, Any]]:
+    workspace = task_core.get("workspace") if isinstance(task_core.get("workspace"), Mapping) else {}
+    return [
+        dict(item)
+        for item in _mapping_list(workspace.get("items"))
+        if str(item.get("source_step_id") or "").strip() == step_id
+    ]
+
+
+def _mapping_list(value: Any) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
 
 
 def _auto_replan_fallback_recovery_requests(

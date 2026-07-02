@@ -2249,6 +2249,15 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_tool_f
     assert auto_recovery_request["replan_trigger"] == "tool_failure"
     assert auto_recovery_request["step_id"] == "analyze-data-file"
     assert auto_recovery_request["capability_id"] == "data.analysis"
+    assert auto_recovery_request["core_id"]
+    assert auto_recovery_request["workspace_id"]
+    assert auto_recovery_request["task_todo"]["step_id"] == "analyze-data-file"
+    assert auto_recovery_request["task_checkpoints"][0]["after_step_id"] == (
+        "analyze-data-file"
+    )
+    assert auto_recovery_request["task_workspace_items"][0]["source_step_id"] == (
+        "analyze-data-file"
+    )
     assert "continue_to_model" not in auto_recovery_request
     assert auto_recovery_request["input"]["shell"] is True
     assert "data/sales.csv" in auto_recovery_request["input"]["command"]
@@ -17765,6 +17774,58 @@ def test_auto_replan_fallback_recovery_reuses_safe_file_inputs() -> None:
     assert terminal_requests[0]["planner_step_id"] == "analyze-data-file"
     assert terminal_requests[0]["capability_id"] == "data.analysis"
     assert "continue_to_model" not in terminal_requests[0]
+
+
+def test_auto_replan_recovery_requests_carry_task_core_context() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 legacy-report.xls 并输出报告",
+        allowed_tools=[
+            "workspace.read",
+            "desktop.open_path",
+            "browser.current_page",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+    loop = _private_runtime_loop()
+    timeline: list[dict[str, Any]] = []
+    loop._record_runtime_planner_events(
+        decision,
+        timeline=timeline,
+        run_id="run-file-replan",
+    )
+    tool_timeline_start = len(timeline)
+    timeline.append(
+        _timeline(
+            "agent.tool.call",
+            "workspace.read",
+            input_preview={"path": "legacy-report.xls"},
+            result={"ok": False, "error": "unsupported file encoding"},
+        )
+    )
+
+    payloads = loop._record_runtime_planner_replan_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=tool_timeline_start,
+        run_id="run-file-replan",
+    )
+    recovery_requests = custom_api_agent_module._auto_replan_recovery_requests_with_task_context(
+        payloads,
+        ["desktop.open_path", "browser.current_page", "terminal.run"],
+        timeline,
+    )
+
+    open_path_request = recovery_requests[0]
+    assert open_path_request["tool"] == "desktop.open_path"
+    assert open_path_request["step_id"] == "inspect-data-source"
+    assert open_path_request["core_id"] == decision.plan.task_core.core_id
+    assert open_path_request["workspace_id"] == decision.plan.task_core.workspace.workspace_id
+    assert open_path_request["task_todo"]["step_id"] == "inspect-data-source"
+    assert open_path_request["task_checkpoints"][0]["after_step_id"] == "inspect-data-source"
+    assert open_path_request["task_workspace_items"][0]["source_step_id"] == (
+        "inspect-data-source"
+    )
 
 
 def test_auto_replan_terminal_data_analysis_command_writes_report(tmp_path) -> None:
