@@ -3754,6 +3754,88 @@ def test_model_followup_context_payload_preserves_multiple_content_snapshots() -
     assert "Data analysis result for data/sales.csv (csv)." in message
 
 
+def test_model_followup_context_snapshots_file_and_app_discovery_candidates() -> None:
+    prompt = "找一个能编辑 PDF 的本机应用并打开最近的 PDF"
+    allowed_tools = [
+        "workspace.list",
+        "desktop.list_apps",
+        "desktop.open_path_with_app",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    planner_requests = planner_tool_requests(prompt, allowed_tools)
+    selection_payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=planner_requests,
+        legacy_requests=[],
+        selected_requests=planner_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    payload = custom_api_agent_module._model_followup_context_payload(
+        planner_requests,
+        selection_payload,
+        allowed_tools=allowed_tools,
+        timeline=[
+            _timeline(
+                "agent.tool.call",
+                "workspace.list",
+                input_preview={"path": "Downloads", "pattern": "*.pdf", "file_type": "pdf"},
+                result={
+                    "ok": True,
+                    "path": "Downloads",
+                    "entries": [
+                        {"name": "older.pdf", "type": "file"},
+                        {"name": "brief-latest.pdf", "type": "file"},
+                    ],
+                    "filter": {"pattern": "*.pdf", "file_type": "pdf"},
+                    "matched_count": 2,
+                    "total_entries": 7,
+                },
+            ),
+            _timeline(
+                "agent.tool.call",
+                "desktop.list_apps",
+                input_preview={"query": "pdf", "limit": 20},
+                result={
+                    "ok": True,
+                    "action": "desktop.list_apps",
+                    "data": {
+                        "query": "pdf",
+                        "apps": [
+                            {
+                                "name": "PDF Expert",
+                                "path": "/Applications/PDF Expert.app",
+                                "match_score": 98,
+                            },
+                            {
+                                "name": "Preview",
+                                "path": "/System/Applications/Preview.app",
+                                "match_score": 72,
+                            },
+                        ],
+                        "count": 2,
+                        "total_count": 2,
+                    },
+                },
+            ),
+        ],
+    )
+    message = custom_api_agent_module._model_followup_context_message(payload)
+
+    assert [snapshot["source_tool"] for snapshot in payload["content_snapshots"]] == [
+        "workspace.list",
+        "desktop.list_apps",
+    ]
+    assert "brief-latest.pdf" in payload["content_snapshots"][0]["text"]
+    assert "PDF Expert" in payload["content_snapshots"][1]["text"]
+    assert payload["pending_plan_steps"][0]["step_id"] == "open-discovered-file-with-app"
+    assert payload["pending_plan_steps"][0]["tool_name"] == "desktop.open_path_with_app"
+    assert "Candidate files in Downloads" in message
+    assert "Candidate apps for pdf" in message
+    assert "open-discovered-file-with-app via desktop.open_path_with_app" in message
+
+
 def test_auto_followup_dispatches_observed_desktop_click_action() -> None:
     selection_payload = {
         "followup_target": {

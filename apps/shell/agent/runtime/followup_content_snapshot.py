@@ -13,10 +13,12 @@ FOLLOWUP_CONTENT_SNAPSHOT_TOOLS: frozenset[str] = frozenset(
         "clipboard.read",
         "data.analyze",
         "desktop.read_ui",
+        "desktop.list_apps",
         "desktop.ui_elements",
         "file.read",
         "screen.capture",
         "terminal.run",
+        "workspace.list",
         "workspace.read",
     }
 )
@@ -83,6 +85,10 @@ def followup_content_snapshot_for_tool_call(
         return data_analyze_content_snapshot(result, input_preview)
     if tool_name == "terminal.run":
         return terminal_run_content_snapshot(result, input_preview)
+    if tool_name == "workspace.list":
+        return workspace_list_content_snapshot(result, input_preview)
+    if tool_name == "desktop.list_apps":
+        return desktop_list_apps_content_snapshot(result, input_preview)
     if tool_name in {"workspace.read", "file.read"}:
         return workspace_read_content_snapshot(result, input_preview, source_tool=tool_name)
     return {}
@@ -293,6 +299,105 @@ def terminal_run_content_snapshot(
     if not result.get("ok"):
         _add_failure_fields(snapshot, result)
     return _compact_snapshot(snapshot)
+
+
+def workspace_list_content_snapshot(
+    result: dict[str, Any],
+    input_preview: dict[str, Any],
+) -> dict[str, Any]:
+    entries = _workspace_list_entries(result)
+    lines = []
+    for entry in entries[:32]:
+        name = str(entry.get("name") or entry.get("path") or "").strip()
+        if not name:
+            continue
+        entry_type = str(entry.get("type") or entry.get("kind") or "").strip()
+        lines.append(f"- {name}" + (f" ({entry_type})" if entry_type else ""))
+    text = "\n".join(lines)
+    snapshot: dict[str, Any] = {
+        "source_tool": "workspace.list",
+        "ok": bool(result.get("ok")),
+        "path": str(result.get("path") or input_preview.get("path") or ".").strip(),
+        "pattern": str(
+            input_preview.get("pattern")
+            or (result.get("filter") if isinstance(result.get("filter"), dict) else {}).get("pattern")
+            or ""
+        ).strip(),
+        "file_type": str(
+            input_preview.get("file_type")
+            or (result.get("filter") if isinstance(result.get("filter"), dict) else {}).get("file_type")
+            or ""
+        ).strip(),
+        "entry_count": len(entries),
+        "matched_count": _number_value(result.get("matched_count")),
+        "total_entries": _number_value(result.get("total_entries")),
+        "truncated": len(entries) > 32 or bool(result.get("truncated")),
+    }
+    if text:
+        snapshot["text"] = (
+            f"Candidate files in {snapshot['path']}:\n{text}"
+            if snapshot.get("path")
+            else f"Candidate files:\n{text}"
+        )
+    if not result.get("ok"):
+        _add_failure_fields(snapshot, result)
+    return _compact_snapshot(snapshot)
+
+
+def desktop_list_apps_content_snapshot(
+    result: dict[str, Any],
+    input_preview: dict[str, Any],
+) -> dict[str, Any]:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    apps = data.get("apps") if isinstance(data.get("apps"), list) else result.get("apps")
+    if not isinstance(apps, list):
+        apps = []
+    lines = []
+    for app in apps[:24]:
+        if not isinstance(app, dict):
+            continue
+        name = str(app.get("name") or "").strip()
+        if not name:
+            continue
+        path = str(app.get("path") or "").strip()
+        score = app.get("match_score")
+        suffixes = []
+        if path:
+            suffixes.append(path)
+        if score not in (None, ""):
+            suffixes.append(f"score={score}")
+        lines.append(f"- {name}" + (f" ({'; '.join(suffixes)})" if suffixes else ""))
+    query = str(data.get("query") or input_preview.get("query") or "").strip()
+    snapshot: dict[str, Any] = {
+        "source_tool": "desktop.list_apps",
+        "ok": bool(result.get("ok")),
+        "query": query,
+        "app_count": len(apps),
+        "total_count": _number_value(data.get("total_count") or result.get("total_count")),
+        "truncated": len(apps) > 24 or bool(data.get("truncated") or result.get("truncated")),
+    }
+    if lines:
+        snapshot["text"] = (
+            f"Candidate apps for {query}:\n" if query else "Candidate apps:\n"
+        ) + "\n".join(lines)
+    if not result.get("ok"):
+        _add_failure_fields(snapshot, result)
+    return _compact_snapshot(snapshot)
+
+
+def _workspace_list_entries(result: dict[str, Any]) -> list[dict[str, Any]]:
+    for key in ("entries", "files", "items"):
+        raw_items = result.get(key)
+        if not isinstance(raw_items, list):
+            continue
+        return [dict(item) for item in raw_items if isinstance(item, dict)]
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    for key in ("entries", "files", "items"):
+        raw_items = data.get(key)
+        if not isinstance(raw_items, list):
+            continue
+        return [dict(item) for item in raw_items if isinstance(item, dict)]
+    return []
 
 
 def _terminal_run_snapshot_text(stdout: str, stderr: str, result: dict[str, Any]) -> str:
