@@ -648,6 +648,60 @@ class RuntimeCustomApiAgentLoop:
                                     ),
                                     *auto_replan_ui_observed_action_requests,
                                 ]
+                                auto_replan_ui_continuation_requests = (
+                                    _auto_replan_ui_continuation_requests(
+                                        replan_payloads,
+                                        execution_tool_requests,
+                                        allowed_tools,
+                                        timeline,
+                                        tool_timeline_start=tool_timeline_start,
+                                        planning_reason="planner_replan_ui_continuation",
+                                    )
+                                )
+                                if auto_replan_ui_continuation_requests:
+                                    auto_replan_approval_requests = [
+                                        *auto_replan_approval_requests,
+                                        *auto_replan_ui_continuation_requests,
+                                    ]
+                                    self._record_auto_model_followup_app_write_plan(
+                                        auto_replan_ui_continuation_requests,
+                                        timeline=timeline,
+                                        run_id=run_id,
+                                    )
+                                    self._record_desktop_permission_preflight(
+                                        auto_replan_ui_continuation_requests,
+                                        broker,
+                                        timeline=timeline,
+                                        run_id=run_id,
+                                    )
+                                    self._record_desktop_tool_policy_decisions(
+                                        auto_replan_ui_continuation_requests,
+                                        allowed_tools=allowed_tools,
+                                        agent=agent,
+                                        run_id=run_id,
+                                    )
+                                    ui_continuation_timeline_start = len(timeline)
+                                    self._run_tool_requests(
+                                        auto_replan_ui_continuation_requests,
+                                        allowed_tools,
+                                        broker,
+                                        messages,
+                                        timeline,
+                                        artifacts,
+                                        next_iteration=start_iteration,
+                                        run_id=run_id,
+                                        budget=budget,
+                                    )
+                                    self._record_runtime_planner_task_progress_events(
+                                        runtime_planner_decision,
+                                        timeline=timeline,
+                                        tool_timeline_start=ui_continuation_timeline_start,
+                                        run_id=run_id,
+                                    )
+                                    auto_replan_recovery_requests = [
+                                        *auto_replan_recovery_requests,
+                                        *auto_replan_ui_continuation_requests,
+                                    ]
                             auto_replan_observed_result_requests = (
                                 _auto_replan_app_search_observed_result_requests(
                                     replan_payloads,
@@ -9859,6 +9913,109 @@ def _annotate_replan_ui_observed_action_requests(
         _attach_replan_payload_trace_metadata(item, payload)
         annotated.append(item)
     return annotated
+
+
+def _auto_replan_ui_continuation_requests(
+    replan_payloads: list[dict[str, Any]],
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return []
+    planned = [request for request in planned_tool_requests if isinstance(request, Mapping)]
+    if not planned:
+        return []
+    requests: list[dict[str, Any]] = []
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        if str(payload.get("trigger") or "").strip() != "tool_failure":
+            continue
+        if not _replan_ui_observed_action_target(payload):
+            continue
+        if not _replan_ui_observed_action_retry_succeeded(payload, timeline):
+            continue
+        source_index = _replan_source_request_index(planned, payload)
+        if source_index < 0:
+            continue
+        continuation = _replan_ui_continuation_slice(
+            planned[source_index + 1 :],
+            payload,
+            allowed,
+            planning_reason=planning_reason,
+        )
+        continuation = _drop_completed_auto_followup_prefix(
+            continuation,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        )
+        requests.extend(continuation)
+    return _dedupe_replan_recovery_requests(requests)
+
+
+def _replan_ui_observed_action_retry_succeeded(
+    payload: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+) -> bool:
+    source_tool = _replan_source_tool_name(payload)
+    if not source_tool:
+        return False
+    request_id = str(payload.get("request_id") or "").strip()
+    for event in reversed(timeline):
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        if str(event.get("detail") or "").strip() != source_tool:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is not True:
+            continue
+        event_request_id = str(event.get("replan_request_id") or "").strip()
+        if request_id and event_request_id == request_id:
+            return True
+        if (
+            str(event.get("planning_reason") or "").strip()
+            == "planner_replan_ui_observed_action"
+        ):
+            return True
+    return False
+
+
+def _replan_ui_continuation_slice(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    payload: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    for request in planned_tool_requests:
+        tool_name = str(request.get("tool") or "").strip()
+        if not tool_name:
+            continue
+        if tool_name not in allowed:
+            break
+        if tool_name not in _DIRECT_DAILY_DESKTOP_TOOLS:
+            break
+        item = dict(request)
+        item.pop("continue_to_model", None)
+        item["source"] = str(item.get("source") or "runtime_planner")
+        item["planning_reason"] = planning_reason
+        trigger = str(payload.get("trigger") or "").strip()
+        request_id = str(payload.get("request_id") or "").strip()
+        if trigger:
+            item["replan_trigger"] = trigger
+        if request_id:
+            item["replan_request_id"] = request_id
+        _attach_replan_payload_trace_metadata(item, payload)
+        requests.append(item)
+        if len(requests) >= _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS:
+            break
+    return requests
 
 
 def _auto_replan_focus_recovery_requests(

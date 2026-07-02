@@ -3179,6 +3179,114 @@ def test_auto_replan_ui_observed_action_retries_after_matching_observation() -> 
     assert all("continue_to_model" not in request for request in requests)
 
 
+def test_auto_replan_ui_continuation_runs_remaining_plan_after_retry() -> None:
+    payload = {
+        "request_id": "replan-ui-continuation",
+        "trigger": "tool_failure",
+        "decision_id": "decision-ui-continuation",
+        "plan_id": "plan-ui-continuation",
+        "source_step_id": "type-media-search-query",
+        "source_tool_name": "app.focus_and_type_into_ui_element",
+        "target_capability_id": "desktop.ui_operation",
+        "input_preview": {
+            "app_name": "Music",
+            "target": "search 搜索",
+            "text": "超时空辉夜姬",
+            "role_filter": "text",
+            "limit": 80,
+        },
+    }
+    planned = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {"app_name": "Music"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+            "step_id": "open-media-app",
+            "capability_id": "desktop.app_control",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_type_into_ui_element",
+            "input": {
+                "app_name": "Music",
+                "target": "search 搜索",
+                "text": "超时空辉夜姬",
+                "role_filter": "text",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+            "step_id": "type-media-search-query",
+            "capability_id": "desktop.ui_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+            "step_id": "submit-media-search",
+            "capability_id": "desktop.ui_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_click_ui_element",
+            "input": {
+                "app_name": "Music",
+                "target": "first result",
+                "role_filter": "",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+            "step_id": "play-media-search-result",
+            "capability_id": "desktop.ui_operation",
+        },
+    ]
+
+    requests = custom_api_agent_module._auto_replan_ui_continuation_requests(
+        [payload],
+        planned,
+        [
+            "app.open",
+            "app.focus_and_type_into_ui_element",
+            "desktop.search_submit",
+            "app.focus_and_click_ui_element",
+        ],
+        [
+            _timeline(
+                "agent.tool.call",
+                "app.focus_and_type_into_ui_element",
+                input_preview=planned[1]["input"],
+                result={"ok": True},
+                planning_reason="planner_replan_ui_observed_action",
+                replan_request_id="replan-ui-continuation",
+            )
+        ],
+        tool_timeline_start=0,
+        planning_reason="planner_replan_ui_continuation",
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+    ]
+    assert {request["planning_reason"] for request in requests} == {
+        "planner_replan_ui_continuation"
+    }
+    assert {request["replan_request_id"] for request in requests} == {
+        "replan-ui-continuation"
+    }
+    assert requests[0]["step_id"] == "submit-media-search"
+    assert requests[0]["planner_step_id"] == "submit-media-search"
+    assert requests[0]["capability_id"] == "desktop.ui_operation"
+    assert requests[1]["step_id"] == "play-media-search-result"
+    assert requests[1]["input"]["target"] == "first result"
+
+
 def test_custom_api_agent_loop_refocuses_after_active_window_mismatch_without_model() -> None:
     allowed_tools = [
         "desktop.list_apps",
@@ -21898,6 +22006,24 @@ def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observa
                     }
                 else:
                     raise AssertionError(f"unexpected observed action tool: {tool}")
+            elif batch_index == 4:
+                if tool == "desktop.search_submit":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.search_submit",
+                        "data": {"app_name": "Music"},
+                    }
+                elif tool == "app.focus_and_click_ui_element":
+                    result = {
+                        "ok": True,
+                        "action": "app.focus_and_click_ui_element",
+                        "data": {
+                            "app_name": payload.get("app_name"),
+                            "target": payload.get("target"),
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected continuation tool: {tool}")
             else:
                 raise AssertionError(f"unexpected tool batch {batch_index}: {tool}")
             append_tool_event(request, payload, result, messages_arg, timeline_arg)
@@ -21951,6 +22077,7 @@ def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observa
         ],
         ["desktop.ui_elements"],
         ["app.focus_and_type_into_ui_element", "desktop.ui_elements"],
+        ["desktop.search_submit", "app.focus_and_click_ui_element"],
     ]
     observation_request = tool_batches[1][0]
     assert observation_request["planning_reason"] == "planner_replan_ui_observation_recovery"
@@ -21968,6 +22095,9 @@ def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observa
         "source_tool": "desktop.ui_elements",
         "strategy": "app_scoped_semantic_ui_tool",
     }
+    continuation_request = tool_batches[3][0]
+    assert continuation_request["planning_reason"] == "planner_replan_ui_continuation"
+    assert continuation_request["replan_request_id"] == retry_request["replan_request_id"]
     assert not any(event["event"] == "agent.model.response" for event in timeline)
 
 
