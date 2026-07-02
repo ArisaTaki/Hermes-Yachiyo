@@ -352,6 +352,12 @@ def _group_run_planner_event_type(event_type: str) -> str:
         return "group.run.replan.requested"
     if event_type == "agent.desktop.intent_planned":
         return "group.run.desktop.intent_planned"
+    if event_type == "agent.desktop.intent_approval_required":
+        return "group.run.desktop.intent_approval_required"
+    if event_type == "agent.desktop.intent_completed":
+        return "group.run.desktop.intent_completed"
+    if event_type == "agent.desktop.intent_unavailable":
+        return "group.run.desktop.intent_unavailable"
     if event_type == "agent.task.workspace_item.updated":
         return "group.run.task.workspace_item.updated"
     if event_type == "agent.task.todo.updated":

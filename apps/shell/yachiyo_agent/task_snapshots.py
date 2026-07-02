@@ -370,7 +370,8 @@ def _desktop_intent_progress_text(
             return planned_progress
 
     for event in reversed(events):
-        if event.event_type not in {
+        desktop_event_type = _desktop_intent_event_type(event.event_type)
+        if (desktop_event_type or event.event_type) not in {
             _PLANNED_DESKTOP_INTENT_EVENT_TYPE,
             _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE,
             _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE,
@@ -387,13 +388,13 @@ def _desktop_intent_progress_text(
             payload = event.payload if isinstance(event.payload, Mapping) else {}
             result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
             return _desktop_tool_result_progress_text(label, result)
-        if event.event_type == _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE:
+        if desktop_event_type == _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE:
             return f"等待批准 · {label}" if label else "等待批准桌面动作"
-        if event.event_type == _COMPLETED_DESKTOP_INTENT_EVENT_TYPE:
+        if desktop_event_type == _COMPLETED_DESKTOP_INTENT_EVENT_TYPE:
             payload = event.payload if isinstance(event.payload, Mapping) else {}
             result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
             return _desktop_tool_result_progress_text(label, result)
-        if event.event_type == _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE:
+        if desktop_event_type == _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE:
             payload = event.payload if isinstance(event.payload, Mapping) else {}
             return _progress_text(
                 "无法执行",
@@ -401,9 +402,9 @@ def _desktop_intent_progress_text(
                 "无法执行桌面动作",
                 detail=_unavailable_desktop_intent_detail(payload),
             )
-        if event.event_type == _PLANNED_DESKTOP_INTENT_EVENT_TYPE:
+        if desktop_event_type == _PLANNED_DESKTOP_INTENT_EVENT_TYPE:
             return f"准备执行 · {label}" if label else "准备执行桌面动作"
-        if event.event_type == _READINESS_RECOVERED_DESKTOP_EVENT_TYPE:
+        if desktop_event_type == _READINESS_RECOVERED_DESKTOP_EVENT_TYPE:
             return f"桌面就绪已恢复 · {label}" if label else "桌面就绪已恢复"
     return None
 
@@ -415,12 +416,12 @@ def _has_desktop_intent_result_event(events: list[PublicRunEvent]) -> bool:
         _COMPLETED_DESKTOP_INTENT_EVENT_TYPE,
         _TOOL_CALL_EVENT_TYPE,
     }
-    return any(event.event_type in result_event_types for event in events)
+    return any(_desktop_intent_event_type(event.event_type) in result_event_types for event in events)
 
 
 def _first_planned_desktop_intent_progress_text(events: list[PublicRunEvent]) -> str | None:
     for event in events:
-        if event.event_type != _PLANNED_DESKTOP_INTENT_EVENT_TYPE:
+        if _desktop_intent_event_type(event.event_type) != _PLANNED_DESKTOP_INTENT_EVENT_TYPE:
             continue
         tool_name = _event_tool_name(event)
         if tool_name not in _DESKTOP_TOOL_PROGRESS_LABELS:
@@ -428,6 +429,34 @@ def _first_planned_desktop_intent_progress_text(events: list[PublicRunEvent]) ->
         label = _DESKTOP_TOOL_PROGRESS_LABELS.get(tool_name, tool_name)
         return f"准备执行 · {label}" if label else "准备执行桌面动作"
     return None
+
+
+def _desktop_intent_event_type(event_type: str) -> str:
+    event_name = str(event_type or "").strip()
+    if event_name in {
+        _PLANNED_DESKTOP_INTENT_EVENT_TYPE,
+        _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE,
+        _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE,
+        _COMPLETED_DESKTOP_INTENT_EVENT_TYPE,
+        _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE,
+        _READINESS_RECOVERED_DESKTOP_EVENT_TYPE,
+    }:
+        return event_name
+    scoped_prefixes = ("group.run.desktop.", "workflow.desktop.", "workflow.run.desktop.")
+    if not event_name.startswith(scoped_prefixes):
+        return ""
+    suffix_map = {
+        "intent_planned": _PLANNED_DESKTOP_INTENT_EVENT_TYPE,
+        "intent_unavailable": _UNAVAILABLE_DESKTOP_INTENT_EVENT_TYPE,
+        "intent_approval_required": _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE,
+        "intent_completed": _COMPLETED_DESKTOP_INTENT_EVENT_TYPE,
+        "permission_recovery": _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE,
+        "readiness_recovered": _READINESS_RECOVERED_DESKTOP_EVENT_TYPE,
+    }
+    for suffix, normalized in suffix_map.items():
+        if event_name.endswith(f".desktop.{suffix}"):
+            return normalized
+    return ""
 
 
 def _desktop_tool_result_progress_text(label: str, result: Mapping[str, Any]) -> str:

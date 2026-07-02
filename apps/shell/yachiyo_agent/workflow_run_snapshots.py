@@ -60,14 +60,16 @@ def workflow_run_payload_with_lifecycle(payload: Mapping[str, Any]) -> dict[str,
     if not run_id:
         return dict(payload)
 
-    raw_events = _workflow_scoped_planner_events(
+    lifecycle_context = _workflow_lifecycle_context(payload, run_id)
+    raw_events = _workflow_stream_events(
         _raw_events_from_payload(
             payload,
             ("events", "run_events", "recent_events", "timeline"),
-        )
+        ),
+        lifecycle_context,
     )
+    raw_events = _workflow_scoped_planner_events(raw_events)
     existing_types = {_event_type(event) for event in raw_events}
-    lifecycle_context = _workflow_lifecycle_context(payload, run_id)
     events: list[dict[str, Any]] = []
     if not existing_types.intersection({"workflow.run.started", "workflow.started"}):
         events.append(
@@ -133,6 +135,8 @@ _WORKFLOW_PLANNER_EVENT_TYPES = {
     "agent.desktop.intent_planned": "workflow.run.desktop.intent_planned",
     "agent.tool.approval_required": "workflow.run.tool.approval_required",
     "agent.desktop.intent_approval_required": "workflow.run.desktop.intent_approval_required",
+    "agent.desktop.intent_completed": "workflow.run.desktop.intent_completed",
+    "agent.desktop.intent_unavailable": "workflow.run.desktop.intent_unavailable",
     "agent.task.workspace_item.updated": "workflow.run.task.workspace_item.updated",
     "agent.task.todo.updated": "workflow.run.task.todo.updated",
     "agent.task.checkpoint.updated": "workflow.run.task.checkpoint.updated",
@@ -206,6 +210,36 @@ def _workflow_lifecycle_event(
     if created_at:
         event["created_at"] = created_at
     return event
+
+
+def _workflow_stream_events(
+    events: list[dict[str, Any]],
+    lifecycle_context: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    return [
+        _workflow_stream_event(event, lifecycle_context)
+        for event in events
+    ]
+
+
+def _workflow_stream_event(
+    event: dict[str, Any],
+    lifecycle_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    item = dict(event)
+    payload = dict(item.get("payload")) if isinstance(item.get("payload"), Mapping) else {}
+    for key in (
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+    ):
+        value = lifecycle_context.get(key)
+        if value:
+            payload.setdefault(key, value)
+    if payload:
+        item["payload"] = payload
+    return item
 
 
 def _workflow_terminal_event_type(value: Any) -> str:

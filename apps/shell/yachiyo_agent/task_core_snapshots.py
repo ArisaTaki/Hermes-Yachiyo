@@ -820,6 +820,7 @@ def _runtime_progress_from_event(
         result_ok is True
         or status in {"completed", "complete", "success", "succeeded", "ok"}
         or event_name.endswith(".completed")
+        or _is_desktop_intent_event(event_name, "completed")
     ):
         return {
             "todo_status": "completed",
@@ -831,6 +832,7 @@ def _runtime_progress_from_event(
         result_ok is False
         or status in {"failed", "failure", "error", "unavailable", "cancelled", "rejected"}
         or event_name.endswith(".failed")
+        or _is_desktop_intent_event(event_name, "unavailable")
     ):
         return {
             "todo_status": "blocked",
@@ -849,6 +851,15 @@ def _runtime_progress_from_event(
             "event_type": event_name,
         }
     return {}
+
+
+def _is_desktop_intent_event(event_type: str, suffix: str) -> bool:
+    return event_type in {
+        f"agent.desktop.intent_{suffix}",
+        f"group.run.desktop.intent_{suffix}",
+        f"workflow.desktop.intent_{suffix}",
+        f"workflow.run.desktop.intent_{suffix}",
+    }
 
 
 def _workspace_with_progress(

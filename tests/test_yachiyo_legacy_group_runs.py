@@ -104,6 +104,15 @@ def test_legacy_group_run_scopes_replan_planner_events() -> None:
     assert _group_run_planner_event_type("agent.desktop.intent_planned") == (
         "group.run.desktop.intent_planned"
     )
+    assert _group_run_planner_event_type("agent.desktop.intent_approval_required") == (
+        "group.run.desktop.intent_approval_required"
+    )
+    assert _group_run_planner_event_type("agent.desktop.intent_completed") == (
+        "group.run.desktop.intent_completed"
+    )
+    assert _group_run_planner_event_type("agent.desktop.intent_unavailable") == (
+        "group.run.desktop.intent_unavailable"
+    )
     assert _group_run_planner_event_type("agent.task.workspace_item.updated") == (
         "group.run.task.workspace_item.updated"
     )

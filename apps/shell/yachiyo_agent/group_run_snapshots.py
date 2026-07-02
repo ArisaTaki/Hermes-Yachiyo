@@ -585,6 +585,8 @@ _GROUP_PLANNER_EVENT_TYPES = {
     "agent.desktop.intent_planned": "group.run.desktop.intent_planned",
     "agent.tool.approval_required": "group.run.tool.approval_required",
     "agent.desktop.intent_approval_required": "group.run.desktop.intent_approval_required",
+    "agent.desktop.intent_completed": "group.run.desktop.intent_completed",
+    "agent.desktop.intent_unavailable": "group.run.desktop.intent_unavailable",
     "agent.task.workspace_item.updated": "group.run.task.workspace_item.updated",
     "agent.task.todo.updated": "group.run.task.todo.updated",
     "agent.task.checkpoint.updated": "group.run.task.checkpoint.updated",

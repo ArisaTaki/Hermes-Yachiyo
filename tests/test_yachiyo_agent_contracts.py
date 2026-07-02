@@ -1880,6 +1880,83 @@ def test_group_and_workflow_snapshots_scope_desktop_approval_events() -> None:
     )
 
 
+def test_group_and_workflow_snapshots_scope_desktop_result_events() -> None:
+    group_snapshot = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-desktop-result-1",
+            "group_id": "group-1",
+            "status": "completed",
+            "objective": "Operate desktop as a group",
+            "events": [
+                {
+                    "event_type": "agent.task_core.created",
+                    "payload": {"task_core": _desktop_approval_task_core_payload()},
+                },
+                {
+                    "event_type": "agent.desktop.intent_completed",
+                    "payload": {
+                        "tool": "desktop.click_ui_element",
+                        "status": "completed",
+                        "source": "runtime_planner",
+                        "step_id": "operate-foreground-ui",
+                        "capability_id": "desktop.ui_operation",
+                        "input_preview": {"label": "Play"},
+                        "result": {"ok": True},
+                    },
+                },
+            ],
+        }
+    )
+    workflow_snapshot = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-desktop-result-1",
+            "workflow_run_id": "workflow-run-desktop-result-1",
+            "workflow_id": "workflow-1",
+            "status": "running",
+            "objective": "Operate desktop in workflow",
+            "events": [
+                {
+                    "event_type": "agent.task_core.created",
+                    "payload": {"task_core": _desktop_approval_task_core_payload()},
+                },
+                {
+                    "event_type": "agent.desktop.intent_unavailable",
+                    "payload": {
+                        "tool": "desktop.click_ui_element",
+                        "source": "runtime_planner",
+                        "step_id": "operate-foreground-ui",
+                        "capability_id": "desktop.ui_operation",
+                        "reason": "tool_not_allowed",
+                        "blocked_by": "agent_tool_policy",
+                    },
+                },
+            ],
+        }
+    )
+
+    group_event_types = [event.event_type for event in group_snapshot.events]
+    assert "group.run.desktop.intent_completed" in group_event_types
+    assert group_snapshot.tool_calls[0].status == "completed"
+    assert group_snapshot.tool_calls[0].group_run_id == "group-run-desktop-result-1"
+    assert group_snapshot.task_core is not None
+    assert group_snapshot.task_core.todos[0].status == "completed"
+    assert group_snapshot.task_core.todos[0].metadata["runtime_event_type"] == (
+        "group.run.desktop.intent_completed"
+    )
+    assert group_snapshot.task_core.checkpoints[0].status == "completed"
+
+    workflow_event_types = [event.event_type for event in workflow_snapshot.events]
+    assert "workflow.run.desktop.intent_unavailable" in workflow_event_types
+    assert workflow_snapshot.tool_calls[0].status == "blocked"
+    assert workflow_snapshot.tool_calls[0].workflow_run_id == "workflow-run-desktop-result-1"
+    assert workflow_snapshot.task_core is not None
+    assert workflow_snapshot.task_core.todos[0].status == "blocked"
+    assert workflow_snapshot.task_core.todos[0].metadata["runtime_event_type"] == (
+        "workflow.run.desktop.intent_unavailable"
+    )
+    assert workflow_snapshot.task_core.checkpoints[0].status == "blocked"
+
+
 def _desktop_approval_task_core_payload() -> dict:
     return {
         "core_id": "task-core-desktop-approval",
