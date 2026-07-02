@@ -1056,15 +1056,16 @@ def _model_selected_desktop_step_ids(steps: list[Any]) -> set[str]:
                 continue
             input_preview = getattr(step, "input_preview", None)
             payload = input_preview if isinstance(input_preview, Mapping) else {}
+            tool_name = str(getattr(step, "tool_name", "") or "").strip()
             depends_on = [
                 str(item or "").strip()
                 for item in (getattr(step, "depends_on", None) or [])
                 if str(item or "").strip()
             ]
             if (
-                _selected_discovered_app_step_requires_model(step_id, payload)
+                _selected_discovered_app_step_requires_model(step_id, payload, tool_name)
                 or step_id == "open-discovered-file-with-app"
-                or _selected_discovered_app_payload_requires_model(payload)
+                or _selected_discovered_app_payload_requires_model(payload, tool_name)
                 or str(payload.get("target_path") or "").strip()
                 == "<selected file from workspace.list>"
                 or any(item in selected_step_ids for item in depends_on)
@@ -1074,22 +1075,47 @@ def _model_selected_desktop_step_ids(steps: list[Any]) -> set[str]:
     return selected_step_ids
 
 
-def _selected_discovered_app_step_requires_model(step_id: str, payload: Mapping[str, Any]) -> bool:
+def _selected_discovered_app_step_requires_model(
+    step_id: str,
+    payload: Mapping[str, Any],
+    tool_name: str = "",
+) -> bool:
     if step_id != "open-selected-discovered-app":
         return False
-    return _selected_discovered_app_payload_requires_model(payload)
+    return _selected_discovered_app_payload_requires_model(payload, tool_name)
 
 
-def _selected_discovered_app_payload_requires_model(payload: Mapping[str, Any]) -> bool:
+def _selected_discovered_app_payload_requires_model(
+    payload: Mapping[str, Any],
+    tool_name: str = "",
+) -> bool:
     if str(payload.get("app_name") or "").strip() != "<selected app from desktop.list_apps>":
         return False
-    return not _runtime_resolvable_selected_app_payload(payload)
+    if (
+        _selected_discovered_app_payload_needs_open_path_tool(payload)
+        and str(tool_name or "").strip() != "desktop.open_path_with_app"
+    ):
+        return True
+    return not _runtime_resolvable_selected_app_payload(payload, tool_name)
 
 
-def _runtime_resolvable_selected_app_payload(payload: Mapping[str, Any]) -> bool:
-    return (
+def _runtime_resolvable_selected_app_payload(
+    payload: Mapping[str, Any],
+    tool_name: str = "",
+) -> bool:
+    if not (
         str(payload.get("selection_source") or "").strip() == "desktop.list_apps"
         and bool(str(payload.get("query") or "").strip())
+    ):
+        return False
+    if _selected_discovered_app_payload_needs_open_path_tool(payload):
+        return str(tool_name or "").strip() == "desktop.open_path_with_app"
+    return True
+
+
+def _selected_discovered_app_payload_needs_open_path_tool(payload: Mapping[str, Any]) -> bool:
+    return bool(str(payload.get("target_path") or "").strip()) or (
+        str(payload.get("action") or "").strip() == "open_path_with_selected_app"
     )
 
 
@@ -1104,9 +1130,13 @@ def _runtime_resolvable_discovered_app_plan(decision: Any) -> bool:
         input_preview = getattr(step, "input_preview", None)
         payload = input_preview if isinstance(input_preview, Mapping) else {}
         step_id = str(getattr(step, "step_id", "") or "").strip()
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if step_id == "open-selected-discovered-app":
-            has_resolvable_open_step = _runtime_resolvable_selected_app_payload(payload)
-        if _selected_discovered_app_payload_requires_model(payload):
+            has_resolvable_open_step = _runtime_resolvable_selected_app_payload(
+                payload,
+                tool_name,
+            )
+        if _selected_discovered_app_payload_requires_model(payload, tool_name):
             return False
     return has_resolvable_open_step
 
