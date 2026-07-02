@@ -3182,6 +3182,90 @@ def test_auto_replan_ui_observed_action_retries_after_matching_observation() -> 
     assert all("continue_to_model" not in request for request in requests)
 
 
+def test_auto_replan_ui_observed_type_uses_safe_text_after_semantic_failure() -> None:
+    requests = custom_api_agent_module._auto_replan_ui_observed_action_requests(
+        [
+            {
+                "request_id": "replan-ui-type-fallback",
+                "trigger": "tool_failure",
+                "decision_id": "decision-ui-type-fallback",
+                "plan_id": "plan-ui-type-fallback",
+                "source_step_id": "type-media-search-query",
+                "source_tool_name": "app.focus_and_type_into_ui_element",
+                "target_capability_id": "desktop.ui_operation",
+                "input_preview": {
+                    "app_name": "Music",
+                    "target": "search 搜索",
+                    "text": "超时空辉夜姬",
+                    "role_filter": "text",
+                    "limit": 80,
+                },
+            }
+        ],
+        [
+            "app.focus_and_type_into_ui_element",
+            "desktop.safe_click",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.ui_elements",
+                input_preview={"app_name": "Music", "role_filter": "text", "limit": 80},
+                result={
+                    "ok": True,
+                    "data": {
+                        "elements": [
+                            {
+                                "role": "AXTextField",
+                                "label": "search 搜索",
+                                "center": {"x": 180, "y": 90},
+                            }
+                        ],
+                        "count": 1,
+                    },
+                },
+            )
+        ],
+        planning_reason="planner_replan_ui_observed_action",
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.safe_click",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["input"] == {"x": 180, "y": 90}
+    assert requests[0]["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "focus_for_type",
+        "target": "search 搜索",
+        "role_filter": "text",
+        "app_name": "Music",
+    }
+    assert requests[0]["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "observed_center",
+        "center": {"x": 180, "y": 90},
+    }
+    assert requests[1]["input"] == {"text": "超时空辉夜姬"}
+    assert requests[1]["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "type_text",
+        "target": "search 搜索",
+        "role_filter": "text",
+        "app_name": "Music",
+    }
+    assert requests[1]["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "focused_after_observed_target",
+    }
+    assert {request["replan_request_id"] for request in requests} == {
+        "replan-ui-type-fallback"
+    }
+
+
 def test_auto_replan_ui_observed_click_uses_observed_center_after_semantic_failure() -> None:
     requests = custom_api_agent_module._auto_replan_ui_observed_action_requests(
         [
@@ -3329,6 +3413,86 @@ def test_auto_replan_ui_continuation_accepts_observed_click_fallback_success() -
     assert requests[0]["step_id"] == "verify-media-playback"
     assert requests[0]["planner_step_id"] == "verify-media-playback"
     assert requests[0]["capability_id"] == "desktop.app_discovery"
+
+
+def test_auto_replan_ui_continuation_accepts_observed_type_fallback_success() -> None:
+    payload = {
+        "request_id": "replan-ui-type-continuation",
+        "trigger": "tool_failure",
+        "decision_id": "decision-ui-type-continuation",
+        "plan_id": "plan-ui-type-continuation",
+        "source_step_id": "type-media-search-query",
+        "source_tool_name": "app.focus_and_type_into_ui_element",
+        "target_capability_id": "desktop.ui_operation",
+        "input_preview": {
+            "app_name": "Music",
+            "target": "search 搜索",
+            "text": "超时空辉夜姬",
+            "role_filter": "text",
+            "limit": 80,
+        },
+    }
+    planned = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_type_into_ui_element",
+            "input": {
+                "app_name": "Music",
+                "target": "search 搜索",
+                "text": "超时空辉夜姬",
+                "role_filter": "text",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+            "step_id": "type-media-search-query",
+            "capability_id": "desktop.ui_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+            "step_id": "submit-media-search",
+            "capability_id": "desktop.ui_operation",
+        },
+    ]
+
+    requests = custom_api_agent_module._auto_replan_ui_continuation_requests(
+        [payload],
+        planned,
+        [
+            "app.focus_and_type_into_ui_element",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+        ],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.safe_type_text",
+                input_preview={"text": "超时空辉夜姬"},
+                result={"ok": True},
+                planning_reason="planner_replan_ui_observed_action",
+                replan_request_id="replan-ui-type-continuation",
+                action_target={
+                    "kind": "desktop_observed_action",
+                    "action": "type_text",
+                    "target": "search 搜索",
+                    "role_filter": "text",
+                    "app_name": "Music",
+                },
+            )
+        ],
+        tool_timeline_start=0,
+        planning_reason="planner_replan_ui_continuation",
+    )
+
+    assert [request["tool"] for request in requests] == ["desktop.search_submit"]
+    assert requests[0]["planning_reason"] == "planner_replan_ui_continuation"
+    assert requests[0]["replan_request_id"] == "replan-ui-type-continuation"
+    assert requests[0]["step_id"] == "submit-media-search"
+    assert requests[0]["planner_step_id"] == "submit-media-search"
 
 
 def test_auto_replan_ui_continuation_runs_remaining_plan_after_retry() -> None:

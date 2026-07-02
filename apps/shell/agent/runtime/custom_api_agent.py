@@ -9148,7 +9148,10 @@ def _auto_desktop_observed_type_requests(
             role_filter=role_filter,
             planning_reason=planning_reason,
         )
-    type_tool = _first_allowed_tool(("desktop.type_text", "desktop.type"), allowed)
+    type_tool = _first_allowed_tool(
+        ("desktop.safe_type_text", "desktop.type_text", "desktop.type"),
+        allowed,
+    )
     if not type_tool:
         return []
     app_scoped_focus_tool = (
@@ -10070,6 +10073,34 @@ def _replan_ui_observed_action_scoped_allowed_tools(
                     *low_level_tools,
                     *[tool for tool in observation_tools if tool in allowed],
                 ]
+    if (
+        target_action == "type_text"
+        and source_tool in {
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_type_into_ui_element",
+            "desktop.type_into_ui_element",
+        }
+    ):
+        role_filter = str(target.get("role_filter") or "").strip()
+        target_label = _desktop_observed_action_execution_target(
+            str(target.get("target") or "").strip(),
+            role_filter,
+        )
+        if _latest_desktop_observation_match_center(timeline, target_label, role_filter):
+            focus_tools = [
+                tool for tool in ("desktop.safe_click", "desktop.click") if tool in allowed
+            ]
+            type_tools = [
+                tool
+                for tool in ("desktop.safe_type_text", "desktop.type_text", "desktop.type")
+                if tool in allowed
+            ]
+            if focus_tools and type_tools:
+                return [
+                    *focus_tools,
+                    *type_tools,
+                    *[tool for tool in observation_tools if tool in allowed],
+                ]
     return [
         tool
         for tool in (
@@ -10322,20 +10353,30 @@ def _replan_ui_observed_action_fallback_succeeded(
     target_action: str,
     event: Mapping[str, Any],
 ) -> bool:
-    if target_action != "click":
-        return False
-    if source_tool not in {
-        "app.open_and_click_ui_element",
-        "app.focus_and_click_ui_element",
-        "desktop.click_ui_element",
-    }:
-        return False
-    if tool_name not in {"desktop.safe_click", "desktop.click"}:
+    if target_action == "click":
+        if source_tool not in {
+            "app.open_and_click_ui_element",
+            "app.focus_and_click_ui_element",
+            "desktop.click_ui_element",
+        }:
+            return False
+        if tool_name not in {"desktop.safe_click", "desktop.click"}:
+            return False
+    elif target_action == "type_text":
+        if source_tool not in {
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_type_into_ui_element",
+            "desktop.type_into_ui_element",
+        }:
+            return False
+        if tool_name not in {"desktop.safe_type_text", "desktop.type_text", "desktop.type"}:
+            return False
+    else:
         return False
     action_target = (
         event.get("action_target") if isinstance(event.get("action_target"), Mapping) else {}
     )
-    return str(action_target.get("action") or "").strip() == "click"
+    return str(action_target.get("action") or "").strip() == target_action
 
 
 def _replan_ui_continuation_slice(
