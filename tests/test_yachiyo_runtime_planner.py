@@ -7,6 +7,7 @@ from datetime import date, datetime, timedelta
 from typing import Any
 
 from apps.shell.yachiyo_agent import (
+    AgentStudioService,
     PlannerDecisionSnapshot,
     RuntimePlanner,
     YachiyoAgentService,
@@ -28485,6 +28486,71 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
         projected_requests[1]["task_workspace_items"][0]["source_step_id"]
         == "operate-foreground-ui"
     )
+
+
+def test_runtime_execution_envelope_can_project_full_data_analysis_plan() -> None:
+    allowed_tools = ["workspace.read", "terminal.run", "artifact.write"]
+    decision = RuntimePlanner().decision(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools=allowed_tools,
+    )
+
+    default_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+    full_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert default_envelope is not None
+    assert full_envelope is not None
+    assert [request.tool_name for request in default_envelope.requests] == ["workspace.read"]
+    assert [request.tool_name for request in full_envelope.requests] == [
+        "workspace.read",
+        "terminal.run",
+        "artifact.write",
+    ]
+    assert [request.step_id for request in full_envelope.requests] == [
+        "inspect-data-source",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert full_envelope.requests[1].approval_required is True
+    assert full_envelope.requests[1].depends_on == ["inspect-data-source"]
+    assert full_envelope.requests[2].depends_on == ["run-analysis"]
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        full_envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    assert projected_requests[1]["approval_required"] is True
+    assert projected_requests[1]["task_todo"]["step_id"] == "run-analysis"
+    assert projected_requests[1]["task_checkpoints"][0]["after_step_id"] == "run-analysis"
+    assert (
+        projected_requests[1]["workspace_id"]
+        == decision.plan.task_core.workspace.workspace_id
+    )
+
+
+def test_agent_studio_service_projects_full_data_analysis_execution_plan() -> None:
+    class StudioPort:
+        pass
+
+    service = AgentStudioService(StudioPort())
+    envelope = service.plan_execution(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools=["workspace.read", "terminal.run", "artifact.write"],
+        metadata={"surface": "studio"},
+    )
+
+    assert [request.tool_name for request in envelope.requests] == [
+        "workspace.read",
+        "terminal.run",
+        "artifact.write",
+    ]
+    assert envelope.requests[1].approval_required is True
 
 
 def test_yachiyo_agent_service_uses_fake_runtime_planner_port() -> None:

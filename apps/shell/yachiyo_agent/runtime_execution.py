@@ -19,15 +19,20 @@ def runtime_execution_envelope_from_decision(
     *,
     allowed_tools: Iterable[str] | None = None,
     direct: bool = False,
+    full_plan: bool = False,
 ) -> RuntimeExecutionEnvelopeSnapshot | None:
     if decision is None:
         return None
     clean_allowed = _allowed_tools(decision, allowed_tools)
-    request_payloads = planner_tool_requests_for_decision(
-        decision,
-        clean_allowed,
-        direct=direct,
-        execution_normalized=True,
+    request_payloads = (
+        _full_plan_tool_requests_from_decision(decision, clean_allowed)
+        if full_plan and _supports_full_plan_projection(decision)
+        else planner_tool_requests_for_decision(
+            decision,
+            clean_allowed,
+            direct=direct,
+            execution_normalized=True,
+        )
     )
     steps = _steps_by_id(decision)
     requests = [
@@ -63,15 +68,58 @@ def runtime_execution_envelope_payload(
     *,
     allowed_tools: Iterable[str] | None = None,
     direct: bool = False,
+    full_plan: bool = False,
 ) -> dict[str, Any]:
     envelope = runtime_execution_envelope_from_decision(
         decision,
         allowed_tools=allowed_tools,
         direct=direct,
+        full_plan=full_plan,
     )
     if envelope is None:
         return {}
     return envelope.model_dump(mode="json")
+
+
+def _supports_full_plan_projection(decision: PlannerDecisionSnapshot) -> bool:
+    return str(decision.selected_intent.kind or "").strip() in {
+        "data_analysis",
+        "report_generation",
+    }
+
+
+def _full_plan_tool_requests_from_decision(
+    decision: PlannerDecisionSnapshot,
+    allowed_tools: set[str],
+) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    for step in list(decision.plan.tool_plan.steps or []):
+        tool_name = _text(getattr(step, "tool_name", None))
+        if not tool_name or tool_name not in allowed_tools:
+            continue
+        status = _text(getattr(step, "status", None)) or "planned"
+        if status in {"unavailable", "skipped"}:
+            continue
+        input_preview = getattr(step, "input_preview", None)
+        request_input = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        step_id = _text(getattr(step, "step_id", None))
+        capability_id = _text(getattr(step, "capability_id", None))
+        request: dict[str, Any] = {
+            "protocol": "json_fallback",
+            "tool": tool_name,
+            "input": request_input,
+            "source": "runtime_planner",
+            "planning_reason": f"planner_full_plan_{decision.selected_intent.kind}",
+            "approval_required": bool(getattr(step, "approval_required", False)),
+            "status": status,
+        }
+        if step_id:
+            request["step_id"] = step_id
+            request["planner_step_id"] = step_id
+        if capability_id:
+            request["capability_id"] = capability_id
+        requests.append(request)
+    return requests
 
 
 def runtime_execution_requests_from_metadata(

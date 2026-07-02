@@ -176,6 +176,7 @@ class AgentStudioService:
             decision,
             allowed_tools=allowed_tools,
             direct=direct,
+            full_plan=True,
         )
         if envelope is None:
             raise ValueError("Unable to build Agent Studio execution plan")
