@@ -24197,6 +24197,33 @@ def test_planner_desktop_tool_requests_discovers_generic_music_app_before_playba
     ]
 
 
+def test_planner_desktop_tool_requests_keeps_generic_music_app_discovery_before_apple_tool() -> None:
+    requests = planner_desktop_tool_requests(
+        "帮我打开任意可以播放音乐的应用并播放 lo-fi",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.ui_elements",
+            "media.apple_music_play",
+            "media.music_app_open_and_play",
+        ],
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+    ]
+    assert all(request["tool"] != "media.apple_music_play" for request in requests)
+    assert requests[0]["input"] == {"query": "music", "limit": 20}
+    assert requests[1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "music",
+    }
+    assert requests[2]["input"] == {"role_filter": "", "limit": 80}
+
+
 def test_runtime_planner_clicks_generic_media_search_result_when_playback_tool_is_missing() -> None:
     decision = RuntimePlanner().decision(
         "打开一个能播放音乐的应用，搜索超时空辉夜姬并播放",

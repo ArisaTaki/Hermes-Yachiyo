@@ -857,7 +857,6 @@ def media_tool_preview(
     if (
         isinstance(app_capability, Mapping)
         and not app_name
-        and not query
         and "desktop.list_apps" in allowed
     ):
         return None, {}
