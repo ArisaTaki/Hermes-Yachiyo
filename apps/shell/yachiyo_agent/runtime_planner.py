@@ -5713,7 +5713,12 @@ class RuntimePlanner:
                         "Prepare target app",
                         "desktop.app_control",
                         _first_allowed(
-                            ("app.focus", "app.open", "app.open_and_safe_shortcut"),
+                            (
+                                "app.focus",
+                                "app.open",
+                                "app.focus_and_safe_shortcut",
+                                "app.open_and_safe_shortcut",
+                            ),
                             allowed,
                         ),
                         input_preview={

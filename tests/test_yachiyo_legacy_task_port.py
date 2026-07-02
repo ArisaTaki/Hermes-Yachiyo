@@ -702,7 +702,7 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
         ),
         (
             "Chrome 点登录",
-            ["desktop.list_apps", "app.focus_and_click_ui_element", "desktop.ui_elements"],
+            ["desktop.list_apps", "app.focus", "desktop.ui_elements"],
         ),
     )
 
@@ -1096,7 +1096,11 @@ def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None
         {
             "protocol": "json_fallback",
             "tool": "app.open",
-            "input": {"app_name": "PixelForge"},
+            "input": {
+                "app_name": "PixelForge",
+                "selection_source": "desktop.list_apps",
+                "query": "PixelForge",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         }

@@ -11978,6 +11978,12 @@ def _annotate_auto_followup_requests_from_tool_plan(
             step_cursor = step_index + 1
             for key, value in _auto_followup_plan_step_trace(step).items():
                 item.setdefault(key, value)
+            task_todo = _auto_followup_task_todo_for_step(
+                selection_payload,
+                str(item.get("step_id") or "").strip(),
+            )
+            if task_todo:
+                item.setdefault("task_todo", task_todo)
         if str(item.get("step_id") or "").strip() and not str(
             item.get("planner_step_id") or ""
         ).strip():
@@ -11997,8 +12003,8 @@ def _first_annotated_auto_followup_request(
     return annotated[0] if annotated else request
 
 
-def _auto_followup_selection_trace_base(selection_payload: Mapping[str, Any]) -> dict[str, str]:
-    trace: dict[str, str] = {}
+def _auto_followup_selection_trace_base(selection_payload: Mapping[str, Any]) -> dict[str, Any]:
+    trace: dict[str, Any] = {}
     for key in ("decision_id", "plan_id", "intent_kind"):
         value = str(selection_payload.get(key) or "").strip()
         if value:
@@ -12011,7 +12017,58 @@ def _auto_followup_selection_trace_base(selection_payload: Mapping[str, Any]) ->
     tool_plan_id = str(tool_plan.get("plan_id") or "").strip()
     if tool_plan_id:
         trace["tool_plan_id"] = tool_plan_id
+    trace.update(_auto_followup_task_core_trace(selection_payload))
     return trace
+
+
+def _auto_followup_task_core_trace(selection_payload: Mapping[str, Any]) -> dict[str, Any]:
+    task_core = _model_followup_task_core_payload(selection_payload)
+    if not task_core:
+        return {}
+    workspace = (
+        task_core.get("workspace")
+        if isinstance(task_core.get("workspace"), Mapping)
+        else {}
+    )
+    trace: dict[str, Any] = {}
+    core_id = str(task_core.get("core_id") or "").strip()
+    if core_id:
+        trace["core_id"] = core_id
+    workspace_id = str(workspace.get("workspace_id") or "").strip()
+    if workspace_id:
+        trace["workspace_id"] = workspace_id
+    workspace_items = workspace.get("items") if isinstance(workspace, Mapping) else []
+    if isinstance(workspace_items, list):
+        items = [dict(item) for item in workspace_items if isinstance(item, Mapping)]
+        if items:
+            trace["task_workspace_items"] = items
+    checkpoints = task_core.get("checkpoints")
+    if isinstance(checkpoints, list):
+        checkpoint_items = [
+            dict(checkpoint) for checkpoint in checkpoints if isinstance(checkpoint, Mapping)
+        ]
+        if checkpoint_items:
+            trace["task_checkpoints"] = checkpoint_items
+    return trace
+
+
+def _auto_followup_task_todo_for_step(
+    selection_payload: Mapping[str, Any],
+    step_id: str,
+) -> dict[str, Any]:
+    clean_step_id = str(step_id or "").strip()
+    if not clean_step_id:
+        return {}
+    task_core = _model_followup_task_core_payload(selection_payload)
+    todos = task_core.get("todos") if isinstance(task_core, Mapping) else []
+    if not isinstance(todos, list):
+        return {}
+    for todo in todos:
+        if not isinstance(todo, Mapping):
+            continue
+        if str(todo.get("step_id") or "").strip() == clean_step_id:
+            return dict(todo)
+    return {}
 
 
 def _next_matching_followup_plan_step(

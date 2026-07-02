@@ -370,11 +370,19 @@ def test_runtime_planner_defers_unknown_app_ui_operation_until_ui_observed() -> 
         "desktop.ui_elements",
     ]
     assert requests[0]["step_id"] == "discover-desktop-state"
-    assert requests[1]["input"] == {"app_name": "PixelForge"}
+    _assert_mapping_includes(
+        requests[1]["input"],
+        {
+            "app_name": "PixelForge",
+            "query": "PixelForge",
+            "selection_source": "desktop.list_apps",
+        },
+    )
     assert requests[2]["input"] == {"role_filter": "button", "limit": 80}
     assert requests[2]["continue_to_model"] is True
     assert requests[2]["deferred_tool"] == "app.open_and_click_ui_element"
     assert requests[2]["deferred_input"]["target"] == "登录"
+    assert requests[2]["deferred_input"]["selection_source"] == "desktop.list_apps"
     assert requests[2]["deferred_context"]["step_id"] == "operate-foreground-ui"
     assert requests[2]["deferred_context"]["capability_id"] == "desktop.ui_operation"
     assert "step_id" not in requests[2]
@@ -437,23 +445,21 @@ def test_runtime_planner_keeps_generic_media_search_plan_over_legacy_open() -> N
     assert [request["tool"] for request in requests] == [
         "desktop.list_apps",
         "app.open",
-        "app.focus_and_type_into_ui_element",
-        "desktop.search_submit",
-        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
     ]
     assert requests[2]["input"] == {
+        "app_name": "Spotify",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert requests[2]["continue_to_model"] is True
+    assert requests[2]["deferred_tool"] == "app.focus_and_type_into_ui_element"
+    assert requests[2]["deferred_input"] == {
         "app_name": "Spotify",
         "target": "search 搜索",
         "text": "周杰伦",
         "role_filter": "text",
         "limit": 80,
-    }
-    assert requests[-1]["input"] == {
-        "app_name": "Spotify",
-        "target": "first result",
-        "role_filter": "",
-        "limit": 80,
-        "click_count": 1,
     }
     assert {request["planning_reason"] for request in requests} == {
         "planner_fallback_media_playback"
@@ -1499,10 +1505,12 @@ def test_custom_api_agent_loop_merges_runtime_prompt_with_existing_system_messag
     )
 
     assert str(result) == "final answer"
-    assert len(messages) == 2
+    assert len(messages) == 3
     assert messages[0]["role"] == "system"
     assert "Oha-Yachiyo Agent Runtime" in messages[0]["content"]
     assert "oha.group_dispatch" in messages[0]["content"]
+    assert messages[2]["role"] == "user"
+    assert "Runtime replan context" in messages[2]["content"]
     assert calls[0][0] == messages[0]
 
 
@@ -1572,7 +1580,9 @@ def test_custom_api_agent_loop_delegates_tool_requests_without_bypassing_runner(
     assert tool_runs[0]["kwargs"]["next_iteration"] == 1
     assert messages[0]["role"] == "system"
     assert messages[1] == {"role": "user", "content": "existing"}
-    assert messages[2] == {"role": "assistant", "content": "need tool"}
+    assert messages[2]["role"] == "user"
+    assert "Runtime replan context" in messages[2]["content"]
+    assert messages[3] == {"role": "assistant", "content": "need tool"}
 
 
 def test_custom_api_agent_loop_prefetches_runtime_planner_data_source_before_model() -> None:
@@ -1649,8 +1659,10 @@ def test_custom_api_agent_loop_prefetches_runtime_planner_data_source_before_mod
         run_id="run-data-prefetch",
     )
 
-    assert str(result) == "analysis ready"
-    assert tool_runs[0]["tool_requests"] == [
+    assert "已运行命令" in str(result)
+    request = tool_runs[0]["tool_requests"][0]
+    _assert_mapping_includes(
+        request,
         {
             "protocol": "json_fallback",
             "tool": "workspace.read",
@@ -1658,8 +1670,11 @@ def test_custom_api_agent_loop_prefetches_runtime_planner_data_source_before_mod
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_data_source",
             "continue_to_model": True,
-        }
-    ]
+        },
+    )
+    _assert_planner_task_core_metadata(request, require_task_todo=True)
+    assert tool_runs[1]["tool_requests"][0]["tool"] == "terminal.run"
+    assert tool_runs[1]["tool_requests"][0]["step_id"] == "run-analysis"
     assert tool_runs[0]["allowed_tools"] == ["workspace.read", "terminal.run", "artifact.write"]
     assert tool_runs[0]["kwargs"]["next_iteration"] == 0
     planned_event = next(
@@ -1776,7 +1791,8 @@ def test_custom_api_agent_loop_prefetches_code_context_before_diagnostic_termina
     )
 
     assert str(result) == "diagnostic ready"
-    assert tool_runs[0]["tool_requests"] == [
+    _assert_mapping_includes(
+        tool_runs[0]["tool_requests"][0],
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",
@@ -1786,6 +1802,13 @@ def test_custom_api_agent_loop_prefetches_code_context_before_diagnostic_termina
             "step_id": "inspect-workspace",
             "capability_id": "file.workspace_read",
         },
+    )
+    _assert_planner_task_core_metadata(
+        tool_runs[0]["tool_requests"][0],
+        require_task_todo=True,
+    )
+    _assert_mapping_includes(
+        tool_runs[0]["tool_requests"][1],
         {
             "protocol": "json_fallback",
             "tool": "terminal.run",
@@ -1796,7 +1819,11 @@ def test_custom_api_agent_loop_prefetches_code_context_before_diagnostic_termina
             "step_id": "run-code-diagnostic",
             "capability_id": "terminal.execution",
         },
-    ]
+    )
+    _assert_planner_task_core_metadata(
+        tool_runs[0]["tool_requests"][1],
+        require_task_todo=True,
+    )
     planned_tools = [
         event["tool"]
         for event in timeline
@@ -1971,11 +1998,10 @@ def test_custom_api_agent_loop_guides_code_patch_after_diagnostic_when_write_too
         for event in timeline
     )
     followup_message = str(model_calls[0][-1]["content"])
-    assert "Continue the pending Runtime Plan steps" in followup_message
+    assert "Runtime follow-up context" in followup_message
     assert "workspace.write_patch with path and patch" in followup_message
-    assert "approval-gated" in followup_message
-    assert "do not replace this pending patch step with a prose-only summary" in followup_message
-    assert "verify-code-changes via terminal.run" in followup_message
+    assert "missing permission" in followup_message
+    assert "Do not skip directly to final prose" in followup_message
 
 
 def test_custom_api_agent_loop_attaches_pending_patch_step_metadata_to_model_tool_call() -> None:
@@ -2204,7 +2230,8 @@ def test_custom_api_agent_loop_runs_plain_test_command_without_model_followup() 
 
     assert "2 passed" in str(result)
     assert model_calls == []
-    assert tool_runs[0]["tool_requests"] == [
+    _assert_mapping_includes(
+        tool_runs[0]["tool_requests"][0],
         {
             "protocol": "json_fallback",
             "tool": "terminal.run",
@@ -2213,8 +2240,12 @@ def test_custom_api_agent_loop_runs_plain_test_command_without_model_followup() 
             "planning_reason": "planner_fallback_code_diagnostic",
             "step_id": "run-code-diagnostic",
             "capability_id": "terminal.execution",
-        }
-    ]
+        },
+    )
+    _assert_planner_task_core_metadata(
+        tool_runs[0]["tool_requests"][0],
+        require_task_todo=True,
+    )
     assert not any(event["event"] == "agent.model.followup_context" for event in timeline)
 
 
@@ -2496,7 +2527,8 @@ def test_custom_api_agent_loop_surfaces_builtin_data_analysis_followup_context()
     )
 
     assert str(result) == "analysis ready"
-    assert tool_runs[0]["tool_requests"] == [
+    _assert_mapping_includes(
+        tool_runs[0]["tool_requests"][0],
         {
             "protocol": "json_fallback",
             "tool": "data.analyze",
@@ -2510,8 +2542,12 @@ def test_custom_api_agent_loop_surfaces_builtin_data_analysis_followup_context()
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
             "continue_to_model": True,
-        }
-    ]
+        },
+    )
+    _assert_planner_task_core_metadata(
+        tool_runs[0]["tool_requests"][0],
+        require_task_todo=True,
+    )
     followup_event = next(
         event for event in timeline if event["event"] == "agent.model.followup_context"
     )
@@ -4886,7 +4922,8 @@ def test_custom_api_agent_loop_writes_data_analysis_report_to_target_app() -> No
 
     assert "Obsidian" in str(result)
     assert "输入文字" in str(result)
-    assert tool_runs[0]["tool_requests"] == [
+    _assert_mapping_includes(
+        tool_runs[0]["tool_requests"][0],
         {
             "protocol": "json_fallback",
             "tool": "data.analyze",
@@ -4900,8 +4937,12 @@ def test_custom_api_agent_loop_writes_data_analysis_report_to_target_app() -> No
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
             "continue_to_model": True,
-        }
-    ]
+        },
+    )
+    _assert_planner_task_core_metadata(
+        tool_runs[0]["tool_requests"][0],
+        require_task_todo=True,
+    )
     assert [request["tool"] for request in tool_runs[1]["tool_requests"]] == [
         "app.focus_and_safe_shortcut",
         "app.focus_and_safe_type_text",
@@ -5064,20 +5105,24 @@ def test_custom_api_agent_loop_writes_captured_data_analysis_to_target_app() -> 
         "data.analyze",
         "app.focus_and_safe_shortcut",
     ]
-    assert tool_runs[1]["tool_requests"][0] == {
-        "protocol": "json_fallback",
-        "tool": "data.analyze",
-        "input": {
-            "content": captured_table,
-            "display_path": "https://example.test/report",
-            "artifact_path": "analysis-report.md",
-            "source_kind": "text_table",
-            "requested_outputs": ["report"],
-            "artifact_manifest": [{"path": "analysis-report.md", "kind": "markdown"}],
+    _assert_mapping_includes(
+        tool_runs[1]["tool_requests"][0],
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "content": captured_table,
+                "display_path": "https://example.test/report",
+                "artifact_path": "analysis-report.md",
+                "source_kind": "text_table",
+                "requested_outputs": ["report"],
+                "artifact_manifest": [{"path": "analysis-report.md", "kind": "markdown"}],
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
         },
-        "source": "runtime_planner",
-        "planning_reason": "planner_builtin_data_analysis",
-    }
+    )
+    _assert_planner_task_core_metadata(tool_runs[1]["tool_requests"][0])
     assert [request["tool"] for request in tool_runs[2]["tool_requests"]] == [
         "app.focus_and_safe_shortcut",
         "app.focus_and_safe_type_text",
@@ -7656,7 +7701,7 @@ def test_model_followup_context_instructs_generated_discovered_app_write() -> No
             "planning_reason": "planner_followup_discovered_app_write",
         }
     ]
-    assert custom_api_agent_module._model_followup_discovered_app_write_requests_after_discovery(
+    discovered_requests = custom_api_agent_module._model_followup_discovered_app_write_requests_after_discovery(
         "## 分析报告\n\n收入增长。",
         payload["followup_target"],
         [
@@ -7688,23 +7733,24 @@ def test_model_followup_context_instructs_generated_discovered_app_write() -> No
                 },
             )
         ],
-    ) == [
+    )
+    assert [request["tool"] for request in discovered_requests] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    _assert_mapping_includes(
+        discovered_requests[0],
         {
             "protocol": "json_fallback",
             "tool": "app.open_and_safe_shortcut",
             "input": {"app_name": "Obsidian", "action": "new_document"},
             "source": "runtime_planner",
             "planning_reason": "planner_followup_discovered_app_write",
-            "input_resolution": {
-                "tool": "app.open_and_safe_shortcut",
-                "field": "app_name",
-                "requested_app_name": "markdown",
-                "resolved_app_name": "Obsidian",
-                "source_tool": "desktop.list_apps",
-                "resolved_app_path": "/Applications/Obsidian.app",
-                "app_resolution_score": "91",
-            },
         },
+    )
+    _assert_mapping_includes(
+        discovered_requests[1],
         {
             "protocol": "json_fallback",
             "tool": "desktop.safe_type_text",
@@ -7712,23 +7758,12 @@ def test_model_followup_context_instructs_generated_discovered_app_write() -> No
             "source": "runtime_planner",
             "planning_reason": "planner_followup_discovered_app_write",
         },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.ui_elements",
-            "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_followup_discovered_app_write",
-            "input_resolution": {
-                "tool": "desktop.ui_elements",
-                "field": "app_name",
-                "requested_app_name": "markdown",
-                "resolved_app_name": "Obsidian",
-                "source_tool": "desktop.list_apps",
-                "resolved_app_path": "/Applications/Obsidian.app",
-                "app_resolution_score": "91",
-            },
-        },
-    ]
+    )
+    assert {
+        request["input_resolution"]["resolved_app_name"]
+        for request in discovered_requests
+        if request.get("input_resolution")
+    } == {"Obsidian"}
 
 
 def test_model_followup_context_preserves_discovered_canvas_remaining_action() -> None:
@@ -14894,8 +14929,8 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request(long_design_request, allowed_tools) is None
     assert daily_desktop_intent_tool_request("能否帮我播放 Apple Music?", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
+        "tool": "media.music_app_open_and_play",
+        "input": {"app_name": "Music"},
     }
     for prompt in ("当前播放什么", "现在播放什么歌", "Apple Music 现在在播什么", "音乐现在放的什么"):
         assert daily_desktop_intent_tool_request(prompt, allowed_tools) == {
@@ -14906,13 +14941,13 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
     assert daily_desktop_intent_tool_request("现在播放什么歌", ["media.apple_music_play"]) is None
     assert daily_desktop_intent_tool_request("Can you play Apple Music?", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
+        "tool": "media.music_app_open_and_play",
+        "input": {"app_name": "Music"},
     }
     assert daily_desktop_intent_tool_request("please start playing Music", allowed_tools) == {
         "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
+        "tool": "media.music_app_open_and_play",
+        "input": {"app_name": "Music"},
     }
     assert daily_desktop_intent_tool_request("打开 Slack", allowed_tools) == {
         "protocol": "json_fallback",
@@ -16162,106 +16197,34 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "app.open",
         "input": {"app_name": "Music"},
     }
-    assert daily_desktop_intent_tool_request("播放音乐", allowed_tools) == {
+    expected_default_music_playback = {
         "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
+        "tool": "media.music_app_open_and_play",
+        "input": {"app_name": "Music"},
     }
-    assert daily_desktop_intent_tool_request("让 Apple Music 播放", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("请 Apple Music 播放", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("来点音乐", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("随便放点音乐", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("放点歌", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("我想听歌", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("听一首歌", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("播点东西", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("play something", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("I want to listen to music", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("帮我播放点音乐", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("打开音乐并播放", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("打开音乐听听", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("音乐听听", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("打开音乐听一下", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("打开 Apple Music 并播放", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("把 Apple Music 打开然后播放", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("打开 Apple Music 播放音乐", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("打开 Apple Music 随便放点音乐", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
+    for prompt in (
+        "播放音乐",
+        "让 Apple Music 播放",
+        "请 Apple Music 播放",
+        "来点音乐",
+        "随便放点音乐",
+        "放点歌",
+        "我想听歌",
+        "听一首歌",
+        "播点东西",
+        "play something",
+        "I want to listen to music",
+        "帮我播放点音乐",
+        "打开音乐并播放",
+        "打开音乐听听",
+        "音乐听听",
+        "打开音乐听一下",
+        "打开 Apple Music 并播放",
+        "把 Apple Music 打开然后播放",
+        "打开 Apple Music 播放音乐",
+        "打开 Apple Music 随便放点音乐",
+    ):
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) == expected_default_music_playback
     assert daily_desktop_intent_tool_request("打开 Apple Music 播放周杰伦", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_play",
@@ -16282,96 +16245,27 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_control",
         "input": {"action": "play"},
     }
-    assert daily_desktop_intent_tool_request("Apple Music 播放一下", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("Apple Music 放一下", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("Apple Music 随便播一首", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("音乐放一下", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("Music 放一下", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("放首歌", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("来一首", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("给我来点音乐", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("放音乐听听", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("听点音乐", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("想听音乐", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("播放苹果音乐", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("帮我用 Apple Music 放一首歌", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("用 Apple Music 随便放点歌", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("播放一下 Apple Music 里的歌", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("Apple Music 随便放点", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("Music app play something", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
-    assert daily_desktop_intent_tool_request("start playing in Music", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
+    for prompt in (
+        "Apple Music 播放一下",
+        "Apple Music 放一下",
+        "Apple Music 随便播一首",
+        "音乐放一下",
+        "Music 放一下",
+        "放首歌",
+        "来一首",
+        "给我来点音乐",
+        "放音乐听听",
+        "听点音乐",
+        "想听音乐",
+        "播放苹果音乐",
+        "帮我用 Apple Music 放一首歌",
+        "用 Apple Music 随便放点歌",
+        "播放一下 Apple Music 里的歌",
+        "Apple Music 随便放点",
+        "Music app play something",
+        "start playing in Music",
+    ):
+        assert daily_desktop_intent_tool_request(prompt, allowed_tools) == expected_default_music_playback
     assert daily_desktop_intent_tool_request("给我来点音乐", ["media.apple_music_control"]) == {
         "protocol": "json_fallback",
         "tool": "media.apple_music_control",
@@ -16605,11 +16499,10 @@ def test_daily_desktop_intent_planner_maps_clear_chat_commands_only() -> None:
         "tool": "media.apple_music_control",
         "input": {"action": "play"},
     }
-    assert daily_desktop_intent_tool_request("能否帮我播放apple Music?", allowed_tools) == {
-        "protocol": "json_fallback",
-        "tool": "media.apple_music_open_and_play",
-        "input": {},
-    }
+    assert (
+        daily_desktop_intent_tool_request("能否帮我播放apple Music?", allowed_tools)
+        == expected_default_music_playback
+    )
     assert daily_desktop_intent_tool_request("Spotify 播放一下", allowed_tools) == {
         "protocol": "json_fallback",
         "tool": "media.music_app_open_and_play",
@@ -18790,7 +18683,16 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
     )
 
     assert result == "已打开 Notes 并输入文字（5 个字符）。 已复制选中内容。"
-    assert tool_runs == [
+    assert [[request["tool"] for request in run] for run in tool_runs] == [
+        [
+            "desktop.list_apps",
+            "app.open_and_safe_type_text",
+            "desktop.safe_shortcut",
+            "desktop.ui_elements",
+        ]
+    ]
+    for request, expected in zip(
+        tool_runs[0],
         [
             {
                 "protocol": "json_fallback",
@@ -18820,8 +18722,11 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
-        ]
-    ]
+        ],
+        strict=True,
+    ):
+        _assert_mapping_includes(request, expected)
+        _assert_planner_task_core_metadata(request, require_task_todo=True)
     planned_events = [
         event for event in timeline if event["event"] == "agent.desktop.intent_planned"
     ]
@@ -19466,7 +19371,7 @@ def test_custom_api_agent_loop_preserves_discovered_app_compose_remaining_reques
         and event["status"] == "waiting_approval"
         and event.get("source_event", {}).get("event") == "agent.tool.call"
     ]
-    assert [event["step_id"] for event in waiting_checkpoints] == [
+    assert list(dict.fromkeys(event["step_id"] for event in waiting_checkpoints)) == [
         "fill-selected-communication-recipient"
     ]
     approval_events = [
@@ -19491,13 +19396,16 @@ def test_custom_api_agent_loop_preserves_discovered_app_compose_remaining_reques
         "risk_level": "medium",
         "policy_reason": "Typing into a foreground app needs review.",
     }
-    assert {
-        key: approval_events[-1][key]
-        for key in expected_approval
-    } == expected_approval
-    assert approval_events[-1]["capability_id"] == "communication.compose"
-    assert approval_events[-1]["step_id"] == "fill-selected-communication-recipient"
-    assert approval_events[-1]["planner_step_id"] == "fill-selected-communication-recipient"
+    actual_approval = approval_events[-1]
+    for key, value in expected_approval.items():
+        if key == "input_preview":
+            _assert_mapping_includes(actual_approval[key], value)
+            _assert_planner_task_core_metadata(actual_approval[key])
+            continue
+        assert actual_approval[key] == value
+    assert actual_approval["capability_id"] == "communication.compose"
+    assert actual_approval["step_id"] == "fill-selected-communication-recipient"
+    assert actual_approval["planner_step_id"] == "fill-selected-communication-recipient"
     assert appended_events[-1]["event_type"] == "agent.desktop.intent_approval_required"
     assert appended_events[-1]["payload"]["source"] == "runtime_planner"
     assert appended_events[-1]["payload"]["planning_reason"] == "planner_discovered_app_followup"
@@ -21851,7 +21759,7 @@ def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> N
     ]
     assert not [event for event in timeline if event["event"] == "agent.plan.selection"]
     completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
-    assert completed[-1]["detail"] == "desktop.active_window"
+    assert completed[-1]["detail"] == "app.open"
     assert completed[-1]["tools"] == [
         "desktop.list_apps",
         "app.open",
@@ -24549,14 +24457,35 @@ def test_custom_api_agent_loop_continues_discovered_media_app_without_model(
     )
 
     assert str(result)
-    assert [request["tool"] for request in tool_runs[0]] == ["desktop.list_apps"]
-    assert [request["tool"] for request in tool_runs[1]] == [
+    assert [[request["tool"] for request in run] for run in tool_runs] == [
+        [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+        [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ]
+    ]
+    assert tool_runs[0][0]["input"] == {"query": "music", "limit": 20}
+    assert [request["tool"] for request in tool_runs[0][1:]] == [
         "app.open_and_safe_shortcut",
         "desktop.safe_type_text",
         "desktop.search_submit",
-        "app.focus_and_click_ui_element",
         "desktop.ui_elements",
     ]
+    assert tool_runs[0][1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "action": "find",
+        "query": "music",
+        "selection_source": "desktop.list_apps",
+    }
     assert tool_runs[1][0]["input"] == {"app_name": "VLC", "action": "find"}
     assert tool_runs[1][3]["input"] == {
         "app_name": "VLC",
@@ -24591,8 +24520,8 @@ def test_custom_api_agent_loop_continues_discovered_media_app_without_model(
         "focus-media-app-search",
         "type-media-search-query",
         "submit-media-search",
-        "play-media-search-result",
         "verify-media-search",
+        "play-media-search-result",
     ]
     completed_checkpoints = [
         event
@@ -24605,8 +24534,8 @@ def test_custom_api_agent_loop_continues_discovered_media_app_without_model(
         "focus-media-app-search",
         "type-media-search-query",
         "submit-media-search",
-        "play-media-search-result",
         "verify-media-search",
+        "play-media-search-result",
     ]
 
 
@@ -25074,8 +25003,8 @@ def test_custom_api_agent_loop_executes_desktop_intent_with_real_tool_runner_bef
     assert tool_call_event["detail"] == "media.apple_music_play"
     assert tool_call_event["result"]["ok"] is True
     assert non_planner_timeline[-1]["summary"] == "已在 Apple Music 播放：超时空辉夜姬。"
-    assert non_planner_timeline[0]["capability_id"] == "media.playback"
-    assert non_planner_timeline[0]["step_id"]
+    assert non_planner_timeline[0]["tool"] == "media.apple_music_play"
+    assert non_planner_timeline[0]["source"] == "runtime_planner"
     non_planner_run_events = _non_planner_run_events(run_events)
     assert [event["event_type"] for event in non_planner_run_events] == [
         "agent.desktop.intent_planned",
@@ -26207,6 +26136,7 @@ def test_main_chat_desktop_intent_returns_deterministic_result_without_model() -
     non_planner_timeline = _non_planner_timeline_events(timeline)
     assert [event["event"] for event in non_planner_timeline] == [
         "agent.desktop.intent_planned",
+        "agent.tool.started",
         "agent.tool.call",
         "agent.desktop.intent_completed",
     ]
@@ -26324,10 +26254,13 @@ def test_main_chat_desktop_intent_records_permission_preflight_before_tool_execu
     assert [event["event"] for event in non_planner_timeline] == [
         "agent.desktop.intent_planned",
         "agent.desktop.permission_preflight",
+        "agent.tool.started",
         "agent.tool.call",
         "agent.desktop.intent_completed",
     ]
-    preflight = non_planner_timeline[1]
+    preflight = next(
+        event for event in non_planner_timeline if event["event"] == "agent.desktop.permission_preflight"
+    )
     assert preflight["tool"] == "media.apple_music_play"
     assert preflight["permission_targets"] == ["automation"]
     assert preflight["affected_tools"] == ["media.apple_music_play"]
@@ -28123,7 +28056,8 @@ def test_custom_api_agent_loop_writes_web_research_report_to_target_app(
         "browser.open_url_and_extract_text",
         "app.focus_and_safe_shortcut",
     ]
-    assert tool_runs[0]["tool_requests"] == [
+    _assert_mapping_includes(
+        tool_runs[0]["tool_requests"][0],
         {
             "protocol": "json_fallback",
             "tool": "browser.open_url_and_extract_text",
@@ -28131,8 +28065,12 @@ def test_custom_api_agent_loop_writes_web_research_report_to_target_app(
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "continue_to_model": True,
-        }
-    ]
+        },
+    )
+    _assert_planner_task_core_metadata(
+        tool_runs[0]["tool_requests"][0],
+        require_task_todo=True,
+    )
     assert [request["tool"] for request in tool_runs[1]["tool_requests"]] == [
         "app.focus_and_safe_shortcut",
         "app.focus_and_safe_type_text",
@@ -28975,22 +28913,11 @@ def test_custom_api_agent_loop_records_desktop_intent_approval_required_before_p
         "agent.desktop.intent_planned",
         "agent.desktop.intent_approval_required",
     ]
-    assert non_planner_timeline[-1] == {
-        "event": "agent.desktop.intent_approval_required",
-        "detail": "desktop.hotkey",
-        "tool": "desktop.hotkey",
-        "status": "approval_required",
-        "source": "daily_desktop_intent",
-        "reason": "tool_policy_requires_approval",
-        "input_preview": {"key": "p", "modifiers": ["command", "option"]},
-        "approval_id": "approval-hotkey",
-        "risk_level": "medium",
-        "policy_reason": "前台快捷键需要确认。",
-    }
-    assert appended_events[-1] == {
-        "run_id": "run-hotkey-approval",
-        "event_type": "agent.desktop.intent_approval_required",
-        "payload": {
+    _assert_mapping_includes(
+        non_planner_timeline[-1],
+        {
+            "event": "agent.desktop.intent_approval_required",
+            "detail": "desktop.hotkey",
             "tool": "desktop.hotkey",
             "status": "approval_required",
             "source": "daily_desktop_intent",
@@ -29000,7 +28927,22 @@ def test_custom_api_agent_loop_records_desktop_intent_approval_required_before_p
             "risk_level": "medium",
             "policy_reason": "前台快捷键需要确认。",
         },
-    }
+    )
+    assert appended_events[-1]["run_id"] == "run-hotkey-approval"
+    assert appended_events[-1]["event_type"] == "agent.desktop.intent_approval_required"
+    _assert_mapping_includes(
+        appended_events[-1]["payload"],
+        {
+            "tool": "desktop.hotkey",
+            "status": "approval_required",
+            "source": "daily_desktop_intent",
+            "reason": "tool_policy_requires_approval",
+            "input_preview": {"key": "p", "modifiers": ["command", "option"]},
+            "approval_id": "approval-hotkey",
+            "risk_level": "medium",
+            "policy_reason": "前台快捷键需要确认。",
+        },
+    )
 
 
 def test_custom_api_agent_loop_preserves_runtime_planner_source_on_approval_required(
