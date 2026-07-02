@@ -4136,11 +4136,10 @@ class RuntimePlanner:
             }
             and not focus_step_added
             and not app_search
-            and (
-                operation_tool
-                not in {"app.focus_and_safe_shortcut", "app.open_and_safe_shortcut"}
-                or screen_capture is not None
-                or ui_inspection is not None
+            and _app_scoped_operation_should_inspect(
+                operation_tool,
+                screen_capture=screen_capture,
+                ui_inspection=ui_inspection,
             )
         ):
             inspect_tool = _first_allowed(("desktop.inspect_app",), allowed)
@@ -9501,6 +9500,18 @@ def _desktop_operation_risk_level(tool_name: str | None) -> str:
 
 def _desktop_operation_approval_required(tool_name: str | None) -> bool:
     return _desktop_operation_risk_level(tool_name) != "low"
+
+
+def _app_scoped_operation_should_inspect(
+    tool_name: str | None,
+    *,
+    screen_capture: Mapping[str, Any] | None,
+    ui_inspection: Mapping[str, Any] | None,
+) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool.startswith(("app.focus_and_", "app.open_and_")):
+        return True
+    return screen_capture is not None or ui_inspection is not None
 
 
 def _app_management_action(tool_name: str | None) -> str:

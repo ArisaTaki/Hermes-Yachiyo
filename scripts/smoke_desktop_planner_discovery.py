@@ -86,7 +86,7 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
             "desktop.list_apps",
             "app.open",
         ],
-        "expected_model_followup": True,
+        "expected_model_followup": False,
     },
     {
         "id": "app_scoped_click",
@@ -178,6 +178,28 @@ DESKTOP_PLANNER_CASES: tuple[dict[str, Any], ...] = (
         ],
     },
     {
+        "id": "app_scoped_safe_shortcut_with_inspect",
+        "prompt": "在 PixelForge 打开新标签页",
+        "allowed_tools": [
+            "desktop.inspect_app",
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
+            "desktop.ui_elements",
+        ],
+        "expected_app": "PixelForge",
+        "expected_steps": [
+            "inspect-app",
+            "operate-foreground-ui",
+            "verify-desktop-result",
+        ],
+        "expected_request_tools": [
+            "desktop.inspect_app",
+            "app.focus_and_safe_shortcut",
+            "desktop.ui_elements",
+        ],
+    },
+    {
         "id": "app_window_focus",
         "prompt": "切到 Slack 的 General 窗口",
         "allowed_tools": [
@@ -251,7 +273,15 @@ def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
         "operation_app_matches": (
             expected_discovery_tool == "desktop.inspect_app"
             or expected_model_followup
-            or (isinstance(operation_input, dict) and operation_input.get("app_name") == expected_app)
+            or (
+                isinstance(operation_input, dict)
+                and operation_input.get("app_name") == expected_app
+            )
+            or (
+                isinstance(operation_input, dict)
+                and operation_input.get("selection_source") == "desktop.list_apps"
+                and operation_input.get("query") == expected_app
+            )
         ),
         "model_followup_matches": (
             any(bool(request.get("continue_to_model")) for request in requests)

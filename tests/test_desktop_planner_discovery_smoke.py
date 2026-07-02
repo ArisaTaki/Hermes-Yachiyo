@@ -19,6 +19,7 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
         "app_scoped_type",
         "app_scoped_hotkey",
         "app_scoped_safe_shortcut",
+        "app_scoped_safe_shortcut_with_inspect",
         "app_window_focus",
     }
     assert [request["tool"] for request in cases["generic_app_open"]["requests"]] == [
@@ -44,7 +45,9 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
         "desktop.list_apps",
         "app.open",
     ]
-    assert cases["capability_app_discovery_open"]["requests"][0]["continue_to_model"] is True
+    assert not cases["capability_app_discovery_open"]["requests"][0].get(
+        "continue_to_model", False
+    )
     assert cases["capability_app_discovery_open"]["requests"][1]["input"] == {
         "app_name": "<selected app from desktop.list_apps>",
         "selection_source": "desktop.list_apps",
@@ -80,6 +83,23 @@ def test_desktop_planner_discovery_smoke_covers_discover_operate_verify():
     ]
     assert cases["app_scoped_safe_shortcut"]["requests"][1]["input"] == {
         "app_name": "Safari",
+        "action": "new_tab",
+    }
+    assert [
+        request["tool"]
+        for request in cases["app_scoped_safe_shortcut_with_inspect"]["requests"]
+    ] == [
+        "desktop.inspect_app",
+        "app.focus_and_safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    assert cases["app_scoped_safe_shortcut_with_inspect"]["requests"][0]["input"] == {
+        "app_name": "PixelForge",
+        "open_if_needed": True,
+        "focus": True,
+    }
+    assert cases["app_scoped_safe_shortcut_with_inspect"]["requests"][1]["input"] == {
+        "app_name": "PixelForge",
         "action": "new_tab",
     }
     assert [request["tool"] for request in cases["app_window_focus"]["requests"]] == [
