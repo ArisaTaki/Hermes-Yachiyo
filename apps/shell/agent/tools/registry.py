@@ -79,7 +79,16 @@ def _workspace_list(broker: Any, payload: dict[str, Any], _approved: bool) -> di
         str(payload.get("path") or "."),
         pattern=str(payload.get("pattern") or ""),
         file_type=str(payload.get("file_type") or ""),
+        include_metadata=_payload_bool(payload.get("include_metadata")),
     )
+
+
+def _payload_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in {"1", "true", "yes", "on"}
+    return bool(value)
 
 
 def _workspace_read(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:

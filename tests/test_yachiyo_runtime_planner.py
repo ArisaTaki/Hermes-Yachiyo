@@ -2310,7 +2310,12 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",
-            "input": {"path": "Downloads", "pattern": "*.pdf", "file_type": "pdf"},
+            "input": {
+                "path": "Downloads",
+                "pattern": "*.pdf",
+                "file_type": "pdf",
+                "include_metadata": True,
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
             "continue_to_model": True,

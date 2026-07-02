@@ -109,6 +109,28 @@ def test_tool_broker_call_passes_workspace_list_filters(tmp_path) -> None:
     }
 
 
+def test_tool_broker_call_workspace_list_metadata_is_opt_in(tmp_path) -> None:
+    (tmp_path / "recent.pdf").write_text("pdf", encoding="utf-8")
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "workspace.list",
+        {
+            "path": ".",
+            "pattern": "*.pdf",
+            "file_type": "pdf",
+            "include_metadata": True,
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["entries"][0]["name"] == "recent.pdf"
+    assert result["entries"][0]["type"] == "file"
+    assert result["entries"][0]["mtime"] > 0
+    assert result["entries"][0]["mtime_ns"] > 0
+    assert result["entries"][0]["size"] == 3
+
+
 def test_tool_broker_call_dispatches_file_organize(tmp_path) -> None:
     downloads = tmp_path / "Downloads"
     downloads.mkdir()

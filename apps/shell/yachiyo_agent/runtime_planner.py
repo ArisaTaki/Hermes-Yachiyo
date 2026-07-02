@@ -6330,6 +6330,7 @@ def _file_open_with_app_discovery_steps(
         for key in ("path", "pattern", "file_type")
         if str(file_hint.get(key) or "").strip()
     }
+    file_list_preview["include_metadata"] = True
     selection = str(file_hint.get("selection") or "").strip()
     open_preview = {
         "app_name": app_name,
@@ -6378,6 +6379,7 @@ def _file_open_with_selected_app_discovery_steps(
         for key in ("path", "pattern", "file_type")
         if str(file_hint.get(key) or "").strip()
     }
+    file_list_preview["include_metadata"] = True
     clean_app_query = str(app_query or "").strip()
     selection = str(file_hint.get("selection") or "").strip()
     open_preview = {

@@ -352,6 +352,7 @@ class ToolBroker:
         *,
         pattern: str = "",
         file_type: str = "",
+        include_metadata: bool = False,
     ) -> dict[str, Any]:
         target = self._resolve_workspace_path(path)
         display_path = path or "."
@@ -381,7 +382,21 @@ class ToolBroker:
                 continue
             if len(entries) >= 200:
                 continue
-            entries.append({"name": child.name, "type": "dir" if child.is_dir() else "file"})
+            entry = {"name": child.name, "type": "dir" if child.is_dir() else "file"}
+            if include_metadata:
+                try:
+                    stat = child.stat()
+                except OSError:
+                    stat = None
+                if stat is not None:
+                    entry.update(
+                        {
+                            "mtime": stat.st_mtime,
+                            "mtime_ns": stat.st_mtime_ns,
+                            "size": stat.st_size,
+                        }
+                    )
+            entries.append(entry)
         result: dict[str, Any] = {"ok": True, "path": display_path, "entries": entries}
         if patterns:
             result["filter"] = {

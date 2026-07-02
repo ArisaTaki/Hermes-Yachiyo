@@ -3318,6 +3318,8 @@ def _context_prefetch_payload(
             request_payload["pattern"] = pattern
         if file_type:
             request_payload["file_type"] = file_type
+        if bool(payload.get("include_metadata")):
+            request_payload["include_metadata"] = True
         return request_payload
     if tool_name in {"workspace.read", "fs.read_file", "file.read"}:
         path = str(payload.get("path") or "").strip()

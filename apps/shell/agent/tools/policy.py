@@ -1060,6 +1060,13 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                     "parquet, archive, audio, or video."
                 ),
             },
+            "include_metadata": {
+                "type": "boolean",
+                "description": (
+                    "Optional. Include per-entry mtime/size metadata when the task needs "
+                    "to choose a latest or recently modified file. Defaults false."
+                ),
+            },
         },
     ),
     "workspace.read": ToolDescriptor(
@@ -1088,6 +1095,13 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                 "description": (
                     "Optional semantic file type hint such as spreadsheet, csv, tsv, xlsx, "
                     "json, jsonl, text, document, image, pdf, archive, audio, or video."
+                ),
+            },
+            "include_metadata": {
+                "type": "boolean",
+                "description": (
+                    "Optional. Include per-entry mtime/size metadata when the task needs "
+                    "to choose a latest or recently modified file. Defaults false."
                 ),
             },
         },
