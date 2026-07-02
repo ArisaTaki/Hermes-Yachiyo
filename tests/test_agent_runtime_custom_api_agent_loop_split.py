@@ -186,6 +186,45 @@ def _planner_selection_events(timeline: list[dict[str, Any]]) -> list[dict[str, 
     return [event for event in timeline if event.get("event") == "agent.plan.selection"]
 
 
+def test_runtime_planner_runtime_requests_trace_multistep_desktop_plan() -> None:
+    loop = _private_runtime_loop()
+    decision, requests, payload = loop._runtime_planner_tool_requests(
+        "打开一个能播放音乐的应用",
+        ["desktop.list_apps", "app.open", "desktop.running_apps"],
+    )
+
+    assert decision is not None
+    assert [request["tool"] for request in requests] == ["desktop.list_apps", "app.open"]
+    assert [request["step_id"] for request in requests] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+    ]
+    assert {request["decision_id"] for request in requests} == {decision.decision_id}
+    assert {request["plan_id"] for request in requests} == {decision.plan.plan_id}
+    assert {request["tool_plan_id"] for request in requests} == {
+        decision.plan.tool_plan.plan_id
+    }
+    assert {request["intent_kind"] for request in requests} == {"desktop_operation"}
+    assert payload["selection_reason"] == "runtime_planner_full_plan_execution"
+    assert payload["decision_id"] == decision.decision_id
+
+
+def test_runtime_planner_runtime_requests_keep_single_step_desktop_plan_light() -> None:
+    loop = _private_runtime_loop()
+    _decision, requests, payload = loop._runtime_planner_tool_requests(
+        "按 Command+Option+P",
+        ["desktop.hotkey"],
+    )
+
+    assert [request["tool"] for request in requests] == ["desktop.hotkey"]
+    assert requests[0]["step_id"] == "operate-foreground-ui"
+    assert "decision_id" not in requests[0]
+    assert "plan_id" not in requests[0]
+    assert "tool_plan_id" not in requests[0]
+    assert "intent_kind" not in requests[0]
+    assert payload["selection_reason"] == "runtime_planner_direct"
+
+
 def test_recovery_actions_projects_retry_input_contract_fields() -> None:
     retry_input_schema = {
         "type": "object",

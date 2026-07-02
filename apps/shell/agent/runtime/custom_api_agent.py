@@ -1464,9 +1464,13 @@ class RuntimeCustomApiAgentLoop:
                 ],
             )
             if selection.selected_source == "runtime_planner" and selection.decision is not None:
+                runtime_trace_metadata = _runtime_planner_request_trace_metadata(
+                    selection.decision
+                )
                 full_plan_requests = planner_tool_requests(
                     planning_context,
                     allowed_tools,
+                    metadata=runtime_trace_metadata,
                 )
                 execution_requests = planner_execution_tool_requests(
                     full_plan_requests,
@@ -1492,6 +1496,7 @@ class RuntimeCustomApiAgentLoop:
                             selected_requests=execution_requests,
                             selected_source="runtime_planner",
                             selected_reason="runtime_planner_full_plan_execution",
+                            metadata=runtime_trace_metadata,
                         ),
                     )
             execution_requests = planner_execution_tool_requests(
@@ -7274,6 +7279,31 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
         if isinstance(value, Mapping) and value:
             payload[key] = dict(value)
     return payload
+
+
+def _runtime_planner_request_trace_metadata(
+    decision: Any | None,
+) -> dict[str, bool] | None:
+    if not _runtime_planner_should_trace_tool_requests(decision):
+        return None
+    return {"runtime_planner_request_trace": True}
+
+
+def _runtime_planner_should_trace_tool_requests(decision: Any | None) -> bool:
+    steps = getattr(
+        getattr(getattr(decision, "plan", None), "tool_plan", None),
+        "steps",
+        None,
+    )
+    if not isinstance(steps, Iterable) or isinstance(steps, (str, bytes)):
+        return False
+    observable_steps = [
+        step
+        for step in steps
+        if str(getattr(step, "tool_name", "") or "").strip()
+        and str(getattr(step, "step_id", "") or "").strip()
+    ]
+    return len(observable_steps) > 1
 
 
 def _approval_required_planner_trace_payload(
