@@ -799,11 +799,14 @@ JSON/Markdown status with `needs_release_evidence` when the safe demo passes but
 full opt-in public-demo evidence or the 9-item release-smoke evidence is still
 missing. Final release signoff can add `--require-release-ready` so partial
 public-demo or release-smoke evidence fails the gate instead of only reporting
-next actions. The macOS release workflow now runs the default preflight after
-frontend dependencies and uploads both top-level gate reports and nested
-`release/public-release-gate/*.json` / `.md` / `.zip` evidence. Manual
-workflow-dispatch builds can set `public_demo=full` to opt into real desktop,
-provider Workflow, and UI public-demo evidence.
+next actions. It also emits `external_requirement_count`,
+`external_requirements`, and an `External Requirements` Markdown section so
+remaining desktop authorization and provider credential requirements are grouped
+separately from product code failures. The macOS release workflow now runs the
+default preflight after frontend dependencies and uploads both top-level gate
+reports and nested `release/public-release-gate/*.json` / `.md` / `.zip`
+evidence. Manual workflow-dispatch builds can set `public_demo=full` to opt into
+real desktop, provider Workflow, and UI public-demo evidence.
 
 `scripts/run_public_demo_smokes.py` now provides the maintained public-demo
 evidence entry point. The default run executes safe default demonstrations for

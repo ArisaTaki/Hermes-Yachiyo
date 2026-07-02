@@ -168,6 +168,13 @@ fail. Existing RC reports and diagnostics bundles can be folded into the same
 assessment with repeated `--release-smoke-report` and `--diagnostics-zip`
 arguments.
 
+When release evidence is still external, the gate also writes
+`external_requirement_count` and `external_requirements` in the JSON report and
+an `External Requirements` section in Markdown. These fields group the remaining
+work into actionable classes such as `real_desktop_smoke_opt_in` and
+`provider_smoke_credentials`, including missing public-demo flow IDs, missing
+provider environment variables, blocking conditions, and rerun commands.
+
 When collecting opt-in evidence incrementally, the same gate can pass through
 granular public-demo flags such as `--include-real-desktop-open`,
 `--include-real-desktop-ui-inspection`, `--include-real-desktop-interaction`,
