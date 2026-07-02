@@ -2,6 +2,7 @@ from apps.shell.agent.runtime.followup_content_snapshot import (
     browser_extract_text_content_snapshot,
     clipboard_read_content_snapshot,
     data_analyze_content_snapshot,
+    desktop_inspect_app_content_snapshot,
     desktop_ui_elements_content_snapshot,
     followup_content_snapshots,
     latest_followup_content_snapshot,
@@ -39,6 +40,85 @@ def test_desktop_ui_elements_content_snapshot_keeps_useful_unique_text() -> None
         "text_item_count": 2,
         "truncated": False,
         "text": "Search result\nRuntime snapshots reduce raw UI tree noise.",
+    }
+
+
+def test_desktop_inspect_app_content_snapshot_summarizes_readiness_and_ui_text() -> None:
+    snapshot = desktop_inspect_app_content_snapshot(
+        {
+            "ok": True,
+            "summary": "Inspected Figma: focused with accessible controls",
+            "data": {
+                "app_name": "Figma",
+                "requested_app_name": "design",
+                "discovered_app_name": "Figma",
+                "running": True,
+                "focus_verified": True,
+                "ready_for_foreground_action": True,
+                "inspection_level": "control",
+                "visibility_limited": False,
+                "window_count": 1,
+                "ui_element_count": 3,
+                "control_like_count": 2,
+                "recommended_tools": ["app.focus_and_click_ui_element", "desktop.ui_elements"],
+                "recovery_actions": [
+                    {
+                        "label": "Focus Figma",
+                        "tool": "app.focus",
+                        "input": {"app_name": "Figma"},
+                        "risk_level": "low",
+                    }
+                ],
+                "active_window": {
+                    "ok": True,
+                    "data": {"app_name": "Figma", "title": "Logo templates"},
+                },
+                "ui_elements": {
+                    "ok": True,
+                    "data": {
+                        "elements": [
+                            {"name": "Logo templates"},
+                            {"description": "Create from template"},
+                        ],
+                        "truncated": False,
+                    },
+                },
+            },
+        },
+        {"app_name": "design"},
+    )
+
+    assert snapshot == {
+        "source_tool": "desktop.inspect_app",
+        "ok": True,
+        "app_name": "Figma",
+        "requested_app_name": "design",
+        "discovered_app_name": "Figma",
+        "running": True,
+        "focus_verified": True,
+        "ready_for_foreground_action": True,
+        "inspection_level": "control",
+        "visibility_limited": False,
+        "window_count": 1,
+        "ui_element_count": 3,
+        "control_like_count": 2,
+        "recommended_tools": ["app.focus_and_click_ui_element", "desktop.ui_elements"],
+        "recovery_actions": [
+            {
+                "label": "Focus Figma",
+                "tool": "app.focus",
+                "input": {"app_name": "Figma"},
+                "risk_level": "low",
+            }
+        ],
+        "truncated": False,
+        "text": (
+            "Inspected Figma: focused with accessible controls\n"
+            "Active window: Figma - Logo templates\n"
+            "Visible UI text:\n"
+            "Logo templates\n"
+            "Create from template"
+        ),
     }
 
 

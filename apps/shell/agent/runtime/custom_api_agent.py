@@ -8718,9 +8718,12 @@ def _auto_replan_verification_recovery_requests(
     target = _replan_recovery_target(first)
     requests: list[dict[str, Any]] = []
     for tool_name in _verification_recovery_tool_order(allowed):
+        request_input = _verification_recovery_tool_input(tool_name, target)
+        if request_input is None:
+            continue
         request = _request_like(
             tool_name,
-            _verification_recovery_tool_input(tool_name, target),
+            request_input,
             source=source,
             planning_reason=planning_reason,
         )
@@ -8872,10 +8875,19 @@ def _replan_recovery_target(payload: Mapping[str, Any]) -> dict[str, str]:
 def _verification_recovery_tool_input(
     tool_name: str,
     target: Mapping[str, str],
-) -> dict[str, Any]:
+) -> dict[str, Any] | None:
     clean_tool = str(tool_name or "").strip()
     app_name = str(target.get("target_app_name") or "").strip()
     search_text = str(target.get("target_search_text") or "").strip()
+    if clean_tool == "desktop.inspect_app":
+        if not app_name:
+            return None
+        return {
+            "app_name": app_name,
+            "open_if_needed": True,
+            "focus": True,
+            "limit": 80,
+        }
     if clean_tool in {"desktop.list_windows", "desktop.windows"}:
         return {"app_name": app_name} if app_name else {}
     if clean_tool in {"desktop.read_ui", "desktop.ui_elements"}:
@@ -9557,6 +9569,7 @@ def _verification_recovery_tool_order(allowed: set[str]) -> list[str]:
     tools: list[str] = []
     for tool_name in (
         "desktop.active_window",
+        "desktop.inspect_app",
         _first_allowed_tool(("desktop.list_windows", "desktop.windows"), allowed),
         _first_allowed_tool(("desktop.read_ui", "desktop.ui_elements"), allowed),
         "screen.capture",

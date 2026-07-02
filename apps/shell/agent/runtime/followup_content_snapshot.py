@@ -13,6 +13,7 @@ FOLLOWUP_CONTENT_SNAPSHOT_TOOLS: frozenset[str] = frozenset(
         "clipboard.read",
         "data.analyze",
         "desktop.active_window",
+        "desktop.inspect_app",
         "desktop.read_ui",
         "desktop.list_apps",
         "desktop.list_windows",
@@ -80,6 +81,8 @@ def followup_content_snapshot_for_tool_call(
         )
     if tool_name == "desktop.active_window":
         return desktop_active_window_content_snapshot(result, input_preview)
+    if tool_name == "desktop.inspect_app":
+        return desktop_inspect_app_content_snapshot(result, input_preview)
     if tool_name in {"desktop.list_windows", "desktop.windows"}:
         return desktop_windows_content_snapshot(result, input_preview, source_tool=tool_name)
     if tool_name == "screen.capture":
@@ -153,6 +156,8 @@ def desktop_active_window_content_snapshot(
         or result.get("title")
         or ""
     ).strip()
+    if result.get("ok") and not app_name:
+        return {}
     snapshot: dict[str, Any] = {
         "source_tool": "desktop.active_window",
         "ok": bool(result.get("ok")),
@@ -203,6 +208,71 @@ def desktop_windows_content_snapshot(
         snapshot["text"] = (
             f"Open windows for {app_name}:\n" if app_name else "Open windows:\n"
         ) + "\n".join(lines)
+    if not result.get("ok"):
+        _add_failure_fields(snapshot, result)
+    return _compact_snapshot(snapshot)
+
+
+def desktop_inspect_app_content_snapshot(
+    result: dict[str, Any],
+    input_preview: dict[str, Any],
+) -> dict[str, Any]:
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    ui_result = data.get("ui_elements") if isinstance(data.get("ui_elements"), dict) else {}
+    ui_data = ui_result.get("data") if isinstance(ui_result.get("data"), dict) else {}
+    elements = ui_data.get("elements")
+    if not isinstance(elements, list):
+        elements = ui_result.get("elements") if isinstance(ui_result.get("elements"), list) else []
+    ui_lines, ui_truncated = desktop_ui_element_text_lines(elements)
+    active_result = data.get("active_window") if isinstance(data.get("active_window"), dict) else {}
+    active_data = active_result.get("data") if isinstance(active_result.get("data"), dict) else {}
+    app_name = str(
+        data.get("app_name")
+        or input_preview.get("app_name")
+        or result.get("app_name")
+        or ""
+    ).strip()
+    active_app_name = str(
+        active_data.get("app_name")
+        or active_data.get("frontmost_app")
+        or active_result.get("app_name")
+        or ""
+    ).strip()
+    active_title = str(active_data.get("title") or active_result.get("title") or "").strip()
+    summary = str(result.get("summary") or "").strip()
+    text_lines = []
+    if summary:
+        text_lines.append(summary)
+    if active_app_name or active_title:
+        text_lines.append(
+            "Active window: " + " - ".join(
+                part for part in (active_app_name, active_title) if part
+            )
+        )
+    if ui_lines:
+        text_lines.append("Visible UI text:\n" + "\n".join(ui_lines))
+    snapshot: dict[str, Any] = {
+        "source_tool": "desktop.inspect_app",
+        "ok": bool(result.get("ok")),
+        "app_name": app_name,
+        "requested_app_name": str(data.get("requested_app_name") or "").strip(),
+        "discovered_app_name": str(data.get("discovered_app_name") or "").strip(),
+        "running": data.get("running"),
+        "focus_verified": data.get("focus_verified"),
+        "ready_for_foreground_action": data.get("ready_for_foreground_action"),
+        "inspection_level": str(data.get("inspection_level") or "").strip(),
+        "visibility_limited": data.get("visibility_limited"),
+        "window_count": _number_value(data.get("window_count")),
+        "ui_element_count": _number_value(data.get("ui_element_count")),
+        "control_like_count": _number_value(data.get("control_like_count")),
+        "recommended_tools": _string_list(data.get("recommended_tools") or result.get("recommended_tools"))[:8],
+        "recovery_actions": _compact_recovery_actions(
+            data.get("recovery_actions") or result.get("recovery_actions")
+        ),
+        "truncated": bool(ui_truncated or ui_data.get("truncated") or ui_result.get("truncated")),
+    }
+    if text_lines:
+        snapshot["text"] = "\n".join(text_lines)
     if not result.get("ok"):
         _add_failure_fields(snapshot, result)
     return _compact_snapshot(snapshot)
@@ -707,6 +777,31 @@ def _add_failure_fields(snapshot: dict[str, Any], result: dict[str, Any]) -> Non
     for key in ("summary", "error", "permission_targets", "recovery_hints"):
         if result.get(key) not in (None, "", []):
             snapshot[key] = result.get(key)
+
+
+def _compact_recovery_actions(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    actions: list[dict[str, Any]] = []
+    for item in value[:6]:
+        if not isinstance(item, dict):
+            continue
+        action = {
+            key: item.get(key)
+            for key in ("label", "tool", "input", "risk_level", "permission_target")
+            if item.get(key) not in (None, "", [])
+        }
+        if action:
+            actions.append(action)
+    return actions
+
+
+def _string_list(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value] if value.strip() else []
+    if not isinstance(value, list):
+        return []
+    return [str(item).strip() for item in value if str(item).strip()]
 
 
 def _compact_snapshot(snapshot: dict[str, Any]) -> dict[str, Any]:

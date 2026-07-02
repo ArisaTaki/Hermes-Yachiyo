@@ -2680,6 +2680,59 @@ def test_auto_replan_focus_recovery_refocuses_expected_app_without_model_followu
     assert {request["runtime_role"] for request in requests} == {"verify_result"}
 
 
+def test_auto_replan_verification_recovery_inspects_target_app_when_available() -> None:
+    recovery_requests = custom_api_agent_module._auto_replan_verification_recovery_requests(
+        [
+            {
+                "request_id": "replan-inspect",
+                "trigger": "verification_failed",
+                "decision_id": "decision-inspect",
+                "plan_id": "plan-inspect",
+                "source_step_id": "verify-desktop-result",
+                "source_tool_name": "desktop.ui_elements",
+                "target_capability_id": "desktop.app_discovery",
+                "failure_detail": "verification observation returned no UI elements or readable text",
+                "metadata": {
+                    "runtime_stage": "verify",
+                    "runtime_role": "verify_result",
+                    "target_app_name": "Figma",
+                    "target_search_text": "logo 模板",
+                },
+            }
+        ],
+        [
+            "desktop.active_window",
+            "desktop.inspect_app",
+            "desktop.list_windows",
+            "desktop.ui_elements",
+            "screen.capture",
+        ],
+    )
+
+    assert [request["tool"] for request in recovery_requests] == [
+        "desktop.active_window",
+        "desktop.inspect_app",
+        "desktop.list_windows",
+        "desktop.ui_elements",
+        "screen.capture",
+    ]
+    assert recovery_requests[1]["input"] == {
+        "app_name": "Figma",
+        "open_if_needed": True,
+        "focus": True,
+        "limit": 80,
+    }
+    assert all(request["continue_to_model"] is True for request in recovery_requests)
+    assert {request["target_app_name"] for request in recovery_requests} == {"Figma"}
+    assert {request["replan_request_id"] for request in recovery_requests} == {
+        "replan-inspect"
+    }
+    assert {request["decision_id"] for request in recovery_requests} == {
+        "decision-inspect"
+    }
+    assert {request["plan_id"] for request in recovery_requests} == {"plan-inspect"}
+
+
 def test_custom_api_agent_loop_refocuses_after_active_window_mismatch_without_model() -> None:
     allowed_tools = [
         "desktop.list_apps",
