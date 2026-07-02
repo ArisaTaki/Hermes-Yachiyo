@@ -791,6 +791,11 @@ def _collect_provider_workflow_public_demo_evidence(
     provider_evidence = _provider_workflow_public_demo_evidence(report)
     if not provider_evidence:
         return
+    _add_provider_workflow_release_evidence(
+        source=source,
+        evidence=evidence,
+        provider_evidence=provider_evidence,
+    )
     required_flow_ids = _canonical_public_demo_flow_ids()
     passed_flow_ids = [PROVIDER_WORKFLOW_PUBLIC_DEMO_FLOW_ID]
     missing_flow_ids = [
@@ -825,6 +830,22 @@ def _collect_provider_workflow_public_demo_evidence(
     evidence.setdefault("public_demo_selected", []).append(projection)
     if complete:
         evidence.setdefault("public_demo_complete", []).append(projection)
+
+
+def _add_provider_workflow_release_evidence(
+    *,
+    source: str,
+    evidence: dict[str, list[dict[str, Any]]],
+    provider_evidence: Mapping[str, Any],
+) -> None:
+    for evidence_id in ("advanced_workflow_orchestration", "workflow_budget_boundary"):
+        _add_evidence(
+            evidence,
+            evidence_id,
+            source=source,
+            kind="provider_workflow_full_chain",
+            provider_workflow_evidence=dict(provider_evidence),
+        )
 
 
 def _provider_workflow_public_demo_evidence(report: Mapping[str, Any]) -> dict[str, Any]:

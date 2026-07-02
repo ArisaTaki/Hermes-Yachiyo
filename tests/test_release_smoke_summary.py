@@ -495,6 +495,46 @@ def test_release_smoke_summary_projects_provider_workflow_smoke_into_public_demo
     assert all(item["id"] != "public_demo" for item in summary["next_actions"])
 
 
+def test_release_smoke_summary_uses_provider_workflow_as_workflow_release_evidence(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    source_report_path = tmp_path / "tmp" / "source-capabilities.json"
+    provider_report_path = tmp_path / "tmp" / "workflow-provider.json"
+    source_report_path.parent.mkdir(parents=True, exist_ok=True)
+    source_report_path.write_text(
+        json.dumps(_matrix_report("source_agent_entrypoint_data_analysis")),
+        encoding="utf-8",
+    )
+    provider_report_path.write_text(
+        json.dumps(
+            {
+                "mode": "native_workflow_full_chain_smoke",
+                "ok": True,
+                "skipped": False,
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = release_smoke.summarize_release_smoke(
+        [source_report_path, provider_report_path]
+    )
+
+    workflow = next(item for item in summary["items"] if item["id"] == "workflow")
+    assert workflow["status"] == "passed"
+    assert workflow["present_evidence_ids"] == [
+        "source_agent_entrypoint_data_analysis",
+        "advanced_workflow_orchestration",
+    ]
+    assert workflow["evidence"]["advanced_workflow_orchestration"][0]["kind"] == (
+        "provider_workflow_full_chain"
+    )
+    assert "workflow" not in summary["missing_item_ids"]
+    assert all(item["id"] != "workflow" for item in summary["next_actions"])
+
+
 def test_release_smoke_summary_does_not_project_provider_workflow_from_capability_matrix(
     tmp_path,
     monkeypatch,
