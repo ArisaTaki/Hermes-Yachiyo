@@ -893,6 +893,111 @@ def test_runtime_tool_request_runner_skips_foreground_mutation_after_inspect_not
     assert "blocked_by_runtime_readiness" in messages[-1]["content"]
 
 
+def test_runtime_tool_request_runner_continues_planned_recovery_after_inspect_not_ready() -> None:
+    calls: list[str] = []
+    timeline: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        calls.append(tool_name)
+        if tool_name == "desktop.inspect_app":
+            result = {
+                "ok": False,
+                "action": "desktop.inspect_app",
+                "summary": "No installed app matched PixelForge",
+                "error": "app_not_found",
+                "recommended_tools": ["desktop.list_apps"],
+                "recovery_actions": [
+                    {
+                        "label": "重新发现应用",
+                        "tool": "desktop.list_apps",
+                        "input": {"query": "PixelForge", "limit": 20},
+                        "permission_target": "app_discovery",
+                        "risk_level": "low",
+                    }
+                ],
+                "data": {
+                    "app_name": "PixelForge",
+                    "requested_app_name": "PixelForge",
+                    "app_found": False,
+                    "running": False,
+                    "ready_for_foreground_action": False,
+                    "checks": {
+                        "discovered_app": False,
+                        "status_running": False,
+                        "ready_for_foreground_action": False,
+                    },
+                },
+            }
+        elif tool_name == "desktop.list_apps":
+            result = {
+                "ok": True,
+                "action": "desktop.list_apps",
+                "data": {
+                    "query": payload.get("query"),
+                    "apps": [{"name": "PixelForge", "path": "/Applications/PixelForge.app"}],
+                },
+            }
+        elif tool_name == "app.open_and_click_ui_element":
+            result = {
+                "ok": True,
+                "action": "app.open_and_click_ui_element",
+                "data": {
+                    "app_name": payload.get("app_name"),
+                    "target": payload.get("target"),
+                },
+            }
+        else:
+            raise AssertionError(f"unexpected call: {tool_name}")
+        timeline_arg.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool)
+    messages = [{"role": "user", "content": "打开 PixelForge 并点击登录"}]
+
+    runner.run(
+        [
+            {"tool": "desktop.inspect_app", "input": {"app_name": "PixelForge"}},
+            {"tool": "desktop.list_apps", "input": {"query": "PixelForge", "limit": 20}},
+            {
+                "tool": "app.open_and_click_ui_element",
+                "input": {"app_name": "PixelForge", "target": "登录"},
+            },
+        ],
+        ["desktop.inspect_app", "desktop.list_apps", "app.open_and_click_ui_element"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-1",
+        budget=FakeBudget(),
+    )
+
+    assert calls == [
+        "desktop.inspect_app",
+        "desktop.list_apps",
+        "app.open_and_click_ui_element",
+    ]
+    assert [event["event"] for event in timeline] == [
+        "agent.tool.call",
+        "agent.tool.call",
+        "agent.desktop.readiness_recovered",
+        "agent.tool.call",
+    ]
+    assert timeline[2]["recovery_tool"] == "desktop.list_apps"
+    assert "blocked_by_runtime_readiness" not in messages[-1]["content"]
+
+
 def test_runtime_tool_request_runner_keeps_readiness_blocker_after_failed_recovery() -> None:
     calls: list[str] = []
     timeline: list[dict[str, Any]] = []

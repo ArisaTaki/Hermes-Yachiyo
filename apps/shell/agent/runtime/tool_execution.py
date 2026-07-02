@@ -926,8 +926,6 @@ class RuntimeToolRequestRunner:
                 append_run_event=self._append_run_event,
                 run_id=run_id,
             )
-            if _tool_result_requests_user_recovery(tool_result):
-                break
             previous_readiness_blocker = foreground_readiness_blocker
             next_readiness_blocker = _updated_foreground_readiness_blocker(
                 foreground_readiness_blocker,
@@ -956,6 +954,13 @@ class RuntimeToolRequestRunner:
                         recovered_payload,
                     )
             foreground_readiness_blocker = next_readiness_blocker
+            if _tool_result_requests_user_recovery(tool_result):
+                if _remaining_request_can_handle_foreground_readiness(
+                    foreground_readiness_blocker,
+                    tool_requests[index + 1 :],
+                ):
+                    continue
+                break
             if tool_name == "desktop.active_window":
                 active_window_verification_target = None
             else:
@@ -1051,6 +1056,40 @@ def _runtime_readiness_skip_result(
     if isinstance(recommended_tools, list) and recommended_tools:
         result["recommended_tools"] = recommended_tools
     return result
+
+
+def _remaining_request_can_handle_foreground_readiness(
+    blocker: dict[str, Any] | None,
+    remaining_requests: list[dict[str, Any]],
+) -> bool:
+    if blocker is None:
+        return False
+    for request in remaining_requests:
+        if not isinstance(request, dict):
+            continue
+        tool_name = str(request.get("tool") or "").strip()
+        raw_input = request.get("input") if isinstance(request.get("input"), dict) else {}
+        if _runtime_readiness_skip_result(tool_name, raw_input, blocker) is not None:
+            return True
+        if _request_may_clear_foreground_readiness(blocker, tool_name, raw_input):
+            return True
+    return False
+
+
+def _request_may_clear_foreground_readiness(
+    blocker: dict[str, Any],
+    tool_name: str,
+    raw_input: dict[str, Any],
+) -> bool:
+    if tool_name not in _FOREGROUND_READINESS_RESET_TOOLS:
+        return False
+    if tool_name == "desktop.active_window":
+        return True
+    if tool_name == "desktop.list_apps":
+        query = str(raw_input.get("query") or "").strip()
+        return not query or _name_matches_blocked_app(blocker, query)
+    app_name = str(raw_input.get("app_name") or "").strip()
+    return not app_name or _name_matches_blocked_app(blocker, app_name)
 
 
 def _unresolved_discovered_app_skip_result(
