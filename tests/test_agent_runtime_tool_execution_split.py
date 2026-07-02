@@ -325,8 +325,14 @@ def test_runtime_tool_call_executor_preserves_planner_trace_on_tool_call_events(
             "planning_reason": "planner_replan_fallback_recovery",
             "step_id": "inspect-data-source",
             "capability_id": "file.workspace_read",
+            "core_id": "core-1",
+            "workspace_id": "workspace-1",
+            "task_id": "task-1",
             "replan_request_id": "replan-1",
             "replan_trigger": "tool_failure",
+            "target_app_name": "Figma",
+            "target_app_query": "design",
+            "target_search_text": "logo 模板",
         },
         ["desktop.open_path"],
         broker,
@@ -340,10 +346,14 @@ def test_runtime_tool_call_executor_preserves_planner_trace_on_tool_call_events(
     assert timeline[0]["status"] == "running"
     assert timeline[0]["step_id"] == "inspect-data-source"
     assert timeline[0]["capability_id"] == "file.workspace_read"
+    assert timeline[0]["core_id"] == "core-1"
+    assert timeline[0]["target_app_name"] == "Figma"
     assert timeline[0]["replan_request_id"] == "replan-1"
     assert timeline[-1]["event"] == "agent.tool.call"
     assert timeline[-1]["step_id"] == "inspect-data-source"
     assert timeline[-1]["capability_id"] == "file.workspace_read"
+    assert timeline[-1]["core_id"] == "core-1"
+    assert timeline[-1]["target_app_name"] == "Figma"
     assert timeline[-1]["replan_request_id"] == "replan-1"
     agent_call = [call for call in events.calls if call[0] == "agent_tool_call"][0]
     assert agent_call[2]["trace"] == {
@@ -351,8 +361,14 @@ def test_runtime_tool_call_executor_preserves_planner_trace_on_tool_call_events(
         "planning_reason": "planner_replan_fallback_recovery",
         "step_id": "inspect-data-source",
         "capability_id": "file.workspace_read",
+        "core_id": "core-1",
+        "workspace_id": "workspace-1",
+        "task_id": "task-1",
         "replan_request_id": "replan-1",
         "replan_trigger": "tool_failure",
+        "target_app_name": "Figma",
+        "target_app_query": "design",
+        "target_search_text": "logo 模板",
     }
     lifecycle_trace = {
         call[0]: call[2]["trace"]

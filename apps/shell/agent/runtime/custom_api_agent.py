@@ -10312,6 +10312,11 @@ def _model_followup_requests_with_pending_plan_metadata(
                 item.get("planner_step_id") or ""
             ).strip():
                 item["planner_step_id"] = str(item.get("step_id") or "").strip()
+            item = _resolve_dynamic_pending_plan_request_input(
+                item,
+                step,
+                followup_context,
+            )
         annotated.append(item)
     return annotated
 
@@ -10624,60 +10629,172 @@ def _tool_requests_with_pending_plan_metadata(
     if not tool_requests:
         return tool_requests
     followup_context = _latest_model_followup_context(timeline)
-    steps = followup_context.get("pending_plan_steps")
-    if not isinstance(steps, list) or not steps:
+    if not followup_context:
         return tool_requests
-    first_step = steps[0] if isinstance(steps[0], Mapping) else {}
-    if not first_step:
-        return tool_requests
-    pending_tool = str(first_step.get("tool_name") or "").strip()
-    if not pending_tool:
-        return tool_requests
-    enriched: list[dict[str, Any]] = []
-    consumed = False
-    for request in tool_requests:
+    tool_requests = _model_followup_requests_with_pending_plan_metadata(
+        tool_requests,
+        followup_context,
+    )
+    return _model_followup_requests_with_context_trace_metadata(
+        tool_requests,
+        followup_context,
+    )
+
+
+def _model_followup_requests_with_context_trace_metadata(
+    requests: list[dict[str, Any]],
+    followup_context: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    if not requests or not isinstance(followup_context, Mapping):
+        return requests
+    trace = _model_followup_context_trace_metadata(followup_context)
+    if not trace:
+        return requests
+    planning_reason = str(followup_context.get("planning_reason") or "").strip()
+    annotated: list[dict[str, Any]] = []
+    for request in requests:
         if not isinstance(request, dict):
             continue
         item = dict(request)
-        if not consumed and str(item.get("tool") or "").strip() == pending_tool:
-            for key in (
-                "step_id",
-                "capability_id",
-                "decision_id",
-                "plan_id",
-                "tool_plan_id",
-                "intent_kind",
-                "replan_request_id",
-                "replan_trigger",
-            ):
-                value = str(
-                    item.get(key)
-                    or first_step.get(key)
-                    or followup_context.get(key)
-                    or ""
-                ).strip()
-                if value:
-                    item[key] = value
-            if not str(item.get("planning_reason") or "").strip():
-                planning_reason = str(
-                    followup_context.get("planning_reason")
-                    or "planner_followup_pending_plan"
-                ).strip()
-                if planning_reason:
-                    item["planning_reason"] = planning_reason
-            if str(item.get("step_id") or "").strip() and not str(
-                item.get("planner_step_id") or ""
-            ).strip():
-                item["planner_step_id"] = str(item.get("step_id") or "").strip()
-            item = _resolve_dynamic_pending_plan_request_input(
-                item,
-                first_step,
-                followup_context,
-            )
-            consumed = True
-        enriched.append(item)
-    return enriched
+        for key, value in trace.items():
+            if key in {"replan_triggers", "replan_signal_ids"}:
+                values = _ordered_text_list(
+                    [*_string_list(item.get(key)), *_string_list(value)]
+                )
+                if values:
+                    item[key] = values
+                continue
+            if not str(item.get(key) or "").strip():
+                item[key] = value
+        if planning_reason and not str(item.get("planning_reason") or "").strip():
+            item["planning_reason"] = planning_reason
+        annotated.append(item)
+    return annotated
 
+
+def _model_followup_context_trace_metadata(
+    followup_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    trace: dict[str, Any] = {}
+    replan_request = _first_model_followup_replan_request(followup_context)
+    task_core = (
+        followup_context.get("task_core")
+        if isinstance(followup_context.get("task_core"), Mapping)
+        else {}
+    )
+    workspace = (
+        task_core.get("workspace")
+        if isinstance(task_core, Mapping) and isinstance(task_core.get("workspace"), Mapping)
+        else {}
+    )
+    for key in (
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "intent_kind",
+        "core_id",
+        "workspace_id",
+        "task_id",
+        "run_id",
+        "target_app_name",
+        "target_app_query",
+        "target_search_text",
+    ):
+        value = str(
+            followup_context.get(key)
+            or replan_request.get(key)
+            or task_core.get(key)
+            or workspace.get(key)
+            or ""
+        ).strip()
+        if value:
+            trace[key] = value
+
+    request_id = str(
+        followup_context.get("replan_request_id")
+        or followup_context.get("request_id")
+        or replan_request.get("replan_request_id")
+        or replan_request.get("request_id")
+        or ""
+    ).strip()
+    if request_id:
+        trace["replan_request_id"] = request_id
+
+    trigger = str(
+        followup_context.get("replan_trigger")
+        or followup_context.get("trigger")
+        or replan_request.get("replan_trigger")
+        or replan_request.get("trigger")
+        or ""
+    ).strip()
+    if trigger:
+        trace["replan_trigger"] = trigger
+        trace["replan_triggers"] = _ordered_text_list(
+            [*_string_list(followup_context.get("triggers")), trigger]
+        )
+
+    target_capability_id = str(
+        followup_context.get("capability_id")
+        or followup_context.get("target_capability_id")
+        or replan_request.get("capability_id")
+        or replan_request.get("target_capability_id")
+        or ""
+    ).strip()
+    if target_capability_id:
+        trace["capability_id"] = target_capability_id
+
+    if not any(trace.get(key) for key in ("target_app_name", "target_app_query", "target_search_text")):
+        recovery_target = _first_model_followup_recovery_target(followup_context)
+        for key in ("target_app_name", "target_app_query", "target_search_text"):
+            value = str(recovery_target.get(key) or "").strip()
+            if value:
+                trace[key] = value
+
+    signal_ids = _model_followup_context_replan_signal_ids(followup_context)
+    if signal_ids:
+        trace["replan_signal_ids"] = signal_ids
+    return trace
+
+
+def _first_model_followup_replan_request(
+    followup_context: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    requests = followup_context.get("replan_requests")
+    if not isinstance(requests, list):
+        return {}
+    for request in requests:
+        if isinstance(request, Mapping):
+            return request
+    return {}
+
+
+def _first_model_followup_recovery_target(
+    followup_context: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    targets = followup_context.get("recovery_targets")
+    if not isinstance(targets, list):
+        return {}
+    for target in targets:
+        if isinstance(target, Mapping):
+            return target
+    return {}
+
+
+def _model_followup_context_replan_signal_ids(
+    followup_context: Mapping[str, Any],
+) -> list[str]:
+    signal_ids: list[str] = []
+    for key in ("content_snapshots", "recovery_observations"):
+        snapshots = followup_context.get(key)
+        if not isinstance(snapshots, list):
+            continue
+        for snapshot in snapshots:
+            if isinstance(snapshot, Mapping):
+                signal_ids.extend(_string_list(snapshot.get("replan_signal_ids")))
+    snapshot = followup_context.get("content_snapshot")
+    if isinstance(snapshot, Mapping):
+        signal_ids.extend(_string_list(snapshot.get("replan_signal_ids")))
+    return _ordered_text_list(signal_ids)
 
 def _resolve_dynamic_pending_plan_request_input(
     request: dict[str, Any],
