@@ -7,7 +7,7 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
-from apps.bridge.routes.yachiyo_models import TaskApprovalRequest
+from apps.bridge.routes.yachiyo_models import PlanExecutionBody, TaskApprovalRequest
 from apps.bridge.routes.yachiyo_services import (
     agent_service,
     app_runtime_from_request,
@@ -44,6 +44,23 @@ async def start_task(
     try:
         task_snapshot = await asyncio.to_thread(agent_service(http_request).start_chat_task, request)
         return snapshot(task_snapshot)
+    except (AgentRuntimeError, KeyError, ValueError) as exc:
+        raise bad_request(exc) from exc
+
+
+async def plan_task_execution(
+    request: PlanExecutionBody,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        envelope = await asyncio.to_thread(
+            agent_service(http_request).plan_chat_execution,
+            request.prompt,
+            allowed_tools=request.allowed_tools,
+            metadata=request.metadata,
+            direct=request.direct,
+        )
+        return snapshot(envelope)
     except (AgentRuntimeError, KeyError, ValueError) as exc:
         raise bad_request(exc) from exc
 

@@ -14,6 +14,7 @@ import type {
   RestrictedToolPluginSnapshot,
   RunEventPageSnapshot,
   RerunRunRequest,
+  RuntimeExecutionEnvelopeSnapshot,
   SaveAgentGroupRequest,
   SkillFolderSnapshot,
   SkillSnapshot,
@@ -34,6 +35,10 @@ export type YachiyoStudioPlanTaskRequest = {
   prompt: string;
   allowed_tools?: string[];
   metadata?: Record<string, unknown>;
+};
+
+export type YachiyoStudioPlanExecutionRequest = YachiyoStudioPlanTaskRequest & {
+  direct?: boolean;
 };
 
 export type YachiyoStudioStartPlannerOrchestrationRequest = StartPlannerOrchestrationRequest;
@@ -75,6 +80,12 @@ export async function planYachiyoStudioTask(
   request: YachiyoStudioPlanTaskRequest,
 ): Promise<PlannerDecisionSnapshot> {
   return apiPost<PlannerDecisionSnapshot>('/yachiyo/studio/planner', request);
+}
+
+export async function planYachiyoStudioExecution(
+  request: YachiyoStudioPlanExecutionRequest,
+): Promise<RuntimeExecutionEnvelopeSnapshot> {
+  return apiPost<RuntimeExecutionEnvelopeSnapshot>('/yachiyo/studio/planner/execution', request);
 }
 
 export async function startYachiyoStudioPlannerOrchestration(

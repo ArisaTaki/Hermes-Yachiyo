@@ -6,6 +6,7 @@ import type {
   ChatRunnableCatalogSnapshot,
   ChatSessionContext,
   PendingAttachment,
+  RuntimeExecutionEnvelopeSnapshot,
   RunEventPageSnapshot,
   RunTimelineSnapshot,
   StartChatTaskRequest,
@@ -143,6 +144,19 @@ export async function listYachiyoTasks(conversationId?: string): Promise<AgentTa
 
 export async function startYachiyoTask(request: StartChatTaskRequest): Promise<AgentTaskSnapshot> {
   return apiPost('/yachiyo/tasks', request);
+}
+
+export type PlanYachiyoTaskExecutionRequest = {
+  prompt: string;
+  allowed_tools?: string[];
+  metadata?: Record<string, unknown>;
+  direct?: boolean;
+};
+
+export async function planYachiyoTaskExecution(
+  request: PlanYachiyoTaskExecutionRequest,
+): Promise<RuntimeExecutionEnvelopeSnapshot> {
+  return apiPost('/yachiyo/tasks/plan', request);
 }
 
 export async function getYachiyoTask(taskId: string): Promise<AgentTaskSnapshot> {

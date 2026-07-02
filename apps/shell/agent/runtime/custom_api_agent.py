@@ -430,6 +430,11 @@ class RuntimeCustomApiAgentLoop:
                     tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
                 )
+                if replan_payloads and _timeline_has_permission_recovery_signal(
+                    timeline,
+                    tool_timeline_start,
+                ):
+                    replan_payloads = []
                 self._record_runtime_planner_task_progress_events(
                     runtime_planner_decision,
                     timeline=timeline,
@@ -2466,6 +2471,7 @@ class RuntimeCustomApiAgentLoop:
             return ""
         event_index = 0
         completed_steps: list[dict[str, Any]] = []
+        stopped_after_recovery = False
         for planned_tool_request in planned_tool_requests:
             planned_tool = str(planned_tool_request.get("tool") or "")
             if planned_tool not in _DIRECT_DAILY_DESKTOP_TOOLS:
@@ -2516,6 +2522,9 @@ class RuntimeCustomApiAgentLoop:
             if presentation:
                 completed_step["presentation"] = presentation
             completed_steps.append(completed_step)
+            if result.get("ok") is False and _has_permission_recovery_signal(result):
+                stopped_after_recovery = True
+                break
         visible_steps = _visible_daily_desktop_completed_steps(completed_steps)
         summary_steps = _daily_desktop_sequence_summary_steps(visible_steps)
         summary = _combine_daily_desktop_summaries(
@@ -2548,8 +2557,12 @@ class RuntimeCustomApiAgentLoop:
         }
         event_payload = {
             "tool": str(last_step.get("tool") or ""),
-            "tools": _planned_daily_desktop_tools(planned_tool_requests)
-            or [str(step.get("tool") or "") for step in completed_tools_steps],
+            "tools": (
+                [str(step.get("tool") or "") for step in completed_tools_steps]
+                if stopped_after_recovery
+                else _planned_daily_desktop_tools(planned_tool_requests)
+                or [str(step.get("tool") or "") for step in completed_tools_steps]
+            ),
             "input_preview": (
                 last_step.get("input_preview") if isinstance(last_step.get("input_preview"), dict) else {}
             ),
@@ -3768,6 +3781,19 @@ def _has_permission_recovery_signal(result: dict[str, Any]) -> bool:
         or _string_list(data.get("missing_permissions"))
         or _recovery_actions(result)
     )
+
+
+def _timeline_has_permission_recovery_signal(
+    timeline: list[dict[str, Any]],
+    start_index: int,
+) -> bool:
+    for event in timeline[start_index:]:
+        if event.get("event") not in {"agent.tool.call", "agent.tool.skipped"}:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        if result and _has_permission_recovery_signal(result):
+            return True
+    return False
 
 
 def _daily_desktop_retry_prompt(tool_name: str, planned_input: dict[str, Any]) -> str:

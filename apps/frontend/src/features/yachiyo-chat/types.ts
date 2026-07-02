@@ -12,6 +12,7 @@ export type {
   ChatRunnableSnapshot,
   PlannerTraceSummarySnapshot,
   PublicRunEvent,
+  RuntimeExecutionEnvelopeSnapshot,
   RunEventPageSnapshot,
   RunTimelineSnapshot,
   StartChatTaskRequest,

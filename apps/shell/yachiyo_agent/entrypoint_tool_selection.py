@@ -7,7 +7,7 @@ from collections.abc import Callable, Iterable, Mapping
 from dataclasses import dataclass
 from typing import Any
 
-from .planner_execution import planner_direct_decision_and_tool_requests
+from .planner_execution import planner_direct_decision_and_tool_requests, planner_execution_tool_requests
 from .planner_projection import planner_selection_payload
 from .terminal_plan_hints import terminal_command_hint
 
@@ -72,6 +72,7 @@ def planner_first_direct_tool_selection(
             selected_requests = legacy_requests
     if selected_source == "runtime_planner":
         selected_requests = _entrypoint_model_followup_requests(selected_requests)
+        selected_requests = planner_execution_tool_requests(selected_requests, allowed) or selected_requests
     if planner_requests:
         return DirectToolSelection(
             decision=decision,

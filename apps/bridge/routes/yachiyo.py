@@ -13,6 +13,7 @@ from apps.bridge.routes.yachiyo_models import (
     FutureTaskCancelBody,
     FutureTaskTriggerBody,
     MemoryBody,
+    PlanExecutionBody,
     PlanTaskBody,
     RerunRunBody,
     RestrictedToolPluginInstallBody,
@@ -70,6 +71,15 @@ async def start_task(
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     return await yachiyo_chat_handlers.start_task(request, http_request)
+
+
+@router.post("/tasks/plan")
+@router.post("/chat/tasks/plan")
+async def plan_task_execution(
+    request: PlanExecutionBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_chat_handlers.plan_task_execution(request, http_request)
 
 
 @router.get("/tasks/{task_id}")
@@ -201,6 +211,14 @@ async def plan_studio_task(
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     return await yachiyo_studio_handlers.plan_task(request, http_request)
+
+
+@router.post("/studio/planner/execution")
+async def plan_studio_execution(
+    request: PlanExecutionBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.plan_execution(request, http_request)
 
 
 @router.post("/studio/planner/orchestration/start")

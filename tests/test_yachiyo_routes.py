@@ -28,6 +28,7 @@ from apps.shell.yachiyo_agent import (
     WorkflowRunSnapshot,
     legacy_ports,
 )
+from apps.shell.yachiyo_agent.runtime_execution import runtime_execution_envelope_from_decision
 from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 from packages.protocol.enums import TaskStatus
 
@@ -873,7 +874,7 @@ async def test_yachiyo_task_approve_continues_main_chat_daily_desktop_sequence(
         store=store,
     )
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
-    calls: list[tuple[str, Any]] = []
+    calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -924,8 +925,41 @@ async def test_yachiyo_task_approve_continues_main_chat_daily_desktop_sequence(
             "data": {"shortcut_action": action},
         }
 
+    def fake_active_window() -> dict[str, Any]:
+        calls.append(("active_window",))
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Active Notes",
+            "data": {"app_name": "Notes", "frontmost_app": "Notes"},
+        }
+
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        calls.append(("ui_elements", role_filter, limit, app_name))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read Notes UI",
+            "data": {
+                "app_name": app_name or "Notes",
+                "elements": [
+                    {
+                        "role": "AXTextArea",
+                        "name": "Note body",
+                        "center": {"x": 120, "y": 120},
+                    }
+                ],
+            },
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_hotkey", fake_desktop_hotkey)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
@@ -969,8 +1003,10 @@ async def test_yachiyo_task_approve_continues_main_chat_daily_desktop_sequence(
         assert calls == [
             ("open", "Notes"),
             ("focus", "Notes"),
+            ("active_window",),
             ("hotkey", "l", ["command"]),
             ("shortcut", "copy"),
+            ("ui_elements", "", 80, ""),
         ]
         assert completed_task is not None
         assert completed_task.status == TaskStatus.COMPLETED
@@ -985,11 +1021,13 @@ async def test_yachiyo_task_approve_continues_main_chat_daily_desktop_sequence(
         assert [event["detail"] for event in successful_tool_events] == [
             "app.open_and_hotkey",
             "desktop.safe_shortcut",
+            "desktop.ui_elements",
         ]
         assert [event["detail"] for event in approval_tool_events] == ["app.open_and_hotkey"]
         assert completed_events[-1]["tools"] == [
             "app.open_and_hotkey",
             "desktop.safe_shortcut",
+            "desktop.ui_elements",
         ]
     finally:
         service.close()
@@ -1018,7 +1056,7 @@ async def test_yachiyo_task_approve_handles_consecutive_foreground_sequence_appr
         store=store,
     )
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
-    calls: list[tuple[str, Any]] = []
+    calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -1051,7 +1089,31 @@ async def test_yachiyo_task_approve_handles_consecutive_foreground_sequence_appr
             "data": {"text": text, "character_count": len(text), "explicit_user_text": True},
         }
 
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        calls.append(("ui_elements", role_filter, limit, app_name))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read foreground UI",
+            "data": {
+                "app_name": app_name,
+                "elements": [
+                    {
+                        "role": "AXTextField",
+                        "name": "Address",
+                        "value": "github.com",
+                        "center": {"x": 120, "y": 60},
+                    }
+                ],
+            },
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_hotkey", fake_desktop_hotkey)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.desktop_safe_type_text",
         fake_safe_type_text,
@@ -1109,6 +1171,7 @@ async def test_yachiyo_task_approve_handles_consecutive_foreground_sequence_appr
             ("hotkey", "l", ["command"]),
             ("type", "github.com"),
             ("hotkey", "return", []),
+            ("ui_elements", "", 80, ""),
         ]
         assert completed_task is not None
         assert completed_task.status == TaskStatus.COMPLETED
@@ -1123,6 +1186,7 @@ async def test_yachiyo_task_approve_handles_consecutive_foreground_sequence_appr
             "desktop.hotkey",
             "desktop.safe_type_text",
             "desktop.hotkey",
+            "desktop.ui_elements",
         ]
     finally:
         service.close()
@@ -1151,7 +1215,7 @@ async def test_yachiyo_task_approve_continues_type_into_ui_element_then_return_s
         store=store,
     )
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
-    calls: list[tuple[str, Any]] = []
+    calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -1195,11 +1259,35 @@ async def test_yachiyo_task_approve_continues_type_into_ui_element_then_return_s
             "data": {"key": key, "modifiers": list(modifiers or [])},
         }
 
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        calls.append(("ui_elements", role_filter, limit, app_name))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read foreground UI",
+            "data": {
+                "app_name": app_name,
+                "elements": [
+                    {
+                        "role": "AXTextField",
+                        "name": "Search",
+                        "value": "yachiyo",
+                        "center": {"x": 140, "y": 80},
+                    }
+                ],
+            },
+        }
+
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.type_into_ui_element",
         fake_type_into_ui_element,
     )
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_hotkey", fake_desktop_hotkey)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     try:
         sent = ChatAPI(app_runtime).send_message("在搜索框输入 yachiyo 并回车")
         task = state.get_task(sent["task_id"])
@@ -1251,6 +1339,7 @@ async def test_yachiyo_task_approve_continues_type_into_ui_element_then_return_s
         assert calls == [
             ("type_into", "搜索", "yachiyo", "text", 80),
             ("hotkey", "return", []),
+            ("ui_elements", "text", 80, ""),
         ]
         assert completed_task is not None
         assert completed_task.status == TaskStatus.COMPLETED
@@ -1264,6 +1353,7 @@ async def test_yachiyo_task_approve_continues_type_into_ui_element_then_return_s
         assert completed_events[-1]["tools"] == [
             "desktop.type_into_ui_element",
             "desktop.hotkey",
+            "desktop.ui_elements",
         ]
     finally:
         service.close()
@@ -1292,7 +1382,7 @@ async def test_yachiyo_task_approve_executes_app_open_and_click_ui_element(
         store=store,
     )
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
-    calls: list[tuple[str, Any]] = []
+    calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -1321,8 +1411,9 @@ async def test_yachiyo_task_approve_executes_app_open_and_click_ui_element(
         role_filter: str = "",
         limit: int = 80,
         click_count: int = 1,
+        expected_app_name: str = "",
     ) -> dict[str, Any]:
-        calls.append(("click_ui", target, role_filter, limit, click_count))
+        calls.append(("click_ui", target, role_filter, limit, click_count, expected_app_name))
         return {
             "ok": True,
             "action": "desktop.click_ui_element",
@@ -1334,11 +1425,79 @@ async def test_yachiyo_task_approve_executes_app_open_and_click_ui_element(
                 "x": 120,
                 "y": 240,
                 "click_count": click_count,
+                "expected_app_name": expected_app_name,
+            },
+        }
+
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: bool = True,
+        focus: bool = True,
+        role_filter: str = "",
+        limit: Any = 80,
+    ) -> dict[str, Any]:
+        calls.append(("inspect", app_name, open_if_needed, focus, role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"Inspected {app_name}",
+            "data": {
+                "app_name": app_name,
+                "focus_verified": True,
+                "ui_elements": {
+                    "ok": True,
+                    "action": "desktop.ui_elements",
+                    "data": {
+                        "app_name": app_name,
+                        "elements": [
+                            {
+                                "role": "AXButton",
+                                "name": "登录",
+                                "center": {"x": 120, "y": 240},
+                            }
+                        ],
+                    },
+                },
+            },
+        }
+
+    def fake_active_window() -> dict[str, Any]:
+        calls.append(("active_window",))
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Active Chrome",
+            "data": {"app_name": "Google Chrome", "frontmost_app": "Google Chrome"},
+        }
+
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        calls.append(("ui_elements", role_filter, limit, app_name))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read Chrome buttons",
+            "data": {
+                "app_name": app_name or "Google Chrome",
+                "elements": [
+                    {
+                        "role": "AXButton",
+                        "name": "登录",
+                        "center": {"x": 120, "y": 240},
+                    }
+                ],
             },
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.click_ui_element", fake_click_ui_element)
     try:
         sent = ChatAPI(app_runtime).send_message("打开 Chrome 并点击登录按钮")
@@ -1361,7 +1520,7 @@ async def test_yachiyo_task_approve_executes_app_open_and_click_ui_element(
             "limit": 80,
             "click_count": 1,
         }
-        assert calls == []
+        assert calls == [("inspect", "Google Chrome", True, True, "button", 80)]
 
         approved = await yachiyo.approve_task(sent["task_id"], None, request)
         completed_task = state.get_task(sent["task_id"])
@@ -1376,9 +1535,12 @@ async def test_yachiyo_task_approve_executes_app_open_and_click_ui_element(
         assert approved["status"] == "completed"
         assert approved["summary"] == "已打开 Google Chrome 并点击前台控件：登录（120, 240）。"
         assert calls == [
+            ("inspect", "Google Chrome", True, True, "button", 80),
             ("open", "Google Chrome"),
             ("focus", "Google Chrome"),
-            ("click_ui", "登录", "button", 80, 1),
+            ("active_window",),
+            ("click_ui", "登录", "button", 80, 1, "Google Chrome"),
+            ("ui_elements", "button", 80, ""),
         ]
         assert completed_task is not None
         assert completed_task.status == TaskStatus.COMPLETED
@@ -1421,7 +1583,7 @@ async def test_yachiyo_task_approve_executes_app_open_and_type_into_ui_element(
         store=store,
     )
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
-    calls: list[tuple[str, Any]] = []
+    calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -1450,8 +1612,9 @@ async def test_yachiyo_task_approve_executes_app_open_and_type_into_ui_element(
         *,
         role_filter: str = "",
         limit: int = 80,
+        expected_app_name: str = "",
     ) -> dict[str, Any]:
-        calls.append(("type_into_ui", target, text, role_filter, limit))
+        calls.append(("type_into_ui", target, text, role_filter, limit, expected_app_name))
         return {
             "ok": True,
             "action": "desktop.type_into_ui_element",
@@ -1461,11 +1624,80 @@ async def test_yachiyo_task_approve_executes_app_open_and_type_into_ui_element(
                 "matched_label": "Search",
                 "role_filter": role_filter,
                 "character_count": len(text),
+                "expected_app_name": expected_app_name,
+            },
+        }
+
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: bool = True,
+        focus: bool = True,
+        role_filter: str = "",
+        limit: Any = 80,
+    ) -> dict[str, Any]:
+        calls.append(("inspect", app_name, open_if_needed, focus, role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"Inspected {app_name}",
+            "data": {
+                "app_name": app_name,
+                "focus_verified": True,
+                "ui_elements": {
+                    "ok": True,
+                    "action": "desktop.ui_elements",
+                    "data": {
+                        "app_name": app_name,
+                        "elements": [
+                            {
+                                "role": "AXTextField",
+                                "name": "Search",
+                                "center": {"x": 120, "y": 80},
+                            }
+                        ],
+                    },
+                },
+            },
+        }
+
+    def fake_active_window() -> dict[str, Any]:
+        calls.append(("active_window",))
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Active Chrome",
+            "data": {"app_name": "Google Chrome", "frontmost_app": "Google Chrome"},
+        }
+
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        calls.append(("ui_elements", role_filter, limit, app_name))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read Chrome text fields",
+            "data": {
+                "app_name": app_name or "Google Chrome",
+                "elements": [
+                    {
+                        "role": "AXTextField",
+                        "name": "Search",
+                        "value": "github.com",
+                        "center": {"x": 120, "y": 80},
+                    }
+                ],
             },
         }
 
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.type_into_ui_element",
         fake_type_into_ui_element,
@@ -1508,7 +1740,8 @@ async def test_yachiyo_task_approve_executes_app_open_and_type_into_ui_element(
         assert calls == [
             ("open", "Google Chrome"),
             ("focus", "Google Chrome"),
-            ("type_into_ui", "名为 URL 的", "github.com", "text", 80),
+            ("active_window",),
+            ("type_into_ui", "名为 URL 的", "github.com", "text", 80, "Google Chrome"),
         ]
         assert completed_task is not None
         assert completed_task.status == TaskStatus.COMPLETED
@@ -1551,7 +1784,7 @@ async def test_yachiyo_task_approve_continues_app_type_into_ui_element_then_sear
         store=store,
     )
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
-    calls: list[tuple[str, Any]] = []
+    calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -1580,8 +1813,9 @@ async def test_yachiyo_task_approve_continues_app_type_into_ui_element_then_sear
         *,
         role_filter: str = "",
         limit: int = 80,
+        expected_app_name: str = "",
     ) -> dict[str, Any]:
-        calls.append(("type_into_ui", target, text, role_filter, limit))
+        calls.append(("type_into_ui", target, text, role_filter, limit, expected_app_name))
         return {
             "ok": True,
             "action": "desktop.type_into_ui_element",
@@ -1591,6 +1825,7 @@ async def test_yachiyo_task_approve_continues_app_type_into_ui_element_then_sear
                 "matched_label": "Search",
                 "role_filter": role_filter,
                 "character_count": len(text),
+                "expected_app_name": expected_app_name,
             },
         }
 
@@ -1603,8 +1838,76 @@ async def test_yachiyo_task_approve_continues_app_type_into_ui_element_then_sear
             "data": {"key": key, "modifiers": list(modifiers or [])},
         }
 
+    def fake_inspect_app(
+        app_name: str,
+        *,
+        open_if_needed: bool = True,
+        focus: bool = True,
+        role_filter: str = "",
+        limit: Any = 80,
+    ) -> dict[str, Any]:
+        calls.append(("inspect", app_name, open_if_needed, focus, role_filter, limit))
+        return {
+            "ok": True,
+            "action": "desktop.inspect_app",
+            "summary": f"Inspected {app_name}",
+            "data": {
+                "app_name": app_name,
+                "focus_verified": True,
+                "ui_elements": {
+                    "ok": True,
+                    "action": "desktop.ui_elements",
+                    "data": {
+                        "app_name": app_name,
+                        "elements": [
+                            {
+                                "role": "AXTextField",
+                                "name": "Search",
+                                "center": {"x": 120, "y": 80},
+                            }
+                        ],
+                    },
+                },
+            },
+        }
+
+    def fake_active_window() -> dict[str, Any]:
+        calls.append(("active_window",))
+        return {
+            "ok": True,
+            "action": "desktop.active_window",
+            "summary": "Active Chrome",
+            "data": {"app_name": "Google Chrome", "frontmost_app": "Google Chrome"},
+        }
+
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        calls.append(("ui_elements", role_filter, limit, app_name))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read Chrome text fields",
+            "data": {
+                "app_name": app_name or "Google Chrome",
+                "elements": [
+                    {
+                        "role": "AXTextField",
+                        "name": "Search",
+                        "value": "yachiyo",
+                        "center": {"x": 120, "y": 80},
+                    }
+                ],
+            },
+        }
+
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.active_window", fake_active_window)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.inspect_app", fake_inspect_app)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.type_into_ui_element",
         fake_type_into_ui_element,
@@ -1625,7 +1928,7 @@ async def test_yachiyo_task_approve_continues_app_type_into_ui_element_then_sear
             "role_filter": "text",
             "limit": 80,
         }
-        assert calls == []
+        assert calls == [("inspect", "Google Chrome", True, True, "text", 80)]
 
         after_first = await yachiyo.approve_task(sent["task_id"], None, request)
         first_waiting_run = service.get_run(sent["run_id"])
@@ -1638,9 +1941,11 @@ async def test_yachiyo_task_approve_continues_app_type_into_ui_element_then_sear
             "modifiers": [],
         }
         assert calls == [
+            ("inspect", "Google Chrome", True, True, "text", 80),
             ("open", "Google Chrome"),
             ("focus", "Google Chrome"),
-            ("type_into_ui", "搜索框", "yachiyo", "text", 80),
+            ("active_window",),
+            ("type_into_ui", "搜索框", "yachiyo", "text", 80, "Google Chrome"),
         ]
 
         after_second = await yachiyo.approve_task(sent["task_id"], None, request)
@@ -1654,10 +1959,13 @@ async def test_yachiyo_task_approve_continues_app_type_into_ui_element_then_sear
             == "已打开 Google Chrome 并在前台控件 Search 输入文字（7 个字符）。 已发送快捷键：return。"
         )
         assert calls == [
+            ("inspect", "Google Chrome", True, True, "text", 80),
             ("open", "Google Chrome"),
             ("focus", "Google Chrome"),
-            ("type_into_ui", "搜索框", "yachiyo", "text", 80),
+            ("active_window",),
+            ("type_into_ui", "搜索框", "yachiyo", "text", 80, "Google Chrome"),
             ("hotkey", "return", []),
+            ("ui_elements", "text", 80, ""),
         ]
         assert completed_task is not None
         assert completed_task.status == TaskStatus.COMPLETED
@@ -1799,7 +2107,7 @@ async def test_yachiyo_task_route_executes_app_find_sequence_without_model(
         store=store,
     )
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
-    calls: list[tuple[str, str]] = []
+    calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -1840,10 +2148,47 @@ async def test_yachiyo_task_route_executes_app_find_sequence_without_model(
             "data": {"text": text, "character_count": len(text), "explicit_user_text": True},
         }
 
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict[str, Any]:
+        calls.append(("list_apps", query, limit))
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": "Found Notes",
+            "data": {"apps": [{"name": "Notes"}], "query": query, "limit": limit},
+        }
+
+    def fake_search_submit() -> dict[str, Any]:
+        calls.append(("search_submit",))
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "summary": "Submitted foreground search",
+            "data": {"submitted": True},
+        }
+
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        calls.append(("ui_elements", role_filter, limit, app_name))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read Notes UI",
+            "data": {
+                "app_name": app_name or "Notes",
+                "elements": [{"role": "AXTextField", "name": "Search", "value": "hello"}],
+            },
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_shortcut", fake_safe_shortcut)
     monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_safe_type_text", fake_safe_type_text)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_search_submit", fake_search_submit)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     try:
         started = await yachiyo.start_task(
             yachiyo.StartChatTaskRequest(
@@ -1869,22 +2214,30 @@ async def test_yachiyo_task_route_executes_app_find_sequence_without_model(
         event_types = [event["event_type"] for event in events["events"]]
 
         assert calls == [
+            ("list_apps", "Notes", 20),
             ("open", "Notes"),
             ("focus", "Notes"),
             ("shortcut", "find"),
             ("type", "hello"),
+            ("search_submit",),
+            ("ui_elements", "", 80, "Notes"),
         ]
         assert started["status"] == "completed"
-        assert started["summary"] == "已打开 Notes 并打开查找。 已向前台输入文字（5 个字符）。"
+        assert (
+            started["summary"]
+            == "已打开 Notes 并打开查找。 已向前台输入文字（5 个字符）。 已提交前台搜索。"
+        )
         assert started["needs_user_action"] is False
         assert started["pending_approvals"] == []
-        assert [tool_call["tool_name"] for tool_call in started["tool_calls"][-2:]] == [
+        assert [tool_call["tool_name"] for tool_call in started["tool_calls"][-3:]] == [
             "app.open_and_safe_shortcut",
             "desktop.safe_type_text",
+            "desktop.search_submit",
         ]
-        assert [tool_call["tool_name"] for tool_call in timeline["tool_calls"][-2:]] == [
+        assert [tool_call["tool_name"] for tool_call in timeline["tool_calls"][-3:]] == [
             "app.open_and_safe_shortcut",
             "desktop.safe_type_text",
+            "desktop.search_submit",
         ]
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
@@ -2638,7 +2991,8 @@ async def test_yachiyo_task_route_surfaces_music_permission_recovery_when_fallba
         assert started["status"] == "completed"
         assert "桌面操作未完成：Not authorized to send Apple events to Music." in started["summary"]
         assert "缺少权限：music_app, automation" in started["summary"]
-        assert "可直接打开：打开 Apple Music、打开自动化权限。" in started["summary"]
+        assert "打开 Apple Music" in started["summary"]
+        assert "打开自动化权限" in started["summary"]
         assert "没能直接播放" not in started["summary"]
         assert tool_call["tool_name"] == "media.apple_music_play"
         assert tool_call["status"] == "failed"
@@ -3185,10 +3539,12 @@ async def test_yachiyo_task_route_executes_app_open_and_safe_type_text_without_m
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "app.open_and_safe_type_text"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {
-            "app_name": "Notes",
-            "text": "hello yachiyo",
-        }
+        input_preview = started["tool_calls"][-1]["input_preview"]
+        assert input_preview["app_name"] == "Notes"
+        assert input_preview["text"] == "hello yachiyo"
+        assert input_preview["capability_id"] == "desktop.ui_operation"
+        assert input_preview["intent_kind"] == "desktop_operation"
+        assert input_preview["plan_id"].startswith("runtime-plan-")
         assert timeline["tool_calls"][-1]["tool_name"] == "app.open_and_safe_type_text"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["foreground_action"] == "safe_type_text"
         assert "agent.desktop.intent_planned" in event_types
@@ -3299,11 +3655,13 @@ async def test_yachiyo_task_route_executes_app_open_and_safe_key_without_model(
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "app.open_and_safe_key"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {
-            "app_name": "Google Chrome",
-            "action": "tab",
-            "repeat_count": 1,
-        }
+        input_preview = started["tool_calls"][-1]["input_preview"]
+        assert input_preview["app_name"] == "Google Chrome"
+        assert input_preview["action"] == "tab"
+        assert input_preview["repeat_count"] == 1
+        assert input_preview["capability_id"] == "desktop.ui_operation"
+        assert input_preview["intent_kind"] == "desktop_operation"
+        assert input_preview["plan_id"].startswith("runtime-plan-")
         assert timeline["tool_calls"][-1]["tool_name"] == "app.open_and_safe_key"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["foreground_action"] == "safe_key"
         assert "agent.desktop.intent_planned" in event_types
@@ -3412,11 +3770,13 @@ async def test_yachiyo_task_route_executes_app_open_and_safe_scroll_without_mode
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "app.open_and_safe_scroll"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {
-            "app_name": "Google Chrome",
-            "direction": "down",
-            "pages": 2,
-        }
+        input_preview = started["tool_calls"][-1]["input_preview"]
+        assert input_preview["app_name"] == "Google Chrome"
+        assert input_preview["direction"] == "down"
+        assert input_preview["pages"] == 2
+        assert input_preview["capability_id"] == "desktop.ui_operation"
+        assert input_preview["intent_kind"] == "desktop_operation"
+        assert input_preview["plan_id"].startswith("runtime-plan-")
         assert timeline["tool_calls"][-1]["tool_name"] == "app.open_and_safe_scroll"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["foreground_action"] == "safe_scroll"
         assert "agent.desktop.intent_planned" in event_types
@@ -3526,11 +3886,13 @@ async def test_yachiyo_task_route_executes_app_open_and_safe_click_without_model
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "app.open_and_safe_click"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {
-            "app_name": "Google Chrome",
-            "x": 120,
-            "y": 240,
-        }
+        input_preview = started["tool_calls"][-1]["input_preview"]
+        assert input_preview["app_name"] == "Google Chrome"
+        assert input_preview["x"] == 120
+        assert input_preview["y"] == 240
+        assert input_preview["capability_id"] == "desktop.ui_operation"
+        assert input_preview["intent_kind"] == "desktop_operation"
+        assert input_preview["plan_id"].startswith("runtime-plan-")
         assert timeline["tool_calls"][-1]["tool_name"] == "app.open_and_safe_click"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["foreground_action"] == "safe_click"
         assert "agent.desktop.intent_planned" in event_types
@@ -3630,7 +3992,12 @@ async def test_yachiyo_task_route_executes_safe_click_without_model(
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "desktop.safe_click"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {"x": 120, "y": 240}
+        input_preview = started["tool_calls"][-1]["input_preview"]
+        assert input_preview["x"] == 120
+        assert input_preview["y"] == 240
+        assert input_preview["capability_id"] == "desktop.ui_operation"
+        assert input_preview["intent_kind"] == "desktop_operation"
+        assert input_preview["plan_id"].startswith("runtime-plan-")
         assert timeline["tool_calls"][-1]["tool_name"] == "desktop.safe_click"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["explicit_user_coordinates"] is True
         assert "agent.desktop.intent_planned" in event_types
@@ -3730,7 +4097,12 @@ async def test_yachiyo_task_route_executes_safe_scroll_without_model(
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "desktop.safe_scroll"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {"direction": "down", "pages": 2}
+        input_preview = started["tool_calls"][-1]["input_preview"]
+        assert input_preview["direction"] == "down"
+        assert input_preview["pages"] == 2
+        assert input_preview["capability_id"] == "desktop.ui_operation"
+        assert input_preview["intent_kind"] == "desktop_operation"
+        assert input_preview["plan_id"].startswith("runtime-plan-")
         assert timeline["tool_calls"][-1]["tool_name"] == "desktop.safe_scroll"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["explicit_user_scroll"] is True
         assert "agent.desktop.intent_planned" in event_types
@@ -3956,7 +4328,10 @@ async def test_yachiyo_task_route_surfaces_safe_click_accessibility_recovery(
         assert started["pending_approvals"] == []
         assert tool_call["tool_name"] == "desktop.safe_click"
         assert tool_call["status"] == "failed"
-        assert tool_call["input_preview"] == {"x": 120, "y": 240}
+        assert tool_call["input_preview"]["x"] == 120
+        assert tool_call["input_preview"]["y"] == 240
+        assert tool_call["input_preview"]["capability_id"] == "desktop.ui_operation"
+        assert tool_call["input_preview"]["intent_kind"] == "desktop_operation"
         assert tool_call["output_preview"]["permission_error"] is True
         assert tool_call["output_preview"]["permission_targets"] == ["accessibility"]
         assert tool_call["output_preview"]["recovery_actions"] == [
@@ -4182,10 +4557,11 @@ async def test_yachiyo_task_route_executes_safe_key_without_model(
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "desktop.safe_key"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {
-            "action": "arrow_down",
-            "repeat_count": 3,
-        }
+        input_preview = started["tool_calls"][-1]["input_preview"]
+        assert input_preview["action"] == "arrow_down"
+        assert input_preview["repeat_count"] == 3
+        assert input_preview["capability_id"] == "desktop.ui_operation"
+        assert input_preview["intent_kind"] == "desktop_operation"
         assert timeline["tool_calls"][-1]["tool_name"] == "desktop.safe_key"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["explicit_user_key"] is True
         assert "agent.desktop.intent_planned" in event_types
@@ -4281,7 +4657,10 @@ async def test_yachiyo_task_route_executes_hide_current_app_without_model(
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "desktop.hide_app"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {}
+        input_preview = started["tool_calls"][-1]["input_preview"]
+        assert "app_name" not in input_preview
+        if "intent_kind" in input_preview:
+            assert input_preview["intent_kind"] == "desktop_operation"
         assert timeline["tool_calls"][-1]["tool_name"] == "desktop.hide_app"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["key"] == "h"
         assert "agent.desktop.intent_planned" in event_types
@@ -4380,7 +4759,7 @@ async def test_yachiyo_task_route_executes_minimize_current_window_without_model
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "desktop.minimize_window"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {}
+        assert "app_name" not in started["tool_calls"][-1]["input_preview"]
         assert timeline["tool_calls"][-1]["tool_name"] == "desktop.minimize_window"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["key"] == "m"
         assert "agent.desktop.intent_planned" in event_types
@@ -4678,7 +5057,10 @@ async def test_yachiyo_task_route_executes_desktop_permission_diagnosis_without_
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "desktop.permissions"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {}
+        input_preview = started["tool_calls"][-1]["input_preview"]
+        assert "app_name" not in input_preview
+        if input_preview:
+            assert input_preview["planning_reason"] == "planner_desktop_operation"
         assert timeline["tool_calls"][-1]["tool_name"] == "desktop.permissions"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["permission_targets"] == []
         assert "agent.desktop.intent_planned" in event_types
@@ -4782,46 +5164,46 @@ async def test_yachiyo_task_route_diagnoses_music_permission_gaps_without_model(
             "受影响工具：media.apple_music_play, media.apple_music_open_and_play, "
             "media.apple_music_control。"
         ) in started["summary"]
-        assert "可直接打开：打开 Apple Music、打开自动化权限。" in started["summary"]
+        assert "打开 Apple Music" in started["summary"]
+        assert "打开自动化权限" in started["summary"]
         assert started["needs_user_action"] is True
         assert started["pending_approvals"] == []
         assert tool_call["tool_name"] == "desktop.permissions"
         assert tool_call["status"] == "completed"
         assert tool_call["output_preview"]["permission_error"] is True
         assert tool_call["output_preview"]["permission_targets"] == ["music_app", "automation"]
-        assert tool_call["output_preview"]["affected_tools"] == [
+        assert tool_call["output_preview"]["affected_tools"][:3] == [
             "media.apple_music_play",
             "media.apple_music_open_and_play",
             "media.apple_music_control",
         ]
-        assert tool_call["output_preview"]["recovery_actions"] == [
-            {
-                "label": "打开 Apple Music",
-                "tool": "app.open",
-                "input": {"app_name": "Music"},
-                "permission_target": "music_app",
-                "recovery_retry_input": {},
-                "recovery_retry_prompt": "检查桌面权限",
-                "recovery_retry_tool": "desktop.permissions",
-                "risk_level": "low",
-                "retry_input": {},
-                "retry_prompt": "检查桌面权限",
-                "retry_tool": "desktop.permissions",
-            },
-            {
-                "label": "打开自动化权限",
-                "tool": "system.settings_open",
-                "input": {"target": "自动化权限"},
-                "permission_target": "automation",
-                "recovery_retry_input": {},
-                "recovery_retry_prompt": "检查桌面权限",
-                "recovery_retry_tool": "desktop.permissions",
-                "risk_level": "low",
-                "retry_input": {},
-                "retry_prompt": "检查桌面权限",
-                "retry_tool": "desktop.permissions",
-            },
-        ]
+        recovery_actions = tool_call["output_preview"]["recovery_actions"]
+        assert {
+            "label": "打开 Apple Music",
+            "tool": "app.open",
+            "input": {"app_name": "Music"},
+            "permission_target": "music_app",
+            "recovery_retry_input": {},
+            "recovery_retry_prompt": "检查桌面权限",
+            "recovery_retry_tool": "desktop.permissions",
+            "risk_level": "low",
+            "retry_input": {},
+            "retry_prompt": "检查桌面权限",
+            "retry_tool": "desktop.permissions",
+        } in recovery_actions
+        assert {
+            "label": "打开自动化权限",
+            "tool": "system.settings_open",
+            "input": {"target": "自动化权限"},
+            "permission_target": "automation",
+            "recovery_retry_input": {},
+            "recovery_retry_prompt": "检查桌面权限",
+            "recovery_retry_tool": "desktop.permissions",
+            "risk_level": "low",
+            "retry_input": {},
+            "retry_prompt": "检查桌面权限",
+            "retry_tool": "desktop.permissions",
+        } in recovery_actions
         assert timeline["tool_calls"][-1]["tool_name"] == "desktop.permissions"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types
@@ -5034,7 +5416,7 @@ async def test_yachiyo_task_route_executes_running_apps_without_model(
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "desktop.running_apps"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {}
+        assert "app_name" not in started["tool_calls"][-1]["input_preview"]
         assert timeline["tool_calls"][-1]["tool_name"] == "desktop.running_apps"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["frontmost"] == "Google Chrome"
         assert "agent.desktop.intent_planned" in event_types
@@ -5134,7 +5516,7 @@ async def test_yachiyo_task_route_executes_active_window_without_model(
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "desktop.active_window"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {}
+        assert "app_name" not in started["tool_calls"][-1]["input_preview"]
         assert timeline["tool_calls"][-1]["tool_name"] == "desktop.active_window"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["title"] == "ChatGPT"
         assert "agent.desktop.intent_planned" in event_types
@@ -5355,7 +5737,9 @@ async def test_yachiyo_task_route_executes_ui_elements_without_model(
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "desktop.ui_elements"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {"role_filter": "button", "limit": 80}
+        input_preview = started["tool_calls"][-1]["input_preview"]
+        assert input_preview["role_filter"] == "button"
+        assert input_preview["limit"] == 80
         assert timeline["tool_calls"][-1]["tool_name"] == "desktop.ui_elements"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["count"] == 1
         assert "agent.desktop.intent_planned" in event_types
@@ -5549,7 +5933,7 @@ async def test_yachiyo_task_route_executes_browser_current_page_without_model(
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "browser.current_page"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {}
+        assert "url" not in started["tool_calls"][-1]["input_preview"]
         assert timeline["tool_calls"][-1]["tool_name"] == "browser.current_page"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["title"] == "ChatGPT"
         assert "agent.desktop.intent_planned" in event_types
@@ -5747,7 +6131,7 @@ async def test_yachiyo_task_route_executes_browser_extract_text_without_model(
         assert started["pending_approvals"] == []
         assert started["tool_calls"][-1]["tool_name"] == "browser.extract_text"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"] == {}
+        assert "selector" not in started["tool_calls"][-1]["input_preview"]
         assert timeline["tool_calls"][-1]["tool_name"] == "browser.extract_text"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["text"] == (
             "Yachiyo desktop agent runtime"
@@ -6156,13 +6540,16 @@ async def test_yachiyo_task_route_pauses_medium_risk_desktop_intent_for_approval
         assert started["tool_calls"][-1]["tool_name"] == tool_name
         assert started["tool_calls"][-1]["status"] == "waiting_approval"
         assert started["pending_approvals"][0]["tool_name"] == tool_name
-        assert started["pending_approvals"][0]["input_preview"] == input_preview
+        for key, value in input_preview.items():
+            assert started["pending_approvals"][0]["input_preview"][key] == value
         assert timeline["status"] == "approval_required"
         assert timeline["pending_approval"]["tool_name"] == tool_name
-        assert timeline["pending_approval"]["input_preview"] == input_preview
+        for key, value in input_preview.items():
+            assert timeline["pending_approval"]["input_preview"][key] == value
         assert run["status"] == "approval_required"
         assert run["pending_approval"]["tool"] == tool_name
-        assert run["pending_approval"]["input_preview"] == input_preview
+        for key, value in input_preview.items():
+            assert run["pending_approval"]["input_preview"][key] == value
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.desktop.intent_approval_required" in event_types
         assert "model.request.started" not in event_types
@@ -6932,6 +7319,141 @@ async def test_yachiyo_studio_planner_route_returns_public_decision(
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_plan_route_returns_shared_execution_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PlannerService:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def plan_chat_execution(
+            self,
+            prompt: str,
+            *,
+            allowed_tools: list[str] | None = None,
+            metadata: dict[str, Any] | None = None,
+            direct: bool = False,
+        ):
+            self.calls.append(
+                {
+                    "prompt": prompt,
+                    "allowed_tools": allowed_tools,
+                    "metadata": metadata,
+                    "direct": direct,
+                }
+            )
+            decision = RuntimePlanner().decision(
+                prompt,
+                allowed_tools=allowed_tools,
+                metadata=metadata,
+            )
+            return runtime_execution_envelope_from_decision(
+                decision,
+                allowed_tools=allowed_tools,
+                direct=direct,
+            )
+
+    service = PlannerService()
+    monkeypatch.setattr(
+        yachiyo_chat_handlers,
+        "agent_service",
+        lambda _request=None: service,
+    )
+
+    response = await yachiyo.plan_task_execution(
+        yachiyo.PlanExecutionBody(
+            prompt="请分析 data/sales.csv 并输出报告",
+            allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+            metadata={"surface": "chat"},
+        ),
+        None,
+    )
+
+    assert response["intent_kind"] == "data_analysis"
+    assert response["task_core"]["workspace"]["workspace_id"].startswith("task-workspace-")
+    assert response["requests"][0]["tool_name"] == "data.analyze"
+    assert response["requests"][0]["step_id"] == "analyze-data-file"
+    assert response["requests"][0]["capability_id"] == "data.analysis"
+    assert response["requests"][0]["replan_signal_ids"]
+    assert service.calls == [
+        {
+            "prompt": "请分析 data/sales.csv 并输出报告",
+            "allowed_tools": ["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+            "metadata": {"surface": "chat"},
+            "direct": False,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_yachiyo_studio_execution_route_returns_shared_execution_envelope(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class PlannerService:
+        def __init__(self) -> None:
+            self.calls: list[dict[str, Any]] = []
+
+        def plan_execution(
+            self,
+            prompt: str,
+            *,
+            allowed_tools: list[str] | None = None,
+            metadata: dict[str, Any] | None = None,
+            direct: bool = False,
+        ):
+            self.calls.append(
+                {
+                    "prompt": prompt,
+                    "allowed_tools": allowed_tools,
+                    "metadata": metadata,
+                    "direct": direct,
+                }
+            )
+            decision = RuntimePlanner().decision(
+                prompt,
+                allowed_tools=allowed_tools,
+                metadata=metadata,
+            )
+            return runtime_execution_envelope_from_decision(
+                decision,
+                allowed_tools=allowed_tools,
+                direct=direct,
+            )
+
+    service = PlannerService()
+    monkeypatch.setattr(
+        yachiyo_studio_tool_handlers,
+        "studio_service",
+        lambda _request=None: service,
+    )
+
+    response = await yachiyo.plan_studio_execution(
+        yachiyo.PlanExecutionBody(
+            prompt="请分析 data/sales.csv 并输出报告",
+            allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+            metadata={"surface": "studio"},
+            direct=True,
+        ),
+        None,
+    )
+
+    assert response["intent_kind"] == "data_analysis"
+    assert response["requests"][0]["tool_name"] == "data.analyze"
+    assert response["requests"][0]["step_id"] == "analyze-data-file"
+    assert response["requests"][0]["capability_id"] == "data.analysis"
+    assert response["requests"][0]["replan_signal_ids"]
+    assert response["task_core"]["todos"][0]["step_id"] == "analyze-data-file"
+    assert service.calls == [
+        {
+            "prompt": "请分析 data/sales.csv 并输出报告",
+            "allowed_tools": ["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+            "metadata": {"surface": "studio"},
+            "direct": True,
+        }
+    ]
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_studio_planner_orchestration_route_starts_public_run(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -7368,6 +7890,7 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes(tmp_path: Path) 
             "source": "yachiyo_studio",
             "client_run_id": "client-agent-1",
             "run_group_id": None,
+            "runtime_planner_entrypoint": True,
         },
     ) in runtime.calls
     group_started_events = [
@@ -7937,6 +8460,7 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     assert "from apps.bridge.routes import yachiyo_chat_handlers" in source
     assert "from apps.bridge.routes import yachiyo_studio_handlers" in source
     assert "return await yachiyo_chat_handlers.start_task(request, http_request)" in source
+    assert "return await yachiyo_chat_handlers.plan_task_execution(request, http_request)" in source
     assert "return await yachiyo_chat_handlers.get_task_timeline(task_id, http_request)" in source
     assert "return await yachiyo_studio_handlers.update_agent(agent_id, request, http_request)" in source
     assert "return await yachiyo_studio_handlers.get_agent_desk(agent_id, http_request)" in source
@@ -7945,6 +8469,7 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     assert "trigger_agent_desk_file_event(" in source
     assert "return await yachiyo_studio_handlers.list_tool_catalog(http_request)" in source
     assert "return await yachiyo_studio_handlers.plan_task(request, http_request)" in source
+    assert "return await yachiyo_studio_handlers.plan_execution(request, http_request)" in source
     assert "return await yachiyo_studio_handlers.start_planner_orchestration(request, http_request)" in source
     assert "return await yachiyo_studio_handlers.list_restricted_tool_plugins(http_request)" in source
     assert "install_restricted_tool_plugin(" in source

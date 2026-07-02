@@ -8,6 +8,7 @@ from typing import Any
 from fastapi import HTTPException, Request
 
 from apps.bridge.routes.yachiyo_models import (
+    PlanExecutionBody,
     PlanTaskBody,
     RestrictedToolPluginInstallBody,
     RestrictedToolPluginUpdateBody,
@@ -34,6 +35,20 @@ async def plan_task(
         metadata=request.metadata,
     )
     return snapshot(decision)
+
+
+async def plan_execution(
+    request: PlanExecutionBody,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    envelope = await asyncio.to_thread(
+        studio_service(http_request).plan_execution,
+        request.prompt,
+        allowed_tools=request.allowed_tools,
+        metadata=request.metadata,
+        direct=request.direct,
+    )
+    return snapshot(envelope)
 
 
 async def start_planner_orchestration(

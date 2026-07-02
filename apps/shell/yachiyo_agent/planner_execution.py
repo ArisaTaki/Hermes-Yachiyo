@@ -68,6 +68,7 @@ def planner_execution_tool_requests(
     )
     if not _has_discovered_app_foreground_verification_chain(normalized_requests):
         normalized_requests = _collapse_app_foreground_direct_requests(normalized_requests, allowed)
+    normalized_requests = _drop_redundant_app_foreground_prepare_requests(normalized_requests)
     normalized_requests = _drop_redundant_post_inspect_app_prepare_requests(normalized_requests)
     return _drop_redundant_execution_verification_requests(normalized_requests)
 
@@ -1272,6 +1273,68 @@ def _drop_redundant_execution_verification_requests(
     return filtered
 
 
+_APP_OPEN_AND_FOREGROUND_TOOLS = {
+    "app.open_and_safe_type_text",
+    "app.open_and_safe_shortcut",
+    "app.open_and_safe_key",
+    "app.open_and_safe_scroll",
+    "app.open_and_safe_click",
+    "app.open_and_click_ui_element",
+    "app.open_and_type_into_ui_element",
+    "app.open_and_hotkey",
+}
+
+_APP_FOCUS_AND_FOREGROUND_TOOLS = {
+    "app.focus_and_safe_type_text",
+    "app.focus_and_safe_shortcut",
+    "app.focus_and_safe_key",
+    "app.focus_and_safe_scroll",
+    "app.focus_and_safe_click",
+    "app.focus_and_click_ui_element",
+    "app.focus_and_type_into_ui_element",
+    "app.focus_and_hotkey",
+}
+
+
+def _drop_redundant_app_foreground_prepare_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    filtered: list[dict[str, Any]] = []
+    for request in requests:
+        tool_name = str(request.get("tool") or "").strip()
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        app_name = str(payload.get("app_name") or "").strip()
+        if app_name and tool_name in _APP_OPEN_AND_FOREGROUND_TOOLS:
+            while _last_prepare_request_matches(
+                filtered,
+                app_name,
+                {"app.open", "app.focus", "desktop.open_app", "desktop.focus_app"},
+            ):
+                filtered.pop()
+        elif app_name and tool_name in _APP_FOCUS_AND_FOREGROUND_TOOLS:
+            while _last_prepare_request_matches(
+                filtered,
+                app_name,
+                {"app.focus", "desktop.focus_app"},
+            ):
+                filtered.pop()
+        filtered.append(request)
+    return filtered
+
+
+def _last_prepare_request_matches(
+    requests: list[dict[str, Any]],
+    app_name: str,
+    tools: set[str],
+) -> bool:
+    if not requests:
+        return False
+    request = requests[-1]
+    tool_name = str(request.get("tool") or "").strip()
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return tool_name in tools and str(payload.get("app_name") or "").strip() == app_name
+
+
 def _drop_redundant_post_inspect_app_prepare_requests(
     requests: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -1319,10 +1382,6 @@ def _keep_post_mutation_verification_request(
         return True
     if tool_name == "desktop.active_window" and (
         previous_mutation_tool in {
-            "app.open",
-            "app.focus",
-            "desktop.open_app",
-            "desktop.focus_app",
             "app.quit",
             "app.hide",
             "app.show",

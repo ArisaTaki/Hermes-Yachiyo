@@ -75,6 +75,10 @@ class PlanTaskBody(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
 
+class PlanExecutionBody(PlanTaskBody):
+    direct: bool = False
+
+
 class StartPlannerOrchestrationBody(PlanTaskBody):
     objective: str | None = Field(default=None, max_length=60000)
     title: str | None = Field(default=None, max_length=1000)

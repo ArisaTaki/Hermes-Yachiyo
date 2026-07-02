@@ -58,6 +58,22 @@ def _tool_request_trace_payload(tool_request: dict[str, Any]) -> dict[str, Any]:
     return payload
 
 
+def _tool_result_requests_user_recovery(result: dict[str, Any]) -> bool:
+    if not isinstance(result, dict):
+        return False
+    data = result.get("data") if isinstance(result.get("data"), dict) else {}
+    return bool(
+        result.get("permission_error")
+        or data.get("permission_error")
+        or result.get("blocked_by_runtime_readiness")
+        or result.get("blocked_by_app_resolution")
+        or result.get("recovery_actions")
+        or data.get("recovery_actions")
+        or result.get("permission_targets")
+        or data.get("permission_targets")
+    )
+
+
 def _normalized_app_lookup(value: Any) -> str:
     return " ".join(str(value or "").strip().casefold().split())
 
@@ -770,6 +786,8 @@ class RuntimeToolRequestRunner:
                     {**tool_request, "tool": tool_name},
                     runtime_skip,
                 )
+                if _tool_result_requests_user_recovery(runtime_skip):
+                    break
                 continue
             goal_block_reason = self._goal_disallows_tool(user_goal, tool_name)
             if goal_block_reason:
@@ -901,6 +919,8 @@ class RuntimeToolRequestRunner:
                 append_run_event=self._append_run_event,
                 run_id=run_id,
             )
+            if _tool_result_requests_user_recovery(tool_result):
+                break
             previous_readiness_blocker = foreground_readiness_blocker
             next_readiness_blocker = _updated_foreground_readiness_blocker(
                 foreground_readiness_blocker,
