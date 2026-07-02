@@ -708,6 +708,56 @@ def test_release_smoke_summary_aggregates_partial_public_demo_reports(
     assert details["kind"] == "public_demo_aggregate"
 
 
+def test_release_smoke_summary_keeps_more_informative_public_demo_blocker(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
+    required_flow_ids = release_smoke._canonical_public_demo_flow_ids()
+    passed_flow_ids = set(required_flow_ids) - {"workflow_provider"}
+    generic_path = tmp_path / "tmp" / "public-demo-generic.json"
+    detailed_path = tmp_path / "tmp" / "public-demo-detailed.json"
+    generic = _public_demo_report_with_passed_flows(passed_flow_ids)
+    generic["release_blockers"] = [
+        {
+            "id": "workflow_provider",
+            "status": "skipped",
+            "reason": "requires live provider smoke credentials",
+        }
+    ]
+    detailed = _public_demo_report_with_passed_flows(passed_flow_ids)
+    detailed["release_blockers"] = [
+        {
+            "id": "workflow_provider",
+            "status": "skipped",
+            "reason": "provider_smoke_credentials_missing",
+            "evidence_summary": {
+                "blocking_condition": "provider_smoke_credentials_missing",
+                "missing_env": [
+                    "OHA_YACHIYO_SMOKE_BASE_URL",
+                    "OHA_YACHIYO_SMOKE_MODEL",
+                ],
+            },
+        }
+    ]
+    generic_path.parent.mkdir(parents=True, exist_ok=True)
+    generic_path.write_text(json.dumps(generic), encoding="utf-8")
+    detailed_path.write_text(json.dumps(detailed), encoding="utf-8")
+
+    summary = release_smoke.summarize_release_smoke([generic_path, detailed_path])
+
+    public_demo = next(item for item in summary["items"] if item["id"] == "public_demo")
+    details = public_demo["related_evidence"]["public_demo_assessment"][-1]
+    blocker = next(
+        item for item in details["release_blockers"] if item["id"] == "workflow_provider"
+    )
+    assert blocker["reason"] == "provider_smoke_credentials_missing"
+    assert blocker["evidence_summary"]["missing_env"] == [
+        "OHA_YACHIYO_SMOKE_BASE_URL",
+        "OHA_YACHIYO_SMOKE_MODEL",
+    ]
+
+
 def test_release_smoke_cli_writes_json_and_markdown(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(release_smoke, "ROOT", tmp_path)
     report_path = tmp_path / "tmp" / "partial.json"

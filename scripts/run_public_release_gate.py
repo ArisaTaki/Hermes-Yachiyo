@@ -304,8 +304,11 @@ def _aggregate_public_demo_reports(report_paths: Sequence[Path]) -> dict[str, An
                 blocker_by_id[flow_id] = _public_demo_blocker_from_flow(flow)
         for blocker in _dict_list(report.get("release_blockers")):
             blocker_id = str(blocker.get("id") or "").strip()
-            if blocker_id and blocker_id not in blocker_by_id:
-                blocker_by_id[blocker_id] = blocker
+            if blocker_id:
+                blocker_by_id[blocker_id] = _more_informative_blocker(
+                    blocker_by_id.get(blocker_id),
+                    blocker,
+                )
     missing_flow_ids = [flow_id for flow_id in required_flow_ids if flow_id not in passed_flow_ids]
     release_blockers = [
         blocker_by_id.get(flow_id)
@@ -379,6 +382,44 @@ def _public_demo_blocker_from_flow(flow: Mapping[str, Any]) -> dict[str, Any]:
         "evidence_summary": evidence_summary,
         "command": " ".join(str(part) for part in flow.get("command") or []),
     }
+
+
+def _more_informative_blocker(
+    existing: Mapping[str, Any] | None,
+    candidate: Mapping[str, Any],
+) -> dict[str, Any]:
+    if existing is None:
+        return dict(candidate)
+    if _blocker_detail_score(candidate) > _blocker_detail_score(existing):
+        return dict(candidate)
+    return dict(existing)
+
+
+def _blocker_detail_score(blocker: Mapping[str, Any]) -> int:
+    score = 0
+    reason = str(blocker.get("reason") or "").strip()
+    if reason and reason not in {
+        "required public demo flow has not passed",
+        "not collected",
+    }:
+        score += 2
+    evidence_summary = _dict(blocker.get("evidence_summary"))
+    for key in (
+        "blocking_condition",
+        "blocking_conditions",
+        "missing_env",
+        "recovery_hints",
+        "recommended_tools",
+        "checks",
+        "error",
+    ):
+        if evidence_summary.get(key) not in (None, "", [], {}):
+            score += 3
+    if blocker.get("command"):
+        score += 1
+    if blocker.get("status") == "failed":
+        score += 1
+    return score
 
 
 def _diagnostics_bundle_check(

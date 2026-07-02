@@ -593,6 +593,44 @@ def _public_demo_command_for_missing_flows(
     )
 
 
+def _more_informative_blocker(
+    existing: Mapping[str, Any] | None,
+    candidate: Mapping[str, Any],
+) -> dict[str, Any]:
+    if existing is None:
+        return dict(candidate)
+    if _blocker_detail_score(candidate) > _blocker_detail_score(existing):
+        return dict(candidate)
+    return dict(existing)
+
+
+def _blocker_detail_score(blocker: Mapping[str, Any]) -> int:
+    score = 0
+    reason = str(blocker.get("reason") or "").strip()
+    if reason and reason not in {
+        "required public demo flow has not passed",
+        "not collected",
+    }:
+        score += 2
+    evidence_summary = _dict(blocker.get("evidence_summary"))
+    for key in (
+        "blocking_condition",
+        "blocking_conditions",
+        "missing_env",
+        "recovery_hints",
+        "recommended_tools",
+        "checks",
+        "error",
+    ):
+        if evidence_summary.get(key) not in (None, "", [], {}):
+            score += 3
+    if blocker.get("command"):
+        score += 1
+    if blocker.get("status") == "failed":
+        score += 1
+    return score
+
+
 def _collect_aggregate_public_demo_evidence(
     evidence: dict[str, list[dict[str, Any]]],
 ) -> None:
@@ -619,8 +657,11 @@ def _collect_aggregate_public_demo_evidence(
                 passed_flow_ids.append(flow_id)
         for blocker in _dict_list(assessment.get("release_blockers")):
             blocker_id = str(blocker.get("id") or "").strip()
-            if blocker_id and blocker_id not in blocker_by_id:
-                blocker_by_id[blocker_id] = blocker
+            if blocker_id:
+                blocker_by_id[blocker_id] = _more_informative_blocker(
+                    blocker_by_id.get(blocker_id),
+                    blocker,
+                )
     if not required_flow_ids:
         return
     missing_flow_ids = [
@@ -922,6 +963,10 @@ def _dict_list(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [dict(item) for item in value if isinstance(item, dict)]
+
+
+def _dict(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, dict) else {}
 
 
 def _string_list(value: Any) -> list[str]:

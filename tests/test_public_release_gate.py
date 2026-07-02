@@ -454,6 +454,96 @@ def test_public_release_gate_accepts_existing_public_demo_reports(
     assert "--include-real-desktop-interaction" in desktop_action["command"]
 
 
+def test_public_release_gate_keeps_more_informative_public_demo_blocker(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    required_flow_ids = gate._public_demo_required_flow_ids([])
+    passed_flow_ids = [
+        flow_id for flow_id in required_flow_ids if flow_id != "workflow_provider"
+    ]
+    generic_path = tmp_path / "tmp" / "public-demo-generic.json"
+    detailed_path = tmp_path / "tmp" / "public-demo-detailed.json"
+    base_report = {
+        "ok": True,
+        "status": "partial",
+        "release_level": "partial_demo_ready",
+        "complete": False,
+        "selected_count": len(passed_flow_ids),
+        "passed_count": len(passed_flow_ids),
+        "required_flow_count": len(required_flow_ids),
+        "passed_required_flow_count": len(passed_flow_ids),
+        "missing_required_flow_ids": ["workflow_provider"],
+        "flows": [
+            {
+                "id": flow_id,
+                "status": "passed" if flow_id in passed_flow_ids else "skipped",
+            }
+            for flow_id in required_flow_ids
+        ],
+    }
+    generic_path.parent.mkdir(parents=True, exist_ok=True)
+    generic_path.write_text(
+        json.dumps(
+            {
+                **base_report,
+                "release_blockers": [
+                    {
+                        "id": "workflow_provider",
+                        "status": "skipped",
+                        "reason": "requires live provider smoke credentials",
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    detailed_path.write_text(
+        json.dumps(
+            {
+                **base_report,
+                "release_blockers": [
+                    {
+                        "id": "workflow_provider",
+                        "status": "skipped",
+                        "reason": "provider_smoke_credentials_missing",
+                        "evidence_summary": {
+                            "blocking_condition": "provider_smoke_credentials_missing",
+                            "missing_env": [
+                                "OHA_YACHIYO_SMOKE_BASE_URL",
+                                "OHA_YACHIYO_SMOKE_MODEL",
+                            ],
+                        },
+                    }
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = gate.run_public_release_gate(
+        tmp_dir="tmp/gate",
+        include_public_demo=False,
+        include_release_smoke=False,
+        include_diagnostics_bundle=False,
+        public_demo_reports=[
+            "tmp/public-demo-generic.json",
+            "tmp/public-demo-detailed.json",
+        ],
+    )
+
+    public_demo = next(item for item in summary["checks"] if item["id"] == "public_demo")
+    blocker = next(
+        item for item in public_demo["release_blockers"] if item["id"] == "workflow_provider"
+    )
+    assert blocker["reason"] == "provider_smoke_credentials_missing"
+    assert blocker["evidence_summary"]["missing_env"] == [
+        "OHA_YACHIYO_SMOKE_BASE_URL",
+        "OHA_YACHIYO_SMOKE_MODEL",
+    ]
+
+
 def test_public_release_gate_passes_granular_real_desktop_demo_flags(
     tmp_path,
     monkeypatch,
