@@ -1,4 +1,10 @@
-import type { AgentTaskSnapshot, ApprovalCardSnapshot, ArtifactSnapshot, TaskStatus } from './types';
+import type {
+  AgentTaskSnapshot,
+  ApprovalCardSnapshot,
+  ArtifactSnapshot,
+  PlannerTraceSummarySnapshot,
+  TaskStatus,
+} from './types';
 import {
   groupRunIdFromStudioUrl,
   runIdFromStudioUrl,
@@ -53,6 +59,7 @@ type YachiyoTaskChatMetadata = {
     input_preview?: unknown;
     requested_at?: string;
   };
+  planner_summary?: PlannerTraceSummarySnapshot | null;
 };
 
 export type YachiyoTaskChatMessage = {
@@ -102,6 +109,7 @@ export function agentTaskSnapshotFromMessage(
     recent_events: messageTaskEvents(message, runId),
     artifacts: messageTaskArtifacts(message, runId),
     metadata: { ...metadata },
+    planner_summary: messagePlannerSummary(message),
     open_in_studio_url: studioRunUrl(runId, { groupRunId }),
     created_at: message.created_at || '',
     updated_at: message.created_at || '',
@@ -357,6 +365,12 @@ function messageGroupRunId(message?: YachiyoTaskChatMessage | null) {
 
 function activityRunId(event?: YachiyoTaskChatActivityEvent | null) {
   return String(event?.metadata?.run_id || event?.metadata?.workflow_run_id || '').trim();
+}
+
+function messagePlannerSummary(message?: YachiyoTaskChatMessage | null): PlannerTraceSummarySnapshot | null {
+  const value = message?.metadata?.planner_summary;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value;
 }
 
 function participantDisplayName(participant?: YachiyoTaskChatParticipant | null) {

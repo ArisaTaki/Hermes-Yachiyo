@@ -1,4 +1,4 @@
-import type { ReadinessSnapshot } from '../runtime-shared/types';
+import type { PlannerTraceSummarySnapshot, ReadinessSnapshot } from '../runtime-shared/types';
 
 export type {
   AgentDefinitionSnapshot,
@@ -114,6 +114,7 @@ export type ChatMessageMetadata = {
     input_preview?: unknown;
     requested_at?: string;
   };
+  planner_summary?: PlannerTraceSummarySnapshot | null;
   group_dispatch_count?: number;
   group_dispatch_run_group_id?: string;
   group_dispatch_skipped?: string[];
