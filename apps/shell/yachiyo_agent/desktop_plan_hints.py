@@ -3552,6 +3552,37 @@ def contains_any(text: str, needles: list[str] | tuple[str, ...]) -> bool:
     return any(str(needle).lower() in lowered for needle in needles)
 
 
+_TARGET_PATH_PATTERN = (
+    r"(?:~|/|\./|\../)?[^\s\"'“”‘’，,。；;]+"
+    r"\.(?:pdf|md|markdown|txt|csv|tsv|xlsx|xls|json|jsonl|doc|docx|rtf|"
+    r"pages|numbers|py|js|jsx|ts|tsx|java|go|rs|swift|kt|kts|c|cc|cpp|h|hpp|"
+    r"png|jpg|jpeg|heic|gif|webp|ppt|pptx|key)"
+)
+
+_TARGET_PATH_PENDING_ACTION_PATTERN = (
+    r"(?:裁剪|剪裁|压缩|打包|解压|筛选|过滤|排序|编辑|处理|转换|调整|标注|"
+    r"保存|导出|另存为|重命名|合并|拆分|"
+    r"crop|compress|zip|archive|unzip|filter|sort|edit|process|convert|"
+    r"resize|annotate|save|export|rename|merge|split)"
+)
+
+
+def _target_path_pending_user_action(text: str) -> str:
+    value = clean(text)
+    if not value:
+        return ""
+    match = re.search(
+        rf"{_TARGET_PATH_PATTERN}\s*"
+        r"(?:(?:，|,|并且|并|然后|再|接着|之后|后|\band\b|\bthen\b)\s*)*"
+        rf"(?P<action>{_TARGET_PATH_PENDING_ACTION_PATTERN}.*)$",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    return str(match.group("action") or "").strip(" .，,。")
+
+
 def discovered_app_open_needs_model_followup(
     inputs: Mapping[str, Any],
     user_goal: str,
@@ -3567,11 +3598,11 @@ def discovered_app_open_needs_model_followup(
         return False
     if str(inputs.get("foreground_compose_text_hint") or "").strip():
         return False
-    if str(inputs.get("selected_app_target_path_hint") or "").strip():
-        return False
     text = clean(user_goal)
     if not text:
         return False
+    if str(inputs.get("selected_app_target_path_hint") or "").strip():
+        return bool(_target_path_pending_user_action(text))
     return bool(
         re.search(
             r"(?:应用(?:程序)?|app|软件|工具|程序|编辑器|阅读器|查看器|浏览器|客户端)"
@@ -3617,6 +3648,9 @@ def discovered_app_pending_user_action(user_goal: str) -> str:
     text = clean(user_goal)
     if not text:
         return ""
+    target_path_action = _target_path_pending_user_action(text)
+    if target_path_action:
+        return _strip_pending_action_prefix(target_path_action)[:160]
     match = re.search(
         r"(?:应用(?:程序)?|app|软件|工具|程序|编辑器|阅读器|查看器|浏览器|客户端)"
         r"\s*(?P<direct_action>"

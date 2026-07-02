@@ -1488,6 +1488,8 @@ def _keep_post_mutation_verification_request(
     previous_mutation_tool: str,
 ) -> bool:
     tool_name = str(request.get("tool") or "").strip()
+    if request.get("continue_to_model"):
+        return True
     if previous_mutation_tool == "desktop.open_path_with_app":
         return False
     if tool_name in {"desktop.ui_elements", "desktop.read_ui", "desktop.windows", "desktop.list_windows"}:
@@ -1686,6 +1688,8 @@ def _desktop_observation_step_needs_model_followup(
     step_id: str,
     tool_name: str,
 ) -> bool:
+    if _selected_discovered_app_observation_needs_model_followup(decision, step_id):
+        return True
     if step_id not in {
         "capture-screen",
         "read-foreground-ui",
@@ -1721,6 +1725,35 @@ def _desktop_observation_step_needs_model_followup(
     if _desktop_verify_step_is_direct_control(step_id, tool_name, inputs):
         return False
     return False
+
+
+def _selected_discovered_app_observation_needs_model_followup(
+    decision: Any,
+    step_id: str,
+) -> bool:
+    if step_id != "observe-selected-discovered-app":
+        return False
+    steps = list(getattr(getattr(getattr(decision, "plan", None), "tool_plan", None), "steps", []) or [])
+    saw_observation = False
+    for step in steps:
+        current_step_id = str(getattr(step, "step_id", "") or "").strip()
+        if current_step_id == step_id:
+            saw_observation = True
+            continue
+        if not saw_observation or not _step_available(step):
+            continue
+        depends_on = {
+            str(item or "").strip()
+            for item in (getattr(step, "depends_on", None) or [])
+            if str(item or "").strip()
+        }
+        if step_id not in depends_on:
+            continue
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if current_step_id.startswith("verify-") or tool_name in _EXECUTION_VERIFICATION_TOOLS:
+            continue
+        return False
+    return saw_observation
 
 
 def _control_presence_prompt_needs_model_followup(prompt: str) -> bool:

@@ -10482,6 +10482,80 @@ def test_runtime_planner_carries_target_file_when_discovering_app_capabilities()
     ).selected_intent.kind == "report_generation"
 
 
+def test_runtime_planner_observes_discovered_file_app_for_pending_followup_action() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "desktop.open_path_with_app",
+        "desktop.ui_elements",
+    ]
+
+    cases = (
+        (
+            "找一个图片编辑器打开 Desktop/photo.png 并裁剪成正方形",
+            "image",
+            "Desktop/photo.png",
+        ),
+        (
+            "打开一个压缩工具把 Downloads/report.pdf 压缩成 zip",
+            "archive",
+            "Downloads/report.pdf",
+        ),
+        (
+            "用一个表格软件打开 Downloads/sales.xlsx，然后筛选 revenue 大于 1000 的行",
+            "spreadsheet",
+            "Downloads/sales.xlsx",
+        ),
+    )
+
+    for prompt, query, target_path in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover_apps-desktop-state",
+            "open-selected-discovered-app",
+            "observe-selected-discovered-app",
+        ]
+        assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": query,
+            "target_path": target_path,
+            "action": "open_path_with_selected_app",
+        }
+        assert _step_by_id(
+            decision,
+            "observe-selected-discovered-app",
+        ).depends_on == ["open-selected-discovered-app"]
+
+        selection = planner_first_direct_tool_selection(prompt, allowed_tools)
+
+        assert selection.selected_source == "runtime_planner"
+        assert selection.requests == [
+            _app_discovery_request(query),
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.open_path_with_app",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": query,
+                    "target_path": target_path,
+                    "action": "open_path_with_selected_app",
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {"limit": 80},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
+            },
+        ]
+
+
 def test_runtime_planner_opens_file_with_discovered_app_before_in_app_search() -> None:
     allowed_tools = [
         "browser.open_url",
