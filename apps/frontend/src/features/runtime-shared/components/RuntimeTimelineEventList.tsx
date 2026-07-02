@@ -68,6 +68,7 @@ export function RuntimeTimelineEventList({
           const plannerContext = runtimeEventPlannerContext(event, payloadRecord);
           const runtimeContext = runtimeEventRuntimeContext(event, payloadRecord);
           const recoveryTarget = runtimeEventRecoveryTarget(event, payloadRecord);
+          const observedContext = runtimeEventObservedContext(event, payloadRecord);
           const contentSnapshots = eventIsSecret ? [] : runtimeEventContentSnapshots(payloadRecord);
           const capabilityRecovery = eventIsSecret ? [] : runtimeEventCapabilityRecovery(payloadRecord);
           const eventMetadata = runtimeEventMetadata(
@@ -77,6 +78,7 @@ export function RuntimeTimelineEventList({
             plannerContext,
             runtimeContext,
             recoveryTarget,
+            observedContext,
             eventSequence,
             eventRunId,
           );
@@ -106,6 +108,9 @@ export function RuntimeTimelineEventList({
               data-run-event-replan-request-id={runtimeContext.replanRequestId}
               data-run-event-replan-signal-ids={runtimeContext.replanSignalIds.join(',')}
               data-run-event-replan-trigger={runtimeContext.replanTrigger || runtimeContext.replanTriggers[0] || ''}
+              data-run-event-observed-action-evidence={observedContext.observationEvidence}
+              data-run-event-observed-action-target={observedContext.actionTarget}
+              data-run-event-observed-center={observedContext.observedCenter}
               data-run-event-recovery-target-app={recoveryTarget.targetAppName}
               data-run-event-recovery-target-query={recoveryTarget.targetAppQuery}
               data-run-event-recovery-target-text={recoveryTarget.targetSearchText}
@@ -411,6 +416,7 @@ function runtimeEventMetadata(
   plannerContext: RuntimeTimelinePlannerContext,
   runtimeContext: RuntimeTimelineRuntimeContext,
   recoveryTarget: RuntimeTimelineRecoveryTarget,
+  observedContext: RuntimeTimelineObservedContext,
   eventSequence: string,
   eventRunId: string,
 ): Array<{ label: string; value: string }> {
@@ -435,6 +441,9 @@ function runtimeEventMetadata(
     { label: 'replan', value: runtimeContext.replanTrigger || runtimeContext.replanTriggers.join(', ') },
     { label: 'replan id', value: runtimeContext.replanRequestId },
     { label: 'signals', value: runtimeContext.replanSignalIds.join(', ') },
+    { label: 'action', value: observedContext.actionTarget },
+    { label: 'observed', value: observedContext.observationEvidence },
+    { label: 'center', value: observedContext.observedCenter },
     { label: 'target app', value: recoveryTarget.targetAppName },
     { label: 'target query', value: recoveryTarget.targetAppQuery },
     { label: 'target text', value: recoveryTarget.targetSearchText },
@@ -511,6 +520,12 @@ type RuntimeTimelineRecoveryTarget = {
   targetAppName: string;
   targetAppQuery: string;
   targetSearchText: string;
+};
+
+type RuntimeTimelineObservedContext = {
+  actionTarget: string;
+  observationEvidence: string;
+  observedCenter: string;
 };
 
 function runtimeEventTraceContext(
@@ -631,6 +646,55 @@ function runtimeEventRecoveryTarget(
       'value',
     ),
   };
+}
+
+function runtimeEventObservedContext(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+): RuntimeTimelineObservedContext {
+  const actionTarget = runtimeEventContextNestedRecord(event, payload, 'action_target');
+  const observationEvidence = runtimeEventContextNestedRecord(event, payload, 'observation_evidence');
+  const observedCenter = runtimeEventObservedCenterSummary(observationEvidence);
+  return {
+    actionTarget: runtimeEventObservedActionTargetSummary(actionTarget),
+    observationEvidence: runtimeEventObservedEvidenceSummary(observationEvidence),
+    observedCenter,
+  };
+}
+
+function runtimeEventObservedActionTargetSummary(value: RuntimeTimelineEventRecord): string {
+  if (!Object.keys(value).length) return '';
+  const action = defaultString(value.action);
+  const target = (
+    defaultString(value.target)
+    || defaultString(value.label)
+    || defaultString(value.name)
+    || defaultString(value.title)
+    || defaultString(value.text)
+    || defaultString(value.role)
+  );
+  const roleFilter = defaultString(value.role_filter);
+  const app = defaultString(value.app_name) || defaultString(value.app) || defaultString(value.bundle_id);
+  return [action, target, roleFilter ? `role ${roleFilter}` : '', app].filter(Boolean).join(' · ');
+}
+
+function runtimeEventObservedEvidenceSummary(value: RuntimeTimelineEventRecord): string {
+  if (!Object.keys(value).length) return '';
+  const sourceTool = defaultString(value.source_tool);
+  const source = defaultString(value.source);
+  const strategy = defaultString(value.strategy);
+  const reason = defaultString(value.reason);
+  const center = runtimeEventObservedCenterSummary(value);
+  return [sourceTool || source, strategy, reason, center ? `center ${center}` : ''].filter(Boolean).join(' · ');
+}
+
+function runtimeEventObservedCenterSummary(value: RuntimeTimelineEventRecord): string {
+  const center = runtimeEventNestedRecord(value, 'observed_center') || {};
+  const legacyCenter = runtimeEventNestedRecord(value, 'center') || {};
+  const point = runtimeEventNestedRecord(value, 'point') || {};
+  const x = runtimeEventCoordinateValue(center.x ?? legacyCenter.x ?? point.x);
+  const y = runtimeEventCoordinateValue(center.y ?? legacyCenter.y ?? point.y);
+  return x && y ? `${x},${y}` : '';
 }
 
 function runtimeEventPlannerContext(
@@ -808,6 +872,23 @@ function runtimeEventContextRecords(
     }
   }
   return records;
+}
+
+function runtimeEventContextNestedRecord(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+  key: string,
+): RuntimeTimelineEventRecord {
+  for (const record of runtimeEventContextRecords(event, payload)) {
+    const nested = runtimeEventNestedRecord(record, key);
+    if (nested && Object.keys(nested).length) return nested;
+  }
+  return {};
+}
+
+function runtimeEventCoordinateValue(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(Math.round(value));
+  return defaultString(value);
 }
 
 function runtimeEventTraceString(

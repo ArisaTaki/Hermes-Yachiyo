@@ -345,23 +345,131 @@ export function timelineEventIsSecret(event: Record<string, unknown>): boolean {
 
 export function timelineEventPayload(event: Record<string, unknown>): string {
   if (timelineEventIsSecret(event)) return '';
+  const observedEvidence = timelineObservedEvidencePayload(event);
   const inputPreview = event.input_preview;
   const result = event.result;
+  const sections: string[] = [];
+  if (observedEvidence) sections.push(observedEvidence);
   if (inputPreview && result) {
-    return [
+    sections.push(
       `请求内容：\n${formatTimelinePayload(inputPreview)}`,
       `执行结果：\n${formatTimelinePayload(result)}`,
-    ].join('\n\n');
+    );
+    return sections.join('\n\n');
   }
-  if (inputPreview) return `请求内容：\n${formatTimelinePayload(inputPreview)}`;
-  if (result) return formatTimelinePayload(result);
+  if (inputPreview) {
+    sections.push(`请求内容：\n${formatTimelinePayload(inputPreview)}`);
+    return sections.join('\n\n');
+  }
+  if (result) {
+    sections.push(formatTimelinePayload(result));
+    return sections.join('\n\n');
+  }
   const pendingApproval = event.pending_approval;
-  if (pendingApproval) return formatTimelinePayload(pendingApproval);
+  if (pendingApproval) {
+    sections.push(formatTimelinePayload(pendingApproval));
+    return sections.join('\n\n');
+  }
   const payload = event.payload;
   if (payload && typeof payload === 'object') {
-    return `事件内容：\n${formatTimelinePayload(payload)}`;
+    sections.push(`事件内容：\n${formatTimelinePayload(payload)}`);
+    return sections.join('\n\n');
   }
-  return '';
+  return sections.join('\n\n');
+}
+
+function timelineObservedEvidencePayload(event: Record<string, unknown>): string {
+  const actionTarget = timelineContextNestedRecord(event, 'action_target');
+  const observationEvidence = timelineContextNestedRecord(event, 'observation_evidence');
+  const targetSummary = timelineObservedActionTargetSummary(actionTarget);
+  const evidenceSummary = timelineObservedEvidenceSummary(observationEvidence);
+  const centerSummary = timelineObservedCenterSummary(observationEvidence);
+  const lines = [
+    targetSummary ? `目标：${targetSummary}` : '',
+    evidenceSummary ? `观测：${evidenceSummary}` : '',
+    centerSummary ? `坐标：${centerSummary}` : '',
+  ].filter(Boolean);
+  return lines.length ? `执行证据：\n${lines.join('\n')}` : '';
+}
+
+function timelineContextNestedRecord(event: Record<string, unknown>, key: string): Record<string, unknown> {
+  for (const record of timelineContextRecords(event)) {
+    const value = record[key];
+    if (value && typeof value === 'object' && !Array.isArray(value)) return value as Record<string, unknown>;
+  }
+  return {};
+}
+
+function timelineContextRecords(event: Record<string, unknown>): Record<string, unknown>[] {
+  const records: Record<string, unknown>[] = [event];
+  const seen = new Set<Record<string, unknown>>(records);
+  const payload = event.payload;
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    const payloadRecord = payload as Record<string, unknown>;
+    records.push(payloadRecord);
+    seen.add(payloadRecord);
+  }
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index];
+    for (const key of ['pending_approval', 'approval', 'tool_request', 'planned_request', 'request', 'result', 'metadata']) {
+      const value = record[key];
+      if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+      const nested = value as Record<string, unknown>;
+      if (seen.has(nested)) continue;
+      records.push(nested);
+      seen.add(nested);
+    }
+  }
+  return records;
+}
+
+function timelineObservedActionTargetSummary(value: Record<string, unknown>): string {
+  if (!Object.keys(value).length) return '';
+  const action = timelineString(value.action);
+  const target = (
+    timelineString(value.target)
+    || timelineString(value.label)
+    || timelineString(value.name)
+    || timelineString(value.title)
+    || timelineString(value.text)
+    || timelineString(value.role)
+  );
+  const roleFilter = timelineString(value.role_filter);
+  const app = timelineString(value.app_name) || timelineString(value.app) || timelineString(value.bundle_id);
+  return [action, target, roleFilter ? `role ${roleFilter}` : '', app].filter(Boolean).join(' · ');
+}
+
+function timelineObservedEvidenceSummary(value: Record<string, unknown>): string {
+  if (!Object.keys(value).length) return '';
+  const source = timelineString(value.source_tool) || timelineString(value.source);
+  const strategy = timelineString(value.strategy);
+  const reason = timelineString(value.reason);
+  const center = timelineObservedCenterSummary(value);
+  return [source, strategy, reason, center ? `center ${center}` : ''].filter(Boolean).join(' · ');
+}
+
+function timelineObservedCenterSummary(value: Record<string, unknown>): string {
+  const center = timelineRecord(value.observed_center);
+  const legacyCenter = timelineRecord(value.center);
+  const point = timelineRecord(value.point);
+  const x = timelineCoordinate(center.x ?? legacyCenter.x ?? point.x);
+  const y = timelineCoordinate(center.y ?? legacyCenter.y ?? point.y);
+  return x && y ? `${x},${y}` : '';
+}
+
+function timelineRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function timelineString(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function timelineCoordinate(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(Math.round(value));
+  return timelineString(value);
 }
 
 export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
