@@ -3050,6 +3050,135 @@ def test_auto_replan_verification_recovery_inspects_target_app_when_available() 
     assert {request["plan_id"] for request in recovery_requests} == {"plan-inspect"}
 
 
+def test_auto_replan_ui_observation_recovery_inspects_failed_semantic_type_target() -> None:
+    recovery_requests = custom_api_agent_module._auto_replan_ui_observation_recovery_requests(
+        [
+            {
+                "request_id": "replan-ui-type",
+                "trigger": "tool_failure",
+                "decision_id": "decision-ui-type",
+                "plan_id": "plan-ui-type",
+                "source_step_id": "type-media-search-query",
+                "source_tool_name": "app.focus_and_type_into_ui_element",
+                "target_capability_id": "desktop.ui_operation",
+                "input_preview": {
+                    "app_name": "Music",
+                    "target": "search 搜索",
+                    "text": "超时空辉夜姬",
+                    "role_filter": "text",
+                    "limit": 80,
+                },
+                "metadata": {
+                    "runtime_doctrine": "discover_operate_verify",
+                    "runtime_stage": "operate",
+                    "runtime_role": "type_ui",
+                    "requires_post_action_verification": True,
+                },
+            }
+        ],
+        ["desktop.ui_elements", "desktop.inspect_app"],
+    )
+
+    assert [request["tool"] for request in recovery_requests] == ["desktop.inspect_app"]
+    request = recovery_requests[0]
+    assert request["input"] == {
+        "app_name": "Music",
+        "open_if_needed": True,
+        "focus": True,
+        "limit": 80,
+        "role_filter": "text",
+    }
+    assert request["planning_reason"] == "planner_replan_ui_observation_recovery"
+    assert request["continue_to_model"] is True
+    assert request["replan_request_id"] == "replan-ui-type"
+    assert request["replan_trigger"] == "tool_failure"
+    assert request["target_app_name"] == "Music"
+    assert request["target_search_text"] == "超时空辉夜姬"
+    assert request["step_id"] == "type-media-search-query"
+    assert request["capability_id"] == "desktop.ui_operation"
+    assert request["runtime_doctrine"] == "discover_operate_verify"
+    assert request["runtime_stage"] == "operate"
+    assert request["runtime_role"] == "type_ui"
+    assert request["requires_post_action_verification"] is True
+
+
+def test_auto_replan_ui_observed_action_retries_after_matching_observation() -> None:
+    requests = custom_api_agent_module._auto_replan_ui_observed_action_requests(
+        [
+            {
+                "request_id": "replan-ui-observed",
+                "trigger": "tool_failure",
+                "decision_id": "decision-ui-observed",
+                "plan_id": "plan-ui-observed",
+                "source_step_id": "type-media-search-query",
+                "source_tool_name": "app.focus_and_type_into_ui_element",
+                "target_capability_id": "desktop.ui_operation",
+                "input_preview": {
+                    "app_name": "Music",
+                    "target": "search 搜索",
+                    "text": "超时空辉夜姬",
+                    "role_filter": "text",
+                    "limit": 80,
+                },
+                "metadata": {
+                    "runtime_stage": "operate",
+                    "runtime_role": "type_ui",
+                },
+            }
+        ],
+        ["app.focus_and_type_into_ui_element", "desktop.ui_elements"],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.ui_elements",
+                input_preview={"app_name": "Music", "role_filter": "text", "limit": 80},
+                result={
+                    "ok": True,
+                    "data": {
+                        "elements": [
+                            {
+                                "role": "AXTextField",
+                                "label": "search 搜索",
+                                "center": {"x": 120, "y": 220},
+                            }
+                        ],
+                        "count": 1,
+                    },
+                },
+            )
+        ],
+        planning_reason="planner_replan_ui_observed_action",
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "app.focus_and_type_into_ui_element",
+        "desktop.ui_elements",
+    ]
+    type_request = requests[0]
+    assert type_request["input"] == {
+        "app_name": "Music",
+        "target": "search 搜索",
+        "text": "超时空辉夜姬",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert type_request["planning_reason"] == "planner_replan_ui_observed_action"
+    assert type_request["replan_request_id"] == "replan-ui-observed"
+    assert type_request["replan_trigger"] == "tool_failure"
+    assert type_request["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "type_text",
+        "target": "search 搜索",
+        "role_filter": "text",
+        "app_name": "Music",
+    }
+    assert type_request["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "app_scoped_semantic_ui_tool",
+    }
+    assert all("continue_to_model" not in request for request in requests)
+
+
 def test_custom_api_agent_loop_refocuses_after_active_window_mismatch_without_model() -> None:
     allowed_tools = [
         "desktop.list_apps",
@@ -21615,6 +21744,231 @@ def test_runtime_planner_media_query_uses_type_into_ui_fallback() -> None:
     assert {request["planning_reason"] for request in requests} == {
         "planner_fallback_media_playback"
     }
+
+
+def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observation_without_model(
+    monkeypatch,
+) -> None:
+    def fail_legacy_daily_planner(*_args, **_kwargs):
+        raise AssertionError("legacy desktop planner should not run for planner media search recovery")
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
+        fail_legacy_daily_planner,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
+        fail_legacy_daily_planner,
+    )
+
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    budget = FakeBudget()
+    tool_batches: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def append_tool_event(
+        request: dict[str, Any],
+        payload: dict[str, Any],
+        result: dict[str, Any],
+        messages_arg: list[dict[str, Any]],
+        timeline_arg: list[dict[str, Any]],
+    ) -> None:
+        timeline_arg.append(
+            _timeline(
+                "agent.tool.call",
+                request["tool"],
+                input_preview=payload,
+                result=result,
+                **{
+                    key: request[key]
+                    for key in (
+                        "planning_reason",
+                        "decision_id",
+                        "plan_id",
+                        "core_id",
+                        "task_id",
+                        "step_id",
+                        "planner_step_id",
+                        "capability_id",
+                        "replan_request_id",
+                        "replan_trigger",
+                        "target_app_name",
+                        "target_app_query",
+                        "target_search_text",
+                        "replan_triggers",
+                        "replan_signal_ids",
+                        "followup_target",
+                        "action_target",
+                        "observation_evidence",
+                    )
+                    if key in request
+                },
+            )
+        )
+        messages_arg.append(
+            {"role": "user", "content": f"Tool result for {request['tool']}: {result}"}
+        )
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_batches.append([dict(request) for request in tool_requests])
+        batch_index = len(tool_batches)
+        for request in tool_requests:
+            tool = str(request.get("tool") or "")
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if batch_index == 1:
+                if tool == "desktop.list_apps":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.list_apps",
+                        "data": {"best_match": {"name": "Music"}},
+                    }
+                elif tool == "app.open":
+                    result = {
+                        "ok": True,
+                        "action": "app.open",
+                        "data": {"app_name": "Music"},
+                    }
+                elif tool == "app.focus_and_type_into_ui_element":
+                    result = {
+                        "ok": False,
+                        "error": "target not found",
+                        "data": {"app_name": "Music", "target": payload.get("target")},
+                    }
+                    append_tool_event(request, payload, result, messages_arg, timeline_arg)
+                    return
+                else:
+                    raise AssertionError(f"unexpected first batch tool after failed type: {tool}")
+            elif batch_index == 2:
+                assert tool == "desktop.ui_elements"
+                result = {
+                    "ok": True,
+                    "action": "desktop.ui_elements",
+                    "data": {
+                        "elements": [
+                            {
+                                "role": "AXTextField",
+                                "label": "search 搜索",
+                                "center": {"x": 180, "y": 90},
+                            }
+                        ],
+                        "count": 1,
+                    },
+                }
+            elif batch_index == 3:
+                if tool == "app.focus_and_type_into_ui_element":
+                    result = {
+                        "ok": True,
+                        "action": "app.focus_and_type_into_ui_element",
+                        "data": {
+                            "app_name": payload.get("app_name"),
+                            "target": payload.get("target"),
+                            "text": payload.get("text"),
+                        },
+                    }
+                elif tool == "desktop.ui_elements":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {
+                            "elements": [
+                                {
+                                    "role": "AXTextField",
+                                    "label": "search 搜索",
+                                    "value": "超时空辉夜姬",
+                                    "center": {"x": 180, "y": 90},
+                                }
+                            ],
+                            "count": 1,
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected observed action tool: {tool}")
+            else:
+                raise AssertionError(f"unexpected tool batch {batch_index}: {tool}")
+            append_tool_event(request, payload, result, messages_arg, timeline_arg)
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": allowed_tools}},
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda tools: [{"name": tool} for tool in tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use planner media app search with UI recovery.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("failed semantic media search type should recover without model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "帮我用 Apple Music 播放超时空辉夜姬",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-planner-media-type-recovery",
+    )
+
+    assert "Music" in str(result)
+    assert [[request["tool"] for request in batch] for batch in tool_batches] == [
+        [
+            "app.open",
+            "app.focus_and_type_into_ui_element",
+            "desktop.search_submit",
+            "app.focus_and_click_ui_element",
+        ],
+        ["desktop.ui_elements"],
+        ["app.focus_and_type_into_ui_element", "desktop.ui_elements"],
+    ]
+    observation_request = tool_batches[1][0]
+    assert observation_request["planning_reason"] == "planner_replan_ui_observation_recovery"
+    assert observation_request["continue_to_model"] is True
+    retry_request = tool_batches[2][0]
+    assert retry_request["planning_reason"] == "planner_replan_ui_observed_action"
+    assert retry_request["input"] == {
+        "app_name": "Music",
+        "target": "search 搜索",
+        "text": "超时空辉夜姬",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert retry_request["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "app_scoped_semantic_ui_tool",
+    }
+    assert not any(event["event"] == "agent.model.response" for event in timeline)
 
 
 def test_auto_discovered_media_playback_followup_searches_clicks_and_verifies() -> None:
