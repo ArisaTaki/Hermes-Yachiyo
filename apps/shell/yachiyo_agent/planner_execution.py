@@ -689,6 +689,16 @@ def _annotate_request_trace(
     request.update(_task_execution_context_for_step(decision, step_id))
 
 
+def _attach_basic_step_metadata(request: dict[str, Any], step: Any | None) -> dict[str, Any]:
+    step_id = str(getattr(step, "step_id", "") or "").strip()
+    capability_id = str(getattr(step, "capability_id", "") or "").strip()
+    if step_id:
+        request["step_id"] = step_id
+    if capability_id:
+        request["capability_id"] = capability_id
+    return request
+
+
 _RUNTIME_TRACE_TEXT_KEYS = (
     "runtime_doctrine",
     "runtime_stage",
@@ -1008,6 +1018,8 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
             _desktop_request_payload(tool_name, payload),
             planning_reason=_desktop_step_planning_reason(step, tool_name),
         )
+        if _desktop_request_needs_basic_step_metadata(decision, step_id):
+            _attach_basic_step_metadata(request, step)
         if step_id == "read-desktop-content" or _desktop_observation_step_needs_model_followup(
             decision,
             step_id,
@@ -1022,6 +1034,15 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
     if _weak_desktop_discovery_plan(decision, requests):
         return []
     return requests
+
+
+def _desktop_request_needs_basic_step_metadata(decision: Any, step_id: str) -> bool:
+    if step_id not in {"discover-file-open-target", "discover_apps-desktop-state"}:
+        return False
+    return any(
+        str(getattr(step, "step_id", "") or "").strip() == "verify-opened-file"
+        for step in getattr(getattr(getattr(decision, "plan", None), "tool_plan", None), "steps", [])
+    )
 
 
 def _model_selected_desktop_step_ids(steps: list[Any]) -> set[str]:
@@ -2140,15 +2161,18 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
                     *file_open_requests,
                     analyze_request,
                 ]
+            artifact_reveal_requests = _artifact_reveal_tool_requests(
+                decision,
+                allowed,
+                planning_reason="planner_builtin_data_analysis",
+            )
+            if artifact_reveal_requests:
+                _attach_basic_step_metadata(analyze_request, data_analyze_step)
             return [
                 *app_requests,
                 *file_open_requests,
                 analyze_request,
-                *_artifact_reveal_tool_requests(
-                    decision,
-                    allowed,
-                    planning_reason="planner_builtin_data_analysis",
-                ),
+                *artifact_reveal_requests,
             ]
 
     inputs = decision.selected_intent.inputs
@@ -2333,20 +2357,18 @@ def _artifact_reveal_tool_requests(
             tool_name,
             {"path": path, "app_name": app_name},
         )
-        return [
-            _request(
-                tool_name,
-                request_input,
-                planning_reason=planning_reason,
-            )
-        ]
-    return [
-        _request(
+        request = _request(
             tool_name,
-            {"path": path},
+            request_input,
             planning_reason=planning_reason,
         )
-    ]
+        return [_attach_basic_step_metadata(request, step)]
+    request = _request(
+        tool_name,
+        {"path": path},
+        planning_reason=planning_reason,
+    )
+    return [_attach_basic_step_metadata(request, step)]
 
 
 def _append_model_followup_requests(
@@ -2400,10 +2422,18 @@ def _code_task_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str,
                 )
                 for prefetch_request in prefetch_requests:
                     prefetch_request.pop("continue_to_model", None)
+                    _attach_basic_step_metadata(
+                        prefetch_request,
+                        _planned_step_by_id(decision, "inspect-workspace"),
+                    )
             request = _request(
                 "terminal.run",
                 {"command": command},
                 planning_reason="planner_fallback_code_diagnostic",
+            )
+            _attach_basic_step_metadata(
+                request,
+                _planned_step_by_id(decision, "run-code-diagnostic"),
             )
             if needs_model_followup:
                 request["continue_to_model"] = True
