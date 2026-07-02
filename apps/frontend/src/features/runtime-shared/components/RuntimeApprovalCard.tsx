@@ -21,12 +21,21 @@ export type RuntimeApprovalCardSnapshot = Pick<
   | 'open_in_studio_url'
   | 'plan_id'
   | 'policy_reason'
+  | 'planning_reason'
+  | 'planner_step_id'
   | 'requested_at'
+  | 'replan_signal_ids'
   | 'resolved_at'
+  | 'replan_triggers'
   | 'replan_request_id'
   | 'replan_trigger'
+  | 'requires_observation'
+  | 'requires_post_action_verification'
   | 'risk_level'
   | 'run_id'
+  | 'runtime_doctrine'
+  | 'runtime_role'
+  | 'runtime_stage'
   | 'source_run_id'
   | 'source_runnable_id'
   | 'source_runnable_name'
@@ -82,10 +91,16 @@ export function RuntimeApprovalCard({
       data-approval-plan-id={approval.plan_id || ''}
       data-approval-risk-level={approval.risk_level || ''}
       data-approval-run-id={approval.run_id || ''}
+      data-approval-runtime-doctrine={approval.runtime_doctrine || ''}
+      data-approval-runtime-role={approval.runtime_role || ''}
+      data-approval-runtime-stage={approval.runtime_stage || ''}
       data-approval-source-runnable-id={approval.source_runnable_id || ''}
       data-approval-source-run-id={approval.source_run_id || ''}
       data-approval-status={status}
-      data-approval-step-id={approval.step_id || ''}
+      data-approval-step-id={approval.step_id || approval.planner_step_id || ''}
+      data-approval-replan-request-id={approval.replan_request_id || ''}
+      data-approval-replan-signal-ids={(approval.replan_signal_ids || []).join(',')}
+      data-approval-replan-trigger={approval.replan_trigger || approval.replan_triggers?.[0] || ''}
       data-approval-tool={toolName}
       data-approval-tool-plan-id={approval.tool_plan_id || ''}
       data-approval-variant={variant}
@@ -137,13 +152,19 @@ function approvalMetadataItems(approval: RuntimeApprovalCardSnapshot, toolName: 
     { label: 'agent', value: approval.source_runnable_name || approval.source_runnable_id || '' },
     { label: 'workflow', value: approval.workflow_node_label || approval.workflow_node_id || approval.workflow_run_id || approval.workflow_id || '' },
     { label: 'group', value: approval.group_run_id || approval.group_id || '' },
-    { label: 'step', value: approval.step_id || '' },
+    { label: 'step', value: approval.step_id || approval.planner_step_id || '' },
     { label: 'capability', value: approval.capability_id || '' },
+    { label: 'stage', value: approval.runtime_stage || '' },
+    { label: 'role', value: approval.runtime_role || '' },
+    { label: 'doctrine', value: approval.runtime_doctrine || '' },
+    { label: 'observe', value: approval.requires_observation ? 'required' : '' },
+    { label: 'verify', value: approval.requires_post_action_verification ? 'required' : '' },
     { label: 'tool', value: toolName },
     { label: 'plan', value: approval.tool_plan_id || approval.plan_id || '' },
     { label: 'decision', value: approval.decision_id || '' },
     { label: 'intent', value: approval.intent_kind || '' },
-    { label: 'replan', value: approval.replan_request_id || approval.replan_trigger || '' },
+    { label: 'replan', value: approval.replan_request_id || approval.replan_trigger || approval.replan_triggers?.join(', ') || '' },
+    { label: 'signals', value: approval.replan_signal_ids?.join(', ') || '' },
     { label: 'risk', value: approval.risk_level || '' },
     { label: 'requested', value: approval.requested_at || '' },
     { label: 'resolved', value: approval.resolved_at || '' },

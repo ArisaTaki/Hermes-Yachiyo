@@ -6,17 +6,35 @@ export type RuntimeArtifactSnapshot = Pick<
   ArtifactSnapshot,
   | 'artifact_id'
   | 'created_at'
+  | 'capability_id'
+  | 'decision_id'
+  | 'intent_kind'
   | 'kind'
   | 'mime_type'
   | 'path'
+  | 'plan_id'
+  | 'planner_step_id'
+  | 'planning_reason'
   | 'preview_text'
+  | 'replan_request_id'
+  | 'replan_signal_ids'
+  | 'replan_trigger'
+  | 'replan_triggers'
+  | 'requires_observation'
+  | 'requires_post_action_verification'
   | 'run_id'
+  | 'runtime_doctrine'
+  | 'runtime_role'
+  | 'runtime_stage'
   | 'size_bytes'
+  | 'source'
   | 'source_runnable_id'
   | 'source_runnable_name'
   | 'source_run_id'
   | 'source_tool'
+  | 'step_id'
   | 'title'
+  | 'tool_plan_id'
   | 'url'
   | 'workflow_id'
   | 'workflow_node_id'
@@ -61,10 +79,18 @@ export function RuntimeArtifactPreview({
       data-artifact-mime-type={artifact.mime_type || ''}
       data-artifact-path={artifact.path || ''}
       data-artifact-run-id={artifact.run_id || ''}
+      data-artifact-runtime-capability-id={artifact.capability_id || ''}
+      data-artifact-runtime-doctrine={artifact.runtime_doctrine || ''}
+      data-artifact-runtime-role={artifact.runtime_role || ''}
+      data-artifact-runtime-stage={artifact.runtime_stage || ''}
+      data-artifact-runtime-step-id={artifact.step_id || artifact.planner_step_id || ''}
       data-artifact-size-bytes={artifact.size_bytes ?? ''}
       data-artifact-source-runnable-id={artifact.source_runnable_id || ''}
       data-artifact-source-tool={artifact.source_tool || ''}
       data-artifact-source-run-id={artifact.source_run_id || ''}
+      data-artifact-replan-request-id={artifact.replan_request_id || ''}
+      data-artifact-replan-signal-ids={(artifact.replan_signal_ids || []).join(',')}
+      data-artifact-replan-trigger={artifact.replan_trigger || artifact.replan_triggers?.[0] || ''}
       data-artifact-variant={variant}
       data-artifact-workflow-id={artifact.workflow_id || ''}
       data-artifact-workflow-node-id={artifact.workflow_node_id || ''}
@@ -102,6 +128,18 @@ function artifactMetadataItems(artifact: RuntimeArtifactSnapshot) {
     { label: 'agent', value: artifact.source_runnable_name || artifact.source_runnable_id || '' },
     { label: 'workflow', value: artifact.workflow_node_label || artifact.workflow_node_id || artifact.workflow_run_id || artifact.workflow_id || '' },
     { label: 'group', value: artifact.group_run_id || artifact.group_id || '' },
+    { label: 'step', value: artifact.step_id || artifact.planner_step_id || '' },
+    { label: 'capability', value: artifact.capability_id || '' },
+    { label: 'stage', value: artifact.runtime_stage || '' },
+    { label: 'role', value: artifact.runtime_role || '' },
+    { label: 'doctrine', value: artifact.runtime_doctrine || '' },
+    { label: 'observe', value: artifact.requires_observation ? 'required' : '' },
+    { label: 'verify', value: artifact.requires_post_action_verification ? 'required' : '' },
+    { label: 'plan', value: artifact.tool_plan_id || artifact.plan_id || '' },
+    { label: 'decision', value: artifact.decision_id || '' },
+    { label: 'intent', value: artifact.intent_kind || '' },
+    { label: 'replan', value: artifact.replan_request_id || artifact.replan_trigger || artifact.replan_triggers?.join(', ') || '' },
+    { label: 'signals', value: artifact.replan_signal_ids?.join(', ') || '' },
     { label: 'mime', value: artifact.mime_type || '' },
     { label: 'size', value: artifactDisplaySize(artifact.size_bytes) },
     { label: 'path', value: artifact.path || '' },

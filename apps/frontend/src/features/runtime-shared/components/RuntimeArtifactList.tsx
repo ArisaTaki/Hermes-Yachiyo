@@ -10,6 +10,8 @@ export type RuntimeArtifactListItem = RuntimeArtifactSnapshot & {
   group_id?: string | null;
   group_run_id?: string | null;
   run_id?: string | null;
+  replan_signal_ids?: string[];
+  replan_triggers?: string[];
   source_label?: string | null;
   source_runnable_id?: string | null;
   source_runnable_name?: string | null;
@@ -108,6 +110,21 @@ export function runtimeArtifactListItem(
   const workflowRunId = artifactStringValue(artifact, 'workflow_run_id');
   const workflowNodeId = artifactStringValue(artifact, 'workflow_node_id');
   const workflowNodeLabel = artifactStringValue(artifact, 'workflow_node_label') || artifactStringValue(artifact, 'workflow_step_label');
+  const planningReason = artifactStringValue(artifact, 'planning_reason');
+  const decisionId = artifactStringValue(artifact, 'decision_id');
+  const planId = artifactStringValue(artifact, 'plan_id');
+  const toolPlanId = artifactStringValue(artifact, 'tool_plan_id');
+  const intentKind = artifactStringValue(artifact, 'intent_kind');
+  const stepId = artifactStringValue(artifact, 'step_id');
+  const plannerStepId = artifactStringValue(artifact, 'planner_step_id');
+  const capabilityId = artifactStringValue(artifact, 'capability_id');
+  const replanRequestId = artifactStringValue(artifact, 'replan_request_id');
+  const replanTrigger = artifactStringValue(artifact, 'replan_trigger');
+  const replanTriggers = artifactStringListValue(artifact, 'replan_triggers');
+  const replanSignalIds = artifactStringListValue(artifact, 'replan_signal_ids');
+  const runtimeDoctrine = artifactStringValue(artifact, 'runtime_doctrine');
+  const runtimeStage = artifactStringValue(artifact, 'runtime_stage');
+  const runtimeRole = artifactStringValue(artifact, 'runtime_role');
   const sourceLabel = sourceRunnableName || workflowNodeLabel || sourceTool;
   const mimeType = artifactStringValue(artifact, 'mime_type');
   const previewText = artifactStringValue(artifact, 'preview_text');
@@ -119,21 +136,39 @@ export function runtimeArtifactListItem(
     || (sourceLabel ? `${sourceLabel} / ${path || 'artifact'}` : path || kind || 'Artifact');
   return {
     artifact_id: artifactId,
+    capability_id: capabilityId,
     created_at: createdAt,
+    decision_id: decisionId,
     group_id: groupId,
     group_run_id: groupRunId,
+    intent_kind: intentKind,
     kind,
     mime_type: mimeType,
     path,
+    plan_id: planId,
+    planner_step_id: plannerStepId,
+    planning_reason: planningReason,
     preview_text: previewText,
+    replan_request_id: replanRequestId,
+    replan_signal_ids: replanSignalIds,
+    replan_trigger: replanTrigger,
+    replan_triggers: replanTriggers,
+    requires_observation: artifactBoolValue(artifact, 'requires_observation'),
+    requires_post_action_verification: artifactBoolValue(artifact, 'requires_post_action_verification'),
     run_id: runId,
+    runtime_doctrine: runtimeDoctrine,
+    runtime_role: runtimeRole,
+    runtime_stage: runtimeStage,
     size_bytes: sizeBytes,
+    source: artifactStringValue(artifact, 'source'),
     source_label: sourceLabel,
     source_runnable_id: sourceRunnableId,
     source_runnable_name: sourceRunnableName,
     source_run_id: sourceRunId,
     source_tool: sourceTool,
+    step_id: stepId,
     title,
+    tool_plan_id: toolPlanId,
     url,
     workflow_id: workflowId,
     workflow_node_id: workflowNodeId,
@@ -153,4 +188,22 @@ function artifactNumberValue(artifact: RuntimeArtifactSource, key: string) {
   if (typeof value !== 'string' || !value.trim()) return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function artifactStringListValue(artifact: RuntimeArtifactSource, key: string): string[] {
+  const value = (artifact as Record<string, unknown>)[key];
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+  const single = artifactStringValue(artifact, key);
+  return single ? [single] : [];
+}
+
+function artifactBoolValue(artifact: RuntimeArtifactSource, key: string): boolean | null {
+  const value = (artifact as Record<string, unknown>)[key];
+  if (value === true || value === false) return value;
+  const clean = artifactStringValue(artifact, key).toLowerCase();
+  if (clean === 'true' || clean === 'required') return true;
+  if (clean === 'false') return false;
+  return null;
 }

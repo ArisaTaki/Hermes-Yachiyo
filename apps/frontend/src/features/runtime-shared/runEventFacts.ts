@@ -28,6 +28,19 @@ const PLANNER_TRACE_KEYS = [
   'replan_request_id',
   'replan_trigger',
 ];
+const RUNTIME_TRACE_KEYS = [
+  'replan_triggers',
+  'replan_signal_ids',
+  'runtime_doctrine',
+  'runtime_stage',
+  'runtime_role',
+  'requires_observation',
+  'requires_post_action_verification',
+];
+const TRACE_KEYS = [
+  ...PLANNER_TRACE_KEYS,
+  ...RUNTIME_TRACE_KEYS,
+];
 
 export function toolCallsFromRunEventReplay(events: PublicRunEvent[]): ToolCallSnapshot[] {
   const calls: ToolCallSnapshot[] = [];
@@ -265,6 +278,13 @@ function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | nul
     capability_id: eventTraceString(source, payload, inputPreview, 'capability_id'),
     replan_request_id: eventTraceString(source, payload, inputPreview, 'replan_request_id'),
     replan_trigger: eventTraceString(source, payload, inputPreview, 'replan_trigger'),
+    replan_triggers: eventTraceStringList(source, payload, inputPreview, 'replan_triggers'),
+    replan_signal_ids: eventTraceStringList(source, payload, inputPreview, 'replan_signal_ids'),
+    runtime_doctrine: eventTraceString(source, payload, inputPreview, 'runtime_doctrine'),
+    runtime_stage: eventTraceString(source, payload, inputPreview, 'runtime_stage'),
+    runtime_role: eventTraceString(source, payload, inputPreview, 'runtime_role'),
+    requires_observation: eventTraceBool(source, payload, inputPreview, 'requires_observation'),
+    requires_post_action_verification: eventTraceBool(source, payload, inputPreview, 'requires_post_action_verification'),
     status,
     title: publicRunEventPayloadString(source, 'title') || `Approval · ${toolName}`,
     tool_name: toolName,
@@ -318,7 +338,7 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
       workflow_run_id: payload.workflow_run_id,
       workflow_node_id: payload.workflow_node_id,
       workflow_node_label: payload.workflow_node_label,
-      ...Object.fromEntries(PLANNER_TRACE_KEYS.map((key) => [key, payload[key]])),
+      ...Object.fromEntries(TRACE_KEYS.map((key) => [key, payload[key]])),
     },
   );
   return {
@@ -357,6 +377,13 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
     capability_id: plannerTraceString(payload, inputPreview, 'capability_id'),
     replan_request_id: plannerTraceString(payload, inputPreview, 'replan_request_id'),
     replan_trigger: plannerTraceString(payload, inputPreview, 'replan_trigger'),
+    replan_triggers: plannerTraceStringList(payload, inputPreview, 'replan_triggers'),
+    replan_signal_ids: plannerTraceStringList(payload, inputPreview, 'replan_signal_ids'),
+    runtime_doctrine: plannerTraceString(payload, inputPreview, 'runtime_doctrine'),
+    runtime_stage: plannerTraceString(payload, inputPreview, 'runtime_stage'),
+    runtime_role: plannerTraceString(payload, inputPreview, 'runtime_role'),
+    requires_observation: plannerTraceBool(payload, inputPreview, 'requires_observation'),
+    requires_post_action_verification: plannerTraceBool(payload, inputPreview, 'requires_post_action_verification'),
     tool_name: toolName,
     status,
     risk_level: riskLevel || null,
@@ -476,6 +503,13 @@ function mergeApprovalTrace(current: ApprovalCardSnapshot, incoming: ApprovalCar
     capability_id: current.capability_id || incoming.capability_id || null,
     replan_request_id: current.replan_request_id || incoming.replan_request_id || null,
     replan_trigger: current.replan_trigger || incoming.replan_trigger || null,
+    replan_triggers: mergeTraceStringLists(current.replan_triggers, incoming.replan_triggers),
+    replan_signal_ids: mergeTraceStringLists(current.replan_signal_ids, incoming.replan_signal_ids),
+    runtime_doctrine: current.runtime_doctrine || incoming.runtime_doctrine || null,
+    runtime_stage: current.runtime_stage || incoming.runtime_stage || null,
+    runtime_role: current.runtime_role || incoming.runtime_role || null,
+    requires_observation: current.requires_observation ?? incoming.requires_observation ?? null,
+    requires_post_action_verification: current.requires_post_action_verification ?? incoming.requires_post_action_verification ?? null,
   };
 }
 
@@ -505,6 +539,13 @@ function mergeApprovalReplayTrace(
     capability_id: current.capability_id || incoming.capability_id || null,
     replan_request_id: current.replan_request_id || incoming.replan_request_id || null,
     replan_trigger: current.replan_trigger || incoming.replan_trigger || null,
+    replan_triggers: mergeTraceStringLists(current.replan_triggers, incoming.replan_triggers),
+    replan_signal_ids: mergeTraceStringLists(current.replan_signal_ids, incoming.replan_signal_ids),
+    runtime_doctrine: current.runtime_doctrine || incoming.runtime_doctrine || null,
+    runtime_stage: current.runtime_stage || incoming.runtime_stage || null,
+    runtime_role: current.runtime_role || incoming.runtime_role || null,
+    requires_observation: current.requires_observation ?? incoming.requires_observation ?? null,
+    requires_post_action_verification: current.requires_post_action_verification ?? incoming.requires_post_action_verification ?? null,
     description: incoming.description || current.description || null,
     input_preview: {
       ...(current.input_preview || {}),
@@ -542,6 +583,13 @@ function mergeToolCallTrace(current: ToolCallSnapshot, incoming: ToolCallSnapsho
     capability_id: current.capability_id || incoming.capability_id || null,
     replan_request_id: current.replan_request_id || incoming.replan_request_id || null,
     replan_trigger: current.replan_trigger || incoming.replan_trigger || null,
+    replan_triggers: mergeTraceStringLists(current.replan_triggers, incoming.replan_triggers),
+    replan_signal_ids: mergeTraceStringLists(current.replan_signal_ids, incoming.replan_signal_ids),
+    runtime_doctrine: current.runtime_doctrine || incoming.runtime_doctrine || null,
+    runtime_stage: current.runtime_stage || incoming.runtime_stage || null,
+    runtime_role: current.runtime_role || incoming.runtime_role || null,
+    requires_observation: current.requires_observation ?? incoming.requires_observation ?? null,
+    requires_post_action_verification: current.requires_post_action_verification ?? incoming.requires_post_action_verification ?? null,
     metadata: {
       ...(incoming.metadata || {}),
       ...(current.metadata || {}),
@@ -576,6 +624,13 @@ function mergeToolCallReplayTrace(current: ToolCallSnapshot, incoming: ToolCallS
     capability_id: current.capability_id || incoming.capability_id || null,
     replan_request_id: current.replan_request_id || incoming.replan_request_id || null,
     replan_trigger: current.replan_trigger || incoming.replan_trigger || null,
+    replan_triggers: mergeTraceStringLists(current.replan_triggers, incoming.replan_triggers),
+    replan_signal_ids: mergeTraceStringLists(current.replan_signal_ids, incoming.replan_signal_ids),
+    runtime_doctrine: current.runtime_doctrine || incoming.runtime_doctrine || null,
+    runtime_stage: current.runtime_stage || incoming.runtime_stage || null,
+    runtime_role: current.runtime_role || incoming.runtime_role || null,
+    requires_observation: current.requires_observation ?? incoming.requires_observation ?? null,
+    requires_post_action_verification: current.requires_post_action_verification ?? incoming.requires_post_action_verification ?? null,
     status: incoming.status || current.status,
     risk_level: current.risk_level || incoming.risk_level || null,
     input_preview: {
@@ -612,6 +667,7 @@ function mergeArtifactTrace(
     'workflow_step_label',
     'group_id',
     'group_run_id',
+    ...TRACE_KEYS,
   ].forEach((key) => {
     if (!merged[key] && incoming[key]) merged[key] = incoming[key];
   });
@@ -642,6 +698,7 @@ function mergeArtifactTraceContext(
     'workflow_node_label',
     'group_id',
     'group_run_id',
+    ...TRACE_KEYS,
   ].forEach((key) => {
     if (!artifactPayload[key] && payload[key]) artifactPayload[key] = payload[key];
   });
@@ -873,7 +930,7 @@ function toolCallCorrelationPreview(preview: Record<string, unknown>): Record<st
     'workflow_node_label',
     'workflow_run_id',
     'workflow_step_label',
-    ...PLANNER_TRACE_KEYS,
+    ...TRACE_KEYS,
   ]);
   return Object.fromEntries(
     Object.entries(preview).filter(([key]) => !traceKeys.has(key)),
@@ -939,6 +996,7 @@ function toolCallInputPreviewWithTraceContext(
 
 function traceContextValuePresent(value: unknown): boolean {
   if (typeof value === 'string') return Boolean(value.trim());
+  if (Array.isArray(value)) return value.length > 0;
   return value !== undefined && value !== null && value !== false;
 }
 
@@ -1072,7 +1130,7 @@ function approvalReplayCorrelationPreview(preview: Record<string, unknown>): Rec
     'workflow_node_label',
     'workflow_run_id',
     'workflow_step_label',
-    ...PLANNER_TRACE_KEYS,
+    ...TRACE_KEYS,
   ]);
   return Object.fromEntries(
     Object.entries(preview).filter(([key]) => !traceKeys.has(key)),
@@ -1089,6 +1147,25 @@ function plannerTraceString(
     || null;
 }
 
+function plannerTraceStringList(
+  payload: Record<string, unknown>,
+  inputPreview: Record<string, unknown>,
+  key: string,
+): string[] {
+  return mergeTraceStringLists(
+    publicRunEventPayloadStringList(payload, key),
+    publicRunEventPayloadStringList(inputPreview, key),
+  );
+}
+
+function plannerTraceBool(
+  payload: Record<string, unknown>,
+  inputPreview: Record<string, unknown>,
+  key: string,
+): boolean | null {
+  return publicRunEventPayloadBool(payload, key) ?? publicRunEventPayloadBool(inputPreview, key);
+}
+
 function eventTraceString(
   source: Record<string, unknown>,
   payload: Record<string, unknown>,
@@ -1099,6 +1176,63 @@ function eventTraceString(
     || publicRunEventPayloadString(payload, key)
     || publicRunEventPayloadString(inputPreview, key)
     || null;
+}
+
+function eventTraceStringList(
+  source: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  inputPreview: Record<string, unknown>,
+  key: string,
+): string[] {
+  return mergeTraceStringLists(
+    publicRunEventPayloadStringList(source, key),
+    publicRunEventPayloadStringList(payload, key),
+    publicRunEventPayloadStringList(inputPreview, key),
+  );
+}
+
+function eventTraceBool(
+  source: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  inputPreview: Record<string, unknown>,
+  key: string,
+): boolean | null {
+  return publicRunEventPayloadBool(source, key)
+    ?? publicRunEventPayloadBool(payload, key)
+    ?? publicRunEventPayloadBool(inputPreview, key);
+}
+
+function publicRunEventPayloadStringList(
+  payload: Record<string, unknown>,
+  key: string,
+): string[] {
+  const value = payload[key];
+  if (Array.isArray(value)) {
+    return value.map((item) => String(item || '').trim()).filter(Boolean);
+  }
+  const single = publicRunEventPayloadString(payload, key);
+  return single ? [single] : [];
+}
+
+function publicRunEventPayloadBool(
+  payload: Record<string, unknown>,
+  key: string,
+): boolean | null {
+  const value = payload[key];
+  if (value === true || value === false) return value;
+  const clean = publicRunEventPayloadString(payload, key).toLowerCase();
+  if (clean === 'true' || clean === 'required') return true;
+  if (clean === 'false') return false;
+  return null;
+}
+
+function mergeTraceStringLists(...lists: Array<string[] | null | undefined>): string[] {
+  const values: string[] = [];
+  lists.flatMap((list) => list || []).forEach((value) => {
+    const clean = String(value || '').trim();
+    if (clean && !values.includes(clean)) values.push(clean);
+  });
+  return values;
 }
 
 function objectPreview(value: unknown): Record<string, unknown> | null {
