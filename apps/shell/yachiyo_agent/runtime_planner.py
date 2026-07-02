@@ -11260,6 +11260,7 @@ def _task_workspace_items(
                     "tool_name": step.tool_name or "",
                     "approval_required": step.approval_required,
                     "input_preview": dict(step.input_preview),
+                    **_runtime_dov_step_metadata(step),
                 },
             )
         )
@@ -11346,6 +11347,7 @@ def _task_todo_items(steps: list[ToolPlanStepSnapshot]) -> list[TaskTodoItemSnap
                     "action": step.action,
                     "risk_level": step.risk_level,
                     "fallback_tools": list(step.fallback_tools),
+                    **_runtime_dov_step_metadata(step),
                 },
             )
         )
@@ -11381,6 +11383,7 @@ def _task_checkpoints(
                     "intent_id": intent.intent_id,
                     "approval_required": step.approval_required,
                     "risk_level": step.risk_level,
+                    **_runtime_dov_step_metadata(step),
                 },
             )
         )
@@ -11463,6 +11466,91 @@ def _step_should_verify_before_continuing(step: ToolPlanStepSnapshot) -> bool:
     )
 
 
+def _runtime_dov_plan_metadata(steps: list[ToolPlanStepSnapshot]) -> dict[str, Any]:
+    stage_counts: dict[str, int] = {}
+    for step in steps:
+        stage = str(_runtime_dov_step_metadata(step).get("runtime_stage") or "").strip()
+        if stage:
+            stage_counts[stage] = stage_counts.get(stage, 0) + 1
+    if not stage_counts:
+        return {}
+    return {
+        "runtime_doctrine": "discover_operate_verify",
+        "runtime_stage_counts": stage_counts,
+    }
+
+
+def _runtime_dov_step_metadata(step: ToolPlanStepSnapshot) -> dict[str, Any]:
+    if not _runtime_dov_step_applies(step):
+        return {}
+    stage = _runtime_dov_stage(step)
+    role = _runtime_dov_role(step, stage)
+    return {
+        "runtime_doctrine": "discover_operate_verify",
+        "runtime_stage": stage,
+        "runtime_role": role,
+        "requires_observation": stage in {"discover", "verify"},
+        "requires_post_action_verification": stage == "operate",
+    }
+
+
+def _runtime_dov_step_applies(step: ToolPlanStepSnapshot) -> bool:
+    tool_name = str(step.tool_name or "").strip()
+    capability_id = str(step.capability_id or "").strip()
+    return bool(
+        tool_name.startswith(("app.", "desktop."))
+        or tool_name == "screen.capture"
+        or capability_id.startswith("desktop.")
+    )
+
+
+def _runtime_dov_stage(step: ToolPlanStepSnapshot) -> str:
+    step_id = str(step.step_id or "").strip()
+    action = str(step.action or "").strip()
+    if "verify" in step_id or action == "verify":
+        return "verify"
+    if (
+        step_id.startswith(("discover", "inspect", "list-", "read-", "capture-"))
+        or action
+        in {
+            "capture_screen",
+            "diagnose_permissions",
+            "inspect_app",
+            "list_apps",
+            "list_windows",
+            "read_active_window",
+            "read_running_apps",
+            "read_ui",
+        }
+    ):
+        return "discover"
+    return "operate"
+
+
+def _runtime_dov_role(step: ToolPlanStepSnapshot, stage: str) -> str:
+    step_id = str(step.step_id or "").strip()
+    action = str(step.action or "").strip()
+    if stage == "discover":
+        if action == "list_apps" or "discover_apps" in step_id:
+            return "find_target_app"
+        if action in {"inspect_app", "read_ui"}:
+            return "inspect_ui"
+        if action == "list_windows":
+            return "inspect_windows"
+        if action == "capture_screen":
+            return "capture_visual_state"
+        return "inspect_desktop_state"
+    if stage == "verify":
+        return "verify_result"
+    if action in {"open_app", "focus_app"} or step_id.startswith(("open-", "focus-", "prepare-")):
+        return "prepare_target_app"
+    if action in {"click", "type", "shortcut", "key", "scroll", "submit"}:
+        return f"{action}_ui"
+    if action in {"send_message", "draft_message", "submit_search"}:
+        return action
+    return "operate_ui"
+
+
 def _timeline_preview(
     intent: TaskIntentSnapshot,
     steps: list[ToolPlanStepSnapshot],
@@ -11490,6 +11578,7 @@ def _timeline_preview(
                 "approvals_required": [step.step_id for step in steps if step.approval_required],
                 "artifacts_expected": _artifacts_expected(intent, steps),
                 "route_to_studio": _route_to_studio(intent, steps),
+                **_runtime_dov_plan_metadata(steps),
             },
         }
     )
@@ -11519,6 +11608,7 @@ def _timeline_preview(
                     "tool": step.tool_name,
                     "status": step.status,
                     "approval_required": step.approval_required,
+                    **_runtime_dov_step_metadata(step),
                 },
             }
         )
@@ -22515,6 +22605,8 @@ def _app_file_open_discovery_hint(
     value = _clean_prompt(text)
     if not value or not _explicit_app_open_request(value):
         return {}
+    if _looks_like_app_scoped_create_followup(value):
+        return {}
     app_name = _app_name_hint(value)
     if not app_name or _is_generic_foreground_app_label(app_name):
         return {}
@@ -22550,6 +22642,8 @@ def _generic_app_file_open_discovery_hint(
     if not value or not app_capability:
         return {}
     if not _explicit_app_open_request(value):
+        return {}
+    if _looks_like_app_scoped_create_followup(value):
         return {}
     if data_source_hint(value, metadata):
         return {}

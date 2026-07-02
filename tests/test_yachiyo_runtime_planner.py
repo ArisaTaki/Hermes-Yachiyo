@@ -2781,16 +2781,20 @@ def test_planner_adds_generic_discovered_app_followup_action_steps() -> None:
     decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
     requests = planner_tool_requests(prompt, allowed_tools)
 
-    assert requests == [
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.list_apps",
-            "input": {"query": "image", "limit": 20},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "desktop.click_ui_element",
+        "screen.capture",
     ]
+    assert requests[0]["input"] == {"query": "image", "limit": 20}
+    assert requests[1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "image",
+    }
+    assert requests[-1]["input"] == {"reason": "verify selected discovered app action"}
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
@@ -2811,6 +2815,35 @@ def test_planner_adds_generic_discovered_app_followup_action_steps() -> None:
         decision,
         "verify-selected-discovered-app-action",
     ).tool_name == "screen.capture"
+    assert decision.plan.task_core is not None
+    todo_stage_by_step = {
+        todo.step_id: todo.metadata.get("runtime_stage")
+        for todo in decision.plan.task_core.todos
+    }
+    assert todo_stage_by_step == {
+        "discover_apps-desktop-state": "discover",
+        "open-selected-discovered-app": "operate",
+        "observe-selected-discovered-app": "discover",
+        "operate-selected-discovered-app-ui": "operate",
+        "verify-selected-discovered-app-action": "verify",
+    }
+    plan_created = next(
+        event
+        for event in decision.plan.timeline_preview
+        if event["event_type"] == "agent.plan.created"
+    )
+    assert plan_created["payload"]["runtime_doctrine"] == "discover_operate_verify"
+    assert plan_created["payload"]["runtime_stage_counts"] == {
+        "discover": 2,
+        "operate": 2,
+        "verify": 1,
+    }
+    plan_step_stages = [
+        event["payload"]["runtime_stage"]
+        for event in decision.plan.timeline_preview
+        if event["event_type"] == "agent.plan.step"
+    ]
+    assert plan_step_stages == ["discover", "operate", "discover", "operate", "verify"]
 
 
 def test_planner_binds_discovered_app_hotkey_to_selected_app_without_dangling_observation() -> None:
@@ -9119,16 +9152,24 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     assert _step_by_id(markdown, "verify-desktop-result").depends_on == [
         "operate-foreground-ui-followup-type"
     ]
-    assert planner_tool_requests("打开一个能写 markdown 的应用，新建文档标题为周报", allowed_tools) == [
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.list_apps",
-            "input": {"query": "markdown", "limit": 20},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
+    markdown_requests = planner_tool_requests(
+        "打开一个能写 markdown 的应用，新建文档标题为周报",
+        allowed_tools,
+    )
+    assert [request["tool"] for request in markdown_requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
     ]
+    assert markdown_requests[0]["input"] == {"query": "markdown", "limit": 20}
+    assert markdown_requests[1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "markdown",
+        "action": "new_document",
+    }
+    assert markdown_requests[2]["input"] == {"text": "周报"}
     local_markdown = RuntimePlanner().decision(
         "打开我电脑里能写 markdown 的应用，新建文档并写一段项目总结",
         allowed_tools=allowed_tools,
@@ -9162,9 +9203,11 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "query": "document",
         "description": "文档",
     }
+    assert "file_open_discovery_hint" not in document.selected_intent.inputs
     assert [step.step_id for step in document.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
+        "verify-desktop-result",
     ]
     assert _step_by_id(document, "open-selected-discovered-app").input_preview == {
         "app_name": "<selected app from desktop.list_apps>",
@@ -9172,19 +9215,22 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "query": "document",
         "action": "new_document",
     }
-    assert planner_tool_requests(
+    document_requests = planner_tool_requests(
         "用任意可用的文档应用新建一份项目报告",
         allowed_tools,
-    ) == [
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.list_apps",
-            "input": {"query": "document", "limit": 20},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
+    )
+    assert [request["tool"] for request in document_requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.ui_elements",
     ]
+    assert document_requests[0]["input"] == {"query": "document", "limit": 20}
+    assert document_requests[1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "document",
+        "action": "new_document",
+    }
 
     default_document = RuntimePlanner().decision(
         "通过默认文档应用新建一份项目报告",
@@ -9239,10 +9285,12 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "query": "markdown",
         "description": "Markdown",
     }
+    assert "file_open_discovery_hint" not in scoped_markdown.selected_intent.inputs
     assert "foreground_compose_text_hint" not in scoped_markdown.selected_intent.inputs
     assert [step.step_id for step in scoped_markdown.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
+        "verify-desktop-result",
     ]
     assert _step_by_id(scoped_markdown, "open-selected-discovered-app").input_preview == {
         "app_name": "<selected app from desktop.list_apps>",
@@ -9259,6 +9307,7 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     assert [step.step_id for step in scoped_markdown_en.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
+        "verify-desktop-result",
     ]
 
     code = RuntimePlanner().decision(
@@ -9348,19 +9397,24 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "query": "image",
         "action": "new_document",
     }
-    assert planner_tool_requests(
+    unknown_image_requests = planner_tool_requests(
         "用我没提过的绘图 app 新建一张 1024x1024 图片",
         allowed_tools,
-    ) == [
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.list_apps",
-            "input": {"query": "image", "limit": 20},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
+    )
+    assert [request["tool"] for request in unknown_image_requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.ui_elements",
     ]
+    assert unknown_image_requests[0]["input"] == {"query": "image", "limit": 20}
+    assert unknown_image_requests[0]["continue_to_model"] is True
+    assert unknown_image_requests[1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "image",
+        "action": "new_document",
+    }
+    assert unknown_image_requests[2]["continue_to_model"] is True
     assert project_task.selected_intent.inputs["app_name_hint"] == ""
     assert project_task.selected_intent.inputs["app_capability_hint"] == {
         "query": "project management",
@@ -9386,19 +9440,27 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     assert _step_by_id(project_task, "operate-foreground-ui-followup-type").input_preview == {
         "text": "整理发布清单"
     }
-    assert planner_tool_requests(
+    project_task_requests = planner_tool_requests(
         "打开任意项目管理工具，新建任务：整理发布清单",
         allowed_tools,
-    ) == [
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.list_apps",
-            "input": {"query": "project management", "limit": 20},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
+    )
+    assert [request["tool"] for request in project_task_requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
     ]
+    assert project_task_requests[0]["input"] == {
+        "query": "project management",
+        "limit": 20,
+    }
+    assert project_task_requests[1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "project management",
+        "action": "new_document",
+    }
+    assert project_task_requests[2]["input"] == {"text": "整理发布清单"}
     assert issue_tracker.selected_intent.inputs["app_name_hint"] == ""
     assert issue_tracker.selected_intent.inputs["app_capability_hint"] == {
         "query": "task management",
@@ -9418,16 +9480,20 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
     ]
-    assert planner_tool_requests("找一个能编辑 PDF 的本机应用并打开它", ["desktop.list_apps", "app.open"]) == [
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.list_apps",
-            "input": {"query": "pdf", "limit": 20},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
+    pdf_requests = planner_tool_requests(
+        "找一个能编辑 PDF 的本机应用并打开它",
+        ["desktop.list_apps", "app.open"],
+    )
+    assert [request["tool"] for request in pdf_requests] == [
+        "desktop.list_apps",
+        "app.open",
     ]
+    assert pdf_requests[0]["input"] == {"query": "pdf", "limit": 20}
+    assert pdf_requests[1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "pdf",
+    }
     local_pdf = RuntimePlanner().decision(
         "找我电脑上可以编辑 PDF 的应用并打开它",
         allowed_tools=["desktop.list_apps", "app.open"],
@@ -10016,6 +10082,7 @@ def test_runtime_planner_discovers_dynamic_file_before_opening_with_app() -> Non
         "path": "Downloads",
         "pattern": "*.csv",
         "file_type": "csv",
+        "include_metadata": True,
     }
     assert _step_by_id(decision, "open-discovered-file-with-app").input_preview == {
         "app_name": "Excel",
@@ -10028,7 +10095,12 @@ def test_runtime_planner_discovers_dynamic_file_before_opening_with_app() -> Non
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",
-            "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+            "input": {
+                "path": "Downloads",
+                "pattern": "*.csv",
+                "file_type": "csv",
+                "include_metadata": True,
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_file_open_target",
             "continue_to_model": True,
