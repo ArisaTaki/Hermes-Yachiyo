@@ -134,7 +134,7 @@ def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
             "workflow_run_id": payload.get("workflow_run_id"),
             "workflow_node_id": payload.get("workflow_node_id"),
             "workflow_node_label": payload.get("workflow_node_label"),
-            **{key: payload.get(key) for key in _PLANNER_TRACE_KEYS},
+            **{key: payload.get(key) for key in _PLANNER_TRACE_KEYS if key != "source"},
         },
     )
     return normalized

@@ -140,6 +140,29 @@ class _FakeChatTaskStarter:
         )
 
 
+class _BareStartTaskRuntimePort(_FakeRuntimePort):
+    def __init__(self, *, existing_planner_events: bool = False) -> None:
+        super().__init__()
+        self.existing_planner_events = existing_planner_events
+
+    def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("start_chat_task", request))
+        events = []
+        if self.existing_planner_events:
+            events.append(
+                {
+                    "event_type": "agent.intent.selected",
+                    "payload": {"intent": {"kind": "data_analysis"}},
+                }
+            )
+        return _task_payload(
+            status="running",
+            title=request.get("title") or "Chat task",
+            session_id=str(request.get("conversation_id") or ""),
+            events=events,
+        )
+
+
 class _PagedRuntimePort(_FakeRuntimePort):
     def get_task_event_page(
         self,
@@ -539,6 +562,43 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     assert task.task_core is not None
     assert task.task_core.workspace.workspace_id == metadata["yachiyo_task_core"]["workspace"]["workspace_id"]
     assert [todo.step_id for todo in task.task_core.todos] == ["analyze-data-file"]
+
+
+def test_yachiyo_agent_service_enriches_bare_chat_start_payload_with_planner_events() -> None:
+    port = _BareStartTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="请分析 data/sales.csv 并输出报告",
+            conversation_id="chat-1",
+            title="Data analysis",
+        )
+    )
+
+    assert [event.event_type for event in task.recent_events[:4]] == [
+        "agent.intent.selected",
+        "agent.plan.created",
+        "agent.task_core.created",
+        "agent.plan.step",
+    ]
+    assert task.recent_events[0].payload["intent"]["kind"] == "data_analysis"
+    assert task.task_core is not None
+    assert [todo.step_id for todo in task.task_core.todos] == ["analyze-data-file"]
+
+
+def test_yachiyo_agent_service_does_not_duplicate_existing_chat_planner_events() -> None:
+    port = _BareStartTaskRuntimePort(existing_planner_events=True)
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="请分析 data/sales.csv 并输出报告",
+            conversation_id="chat-1",
+        )
+    )
+
+    assert [event.event_type for event in task.recent_events].count("agent.intent.selected") == 1
 
 
 def test_yachiyo_agent_service_defaults_main_chat_entrypoint_metadata() -> None:

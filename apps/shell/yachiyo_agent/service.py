@@ -27,6 +27,7 @@ from .planner_projection import planner_enriched_chat_request
 from .ports import ChatTaskStarter, RuntimePort
 from .runtime_planner import RuntimePlanner
 from .run_snapshots import run_timeline_snapshot_from_payload
+from .start_event_enrichment import start_payload_with_planner_events
 from .task_cards import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
 from .task_core_snapshots import task_core_snapshot_from_payload
 from .task_snapshots import _chat_task_tool_calls
@@ -86,11 +87,18 @@ class YachiyoAgentService:
             chat_payload = self._chat_task_starter.start_chat_task(payload)
             if chat_payload is not None:
                 return _task_with_request_metadata(
-                    agent_task_snapshot_from_payload(chat_payload),
+                    agent_task_snapshot_from_payload(
+                        self._start_payload_with_planner_events(chat_payload, payload)
+                    ),
                     metadata,
                 )
         return _task_with_request_metadata(
-            agent_task_snapshot_from_payload(self._runtime_port.start_chat_task(payload)),
+            agent_task_snapshot_from_payload(
+                self._start_payload_with_planner_events(
+                    self._runtime_port.start_chat_task(payload),
+                    payload,
+                )
+            ),
             metadata,
         )
 
@@ -181,6 +189,18 @@ class YachiyoAgentService:
 
     def cancel(self, task_id: str) -> AgentTaskSnapshot:
         return agent_task_snapshot_from_payload(self._runtime_port.cancel(task_id))
+
+    def _start_payload_with_planner_events(
+        self,
+        raw_payload: Mapping[str, Any],
+        request_payload: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        return start_payload_with_planner_events(
+            raw_payload,
+            request_payload,
+            plan_task=self.plan_chat_task,
+            metadata_source="yachiyo_agent_service_start",
+        )
 
 
 def _request_payload(request: StartChatTaskRequest | Mapping[str, Any]) -> dict[str, Any]:
