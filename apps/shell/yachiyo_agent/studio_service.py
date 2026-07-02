@@ -47,7 +47,7 @@ from .contracts import (
 )
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from .desk import agent_desk_snapshot_from_payload
-from .events import public_run_event_from_payload, public_run_event_page_from_payload
+from .events import public_run_event_page_from_payload
 from .future_tasks import (
     future_task_snapshot_from_payload,
     future_task_trigger_result_snapshot_from_payload,
@@ -685,8 +685,10 @@ class AgentStudioService:
         port_event_stream = getattr(self._studio_port, "get_group_run_event_stream", None)
         if callable(port_event_stream):
             raw_events = port_event_stream(group_run_id)
-            for event in _payload_items(raw_events, "events"):
-                yield public_run_event_from_payload(event, run_id=group_run_id)
+            yield from _group_run_events_from_port_payload(
+                raw_events,
+                group_run_id=group_run_id,
+            )
             return
 
         group_run = self.get_group_run(group_run_id)
@@ -711,11 +713,18 @@ class AgentStudioService:
                 after_sequence=clean_after_sequence,
                 limit=clean_limit,
             )
-            return public_run_event_page_from_payload(
+            page = public_run_event_page_from_payload(
                 raw_page,
                 run_id=group_run_id,
                 after_sequence=clean_after_sequence,
                 limit=clean_limit,
+            )
+            return _run_event_page_with_projected_events(
+                page,
+                _group_run_events_from_port_payload(
+                    raw_page,
+                    group_run_id=group_run_id,
+                ),
             )
 
         events = [
@@ -831,8 +840,7 @@ class AgentStudioService:
 
     def get_run_event_stream(self, run_id: str) -> Iterable[PublicRunEvent]:
         raw_events = self._studio_port.get_run_event_stream(run_id)
-        for event in _payload_items(raw_events, "events"):
-            yield public_run_event_from_payload(event, run_id=run_id)
+        yield from _run_events_from_port_payload(raw_events, run_id=run_id)
 
     def get_run_event_page(
         self,
@@ -849,11 +857,15 @@ class AgentStudioService:
                 after_sequence=clean_after_sequence,
                 limit=clean_limit,
             )
-            return public_run_event_page_from_payload(
+            page = public_run_event_page_from_payload(
                 raw_page,
                 run_id=run_id,
                 after_sequence=clean_after_sequence,
                 limit=clean_limit,
+            )
+            return _run_event_page_with_projected_events(
+                page,
+                _run_events_from_port_payload(raw_page, run_id=run_id),
             )
 
         filtered_events = [
@@ -1016,6 +1028,112 @@ def _public_run_snapshot_from_payload(
     if is_workflow_run_payload(payload):
         return workflow_run_snapshot_from_payload(payload)
     return run_timeline_snapshot_from_payload(payload)
+
+
+_GROUP_RUN_LIFECYCLE_EVENT_TYPES = {
+    "group.run.started",
+    "group.run.completed",
+    "group.run.failed",
+    "group.run.cancelled",
+}
+
+_WORKFLOW_RUN_LIFECYCLE_EVENT_TYPES = {
+    "workflow.run.started",
+    "workflow.run.completed",
+    "workflow.run.failed",
+    "workflow.run.cancelled",
+}
+
+
+def _group_run_events_from_port_payload(
+    payload: Any,
+    *,
+    group_run_id: str,
+) -> list[PublicRunEvent]:
+    raw_events = _payload_items(payload, "events")
+    projected_payload = _event_projection_payload(payload, raw_events)
+    projected_payload.setdefault("group_run_id", group_run_id)
+    projected_payload.setdefault("run_group_id", group_run_id)
+    events = group_run_snapshot_from_payload(projected_payload).events
+    return _drop_unreported_lifecycle_events(
+        events,
+        raw_events,
+        lifecycle_event_types=_GROUP_RUN_LIFECYCLE_EVENT_TYPES,
+    )
+
+
+def _run_events_from_port_payload(
+    payload: Any,
+    *,
+    run_id: str,
+) -> list[PublicRunEvent]:
+    raw_events = _payload_items(payload, "events")
+    projected_payload = _event_projection_payload(payload, raw_events)
+    projected_payload.setdefault("run_id", run_id)
+    if _is_workflow_event_payload(projected_payload, raw_events):
+        projected_payload.setdefault("workflow_run_id", run_id)
+        events = workflow_run_snapshot_from_payload(projected_payload).events
+        return _drop_unreported_lifecycle_events(
+            events,
+            raw_events,
+            lifecycle_event_types=_WORKFLOW_RUN_LIFECYCLE_EVENT_TYPES,
+        )
+    return run_timeline_snapshot_from_payload(projected_payload).events
+
+
+def _event_projection_payload(payload: Any, raw_events: list[dict[str, Any]]) -> dict[str, Any]:
+    projected = dict(payload) if isinstance(payload, Mapping) else {}
+    projected["events"] = raw_events
+    return projected
+
+
+def _is_workflow_event_payload(
+    payload: Mapping[str, Any],
+    raw_events: list[dict[str, Any]],
+) -> bool:
+    if is_workflow_run_payload(payload):
+        return True
+    for event in raw_events:
+        event_type = str(event.get("event_type") or event.get("event") or "").strip()
+        if event_type.startswith("workflow.run."):
+            return True
+        event_payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+        if str(event_payload.get("planner_scope") or "").strip() == "workflow_run":
+            return True
+    return False
+
+
+def _drop_unreported_lifecycle_events(
+    events: list[PublicRunEvent],
+    raw_events: list[dict[str, Any]],
+    *,
+    lifecycle_event_types: set[str],
+) -> list[PublicRunEvent]:
+    raw_event_types = {
+        str(event.get("event_type") or event.get("event") or "").strip()
+        for event in raw_events
+    }
+    return [
+        event
+        for event in events
+        if event.event_type not in lifecycle_event_types
+        or event.event_type in raw_event_types
+    ]
+
+
+def _run_event_page_with_projected_events(
+    page: RunEventPageSnapshot,
+    events: list[PublicRunEvent],
+) -> RunEventPageSnapshot:
+    next_after_sequence = max(
+        [int(event.sequence or 0) for event in events] or [int(page.next_after_sequence or 0)]
+    )
+    return page.model_copy(
+        update={
+            "events": events,
+            "next_after_sequence": max(int(page.next_after_sequence or 0), next_after_sequence),
+        }
+    )
 
 
 def _payload_items(payload: Any, key: str) -> list[dict[str, Any]]:

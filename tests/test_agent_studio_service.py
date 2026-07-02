@@ -20,6 +20,7 @@ from apps.shell.yachiyo_agent import (
     StartPlannerOrchestrationRequest,
     StartWorkflowRunRequest,
 )
+from apps.shell.yachiyo_agent.planner_projection import planner_run_event_payloads
 from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 
 
@@ -458,6 +459,34 @@ class _FakeStudioPort:
                 }
             ],
         }
+
+
+def _planner_events_with_failed_analysis() -> list[dict[str, Any]]:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+    analysis_step = next(
+        step for step in decision.plan.tool_plan.steps if step.tool_name == "data.analyze"
+    )
+    events = [
+        {"event_type": event_type, "payload": payload}
+        for event_type, payload in planner_run_event_payloads(decision)
+    ]
+    events.append(
+        {
+            "event_id": "analysis-failed",
+            "sequence": len(events) + 1,
+            "event_type": "agent.tool.call",
+            "payload": {
+                "step_id": analysis_step.step_id,
+                "tool_name": "data.analyze",
+                "status": "failed",
+                "result": {"ok": False, "error": "empty result"},
+            },
+        }
+    )
+    return events
 
 
 def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
@@ -1398,6 +1427,33 @@ def test_agent_studio_service_prefers_runtime_group_run_event_page_port() -> Non
     assert ("get_group_run", "group-run-1") not in port.calls
 
 
+def test_agent_studio_service_projects_group_run_replan_events_from_port_stream() -> None:
+    class ReplanGroupRunEventPort(_FakeStudioPort):
+        def get_group_run_event_stream(self, group_run_id: str) -> dict[str, Any]:
+            self.calls.append(("get_group_run_event_stream", group_run_id))
+            return {
+                "run_id": group_run_id,
+                "events": _planner_events_with_failed_analysis(),
+            }
+
+    port = ReplanGroupRunEventPort()
+    service = AgentStudioService(port)
+
+    stream = list(service.get_group_run_event_stream("group-run-1"))
+    event_types = [event.event_type for event in stream]
+    replan_event = next(
+        event for event in stream if event.event_type == "group.run.replan.requested"
+    )
+
+    assert "group.run.started" not in event_types
+    assert "group.run.intent.selected" in event_types
+    assert "group.run.plan.created" in event_types
+    assert replan_event.payload["planner_event_type"] == "agent.replan.requested"
+    assert replan_event.payload["planner_scope"] == "group_run"
+    assert replan_event.payload["run_id"] == "group-run-1"
+    assert ("get_group_run", "group-run-1") not in port.calls
+
+
 def test_agent_studio_service_prefers_runtime_run_event_page_port() -> None:
     class PagedRunEventPort(_FakeStudioPort):
         def get_run_event_page(
@@ -1451,6 +1507,53 @@ def test_agent_studio_service_prefers_runtime_run_event_page_port() -> None:
         {"run_id": "run-1", "after_sequence": 3, "limit": 1},
     ) in port.calls
     assert ("get_run_event_stream", "run-1") not in port.calls
+
+
+def test_agent_studio_service_projects_workflow_replan_events_from_port_page() -> None:
+    class WorkflowRunEventPagePort(_FakeStudioPort):
+        def get_run_event_page(
+            self,
+            run_id: str,
+            *,
+            after_sequence: int = 0,
+            limit: int = 200,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "get_run_event_page",
+                    {
+                        "run_id": run_id,
+                        "after_sequence": after_sequence,
+                        "limit": limit,
+                    },
+                )
+            )
+            return {
+                "workflow_run_id": run_id,
+                "after_sequence": after_sequence,
+                "limit": limit,
+                "next_after_sequence": 6,
+                "has_more": False,
+                "events": _planner_events_with_failed_analysis(),
+            }
+
+    port = WorkflowRunEventPagePort()
+    service = AgentStudioService(port)
+
+    page = service.get_run_event_page("workflow-run-1", after_sequence=0, limit=200)
+    event_types = [event.event_type for event in page.events]
+    replan_event = next(
+        event for event in page.events if event.event_type == "workflow.run.replan.requested"
+    )
+
+    assert "workflow.run.started" not in event_types
+    assert "workflow.run.intent.selected" in event_types
+    assert "workflow.run.plan.created" in event_types
+    assert replan_event.payload["planner_event_type"] == "agent.replan.requested"
+    assert replan_event.payload["planner_scope"] == "workflow_run"
+    assert replan_event.payload["run_id"] == "workflow-run-1"
+    assert page.next_after_sequence == int(replan_event.sequence or 0)
+    assert ("get_run_event_stream", "workflow-run-1") not in port.calls
 
 
 def test_agent_studio_service_run_actions_return_public_timeline_snapshots() -> None:
