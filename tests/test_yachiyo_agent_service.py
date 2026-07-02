@@ -553,6 +553,12 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     assert metadata["yachiyo_plan_artifacts_expected"] == ["analysis-report.md"]
     assert metadata["yachiyo_plan_open_questions"] == []
     assert metadata["yachiyo_missing_capabilities"] == []
+    assert metadata["yachiyo_execution_requests"] == ["data.analyze"]
+    assert metadata["yachiyo_execution_envelope"]["intent_kind"] == "data_analysis"
+    assert metadata["yachiyo_execution_envelope"]["requests"][0]["tool_name"] == "data.analyze"
+    assert metadata["yachiyo_execution_envelope"]["task_core"]["core_id"] == (
+        metadata["yachiyo_task_core"]["core_id"]
+    )
     assert metadata["yachiyo_task_core"]["workspace"]["workspace_id"].startswith(
         "task-workspace-"
     )

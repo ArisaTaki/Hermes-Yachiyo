@@ -17,6 +17,7 @@ from .replans import (
     task_replan_timeline_event,
 )
 from .runtime_planner import RuntimePlanner
+from .runtime_execution import runtime_execution_envelope_payload
 
 _MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
 
@@ -39,6 +40,8 @@ def runtime_planner_decision(
 
 def runtime_planner_metadata(
     decision: PlannerDecisionSnapshot | None,
+    *,
+    allowed_tools: Iterable[str] | None = None,
 ) -> dict[str, Any]:
     if decision is None:
         return {}
@@ -67,6 +70,17 @@ def runtime_planner_metadata(
     }
     if decision.plan.task_core is not None:
         payload["yachiyo_task_core"] = decision.plan.task_core.model_dump(mode="json")
+    execution_envelope = runtime_execution_envelope_payload(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+    if execution_envelope:
+        payload["yachiyo_execution_envelope"] = execution_envelope
+        payload["yachiyo_execution_requests"] = [
+            request.get("tool_name")
+            for request in execution_envelope.get("requests", [])
+            if isinstance(request, Mapping) and request.get("tool_name")
+        ]
     followup_target = _selection_followup_target_payload(decision)
     if followup_target:
         payload["yachiyo_followup_target"] = followup_target
@@ -98,10 +112,21 @@ def planner_enriched_chat_request(
     )
     payload["metadata"] = {
         **dict(metadata),
-        **runtime_planner_metadata(decision),
+        **runtime_planner_metadata(
+            decision,
+            allowed_tools=allowed_tools or _request_allowed_tools(payload),
+        ),
         **orchestration_metadata,
     }
     return payload
+
+
+def _request_allowed_tools(payload: Mapping[str, Any]) -> list[str] | None:
+    value = payload.get("allowed_tools")
+    if not isinstance(value, Iterable) or isinstance(value, (str, bytes, Mapping)):
+        return None
+    tools = [str(tool or "").strip() for tool in value if str(tool or "").strip()]
+    return tools or None
 
 
 def _normalized_entrypoint_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:

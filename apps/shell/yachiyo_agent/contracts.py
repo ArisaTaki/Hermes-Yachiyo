@@ -357,6 +357,36 @@ class PlannerDecisionSnapshot(_PublicSnapshot):
     source: str = "runtime_planner"
 
 
+class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
+    request_id: str
+    step_id: str | None = None
+    capability_id: str | None = None
+    tool_name: str
+    protocol: str = "json_fallback"
+    input: dict[str, Any] = Field(default_factory=dict)
+    planning_reason: str = ""
+    approval_required: bool = False
+    continue_to_model: bool = False
+    depends_on: list[str] = Field(default_factory=list)
+    fallback_tools: list[str] = Field(default_factory=list)
+    status: str = "planned"
+    source: str = "runtime_planner"
+
+
+class RuntimeExecutionEnvelopeSnapshot(_PublicSnapshot):
+    envelope_id: str
+    decision_id: str
+    plan_id: str
+    intent_kind: str
+    requests: list[RuntimeExecutionRequestSnapshot] = Field(default_factory=list)
+    task_core: TaskCoreSnapshot | None = None
+    approvals_required: list[str] = Field(default_factory=list)
+    artifacts_expected: list[str] = Field(default_factory=list)
+    open_questions: list[str] = Field(default_factory=list)
+    route_to_studio: bool = False
+    source: str = "runtime_planner"
+
+
 class PlannerTraceSummarySnapshot(_PublicSnapshot):
     source: str = ""
     decision_id: str | None = None

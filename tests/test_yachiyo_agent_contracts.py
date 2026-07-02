@@ -52,6 +52,8 @@ from apps.shell.yachiyo_agent import (
     RunEventPageSnapshot,
     RunTimelineChildSnapshot,
     RunTimelineSnapshot,
+    RuntimeExecutionEnvelopeSnapshot,
+    RuntimeExecutionRequestSnapshot,
     RuntimePlanSnapshot,
     RestrictedPluginToolSnapshot,
     RestrictedToolPluginSnapshot,
@@ -309,6 +311,44 @@ def test_planner_public_snapshots_explain_intent_capabilities_and_tool_plan() ->
     )
     assert payload["plan"]["tool_plan"]["steps"][1]["fallback_tools"] == ["terminal.run"]
     assert payload["plan"]["timeline_preview"] == [{"event_type": "agent.plan.created"}]
+
+
+def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
+    request = RuntimeExecutionRequestSnapshot(
+        request_id="runtime-plan-1:request:1:desktop.list_apps",
+        step_id="discover-desktop-state",
+        capability_id="desktop.app_discovery",
+        tool_name="desktop.list_apps",
+        input={"query": "PixelForge", "limit": 20},
+        planning_reason="planner_desktop_app_discovery",
+    )
+    envelope = RuntimeExecutionEnvelopeSnapshot(
+        envelope_id="execution-envelope-runtime-plan-1",
+        decision_id="decision-1",
+        plan_id="runtime-plan-1",
+        intent_kind="desktop_operation",
+        requests=[request],
+        approvals_required=["operate-foreground-ui"],
+        route_to_studio=True,
+    )
+
+    payload = _json(envelope)
+
+    assert list(payload) == [
+        "envelope_id",
+        "decision_id",
+        "plan_id",
+        "intent_kind",
+        "requests",
+        "task_core",
+        "approvals_required",
+        "artifacts_expected",
+        "open_questions",
+        "route_to_studio",
+        "source",
+    ]
+    assert payload["requests"][0]["tool_name"] == "desktop.list_apps"
+    assert payload["requests"][0]["input"] == {"query": "PixelForge", "limit": 20}
 
 
 def test_task_core_public_snapshot_exposes_workspace_todo_checkpoint_and_replan() -> None:

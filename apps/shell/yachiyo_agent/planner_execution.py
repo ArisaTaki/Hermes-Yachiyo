@@ -439,6 +439,30 @@ def planner_direct_decision_and_tool_requests(
     return decision, requests
 
 
+def planner_tool_requests_for_decision(
+    decision: Any,
+    allowed_tools: Iterable[str],
+    *,
+    direct: bool = False,
+    execution_normalized: bool = True,
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return []
+    if direct:
+        requests = _direct_tool_requests_for_decision(decision, allowed)
+    else:
+        requests = _tool_requests_for_decision(decision, allowed)
+    requests = _annotated_tool_requests_for_decision(
+        requests,
+        decision,
+        include_trace=True,
+    )
+    if not execution_normalized:
+        return requests
+    return planner_execution_tool_requests(requests, allowed) or requests
+
+
 def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
     if decision.selected_intent.kind == "media_playback":
         return _media_tool_requests(decision.selected_intent.inputs, allowed)
@@ -622,12 +646,12 @@ def _annotate_request_trace(
 ) -> None:
     step_id = str(getattr(step, "step_id", "") or "").strip()
     capability_id = str(getattr(step, "capability_id", "") or "").strip()
+    if not include_trace:
+        return
     if step_id:
         request["step_id"] = step_id
     if capability_id:
         request["capability_id"] = capability_id
-    if not include_trace:
-        return
     decision_id = str(getattr(decision, "decision_id", "") or "").strip()
     plan = getattr(decision, "plan", None)
     plan_id = str(getattr(plan, "plan_id", "") or "").strip()

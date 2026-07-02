@@ -26,8 +26,10 @@ from apps.shell.yachiyo_agent.planner_execution import (
     planner_orchestration_requests,
     planner_direct_tool_requests,
     planner_desktop_tool_requests,
+    planner_tool_requests_for_decision,
     planner_tool_requests,
 )
+from apps.shell.yachiyo_agent.runtime_execution import runtime_execution_envelope_from_decision
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_decision_and_tool_requests,
     planner_first_direct_tool_selection,
@@ -28237,6 +28239,44 @@ def test_planner_tool_requests_optionally_include_runtime_plan_trace() -> None:
     assert traced_requests[1]["decision_id"].startswith("decision-")
     assert traced_requests[1]["plan_id"].startswith("runtime-plan-")
     assert traced_requests[1]["tool_plan_id"].startswith("tool-plan-")
+
+
+def test_runtime_execution_envelope_projects_decision_into_executable_requests() -> None:
+    allowed_tools = [
+        "desktop.inspect_app",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge 并点击导出",
+        allowed_tools=allowed_tools,
+    )
+
+    requests = planner_tool_requests_for_decision(decision, allowed_tools)
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+
+    assert [request["step_id"] for request in requests] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert envelope is not None
+    assert envelope.decision_id == decision.decision_id
+    assert envelope.plan_id == decision.plan.plan_id
+    assert envelope.task_core is not None
+    assert envelope.task_core.core_id == decision.plan.task_core.core_id
+    assert [request.tool_name for request in envelope.requests] == [
+        "desktop.inspect_app",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert envelope.requests[1].step_id == "operate-foreground-ui"
+    assert envelope.requests[1].capability_id == "desktop.ui_operation"
+    assert envelope.requests[1].approval_required is True
+    assert envelope.requests[2].depends_on == ["operate-foreground-ui"]
 
 
 def test_yachiyo_agent_service_uses_fake_runtime_planner_port() -> None:
