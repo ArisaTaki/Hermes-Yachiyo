@@ -2166,7 +2166,7 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
                 allowed,
                 planning_reason="planner_builtin_data_analysis",
             )
-            if artifact_reveal_requests:
+            if _artifact_reveal_requests_include_analysis_app_open(decision):
                 _attach_basic_step_metadata(analyze_request, data_analyze_step)
             return [
                 *app_requests,
@@ -2349,6 +2349,10 @@ def _artifact_reveal_tool_requests(
     path = str(payload.get("path") or "").strip()
     if not path:
         return []
+    include_step_metadata = (
+        str(getattr(step, "step_id", "") or "").strip()
+        == "open-analysis-artifact-with-app"
+    )
     if tool_name == "desktop.open_path_with_app":
         app_name = str(payload.get("app_name") or "").strip()
         if not app_name:
@@ -2362,13 +2366,26 @@ def _artifact_reveal_tool_requests(
             request_input,
             planning_reason=planning_reason,
         )
-        return [_attach_basic_step_metadata(request, step)]
+        if include_step_metadata:
+            _attach_basic_step_metadata(request, step)
+        return [request]
     request = _request(
         tool_name,
         {"path": path},
         planning_reason=planning_reason,
     )
-    return [_attach_basic_step_metadata(request, step)]
+    if include_step_metadata:
+        _attach_basic_step_metadata(request, step)
+    return [request]
+
+
+def _artifact_reveal_requests_include_analysis_app_open(decision: Any) -> bool:
+    return any(
+        str(getattr(step, "step_id", "") or "").strip()
+        == "open-analysis-artifact-with-app"
+        and _step_available(step)
+        for step in getattr(getattr(getattr(decision, "plan", None), "tool_plan", None), "steps", [])
+    )
 
 
 def _append_model_followup_requests(
