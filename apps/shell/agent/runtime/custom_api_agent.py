@@ -7525,6 +7525,7 @@ def _model_followup_desktop_observed_action_target_payload(
     recommended_tools = _model_followup_desktop_observed_action_tools(
         target_action,
         allowed,
+        app_scoped=bool(_observed_action_app_name(target)),
     )
     verify_tools = [
         tool
@@ -7549,6 +7550,12 @@ def _model_followup_desktop_observed_action_target_payload(
             target.get("observation_source") or "desktop.read_ui"
         ).strip(),
     }
+    app_name = _observed_action_app_name(target)
+    if app_name:
+        payload["app_name"] = app_name
+    app_query = _observed_action_app_query(target)
+    if app_query:
+        payload["app_query"] = app_query
     if target_action == "click":
         payload["click_count"] = _clean_model_followup_int(
             target.get("click_count"),
@@ -7566,7 +7573,22 @@ def _model_followup_desktop_observed_action_target_payload(
 def _model_followup_desktop_observed_action_tools(
     target_action: str,
     allowed: set[str],
+    *,
+    app_scoped: bool = False,
 ) -> list[str]:
+    app_candidates = (
+        (
+            "app.focus_and_click_ui_element",
+            "app.open_and_click_ui_element",
+        )
+        if target_action == "click"
+        else (
+            "app.focus_and_type_into_ui_element",
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_click_ui_element",
+            "app.open_and_click_ui_element",
+        )
+    )
     candidates = (
         (
             "desktop.click_ui_element",
@@ -7581,6 +7603,8 @@ def _model_followup_desktop_observed_action_tools(
             "desktop.type",
         )
     )
+    if app_scoped:
+        candidates = (*app_candidates, *candidates)
     return [tool for tool in candidates if tool in allowed]
 
 
@@ -7888,6 +7912,7 @@ def _auto_discovered_app_search_observed_result_requests(
     )
     if not observed_target:
         return []
+    _attach_discovered_app_context_to_observed_target(observed_target, target, timeline)
     latest_observation_tool = _latest_desktop_observation_tool(timeline)
     if latest_observation_tool == "desktop.inspect_app":
         observed_target["observation_source"] = latest_observation_tool
@@ -7942,6 +7967,12 @@ def _auto_replan_app_search_observed_result_requests(
         "click_count": 1,
         "limit": 80,
     }
+    _attach_discovered_app_context_to_observed_target(
+        observed_target,
+        target,
+        timeline,
+        replan_payloads=replan_payloads,
+    )
     latest_observation_tool = _latest_desktop_observation_tool(timeline)
     if latest_observation_tool:
         observed_target["observation_source"] = latest_observation_tool
@@ -8017,6 +8048,62 @@ def _observed_action_target_from_app_search_result_selection(
     }
 
 
+def _attach_discovered_app_context_to_observed_target(
+    observed_target: dict[str, Any],
+    source_target: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    *,
+    replan_payloads: Iterable[Mapping[str, Any]] = (),
+) -> None:
+    app_name = _discovered_app_context_app_name(
+        source_target,
+        timeline,
+        replan_payloads=replan_payloads,
+    )
+    if app_name:
+        observed_target["app_name"] = app_name
+    app_query = str(
+        source_target.get("app_query") or source_target.get("target_app_query") or ""
+    ).strip()
+    if app_query:
+        observed_target["app_query"] = app_query
+
+
+def _discovered_app_context_app_name(
+    target: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    *,
+    replan_payloads: Iterable[Mapping[str, Any]] = (),
+) -> str:
+    for value in (
+        target.get("app_name"),
+        target.get("target_app_name"),
+        target.get("resolved_app_name"),
+        target.get("discovered_app_name"),
+    ):
+        app_name = str(value or "").strip()
+        if app_name and not _runtime_planner_placeholder_app_name(app_name):
+            return app_name
+    app_query = str(target.get("app_query") or target.get("target_app_query") or "").strip()
+    if app_query:
+        discovered = _discovered_app_name_for_query(timeline, app_query)
+        if discovered:
+            return discovered
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        replan_target = _replan_recovery_target(payload)
+        app_name = str(replan_target.get("target_app_name") or "").strip()
+        if app_name and not _runtime_planner_placeholder_app_name(app_name):
+            return app_name
+        app_query = str(replan_target.get("target_app_query") or "").strip()
+        if app_query:
+            discovered = _discovered_app_name_for_query(timeline, app_query)
+            if discovered:
+                return discovered
+    return ""
+
+
 def _auto_desktop_observed_action_followup_requests(
     selection_payload: Mapping[str, Any],
     allowed_tools: Iterable[str],
@@ -8065,6 +8152,47 @@ def _auto_desktop_observed_click_requests(
     role_filter = str(target.get("role_filter") or "").strip()
     click_count = _clean_model_followup_int(target.get("click_count"), default=1)
     limit = _clean_model_followup_int(target.get("limit"), default=80)
+    app_name = _observed_action_app_name(target)
+    app_scoped_tool = (
+        _first_allowed_tool(
+            ("app.focus_and_click_ui_element", "app.open_and_click_ui_element"),
+            allowed,
+        )
+        if app_name
+        else ""
+    )
+    if app_scoped_tool:
+        request = _with_observed_action_metadata(
+            _with_observed_action_app_resolution(
+                _request_like(
+                    app_scoped_tool,
+                    {
+                        "app_name": app_name,
+                        "target": target_label,
+                        "role_filter": role_filter,
+                        "click_count": click_count,
+                        "limit": limit,
+                    },
+                    source="runtime_planner",
+                    planning_reason=planning_reason,
+                ),
+                target,
+                app_name,
+            ),
+            target,
+            action="click",
+            target_label=target_label,
+            role_filter=role_filter,
+            evidence={"strategy": "app_scoped_semantic_ui_tool"},
+        )
+        return _with_observed_action_verification(
+            [request],
+            target,
+            allowed,
+            target_label=target_label,
+            role_filter=role_filter,
+            planning_reason=planning_reason,
+        )
     if "desktop.click_ui_element" in allowed:
         request = _with_observed_action_metadata(
             _request_like(
@@ -8195,12 +8323,47 @@ def _auto_desktop_observed_type_requests(
         target_label,
         role_filter,
     )
+    app_name = _observed_action_app_name(target)
     base_input = {
         "target": execution_target,
         "text": text,
         "role_filter": role_filter,
         "limit": _clean_model_followup_int(target.get("limit"), default=80),
     }
+    app_scoped_type_tool = (
+        _first_allowed_tool(
+            ("app.focus_and_type_into_ui_element", "app.open_and_type_into_ui_element"),
+            allowed,
+        )
+        if app_name
+        else ""
+    )
+    if app_scoped_type_tool:
+        request = _with_observed_action_metadata(
+            _with_observed_action_app_resolution(
+                _request_like(
+                    app_scoped_type_tool,
+                    {"app_name": app_name, **base_input},
+                    source="runtime_planner",
+                    planning_reason=planning_reason,
+                ),
+                target,
+                app_name,
+            ),
+            target,
+            action="type_text",
+            target_label=execution_target,
+            role_filter=role_filter,
+            evidence={"strategy": "app_scoped_semantic_ui_tool"},
+        )
+        return _with_observed_action_verification(
+            [request],
+            target,
+            allowed,
+            target_label=execution_target,
+            role_filter=role_filter,
+            planning_reason=planning_reason,
+        )
     if "desktop.type_into_ui_element" in allowed:
         request = _with_observed_action_metadata(
             _request_like(
@@ -8226,7 +8389,39 @@ def _auto_desktop_observed_type_requests(
     type_tool = _first_allowed_tool(("desktop.type_text", "desktop.type"), allowed)
     if not type_tool:
         return []
-    if "desktop.click_ui_element" in allowed:
+    app_scoped_focus_tool = (
+        _first_allowed_tool(
+            ("app.focus_and_click_ui_element", "app.open_and_click_ui_element"),
+            allowed,
+        )
+        if app_name
+        else ""
+    )
+    if app_scoped_focus_tool:
+        click_request = _with_observed_action_metadata(
+            _with_observed_action_app_resolution(
+                _request_like(
+                    app_scoped_focus_tool,
+                    {
+                        "app_name": app_name,
+                        "target": execution_target,
+                        "role_filter": role_filter,
+                        "click_count": 1,
+                        "limit": _clean_model_followup_int(target.get("limit"), default=80),
+                    },
+                    source="runtime_planner",
+                    planning_reason=planning_reason,
+                ),
+                target,
+                app_name,
+            ),
+            target,
+            action="focus_for_type",
+            target_label=execution_target,
+            role_filter=role_filter,
+            evidence={"strategy": "app_scoped_semantic_ui_tool"},
+        )
+    elif "desktop.click_ui_element" in allowed:
         click_request = _with_observed_action_metadata(
             _request_like(
                 "desktop.click_ui_element",
@@ -8306,6 +8501,25 @@ def _observed_click_input(
     return payload
 
 
+def _observed_action_app_name(target: Mapping[str, Any]) -> str:
+    return str(target.get("app_name") or target.get("target_app_name") or "").strip()
+
+
+def _observed_action_app_query(target: Mapping[str, Any]) -> str:
+    return str(target.get("app_query") or target.get("target_app_query") or "").strip()
+
+
+def _with_observed_action_app_resolution(
+    request: dict[str, Any],
+    target: Mapping[str, Any],
+    app_name: str,
+) -> dict[str, Any]:
+    app_query = _observed_action_app_query(target)
+    if not app_query or not app_name:
+        return request
+    return _with_discovered_app_resolution(request, app_query, app_name)
+
+
 def _latest_desktop_observation_succeeded(timeline: list[dict[str, Any]]) -> bool:
     for event in reversed(timeline):
         if str(event.get("event") or "").strip() != "agent.tool.call":
@@ -8371,7 +8585,13 @@ def _with_observed_action_metadata(
     role_filter: str,
     evidence: Mapping[str, Any],
 ) -> dict[str, Any]:
+    app_name = _observed_action_app_name(target)
     request["capability_id"] = "desktop.ui_operation"
+    if app_name:
+        request.setdefault("target_app_name", app_name)
+    app_query = _observed_action_app_query(target)
+    if app_query:
+        request.setdefault("target_app_query", app_query)
     request["followup_target"] = _compact_observed_action_target(target)
     request["action_target"] = {
         "kind": "desktop_observed_action",
@@ -8379,6 +8599,8 @@ def _with_observed_action_metadata(
         "target": str(target_label or "").strip(),
         "role_filter": str(role_filter or "").strip(),
     }
+    if app_name:
+        request["action_target"]["app_name"] = app_name
     request["observation_evidence"] = {
         "source_tool": str(target.get("observation_source") or "desktop.read_ui").strip(),
         **{
@@ -8398,6 +8620,12 @@ def _compact_observed_action_target(target: Mapping[str, Any]) -> dict[str, Any]
         "role_filter": str(target.get("role_filter") or "").strip(),
         "observation_source": str(target.get("observation_source") or "desktop.read_ui").strip(),
     }
+    app_name = _observed_action_app_name(target)
+    if app_name:
+        payload["app_name"] = app_name
+    app_query = _observed_action_app_query(target)
+    if app_query:
+        payload["app_query"] = app_query
     text = str(target.get("text") or "")
     if text:
         payload["text"] = text

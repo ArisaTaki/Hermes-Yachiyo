@@ -3292,7 +3292,7 @@ def test_custom_api_agent_loop_clicks_observed_search_result_after_replan_inspec
         "desktop.ui_elements",
         "desktop.active_window",
         "desktop.inspect_app",
-        "desktop.safe_click",
+        "app.focus_and_click_ui_element",
     ]
     tool_batches: list[list[dict[str, Any]]] = []
     ui_calls = 0
@@ -3357,8 +3357,14 @@ def test_custom_api_agent_loop_clicks_observed_search_result_after_replan_inspec
                         },
                     }
                 )
-            elif tool == "desktop.safe_click":
-                result = {"ok": True, "data": {"clicked": True, "x": payload["x"], "y": payload["y"]}}
+            elif tool == "app.focus_and_click_ui_element":
+                result = {
+                    "ok": True,
+                    "data": {
+                        "app_name": payload["app_name"],
+                        "target": payload["target"],
+                    },
+                }
             else:
                 raise AssertionError(f"unexpected tool: {tool}")
             timeline_arg.append(
@@ -3433,7 +3439,7 @@ def test_custom_api_agent_loop_clicks_observed_search_result_after_replan_inspec
         run_id="run-verify-recovery-inspect-click",
     )
 
-    assert "已点击前台位置" in str(result)
+    assert "Figma" in str(result)
     assert [[request["tool"] for request in batch] for batch in tool_batches] == [
         [
             "desktop.list_apps",
@@ -3444,15 +3450,22 @@ def test_custom_api_agent_loop_clicks_observed_search_result_after_replan_inspec
             "desktop.ui_elements",
         ],
         ["desktop.active_window", "desktop.inspect_app", "desktop.ui_elements"],
-        ["desktop.safe_click", "desktop.ui_elements"],
+        ["app.focus_and_click_ui_element", "desktop.ui_elements"],
     ]
     click_request = tool_batches[2][0]
     assert click_request["planning_reason"] == "planner_replan_app_search_observed_result"
-    assert click_request["input"] == {"x": 320, "y": 180}
+    assert click_request["input"] == {
+        "app_name": "Figma",
+        "target": "第一个结果",
+        "role_filter": "",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert click_request["target_app_name"] == "Figma"
+    assert click_request["target_app_query"] == "image"
     assert click_request["observation_evidence"] == {
         "source_tool": "desktop.inspect_app",
-        "strategy": "observed_center",
-        "center": {"x": 320, "y": 180},
+        "strategy": "app_scoped_semantic_ui_tool",
     }
     assert not any(event["event"] == "agent.model.followup_context" for event in timeline)
 
@@ -4892,6 +4905,51 @@ def test_auto_followup_dispatches_observed_desktop_click_action() -> None:
         "strategy": "post_action_observation",
     }
 
+    app_scoped_click = custom_api_agent_module._auto_discovered_followup_requests(
+        {
+            "followup_target": {
+                **selection_payload["followup_target"],
+                "app_name": "Figma",
+                "app_query": "image",
+            }
+        },
+        [
+            "desktop.read_ui",
+            "app.focus_and_click_ui_element",
+            "desktop.click_ui_element",
+        ],
+        timeline,
+    )
+    assert [request["tool"] for request in app_scoped_click] == [
+        "app.focus_and_click_ui_element",
+        "desktop.read_ui",
+    ]
+    assert app_scoped_click[0]["input"] == {
+        "app_name": "Figma",
+        "target": "登录",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert app_scoped_click[0]["input_resolution"] == {
+        "tool": "app.focus_and_click_ui_element",
+        "field": "app_name",
+        "requested_app_name": "image",
+        "resolved_app_name": "Figma",
+        "source_tool": "desktop.list_apps",
+    }
+    assert app_scoped_click[0]["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "click",
+        "target": "登录",
+        "role_filter": "button",
+        "app_name": "Figma",
+    }
+    assert app_scoped_click[0]["observation_evidence"] == {
+        "source_tool": "desktop.read_ui",
+        "strategy": "app_scoped_semantic_ui_tool",
+    }
+
     safe_level_click = custom_api_agent_module._auto_discovered_followup_requests(
         selection_payload,
         ["desktop.read_ui", "desktop.safe_click", "desktop.click"],
@@ -5052,6 +5110,47 @@ def test_auto_followup_dispatches_observed_desktop_type_action() -> None:
         "action": "verify_after_action",
         "target": "text field",
         "role_filter": "text field",
+    }
+
+    app_scoped_type = custom_api_agent_module._auto_discovered_followup_requests(
+        {
+            "followup_target": {
+                **selection_payload["followup_target"],
+                "app_name": "Figma",
+                "app_query": "image",
+            }
+        },
+        [
+            "desktop.read_ui",
+            "app.focus_and_type_into_ui_element",
+            "desktop.type_into_ui_element",
+        ],
+        timeline,
+    )
+    assert [request["tool"] for request in app_scoped_type] == [
+        "app.focus_and_type_into_ui_element",
+        "desktop.read_ui",
+    ]
+    assert app_scoped_type[0]["input"] == {
+        "app_name": "Figma",
+        "target": "text field",
+        "text": "hello",
+        "role_filter": "text field",
+        "limit": 80,
+    }
+    assert app_scoped_type[0]["input_resolution"] == {
+        "tool": "app.focus_and_type_into_ui_element",
+        "field": "app_name",
+        "requested_app_name": "image",
+        "resolved_app_name": "Figma",
+        "source_tool": "desktop.list_apps",
+    }
+    assert app_scoped_type[0]["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "type_text",
+        "target": "text field",
+        "role_filter": "text field",
+        "app_name": "Figma",
     }
 
     semantic_focus_type = custom_api_agent_module._auto_discovered_followup_requests(
@@ -19319,7 +19418,10 @@ def test_auto_discovered_app_search_followup_types_submits_and_verifies() -> Non
         "action": "click",
         "target": "第一个结果",
         "role_filter": "",
+        "app_name": "Figma",
     }
+    assert observed_result_click_requests[0]["target_app_name"] == "Figma"
+    assert observed_result_click_requests[0]["target_app_query"] == "image"
     assert observed_result_click_requests[0]["observation_evidence"] == {
         "source_tool": "desktop.read_ui",
         "strategy": "observed_center",
