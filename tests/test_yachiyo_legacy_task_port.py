@@ -1777,6 +1777,50 @@ def test_legacy_chat_task_starter_uses_runtime_execution_envelope_requests() -> 
     assert direct_requests[0]["capability_id"] == "desktop.app_discovery"
 
 
+def test_legacy_chat_task_starter_does_not_direct_run_approval_required_envelope_requests() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatPlannerEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+    request = planner_enriched_chat_request(
+        {
+            "prompt": "打开 PixelForge",
+            "metadata": {"source": "launcher", "launcher_mode": "bubble"},
+        }
+    )
+    request["metadata"]["yachiyo_execution_envelope"]["requests"] = [
+        {
+            "request_id": "runtime-plan-test:request:2:terminal.run",
+            "step_id": "run-analysis",
+            "capability_id": "data.analysis",
+            "tool_name": "terminal.run",
+            "protocol": "json_fallback",
+            "input": {"command": "python - <<'PY'\n# analyze data\nPY"},
+            "planning_reason": "planner_full_plan_data_analysis",
+            "approval_required": True,
+            "source": "runtime_planner",
+        }
+    ]
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-main",
+        conversation_id="chat-1",
+        prompt=str(request["prompt"]),
+        metadata=request["metadata"],
+    )
+
+    assert task is not None
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    direct_requests = model_loop_call[1]["direct_tool_requests"]
+    assert [request["tool"] for request in direct_requests] == [
+        "desktop.list_apps",
+        "app.open",
+    ]
+    assert all(request["tool"] != "terminal.run" for request in direct_requests)
+    assert all(request.get("approval_required") is not True for request in direct_requests)
+
+
 def test_legacy_chat_task_starter_planned_timeline_keeps_runtime_planner_sequence() -> None:
     starter = LegacyChatTaskStarter(_FakeAppRuntime(), _MainChatPlannerEventRuntime())
 

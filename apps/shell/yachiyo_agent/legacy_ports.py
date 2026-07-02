@@ -1698,7 +1698,10 @@ def _legacy_direct_verify_request(request: dict[str, Any]) -> bool:
 def _has_approval_plan_tool(tool_requests: list[dict[str, Any]]) -> bool:
     return any(
         isinstance(request, dict)
-        and str(request.get("tool") or "").strip() in _APPROVAL_PLAN_TOOLS
+        and (
+            str(request.get("tool") or "").strip() in _APPROVAL_PLAN_TOOLS
+            or request.get("approval_required") is True
+        )
         for request in tool_requests
     )
 
