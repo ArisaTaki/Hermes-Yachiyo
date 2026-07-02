@@ -59,6 +59,69 @@ def public_run_event_from_payload(
         sequence=event_sequence,
         schema_version=_int(payload.get("schema_version"), default=1),
         event_type=event_type or "run.event",
+        parent_run_id=_event_context_text(payload, raw_payload, "parent_run_id"),
+        source_run_id=_event_context_text(payload, raw_payload, "source_run_id"),
+        source_runnable_id=_event_context_text_any(
+            payload,
+            raw_payload,
+            "source_runnable_id",
+            "source_agent_id",
+            "member_agent_id",
+            "agent_id",
+        ),
+        source_runnable_name=_event_context_text_any(
+            payload,
+            raw_payload,
+            "source_runnable_name",
+            "source_agent_name",
+            "member_agent_name",
+            "agent_name",
+        ),
+        workflow_id=_event_context_text(payload, raw_payload, "workflow_id"),
+        workflow_run_id=_event_context_text(payload, raw_payload, "workflow_run_id"),
+        workflow_node_id=_event_context_text(payload, raw_payload, "workflow_node_id"),
+        workflow_node_label=_event_context_text(
+            payload,
+            raw_payload,
+            "workflow_node_label",
+        ),
+        group_id=_event_context_text(payload, raw_payload, "group_id"),
+        group_run_id=_event_context_text_any(
+            payload,
+            raw_payload,
+            "group_run_id",
+            "run_group_id",
+        ),
+        run_group_id=_event_context_text_any(
+            payload,
+            raw_payload,
+            "run_group_id",
+            "group_run_id",
+        ),
+        agent_id=_event_context_text_any(
+            payload,
+            raw_payload,
+            "agent_id",
+            "member_agent_id",
+        ),
+        agent_name=_event_context_text_any(
+            payload,
+            raw_payload,
+            "agent_name",
+            "member_agent_name",
+        ),
+        member_agent_id=_event_context_text_any(
+            payload,
+            raw_payload,
+            "member_agent_id",
+            "agent_id",
+        ),
+        member_agent_name=_event_context_text_any(
+            payload,
+            raw_payload,
+            "member_agent_name",
+            "agent_name",
+        ),
         title=_public_event_title(title, sensitivity),
         detail=_public_event_detail(detail, sensitivity),
         actor=_optional_text(payload.get("actor")),
@@ -130,6 +193,26 @@ def _public_event_detail(value: Any, sensitivity: str) -> str | None:
     if sensitivity == "secret":
         return None
     return _optional_text(redact_secrets(value)) if value is not None else None
+
+
+def _event_context_text(
+    payload: Mapping[str, Any],
+    raw_payload: Mapping[str, Any],
+    key: str,
+) -> str | None:
+    return _optional_text(payload.get(key)) or _optional_text(raw_payload.get(key))
+
+
+def _event_context_text_any(
+    payload: Mapping[str, Any],
+    raw_payload: Mapping[str, Any],
+    *keys: str,
+) -> str | None:
+    for key in keys:
+        value = _event_context_text(payload, raw_payload, key)
+        if value:
+            return value
+    return None
 
 
 def _payload_items(payload: Any, key: str) -> list[dict[str, Any]]:

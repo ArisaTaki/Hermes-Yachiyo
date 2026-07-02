@@ -391,6 +391,21 @@ class PublicRunEvent(_PublicSnapshot):
     sequence: int = 0
     schema_version: int = 1
     event_type: str
+    parent_run_id: str | None = None
+    source_run_id: str | None = None
+    source_runnable_id: str | None = None
+    source_runnable_name: str | None = None
+    workflow_id: str | None = None
+    workflow_run_id: str | None = None
+    workflow_node_id: str | None = None
+    workflow_node_label: str | None = None
+    group_id: str | None = None
+    group_run_id: str | None = None
+    run_group_id: str | None = None
+    agent_id: str | None = None
+    agent_name: str | None = None
+    member_agent_id: str | None = None
+    member_agent_name: str | None = None
     title: str | None = None
     detail: str | None = None
     actor: str | None = None

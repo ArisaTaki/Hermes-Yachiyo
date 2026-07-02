@@ -2052,7 +2052,10 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
         "workflow_node_label",
         "group_id",
         "group_run_id",
+        "source",
+        "planning_reason",
         "step_id",
+        "planner_step_id",
         "capability_id",
         "decision_id",
         "plan_id",
@@ -3640,11 +3643,23 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
         "workflow_node_label",
         "group_id",
         "group_run_id",
+        "source",
+        "planning_reason",
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "intent_kind",
+        "step_id",
+        "planner_step_id",
+        "capability_id",
+        "replan_request_id",
+        "replan_trigger",
         "tool_name",
         "status",
         "risk_level",
         "input_preview",
         "output_preview",
+        "metadata",
         "foreground_lock_busy",
         "foreground_lock_holder",
         "approval_id",
@@ -3951,6 +3966,68 @@ def test_public_run_event_mapping_preserves_runtime_trace_payload_fields() -> No
     assert event.payload["result"] == {"ok": True}
     assert "event" not in event.payload
     assert "visibility" not in event.payload
+
+
+def test_public_run_event_mapping_promotes_run_correlation_fields() -> None:
+    event = public_run_event_from_payload(
+        {
+            "event_type": "workflow.node.agent",
+            "run_id": "child-run-1",
+            "sequence": 3,
+            "parent_run_id": "workflow-run-1",
+            "source_run_id": "child-run-source-1",
+            "payload": {
+                "workflow_id": "workflow-1",
+                "workflow_run_id": "workflow-run-1",
+                "workflow_node_id": "research",
+                "workflow_node_label": "Research",
+                "group_id": "group-1",
+                "run_group_id": "group-run-1",
+                "member_agent_id": "agent-1",
+                "member_agent_name": "Researcher",
+            },
+        }
+    )
+
+    assert event.parent_run_id == "workflow-run-1"
+    assert event.source_run_id == "child-run-source-1"
+    assert event.workflow_id == "workflow-1"
+    assert event.workflow_run_id == "workflow-run-1"
+    assert event.workflow_node_id == "research"
+    assert event.workflow_node_label == "Research"
+    assert event.group_id == "group-1"
+    assert event.group_run_id == "group-run-1"
+    assert event.run_group_id == "group-run-1"
+    assert event.agent_id == "agent-1"
+    assert event.agent_name == "Researcher"
+    assert event.member_agent_id == "agent-1"
+    assert event.member_agent_name == "Researcher"
+    assert event.source_runnable_id == "agent-1"
+    assert event.source_runnable_name == "Researcher"
+    assert event.payload["workflow_run_id"] == "workflow-run-1"
+    assert event.payload["run_group_id"] == "group-run-1"
+
+
+def test_secret_public_run_event_keeps_top_level_correlation_fields() -> None:
+    event = public_run_event_from_payload(
+        {
+            "event_type": "agent.tool.call",
+            "run_id": "child-run-1",
+            "parent_run_id": "workflow-run-1",
+            "sensitivity": "secret",
+            "payload": {
+                "workflow_run_id": "workflow-run-1",
+                "group_run_id": "group-run-1",
+                "tool": "terminal.run",
+                "command": "secret-token",
+            },
+        }
+    )
+
+    assert event.parent_run_id == "workflow-run-1"
+    assert event.workflow_run_id == "workflow-run-1"
+    assert event.group_run_id == "group-run-1"
+    assert event.payload == {"redacted": True, "reason": "secret_event"}
 
 
 def test_agent_definition_snapshot_keeps_editing_fields() -> None:
