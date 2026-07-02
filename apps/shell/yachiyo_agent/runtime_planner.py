@@ -1584,7 +1584,9 @@ class TaskIntentRouter:
             or app_write_current_page_context
             or artifact_context_source
         )
-        if context_source == "current_page_content":
+        if context_source == "current_page_content" and not (
+            app_write_target or transform_target or _artifact_output_location_hint(text)
+        ):
             return _empty_intent("report_generation", text)
         file_context = {} if artifact_context_source else _report_file_context_hint(text)
         if score <= 0 and transform_target:
