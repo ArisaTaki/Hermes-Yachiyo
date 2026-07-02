@@ -96,15 +96,15 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
     const selectionDetail = plannerSelectionTimelineDetail(event, detail);
     return selectionDetail ? `Planner 选择 · ${selectionDetail}` : 'Planner 选择';
   }
-  if (name === 'agent.desktop.intent_planned') {
+  if (isDesktopIntentEvent(name, 'planned')) {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `准备执行 · ${toolLabel}` : '准备执行桌面动作';
   }
-  if (name === 'agent.desktop.intent_approval_required') {
+  if (isDesktopIntentEvent(name, 'approval_required')) {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `等待审批 · ${toolLabel}` : '等待审批桌面动作';
   }
-  if (name === 'agent.desktop.intent_completed') {
+  if (isDesktopIntentEvent(name, 'completed')) {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `已执行 · ${toolLabel}` : '已执行桌面动作';
   }
@@ -116,7 +116,7 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `桌面就绪已恢复 · ${toolLabel}` : '桌面就绪已恢复';
   }
-  if (name === 'agent.desktop.intent_unavailable') {
+  if (isDesktopIntentEvent(name, 'unavailable')) {
     const toolLabel = plannedDesktopToolLabel(event, detail);
     return toolLabel ? `无法执行 · ${toolLabel}` : '无法执行桌面动作';
   }
@@ -210,12 +210,12 @@ export function timelineEventTone(event: Record<string, unknown>): string {
   if (name === 'group.run.completed') return 'ready';
   if (name === 'group.run.failed' || name === 'group.run.cancelled') return 'danger';
   if (name.startsWith('group.member.')) return name.includes('started') ? 'running' : 'ready';
-  if (name === 'agent.desktop.intent_planned') return 'tool';
-  if (name === 'agent.desktop.intent_approval_required') return 'approval';
+  if (isDesktopIntentEvent(name, 'planned')) return 'tool';
+  if (isDesktopIntentEvent(name, 'approval_required')) return 'approval';
   if (name === 'agent.desktop.permission_recovery') return 'approval';
   if (name === 'agent.desktop.readiness_recovered') return 'ready';
-  if (name === 'agent.desktop.intent_completed') return 'ready';
-  if (name === 'agent.desktop.intent_unavailable') return 'danger';
+  if (isDesktopIntentEvent(name, 'completed')) return 'ready';
+  if (isDesktopIntentEvent(name, 'unavailable')) return 'danger';
   if (name === 'agent.model.followup_context') return 'model';
   if (name === 'agent.tool.policy_decision' || name === 'tool.policy_decision') {
     const payload = event.payload && typeof event.payload === 'object' && !Array.isArray(event.payload)
@@ -271,6 +271,13 @@ export function timelineEventTone(event: Record<string, unknown>): string {
 export function timelineEventCode(event: Record<string, unknown>): string {
   const name = timelineEventName(event);
   return name.includes('.') ? name.split('.').slice(-2).join('.') : name || 'event';
+}
+
+function isDesktopIntentEvent(name: string, suffix: string): boolean {
+  return name === `agent.desktop.intent_${suffix}`
+    || name === `group.run.desktop.intent_${suffix}`
+    || name === `workflow.desktop.intent_${suffix}`
+    || name === `workflow.run.desktop.intent_${suffix}`;
 }
 
 function plannedDesktopToolLabel(event: Record<string, unknown>, detail: string): string {
@@ -366,7 +373,7 @@ export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
     const contentSnapshotSummary = publicRunEventContentSnapshotSummary(payload);
     if (contentSnapshotSummary) return contentSnapshotSummary;
   }
-  if (event.event_type === 'agent.desktop.intent_completed') {
+  if (isDesktopIntentEvent(event.event_type, 'completed')) {
     const toolChainSummary = publicRunEventDesktopToolChainSummary(payload);
     if (toolChainSummary) return toolChainSummary;
   }

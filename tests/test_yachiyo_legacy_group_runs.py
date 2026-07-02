@@ -101,6 +101,9 @@ def test_legacy_group_run_scopes_replan_planner_events() -> None:
     assert _group_run_planner_event_type("agent.replan.requested") == (
         "group.run.replan.requested"
     )
+    assert _group_run_planner_event_type("agent.desktop.intent_planned") == (
+        "group.run.desktop.intent_planned"
+    )
     assert _group_run_planner_event_type("agent.task.workspace_item.updated") == (
         "group.run.task.workspace_item.updated"
     )

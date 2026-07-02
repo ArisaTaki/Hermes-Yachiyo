@@ -1649,6 +1649,18 @@ def test_group_run_snapshot_synthesizes_scoped_replan_event() -> None:
     ]
     events.append(
         {
+            "event_type": "agent.desktop.intent_planned",
+            "payload": {
+                "tool": "terminal.run",
+                "planning_reason": "planner_replan_fallback_recovery",
+                "replan_request_id": "replan-terminal-1",
+                "replan_trigger": "tool_failure",
+                "step_id": analysis_step.step_id,
+            },
+        }
+    )
+    events.append(
+        {
             "event_type": "agent.tool.call",
             "payload": {
                 "step_id": analysis_step.step_id,
@@ -1674,6 +1686,12 @@ def test_group_run_snapshot_synthesizes_scoped_replan_event() -> None:
     assert "group.run.plan.created" in event_types
     assert "group.run.task_core.created" in event_types
     assert "group.run.plan.step" in event_types
+    planned_event = next(
+        event for event in snapshot.events if event.event_type == "group.run.desktop.intent_planned"
+    )
+    assert planned_event.payload["planner_event_type"] == "agent.desktop.intent_planned"
+    assert planned_event.payload["planner_scope"] == "group_run"
+    assert planned_event.payload["replan_request_id"] == "replan-terminal-1"
     replan_event = next(
         event for event in snapshot.events if event.event_type == "group.run.replan.requested"
     )
@@ -1733,15 +1751,25 @@ def test_workflow_run_snapshot_scopes_agent_planner_events_to_workflow_run() -> 
                         },
                     },
                 },
+                {
+                    "event_type": "agent.desktop.intent_planned",
+                    "payload": {
+                        "source": "runtime_planner",
+                        "tool": "workflow.run",
+                        "planning_reason": "planner_replan_fallback_recovery",
+                        "replan_request_id": "replan-workflow-1",
+                    },
+                },
             ],
         }
     )
 
     event_types = [event.event_type for event in snapshot.events]
-    assert event_types[:3] == [
+    assert event_types[:4] == [
         "workflow.run.started",
         "workflow.run.intent.selected",
         "workflow.run.task_core.created",
+        "workflow.run.desktop.intent_planned",
     ]
     planner_event = snapshot.events[1]
     assert planner_event.payload["planner_scope"] == "workflow_run"
@@ -1749,6 +1777,10 @@ def test_workflow_run_snapshot_scopes_agent_planner_events_to_workflow_run() -> 
     task_core_event = snapshot.events[2]
     assert task_core_event.payload["planner_event_type"] == "agent.task_core.created"
     assert task_core_event.payload["task_core"]["workspace"]["title"] == "Workflow Workspace"
+    planned_event = snapshot.events[3]
+    assert planned_event.payload["planner_event_type"] == "agent.desktop.intent_planned"
+    assert planned_event.payload["planner_scope"] == "workflow_run"
+    assert planned_event.payload["replan_request_id"] == "replan-workflow-1"
 
 
 def test_run_timeline_snapshot_projects_desktop_approval_event() -> None:
