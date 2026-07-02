@@ -23493,6 +23493,8 @@ def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observa
         "desktop.list_apps",
         "app.open",
         "app.focus_and_type_into_ui_element",
+        "desktop.safe_click",
+        "desktop.safe_type_text",
         "desktop.search_submit",
         "app.focus_and_click_ui_element",
         "desktop.ui_elements",
@@ -23571,7 +23573,25 @@ def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observa
                         "action": "app.open",
                         "data": {"app_name": "Music"},
                     }
-                elif tool == "app.focus_and_type_into_ui_element":
+                elif tool == "desktop.ui_elements":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {
+                            "elements": [
+                                {
+                                    "role": "AXTextField",
+                                    "label": "search 搜索",
+                                    "center": {"x": 180, "y": 90},
+                                }
+                            ],
+                            "count": 1,
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected first batch tool after failed type: {tool}")
+            elif batch_index == 2:
+                if tool == "app.focus_and_type_into_ui_element":
                     result = {
                         "ok": False,
                         "error": "target not found",
@@ -23580,8 +23600,8 @@ def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observa
                     append_tool_event(request, payload, result, messages_arg, timeline_arg)
                     return
                 else:
-                    raise AssertionError(f"unexpected first batch tool after failed type: {tool}")
-            elif batch_index == 2:
+                    raise AssertionError(f"unexpected deferred type tool: {tool}")
+            elif batch_index == 3:
                 assert tool == "desktop.ui_elements"
                 result = {
                     "ok": True,
@@ -23597,16 +23617,18 @@ def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observa
                         "count": 1,
                     },
                 }
-            elif batch_index == 3:
-                if tool == "app.focus_and_type_into_ui_element":
+            elif batch_index == 4:
+                if tool == "desktop.safe_click":
                     result = {
                         "ok": True,
-                        "action": "app.focus_and_type_into_ui_element",
-                        "data": {
-                            "app_name": payload.get("app_name"),
-                            "target": payload.get("target"),
-                            "text": payload.get("text"),
-                        },
+                        "action": "desktop.safe_click",
+                        "data": {"x": payload.get("x"), "y": payload.get("y")},
+                    }
+                elif tool == "desktop.safe_type_text":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.safe_type_text",
+                        "data": {"text": payload.get("text")},
                     }
                 elif tool == "desktop.ui_elements":
                     result = {
@@ -23626,7 +23648,7 @@ def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observa
                     }
                 else:
                     raise AssertionError(f"unexpected observed action tool: {tool}")
-            elif batch_index == 4:
+            elif batch_index == 5:
                 if tool == "desktop.search_submit":
                     result = {
                         "ok": True,
@@ -23650,7 +23672,7 @@ def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observa
                     }
                 else:
                     raise AssertionError(f"unexpected continuation tool: {tool}")
-            elif batch_index == 5:
+            elif batch_index == 6:
                 if tool == "app.focus_and_click_ui_element":
                     result = {
                         "ok": True,
@@ -23723,36 +23745,47 @@ def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observa
     assert "Music" in str(result)
     assert [[request["tool"] for request in batch] for batch in tool_batches] == [
         [
+            "desktop.list_apps",
             "app.open",
+            "desktop.ui_elements",
+        ],
+        [
             "app.focus_and_type_into_ui_element",
+            "desktop.ui_elements",
             "desktop.search_submit",
             "desktop.ui_elements",
         ],
         ["desktop.ui_elements"],
-        ["app.focus_and_type_into_ui_element", "desktop.ui_elements"],
+        ["desktop.safe_click", "desktop.safe_type_text", "desktop.ui_elements"],
         ["desktop.search_submit", "desktop.ui_elements"],
         ["app.focus_and_click_ui_element", "desktop.ui_elements"],
     ]
-    observation_request = tool_batches[1][0]
+    initial_observation_request = tool_batches[0][-1]
+    assert initial_observation_request["deferred_tool"] == (
+        "app.focus_and_type_into_ui_element"
+    )
+    observation_request = tool_batches[2][0]
     assert observation_request["planning_reason"] == "planner_replan_ui_observation_recovery"
     assert observation_request["continue_to_model"] is True
-    retry_request = tool_batches[2][0]
-    assert retry_request["planning_reason"] == "planner_replan_ui_observed_action"
-    assert retry_request["input"] == {
-        "app_name": "Music",
-        "target": "search 搜索",
-        "text": "超时空辉夜姬",
-        "role_filter": "text",
-        "limit": 80,
+    focus_request = tool_batches[3][0]
+    assert focus_request["planning_reason"] == "planner_replan_ui_observed_action"
+    assert focus_request["input"] == {"x": 180, "y": 90}
+    assert focus_request["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "observed_center",
+        "center": {"x": 180, "y": 90},
     }
+    retry_request = tool_batches[3][1]
+    assert retry_request["planning_reason"] == "planner_replan_ui_observed_action"
+    assert retry_request["input"] == {"text": "超时空辉夜姬"}
     assert retry_request["observation_evidence"] == {
         "source_tool": "desktop.ui_elements",
-        "strategy": "app_scoped_semantic_ui_tool",
+        "strategy": "focused_after_observed_target",
     }
-    continuation_request = tool_batches[3][0]
+    continuation_request = tool_batches[4][0]
     assert continuation_request["planning_reason"] == "planner_replan_ui_continuation"
     assert continuation_request["replan_request_id"] == retry_request["replan_request_id"]
-    observed_result_request = tool_batches[4][0]
+    observed_result_request = tool_batches[5][0]
     assert (
         observed_result_request["planning_reason"]
         == "planner_replan_ui_search_observed_result"
