@@ -146,6 +146,27 @@ def test_planner_first_daily_desktop_entrypoint_requests_use_runtime_planner_by_
         assert requests[1]["input"] == {"app_name": app_name}
 
 
+def test_planner_first_daily_desktop_entrypoint_requests_can_be_execution_normalized() -> None:
+    requests = planner_first_daily_desktop_entrypoint_requests(
+        "打开 PixelForge",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+        execution_normalized=True,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert requests[0]["input"] == {"query": "PixelForge", "limit": 20}
+    assert requests[1]["input"] == {
+        "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
+    }
+    assert requests[2]["input"] == {}
+
+
 def test_planner_first_daily_desktop_entrypoint_discovers_apps_by_capability() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(
         "打开一个能写 markdown 的应用，新建文档标题为周报",

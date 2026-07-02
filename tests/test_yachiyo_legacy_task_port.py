@@ -1902,7 +1902,11 @@ def test_legacy_chat_task_starter_planned_timeline_keeps_runtime_planner_sequenc
         "desktop.active_window",
     ]
     assert timeline[0]["input_preview"] == {"query": "PixelForge", "limit": 20}
-    assert timeline[1]["input_preview"] == {"app_name": "PixelForge"}
+    assert timeline[1]["input_preview"] == {
+        "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
+    }
     assert timeline[2]["input_preview"] == {}
 
 

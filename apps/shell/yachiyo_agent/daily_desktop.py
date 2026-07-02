@@ -73,6 +73,7 @@ def planner_first_daily_desktop_entrypoint_requests(
     metadata: Mapping[str, Any] | None = None,
     allowed_tools: Sequence[str] | None = None,
     metadata_allowed_tools: Sequence[str] | None = None,
+    execution_normalized: bool = False,
 ) -> list[dict[str, Any]]:
     """Return daily entrypoint requests with Runtime Planner as the default."""
 
@@ -84,7 +85,7 @@ def planner_first_daily_desktop_entrypoint_requests(
     if direct_tool_request:
         return [direct_tool_request]
     try:
-        from .planner_execution import planner_tool_requests
+        from .planner_execution import planner_execution_tool_requests, planner_tool_requests
 
         planner_requests = planner_tool_requests(
             str(text or ""),
@@ -95,6 +96,8 @@ def planner_first_daily_desktop_entrypoint_requests(
         logger.debug("Runtime planner daily desktop candidates unavailable", exc_info=True)
         planner_requests = []
     if planner_requests:
+        if execution_normalized:
+            return planner_execution_tool_requests(planner_requests, allowed) or planner_requests
         return planner_requests
     return daily_desktop_entrypoint_requests(
         text,
@@ -216,6 +219,7 @@ def daily_desktop_planned_timeline(
             prompt,
             metadata=metadata,
             allowed_tools=allowed_tools,
+            execution_normalized=True,
         )
     if not planned_requests:
         return []

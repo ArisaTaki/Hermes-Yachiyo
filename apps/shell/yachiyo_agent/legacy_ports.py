@@ -276,6 +276,7 @@ class LegacyChatTaskStarter:
             metadata=metadata,
             allowed_tools=allowed_entrypoint_tools,
             metadata_allowed_tools=allowed_daily_desktop_tools,
+            execution_normalized=True,
         )
         if _prefer_execution_requests_for_metadata(metadata):
             planned_requests = [
