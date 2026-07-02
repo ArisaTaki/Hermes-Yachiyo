@@ -348,8 +348,12 @@ def _group_run_planner_event_type(event_type: str) -> str:
         return "group.run.task_core.created"
     if event_type == "agent.plan.step":
         return "group.run.plan.step"
+    if event_type == "agent.plan.selection":
+        return "group.run.plan.selection"
     if event_type == "agent.replan.requested":
         return "group.run.replan.requested"
+    if event_type == "agent.replan.recovery.updated":
+        return "group.run.replan.recovery.updated"
     if event_type == "agent.desktop.intent_planned":
         return "group.run.desktop.intent_planned"
     if event_type == "agent.desktop.intent_approval_required":
