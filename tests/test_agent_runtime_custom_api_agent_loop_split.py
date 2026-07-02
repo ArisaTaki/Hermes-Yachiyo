@@ -298,6 +298,36 @@ def test_runtime_planner_defers_unknown_app_ui_operation_until_ui_observed() -> 
     assert payload["yachiyo_execution_envelope"]["requests"][-1]["continue_to_model"] is True
 
 
+def test_runtime_planner_file_access_opens_path_with_requested_app() -> None:
+    loop = _private_runtime_loop()
+    decision, requests, payload = loop._runtime_planner_tool_requests(
+        "用 Numbers 打开 Downloads/sales.csv",
+        [
+            "desktop.open_path",
+            "desktop.open_path_with_app",
+            "desktop.active_window",
+        ],
+    )
+
+    assert decision is not None
+    assert decision.selected_intent.kind == "file_access"
+    assert decision.selected_intent.inputs == {
+        "action": "open_path_with_app",
+        "path": "Downloads/sales.csv",
+        "app_name": "Numbers",
+    }
+    assert [request["tool"] for request in requests] == ["desktop.open_path_with_app"]
+    assert requests[0]["input"] == {
+        "path": "Downloads/sales.csv",
+        "app_name": "Numbers",
+    }
+    assert requests[0]["planning_reason"] == "planner_fallback_file_access"
+    assert payload["selection_reason"] == "runtime_planner_full_plan_execution"
+    assert decision.plan.tool_plan.steps[0].step_id == "open-local-path-with-app"
+    assert decision.plan.tool_plan.steps[0].tool_name == "desktop.open_path_with_app"
+    assert decision.plan.tool_plan.steps[0].action == "open_path_with_app"
+
+
 def test_runtime_loop_auto_executes_deferred_ui_action_after_observation() -> None:
     budget = FakeBudget()
     timeline: list[dict[str, Any]] = []
@@ -417,6 +447,94 @@ def test_runtime_loop_auto_executes_deferred_ui_action_after_observation() -> No
         "role_filter": "button",
         "app_name": "PixelForge",
     }
+
+
+def test_runtime_loop_opens_file_with_requested_app_without_model_recipe() -> None:
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = []
+    executed_requests: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        for request in tool_requests:
+            executed_requests.append(request)
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    request["tool"],
+                    input_preview=request.get("input", {}),
+                    result={
+                        "ok": True,
+                        "data": {
+                            "path": request["input"]["path"],
+                            "app_name": request["input"]["app_name"],
+                        },
+                    },
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "desktop.open_path",
+                    "desktop.open_path_with_app",
+                ]
+            }
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("file access with app should execute directly")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "用 Numbers 打开 Downloads/sales.csv",
+        broker=object(),
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-open-file-with-app",
+    )
+
+    assert [request["tool"] for request in executed_requests] == [
+        "desktop.open_path_with_app"
+    ]
+    assert executed_requests[0]["input"] == {
+        "path": "Downloads/sales.csv",
+        "app_name": "Numbers",
+    }
+    assert "Downloads/sales.csv" in str(result)
+    assert "Numbers" in str(result)
 
 
 def test_recovery_actions_projects_retry_input_contract_fields() -> None:

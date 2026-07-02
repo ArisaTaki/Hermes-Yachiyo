@@ -6045,6 +6045,23 @@ class RuntimePlanner:
     ) -> list[ToolPlanStepSnapshot]:
         action = str(intent.inputs.get("action") or "").strip()
         path = str(intent.inputs.get("path") or "").strip()
+        app_name = str(intent.inputs.get("app_name") or "").strip()
+        if action == "open_path_with_app" and app_name:
+            return [
+                _step(
+                    intent,
+                    "open-local-path-with-app",
+                    "Open local path with app",
+                    "file.desktop_access",
+                    _first_allowed(("desktop.open_path_with_app", "app.open_path_with_app"), allowed),
+                    input_preview={"path": path, "app_name": app_name} if path else {},
+                    action="open_path_with_app",
+                    reason=(
+                        "Use the dedicated desktop file tool to open the requested local path "
+                        "with the requested app instead of treating paths as app names."
+                    ),
+                )
+            ]
         reveal = action == "reveal_path"
         tool_name = "desktop.reveal_path" if reveal else "desktop.open_path"
         return [

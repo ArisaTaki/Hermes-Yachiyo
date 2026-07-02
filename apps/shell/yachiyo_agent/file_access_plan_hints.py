@@ -6,6 +6,7 @@ import re
 from collections.abc import Iterable, Mapping
 from typing import Any
 
+from .app_name_hints import legacy_app_name_hint
 from .path_alias_hints import legacy_common_desktop_path_hint
 
 
@@ -15,6 +16,9 @@ def file_access_hint(prompt: str) -> dict[str, str]:
         return {}
     if re.search(r"https?://", text, flags=re.IGNORECASE):
         return {}
+    open_with_app = _open_path_with_app(text)
+    if open_with_app:
+        return open_with_app
     reveal_path = _reveal_path(text)
     if reveal_path:
         return {"action": "reveal_path", "path": reveal_path}
@@ -32,10 +36,72 @@ def file_access_tool_preview(
     path = str(inputs.get("path") or "").strip()
     if not action or not path:
         return None, {}
+    allowed = (
+        {str(tool or "").strip() for tool in allowed_tools}
+        if allowed_tools is not None
+        else None
+    )
+    if action == "open_path_with_app":
+        app_name = str(inputs.get("app_name") or "").strip()
+        if not app_name:
+            return None, {}
+        tool_name = "desktop.open_path_with_app"
+        if allowed is not None and tool_name not in allowed:
+            return None, {}
+        return tool_name, {"path": path, "app_name": app_name}
     tool_name = "desktop.reveal_path" if action == "reveal_path" else "desktop.open_path"
-    if allowed_tools is not None and tool_name not in {str(tool or "").strip() for tool in allowed_tools}:
+    if allowed is not None and tool_name not in allowed:
         return None, {}
     return tool_name, {"path": path}
+
+
+def _open_path_with_app(text: str) -> dict[str, str]:
+    if _is_reveal_request(text):
+        return {}
+    path = _explicit_path(text)
+    if not path or not _looks_like_open_request(text):
+        return {}
+    app_name = _open_with_app_name(text, path)
+    if not app_name:
+        return {}
+    return {"action": "open_path_with_app", "path": path, "app_name": app_name}
+
+
+def _open_with_app_name(text: str, path: str) -> str:
+    escaped_path = re.escape(path)
+    patterns = (
+        rf"(?:用|使用|通过)\s*(?P<app>.+?)\s*(?:打开|开启|查看)\s*{escaped_path}",
+        rf"(?:打开|开启|查看)\s*{escaped_path}\s*(?:用|使用|通过)\s*(?P<app>.+)$",
+        rf"\bopen\s+{escaped_path}\s+(?:with|in|using)\s+(?P<app>.+)$",
+        rf"\b(?:with|using)\s+(?P<app>.+?)\s+open\s+{escaped_path}\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, text, flags=re.IGNORECASE)
+        if not match:
+            continue
+        app_name = _clean_open_with_app_name(match.group("app"))
+        if app_name:
+            return app_name
+    return ""
+
+
+def _clean_open_with_app_name(value: str) -> str:
+    app_name = _clean(value)
+    app_name = re.sub(
+        r"^(?:the\s+)?(?:app|application|应用|软件)\s+",
+        "",
+        app_name,
+        flags=re.IGNORECASE,
+    ).strip()
+    app_name = re.sub(
+        r"\s*(?:app|application|应用|软件|打开|开启|查看)$",
+        "",
+        app_name,
+        flags=re.IGNORECASE,
+    ).strip(" ：:，,。.;；")
+    if not app_name:
+        return ""
+    return legacy_app_name_hint(app_name)
 
 
 def _open_path(text: str) -> str:
