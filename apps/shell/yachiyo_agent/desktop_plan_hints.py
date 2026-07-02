@@ -955,12 +955,20 @@ def media_app_query_search_plan(
         ),
         allowed,
     )
+    type_into_tool = _first_allowed(
+        (
+            "app.focus_and_type_into_ui_element",
+            "app.open_and_type_into_ui_element",
+            "desktop.type_into_ui_element",
+        ),
+        allowed,
+    )
     submit_tool = _first_allowed(("desktop.search_submit", "desktop.submit_foreground"), allowed)
-    if not type_tool or not submit_tool:
+    if (not type_tool and not type_into_tool) or not submit_tool:
         return []
     submit_payload = {"action": "confirm"} if submit_tool == "desktop.submit_foreground" else {}
     type_payload = {"text": query}
-    if type_tool.startswith("app."):
+    if type_tool and type_tool.startswith("app."):
         type_payload = {"app_name": app_name, **selected_app_payload, "text": query}
 
     discovery_step = []
@@ -974,7 +982,7 @@ def media_app_query_search_plan(
         ("app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"),
         allowed,
     )
-    if app_search_tool:
+    if app_search_tool and type_tool:
         app_search_payload = {
             "app_name": app_name,
             **selected_app_payload,
@@ -999,6 +1007,34 @@ def media_app_query_search_plan(
         ("app.open", "desktop.open_app", "app.focus", "desktop.focus_app"),
         allowed,
     )
+    if app_tool and type_into_tool:
+        type_into_payload = {
+            "target": "search 搜索",
+            "text": query,
+            "role_filter": "text",
+            "limit": 80,
+        }
+        if type_into_tool.startswith("app."):
+            type_into_payload = {
+                "app_name": app_name,
+                **selected_app_payload,
+                **type_into_payload,
+            }
+        plan = [
+            *discovery_step,
+            (app_tool, {"app_name": app_name, **selected_app_payload}),
+            (type_into_tool, type_into_payload),
+            (submit_tool, submit_payload),
+        ]
+        _append_media_search_result_play_step(
+            plan,
+            app_name=app_name,
+            selected_app_payload=selected_app_payload,
+            allowed=allowed,
+        )
+        _append_media_app_verify_step(plan, allowed)
+        return plan
+
     shortcut_tool = _first_allowed(("desktop.safe_shortcut", "desktop.hotkey"), allowed)
     if not app_tool or not shortcut_tool:
         return []

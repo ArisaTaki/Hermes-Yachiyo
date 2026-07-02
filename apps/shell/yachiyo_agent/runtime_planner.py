@@ -4839,6 +4839,9 @@ class RuntimePlanner:
                 elif tool_name in {
                     "app.open_and_safe_type_text",
                     "app.focus_and_safe_type_text",
+                    "app.open_and_type_into_ui_element",
+                    "app.focus_and_type_into_ui_element",
+                    "desktop.type_into_ui_element",
                 }:
                     step_id = "type-media-search-query"
                     title = "Type media search query"

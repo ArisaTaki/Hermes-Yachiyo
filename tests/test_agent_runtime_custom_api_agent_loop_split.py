@@ -20954,6 +20954,68 @@ def test_custom_api_agent_loop_executes_runtime_planner_media_app_search_verify(
     assert completed_event["planning_reason"] == "planner_fallback_media_playback"
 
 
+def test_runtime_planner_media_query_uses_type_into_ui_fallback() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+
+    decision = RuntimePlanner().decision(
+        "帮我用 Apple Music 播放超时空辉夜姬",
+        allowed_tools=allowed_tools,
+    )
+    requests = planner_tool_requests(
+        "帮我用 Apple Music 播放超时空辉夜姬",
+        allowed_tools,
+    )
+
+    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-media-app",
+        "open-media-app",
+        "type-media-search-query",
+        "submit-media-search",
+        "play-media-search-result",
+        "verify-media-search",
+    ]
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert requests[2]["input"] == {
+        "app_name": "Music",
+        "target": "search 搜索",
+        "text": "超时空辉夜姬",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert requests[4]["input"] == {
+        "app_name": "Music",
+        "target": "first result",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+    assert {request["planning_reason"] for request in requests} == {
+        "planner_fallback_media_playback"
+    }
+
+
 def test_auto_discovered_media_playback_followup_searches_clicks_and_verifies() -> None:
     timeline = [
         _timeline(
