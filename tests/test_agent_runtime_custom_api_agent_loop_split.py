@@ -123,6 +123,40 @@ def test_auto_data_analysis_from_workspace_discovery_preserves_expected_artifact
     }
 
 
+def test_auto_data_analysis_from_workspace_discovery_skips_ambiguous_files() -> None:
+    request = RuntimeCustomApiAgentLoop._auto_data_analysis_request_from_discovery(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "workspace.list",
+                "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_prefetch_data_source",
+                "continue_to_model": True,
+            }
+        ],
+        ["workspace.list", "data.analyze", "artifact.write"],
+        {"artifacts_expected": ["analysis-report.md"]},
+        [
+            _timeline(
+                "agent.tool.call",
+                "workspace.list",
+                input_preview={"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+                result={
+                    "ok": True,
+                    "path": "Downloads",
+                    "entries": [
+                        {"name": "sales.csv", "type": "file"},
+                        {"name": "inventory.csv", "type": "file"},
+                    ],
+                },
+            )
+        ],
+    )
+
+    assert request is None
+
+
 def _private_runtime_loop(
     *,
     append_run_event=None,
@@ -1877,7 +1911,18 @@ def test_custom_api_agent_loop_auto_analyzes_captured_visible_table() -> None:
         "desktop.ui_elements",
         "data.analyze",
     ]
-    assert tool_runs[0]["tool_requests"][0] == {
+    context_request = tool_runs[0]["tool_requests"][0]
+    assert {
+        key: context_request[key]
+        for key in (
+            "protocol",
+            "tool",
+            "input",
+            "source",
+            "planning_reason",
+            "continue_to_model",
+        )
+    } == {
         "protocol": "json_fallback",
         "tool": "desktop.ui_elements",
         "input": {"role_filter": "text", "limit": 80},
@@ -1885,7 +1930,18 @@ def test_custom_api_agent_loop_auto_analyzes_captured_visible_table() -> None:
         "planning_reason": "planner_prefetch_data_source",
         "continue_to_model": True,
     }
-    assert tool_runs[1]["tool_requests"][0] == {
+    assert context_request["step_id"] == "read-data-context"
+    assert context_request["capability_id"] == "desktop.app_discovery"
+    assert context_request["intent_kind"] == "data_analysis"
+    assert context_request["decision_id"].startswith("decision-")
+    assert context_request["plan_id"].startswith("runtime-plan-")
+    assert context_request["tool_plan_id"].startswith("tool-plan-")
+
+    analysis_request = tool_runs[1]["tool_requests"][0]
+    assert {
+        key: analysis_request[key]
+        for key in ("protocol", "tool", "input", "source", "planning_reason")
+    } == {
         "protocol": "json_fallback",
         "tool": "data.analyze",
         "input": {
@@ -1904,6 +1960,13 @@ def test_custom_api_agent_loop_auto_analyzes_captured_visible_table() -> None:
         "source": "runtime_planner",
         "planning_reason": "planner_builtin_data_analysis",
     }
+    assert analysis_request["step_id"] == "analyze-data-context"
+    assert analysis_request["capability_id"] == "data.analysis"
+    assert analysis_request["planner_step_id"] == "analyze-data-context"
+    assert analysis_request["decision_id"] == context_request["decision_id"]
+    assert analysis_request["plan_id"] == context_request["plan_id"]
+    assert analysis_request["tool_plan_id"] == context_request["tool_plan_id"]
+    assert analysis_request["intent_kind"] == "data_analysis"
     auto_plan_event = [
         event
         for event in timeline
@@ -1911,6 +1974,8 @@ def test_custom_api_agent_loop_auto_analyzes_captured_visible_table() -> None:
         and event["detail"] == "data.analyze"
     ][0]
     assert auto_plan_event["planning_reason"] == "planner_builtin_data_analysis"
+    assert auto_plan_event["step_id"] == "analyze-data-context"
+    assert auto_plan_event["decision_id"] == context_request["decision_id"]
     completed_todos = [
         event
         for event in timeline

@@ -1206,53 +1206,62 @@ class RuntimeCustomApiAgentLoop:
             if isinstance(request, dict)
         ):
             return None
-        captured_request = _auto_data_analysis_request_from_captured_content(
+        prefetch_tools = {
+            str(request.get("tool") or "").strip()
+            for request in planned_tool_requests
+            if isinstance(request, dict) and bool(request.get("continue_to_model"))
+        }
+        if "workspace.list" in prefetch_tools:
+            latest_list = _latest_workspace_list_event(timeline)
+            if latest_list is None:
+                return None
+            result = latest_list.get("result") if isinstance(latest_list.get("result"), dict) else {}
+            entries = result.get("entries")
+            data_files: list[str] = []
+            if isinstance(entries, list):
+                data_files = [
+                    str(entry.get("name") or "").strip()
+                    for entry in entries
+                    if isinstance(entry, dict)
+                    and str(entry.get("type") or "").strip() == "file"
+                    and _data_analysis_file_kind(str(entry.get("name") or "")) != ""
+                ]
+            if result.get("ok") is not True or len(data_files) != 1:
+                return None
+            list_input = (
+                latest_list.get("input_preview")
+                if isinstance(latest_list.get("input_preview"), dict)
+                else {}
+            )
+            base_path = str(list_input.get("path") or result.get("path") or "").strip()
+            path = _join_workspace_list_path(base_path, data_files[0])
+            artifact_paths = _string_list(selection_payload.get("artifacts_expected"))
+            if not artifact_paths:
+                artifact_paths = ["analysis-report.md"]
+            input_payload: dict[str, Any] = {
+                "path": path,
+                "artifact_path": artifact_paths[0],
+                "source_kind": _data_analysis_file_kind(path),
+                "requested_outputs": _requested_outputs_from_artifact_paths(artifact_paths),
+                "artifact_manifest": _artifact_manifest_from_paths(artifact_paths),
+            }
+            if len(artifact_paths) > 1:
+                input_payload["artifact_paths"] = artifact_paths
+            return _first_annotated_auto_followup_request(
+                {
+                    "protocol": "json_fallback",
+                    "tool": "data.analyze",
+                    "input": input_payload,
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_builtin_data_analysis",
+                },
+                selection_payload,
+            )
+        return _auto_data_analysis_request_from_captured_content(
             planned_tool_requests,
             selection_payload,
             timeline,
         )
-        if captured_request:
-            return captured_request
-        latest_list = _latest_workspace_list_event(timeline)
-        if latest_list is None:
-            return None
-        result = latest_list.get("result") if isinstance(latest_list.get("result"), dict) else {}
-        if result.get("ok") is not True:
-            return None
-        entries = result.get("entries")
-        if not isinstance(entries, list):
-            return None
-        data_files = [
-            str(entry.get("name") or "").strip()
-            for entry in entries
-            if isinstance(entry, dict)
-            and str(entry.get("type") or "").strip() == "file"
-            and _data_analysis_file_kind(str(entry.get("name") or "")) != ""
-        ]
-        if len(data_files) != 1:
-            return None
-        list_input = latest_list.get("input_preview") if isinstance(latest_list.get("input_preview"), dict) else {}
-        base_path = str(list_input.get("path") or result.get("path") or "").strip()
-        path = _join_workspace_list_path(base_path, data_files[0])
-        artifact_paths = _string_list(selection_payload.get("artifacts_expected"))
-        if not artifact_paths:
-            artifact_paths = ["analysis-report.md"]
-        input_payload: dict[str, Any] = {
-            "path": path,
-            "artifact_path": artifact_paths[0],
-            "source_kind": _data_analysis_file_kind(path),
-            "requested_outputs": _requested_outputs_from_artifact_paths(artifact_paths),
-            "artifact_manifest": _artifact_manifest_from_paths(artifact_paths),
-        }
-        if len(artifact_paths) > 1:
-            input_payload["artifact_paths"] = artifact_paths
-        return {
-            "protocol": "json_fallback",
-            "tool": "data.analyze",
-            "input": input_payload,
-            "source": "runtime_planner",
-            "planning_reason": "planner_builtin_data_analysis",
-        }
 
     def _append_model_followup_context(
         self,
@@ -8102,6 +8111,17 @@ def _annotate_auto_followup_requests_from_tool_plan(
     return annotated
 
 
+def _first_annotated_auto_followup_request(
+    request: dict[str, Any],
+    selection_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    annotated = _annotate_auto_followup_requests_from_tool_plan(
+        [request],
+        selection_payload,
+    )
+    return annotated[0] if annotated else request
+
+
 def _auto_followup_selection_trace_base(selection_payload: Mapping[str, Any]) -> dict[str, str]:
     trace: dict[str, str] = {}
     for key in ("decision_id", "plan_id", "intent_kind"):
@@ -10758,13 +10778,16 @@ def _auto_data_analysis_request_from_captured_content(
     }
     if len(artifact_paths) > 1:
         input_payload["artifact_paths"] = artifact_paths
-    return {
-        "protocol": "json_fallback",
-        "tool": "data.analyze",
-        "input": input_payload,
-        "source": "runtime_planner",
-        "planning_reason": "planner_builtin_data_analysis",
-    }
+    return _first_annotated_auto_followup_request(
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": input_payload,
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+        },
+        selection_payload,
+    )
 
 
 def _captured_data_display_path(snapshot: dict[str, Any]) -> str:
