@@ -4923,6 +4923,15 @@ def _model_followup_context_payload(
         content_requests,
         allowed,
     )
+    deferred_execution_requests = _model_followup_deferred_execution_requests(
+        content_requests,
+        allowed,
+    )
+    if deferred_execution_requests:
+        pending_execution_requests = _merged_pending_execution_requests(
+            pending_execution_requests,
+            deferred_execution_requests,
+        )
     if pending_execution_requests:
         payload["pending_execution_requests"] = pending_execution_requests
     task_core_payload = _model_followup_task_core_payload(selection_payload)
@@ -5010,6 +5019,110 @@ def _model_followup_pending_execution_requests(
         if len(pending_requests) >= 5:
             break
     return pending_requests
+
+
+def _model_followup_deferred_execution_requests(
+    content_requests: list[dict[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    pending: list[dict[str, Any]] = []
+    for index, request in enumerate(content_requests, start=1):
+        if not isinstance(request, Mapping):
+            continue
+        tool_name = str(request.get("deferred_tool") or "").strip()
+        if not tool_name or (allowed and tool_name not in allowed):
+            continue
+        raw_input = (
+            dict(request.get("deferred_input"))
+            if isinstance(request.get("deferred_input"), Mapping)
+            else {}
+        )
+        if not raw_input:
+            continue
+        pending.append(
+            {
+                "request_id": _deferred_execution_request_id(
+                    request,
+                    tool_name=tool_name,
+                    index=index,
+                ),
+                "tool_name": tool_name,
+                "capability_id": "desktop.ui_operation",
+                "input_preview": raw_input,
+                "planning_reason": str(
+                    request.get("planning_reason") or "planner_followup_deferred_ui_action"
+                ).strip(),
+                "status": "planned",
+                "runtime_doctrine": str(
+                    request.get("runtime_doctrine") or "discover_operate_verify"
+                ).strip(),
+                "runtime_stage": "operate",
+                "runtime_role": _deferred_ui_runtime_role(tool_name),
+                "approval_required": _deferred_ui_tool_requires_approval(tool_name),
+                "requires_post_action_verification": True,
+                "source": str(request.get("source") or "runtime_planner").strip(),
+            }
+        )
+    return pending
+
+
+def _deferred_execution_request_id(
+    request: Mapping[str, Any],
+    *,
+    tool_name: str,
+    index: int,
+) -> str:
+    request_id = str(request.get("request_id") or "").strip()
+    if request_id:
+        return f"{request_id}:deferred:{tool_name}"
+    plan_id = str(request.get("plan_id") or "").strip()
+    if plan_id:
+        return f"{plan_id}:deferred:{index}:{tool_name}"
+    return f"deferred:{index}:{tool_name}"
+
+
+def _deferred_ui_runtime_role(tool_name: str) -> str:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool.endswith("_type_into_ui_element") or clean_tool == "desktop.type_into_ui_element":
+        return "type_ui"
+    if clean_tool.endswith("_click_ui_element") or clean_tool == "desktop.click_ui_element":
+        return "click_ui"
+    return "operate_ui"
+
+
+def _deferred_ui_tool_requires_approval(tool_name: str) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    return clean_tool in {
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
+    }
+
+
+def _merged_pending_execution_requests(
+    first: list[dict[str, Any]],
+    second: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for request in [*first, *second]:
+        tool_name = str(request.get("tool_name") or request.get("tool") or "").strip()
+        input_preview = (
+            request.get("input_preview")
+            if isinstance(request.get("input_preview"), Mapping)
+            else request.get("input")
+            if isinstance(request.get("input"), Mapping)
+            else {}
+        )
+        key = (tool_name, repr(sorted(dict(input_preview).items())))
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(request)
+    return merged
 
 
 def _selection_execution_envelope_requests(
