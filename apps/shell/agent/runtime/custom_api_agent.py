@@ -251,13 +251,18 @@ class RuntimeCustomApiAgentLoop:
                     allowed_tools,
                 )
                 if not planned_tool_requests:
-                    planner_unavailable_payloads = (
-                        _runtime_planner_unavailable_failure_payloads(
-                            runtime_planner_decision
-                        )
-                        if runtime_planner_decision is not None
-                        else []
+                    daily_unavailable_candidates = daily_desktop_intent_candidates(
+                        planning_context
                     )
+                    planner_unavailable_payloads = []
+                    if not daily_unavailable_candidates:
+                        planner_unavailable_payloads = (
+                            _runtime_planner_unavailable_failure_payloads(
+                                runtime_planner_decision
+                            )
+                            if runtime_planner_decision is not None
+                            else []
+                        )
                     if planner_unavailable_payloads:
                         self._record_runtime_planner_events(
                             runtime_planner_decision,

@@ -1171,7 +1171,7 @@ def _has_unavailable_required_desktop_step(decision: Any) -> bool:
     if not isinstance(steps, list):
         return False
     has_actionable_discovery = _has_actionable_desktop_app_discovery_step(steps)
-    for step in steps:
+    for index, step in enumerate(steps):
         status = str(getattr(step, "status", "") or "").strip()
         if status != "unavailable":
             continue
@@ -1185,6 +1185,12 @@ def _has_unavailable_required_desktop_step(decision: Any) -> bool:
         if not tool_name and step_id == "submit-foreground-ui":
             continue
         if capability_id == "desktop.ui_operation" and not tool_name:
+            if _unavailable_desktop_ui_step_can_continue_with_model(
+                steps,
+                index,
+                has_actionable_discovery=has_actionable_discovery,
+            ):
+                continue
             return True
         if (
             capability_id in {"desktop.app_control", "desktop.ui_operation"}
@@ -1212,6 +1218,50 @@ def _has_actionable_desktop_app_discovery_step(steps: list[Any]) -> bool:
             continue
         step_id = str(getattr(step, "step_id", "") or "").strip()
         if step_id in {"discover-desktop-state", "discover_apps-desktop-state"}:
+            return True
+    return False
+
+
+def _unavailable_desktop_ui_step_can_continue_with_model(
+    steps: list[Any],
+    index: int,
+    *,
+    has_actionable_discovery: bool,
+) -> bool:
+    if not has_actionable_discovery or index < 0 or index >= len(steps):
+        return False
+    step = steps[index]
+    if str(getattr(step, "status", "") or "").strip() != "unavailable":
+        return False
+    if str(getattr(step, "capability_id", "") or "").strip() != "desktop.ui_operation":
+        return False
+    if str(getattr(step, "tool_name", "") or "").strip():
+        return False
+    input_preview = getattr(step, "input_preview", None)
+    payload = input_preview if isinstance(input_preview, Mapping) else {}
+    if not _unavailable_desktop_ui_payload_is_model_resolvable(payload):
+        return False
+    return _has_later_available_desktop_observation_step(steps, index)
+
+
+def _unavailable_desktop_ui_payload_is_model_resolvable(payload: Mapping[str, Any]) -> bool:
+    for key in ("target", "role_filter", "key", "action"):
+        if str(payload.get(key) or "").strip():
+            return True
+    modifiers = payload.get("modifiers")
+    if isinstance(modifiers, list) and modifiers:
+        return True
+    if payload.get("click_count") is not None:
+        return True
+    return False
+
+
+def _has_later_available_desktop_observation_step(steps: list[Any], index: int) -> bool:
+    for step in steps[index + 1 :]:
+        if not _step_available(step):
+            continue
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if tool_name in _EXECUTION_VERIFICATION_TOOLS:
             return True
     return False
 
@@ -1804,6 +1854,8 @@ def _desktop_observation_step_needs_model_followup(
     step_id: str,
     tool_name: str,
 ) -> bool:
+    if _desktop_observation_step_depends_on_model_resolved_ui_step(decision, step_id):
+        return True
     if _selected_discovered_app_observation_needs_model_followup(decision, step_id):
         return True
     if step_id not in {
@@ -1841,6 +1893,66 @@ def _desktop_observation_step_needs_model_followup(
     if _desktop_verify_step_is_direct_control(step_id, tool_name, inputs):
         return False
     return False
+
+
+def _desktop_observation_step_depends_on_model_resolved_ui_step(
+    decision: Any,
+    step_id: str,
+) -> bool:
+    if step_id != "verify-desktop-result":
+        return False
+    steps = list(getattr(getattr(getattr(decision, "plan", None), "tool_plan", None), "steps", []) or [])
+    step_indexes = {
+        str(getattr(step, "step_id", "") or "").strip(): index
+        for index, step in enumerate(steps)
+        if str(getattr(step, "step_id", "") or "").strip()
+    }
+    target_index = step_indexes.get(step_id, -1)
+    if target_index <= 0:
+        return False
+    dependencies = _transitive_step_dependencies(steps, step_id)
+    if not dependencies:
+        return False
+    has_actionable_discovery = _has_actionable_desktop_app_discovery_step(steps)
+    for dependency_id in dependencies:
+        dependency_index = step_indexes.get(dependency_id, -1)
+        if dependency_index < 0 or dependency_index >= target_index:
+            continue
+        if _unavailable_desktop_ui_step_can_continue_with_model(
+            steps,
+            dependency_index,
+            has_actionable_discovery=has_actionable_discovery,
+        ):
+            return True
+    return False
+
+
+def _transitive_step_dependencies(steps: list[Any], step_id: str) -> set[str]:
+    by_id = {
+        str(getattr(step, "step_id", "") or "").strip(): step
+        for step in steps
+        if str(getattr(step, "step_id", "") or "").strip()
+    }
+    pending = [
+        str(item or "").strip()
+        for item in (getattr(by_id.get(step_id), "depends_on", None) or [])
+        if str(item or "").strip()
+    ]
+    dependencies: set[str] = set()
+    while pending:
+        current = pending.pop()
+        if current in dependencies:
+            continue
+        dependencies.add(current)
+        current_step = by_id.get(current)
+        if current_step is None:
+            continue
+        pending.extend(
+            str(item or "").strip()
+            for item in (getattr(current_step, "depends_on", None) or [])
+            if str(item or "").strip()
+        )
+    return dependencies
 
 
 def _selected_discovered_app_observation_needs_model_followup(

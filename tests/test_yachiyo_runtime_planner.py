@@ -10238,6 +10238,45 @@ def test_runtime_planner_discovers_generic_design_tool_before_searching() -> Non
             "click_count": 1,
         },
     }
+    model_resolved_click_allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+        "desktop.safe_click",
+    ]
+    model_resolved_click_decision = RuntimePlanner().decision(
+        click_result_prompt,
+        allowed_tools=model_resolved_click_allowed_tools,
+    )
+    model_resolved_click = _step_by_id(
+        model_resolved_click_decision,
+        "select-app-search-result",
+    )
+    assert model_resolved_click.status == "unavailable"
+    assert model_resolved_click.tool_name is None
+    model_resolved_click_requests = planner_tool_requests(
+        click_result_prompt,
+        model_resolved_click_allowed_tools,
+    )
+    assert [request["tool"] for request in model_resolved_click_requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    assert model_resolved_click_requests[-1]["continue_to_model"] is True
+    assert (
+        planner_direct_tool_requests(
+            click_result_prompt,
+            model_resolved_click_allowed_tools,
+        )
+        == model_resolved_click_requests
+    )
 
     key_confirm_prompt = "帮我打开一个设计工具，搜索 logo 模板，按下箭头确认"
     key_confirm_decision = RuntimePlanner().decision(
@@ -20724,8 +20763,6 @@ def test_runtime_planner_prefetches_app_search_result_for_communication() -> Non
     assert selection.event_payload["legacy_request_count"] == 0
     assert [request["tool"] for request in selection.requests] == [
         "desktop.list_apps",
-        "app.open",
-        "app.focus",
         "app.open_and_safe_shortcut",
         "app.open_and_safe_type_text",
         "desktop.search_submit",

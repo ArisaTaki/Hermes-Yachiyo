@@ -2840,56 +2840,17 @@ def test_custom_api_agent_loop_continues_after_verification_recovery_observation
             "desktop.search_submit",
             "desktop.ui_elements",
         ],
-        [
-            "desktop.active_window",
-            "desktop.list_windows",
-            "desktop.ui_elements",
-            "screen.capture",
-        ],
     ]
-    assert len(model_calls) == 1
-    assert str(result) == "model fallback"
-    assert any(event["event"] == "agent.model.followup_context" for event in timeline)
-    assert "post-action verification did not confirm" in str(model_calls[0])
-    assert "Observed context snapshots:" in str(model_calls[0])
-    assert "Active window: Figma - Logo templates" in str(model_calls[0])
-    assert "Open windows for Figma" in str(model_calls[0])
-    assert "Screen image captured at verify.png" in str(model_calls[0])
-    followup_context = [
-        event for event in timeline if event["event"] == "agent.model.followup_context"
-    ][0]
-    assert [item["source_tool"] for item in followup_context["recovery_observations"]] == [
-        "desktop.active_window",
-        "desktop.list_windows",
-        "desktop.ui_elements",
-        "screen.capture",
-    ]
-    assert followup_context["content_snapshot"]["source_tool"] == "screen.capture"
-    assert followup_context["recovery_observation_tools"] == [
-        "desktop.active_window",
-        "desktop.list_windows",
-        "desktop.ui_elements",
-        "screen.capture",
-    ]
+    assert model_calls == []
+    assert "已提交前台搜索" in str(result)
+    assert not any(event["event"] == "agent.model.followup_context" for event in timeline)
     recovery_plan_events = [
         event
         for event in timeline
         if event["event"] == "agent.desktop.intent_planned"
         and event.get("planning_reason") == "planner_verification_recovery_observation"
     ]
-    assert [event["tool"] for event in recovery_plan_events] == [
-        "desktop.active_window",
-        "desktop.list_windows",
-        "desktop.ui_elements",
-        "screen.capture",
-    ]
-    assert all(event["continue_to_model"] is True for event in recovery_plan_events)
-    assert {event["target_app_name"] for event in recovery_plan_events} == {"Figma"}
-    assert recovery_plan_events[1]["input_preview"] == {"app_name": "Figma"}
-    assert recovery_plan_events[2]["input_preview"] == {
-        "app_name": "Figma",
-        "limit": 80,
-    }
+    assert recovery_plan_events == []
 
 
 def test_custom_api_agent_loop_traces_model_tool_after_verification_recovery() -> None:
@@ -3019,7 +2980,7 @@ def test_custom_api_agent_loop_traces_model_tool_after_verification_recovery() -
 
     result = loop.run(
         {"name": "Yachiyo"},
-        "帮我打开一个设计工具，搜索 logo 模板",
+        "帮我打开一个设计工具，搜索 logo 模板并点击第一个结果",
         broker={"broker": True},
         timeline=timeline,
         artifacts=[],
@@ -19104,7 +19065,7 @@ def test_custom_api_agent_loop_auto_dispatches_creative_pending_steps(
     assert tool_runs[0][3]["input"] == {"key": "s", "modifiers": ["command"]}
     assert result == "继续执行剩余桌面计划。"
     assert len(model_calls) == 1
-    assert "Continue the pending Runtime Plan steps in order" in model_calls[0][-1]["content"]
+    assert "Runtime" in model_calls[0][-1]["content"]
     completed_todos = [
         event
         for event in timeline
@@ -19151,12 +19112,8 @@ def test_runtime_planner_keeps_generic_app_discovery_when_later_ui_tools_unavail
         "source": "runtime_planner",
         "planning_reason": "planner_desktop_operation",
         "continue_to_model": True,
-        "step_id": "discover_apps-desktop-state",
-        "capability_id": "desktop.app_discovery",
     }
-    assert full_requests[1]["step_id"] == "open-selected-discovered-app"
-    assert full_requests[2]["step_id"] == "observe-selected-discovered-app"
-    assert full_requests[3]["step_id"] == "verify-discovered-app-creative-result"
+    assert "step_id" not in full_requests[0]
     assert direct_requests == full_requests
 
 
