@@ -25,6 +25,7 @@ from .contracts import (
 )
 from .task_snapshots import run_events_from_payload, task_status_from_value
 from .task_core_snapshots import task_core_snapshot_from_payload
+from .task_progress_snapshots import task_progress_summary_from_task_core
 from .replan_event_projection import run_events_with_replan_requests
 from .timeline_metadata_snapshots import (
     merge_timeline_child_snapshots,
@@ -68,6 +69,12 @@ def run_timeline_snapshot_from_payload(
     )
     pending_approval = _pending_timeline_approval(payload, approvals)
     rerun_provenance = run_timeline_rerun_provenance_from_payload(payload, events)
+    task_core = task_core_snapshot_from_payload(payload, events=events)
+    task_progress = task_progress_summary_from_task_core(
+        task_core,
+        events=events,
+        needs_user_action=pending_approval is not None,
+    )
 
     return RunTimelineSnapshot(
         run_id=run_id,
@@ -94,7 +101,8 @@ def run_timeline_snapshot_from_payload(
         rerun_original_created_at=rerun_provenance.get("rerun_original_created_at"),
         rerun_original_updated_at=rerun_provenance.get("rerun_original_updated_at"),
         planner_summary=planner_trace_summary_from_payload(payload),
-        task_core=task_core_snapshot_from_payload(payload, events=events),
+        task_core=task_core,
+        task_progress=task_progress,
         events=events,
         tool_calls=tool_call_snapshots_from_payloads(
             payload.get("tool_calls"),

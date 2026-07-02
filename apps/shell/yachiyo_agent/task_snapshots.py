@@ -28,6 +28,7 @@ from .replan_event_projection import run_events_with_replan_requests
 from .timeline_metadata_snapshots import planner_trace_summary_from_payload
 from .tool_call_snapshots import tool_call_snapshots_from_payloads
 from .task_core_snapshots import task_core_snapshot_from_payload
+from .task_progress_snapshots import task_progress_summary_from_task_core
 
 _ACTIVE_TASK_STATUSES = {"queued", "running", "waiting_approval"}
 _PLANNED_DESKTOP_INTENT_EVENT_TYPE = "agent.desktop.intent_planned"
@@ -130,6 +131,12 @@ def agent_task_snapshot_from_payload(
             and payload.get("needs_user_action")
         )
     )
+    task_core = task_core_snapshot_from_payload(payload, events=all_events)
+    task_progress = task_progress_summary_from_task_core(
+        task_core,
+        events=all_events,
+        needs_user_action=needs_user_action,
+    )
 
     return AgentTaskSnapshot(
         task_id=task_id,
@@ -155,7 +162,8 @@ def agent_task_snapshot_from_payload(
                 "events": recent_events,
             }
         ),
-        task_core=task_core_snapshot_from_payload(payload, events=all_events),
+        task_core=task_core,
+        task_progress=task_progress,
         open_in_studio_url=_optional_text(payload.get("open_in_studio_url"))
         or studio_run_url(run_id, group_run_id=group_run_id),
         created_at=_text(payload.get("created_at")),

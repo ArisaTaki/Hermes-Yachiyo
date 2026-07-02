@@ -21,6 +21,7 @@ from .group_member_snapshots import group_run_participants_from_payload
 from .replan_event_projection import run_events_with_replan_requests
 from .run_snapshots import RunSnapshotProjector
 from .task_core_snapshots import task_core_snapshot_from_payload
+from .task_progress_snapshots import task_progress_summary_from_task_core
 
 _RUN_PROJECTOR = RunSnapshotProjector()
 
@@ -81,6 +82,12 @@ def group_run_snapshot_from_payload(
         events,
         group_run_id=group_run_id,
     )
+    task_core = task_core_snapshot_from_payload(payload, events=events)
+    task_progress = task_progress_summary_from_task_core(
+        task_core,
+        events=events,
+        needs_user_action=bool(pending_approvals),
+    )
     return GroupRunSnapshot(
         group_run_id=group_run_id,
         run_group_id=legacy_run_group_id or group_run_id or None,
@@ -96,7 +103,8 @@ def group_run_snapshot_from_payload(
             shared_artifacts,
         ),
         active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
-        task_core=task_core_snapshot_from_payload(payload, events=events),
+        task_core=task_core,
+        task_progress=task_progress,
         events=events,
         runs=runs,
         child_run_ids=child_run_ids,

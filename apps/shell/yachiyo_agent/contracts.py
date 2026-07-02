@@ -312,6 +312,37 @@ class TaskCoreSnapshot(_PublicSnapshot):
     source: str = "runtime_planner"
 
 
+class TaskProgressSummarySnapshot(_PublicSnapshot):
+    core_id: str | None = None
+    workspace_id: str | None = None
+    status: str = "unknown"
+    current_step_id: str | None = None
+    current_step_title: str | None = None
+    current_tool_name: str | None = None
+    total_todos: int = 0
+    completed_todos: int = 0
+    active_todos: int = 0
+    blocked_todos: int = 0
+    skipped_todos: int = 0
+    total_checkpoints: int = 0
+    completed_checkpoints: int = 0
+    blocked_checkpoints: int = 0
+    waiting_approval_checkpoints: int = 0
+    total_workspace_items: int = 0
+    completed_workspace_items: int = 0
+    blocked_workspace_items: int = 0
+    replan_request_count: int = 0
+    latest_replan_request_id: str | None = None
+    latest_replan_trigger: str | None = None
+    latest_replan_step_id: str | None = None
+    needs_replan: bool = False
+    needs_user_action: bool = False
+    blocked_step_ids: list[str] = Field(default_factory=list)
+    approval_step_ids: list[str] = Field(default_factory=list)
+    progress_text: str = ""
+    source: str = "task_progress_projection"
+
+
 class TaskReplanRequestSnapshot(_PublicSnapshot):
     request_id: str
     trigger: str
@@ -632,6 +663,7 @@ class AgentTaskSnapshot(_PublicSnapshot):
     metadata: dict[str, Any] = Field(default_factory=dict)
     planner_summary: PlannerTraceSummarySnapshot | None = None
     task_core: TaskCoreSnapshot | None = None
+    task_progress: TaskProgressSummarySnapshot | None = None
     open_in_studio_url: str | None = None
     created_at: str = ""
     updated_at: str = ""
@@ -690,6 +722,7 @@ class RunTimelineSnapshot(_PublicSnapshot):
     rerun_original_updated_at: str | None = None
     planner_summary: PlannerTraceSummarySnapshot | None = None
     task_core: TaskCoreSnapshot | None = None
+    task_progress: TaskProgressSummarySnapshot | None = None
     events: list[PublicRunEvent] = Field(default_factory=list)
     tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
     memory_traces: list[MemoryTraceSnapshot] = Field(default_factory=list)
@@ -869,6 +902,7 @@ class GroupRunSnapshot(_PublicSnapshot):
     participants: list[AgentGroupMemberSnapshot] = Field(default_factory=list)
     active_speaker_agent_id: str | None = None
     task_core: TaskCoreSnapshot | None = None
+    task_progress: TaskProgressSummarySnapshot | None = None
     events: list[PublicRunEvent] = Field(default_factory=list)
     runs: list[RunTimelineSnapshot] = Field(default_factory=list)
     child_run_ids: list[str] = Field(default_factory=list)

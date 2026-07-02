@@ -72,6 +72,7 @@ from apps.shell.yachiyo_agent import (
     ReplanSignalSnapshot,
     TaskCheckpointSnapshot,
     TaskCoreSnapshot,
+    TaskProgressSummarySnapshot,
     TaskIntentSnapshot,
     TaskIntentKind,
     TaskReplanRequestSnapshot,
@@ -410,6 +411,65 @@ def test_task_core_public_snapshot_exposes_workspace_todo_checkpoint_and_replan(
     assert payload["todos"][0]["approval_required"] is True
     assert payload["checkpoints"][0]["replan_on_failure"] is True
     assert payload["replan_signals"][0]["fallback_tools"] == ["terminal.run"]
+
+
+def test_task_progress_summary_public_snapshot_exposes_replay_state() -> None:
+    summary = TaskProgressSummarySnapshot(
+        core_id="task-core-1",
+        workspace_id="task-workspace-1",
+        status="replan_requested",
+        current_step_id="run-analysis",
+        current_step_title="Run analysis",
+        current_tool_name="data.analyze",
+        total_todos=3,
+        completed_todos=1,
+        blocked_todos=1,
+        total_checkpoints=3,
+        waiting_approval_checkpoints=1,
+        replan_request_count=1,
+        latest_replan_request_id="replan-1",
+        latest_replan_trigger="tool_failure",
+        latest_replan_step_id="run-analysis",
+        needs_replan=True,
+        blocked_step_ids=["run-analysis"],
+        progress_text="1/3 todos completed | 1 blocked | replan requested",
+    )
+
+    payload = _json(summary)
+
+    assert list(payload) == [
+        "core_id",
+        "workspace_id",
+        "status",
+        "current_step_id",
+        "current_step_title",
+        "current_tool_name",
+        "total_todos",
+        "completed_todos",
+        "active_todos",
+        "blocked_todos",
+        "skipped_todos",
+        "total_checkpoints",
+        "completed_checkpoints",
+        "blocked_checkpoints",
+        "waiting_approval_checkpoints",
+        "total_workspace_items",
+        "completed_workspace_items",
+        "blocked_workspace_items",
+        "replan_request_count",
+        "latest_replan_request_id",
+        "latest_replan_trigger",
+        "latest_replan_step_id",
+        "needs_replan",
+        "needs_user_action",
+        "blocked_step_ids",
+        "approval_step_ids",
+        "progress_text",
+        "source",
+    ]
+    assert payload["status"] == "replan_requested"
+    assert payload["needs_replan"] is True
+    assert payload["blocked_step_ids"] == ["run-analysis"]
 
 
 def test_task_replan_request_contract_links_failure_to_planner_state() -> None:
@@ -1168,6 +1228,13 @@ def test_agent_task_snapshot_replays_explicit_task_core_update_events_by_id() ->
     assert checkpoint.payload["runtime_update_event_type"] == (
         "workflow.run.task.checkpoint.updated"
     )
+    assert snapshot.task_progress is not None
+    assert snapshot.task_progress.core_id == "task-core-1"
+    assert snapshot.task_progress.status == "completed"
+    assert snapshot.task_progress.completed_todos == 1
+    assert snapshot.task_progress.completed_checkpoints == 1
+    assert snapshot.task_progress.completed_workspace_items == 1
+    assert snapshot.task_progress.progress_text == "1/1 todos completed"
 
 
 def test_run_timeline_snapshot_projects_task_core_from_plan_event() -> None:
@@ -1280,7 +1347,16 @@ def test_run_timeline_snapshot_synthesizes_replan_event_from_failed_tool() -> No
     assert replan_event.payload["fallback_tools"] == ["terminal.run"]
     assert "unsupported chart type" in replan_event.payload["failure_detail"]
     assert task.recent_events[-1].event_type == "agent.replan.requested"
+    assert snapshot.task_progress is not None
+    assert snapshot.task_progress.status == "replan_requested"
+    assert snapshot.task_progress.needs_replan is True
+    assert snapshot.task_progress.latest_replan_step_id == "run-analysis"
+    assert snapshot.task_progress.latest_replan_trigger == "tool_failure"
+    assert snapshot.task_progress.blocked_step_ids == ["analyze-data-file"]
     assert task.task_core is not None
+    assert task.task_progress is not None
+    assert task.task_progress.status == snapshot.task_progress.status
+    assert task.task_progress.latest_replan_step_id == "run-analysis"
     failed_todo = next(
         todo for todo in task.task_core.todos if todo.tool_name == "data.analyze"
     )
@@ -1338,6 +1414,9 @@ def test_run_timeline_snapshot_synthesizes_scoped_workflow_replan_event() -> Non
     assert replan_event.payload["planner_event_type"] == "agent.replan.requested"
     assert replan_event.payload["planner_scope"] == "workflow_run"
     assert replan_event.payload["source_step_id"] == analysis_step.step_id
+    assert snapshot.task_progress is not None
+    assert snapshot.task_progress.status == "replan_requested"
+    assert snapshot.task_progress.latest_replan_step_id == analysis_step.step_id
 
 
 def test_run_timeline_snapshot_synthesizes_replan_from_native_scoped_workflow_events() -> None:
@@ -1431,6 +1510,9 @@ def test_group_run_snapshot_synthesizes_scoped_replan_event() -> None:
     assert replan_event.payload["planner_scope"] == "group_run"
     assert replan_event.payload["source_step_id"] == analysis_step.step_id
     assert snapshot.task_core is not None
+    assert snapshot.task_progress is not None
+    assert snapshot.task_progress.status == "replan_requested"
+    assert snapshot.task_progress.latest_replan_step_id == analysis_step.step_id
     failed_todo = next(
         todo for todo in snapshot.task_core.todos if todo.step_id == analysis_step.step_id
     )
@@ -1570,6 +1652,9 @@ def test_group_and_workflow_snapshots_scope_desktop_approval_events() -> None:
     assert group_snapshot.pending_approvals[0].group_run_id == "group-run-approval-1"
     assert group_snapshot.pending_approvals[0].step_id == "operate-foreground-ui"
     assert group_snapshot.task_core is not None
+    assert group_snapshot.task_progress is not None
+    assert group_snapshot.task_progress.status == "waiting_approval"
+    assert group_snapshot.task_progress.needs_user_action is True
     assert group_snapshot.task_core.todos[0].metadata["runtime_event_type"] == (
         "group.run.desktop.intent_approval_required"
     )
@@ -1578,6 +1663,8 @@ def test_group_and_workflow_snapshots_scope_desktop_approval_events() -> None:
     assert "workflow.run.desktop.intent_approval_required" in workflow_event_types
     assert workflow_snapshot.pending_approval is not None
     assert workflow_snapshot.pending_approval.workflow_run_id == "workflow-run-approval-1"
+    assert workflow_snapshot.task_progress is not None
+    assert workflow_snapshot.task_progress.status == "waiting_approval"
     assert workflow_snapshot.pending_approval.step_id == "operate-foreground-ui"
     assert workflow_snapshot.task_core is not None
     assert workflow_snapshot.task_core.todos[0].metadata["runtime_event_type"] == (
@@ -1759,6 +1846,7 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
         "metadata",
         "planner_summary",
         "task_core",
+        "task_progress",
         "open_in_studio_url",
         "created_at",
         "updated_at",
@@ -3620,6 +3708,7 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
         "rerun_original_updated_at",
         "planner_summary",
         "task_core",
+        "task_progress",
         "events",
         "tool_calls",
         "memory_traces",
