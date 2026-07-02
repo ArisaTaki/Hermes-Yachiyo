@@ -754,6 +754,39 @@ def test_yachiyo_agent_service_does_not_duplicate_existing_chat_planner_events()
     assert [event.event_type for event in task.recent_events].count("agent.intent.selected") == 1
 
 
+def test_yachiyo_agent_service_treats_scoped_recovery_events_as_planner_events() -> None:
+    class ScopedRecoveryRuntimePort(_BareStartTaskRuntimePort):
+        def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any]:
+            self.calls.append(("start_chat_task", request))
+            return _task_payload(
+                status="running",
+                title=request.get("title") or "Chat task",
+                session_id=str(request.get("conversation_id") or ""),
+                events=[
+                    {
+                        "event_type": "group.run.replan.recovery.updated",
+                        "payload": {
+                            "planner_event_type": "agent.replan.recovery.updated",
+                            "status": "requested",
+                        },
+                    }
+                ],
+            )
+
+    service = YachiyoAgentService(ScopedRecoveryRuntimePort())
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="请分析 data/sales.csv 并输出报告",
+            conversation_id="chat-1",
+        )
+    )
+
+    assert [event.event_type for event in task.recent_events] == [
+        "group.run.replan.recovery.updated"
+    ]
+
+
 def test_yachiyo_agent_service_defaults_main_chat_entrypoint_metadata() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
