@@ -90,6 +90,38 @@ def _app_discovery_request(query: str) -> dict[str, Any]:
     }
 
 
+def _selected_discovered_app_open_request(query: str) -> dict[str, Any]:
+    return {
+        "protocol": "json_fallback",
+        "tool": "app.open",
+        "input": {
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": query,
+        },
+        "source": "runtime_planner",
+        "planning_reason": "planner_desktop_operation",
+    }
+
+
+def _active_window_request() -> dict[str, Any]:
+    return {
+        "protocol": "json_fallback",
+        "tool": "desktop.active_window",
+        "input": {},
+        "source": "runtime_planner",
+        "planning_reason": "planner_desktop_operation",
+    }
+
+
+def _selected_discovered_app_open_chain(query: str) -> list[dict[str, Any]]:
+    return [
+        _app_discovery_request(query),
+        _selected_discovered_app_open_request(query),
+        _active_window_request(),
+    ]
+
+
 def _data_analysis_preview(
     path: str,
     source_kind: str,
@@ -6108,9 +6140,14 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
     }
     assert [step.step_id for step in current_app_find_then_click.plan.tool_plan.steps] == [
         "discover-desktop-state",
+        "read-foreground-ui",
         "operate-foreground-ui",
         "verify-desktop-result",
     ]
+    assert _step_by_id(current_app_find_then_click, "read-foreground-ui").input_preview == {
+        "role_filter": "button",
+        "limit": 80,
+    }
     assert _step_by_id(current_app_find_then_click, "operate-foreground-ui").tool_name == (
         "desktop.click_ui_element"
     )
@@ -6134,6 +6171,7 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         ],
     )] == [
         "desktop.running_apps",
+        "desktop.ui_elements",
         "desktop.click_ui_element",
         "desktop.ui_elements",
     ]
@@ -8884,18 +8922,19 @@ def test_runtime_planner_applies_artifact_output_locations() -> None:
     ]
     assert current_window_release_notes.selected_intent.kind == "report_generation"
     assert _step_by_id(current_window_release_notes, "write-report-artifact").input_preview == {
-        "path": "Downloads/report.md",
+        "path": "Downloads/release-notes.md",
         "body_source": "visible_text",
     }
     assert current_window_release_notes.plan.tool_plan.artifacts_expected == [
-        "Downloads/report.md"
+        "Downloads/release-notes.md"
     ]
-    assert current_page_markdown.selected_intent.kind == "web_research"
-    assert _step_by_id(current_page_markdown, "write-research-artifact").input_preview == {
-        "path": "Desktop/research-summary.md"
+    assert current_page_markdown.selected_intent.kind == "report_generation"
+    assert _step_by_id(current_page_markdown, "write-report-artifact").input_preview == {
+        "path": "Desktop/report.md",
+        "body_source": "current_page_content",
     }
     assert current_page_markdown.plan.tool_plan.artifacts_expected == [
-        "Desktop/research-summary.md"
+        "Desktop/report.md"
     ]
     assert clipboard_table.selected_intent.kind == "data_analysis"
     assert _step_by_id(clipboard_table, "write-analysis-artifact").input_preview == {
@@ -9887,34 +9926,9 @@ def test_runtime_planner_discovers_chinese_generic_editor_apps_before_acting() -
         assert _step_by_id(decision, "verify-desktop-result").depends_on == [
             "open-selected-discovered-app"
         ]
-        assert planner_tool_requests(prompt, allowed_tools) == [
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.list_apps",
-                "input": {"query": query, "limit": 20},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-                "continue_to_model": True,
-            },
-            {
-                "protocol": "json_fallback",
-                "tool": "app.open",
-                "input": {
-                    "app_name": "<selected app from desktop.list_apps>",
-                    "selection_source": "desktop.list_apps",
-                    "query": query,
-                },
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.active_window",
-                "input": {},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
-        ]
+        assert planner_tool_requests(prompt, allowed_tools) == (
+            _selected_discovered_app_open_chain(query)
+        )
 
     assert RuntimePlanner().decision(
         "用 Excel 分析 data/sales.csv 并输出报告",
@@ -10768,17 +10782,11 @@ def test_runtime_planner_discovers_generic_browser_before_acting() -> None:
     assert [step.step_id for step in open_decision.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
+        "verify-desktop-result",
     ]
-    assert planner_tool_requests("打开默认浏览器", open_allowed) == [
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.list_apps",
-            "input": {"query": "browser", "limit": 20},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
-    ]
+    assert planner_tool_requests("打开默认浏览器", open_allowed) == (
+        _selected_discovered_app_open_chain("browser")
+    )
 
     open_one_decision = RuntimePlanner().decision("打开一个浏览器", allowed_tools=open_allowed)
     assert open_one_decision.selected_intent.inputs["app_name_hint"] == ""
@@ -10790,16 +10798,9 @@ def test_runtime_planner_discovers_generic_browser_before_acting() -> None:
         "query": "browser",
         "description": "browser",
     }
-    assert planner_tool_requests("打开一个浏览器", open_allowed) == [
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.list_apps",
-            "input": {"query": "browser", "limit": 20},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
-    ]
+    assert planner_tool_requests("打开一个浏览器", open_allowed) == (
+        _selected_discovered_app_open_chain("browser")
+    )
 
     inspect_allowed = ["desktop.list_apps", "app.focus", "desktop.ui_elements"]
     assert planner_tool_requests("默认浏览器有哪些按钮", inspect_allowed) == [
@@ -10865,34 +10866,9 @@ def test_runtime_planner_discovers_generic_file_manager_before_acting() -> None:
         assert _step_by_id(decision, "verify-desktop-result").depends_on == [
             "open-selected-discovered-app"
         ]
-        assert planner_tool_requests(prompt, allowed_tools) == [
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.list_apps",
-                "input": {"query": "file manager", "limit": 20},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-                "continue_to_model": True,
-            },
-            {
-                "protocol": "json_fallback",
-                "tool": "app.open",
-                "input": {
-                    "app_name": "<selected app from desktop.list_apps>",
-                    "selection_source": "desktop.list_apps",
-                    "query": "file manager",
-                },
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.active_window",
-                "input": {},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
-        ]
+        assert planner_tool_requests(prompt, allowed_tools) == (
+            _selected_discovered_app_open_chain("file manager")
+        )
 
     assert planner_tool_requests("打开 Finder", allowed_tools) == [
         {
@@ -10938,17 +10914,11 @@ def test_runtime_planner_discovers_generic_terminal_app_before_acting() -> None:
         assert [step.step_id for step in decision.plan.tool_plan.steps] == [
             "discover_apps-desktop-state",
             "open-selected-discovered-app",
+            "verify-desktop-result",
         ]
-        assert planner_tool_requests(prompt, allowed_tools) == [
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.list_apps",
-                "input": {"query": "terminal", "limit": 20},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-                "continue_to_model": True,
-            }
-        ]
+        assert planner_tool_requests(prompt, allowed_tools) == (
+            _selected_discovered_app_open_chain("terminal")
+        )
 
     assert planner_tool_requests("打开 iTerm", allowed_tools) == [
         {
@@ -11022,20 +10992,40 @@ def test_runtime_planner_discovers_generic_communication_app_before_acting() -> 
         }
         if capability_query:
             assert decision.selected_intent.inputs["app_capability_hint"]["query"] == capability_query
-        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
-            "discover_apps-desktop-state",
-            "open-selected-discovered-app",
-        ]
-        assert planner_tool_requests(prompt, allowed_tools) == [
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.list_apps",
-                "input": {"query": query, "limit": 20},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-                "continue_to_model": True,
-            }
-        ]
+        if prompt == "打开一个聊天软件，给 Alice 输入 hello":
+            assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+                "discover_apps-desktop-state",
+                "open-selected-discovered-app",
+                "type-selected-discovered-app-text",
+                "verify-selected-discovered-app-action",
+            ]
+            assert planner_tool_requests(prompt, allowed_tools) == [
+                _app_discovery_request(query),
+                _selected_discovered_app_open_request(query),
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_type_text",
+                    "input": {"text": "hello"},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_desktop_operation",
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.ui_elements",
+                    "input": {"limit": 80},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_desktop_operation",
+                },
+            ]
+        else:
+            assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+                "discover_apps-desktop-state",
+                "open-selected-discovered-app",
+                "verify-desktop-result",
+            ]
+            assert planner_tool_requests(prompt, allowed_tools) == (
+                _selected_discovered_app_open_chain(query)
+            )
 
     assert planner_tool_requests("打开 Slack", allowed_tools) == [
         {
@@ -11281,14 +11271,19 @@ def test_runtime_planner_discovers_generic_communication_app_before_composing() 
             assert send.approval_required is True
             assert send.input_preview == {"action": "send"}
         assert planner_tool_requests(prompt, allowed_tools) == [
+            {**_app_discovery_request(query), "continue_to_model": True},
             {
                 "protocol": "json_fallback",
-                "tool": "desktop.list_apps",
-                "input": {"query": query, "limit": 20},
+                "tool": "app.open_and_safe_shortcut",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": query,
+                    "action": "new_message",
+                },
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
-                "continue_to_model": True,
-            }
+            },
         ]
 
     assert RuntimePlanner().decision(
@@ -11391,16 +11386,31 @@ def test_runtime_planner_discovers_unscoped_communication_app_before_direct_send
         send_step = _step_by_id(decision, "send-selected-communication-message")
         assert send_step.input_preview == {"action": "send"}
         assert send_step.approval_required is True
-        assert planner_tool_requests(prompt, allowed_tools) == [
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.list_apps",
-                "input": {"query": query, "limit": 20},
-                "source": "runtime_planner",
-                "planning_reason": "planner_prefetch_communication_surface",
-                "continue_to_model": True,
-            }
+        requests = planner_tool_requests(prompt, allowed_tools)
+        assert [request["tool"] for request in requests] == [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.inspect_app",
+            "app.focus_and_type_into_ui_element",
+            "desktop.search_submit",
+            "app.focus_and_type_into_ui_element",
+            "desktop.submit_foreground",
         ]
+        assert requests[0]["input"] == {"query": query, "limit": 20}
+        assert requests[1]["input"] == {
+            "app_name": "<selected app from desktop.list_apps>",
+            "selection_source": "desktop.list_apps",
+            "query": query,
+            "action": "new_message",
+        }
+        assert requests[3]["input"]["target"] == recipient_target
+        assert requests[3]["input"]["text"] == "Alice"
+        assert requests[5]["input"]["target"] == body_target
+        assert requests[5]["input"]["text"] == body
+        assert requests[6]["input"] == {"action": "send"}
+        assert {request["planning_reason"] for request in requests} == {
+            "planner_fallback_communication_send"
+        }
 
 
 def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation() -> None:
@@ -11659,34 +11669,9 @@ def test_runtime_planner_discovers_generic_music_app_before_acting() -> None:
         assert _step_by_id(decision, "verify-desktop-result").depends_on == [
             "open-selected-discovered-app"
         ]
-        assert planner_tool_requests(prompt, allowed_tools) == [
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.list_apps",
-                "input": {"query": "music", "limit": 20},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-                "continue_to_model": True,
-            },
-            {
-                "protocol": "json_fallback",
-                "tool": "app.open",
-                "input": {
-                    "app_name": "<selected app from desktop.list_apps>",
-                    "selection_source": "desktop.list_apps",
-                    "query": "music",
-                },
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.active_window",
-                "input": {},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
-        ]
+        assert planner_tool_requests(prompt, allowed_tools) == (
+            _selected_discovered_app_open_chain("music")
+        )
 
     capability_decision = RuntimePlanner().decision(
         "打开一个能播放音乐的应用",
@@ -11696,34 +11681,9 @@ def test_runtime_planner_discovers_generic_music_app_before_acting() -> None:
         "query": "music",
         "description": "播放音乐",
     }
-    assert planner_tool_requests("打开一个能播放音乐的应用", allowed_tools) == [
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.list_apps",
-            "input": {"query": "music", "limit": 20},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "app.open",
-            "input": {
-                "app_name": "<selected app from desktop.list_apps>",
-                "selection_source": "desktop.list_apps",
-                "query": "music",
-            },
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
-        {
-            "protocol": "json_fallback",
-            "tool": "desktop.active_window",
-            "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
-        },
-    ]
+    assert planner_tool_requests("打开一个能播放音乐的应用", allowed_tools) == (
+        _selected_discovered_app_open_chain("music")
+    )
 
     playback = RuntimePlanner().decision(
         "播放音乐",
@@ -15499,8 +15459,8 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
         },
         {
             "protocol": "json_fallback",
-            "tool": "desktop.safe_shortcut",
-            "input": {"action": "find"},
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Finder", "action": "find"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -23549,6 +23509,13 @@ def test_planner_desktop_tool_requests_discovers_app_name_from_in_app_phrase() -
             "protocol": "json_fallback",
             "tool": "desktop.running_apps",
             "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
