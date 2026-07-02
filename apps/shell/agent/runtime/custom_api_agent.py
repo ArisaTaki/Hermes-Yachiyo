@@ -521,6 +521,7 @@ class RuntimeCustomApiAgentLoop:
                             run_id=run_id,
                         )
                         auto_tool_timeline_start = len(timeline)
+                        auto_replan_approval_requests = auto_replan_recovery_requests
                         try:
                             self._run_tool_requests(
                                 auto_replan_recovery_requests,
@@ -539,6 +540,60 @@ class RuntimeCustomApiAgentLoop:
                                 tool_timeline_start=auto_tool_timeline_start,
                                 run_id=run_id,
                             )
+                            auto_replan_continuation_requests = (
+                                _auto_replan_discovered_app_continuation_requests(
+                                    replan_payloads,
+                                    execution_tool_requests,
+                                    allowed_tools,
+                                    timeline,
+                                )
+                            )
+                            if auto_replan_continuation_requests:
+                                auto_replan_approval_requests = [
+                                    *auto_replan_recovery_requests,
+                                    *auto_replan_continuation_requests,
+                                ]
+                                self._record_auto_model_followup_app_write_plan(
+                                    auto_replan_continuation_requests,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                )
+                                self._record_desktop_permission_preflight(
+                                    auto_replan_continuation_requests,
+                                    broker,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                )
+                                self._record_desktop_tool_policy_decisions(
+                                    auto_replan_continuation_requests,
+                                    allowed_tools=allowed_tools,
+                                    agent=agent,
+                                    run_id=run_id,
+                                )
+                                continuation_timeline_start = len(timeline)
+                                self._run_tool_requests(
+                                    auto_replan_continuation_requests,
+                                    allowed_tools,
+                                    broker,
+                                    messages,
+                                    timeline,
+                                    artifacts,
+                                    next_iteration=start_iteration,
+                                    run_id=run_id,
+                                    budget=budget,
+                                )
+                                self._record_runtime_planner_task_progress_events(
+                                    runtime_planner_decision,
+                                    timeline=timeline,
+                                    tool_timeline_start=continuation_timeline_start,
+                                    run_id=run_id,
+                                )
+                                auto_replan_recovery_requests = [
+                                    *_tool_requests_without_model_followup(
+                                        auto_replan_recovery_requests
+                                    ),
+                                    *auto_replan_continuation_requests,
+                                ]
                         except AgentApprovalRequired as exc:
                             self._record_runtime_planner_task_progress_events(
                                 runtime_planner_decision,
@@ -553,19 +608,19 @@ class RuntimeCustomApiAgentLoop:
                             )
                             planned_tool = str(
                                 pending_approval.get("tool")
-                                or auto_replan_recovery_requests[0].get("tool")
+                                or auto_replan_approval_requests[0].get("tool")
                                 or ""
                             )
                             approval_request = self._planned_request_for_tool(
-                                auto_replan_recovery_requests,
+                                auto_replan_approval_requests,
                                 planned_tool,
                             )
                             planned_input = self._pending_approval_input_preview(
                                 pending_approval,
                                 approval_request,
                                 (
-                                    auto_replan_recovery_requests[0]
-                                    if auto_replan_recovery_requests
+                                    auto_replan_approval_requests[0]
+                                    if auto_replan_approval_requests
                                     else {}
                                 ),
                             )
@@ -3884,6 +3939,10 @@ def _timeline_has_permission_recovery_signal(
         if event.get("event") not in {"agent.tool.call", "agent.tool.skipped"}:
             continue
         result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        if result.get("blocked_by_app_resolution") or str(
+            result.get("error") or ""
+        ).strip() == "app_resolution_failed":
+            continue
         if result and _has_permission_recovery_signal(result):
             return True
     return False
@@ -8873,6 +8932,128 @@ def _auto_replan_recovery_requests_with_task_context(
         _replan_recovery_request_with_task_context(request, task_core)
         for request in requests
     ]
+
+
+def _auto_replan_discovered_app_continuation_requests(
+    replan_payloads: list[dict[str, Any]],
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    planned = [request for request in planned_tool_requests if isinstance(request, Mapping)]
+    if not planned:
+        return []
+    requests: list[dict[str, Any]] = []
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        if not _replan_payload_is_app_resolution_failure(payload):
+            continue
+        source_index = _replan_source_request_index(planned, payload)
+        if source_index < 0:
+            continue
+        source_request = planned[source_index]
+        app_query = _replan_discovered_app_query(source_request, payload)
+        if not app_query or not _discovered_app_name_for_query(timeline, app_query):
+            continue
+        requests.extend(
+            _replan_discovered_app_continuation_slice(
+                planned[source_index:],
+                payload,
+                allowed,
+            )
+        )
+    return _dedupe_replan_recovery_requests(requests)
+
+
+def _replan_payload_is_app_resolution_failure(payload: Mapping[str, Any]) -> bool:
+    source_tool = str(payload.get("source_tool_name") or payload.get("tool") or "").strip()
+    if source_tool not in _DISCOVERED_APP_DIRECT_COMPLETION_TOOLS:
+        return False
+    failure_detail = str(payload.get("failure_detail") or "").strip()
+    if "app_resolution_failed" in failure_detail:
+        return True
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    for action in _mapping_list(metadata.get("recovery_actions")):
+        if str(action.get("tool") or "").strip() == "desktop.list_apps":
+            return True
+    return False
+
+
+def _replan_source_request_index(
+    planned_tool_requests: list[Mapping[str, Any]],
+    payload: Mapping[str, Any],
+) -> int:
+    source_step_id = str(
+        payload.get("source_step_id") or payload.get("planner_step_id") or ""
+    ).strip()
+    source_tool = str(payload.get("source_tool_name") or payload.get("tool") or "").strip()
+    for index, request in enumerate(planned_tool_requests):
+        tool_name = str(request.get("tool") or "").strip()
+        step_id = str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+        if source_step_id and step_id == source_step_id:
+            if not source_tool or tool_name == source_tool:
+                return index
+        if not source_step_id and source_tool and tool_name == source_tool:
+            if _request_uses_discovered_app_resolution(request):
+                return index
+    return -1
+
+
+def _replan_discovered_app_query(
+    source_request: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> str:
+    request_input = (
+        source_request.get("input") if isinstance(source_request.get("input"), Mapping) else {}
+    )
+    query = str(request_input.get("query") or "").strip()
+    if query:
+        return query
+    app_name = str(request_input.get("app_name") or "").strip()
+    if app_name and app_name != "<selected app from desktop.list_apps>":
+        return app_name
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    for action in _mapping_list(metadata.get("recovery_actions")):
+        action_input = action.get("input") if isinstance(action.get("input"), Mapping) else {}
+        query = str(action_input.get("query") or "").strip()
+        if query:
+            return query
+    return str(payload.get("target_app_query") or payload.get("target_app_name") or "").strip()
+
+
+def _replan_discovered_app_continuation_slice(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    payload: Mapping[str, Any],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    for request in planned_tool_requests:
+        tool_name = str(request.get("tool") or "").strip()
+        if not tool_name:
+            continue
+        if allowed and tool_name not in allowed:
+            break
+        if tool_name == "desktop.list_apps":
+            continue
+        if tool_name not in _DIRECT_DAILY_DESKTOP_TOOLS:
+            break
+        item = dict(request)
+        item.pop("continue_to_model", None)
+        item["source"] = str(item.get("source") or "runtime_planner")
+        item["planning_reason"] = "planner_replan_discovered_app_continuation"
+        trigger = str(payload.get("trigger") or "").strip()
+        request_id = str(payload.get("request_id") or "").strip()
+        if trigger:
+            item["replan_trigger"] = trigger
+        if request_id:
+            item["replan_request_id"] = request_id
+        _attach_replan_payload_trace_metadata(item, payload)
+        requests.append(item)
+        if len(requests) >= _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS:
+            break
+    return requests
 
 
 def _replan_recovery_request_with_task_context(

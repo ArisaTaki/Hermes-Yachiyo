@@ -18472,6 +18472,15 @@ def test_auto_discovered_app_compose_followup_types_and_verifies() -> None:
             "input": {"text": "周报"},
             "source": "runtime_planner",
             "planning_reason": "planner_discovered_app_followup",
+            "input_resolution": {
+                "tool": "desktop.safe_type_text",
+                "field": "app_name",
+                "requested_app_name": "markdown",
+                "resolved_app_name": "Obsidian",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/Obsidian.app",
+                "app_resolution_score": "91",
+            },
         },
         {
             "protocol": "json_fallback",
@@ -21539,6 +21548,309 @@ def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> No
     assert recovery_request["task_todo"]["step_id"] == "open-selected-discovered-app"
     assert recovery_request["task_checkpoints"][0]["after_step_id"] == "open-selected-discovered-app"
     assert recovery_request["workspace_id"]
+    continuation_requests = (
+        custom_api_agent_module._auto_replan_discovered_app_continuation_requests(
+            replan_payloads,
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.list_apps",
+                    "input": {"query": "pdf", "limit": 20},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_desktop_operation",
+                    "continue_to_model": True,
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.open",
+                    "input": {
+                        "app_name": "<selected app from desktop.list_apps>",
+                        "selection_source": "desktop.list_apps",
+                        "query": "pdf",
+                    },
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_desktop_operation",
+                    "step_id": "open-selected-discovered-app",
+                    "capability_id": "desktop.app_control",
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus_and_safe_scroll",
+                    "input": {
+                        "app_name": "<selected app from desktop.list_apps>",
+                        "selection_source": "desktop.list_apps",
+                        "query": "pdf",
+                        "direction": "down",
+                        "amount": 2,
+                    },
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_desktop_operation",
+                    "step_id": "operate-selected-discovered-app-ui",
+                    "capability_id": "desktop.ui_operation",
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "screen.capture",
+                    "input": {},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_desktop_operation",
+                    "step_id": "verify-desktop-result",
+                    "capability_id": "desktop.app_discovery",
+                },
+            ],
+            [
+                "desktop.list_apps",
+                "app.open",
+                "app.focus_and_safe_scroll",
+                "screen.capture",
+            ],
+            [
+                *timeline,
+                _timeline(
+                    "agent.tool.call",
+                    "desktop.list_apps",
+                    input_preview={"query": "pdf", "limit": 20},
+                    result={
+                        "ok": True,
+                        "action": "desktop.list_apps",
+                        "summary": "Found PDF Expert",
+                        "data": {
+                            "query": "pdf",
+                            "apps": [
+                                {
+                                    "name": "PDF Expert",
+                                    "path": "/Applications/PDF Expert.app",
+                                    "match_score": 94,
+                                }
+                            ],
+                        },
+                    },
+                ),
+            ],
+        )
+    )
+    assert [request["tool"] for request in continuation_requests] == [
+        "app.open",
+        "app.focus_and_safe_scroll",
+        "screen.capture",
+    ]
+    assert {request["planning_reason"] for request in continuation_requests} == {
+        "planner_replan_discovered_app_continuation"
+    }
+    assert {request["replan_request_id"] for request in continuation_requests} == {
+        payload["request_id"]
+    }
+    assert {request["replan_trigger"] for request in continuation_requests} == {
+        "tool_failure"
+    }
+    assert all("continue_to_model" not in request for request in continuation_requests)
+    assert continuation_requests[0]["input"]["query"] == "pdf"
+    assert continuation_requests[1]["input"]["amount"] == 2
+
+
+def test_custom_api_agent_loop_continues_after_replan_app_rediscovery_without_model() -> None:
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = []
+    tool_runs: list[list[str]] = []
+    list_apps_calls = 0
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus_and_safe_scroll",
+        "screen.capture",
+    ]
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        nonlocal list_apps_calls
+        tool_runs.append([str(request.get("tool") or "") for request in tool_requests])
+        for request in tool_requests:
+            tool = str(request.get("tool") or "")
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if tool == "desktop.list_apps":
+                list_apps_calls += 1
+                result = (
+                    {
+                        "ok": True,
+                        "action": tool,
+                        "summary": "No PDF apps",
+                        "data": {"query": "pdf", "apps": [], "count": 0},
+                    }
+                    if list_apps_calls == 1
+                    else {
+                        "ok": True,
+                        "action": tool,
+                        "summary": "Found PDF Expert",
+                        "data": {
+                            "query": "pdf",
+                            "apps": [
+                                {
+                                    "name": "PDF Expert",
+                                    "path": "/Applications/PDF Expert.app",
+                                    "match_score": 94,
+                                }
+                            ],
+                        },
+                    }
+                )
+                timeline_arg.append(
+                    _timeline(
+                        "agent.tool.call",
+                        tool,
+                        input_preview=dict(payload),
+                        result=result,
+                    )
+                )
+                continue
+            if tool == "app.open" and list_apps_calls == 1:
+                result = {
+                    "ok": False,
+                    "skipped": True,
+                    "blocked_by_app_resolution": True,
+                    "error": "app_resolution_failed",
+                    "hint": "desktop.list_apps did not return a high-confidence app match.",
+                    "recovery_actions": [
+                        {
+                            "label": "重新发现应用",
+                            "tool": "desktop.list_apps",
+                            "input": {"query": "pdf", "limit": 20},
+                            "permission_target": "app_discovery",
+                            "risk_level": "low",
+                        }
+                    ],
+                }
+                timeline_arg.append(
+                    _timeline(
+                        "agent.tool.skipped",
+                        tool,
+                        input_preview=dict(payload),
+                        result=result,
+                    )
+                )
+                return
+            if tool == "app.open":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Opened PDF Expert",
+                    "data": {"app_name": "PDF Expert"},
+                }
+            elif tool == "app.focus_and_safe_scroll":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Scrolled PDF Expert",
+                    "data": {"app_name": "PDF Expert", "direction": payload.get("direction")},
+                }
+            elif tool == "screen.capture":
+                result = {
+                    "ok": True,
+                    "action": tool,
+                    "summary": "Captured screen",
+                    "data": {"path": "artifacts/pdf-scroll.png"},
+                }
+            else:
+                raise AssertionError(f"unexpected tool: {tool}")
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool,
+                    input_preview=dict(payload),
+                    result=result,
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": allowed_tools},
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed: [{"name": tool} for tool in allowed],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=2,
+        operating_doctrine="Use runtime planner direct desktop execution.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("app rediscovery continuation should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "找一个 PDF 阅读器，向下滚动两页",
+        broker={},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-app-rediscovery",
+    )
+
+    assert result
+    assert budget.claims == 0
+    assert tool_runs == [
+        [
+            "desktop.list_apps",
+            "app.open",
+            "app.focus_and_safe_scroll",
+            "screen.capture",
+        ],
+        ["desktop.list_apps"],
+        ["app.open", "app.focus_and_safe_scroll", "screen.capture"],
+    ]
+
+    def replan_source_tool(event: dict[str, Any]) -> str:
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        return str(event.get("source_tool_name") or payload.get("source_tool_name") or "")
+
+    assert any(
+        event["event"] == "agent.replan.requested"
+        and replan_source_tool(event) == "app.open"
+        for event in timeline
+    )
+    continuation_plans = [
+        event
+        for event in timeline
+        if event["event"] == "agent.desktop.intent_planned"
+        and event["planning_reason"] == "planner_replan_discovered_app_continuation"
+    ]
+    assert [event["tool"] for event in continuation_plans] == [
+        "app.open",
+        "app.focus_and_safe_scroll",
+        "screen.capture",
+    ]
+    completed = next(
+        event for event in reversed(timeline) if event["event"] == "agent.desktop.intent_completed"
+    )
+    assert completed["tools"] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus_and_safe_scroll",
+        "screen.capture",
+    ]
+    assert any(step.get("replan_request_id") for step in completed["steps"])
 
 
 def test_runtime_tool_runner_projects_task_progress_from_tool_result() -> None:
