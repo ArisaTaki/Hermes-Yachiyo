@@ -815,6 +815,10 @@ export type PlannerOrchestrationStartSnapshot = {
   kind: 'workflow' | 'group_run' | string;
   status: 'started' | 'handoff' | 'unsupported' | 'target_not_found' | string;
   decision: PlannerDecisionSnapshot;
+  run_id?: string | null;
+  workflow_run_id?: string | null;
+  group_run_id?: string | null;
+  run_group_id?: string | null;
   target_id?: string | null;
   target_name?: string | null;
   objective?: string;

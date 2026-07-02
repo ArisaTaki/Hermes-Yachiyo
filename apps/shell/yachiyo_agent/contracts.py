@@ -902,6 +902,10 @@ class PlannerOrchestrationStartSnapshot(_PublicSnapshot):
     kind: Literal["workflow", "group_run"] | str
     status: Literal["started", "handoff", "unsupported", "target_not_found"] | str
     decision: PlannerDecisionSnapshot
+    run_id: str | None = None
+    workflow_run_id: str | None = None
+    group_run_id: str | None = None
+    run_group_id: str | None = None
     target_id: str | None = None
     target_name: str | None = None
     objective: str = ""

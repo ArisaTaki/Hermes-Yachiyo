@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from typing import get_args
+from typing import Any, get_args
 
 import pytest
 from pydantic import ValidationError
@@ -23,6 +23,7 @@ from apps.shell.yachiyo_agent import (
     AgentDeskFileEventRequest,
     AgentDeskItemSnapshot,
     AgentDeskSnapshot,
+    AgentStudioService,
     AgentGroupMemberSnapshot,
     AgentGroupSnapshot,
     AgentTaskLightSnapshot,
@@ -107,6 +108,56 @@ from apps.shell.yachiyo_agent.workflow_run_snapshots import workflow_run_snapsho
 
 def _json(model) -> dict:
     return json.loads(model.model_dump_json())
+
+
+class _FakeStudioOrchestrationPort:
+    def list_workflows(self) -> dict[str, Any]:
+        return {
+            "workflows": [
+                {
+                    "workflow_id": "workflow-1",
+                    "name": "Review workflow",
+                    "nodes": [],
+                    "edges": [],
+                }
+            ]
+        }
+
+    def start_workflow_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "run_id": "workflow-run-1",
+            "workflow_run_id": "workflow-run-1",
+            "workflow_id": payload.get("workflow_id") or "workflow-1",
+            "kind": "workflow_run",
+            "status": "running",
+            "title": payload.get("title") or "Review workflow",
+            "objective": payload.get("objective") or "Build report",
+            "timeline": [{"event": "workflow.run.started"}],
+        }
+
+    def list_groups(self) -> dict[str, Any]:
+        return {
+            "groups": [
+                {
+                    "group_id": "group-1",
+                    "name": "Research squad",
+                    "members": [],
+                }
+            ]
+        }
+
+    def start_group_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "group_run_id": "group-run-1",
+            "run_group_id": "group-run-1",
+            "group_id": payload.get("group_id") or "group-1",
+            "title": payload.get("title") or "Research squad",
+            "objective": payload.get("objective") or "Research Hanako",
+            "status": "running",
+            "events": [{"event": "group.run.started"}],
+            "runs": [],
+            "child_run_ids": [],
+        }
 
 
 def test_task_intent_kind_contract_covers_runtime_planner_routes() -> None:
@@ -414,6 +465,8 @@ def test_planner_orchestration_start_contract_links_decision_and_started_run() -
         kind="workflow",
         status="started",
         decision=decision,
+        run_id="workflow-run-1",
+        workflow_run_id="workflow-run-1",
         target_id="workflow-1",
         target_name="Review workflow",
         objective="Build report",
@@ -433,6 +486,10 @@ def test_planner_orchestration_start_contract_links_decision_and_started_run() -
         "kind",
         "status",
         "decision",
+        "run_id",
+        "workflow_run_id",
+        "group_run_id",
+        "run_group_id",
         "target_id",
         "target_name",
         "objective",
@@ -443,6 +500,9 @@ def test_planner_orchestration_start_contract_links_decision_and_started_run() -
         "group_run",
     ]
     assert payload["decision"]["selected_intent"]["kind"] == "workflow_orchestration"
+    assert payload["run_id"] == "workflow-run-1"
+    assert payload["workflow_run_id"] == "workflow-run-1"
+    assert payload["group_run_id"] is None
     assert payload["target_id"] == "workflow-1"
     assert payload["route_to_studio"] is True
     assert payload["workflow_run"]["workflow_id"] == "workflow-1"
@@ -453,6 +513,37 @@ def test_planner_orchestration_start_contract_links_decision_and_started_run() -
         "allowed_tools": ["workflow.run"],
         "metadata": {"surface": "agent_studio"},
     }
+
+
+def test_agent_studio_planner_orchestration_start_surfaces_run_correlation() -> None:
+    service = AgentStudioService(_FakeStudioOrchestrationPort())
+
+    workflow = service.start_planner_orchestration(
+        StartPlannerOrchestrationRequest(
+            prompt="运行 Review workflow",
+            target_name="Review workflow",
+            allowed_tools=["workflow.run"],
+        )
+    )
+    group = service.start_planner_orchestration(
+        StartPlannerOrchestrationRequest(
+            prompt="启动 Research squad group 调研 Hanako",
+            target_name="Research squad",
+            allowed_tools=["group.run", "agent.group_run"],
+        )
+    )
+
+    assert workflow.status == "started"
+    assert workflow.run_id == "workflow-run-1"
+    assert workflow.workflow_run_id == "workflow-run-1"
+    assert workflow.workflow_run is not None
+    assert workflow.workflow_run.workflow_id == "workflow-1"
+    assert group.status == "started"
+    assert group.run_id == "group-run-1"
+    assert group.group_run_id == "group-run-1"
+    assert group.run_group_id == "group-run-1"
+    assert group.group_run is not None
+    assert group.group_run.group_id == "group-1"
 
 
 def test_run_timeline_child_snapshot_projects_planner_summary_from_child_events() -> None:

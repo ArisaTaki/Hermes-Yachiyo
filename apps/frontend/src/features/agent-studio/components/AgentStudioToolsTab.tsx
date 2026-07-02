@@ -439,6 +439,9 @@ function PlannerStepRow({
 }
 
 function plannerOrchestrationRunId(result: PlannerOrchestrationStartSnapshot): string {
+  if (result.run_id) return result.run_id;
+  if (result.workflow_run_id) return result.workflow_run_id;
+  if (result.group_run_id) return result.group_run_id;
   if (result.workflow_run?.run_id) return result.workflow_run.run_id;
   const groupRun = result.group_run;
   return groupRun?.runs?.[0]?.run_id || groupRun?.child_run_ids?.[0] || '';

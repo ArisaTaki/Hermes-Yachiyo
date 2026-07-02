@@ -70,6 +70,9 @@ import { groupRunTimelineRunId } from '../features/agent-studio/utils/groups';
 import { openAppView } from '../lib/bridge';
 
 function plannerOrchestrationRunId(result: PlannerOrchestrationStartSnapshot): string {
+  if (result.run_id) return result.run_id;
+  if (result.workflow_run_id) return result.workflow_run_id;
+  if (result.group_run_id) return result.group_run_id;
   if (result.workflow_run?.run_id) return result.workflow_run.run_id;
   return groupRunTimelineRunId(result.group_run || null);
 }
