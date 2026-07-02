@@ -512,8 +512,9 @@ def _has_desktop_recovery_user_action(
             continue
         payload = event.payload if isinstance(event.payload, Mapping) else {}
         result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
+        desktop_event_type = _desktop_intent_event_type(event.event_type)
         if (
-            event.event_type == _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE
+            desktop_event_type == _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE
             and _has_recovery_signal(
                 payload,
                 count_success_recovery_actions=count_success_recovery_actions,
@@ -526,7 +527,10 @@ def _has_desktop_recovery_user_action(
         ):
             return True
         if (
-            event.event_type in {_COMPLETED_DESKTOP_INTENT_EVENT_TYPE, _TOOL_CALL_EVENT_TYPE}
+            (
+                desktop_event_type == _COMPLETED_DESKTOP_INTENT_EVENT_TYPE
+                or event.event_type == _TOOL_CALL_EVENT_TYPE
+            )
             and _has_recovery_signal(
                 result,
                 count_success_recovery_actions=(
@@ -559,7 +563,8 @@ def _has_completed_desktop_recovery_user_action(events: list[PublicRunEvent]) ->
     latest_readiness_recovery_sequence = _latest_readiness_recovery_sequence(events)
     for event in reversed(events):
         payload = event.payload if isinstance(event.payload, Mapping) else {}
-        if event.event_type == _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE:
+        desktop_event_type = _desktop_intent_event_type(event.event_type)
+        if desktop_event_type == _PERMISSION_RECOVERY_DESKTOP_EVENT_TYPE:
             if _has_recovery_signal(payload) and not _is_recovered_foreground_readiness_signal(
                 event,
                 payload,
@@ -567,7 +572,7 @@ def _has_completed_desktop_recovery_user_action(events: list[PublicRunEvent]) ->
             ):
                 return True
             continue
-        if event.event_type != _COMPLETED_DESKTOP_INTENT_EVENT_TYPE:
+        if desktop_event_type != _COMPLETED_DESKTOP_INTENT_EVENT_TYPE:
             continue
         result = payload.get("result") if isinstance(payload.get("result"), Mapping) else {}
         return _has_recovery_signal(
@@ -586,7 +591,7 @@ def _latest_readiness_recovery_sequence(events: list[PublicRunEvent]) -> int:
         [
             int(event.sequence or 0)
             for event in events
-            if event.event_type == _READINESS_RECOVERED_DESKTOP_EVENT_TYPE
+            if _desktop_intent_event_type(event.event_type) == _READINESS_RECOVERED_DESKTOP_EVENT_TYPE
         ]
         or [0]
     )

@@ -137,6 +137,8 @@ _WORKFLOW_PLANNER_EVENT_TYPES = {
     "agent.desktop.intent_approval_required": "workflow.run.desktop.intent_approval_required",
     "agent.desktop.intent_completed": "workflow.run.desktop.intent_completed",
     "agent.desktop.intent_unavailable": "workflow.run.desktop.intent_unavailable",
+    "agent.desktop.permission_recovery": "workflow.run.desktop.permission_recovery",
+    "agent.desktop.readiness_recovered": "workflow.run.desktop.readiness_recovered",
     "agent.task.workspace_item.updated": "workflow.run.task.workspace_item.updated",
     "agent.task.todo.updated": "workflow.run.task.todo.updated",
     "agent.task.checkpoint.updated": "workflow.run.task.checkpoint.updated",

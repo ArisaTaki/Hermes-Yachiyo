@@ -19,6 +19,7 @@ from .tool_call_payload_snapshots import (
 _DAILY_DESKTOP_INTENT_TOOL_EVENTS = {
     "agent.desktop.intent_approval_required",
     "agent.desktop.intent_completed",
+    "agent.desktop.permission_recovery",
     "agent.desktop.intent_unavailable",
 }
 _TOOL_INPUT_RESOLUTION_EVENT_TYPE = "agent.tool.input_resolved"
@@ -417,6 +418,8 @@ def tool_status_from_event_payload(event_type: str, payload: Mapping[str, Any]) 
         return "waiting_approval"
     if is_desktop_intent_event(event_type, "unavailable"):
         return "blocked"
+    if is_desktop_permission_recovery_event(event_type):
+        return _text(payload.get("status")) or "blocked"
     if is_desktop_intent_event(event_type, "completed"):
         result = payload.get("result")
         if isinstance(result, Mapping):
@@ -493,13 +496,29 @@ def daily_desktop_intent_output_preview(
             for key in ("reason", "approval_id", "risk_level", "policy_reason")
             if payload.get(key)
         }
+    if is_desktop_permission_recovery_event(event_type):
+        return {
+            key: payload[key]
+            for key in (
+                "permission_targets",
+                "affected_tools",
+                "recovery_hints",
+                "recovery_actions",
+                "status",
+            )
+            if payload.get(key)
+        }
     return {}
 
 
 def is_daily_desktop_intent_tool_event(event_type: str) -> bool:
-    return event_type in _DAILY_DESKTOP_INTENT_TOOL_EVENTS or any(
-        is_desktop_intent_event(event_type, suffix)
-        for suffix in ("approval_required", "completed", "unavailable")
+    return (
+        event_type in _DAILY_DESKTOP_INTENT_TOOL_EVENTS
+        or is_desktop_permission_recovery_event(event_type)
+        or any(
+            is_desktop_intent_event(event_type, suffix)
+            for suffix in ("approval_required", "completed", "unavailable")
+        )
     )
 
 
@@ -509,6 +528,15 @@ def is_desktop_intent_event(event_type: str, suffix: str) -> bool:
         f"group.run.desktop.intent_{suffix}",
         f"workflow.desktop.intent_{suffix}",
         f"workflow.run.desktop.intent_{suffix}",
+    }
+
+
+def is_desktop_permission_recovery_event(event_type: str) -> bool:
+    return event_type in {
+        "agent.desktop.permission_recovery",
+        "group.run.desktop.permission_recovery",
+        "workflow.desktop.permission_recovery",
+        "workflow.run.desktop.permission_recovery",
     }
 
 

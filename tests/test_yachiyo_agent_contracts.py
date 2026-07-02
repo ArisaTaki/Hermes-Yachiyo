@@ -1957,6 +1957,82 @@ def test_group_and_workflow_snapshots_scope_desktop_result_events() -> None:
     assert workflow_snapshot.task_core.checkpoints[0].status == "blocked"
 
 
+def test_group_and_workflow_snapshots_scope_desktop_recovery_events() -> None:
+    group_snapshot = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-desktop-recovery-1",
+            "group_id": "group-1",
+            "status": "running",
+            "objective": "Recover desktop operation as a group",
+            "events": [
+                {
+                    "event_type": "agent.desktop.permission_recovery",
+                    "payload": {
+                        "tool": "desktop.safe_type_text",
+                        "permission_targets": ["accessibility"],
+                        "affected_tools": ["desktop.safe_type_text"],
+                        "recovery_actions": [
+                            {
+                                "label": "打开辅助功能权限",
+                                "tool": "system.settings_open",
+                                "input": {"target": "accessibility"},
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+    )
+    workflow_snapshot = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-desktop-recovery-1",
+            "workflow_run_id": "workflow-run-desktop-recovery-1",
+            "workflow_id": "workflow-1",
+            "status": "running",
+            "objective": "Recover desktop operation in workflow",
+            "events": [
+                {
+                    "event_type": "agent.desktop.readiness_recovered",
+                    "sequence": 2,
+                    "payload": {
+                        "tool": "desktop.list_apps",
+                        "recovery_tool": "desktop.list_apps",
+                        "status": "recovered",
+                        "app_name": "PixelForge",
+                        "blocking_conditions": ["app_not_found"],
+                    },
+                }
+            ],
+        }
+    )
+
+    group_event_types = [event.event_type for event in group_snapshot.events]
+    group_recovery_event = next(
+        event
+        for event in group_snapshot.events
+        if event.event_type == "group.run.desktop.permission_recovery"
+    )
+    assert "group.run.desktop.permission_recovery" in group_event_types
+    assert group_recovery_event.payload["planner_event_type"] == (
+        "agent.desktop.permission_recovery"
+    )
+    assert group_snapshot.tool_calls[0].tool_name == "desktop.safe_type_text"
+    assert group_snapshot.tool_calls[0].status == "blocked"
+    assert group_snapshot.tool_calls[0].output_preview["permission_targets"] == [
+        "accessibility"
+    ]
+    workflow_event_types = [event.event_type for event in workflow_snapshot.events]
+    workflow_recovered_event = next(
+        event
+        for event in workflow_snapshot.events
+        if event.event_type == "workflow.run.desktop.readiness_recovered"
+    )
+    assert "workflow.run.desktop.readiness_recovered" in workflow_event_types
+    assert workflow_recovered_event.payload["planner_event_type"] == (
+        "agent.desktop.readiness_recovered"
+    )
+
+
 def _desktop_approval_task_core_payload() -> dict:
     return {
         "core_id": "task-core-desktop-approval",
@@ -2294,6 +2370,78 @@ def test_agent_task_snapshot_clears_recovered_foreground_readiness_action() -> N
         "agent.tool.call",
         "agent.desktop.readiness_recovered",
     ]
+
+
+def test_agent_task_snapshot_handles_scoped_desktop_recovery_events() -> None:
+    recovered_snapshot = agent_task_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "status": "running",
+            "timeline": [
+                {
+                    "event_type": "agent.tool.call",
+                    "sequence": 1,
+                    "payload": {
+                        "tool": "desktop.inspect_app",
+                        "input_preview": {"app_name": "PixelForge"},
+                        "result": {
+                            "ok": False,
+                            "error": "app_not_found",
+                            "recovery_actions": [
+                                {
+                                    "label": "重新发现应用",
+                                    "tool": "desktop.list_apps",
+                                    "input": {"query": "PixelForge", "limit": 20},
+                                }
+                            ],
+                            "data": {
+                                "app_name": "PixelForge",
+                                "ready_for_foreground_action": False,
+                            },
+                        },
+                    },
+                },
+                {
+                    "event_type": "workflow.run.desktop.readiness_recovered",
+                    "sequence": 2,
+                    "payload": {
+                        "tool": "desktop.list_apps",
+                        "recovery_tool": "desktop.list_apps",
+                        "status": "recovered",
+                        "app_name": "PixelForge",
+                        "blocking_conditions": ["app_not_found"],
+                    },
+                },
+            ],
+        }
+    )
+    pending_snapshot = agent_task_snapshot_from_payload(
+        {
+            "run_id": "run-2",
+            "status": "running",
+            "timeline": [
+                {
+                    "event_type": "group.run.desktop.permission_recovery",
+                    "sequence": 1,
+                    "payload": {
+                        "tool": "desktop.safe_type_text",
+                        "permission_targets": ["accessibility"],
+                        "recovery_actions": [
+                            {
+                                "label": "打开辅助功能权限",
+                                "tool": "system.settings_open",
+                                "input": {"target": "accessibility"},
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+    )
+
+    assert recovered_snapshot.needs_user_action is False
+    assert recovered_snapshot.current_step == "桌面就绪已恢复 · 发现已安装应用"
+    assert pending_snapshot.needs_user_action is True
 
 
 def test_agent_task_snapshot_keeps_permission_action_after_readiness_recovery() -> None:

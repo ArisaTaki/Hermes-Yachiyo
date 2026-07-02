@@ -358,6 +358,10 @@ def _group_run_planner_event_type(event_type: str) -> str:
         return "group.run.desktop.intent_completed"
     if event_type == "agent.desktop.intent_unavailable":
         return "group.run.desktop.intent_unavailable"
+    if event_type == "agent.desktop.permission_recovery":
+        return "group.run.desktop.permission_recovery"
+    if event_type == "agent.desktop.readiness_recovered":
+        return "group.run.desktop.readiness_recovered"
     if event_type == "agent.task.workspace_item.updated":
         return "group.run.task.workspace_item.updated"
     if event_type == "agent.task.todo.updated":
