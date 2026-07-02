@@ -617,6 +617,8 @@ def test_runtime_planner_opens_generated_analysis_result_with_requested_app() ->
             },
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
+            "step_id": "analyze-data-file",
+            "capability_id": "data.analysis",
         },
         {
             "protocol": "json_fallback",
@@ -627,6 +629,8 @@ def test_runtime_planner_opens_generated_analysis_result_with_requested_app() ->
             },
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
+            "step_id": "open-analysis-artifact-with-app",
+            "capability_id": "file.desktop_access",
         },
     ]
 
@@ -2260,6 +2264,65 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
             "planning_reason": "planner_desktop_operation",
             "continue_to_model": True,
         }
+    ]
+
+    pdf_prompt = "找一个能编辑 PDF 的本机应用并打开最近的 PDF"
+    pdf_allowed_tools = [
+        "workspace.list",
+        "desktop.list_apps",
+        "desktop.open_path_with_app",
+    ]
+    pdf_decision = RuntimePlanner().decision(
+        pdf_prompt,
+        allowed_tools=pdf_allowed_tools,
+    )
+    pdf_requests = planner_tool_requests(
+        pdf_prompt,
+        pdf_allowed_tools,
+    )
+
+    assert pdf_decision.selected_intent.kind == "desktop_operation"
+    assert pdf_decision.selected_intent.inputs["app_capability_hint"] == {
+        "query": "pdf",
+        "description": "PDF",
+    }
+    assert pdf_decision.selected_intent.inputs["file_open_discovery_hint"] == {
+        "path": "Downloads",
+        "file_type": "pdf",
+        "selection": "latest",
+        "pattern": "*.pdf",
+    }
+    assert [step.step_id for step in pdf_decision.plan.tool_plan.steps] == [
+        "discover-file-open-target",
+        "discover_apps-desktop-state",
+        "open-discovered-file-with-app",
+    ]
+    assert _step_by_id(pdf_decision, "open-discovered-file-with-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "app_selection_source": "desktop.list_apps",
+        "query": "pdf",
+        "target_path": "<selected file from workspace.list>",
+        "selection_source": "workspace.list",
+        "action": "open_path_with_app",
+        "selection": "latest",
+    }
+    assert pdf_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads", "pattern": "*.pdf", "file_type": "pdf"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "pdf", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        },
     ]
 
     drawing_prompt = "用任意可用的画图应用新建画布并输入标题 Yachiyo"

@@ -382,7 +382,14 @@ class TaskIntentRouter:
         generic_browser_search = _generic_browser_app_search_hint(text)
         if generic_browser_search and not app_capability:
             app_capability = {"query": "browser", "description": "browser"}
-        file_open_discovery = _app_file_open_discovery_hint(text, metadata)
+        file_open_discovery = _app_file_open_discovery_hint(
+            text,
+            metadata,
+        ) or _generic_app_file_open_discovery_hint(
+            text,
+            metadata,
+            app_capability=app_capability,
+        )
         app_search_app_hint = "" if app_capability else _app_name_hint(text)
         if (
             _explicit_system_settings_request(text)
@@ -3115,6 +3122,20 @@ class RuntimePlanner:
                 app_name=app_name,
                 file_hint=file_open_discovery,
             )
+        if file_open_discovery and (desktop_discovery or app_capability):
+            app_query = str(
+                (desktop_discovery or {}).get("query")
+                or app_capability.get("query")
+                or file_open_discovery.get("file_type")
+                or ""
+            ).strip()
+            if app_query:
+                return _file_open_with_selected_app_discovery_steps(
+                    intent,
+                    allowed,
+                    app_query=app_query,
+                    file_hint=file_open_discovery,
+                )
         if foreground_search_submit:
             return [
                 _step(
@@ -6340,6 +6361,66 @@ def _file_open_with_app_discovery_steps(
             reason=(
                 "After workspace.list returns candidates, the model selects the matching "
                 "file path and opens it with the requested app."
+            ),
+        ),
+    ]
+
+
+def _file_open_with_selected_app_discovery_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    *,
+    app_query: str,
+    file_hint: Mapping[str, Any],
+) -> list[ToolPlanStepSnapshot]:
+    file_list_preview = {
+        key: str(file_hint.get(key) or "").strip()
+        for key in ("path", "pattern", "file_type")
+        if str(file_hint.get(key) or "").strip()
+    }
+    clean_app_query = str(app_query or "").strip()
+    selection = str(file_hint.get("selection") or "").strip()
+    open_preview = {
+        "app_name": "<selected app from desktop.list_apps>",
+        "app_selection_source": "desktop.list_apps",
+        "query": clean_app_query,
+        "target_path": "<selected file from workspace.list>",
+        "selection_source": "workspace.list",
+        "action": "open_path_with_app",
+    }
+    if selection:
+        open_preview["selection"] = selection
+    return [
+        _step(
+            intent,
+            "discover-file-open-target",
+            "Discover file open target",
+            "file.workspace_read",
+            _first_allowed(("workspace.list",), allowed),
+            input_preview=file_list_preview,
+            reason="List candidate files before opening a dynamic file target with a discovered app.",
+        ),
+        _step(
+            intent,
+            "discover_apps-desktop-state",
+            "Discover desktop apps",
+            "desktop.app_discovery",
+            _first_allowed(("desktop.list_apps",), allowed),
+            input_preview={"query": clean_app_query, "limit": 20},
+            reason="Discover installed apps matching the requested capability before opening the selected file.",
+        ),
+        _step(
+            intent,
+            "open-discovered-file-with-app",
+            "Open discovered file with selected app",
+            "file.desktop_access",
+            _first_allowed(("desktop.open_path_with_app", "app.open_path_with_app"), allowed),
+            input_preview=open_preview,
+            depends_on=["discover-file-open-target", "discover_apps-desktop-state"],
+            action="open_path_with_app",
+            reason=(
+                "After workspace.list and desktop.list_apps return candidates, the model "
+                "selects both the file path and the matching app, then opens the file with that app."
             ),
         ),
     ]
@@ -22409,6 +22490,41 @@ def _app_file_open_discovery_hint(
         "path": scope,
         "file_type": file_type,
         "selection": _file_open_selection_hint(value),
+    }
+    if pattern:
+        hint["pattern"] = pattern
+    return {key: item for key, item in hint.items() if item}
+
+
+def _generic_app_file_open_discovery_hint(
+    text: str,
+    metadata: Mapping[str, Any] | None = None,
+    *,
+    app_capability: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value or not app_capability:
+        return {}
+    if not _explicit_app_open_request(value):
+        return {}
+    if data_source_hint(value, metadata):
+        return {}
+    if not _looks_like_dynamic_file_open_target(value):
+        return {}
+    scope = data_source_scope_hint(value, metadata) or _file_open_location_hint(value)
+    selection = _file_open_selection_hint(value)
+    if not scope and selection:
+        scope = "Downloads"
+    file_type = data_source_kind_hint("", value) or _file_open_type_hint(value)
+    if file_type == "unknown":
+        file_type = _file_open_type_hint(value)
+    if not scope or not file_type:
+        return {}
+    pattern = _file_open_pattern(file_type)
+    hint = {
+        "path": scope,
+        "file_type": file_type,
+        "selection": selection,
     }
     if pattern:
         hint["pattern"] = pattern
