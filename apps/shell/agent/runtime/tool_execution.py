@@ -23,6 +23,13 @@ _TOOL_REQUEST_TRACE_TEXT_KEYS = (
     "workspace_id",
     "task_id",
     "run_id",
+    "run_group_id",
+    "group_run_id",
+    "group_id",
+    "workflow_id",
+    "workflow_run_id",
+    "workflow_node_id",
+    "workflow_node_label",
     "replan_request_id",
     "replan_trigger",
     "target_app_name",
@@ -61,6 +68,13 @@ _INPUT_PREVIEW_TRACE_KEYS = (
     "workspace_id",
     "task_id",
     "run_id",
+    "run_group_id",
+    "group_run_id",
+    "group_id",
+    "workflow_id",
+    "workflow_run_id",
+    "workflow_node_id",
+    "workflow_node_label",
     "replan_request_id",
     "replan_trigger",
     "target_app_name",
@@ -73,6 +87,33 @@ _INPUT_PREVIEW_TRACE_KEYS = (
     "requires_post_action_verification",
     "replan_triggers",
     "replan_signal_ids",
+)
+
+_ARTIFACT_CONTEXT_KEYS = (
+    "source",
+    "planning_reason",
+    "decision_id",
+    "plan_id",
+    "tool_plan_id",
+    "intent_kind",
+    "step_id",
+    "planner_step_id",
+    "capability_id",
+    "core_id",
+    "workspace_id",
+    "task_id",
+    "run_group_id",
+    "group_run_id",
+    "group_id",
+    "workflow_id",
+    "workflow_run_id",
+    "workflow_node_id",
+    "workflow_node_label",
+    "replan_request_id",
+    "replan_trigger",
+    "runtime_doctrine",
+    "runtime_stage",
+    "runtime_role",
 )
 
 
@@ -119,6 +160,46 @@ def _input_preview_with_trace_payload(
         if value in (None, "", [], {}):
             continue
         enriched.setdefault(key, value)
+    return enriched
+
+
+def _artifact_context_from_trace_payload(trace_payload: dict[str, Any]) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    for key in _ARTIFACT_CONTEXT_KEYS:
+        value = trace_payload.get(key)
+        if value in (None, "", [], {}):
+            continue
+        context[key] = value
+    return context
+
+
+def _artifact_with_context(
+    artifact: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    if not context:
+        return artifact
+    enriched = dict(artifact)
+    for key, value in context.items():
+        enriched.setdefault(key, value)
+    return enriched
+
+
+def _event_payload_with_artifact_context(
+    payload: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    if not context:
+        return payload
+    enriched = dict(payload)
+    for key, value in context.items():
+        enriched.setdefault(key, value)
+    artifact = enriched.get("artifact")
+    if isinstance(artifact, dict):
+        nested_artifact = dict(artifact)
+        for key, value in context.items():
+            nested_artifact.setdefault(key, value)
+        enriched["artifact"] = nested_artifact
     return enriched
 
 
@@ -704,6 +785,13 @@ class RuntimeToolCallExecutor:
                 )
         artifact = _tool_result_artifact(tool_name, tool_result)
         extra_artifacts = _tool_result_extra_artifacts(tool_name, tool_result, artifact)
+        artifact_context = _artifact_context_from_trace_payload(trace_payload)
+        if artifact is not None:
+            artifact = _artifact_with_context(artifact, artifact_context)
+        extra_artifacts = [
+            _artifact_with_context(extra_artifact, artifact_context)
+            for extra_artifact in extra_artifacts
+        ]
         if artifact is not None and artifacts is not None:
             if artifact not in artifacts:
                 artifacts.append(artifact)
@@ -714,10 +802,13 @@ class RuntimeToolCallExecutor:
             self._append_run_event(
                 run_id,
                 "artifact.created",
-                self._trace_events.artifact_created_payload(
-                    tool_result,
-                    run_id=run_id,
-                    source_tool=tool_name,
+                _event_payload_with_artifact_context(
+                    self._trace_events.artifact_created_payload(
+                        tool_result,
+                        run_id=run_id,
+                        source_tool=tool_name,
+                    ),
+                    artifact_context,
                 ),
             )
         if run_id:
@@ -725,10 +816,13 @@ class RuntimeToolCallExecutor:
                 self._append_run_event(
                     run_id,
                     "artifact.created",
-                    self._trace_events.artifact_created_payload(
-                        {"ok": True, "artifact": extra_artifact},
-                        run_id=run_id,
-                        source_tool=tool_name,
+                    _event_payload_with_artifact_context(
+                        self._trace_events.artifact_created_payload(
+                            {"ok": True, "artifact": extra_artifact},
+                            run_id=run_id,
+                            source_tool=tool_name,
+                        ),
+                        artifact_context,
                     ),
                 )
         return tool_result

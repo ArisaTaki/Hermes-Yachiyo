@@ -548,6 +548,66 @@ def test_runtime_tool_call_executor_projects_structured_tool_artifact_events() -
     ) in run_events
 
 
+def test_runtime_tool_call_executor_preserves_scope_on_artifact_events() -> None:
+    events = FakeToolCallEvents()
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    executor = _executor(tool_call_events=events, run_events=run_events)
+    artifacts: list[dict[str, Any]] = []
+    report_artifact = {
+        "path": "reports/analysis.md",
+        "kind": "markdown",
+        "mime_type": "text/markdown",
+    }
+    request_context = {
+        "source": "runtime_planner",
+        "decision_id": "decision-1",
+        "plan_id": "plan-1",
+        "step_id": "write-analysis",
+        "capability_id": "data.analysis",
+        "core_id": "core-1",
+        "workspace_id": "workspace-1",
+        "task_id": "task-1",
+        "group_id": "group-1",
+        "run_group_id": "run-group-1",
+        "group_run_id": "group-run-1",
+        "workflow_id": "workflow-1",
+        "workflow_run_id": "workflow-run-1",
+        "workflow_node_id": "node-analyze",
+        "workflow_node_label": "Analyze data",
+    }
+
+    result = executor.execute(
+        {
+            "tool": "data.analyze",
+            "input": {"path": "sales.csv"},
+            **request_context,
+        },
+        ["data.analyze"],
+        FakeBroker({"ok": True, "summary": "Analyzed data", "artifact": report_artifact}),
+        [],
+        artifacts=artifacts,
+        run_id="run-data",
+        budget=FakeBudget(),
+    )
+
+    assert result["ok"] is True
+    assert artifacts == [
+        {
+            **report_artifact,
+            "source_tool": "data.analyze",
+            **request_context,
+        }
+    ]
+    artifact_event = next(
+        payload for _run_id, event_type, payload in run_events if event_type == "artifact.created"
+    )
+    for key, value in request_context.items():
+        assert artifact_event[key] == value
+        assert artifact_event["artifact"][key] == value
+    assert artifact_event["path"] == "reports/analysis.md"
+    assert artifact_event["source_tool"] == "data.analyze"
+
+
 def test_runtime_tool_call_executor_projects_multiple_structured_artifacts() -> None:
     events = FakeToolCallEvents()
     run_events: list[tuple[str, str, dict[str, Any]]] = []
