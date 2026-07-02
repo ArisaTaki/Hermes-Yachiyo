@@ -16,6 +16,7 @@ from apps.shell.yachiyo_agent.legacy_ports import (
 )
 from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import planner_first_direct_tool_selection
+from apps.shell.yachiyo_agent.planner_projection import planner_enriched_chat_request
 
 
 def _recording_legacy_requests(
@@ -1718,6 +1719,51 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
         "app.open",
         "desktop.active_window",
     ]
+
+
+def test_legacy_chat_task_starter_uses_runtime_execution_envelope_requests() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatPlannerEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+    request = planner_enriched_chat_request(
+        {
+            "prompt": "打开 PixelForge",
+            "metadata": {"source": "launcher", "launcher_mode": "bubble"},
+        }
+    )
+    request["metadata"]["yachiyo_execution_envelope"]["requests"] = [
+        {
+            "request_id": "runtime-plan-test:request:1:desktop.inspect_app",
+            "step_id": "inspect-app",
+            "capability_id": "desktop.app_discovery",
+            "tool_name": "desktop.inspect_app",
+            "protocol": "json_fallback",
+            "input": {"app_name": "PixelForge", "open_if_needed": True, "focus": True},
+            "planning_reason": "planner_desktop_operation",
+            "source": "runtime_planner",
+        }
+    ]
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-main",
+        conversation_id="chat-1",
+        prompt=str(request["prompt"]),
+        metadata=request["metadata"],
+    )
+
+    assert task is not None
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    direct_requests = model_loop_call[1]["direct_tool_requests"]
+    assert [request["tool"] for request in direct_requests] == ["desktop.inspect_app"]
+    assert direct_requests[0]["input"] == {
+        "app_name": "PixelForge",
+        "open_if_needed": True,
+        "focus": True,
+    }
+    assert direct_requests[0]["step_id"] == "inspect-app"
+    assert direct_requests[0]["capability_id"] == "desktop.app_discovery"
 
 
 def test_legacy_chat_task_starter_planned_timeline_keeps_runtime_planner_sequence() -> None:

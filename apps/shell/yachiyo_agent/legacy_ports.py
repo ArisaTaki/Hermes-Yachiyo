@@ -65,6 +65,7 @@ from .recovery_actions import (
     RECOVERY_RETRY_CONTEXT_EVENT_TYPE,
     recovery_retry_context_payload,
 )
+from .runtime_execution import runtime_execution_requests_from_metadata
 from .groups import group_run_snapshot_from_payload
 from .tool_catalog import runtime_tool_catalog_snapshot
 
@@ -369,6 +370,14 @@ class LegacyChatTaskStarter:
                     metadata=metadata,
                     selected_requests=selected_requests,
                 )
+                envelope_tool_requests = _safe_runtime_execution_envelope_requests(
+                    prompt or execution_prompt,
+                    metadata,
+                    allowed_entrypoint_tools,
+                    selected_requests=selected_requests,
+                )
+                if envelope_tool_requests:
+                    direct_tool_requests = envelope_tool_requests
         if not task_id:
             return None
         if not direct_tool_request and not selected_requests:
@@ -1211,6 +1220,29 @@ def _safe_runtime_planner_tool_requests(
     requests = _coalesce_legacy_direct_app_shortcut_requests(prompt, requests, allowed_tools)
     requests = _drop_legacy_open_then_plain_find_submit(prompt, requests)
     return planner_execution_tool_requests(requests, allowed_tools) or requests
+
+
+def _safe_runtime_execution_envelope_requests(
+    prompt: str,
+    metadata: dict[str, Any] | None,
+    allowed_tools: list[str],
+    *,
+    selected_requests: list[dict[str, Any]] | None = None,
+) -> list[dict[str, Any]]:
+    selected_requests = selected_requests or []
+    if _has_approval_plan_tool(selected_requests):
+        return []
+    requests = runtime_execution_requests_from_metadata(
+        metadata,
+        allowed_tools=allowed_tools,
+    )
+    if not requests:
+        return []
+    if _has_approval_plan_tool(requests):
+        return []
+    if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
+        return []
+    return requests
 
 
 def _apply_legacy_file_transfer_app_alias(

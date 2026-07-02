@@ -70,6 +70,53 @@ def runtime_execution_envelope_payload(
     return envelope.model_dump(mode="json")
 
 
+def runtime_execution_requests_from_metadata(
+    metadata: Mapping[str, Any] | None,
+    *,
+    allowed_tools: Iterable[str] | None = None,
+) -> list[dict[str, Any]]:
+    if not isinstance(metadata, Mapping):
+        return []
+    return runtime_execution_requests_from_envelope_payload(
+        metadata.get("yachiyo_execution_envelope"),
+        allowed_tools=allowed_tools,
+    )
+
+
+def runtime_execution_requests_from_envelope_payload(
+    envelope_payload: Any,
+    *,
+    allowed_tools: Iterable[str] | None = None,
+) -> list[dict[str, Any]]:
+    if isinstance(envelope_payload, RuntimeExecutionEnvelopeSnapshot):
+        envelope = envelope_payload.model_dump(mode="json")
+    elif isinstance(envelope_payload, Mapping):
+        envelope = dict(envelope_payload)
+    else:
+        return []
+
+    allowed = {
+        str(tool or "").strip()
+        for tool in (allowed_tools or [])
+        if str(tool or "").strip()
+    }
+    requests = envelope.get("requests")
+    if not isinstance(requests, list):
+        return []
+    projected: list[dict[str, Any]] = []
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        projected_request = _tool_request_from_execution_request(request)
+        tool_name = str(projected_request.get("tool") or "").strip()
+        if not tool_name:
+            continue
+        if allowed and tool_name not in allowed:
+            continue
+        projected.append(projected_request)
+    return projected
+
+
 def _execution_request_snapshot(
     request: Mapping[str, Any],
     *,
@@ -108,6 +155,33 @@ def _execution_request_snapshot(
         status=str(request.get("status") or (step.status if step is not None else "planned")),
         source=str(request.get("source") or "runtime_planner"),
     )
+
+
+def _tool_request_from_execution_request(request: Mapping[str, Any]) -> dict[str, Any]:
+    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    payload: dict[str, Any] = {
+        "protocol": str(request.get("protocol") or "json_fallback"),
+        "tool": str(request.get("tool_name") or request.get("tool") or "").strip(),
+        "input": dict(request_input),
+        "source": str(request.get("source") or "runtime_planner"),
+        "planning_reason": str(request.get("planning_reason") or ""),
+    }
+    for key in (
+        "request_id",
+        "step_id",
+        "capability_id",
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "intent_kind",
+        "approval_required",
+        "continue_to_model",
+        "status",
+    ):
+        value = request.get(key)
+        if value not in (None, "", [], {}):
+            payload[key] = value
+    return payload
 
 
 def _allowed_tools(

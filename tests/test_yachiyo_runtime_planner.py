@@ -29,7 +29,10 @@ from apps.shell.yachiyo_agent.planner_execution import (
     planner_tool_requests_for_decision,
     planner_tool_requests,
 )
-from apps.shell.yachiyo_agent.runtime_execution import runtime_execution_envelope_from_decision
+from apps.shell.yachiyo_agent.runtime_execution import (
+    runtime_execution_envelope_from_decision,
+    runtime_execution_requests_from_envelope_payload,
+)
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_decision_and_tool_requests,
     planner_first_direct_tool_selection,
@@ -28277,6 +28280,18 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     assert envelope.requests[1].capability_id == "desktop.ui_operation"
     assert envelope.requests[1].approval_required is True
     assert envelope.requests[2].depends_on == ["operate-foreground-ui"]
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    assert [request["tool"] for request in projected_requests] == [
+        "desktop.inspect_app",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert projected_requests[1]["step_id"] == "operate-foreground-ui"
+    assert projected_requests[1]["capability_id"] == "desktop.ui_operation"
+    assert projected_requests[1]["approval_required"] is True
 
 
 def test_yachiyo_agent_service_uses_fake_runtime_planner_port() -> None:
