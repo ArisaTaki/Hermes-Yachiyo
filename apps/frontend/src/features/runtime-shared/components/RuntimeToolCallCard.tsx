@@ -93,6 +93,10 @@ export function RuntimeToolCallCard({
       retry_tool: rawToolName,
     },
   );
+  const observedMetadata = runtimeToolObservedMetadata(toolCall);
+  const observedActionTarget = observedActionTargetSummary(observedMetadata.actionTarget);
+  const observedActionEvidence = observedActionEvidenceSummary(observedMetadata.observationEvidence);
+  const observedCenter = observedActionCenterSummary(observedMetadata.observationEvidence);
   const metadata = toolCallMetadataItems(toolCall);
   return (
     <div
@@ -101,6 +105,9 @@ export function RuntimeToolCallCard({
       data-blocking-conditions={blockingConditions.join(',')}
       data-group-id={toolCall.group_id || ''}
       data-group-run-id={toolCall.group_run_id || ''}
+      data-observed-action-evidence={observedActionEvidence}
+      data-observed-action-target={observedActionTarget}
+      data-observed-center={observedCenter}
       data-risk-level={toolCall.risk_level || ''}
       data-run-id={toolCall.run_id || ''}
       data-runtime-capability-id={runtimeToolTraceString(toolCall, 'capability_id')}
@@ -237,9 +244,7 @@ export function RuntimeToolCallCard({
 }
 
 function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ label: string; value: string }> {
-  const metadata = approvalPreviewRecord(toolCall.metadata);
-  const actionTarget = approvalPreviewRecord(metadata.action_target);
-  const observationEvidence = approvalPreviewRecord(metadata.observation_evidence);
+  const observedMetadata = runtimeToolObservedMetadata(toolCall);
   const replanTrigger = runtimeToolTraceString(toolCall, 'replan_trigger');
   const replanTriggers = runtimeToolTraceStringList(toolCall, 'replan_triggers');
   return [
@@ -258,9 +263,20 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
     { label: 'verify', value: runtimeToolTraceBoolLabel(toolCall, 'requires_post_action_verification') },
     { label: 'replan', value: runtimeToolTraceString(toolCall, 'replan_request_id') || replanTrigger || replanTriggers.join(', ') },
     { label: 'signals', value: runtimeToolTraceStringList(toolCall, 'replan_signal_ids').join(', ') },
-    { label: 'action', value: observedActionTargetSummary(actionTarget) },
-    { label: 'observed', value: observedActionEvidenceSummary(observationEvidence) },
+    { label: 'action', value: observedActionTargetSummary(observedMetadata.actionTarget) },
+    { label: 'observed', value: observedActionEvidenceSummary(observedMetadata.observationEvidence) },
   ].filter((item) => item.value);
+}
+
+function runtimeToolObservedMetadata(toolCall: RuntimeToolCallCardSnapshot): {
+  actionTarget: Record<string, unknown>;
+  observationEvidence: Record<string, unknown>;
+} {
+  const metadata = approvalPreviewRecord(toolCall.metadata);
+  return {
+    actionTarget: approvalPreviewRecord(metadata.action_target),
+    observationEvidence: approvalPreviewRecord(metadata.observation_evidence),
+  };
 }
 
 function runtimeToolTraceString(
@@ -318,23 +334,47 @@ function runtimeToolTraceRecords(toolCall: RuntimeToolCallCardSnapshot): Record<
 }
 
 function observedActionTargetSummary(value: Record<string, unknown>): string {
+  if (!Object.keys(value).length) return '';
   const action = stringValue(value.action);
-  const target = stringValue(value.target);
+  const target = (
+    stringValue(value.target)
+    || stringValue(value.label)
+    || stringValue(value.name)
+    || stringValue(value.title)
+    || stringValue(value.text)
+    || stringValue(value.role)
+  );
   const roleFilter = stringValue(value.role_filter);
-  if (!action && !target) return '';
-  return [action, target, roleFilter ? `role ${roleFilter}` : '']
+  const app = stringValue(value.app_name) || stringValue(value.app) || stringValue(value.bundle_id);
+  if (!action && !target && !app) return '';
+  return [action, target, roleFilter ? `role ${roleFilter}` : '', app]
     .filter(Boolean)
     .join(' · ');
 }
 
 function observedActionEvidenceSummary(value: Record<string, unknown>): string {
+  if (!Object.keys(value).length) return '';
   const sourceTool = stringValue(value.source_tool);
+  const source = stringValue(value.source);
   const strategy = stringValue(value.strategy);
-  const center = approvalPreviewRecord(value.center);
-  const x = stringValue(center.x);
-  const y = stringValue(center.y);
-  const centerText = x && y ? `center ${x},${y}` : '';
-  return [sourceTool, strategy, centerText].filter(Boolean).join(' · ');
+  const reason = stringValue(value.reason);
+  const center = observedActionCenterSummary(value);
+  return [sourceTool || source, strategy, reason, center ? `center ${center}` : ''].filter(Boolean).join(' · ');
+}
+
+function observedActionCenterSummary(value: Record<string, unknown>): string {
+  const center = approvalPreviewRecord(value.observed_center);
+  const legacyCenter = approvalPreviewRecord(value.center);
+  const point = approvalPreviewRecord(value.point);
+  const x = coordinateValue(center.x ?? legacyCenter.x ?? point.x);
+  const y = coordinateValue(center.y ?? legacyCenter.y ?? point.y);
+  return x && y ? `${x},${y}` : '';
+}
+
+function coordinateValue(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(Math.round(value));
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  return '';
 }
 
 function stringValue(value: unknown): string {
