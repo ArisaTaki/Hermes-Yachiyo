@@ -125,6 +125,7 @@ def _trace_context_kwargs(
     event: PublicRunEvent,
     payload: Mapping[str, Any],
 ) -> dict[str, Any]:
+    input_preview = _nested_mapping(payload, "input_preview")
     return {
         "source_run_id": _optional_text(event.source_run_id or payload.get("source_run_id")),
         "source_runnable_id": _optional_text(
@@ -162,6 +163,11 @@ def _trace_context_kwargs(
             or payload.get("group_run_id")
             or payload.get("run_group_id")
         ),
+        "core_id": _optional_text(payload.get("core_id") or input_preview.get("core_id")),
+        "workspace_id": _optional_text(
+            payload.get("workspace_id") or input_preview.get("workspace_id")
+        ),
+        "task_id": _optional_text(payload.get("task_id") or input_preview.get("task_id")),
     }
 
 

@@ -624,6 +624,9 @@ export type MemoryTraceSnapshot = {
   workflow_node_label?: string | null;
   group_id?: string | null;
   group_run_id?: string | null;
+  core_id?: string | null;
+  workspace_id?: string | null;
+  task_id?: string | null;
   title: string;
   detail?: string | null;
   payload_preview?: Record<string, unknown>;
@@ -651,6 +654,9 @@ export type SkillTraceSnapshot = {
   workflow_node_label?: string | null;
   group_id?: string | null;
   group_run_id?: string | null;
+  core_id?: string | null;
+  workspace_id?: string | null;
+  task_id?: string | null;
   title: string;
   detail?: string | null;
   payload_preview?: Record<string, unknown>;

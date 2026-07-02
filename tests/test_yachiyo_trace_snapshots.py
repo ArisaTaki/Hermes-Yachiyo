@@ -24,6 +24,9 @@ def test_trace_snapshot_mappers_filter_secret_events_and_preserve_context() -> N
             "workflow_run_id": "workflow-run-1",
             "workflow_node_id": "retrieve",
             "workflow_node_label": "Retrieve Context",
+            "core_id": "core-1",
+            "workspace_id": "workspace-1",
+            "task_id": "task-1",
             "memories": [
                 {
                     "memory_id": "memory-1",
@@ -46,6 +49,11 @@ def test_trace_snapshot_mappers_filter_secret_events_and_preserve_context() -> N
         event_type="skill.dispatch.read",
         payload={
             "tool": "skill.read",
+            "input_preview": {
+                "core_id": "core-1",
+                "workspace_id": "workspace-1",
+                "task_id": "task-1",
+            },
             "result": {
                 "skill_id": "skill-1",
                 "name": "Demo Skill",
@@ -63,9 +71,15 @@ def test_trace_snapshot_mappers_filter_secret_events_and_preserve_context() -> N
     assert memory_traces[0].source_runnable_name == "Researcher"
     assert memory_traces[0].workflow_node_id == "retrieve"
     assert memory_traces[0].group_run_id == "group-run-1"
+    assert memory_traces[0].core_id == "core-1"
+    assert memory_traces[0].workspace_id == "workspace-1"
+    assert memory_traces[0].task_id == "task-1"
     assert skill_traces[0].skill_id == "skill-1"
     assert skill_traces[0].tool_name == "skill.read"
     assert skill_traces[0].source_ref == "skills/demo/SKILL.md"
+    assert skill_traces[0].core_id == "core-1"
+    assert skill_traces[0].workspace_id == "workspace-1"
+    assert skill_traces[0].task_id == "task-1"
 
 
 def test_trace_snapshot_mappers_use_top_level_run_context() -> None:

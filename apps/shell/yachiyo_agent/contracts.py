@@ -668,6 +668,9 @@ class MemoryTraceSnapshot(_PublicSnapshot):
     workflow_node_label: str | None = None
     group_id: str | None = None
     group_run_id: str | None = None
+    core_id: str | None = None
+    workspace_id: str | None = None
+    task_id: str | None = None
     title: str
     detail: str | None = None
     payload_preview: dict[str, Any] = Field(default_factory=dict)
@@ -695,6 +698,9 @@ class SkillTraceSnapshot(_PublicSnapshot):
     workflow_node_label: str | None = None
     group_id: str | None = None
     group_run_id: str | None = None
+    core_id: str | None = None
+    workspace_id: str | None = None
+    task_id: str | None = None
     title: str
     detail: str | None = None
     payload_preview: dict[str, Any] = Field(default_factory=dict)
