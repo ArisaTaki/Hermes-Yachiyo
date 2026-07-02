@@ -161,6 +161,7 @@ def test_auto_data_analysis_from_workspace_discovery_skips_ambiguous_files() -> 
 def _private_runtime_loop(
     *,
     append_run_event=None,
+    run_tool_requests=None,
 ) -> RuntimeCustomApiAgentLoop:
     return RuntimeCustomApiAgentLoop(
         agent_model_config_private=lambda _agent: {},
@@ -182,7 +183,7 @@ def _private_runtime_loop(
         limit_model_output=lambda value: (str(value), False),
         model_output_text_factory=agent_runtime._ModelOutputText,
         tool_loop_projection=FakeToolLoopProjection(),
-        run_tool_requests=lambda *_args, **_kwargs: None,
+        run_tool_requests=run_tool_requests or (lambda *_args, **_kwargs: None),
         error_type=agent_runtime.AgentRuntimeError,
         append_run_event=append_run_event,
     )
@@ -215,6 +216,70 @@ def _non_planner_run_events(events: list[dict[str, Any]]) -> list[dict[str, Any]
         for event in events
         if event.get("event_type") not in _PLANNER_EVENT_TYPES
     ]
+
+
+def test_auto_runtime_planner_requests_record_approval_required() -> None:
+    timeline: list[dict[str, Any]] = []
+    run_events: list[dict[str, Any]] = []
+
+    def run_tool_requests(*_args, **_kwargs) -> None:
+        raise AgentApprovalRequired(
+            {
+                "tool": "desktop.safe_click",
+                "approval_id": "approval-click",
+                "risk_level": "medium",
+                "policy_reason": "desktop_click",
+                "input_preview": {"x": 180, "y": 90},
+            }
+        )
+
+    loop = _private_runtime_loop(
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+        run_tool_requests=run_tool_requests,
+    )
+    requests = [
+        {
+            "tool": "desktop.safe_click",
+            "input": {"x": 180, "y": 90},
+            "source": "runtime_planner",
+            "planning_reason": "planner_replan_ui_observed_action",
+            "step_id": "focus-media-search",
+            "capability_id": "desktop.ui_operation",
+        }
+    ]
+
+    with pytest.raises(AgentApprovalRequired):
+        loop._run_auto_runtime_planner_requests(
+            requests,
+            ["desktop.safe_click"],
+            {"broker": True},
+            [],
+            timeline,
+            [],
+            agent={"name": "Yachiyo"},
+            runtime_planner_decision=None,
+            run_id="run-approval",
+            budget=FakeBudget(),
+            next_iteration=0,
+        )
+
+    approval_event = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.desktop.intent_approval_required"
+    )
+    assert approval_event["tool"] == "desktop.safe_click"
+    assert approval_event["approval_id"] == "approval-click"
+    assert approval_event["risk_level"] == "medium"
+    assert approval_event["planning_reason"] == "planner_replan_ui_observed_action"
+    assert approval_event["input_preview"] == {"x": 180, "y": 90}
+    assert any(
+        event["event_type"] == "agent.desktop.intent_approval_required"
+        and event["payload"]["approval_id"] == "approval-click"
+        for event in run_events
+    )
 
 
 def _planner_selection_events(timeline: list[dict[str, Any]]) -> list[dict[str, Any]]:

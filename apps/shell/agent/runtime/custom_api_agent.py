@@ -1082,226 +1082,24 @@ class RuntimeCustomApiAgentLoop:
                             tool_timeline_start=auto_tool_timeline_start,
                             run_id=run_id,
                         )
-                        deferred_replan_payloads = (
-                            self._record_runtime_planner_replan_events(
+                        deferred_direct_result = (
+                            self._run_deferred_observed_ui_replan_recovery(
                                 runtime_planner_decision,
-                                timeline=timeline,
-                                tool_timeline_start=auto_tool_timeline_start,
+                                auto_deferred_observed_ui_requests,
+                                allowed_tools,
+                                broker,
+                                messages,
+                                timeline,
+                                artifacts,
+                                agent=agent,
                                 run_id=run_id,
+                                budget=budget,
+                                next_iteration=start_iteration,
+                                tool_timeline_start=auto_tool_timeline_start,
                             )
                         )
-                        if deferred_replan_payloads and _timeline_has_permission_recovery_signal(
-                            timeline,
-                            auto_tool_timeline_start,
-                        ):
-                            deferred_replan_payloads = []
-                        if deferred_replan_payloads:
-                            deferred_replan_recovery_requests: list[dict[str, Any]] = []
-                            deferred_replan_timeline_start = len(timeline)
-                            deferred_observation_requests = (
-                                _auto_replan_ui_observation_recovery_requests(
-                                    deferred_replan_payloads,
-                                    allowed_tools,
-                                )
-                            )
-                            if deferred_observation_requests:
-                                self._record_auto_model_followup_app_write_plan(
-                                    deferred_observation_requests,
-                                    timeline=timeline,
-                                    run_id=run_id,
-                                )
-                                self._record_desktop_permission_preflight(
-                                    deferred_observation_requests,
-                                    broker,
-                                    timeline=timeline,
-                                    run_id=run_id,
-                                )
-                                self._record_desktop_tool_policy_decisions(
-                                    deferred_observation_requests,
-                                    allowed_tools=allowed_tools,
-                                    agent=agent,
-                                    run_id=run_id,
-                                )
-                                deferred_observation_timeline_start = len(timeline)
-                                self._run_tool_requests(
-                                    deferred_observation_requests,
-                                    allowed_tools,
-                                    broker,
-                                    messages,
-                                    timeline,
-                                    artifacts,
-                                    next_iteration=start_iteration,
-                                    run_id=run_id,
-                                    budget=budget,
-                                )
-                                self._record_runtime_planner_task_progress_events(
-                                    runtime_planner_decision,
-                                    timeline=timeline,
-                                    tool_timeline_start=deferred_observation_timeline_start,
-                                    run_id=run_id,
-                                )
-                                deferred_replan_recovery_requests.extend(
-                                    deferred_observation_requests
-                                )
-                            deferred_observed_action_requests = (
-                                _auto_replan_ui_observed_action_requests(
-                                    deferred_replan_payloads,
-                                    allowed_tools,
-                                    timeline,
-                                    planning_reason="planner_replan_ui_observed_action",
-                                )
-                            )
-                            if deferred_observed_action_requests:
-                                self._record_auto_model_followup_app_write_plan(
-                                    deferred_observed_action_requests,
-                                    timeline=timeline,
-                                    run_id=run_id,
-                                )
-                                self._record_desktop_permission_preflight(
-                                    deferred_observed_action_requests,
-                                    broker,
-                                    timeline=timeline,
-                                    run_id=run_id,
-                                )
-                                self._record_desktop_tool_policy_decisions(
-                                    deferred_observed_action_requests,
-                                    allowed_tools=allowed_tools,
-                                    agent=agent,
-                                    run_id=run_id,
-                                )
-                                deferred_action_timeline_start = len(timeline)
-                                self._run_tool_requests(
-                                    deferred_observed_action_requests,
-                                    allowed_tools,
-                                    broker,
-                                    messages,
-                                    timeline,
-                                    artifacts,
-                                    next_iteration=start_iteration,
-                                    run_id=run_id,
-                                    budget=budget,
-                                )
-                                self._record_runtime_planner_task_progress_events(
-                                    runtime_planner_decision,
-                                    timeline=timeline,
-                                    tool_timeline_start=deferred_action_timeline_start,
-                                    run_id=run_id,
-                                )
-                                deferred_replan_recovery_requests.extend(
-                                    deferred_observed_action_requests
-                                )
-                                deferred_continuation_requests = (
-                                    _auto_replan_ui_continuation_requests(
-                                        deferred_replan_payloads,
-                                        auto_deferred_observed_ui_requests,
-                                        allowed_tools,
-                                        timeline,
-                                        tool_timeline_start=auto_tool_timeline_start,
-                                        planning_reason="planner_replan_ui_continuation",
-                                    )
-                                )
-                                if deferred_continuation_requests:
-                                    self._record_auto_model_followup_app_write_plan(
-                                        deferred_continuation_requests,
-                                        timeline=timeline,
-                                        run_id=run_id,
-                                    )
-                                    self._record_desktop_permission_preflight(
-                                        deferred_continuation_requests,
-                                        broker,
-                                        timeline=timeline,
-                                        run_id=run_id,
-                                    )
-                                    self._record_desktop_tool_policy_decisions(
-                                        deferred_continuation_requests,
-                                        allowed_tools=allowed_tools,
-                                        agent=agent,
-                                        run_id=run_id,
-                                    )
-                                    deferred_continuation_timeline_start = len(timeline)
-                                    self._run_tool_requests(
-                                        deferred_continuation_requests,
-                                        allowed_tools,
-                                        broker,
-                                        messages,
-                                        timeline,
-                                        artifacts,
-                                        next_iteration=start_iteration,
-                                        run_id=run_id,
-                                        budget=budget,
-                                    )
-                                    self._record_runtime_planner_task_progress_events(
-                                        runtime_planner_decision,
-                                        timeline=timeline,
-                                        tool_timeline_start=(
-                                            deferred_continuation_timeline_start
-                                        ),
-                                        run_id=run_id,
-                                    )
-                                    deferred_replan_recovery_requests.extend(
-                                        deferred_continuation_requests
-                                    )
-                                deferred_observed_result_requests = (
-                                    _auto_replan_ui_search_observed_result_requests(
-                                        deferred_replan_payloads,
-                                        auto_deferred_observed_ui_requests,
-                                        allowed_tools,
-                                        timeline,
-                                        planning_reason=(
-                                            "planner_replan_ui_search_observed_result"
-                                        ),
-                                    )
-                                )
-                                if deferred_observed_result_requests:
-                                    self._record_auto_model_followup_app_write_plan(
-                                        deferred_observed_result_requests,
-                                        timeline=timeline,
-                                        run_id=run_id,
-                                    )
-                                    self._record_desktop_permission_preflight(
-                                        deferred_observed_result_requests,
-                                        broker,
-                                        timeline=timeline,
-                                        run_id=run_id,
-                                    )
-                                    self._record_desktop_tool_policy_decisions(
-                                        deferred_observed_result_requests,
-                                        allowed_tools=allowed_tools,
-                                        agent=agent,
-                                        run_id=run_id,
-                                    )
-                                    deferred_result_timeline_start = len(timeline)
-                                    self._run_tool_requests(
-                                        deferred_observed_result_requests,
-                                        allowed_tools,
-                                        broker,
-                                        messages,
-                                        timeline,
-                                        artifacts,
-                                        next_iteration=start_iteration,
-                                        run_id=run_id,
-                                        budget=budget,
-                                    )
-                                    self._record_runtime_planner_task_progress_events(
-                                        runtime_planner_decision,
-                                        timeline=timeline,
-                                        tool_timeline_start=deferred_result_timeline_start,
-                                        run_id=run_id,
-                                    )
-                                    deferred_replan_recovery_requests.extend(
-                                        deferred_observed_result_requests
-                                    )
-                            if deferred_replan_recovery_requests:
-                                direct_result = self._direct_daily_desktop_sequence_result(
-                                    _tool_requests_without_model_followup(
-                                        deferred_replan_recovery_requests
-                                    ),
-                                    timeline,
-                                    tool_timeline_start=deferred_replan_timeline_start,
-                                    run_id=run_id,
-                                )
-                                if direct_result:
-                                    return direct_result
+                        if deferred_direct_result:
+                            return deferred_direct_result
                         nested_deferred_observed_ui_requests = (
                             _auto_deferred_observed_ui_followup_requests(
                                 auto_deferred_observed_ui_requests,
@@ -2513,6 +2311,224 @@ class RuntimeCustomApiAgentLoop:
         )
         if run_id and self._append_run_event is not None:
             self._append_run_event(run_id, "agent.plan.selection", event_payload)
+
+    def _run_auto_runtime_planner_requests(
+        self,
+        requests: list[dict[str, Any]],
+        allowed_tools: Iterable[str],
+        broker: Any,
+        messages: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        *,
+        agent: dict[str, Any],
+        runtime_planner_decision: Any,
+        run_id: str,
+        budget: Any,
+        next_iteration: int,
+    ) -> int:
+        if not requests:
+            return len(timeline)
+        self._record_auto_model_followup_app_write_plan(
+            requests,
+            timeline=timeline,
+            run_id=run_id,
+        )
+        self._record_desktop_permission_preflight(
+            requests,
+            broker,
+            timeline=timeline,
+            run_id=run_id,
+        )
+        self._record_desktop_tool_policy_decisions(
+            requests,
+            allowed_tools=allowed_tools,
+            agent=agent,
+            run_id=run_id,
+        )
+        tool_timeline_start = len(timeline)
+        try:
+            self._run_tool_requests(
+                requests,
+                allowed_tools,
+                broker,
+                messages,
+                timeline,
+                artifacts,
+                next_iteration=next_iteration,
+                run_id=run_id,
+                budget=budget,
+            )
+        except AgentApprovalRequired as exc:
+            self._record_runtime_planner_task_progress_events(
+                runtime_planner_decision,
+                timeline=timeline,
+                tool_timeline_start=tool_timeline_start,
+                run_id=run_id,
+            )
+            pending_approval = (
+                exc.pending_approval if isinstance(exc.pending_approval, dict) else {}
+            )
+            planned_tool = str(
+                pending_approval.get("tool") or requests[0].get("tool") or ""
+            )
+            approval_request = self._planned_request_for_tool(requests, planned_tool)
+            planned_input = self._pending_approval_input_preview(
+                pending_approval,
+                approval_request,
+                requests[0] if requests else {},
+            )
+            self._record_desktop_intent_approval_required(
+                planned_tool,
+                planned_input,
+                pending_approval=exc.pending_approval,
+                timeline=timeline,
+                run_id=run_id,
+                planned_request=approval_request,
+                source=self._approval_event_source(approval_request, planned_tool),
+                planning_reason=self._approval_event_planning_reason(
+                    approval_request,
+                    planned_tool,
+                ),
+            )
+            raise
+        self._record_runtime_planner_task_progress_events(
+            runtime_planner_decision,
+            timeline=timeline,
+            tool_timeline_start=tool_timeline_start,
+            run_id=run_id,
+        )
+        return tool_timeline_start
+
+    def _run_deferred_observed_ui_replan_recovery(
+        self,
+        runtime_planner_decision: Any,
+        planned_tool_requests: list[dict[str, Any]],
+        allowed_tools: Iterable[str],
+        broker: Any,
+        messages: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        *,
+        agent: dict[str, Any],
+        run_id: str,
+        budget: Any,
+        next_iteration: int,
+        tool_timeline_start: int,
+    ) -> str:
+        replan_payloads = self._record_runtime_planner_replan_events(
+            runtime_planner_decision,
+            timeline=timeline,
+            tool_timeline_start=tool_timeline_start,
+            run_id=run_id,
+        )
+        if replan_payloads and _timeline_has_permission_recovery_signal(
+            timeline,
+            tool_timeline_start,
+        ):
+            replan_payloads = []
+        if not replan_payloads:
+            return ""
+
+        recovery_requests: list[dict[str, Any]] = []
+        recovery_timeline_start = len(timeline)
+        observation_requests = _auto_replan_ui_observation_recovery_requests(
+            replan_payloads,
+            allowed_tools,
+        )
+        if observation_requests:
+            self._run_auto_runtime_planner_requests(
+                observation_requests,
+                allowed_tools,
+                broker,
+                messages,
+                timeline,
+                artifacts,
+                agent=agent,
+                runtime_planner_decision=runtime_planner_decision,
+                run_id=run_id,
+                budget=budget,
+                next_iteration=next_iteration,
+            )
+            recovery_requests.extend(observation_requests)
+
+        observed_action_requests = _auto_replan_ui_observed_action_requests(
+            replan_payloads,
+            allowed_tools,
+            timeline,
+            planning_reason="planner_replan_ui_observed_action",
+        )
+        if observed_action_requests:
+            self._run_auto_runtime_planner_requests(
+                observed_action_requests,
+                allowed_tools,
+                broker,
+                messages,
+                timeline,
+                artifacts,
+                agent=agent,
+                runtime_planner_decision=runtime_planner_decision,
+                run_id=run_id,
+                budget=budget,
+                next_iteration=next_iteration,
+            )
+            recovery_requests.extend(observed_action_requests)
+
+            continuation_requests = _auto_replan_ui_continuation_requests(
+                replan_payloads,
+                planned_tool_requests,
+                allowed_tools,
+                timeline,
+                tool_timeline_start=tool_timeline_start,
+                planning_reason="planner_replan_ui_continuation",
+            )
+            if continuation_requests:
+                self._run_auto_runtime_planner_requests(
+                    continuation_requests,
+                    allowed_tools,
+                    broker,
+                    messages,
+                    timeline,
+                    artifacts,
+                    agent=agent,
+                    runtime_planner_decision=runtime_planner_decision,
+                    run_id=run_id,
+                    budget=budget,
+                    next_iteration=next_iteration,
+                )
+                recovery_requests.extend(continuation_requests)
+
+            observed_result_requests = _auto_replan_ui_search_observed_result_requests(
+                replan_payloads,
+                planned_tool_requests,
+                allowed_tools,
+                timeline,
+                planning_reason="planner_replan_ui_search_observed_result",
+            )
+            if observed_result_requests:
+                self._run_auto_runtime_planner_requests(
+                    observed_result_requests,
+                    allowed_tools,
+                    broker,
+                    messages,
+                    timeline,
+                    artifacts,
+                    agent=agent,
+                    runtime_planner_decision=runtime_planner_decision,
+                    run_id=run_id,
+                    budget=budget,
+                    next_iteration=next_iteration,
+                )
+                recovery_requests.extend(observed_result_requests)
+
+        if not recovery_requests:
+            return ""
+        return self._direct_daily_desktop_sequence_result(
+            _tool_requests_without_model_followup(recovery_requests),
+            timeline,
+            tool_timeline_start=recovery_timeline_start,
+            run_id=run_id,
+        )
 
     def _record_runtime_planner_replan_events(
         self,
