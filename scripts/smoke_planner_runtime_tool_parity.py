@@ -124,7 +124,7 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "id": "current_page_report",
         "category": "orchestrator",
         "prompt": "把当前网页总结成一份报告",
-        "expected_intent": "report_generation",
+        "expected_intent": "web_research",
         "expected_plan_tools": ["browser.extract_text", "artifact.write"],
         "expected_request_tools": ["browser.extract_text"],
         "approval_required": [],

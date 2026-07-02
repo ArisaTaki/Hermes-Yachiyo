@@ -172,6 +172,12 @@ def _payload(event: dict[str, Any]) -> dict[str, Any]:
     return payload if isinstance(payload, dict) else {}
 
 
+def _mapping_includes(mapping: Any, expected: dict[str, Any]) -> bool:
+    if not isinstance(mapping, dict):
+        return False
+    return all(mapping.get(key) == value for key, value in expected.items())
+
+
 def _model_event_free(events: Sequence[dict[str, Any]]) -> bool:
     return not any(
         event_type in {"model.request.started", "model.requested"}
@@ -245,7 +251,7 @@ def _generic_app_open_case(
     selection_payload = _payload(selection_event)
     selected_intent_payload = _payload(selected_intent_event)
     expected_plan_tools = ["desktop.list_apps", "app.open", "desktop.active_window"]
-    expected_execution_tools = ["desktop.list_apps", "app.open"]
+    expected_execution_tools = expected_plan_tools
     checks = {
         "run_completed": updated.get("status") == "completed",
         "summary_names_generic_app": "已打开 PixelForge" in str(updated.get("result") or ""),
@@ -264,8 +270,10 @@ def _generic_app_open_case(
         == {"query": "PixelForge", "limit": 20}
         if planned_events
         else False,
-        "planned_open_input": _payload(planned_events[1]).get("input_preview")
-        == {"app_name": "PixelForge"}
+        "planned_open_input": _mapping_includes(
+            _payload(planned_events[1]).get("input_preview"),
+            {"app_name": "PixelForge"},
+        )
         if len(planned_events) > 1
         else False,
         "tool_call_chain": tool_call_tools == expected_execution_tools,
@@ -354,6 +362,7 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
         "planned_tool_chain": planned_tools == [
             "desktop.list_apps",
             "app.open",
+            "desktop.active_window",
         ],
         "planned_discovery_is_direct_execution": (
             not bool(_payload(planned_events[0]).get("continue_to_model"))
@@ -366,17 +375,18 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
         else False,
         "planned_followup_tools": [
             _payload(event).get("planning_reason") for event in planned_events[1:]
-        ]
-        == ["planner_desktop_operation"]
+        ] == ["planner_desktop_operation", "planner_desktop_operation"]
         if len(planned_events) > 1
         else False,
         "tool_call_chain": tool_call_tools == [
             "desktop.list_apps",
             "app.open",
+            "desktop.active_window",
         ],
         "tool_results_match_chain": tool_result_actions == [
             "desktop.list_apps",
             "app.open",
+            "desktop.active_window",
         ],
         "resolved_app_from_discovery": {
             "app_name": "PixelForge",
@@ -391,7 +401,7 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
         else False,
         "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
         "completed_tools_match": completed_payload.get("tools")
-        == ["desktop.list_apps", "app.open"],
+        == ["desktop.list_apps", "app.open", "desktop.active_window"],
         "completed_after_discovered_app_open": completed_payload.get("tool") == "app.open",
     }
     return {

@@ -37,7 +37,7 @@ def test_group_run_timeline_smoke_covers_event_stream_and_page():
     assert evidence["event_page"]["limit"] == 2
     assert [event["event_type"] for event in evidence["event_page"]["events"]] == [
         "group.member.started",
-        "agent.tool.approval_required",
+        "group.run.tool.approval_required",
     ]
     assert evidence["event_page"]["has_more"] is True
     assert [call["name"] for call in evidence["calls"]] == [

@@ -278,7 +278,7 @@ def run_smoke() -> dict[str, Any]:
         and page.after_sequence == 1
         and page.limit == 2
         and [event.event_type for event in page.events]
-        == ["group.member.started", "agent.tool.approval_required"]
+        == ["group.member.started", "group.run.tool.approval_required"]
         and page.has_more is True,
         "listed_group_run": listed[0].group_run_id == LISTED_GROUP_RUN_ID,
         "fetched_group_run": fetched.group_run_id == GROUP_RUN_ID
