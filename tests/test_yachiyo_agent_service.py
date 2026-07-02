@@ -467,6 +467,43 @@ def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task() 
     assert metadata["yachiyo_missing_capabilities"] == []
 
 
+def test_yachiyo_agent_service_surfaces_desktop_execution_request_previews() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    service.start_chat_task(
+        {
+            "prompt": "打开 PixelForge",
+            "conversation_id": "chat-1",
+            "allowed_tools": ["desktop.list_apps", "app.open", "desktop.active_window"],
+        }
+    )
+
+    metadata = port.calls[0][1]["metadata"]
+    assert metadata["yachiyo_execution_requests"] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    previews = metadata["yachiyo_execution_request_previews"]
+    assert [preview["tool_name"] for preview in previews] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert previews[0]["runtime_stage"] == "discover"
+    assert previews[0]["input"] == {"query": "PixelForge", "limit": 20}
+    assert previews[1]["runtime_stage"] == "operate"
+    assert previews[1]["input"] == {
+        "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
+    }
+    assert previews[1]["requires_post_action_verification"] is True
+    assert previews[2]["runtime_stage"] == "verify"
+    assert previews[2]["depends_on"] == ["open-or-focus-app"]
+
+
 def test_yachiyo_agent_service_returns_runtime_planner_metadata_on_chat_task() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
@@ -646,6 +683,38 @@ def test_agent_studio_service_plans_shared_execution_envelope() -> None:
     assert envelope.requests[0].step_id == "analyze-data-file"
     assert envelope.requests[0].capability_id == "data.analysis"
     assert envelope.requests[0].replan_signal_ids
+
+
+def test_agent_studio_service_plans_discovered_desktop_app_execution() -> None:
+    service = AgentStudioService(_FakeStudioExecutionPort())
+
+    envelope = service.plan_execution(
+        "在一个我没提过的新应用 PixelForge 点击 Export",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.ui_elements",
+            "app.focus_and_click_ui_element",
+        ],
+        metadata={"surface": "studio"},
+    )
+
+    assert envelope.intent_kind == "desktop_operation"
+    assert [request.tool_name for request in envelope.requests] == [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.ui_elements",
+    ]
+    assert envelope.requests[0].runtime_stage == "discover"
+    assert envelope.requests[0].input == {"query": "PixelForge", "limit": 20}
+    assert envelope.requests[1].input == {
+        "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
+    }
+    assert envelope.requests[1].requires_post_action_verification is True
+    assert envelope.requests[2].input == {"limit": 80}
+    assert envelope.requests[2].requires_post_action_verification is True
 
 
 def test_yachiyo_agent_service_enriches_bare_chat_start_payload_with_planner_events() -> None:

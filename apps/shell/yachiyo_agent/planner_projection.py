@@ -75,12 +75,16 @@ def runtime_planner_metadata(
         allowed_tools=allowed_tools,
     )
     if execution_envelope:
+        execution_requests = _execution_request_payloads(execution_envelope)
         payload["yachiyo_execution_envelope"] = execution_envelope
         payload["yachiyo_execution_requests"] = [
             request.get("tool_name")
-            for request in execution_envelope.get("requests", [])
-            if isinstance(request, Mapping) and request.get("tool_name")
+            for request in execution_requests
+            if request.get("tool_name")
         ]
+        execution_previews = _execution_request_previews(execution_requests)
+        if execution_previews:
+            payload["yachiyo_execution_request_previews"] = execution_previews
     followup_target = _selection_followup_target_payload(decision)
     if followup_target:
         payload["yachiyo_followup_target"] = followup_target
@@ -127,6 +131,54 @@ def _request_allowed_tools(payload: Mapping[str, Any]) -> list[str] | None:
         return None
     tools = [str(tool or "").strip() for tool in value if str(tool or "").strip()]
     return tools or None
+
+
+def _execution_request_payloads(envelope: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    requests = envelope.get("requests")
+    if not isinstance(requests, list):
+        return []
+    return [request for request in requests if isinstance(request, Mapping)]
+
+
+def _execution_request_previews(
+    requests: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    previews: list[dict[str, Any]] = []
+    for request in requests:
+        tool_name = str(request.get("tool_name") or request.get("tool") or "").strip()
+        if not tool_name:
+            continue
+        preview: dict[str, Any] = {"tool_name": tool_name}
+        for key in (
+            "request_id",
+            "step_id",
+            "capability_id",
+            "runtime_stage",
+            "runtime_role",
+            "status",
+            "planning_reason",
+            "source",
+        ):
+            value = request.get(key)
+            if value not in (None, "", [], {}):
+                preview[key] = value
+        request_input = request.get("input")
+        if isinstance(request_input, Mapping) and request_input:
+            preview["input"] = dict(request_input)
+        for key in (
+            "approval_required",
+            "continue_to_model",
+            "requires_observation",
+            "requires_post_action_verification",
+        ):
+            if bool(request.get(key)):
+                preview[key] = True
+        for key in ("depends_on", "fallback_tools", "replan_signal_ids", "replan_triggers"):
+            value = request.get(key)
+            if isinstance(value, list) and value:
+                preview[key] = list(value)
+        previews.append(preview)
+    return previews
 
 
 def _normalized_entrypoint_metadata(metadata: Mapping[str, Any]) -> dict[str, Any]:
