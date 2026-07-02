@@ -582,6 +582,7 @@ _GROUP_PLANNER_EVENT_TYPES = {
     "agent.plan.step": "group.run.plan.step",
     "agent.plan.selection": "group.run.plan.selection",
     "agent.replan.requested": "group.run.replan.requested",
+    "agent.replan.recovery.updated": "group.run.replan.recovery.updated",
     "agent.desktop.intent_planned": "group.run.desktop.intent_planned",
     "agent.tool.approval_required": "group.run.tool.approval_required",
     "agent.desktop.intent_approval_required": "group.run.desktop.intent_approval_required",

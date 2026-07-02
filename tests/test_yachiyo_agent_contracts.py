@@ -2189,6 +2189,112 @@ def test_group_and_workflow_snapshots_scope_desktop_recovery_events() -> None:
     )
 
 
+def test_group_and_workflow_snapshots_scope_replan_recovery_updates() -> None:
+    replan_request = {
+        "request_id": "replan-app-1",
+        "trigger": "tool_failure",
+        "decision_id": "decision-1",
+        "plan_id": "plan-1",
+        "core_id": "task-core-1",
+        "source_step_id": "open-selected-discovered-app",
+        "source_tool_name": "app.open",
+        "target_capability_id": "desktop.app_control",
+        "fallback_tools": ["desktop.list_apps"],
+        "failure_detail": "app_resolution_failed",
+    }
+    recovery_update = {
+        "request_id": "replan-app-1",
+        "trigger": "tool_failure",
+        "decision_id": "decision-1",
+        "plan_id": "plan-1",
+        "core_id": "task-core-1",
+        "source_step_id": "open-selected-discovered-app",
+        "source_tool_name": "app.open",
+        "selected_step_id": "open-selected-discovered-app",
+        "selected_tool_name": "desktop.list_apps",
+        "target_capability_id": "desktop.app_control",
+        "planning_reason": "planner_replan_runtime_recovery_action",
+        "status": "completed",
+        "tool_status": "completed",
+        "todo_status": "completed",
+        "checkpoint_status": "completed",
+        "recovery_action_label": "Rediscover app",
+        "permission_target": "app_discovery",
+        "risk_level": "low",
+        "result_preview": {"ok": True, "summary": "Found Preview"},
+    }
+    group_snapshot = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-recovery-1",
+            "group_id": "group-1",
+            "status": "completed",
+            "objective": "Recover app as a group",
+            "events": [
+                {
+                    "event_type": "agent.replan.requested",
+                    "payload": replan_request,
+                },
+                {
+                    "event_type": "agent.replan.recovery.updated",
+                    "payload": recovery_update,
+                },
+            ],
+        }
+    )
+    workflow_snapshot = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-recovery-1",
+            "workflow_run_id": "workflow-run-recovery-1",
+            "workflow_id": "workflow-1",
+            "status": "completed",
+            "objective": "Recover app in workflow",
+            "events": [
+                {
+                    "event_type": "agent.replan.requested",
+                    "payload": replan_request,
+                },
+                {
+                    "event_type": "agent.replan.recovery.updated",
+                    "payload": recovery_update,
+                },
+            ],
+        }
+    )
+
+    group_recovery_event = next(
+        event
+        for event in group_snapshot.events
+        if event.event_type == "group.run.replan.recovery.updated"
+    )
+    assert group_recovery_event.payload["planner_event_type"] == (
+        "agent.replan.recovery.updated"
+    )
+    assert group_recovery_event.payload["planner_scope"] == "group_run"
+    assert group_snapshot.replan_recoveries[0].status == "completed"
+    assert group_snapshot.replan_recoveries[0].group_run_id == "group-run-recovery-1"
+    assert group_snapshot.replan_recoveries[0].selected_tool_name == "desktop.list_apps"
+    assert group_snapshot.replan_recoveries[0].result_preview == {
+        "ok": True,
+        "summary": "Found Preview",
+    }
+
+    workflow_recovery_event = next(
+        event
+        for event in workflow_snapshot.events
+        if event.event_type == "workflow.run.replan.recovery.updated"
+    )
+    assert workflow_recovery_event.payload["planner_event_type"] == (
+        "agent.replan.recovery.updated"
+    )
+    assert workflow_recovery_event.payload["planner_scope"] == "workflow_run"
+    assert workflow_snapshot.replan_recoveries[0].status == "completed"
+    assert workflow_snapshot.replan_recoveries[0].workflow_run_id == (
+        "workflow-run-recovery-1"
+    )
+    assert workflow_snapshot.replan_recoveries[0].selected_tool_name == "desktop.list_apps"
+    assert workflow_snapshot.replan_recoveries[0].permission_target == "app_discovery"
+
+
 def _desktop_approval_task_core_payload() -> dict:
     return {
         "core_id": "task-core-desktop-approval",
