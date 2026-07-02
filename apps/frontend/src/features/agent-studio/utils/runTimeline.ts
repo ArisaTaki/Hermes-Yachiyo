@@ -375,6 +375,14 @@ export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
     const toolChainSummary = publicRunEventDesktopToolChainSummary(payload);
     if (toolChainSummary) return toolChainSummary;
   }
+  if (event.event_type === 'agent.tool.skipped' || event.event_type === 'tool.skipped') {
+    const skipSummary = publicRunEventToolSkipSummary(payload);
+    if (skipSummary) return skipSummary;
+  }
+  if (runtimeEventIsDesktopReadinessRecovered(event.event_type)) {
+    const recoveredSummary = publicRunEventReadinessRecoveredSummary(payload);
+    if (recoveredSummary) return recoveredSummary;
+  }
   return (
     event.detail
     || event.title
@@ -576,6 +584,15 @@ function publicRunEventPayloadStringList(payload: Record<string, unknown>, key: 
   return value.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean);
 }
 
+function publicRunEventPayloadStringValues(payload: Record<string, unknown>, ...keys: string[]): string[] {
+  return keys.flatMap((key) => {
+    const value = payload[key];
+    if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean);
+    const text = typeof value === 'string' ? value.trim() : '';
+    return text ? [text] : [];
+  });
+}
+
 function publicRunEventUniqueStrings(values: string[]): string[] {
   const seen = new Set<string>();
   const next: string[] = [];
@@ -586,6 +603,86 @@ function publicRunEventUniqueStrings(values: string[]): string[] {
     next.push(item);
   }
   return next;
+}
+
+function publicRunEventToolSkipSummary(payload: Record<string, unknown>): string {
+  const result = publicRunEventPayloadRecord(payload, 'result');
+  const data = publicRunEventPayloadRecord(result, 'data');
+  const reason = publicRunEventSkipReason(payload, result, data);
+  const conditions = publicRunEventUniqueStrings([
+    ...publicRunEventPayloadStringValues(payload, 'blocking_condition', 'blocking_conditions'),
+    ...publicRunEventPayloadStringValues(result, 'blocking_condition', 'blocking_conditions'),
+    ...publicRunEventPayloadStringValues(data, 'blocking_condition', 'blocking_conditions'),
+  ]);
+  const recommendedTools = publicRunEventUniqueStrings([
+    ...publicRunEventPayloadStringValues(payload, 'recommended_tools'),
+    ...publicRunEventPayloadStringValues(result, 'recommended_tools'),
+    ...publicRunEventPayloadStringValues(data, 'recommended_tools'),
+  ]);
+  const recoveryTool = publicRunEventRecoveryActionTool(payload, result, data);
+  return [
+    reason,
+    conditions.slice(0, 3).join(', '),
+    recommendedTools.length ? `建议 ${recommendedTools.map(runtimeToolDisplayLabelOrName).join(' -> ')}` : '',
+    recoveryTool ? `恢复 ${runtimeToolDisplayLabelOrName(recoveryTool)}` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function publicRunEventReadinessRecoveredSummary(payload: Record<string, unknown>): string {
+  const tool = (
+    publicRunEventPayloadString(payload, 'recovery_tool')
+    || publicRunEventPayloadString(payload, 'tool')
+    || publicRunEventPayloadString(payload, 'tool_name')
+  );
+  const appName = (
+    publicRunEventPayloadString(payload, 'app_name')
+    || publicRunEventPayloadString(payload, 'requested_app_name')
+    || publicRunEventPayloadString(payload, 'target_app_name')
+  );
+  const conditions = publicRunEventUniqueStrings(
+    publicRunEventPayloadStringValues(payload, 'blocking_condition', 'blocking_conditions'),
+  );
+  return [
+    tool ? `恢复工具 · ${runtimeToolDisplayLabelOrName(tool)}` : '',
+    appName,
+    conditions.slice(0, 3).join(', '),
+  ].filter(Boolean).join(' · ');
+}
+
+function publicRunEventSkipReason(...records: Array<Record<string, unknown>>): string {
+  if (records.some((record) => record.blocked_by_runtime_readiness === true)) return '前台未就绪';
+  if (records.some((record) => record.blocked_by_app_resolution === true)) return '应用未解析';
+  if (records.some((record) => record.blocked_by_user_goal === true)) return '用户约束';
+  return publicRunEventFirstPayloadString(
+    ['error', 'blocking_condition', 'source_summary'],
+    ...records,
+  );
+}
+
+function publicRunEventRecoveryActionTool(...records: Array<Record<string, unknown>>): string {
+  for (const record of records) {
+    const actions = record.recovery_actions;
+    if (!Array.isArray(actions)) continue;
+    for (const action of actions) {
+      if (!action || typeof action !== 'object' || Array.isArray(action)) continue;
+      const tool = publicRunEventPayloadString(action as Record<string, unknown>, 'tool');
+      if (tool) return tool;
+    }
+  }
+  return '';
+}
+
+function publicRunEventFirstPayloadString(
+  keys: string[],
+  ...records: Array<Record<string, unknown>>
+): string {
+  for (const record of records) {
+    for (const key of keys) {
+      const value = publicRunEventPayloadString(record, key);
+      if (value) return value;
+    }
+  }
+  return '';
 }
 
 function publicRunEventContentSnapshotSummary(payload: Record<string, unknown>): string {

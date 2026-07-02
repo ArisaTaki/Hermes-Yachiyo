@@ -124,6 +124,14 @@ function runtimeTimelineEventDetail(event: RuntimeTimelineEventSnapshot): string
     const toolChainDetail = runtimeTimelineDesktopToolChainDetail(event);
     if (toolChainDetail) return toolChainDetail;
   }
+  if (type === 'agent.tool.skipped' || type === 'tool.skipped') {
+    const skipDetail = runtimeTimelineToolSkipDetail(event);
+    if (skipDetail) return skipDetail;
+  }
+  if (runtimeEventIsDesktopReadinessRecovered(type)) {
+    const recoveredDetail = runtimeTimelineReadinessRecoveredDetail(event);
+    if (recoveredDetail) return recoveredDetail;
+  }
   const detail = String(event.detail || '').trim();
   if (!detail) return '';
   if (detail === String(event.title || '').trim()) return '';
@@ -374,6 +382,19 @@ function runtimeTimelineRecordStringList(record: Record<string, unknown>, key: s
   return value.map((item) => typeof item === 'string' ? item.trim() : '').filter(Boolean);
 }
 
+function runtimeTimelineRecordStringValues(record: Record<string, unknown>, ...keys: string[]): string[] {
+  return keys.flatMap((key) => {
+    const value = record[key];
+    if (Array.isArray(value)) return value.map((item) => String(item || '').trim()).filter(Boolean);
+    const text = typeof value === 'string' ? value.trim() : '';
+    return text ? [text] : [];
+  });
+}
+
+function runtimeTimelineUniqueStrings(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => String(value || '').trim()).filter(Boolean)));
+}
+
 function runtimeTimelineUniqueToolNames(values: string[]): string[] {
   const seen = new Set<string>();
   const tools: string[] = [];
@@ -431,6 +452,95 @@ function runtimeTimelineContentSnapshotRecordDetail(record: Record<string, unkno
     artifactCount ? `${artifactCount} 个产物` : '',
     runtimeTimelineRecordString(record, 'path'),
   ].filter(Boolean).join(' · ');
+}
+
+function runtimeTimelineToolSkipDetail(event: RuntimeTimelineEventSnapshot): string {
+  const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+  const payload = runtimeTimelineRecordObject(record, 'payload');
+  const result = runtimeTimelineFirstRecordObject([record, payload], 'result');
+  const data = runtimeTimelineRecordObject(result, 'data');
+  const reason = runtimeTimelineSkipReason(record, payload, result, data);
+  const conditions = runtimeTimelineUniqueStrings([
+    ...runtimeTimelineRecordStringValues(record, 'blocking_condition', 'blocking_conditions'),
+    ...runtimeTimelineRecordStringValues(payload, 'blocking_condition', 'blocking_conditions'),
+    ...runtimeTimelineRecordStringValues(result, 'blocking_condition', 'blocking_conditions'),
+    ...runtimeTimelineRecordStringValues(data, 'blocking_condition', 'blocking_conditions'),
+  ]);
+  const recommendedTools = runtimeTimelineUniqueStrings([
+    ...runtimeTimelineRecordStringValues(record, 'recommended_tools'),
+    ...runtimeTimelineRecordStringValues(payload, 'recommended_tools'),
+    ...runtimeTimelineRecordStringValues(result, 'recommended_tools'),
+    ...runtimeTimelineRecordStringValues(data, 'recommended_tools'),
+  ]);
+  const recoveryTool = runtimeTimelineRecoveryActionTool(record, payload, result, data);
+  return [
+    reason,
+    conditions.slice(0, 3).join(', '),
+    recommendedTools.length ? `建议 ${recommendedTools.map(runtimeToolDisplayLabelOrName).join(' -> ')}` : '',
+    recoveryTool ? `恢复 ${runtimeToolDisplayLabelOrName(recoveryTool)}` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function runtimeTimelineReadinessRecoveredDetail(event: RuntimeTimelineEventSnapshot): string {
+  const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+  const payload = runtimeTimelineRecordObject(record, 'payload');
+  const tool = runtimeTimelineFirstRecordString(
+    ['recovery_tool', 'tool', 'tool_name'],
+    record,
+    payload,
+  );
+  const appName = runtimeTimelineFirstRecordString(
+    ['app_name', 'requested_app_name', 'target_app_name'],
+    record,
+    payload,
+  );
+  const conditions = runtimeTimelineUniqueStrings([
+    ...runtimeTimelineRecordStringValues(record, 'blocking_condition', 'blocking_conditions'),
+    ...runtimeTimelineRecordStringValues(payload, 'blocking_condition', 'blocking_conditions'),
+  ]);
+  return [
+    tool ? `恢复工具 · ${runtimeToolDisplayLabelOrName(tool)}` : '',
+    appName,
+    conditions.slice(0, 3).join(', '),
+  ].filter(Boolean).join(' · ');
+}
+
+function runtimeTimelineSkipReason(...records: Array<Record<string, unknown>>): string {
+  if (records.some((record) => record.blocked_by_runtime_readiness === true)) return '前台未就绪';
+  if (records.some((record) => record.blocked_by_app_resolution === true)) return '应用未解析';
+  if (records.some((record) => record.blocked_by_user_goal === true)) return '用户约束';
+  return runtimeTimelineFirstRecordString(
+    ['error', 'blocking_condition', 'source_summary'],
+    ...records,
+  );
+}
+
+function runtimeTimelineRecoveryActionTool(...records: Array<Record<string, unknown>>): string {
+  for (const record of records) {
+    const actions = record.recovery_actions;
+    if (!Array.isArray(actions)) continue;
+    for (const action of actions) {
+      if (!action || typeof action !== 'object' || Array.isArray(action)) continue;
+      const tool = runtimeTimelineRecordString(action as Record<string, unknown>, 'tool');
+      if (tool) return tool;
+    }
+  }
+  return '';
+}
+
+function runtimeTimelineRecordObject(record: Record<string, unknown>, key: string): Record<string, unknown> {
+  const value = record[key];
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function runtimeTimelineFirstRecordObject(records: Array<Record<string, unknown>>, key: string): Record<string, unknown> {
+  for (const record of records) {
+    const value = runtimeTimelineRecordObject(record, key);
+    if (Object.keys(value).length > 0) return value;
+  }
+  return {};
 }
 
 function runtimeTimelineRecordString(record: Record<string, unknown>, key: string): string {
