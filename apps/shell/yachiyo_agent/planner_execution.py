@@ -1133,6 +1133,8 @@ def _has_unavailable_required_desktop_step(decision: Any) -> bool:
             continue
         if not tool_name and step_id == "submit-foreground-ui":
             continue
+        if capability_id == "desktop.ui_operation" and not tool_name:
+            return True
         if (
             capability_id in {"desktop.app_control", "desktop.ui_operation"}
             and (

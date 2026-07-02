@@ -12027,10 +12027,16 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score -= 0.36
     current_page_action = _browser_current_page_hint(text)
     current_page_action_kind = str(current_page_action.get("browser_action") or "").strip()
+    web_navigation_action = _web_search_hint(text, "")
+    web_navigation_action_kind = str(
+        web_navigation_action.get("browser_action") or ""
+    ).strip()
     if intent.kind == "desktop_operation" and intent.inputs.get("screen_capture_hint"):
         score += 0.44
         if current_page_action_kind == "screenshot":
             score -= 0.58
+        if web_navigation_action_kind == "open_url_screenshot":
+            score -= 0.56
     if intent.kind == "desktop_operation" and "window_list_hint" in intent.inputs:
         score += 0.2
     if intent.kind == "media_playback" and _contains_any(
@@ -12211,6 +12217,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         in {"open_url", "open_url_extract", "open_url_screenshot"}
     ):
         score += 0.42
+        if str(intent.inputs.get("browser_action") or "").strip() == "open_url_screenshot":
+            score += 0.18
     if intent.kind == "web_research" and _contains_any(
         text,
         [
