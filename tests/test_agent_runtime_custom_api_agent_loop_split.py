@@ -2537,12 +2537,14 @@ def test_model_replan_followup_context_includes_task_core_workspace() -> None:
     )
     message = custom_api_agent_module._model_replan_followup_context_message(payload)
 
-    assert payload["task_core"] == task_core
+    assert payload["task_core"]["core_id"] == task_core["core_id"]
+    assert payload["task_core"]["todos"][0]["status"] == "blocked"
+    assert payload["task_core"]["checkpoints"][0]["status"] == "blocked"
     assert payload["task_progress"]["blocked_steps"] == ["analyze-data-file"]
     assert "Task workspace:" in message
     assert "- workspace: Data Analysis Workspace" in message
-    assert "analyze-data-file · planned · data.analyze" in message
-    assert "analyze-data-file · planned · Verify analysis output" in message
+    assert "analyze-data-file · blocked · data.analyze" in message
+    assert "analyze-data-file · blocked · Verify analysis output" in message
 
 
 def test_custom_api_agent_loop_completes_verification_recovery_without_model_followup() -> None:

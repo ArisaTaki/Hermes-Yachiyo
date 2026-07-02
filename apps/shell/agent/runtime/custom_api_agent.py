@@ -5259,26 +5259,190 @@ def _runtime_replan_task_core_payload(
         for payload in replan_payloads
         if isinstance(payload, Mapping) and str(payload.get("plan_id") or "").strip()
     }
+    task_core_event = _runtime_replan_latest_task_core_event(
+        timeline,
+        core_ids=core_ids,
+        plan_ids=plan_ids,
+    )
+    if not task_core_event:
+        return {}
+    event_payload = (
+        task_core_event.get("payload")
+        if isinstance(task_core_event.get("payload"), Mapping)
+        else {}
+    )
+    task_core = (
+        event_payload.get("task_core")
+        if isinstance(event_payload.get("task_core"), Mapping)
+        else {}
+    )
+    if not task_core:
+        return {}
+    replay_events = _runtime_replan_task_core_replay_events(
+        timeline,
+        core_ids=core_ids,
+        plan_ids=plan_ids,
+    )
+    replayed = _runtime_replan_replayed_task_core_payload(
+        task_core,
+        replay_events,
+    )
+    if replayed:
+        return replayed
+    return dict(task_core)
+
+
+def _runtime_replan_latest_task_core_event(
+    timeline: list[dict[str, Any]],
+    *,
+    core_ids: set[str],
+    plan_ids: set[str],
+) -> Mapping[str, Any]:
     for event in reversed(timeline):
         if not isinstance(event, Mapping):
             continue
-        if str(event.get("event") or "").strip() != "agent.task_core.created":
+        event_name = str(event.get("event") or "").strip()
+        if not event_name.endswith(".task_core.created"):
             continue
-        event_payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
-        core_id = str(event.get("core_id") or event_payload.get("core_id") or "").strip()
-        plan_id = str(event.get("plan_id") or event_payload.get("plan_id") or "").strip()
-        if core_ids and core_id and core_id not in core_ids:
+        if not _runtime_replan_event_matches_ids(event, core_ids, plan_ids):
             continue
-        if plan_ids and plan_id and plan_id not in plan_ids:
-            continue
-        task_core = (
-            event_payload.get("task_core")
-            if isinstance(event_payload.get("task_core"), Mapping)
-            else {}
-        )
-        if task_core:
-            return dict(task_core)
+        return event
     return {}
+
+
+def _runtime_replan_task_core_replay_events(
+    timeline: list[dict[str, Any]],
+    *,
+    core_ids: set[str],
+    plan_ids: set[str],
+) -> list[Mapping[str, Any]]:
+    events: list[Mapping[str, Any]] = []
+    for event in timeline:
+        if not isinstance(event, Mapping):
+            continue
+        event_name = str(event.get("event") or "").strip()
+        if not (
+            event_name.endswith(".task_core.created")
+            or event_name.endswith(".task.workspace_item.updated")
+            or event_name.endswith(".task.todo.updated")
+            or event_name.endswith(".task.checkpoint.updated")
+        ):
+            continue
+        if not _runtime_replan_event_matches_ids(event, core_ids, plan_ids):
+            continue
+        events.append(event)
+    return events
+
+
+def _runtime_replan_event_matches_ids(
+    event: Mapping[str, Any],
+    core_ids: set[str],
+    plan_ids: set[str],
+) -> bool:
+    event_payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+    core_id = str(event.get("core_id") or event_payload.get("core_id") or "").strip()
+    plan_id = str(event.get("plan_id") or event_payload.get("plan_id") or "").strip()
+    if core_ids:
+        return bool(core_id and core_id in core_ids)
+    if plan_ids:
+        return bool(plan_id and plan_id in plan_ids)
+    return True
+
+
+def _runtime_replan_replayed_task_core_payload(
+    task_core: Mapping[str, Any],
+    replay_events: list[Mapping[str, Any]],
+) -> dict[str, Any]:
+    try:
+        from apps.shell.yachiyo_agent.events import public_run_event_from_payload
+        from apps.shell.yachiyo_agent.task_core_snapshots import (
+            task_core_snapshot_from_payload,
+        )
+    except Exception:
+        return {}
+    public_events = [
+        public_run_event_from_payload(event, sequence=index + 1)
+        for index, event in enumerate(replay_events)
+    ]
+    snapshot = task_core_snapshot_from_payload(
+        {"task_core": _runtime_replan_normalized_task_core_payload(task_core)},
+        events=public_events,
+    )
+    if snapshot is None:
+        return {}
+    return snapshot.model_dump(mode="json")
+
+
+def _runtime_replan_normalized_task_core_payload(
+    task_core: Mapping[str, Any],
+) -> dict[str, Any]:
+    normalized = dict(task_core)
+    workspace = (
+        dict(normalized.get("workspace"))
+        if isinstance(normalized.get("workspace"), Mapping)
+        else {}
+    )
+    if workspace:
+        workspace.setdefault(
+            "title",
+            str(workspace.get("workspace_id") or "Task Workspace").strip(),
+        )
+        workspace["items"] = [
+            _runtime_replan_normalized_workspace_item(item)
+            for item in workspace.get("items", [])
+            if isinstance(item, Mapping)
+        ]
+        normalized["workspace"] = workspace
+    normalized["todos"] = [
+        _runtime_replan_normalized_todo_item(todo)
+        for todo in normalized.get("todos", [])
+        if isinstance(todo, Mapping)
+    ]
+    normalized["checkpoints"] = [
+        _runtime_replan_normalized_checkpoint(checkpoint)
+        for checkpoint in normalized.get("checkpoints", [])
+        if isinstance(checkpoint, Mapping)
+    ]
+    return normalized
+
+
+def _runtime_replan_normalized_workspace_item(item: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = dict(item)
+    title = str(
+        normalized.get("title")
+        or normalized.get("path")
+        or normalized.get("item_id")
+        or "workspace item"
+    ).strip()
+    normalized["title"] = title
+    return normalized
+
+
+def _runtime_replan_normalized_todo_item(todo: Mapping[str, Any]) -> dict[str, Any]:
+    normalized = dict(todo)
+    title = str(
+        normalized.get("title")
+        or normalized.get("step_id")
+        or normalized.get("tool_name")
+        or normalized.get("todo_id")
+        or "task todo"
+    ).strip()
+    normalized["title"] = title
+    return normalized
+
+
+def _runtime_replan_normalized_checkpoint(
+    checkpoint: Mapping[str, Any],
+) -> dict[str, Any]:
+    normalized = dict(checkpoint)
+    title = str(
+        normalized.get("title")
+        or normalized.get("after_step_id")
+        or normalized.get("checkpoint_id")
+        or "task checkpoint"
+    ).strip()
+    normalized["title"] = title
+    return normalized
 
 
 def _runtime_workspace_item_summaries(items: Any) -> list[dict[str, Any]]:
