@@ -607,6 +607,31 @@ def test_yachiyo_agent_service_plans_shared_chat_execution_envelope() -> None:
     assert envelope.replan_signal_count == len(envelope.task_core.replan_signals)
 
 
+def test_yachiyo_agent_service_can_project_full_chat_execution_plan() -> None:
+    service = YachiyoAgentService(_FakeRuntimePort())
+
+    envelope = service.plan_chat_execution(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools=["workspace.read", "terminal.run", "artifact.write"],
+        full_plan=True,
+    )
+
+    assert envelope.intent_kind == "data_analysis"
+    assert [request.tool_name for request in envelope.requests] == [
+        "workspace.read",
+        "terminal.run",
+        "artifact.write",
+    ]
+    assert [request.step_id for request in envelope.requests] == [
+        "inspect-data-source",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert envelope.requests[1].approval_required is True
+    assert envelope.requests[1].depends_on == ["inspect-data-source"]
+    assert envelope.requests[2].depends_on == ["run-analysis"]
+
+
 def test_agent_studio_service_plans_shared_execution_envelope() -> None:
     service = AgentStudioService(_FakeStudioExecutionPort())
 

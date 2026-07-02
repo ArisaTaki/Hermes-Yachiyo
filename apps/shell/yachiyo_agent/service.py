@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from inspect import Parameter, signature
 from typing import Any
 
 from apps.shell.agent.runtime.events import redact_json_value
@@ -86,14 +87,26 @@ class YachiyoAgentService:
         allowed_tools: Iterable[str] | None = None,
         metadata: Mapping[str, Any] | None = None,
         direct: bool = False,
+        full_plan: bool = False,
     ) -> RuntimeExecutionEnvelopeSnapshot:
         port_planner = getattr(self._runtime_port, "plan_chat_execution", None)
         if callable(port_planner):
-            payload = port_planner(
-                prompt,
-                allowed_tools=allowed_tools,
-                metadata=metadata or {},
-                direct=direct,
+            payload = (
+                _port_chat_execution_payload(
+                    port_planner,
+                    prompt,
+                    allowed_tools=allowed_tools,
+                    metadata=metadata or {},
+                    direct=direct,
+                    full_plan=full_plan,
+                )
+                if full_plan
+                else port_planner(
+                    prompt,
+                    allowed_tools=allowed_tools,
+                    metadata=metadata or {},
+                    direct=direct,
+                )
             )
             if payload is not None:
                 return RuntimeExecutionEnvelopeSnapshot.model_validate(payload)
@@ -106,6 +119,7 @@ class YachiyoAgentService:
             decision,
             allowed_tools=allowed_tools,
             direct=direct,
+            full_plan=full_plan,
         )
         if envelope is None:
             raise ValueError("Unable to build Yachiyo chat execution plan")
@@ -298,6 +312,39 @@ def _payload_run_id(payload: Any) -> str:
     if not isinstance(payload, Mapping):
         return ""
     return str(payload.get("run_id") or "").strip()
+
+
+def _port_chat_execution_payload(
+    port_planner: Any,
+    prompt: str,
+    *,
+    allowed_tools: Iterable[str] | None,
+    metadata: Mapping[str, Any],
+    direct: bool,
+    full_plan: bool,
+) -> Any:
+    if not _callable_accepts_keyword(port_planner, "full_plan"):
+        return None
+    return port_planner(
+        prompt,
+        allowed_tools=allowed_tools,
+        metadata=metadata,
+        direct=direct,
+        full_plan=full_plan,
+    )
+
+
+def _callable_accepts_keyword(callback: Any, keyword: str) -> bool:
+    try:
+        parameters = signature(callback).parameters
+    except (TypeError, ValueError):
+        return True
+    if keyword in parameters:
+        return True
+    return any(
+        parameter.kind == Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
 
 
 def _chat_timeline_snapshot_from_payload(payload: Mapping[str, Any]) -> RunTimelineSnapshot:
