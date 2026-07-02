@@ -1770,11 +1770,17 @@ class RuntimeCustomApiAgentLoop:
                     if key != "metadata"
                 },
             }
+            event_trace_metadata = _runtime_trace_metadata_from_mapping(event)
             if step_metadata or input_preview:
-                metadata = dict(step_metadata)
+                metadata = {
+                    **dict(step_metadata),
+                    **event_trace_metadata,
+                }
                 if input_preview:
                     metadata.setdefault("input_preview", dict(input_preview))
                 failure_payload["metadata"] = metadata
+            elif event_trace_metadata:
+                failure_payload["metadata"] = event_trace_metadata
             failure_payloads.append(failure_payload)
         failure_payloads.extend(
             _runtime_planner_verification_failure_payloads(
@@ -5954,6 +5960,7 @@ def _runtime_planner_verification_failure_payloads(
                 ),
                 "detail": "verification observation returned no UI elements or readable text",
                 "result": result,
+                **_runtime_trace_failure_payload_fields(tool_event),
             }
         )
     return payloads
@@ -7296,6 +7303,7 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
             payload[key] = value
     if payload.get("step_id") and not payload.get("planner_step_id"):
         payload["planner_step_id"] = payload["step_id"]
+    payload.update(_runtime_trace_metadata_from_mapping(request))
     for key in ("followup_target", "action_target", "observation_evidence"):
         value = request.get(key)
         if isinstance(value, Mapping) and value:
@@ -7354,6 +7362,12 @@ def _approval_required_planner_trace_payload(
             payload[key] = value
     if payload.get("step_id") and not payload.get("planner_step_id"):
         payload["planner_step_id"] = payload["step_id"]
+    payload.update(
+        {
+            **_runtime_trace_metadata_from_mapping(planned_request),
+            **_runtime_trace_metadata_from_mapping(tool_request),
+        }
+    )
     return payload
 
 
@@ -7617,6 +7631,61 @@ def _attach_replan_payload_trace_metadata(
     ).strip()
     if capability_id:
         request["capability_id"] = capability_id
+    request.update(_runtime_trace_metadata_from_replan_payload(payload))
+
+
+_RUNTIME_TRACE_TEXT_KEYS = (
+    "runtime_doctrine",
+    "runtime_stage",
+    "runtime_role",
+)
+
+_RUNTIME_TRACE_BOOL_KEYS = (
+    "requires_observation",
+    "requires_post_action_verification",
+)
+
+_RUNTIME_TRACE_LIST_KEYS = (
+    "replan_triggers",
+    "replan_signal_ids",
+)
+
+
+def _runtime_trace_failure_payload_fields(value: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = _runtime_trace_metadata_from_mapping(value)
+    return {"metadata": metadata} if metadata else {}
+
+
+def _runtime_trace_metadata_from_replan_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    trace = {
+        **_runtime_trace_metadata_from_mapping(metadata),
+        **_runtime_trace_metadata_from_mapping(payload),
+    }
+    trigger = str(payload.get("trigger") or "").strip()
+    if trigger:
+        triggers = _string_list(trace.get("replan_triggers"))
+        if trigger not in triggers:
+            triggers.append(trigger)
+        trace["replan_triggers"] = triggers
+    return trace
+
+
+def _runtime_trace_metadata_from_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
+    trace: dict[str, Any] = {}
+    for key in _RUNTIME_TRACE_TEXT_KEYS:
+        item = str(value.get(key) or "").strip()
+        if item:
+            trace[key] = item
+    for key in _RUNTIME_TRACE_BOOL_KEYS:
+        item = value.get(key)
+        if isinstance(item, bool):
+            trace[key] = item
+    for key in _RUNTIME_TRACE_LIST_KEYS:
+        items = _string_list(value.get(key))
+        if items:
+            trace[key] = items
+    return trace
 
 
 def _replan_recovery_requests_need_model_followup(

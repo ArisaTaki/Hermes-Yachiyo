@@ -2439,6 +2439,13 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
                 "desktop.ui_elements",
                 input_preview={},
                 result=verification_result,
+                runtime_doctrine="discover_operate_verify",
+                runtime_stage="verify",
+                runtime_role="verify_result",
+                requires_observation=True,
+                requires_post_action_verification=False,
+                replan_triggers=["verification_failed"],
+                replan_signal_ids=["replan-verify"],
             ),
         ]
 
@@ -2458,6 +2465,9 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
     assert payload["run_id"] == "run-verify-replan"
     assert payload["source_step_id"] == "verify-desktop-result"
     assert payload["source_tool_name"] == "desktop.ui_elements"
+    assert payload["metadata"]["runtime_stage"] == "verify"
+    assert payload["metadata"]["runtime_role"] == "verify_result"
+    assert payload["metadata"]["replan_signal_ids"] == ["replan-verify"]
     assert "no UI elements or readable text" in payload["failure_detail"]
     assert any(event["event"] == "agent.replan.requested" for event in empty_timeline)
     assert any(
@@ -2510,6 +2520,14 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
     assert {
         request["replan_trigger"] for request in recovery_requests
     } == {"verification_failed"}
+    assert {request["runtime_stage"] for request in recovery_requests} == {"verify"}
+    assert {request["runtime_role"] for request in recovery_requests} == {"verify_result"}
+    assert {tuple(request["replan_triggers"]) for request in recovery_requests} == {
+        ("verification_failed",)
+    }
+    assert {tuple(request["replan_signal_ids"]) for request in recovery_requests} == {
+        ("replan-verify",)
+    }
     assert {request["plan_id"] for request in recovery_requests} == {decision.plan.plan_id}
     assert {request["planner_step_id"] for request in recovery_requests} == {
         "verify-desktop-result"
@@ -17707,6 +17725,13 @@ def test_auto_replan_fallback_recovery_reuses_safe_file_inputs() -> None:
             "workspace.read",
             input_preview={"path": "legacy-report.xls"},
             result={"ok": False, "error": "unsupported file encoding"},
+            runtime_doctrine="discover_operate_verify",
+            runtime_stage="discover",
+            runtime_role="inspect_desktop_state",
+            requires_observation=True,
+            requires_post_action_verification=False,
+            replan_triggers=["tool_failure"],
+            replan_signal_ids=["replan-inspect-data-source"],
         )
     ]
 
@@ -17732,6 +17757,16 @@ def test_auto_replan_fallback_recovery_reuses_safe_file_inputs() -> None:
         "planner_replan_fallback_recovery"
     }
     assert {request["replan_trigger"] for request in fallback_requests} == {"tool_failure"}
+    assert {request["runtime_stage"] for request in fallback_requests} == {"discover"}
+    assert {request["runtime_role"] for request in fallback_requests} == {
+        "inspect_desktop_state"
+    }
+    assert {tuple(request["replan_triggers"]) for request in fallback_requests} == {
+        ("tool_failure",)
+    }
+    assert {tuple(request["replan_signal_ids"]) for request in fallback_requests} == {
+        ("replan-inspect-data-source",)
+    }
     assert {request["step_id"] for request in fallback_requests} == {"inspect-data-source"}
     assert {request["planner_step_id"] for request in fallback_requests} == {
         "inspect-data-source"
