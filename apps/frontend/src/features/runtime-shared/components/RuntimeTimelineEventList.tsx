@@ -66,6 +66,7 @@ export function RuntimeTimelineEventList({
           const payloadRecord = runtimeEventPayloadRecord(event);
           const traceContext = runtimeEventTraceContext(event, payloadRecord);
           const plannerContext = runtimeEventPlannerContext(event, payloadRecord);
+          const runtimeContext = runtimeEventRuntimeContext(event, payloadRecord);
           const contentSnapshots = eventIsSecret ? [] : runtimeEventContentSnapshots(payloadRecord);
           const capabilityRecovery = eventIsSecret ? [] : runtimeEventCapabilityRecovery(payloadRecord);
           const eventMetadata = runtimeEventMetadata(
@@ -73,6 +74,7 @@ export function RuntimeTimelineEventList({
             payloadRecord,
             traceContext,
             plannerContext,
+            runtimeContext,
             eventSequence,
             eventRunId,
           );
@@ -93,7 +95,15 @@ export function RuntimeTimelineEventList({
               data-run-event-launcher-mode={plannerContext.launcherMode}
               data-run-event-launcher-surface={plannerContext.launcherSurface}
               data-run-event-entrypoint-source={plannerContext.entrypointSource}
+              data-run-event-runtime-capability-id={runtimeContext.capabilityId}
+              data-run-event-runtime-doctrine={runtimeContext.runtimeDoctrine}
+              data-run-event-runtime-role={runtimeContext.runtimeRole}
+              data-run-event-runtime-stage={runtimeContext.runtimeStage}
+              data-run-event-runtime-step-id={runtimeContext.stepId}
               data-run-event-planner-entrypoint={plannerContext.plannerEntrypoint}
+              data-run-event-replan-request-id={runtimeContext.replanRequestId}
+              data-run-event-replan-signal-ids={runtimeContext.replanSignalIds.join(',')}
+              data-run-event-replan-trigger={runtimeContext.replanTrigger || runtimeContext.replanTriggers[0] || ''}
               data-run-event-runnable-kind={plannerContext.runnableKind}
               data-run-event-selection-role={plannerContext.selectionRole}
               data-run-event-selection-source={plannerContext.selectionSource}
@@ -394,6 +404,7 @@ function runtimeEventMetadata(
   payload: RuntimeTimelineEventRecord,
   traceContext: RuntimeTimelineTraceContext,
   plannerContext: RuntimeTimelinePlannerContext,
+  runtimeContext: RuntimeTimelineRuntimeContext,
   eventSequence: string,
   eventRunId: string,
 ): Array<{ label: string; value: string }> {
@@ -405,8 +416,19 @@ function runtimeEventMetadata(
       label: 'approval',
       value: runtimeEventString(event, payload, 'approval_id')
         || runtimeEventNestedString(payload, 'pending_approval', 'approval_id')
-        || runtimeEventNestedString(payload, 'approval', 'approval_id'),
+        || runtimeEventNestedString(payload, 'approval', 'approval_id')
+        || runtimeContext.approvalRequired,
     },
+    { label: 'step', value: runtimeContext.stepId },
+    { label: 'capability', value: runtimeContext.capabilityId },
+    { label: 'stage', value: runtimeContext.runtimeStage },
+    { label: 'role', value: runtimeContext.runtimeRole },
+    { label: 'doctrine', value: runtimeContext.runtimeDoctrine },
+    { label: 'observe', value: runtimeContext.requiresObservation },
+    { label: 'verify', value: runtimeContext.requiresVerification },
+    { label: 'replan', value: runtimeContext.replanTrigger || runtimeContext.replanTriggers.join(', ') },
+    { label: 'replan id', value: runtimeContext.replanRequestId },
+    { label: 'signals', value: runtimeContext.replanSignalIds.join(', ') },
     { label: 'artifact', value: runtimeEventString(event, payload, 'artifact_id') },
     { label: 'memory', value: runtimeEventMemoryId(event, payload) },
     { label: 'skill', value: runtimeEventSkillId(event, payload) },
@@ -461,6 +483,21 @@ type RuntimeTimelinePlannerContext = {
   selectionSource: string;
 };
 
+type RuntimeTimelineRuntimeContext = {
+  approvalRequired: string;
+  capabilityId: string;
+  replanRequestId: string;
+  replanSignalIds: string[];
+  replanTrigger: string;
+  replanTriggers: string[];
+  requiresObservation: string;
+  requiresVerification: string;
+  runtimeDoctrine: string;
+  runtimeRole: string;
+  runtimeStage: string;
+  stepId: string;
+};
+
 function runtimeEventTraceContext(
   event: RuntimeTimelineEventRecord,
   payload: RuntimeTimelineEventRecord,
@@ -493,6 +530,59 @@ function runtimeEventTraceContext(
     workflowNodeId: runtimeEventTraceString(event, payload, approvalContext, 'workflow_node_id'),
     workflowNodeLabel: runtimeEventTraceString(event, payload, approvalContext, 'workflow_node_label'),
     workflowRunId: runtimeEventTraceString(event, payload, approvalContext, 'workflow_run_id'),
+  };
+}
+
+function runtimeEventRuntimeContext(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+): RuntimeTimelineRuntimeContext {
+  const replanTrigger = runtimeEventContextString(
+    event,
+    payload,
+    'replan_trigger',
+    'trigger',
+    'latest_replan_trigger',
+  );
+  const replanTriggers = runtimeEventContextStringList(event, payload, 'replan_triggers');
+  if (replanTrigger && !replanTriggers.includes(replanTrigger)) {
+    replanTriggers.unshift(replanTrigger);
+  }
+  return {
+    approvalRequired: runtimeEventContextBoolLabel(event, payload, 'approval_required'),
+    capabilityId: runtimeEventContextString(
+      event,
+      payload,
+      'capability_id',
+      'target_capability_id',
+    ),
+    replanRequestId: runtimeEventContextString(
+      event,
+      payload,
+      'replan_request_id',
+      'request_id',
+    ),
+    replanSignalIds: runtimeEventContextStringList(event, payload, 'replan_signal_ids'),
+    replanTrigger,
+    replanTriggers,
+    requiresObservation: runtimeEventContextBoolLabel(event, payload, 'requires_observation'),
+    requiresVerification: runtimeEventContextBoolLabel(
+      event,
+      payload,
+      'requires_post_action_verification',
+    ),
+    runtimeDoctrine: runtimeEventContextString(event, payload, 'runtime_doctrine'),
+    runtimeRole: runtimeEventContextString(event, payload, 'runtime_role'),
+    runtimeStage: runtimeEventContextString(event, payload, 'runtime_stage'),
+    stepId: runtimeEventContextString(
+      event,
+      payload,
+      'step_id',
+      'planner_step_id',
+      'source_step_id',
+      'after_step_id',
+      'latest_replan_step_id',
+    ),
   };
 }
 
@@ -601,6 +691,76 @@ function runtimeEventString(
   key: string,
 ): string {
   return defaultString(event[key]) || defaultString(payload[key]);
+}
+
+function runtimeEventContextString(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+  ...keys: string[]
+): string {
+  const records = runtimeEventContextRecords(event, payload);
+  for (const key of keys) {
+    for (const record of records) {
+      const value = defaultString(record[key]);
+      if (value) return value;
+    }
+  }
+  return '';
+}
+
+function runtimeEventContextStringList(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+  ...keys: string[]
+): string[] {
+  const values: string[] = [];
+  for (const record of runtimeEventContextRecords(event, payload)) {
+    for (const key of keys) {
+      for (const value of runtimeEventStringList(record[key])) {
+        if (!values.includes(value)) values.push(value);
+      }
+    }
+  }
+  return values;
+}
+
+function runtimeEventContextBoolLabel(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+  key: string,
+): string {
+  for (const record of runtimeEventContextRecords(event, payload)) {
+    if (record[key] === true) return 'required';
+    if (record[key] === false) continue;
+    const value = defaultString(record[key]).toLowerCase();
+    if (value === 'true' || value === 'required') return 'required';
+  }
+  return '';
+}
+
+function runtimeEventContextRecords(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+): RuntimeTimelineEventRecord[] {
+  const records: RuntimeTimelineEventRecord[] = [event, payload];
+  const seen = new Set<RuntimeTimelineEventRecord>(records);
+  const addRecord = (record: RuntimeTimelineEventRecord | null) => {
+    if (!record || seen.has(record)) return;
+    seen.add(record);
+    records.push(record);
+  };
+  for (const key of ['pending_approval', 'approval', 'tool_request', 'planned_request', 'request', 'result', 'metadata']) {
+    addRecord(runtimeEventNestedRecord(payload, key));
+  }
+  for (const record of records.slice(2)) {
+    for (const key of ['tool_request', 'planned_request', 'request', 'result', 'metadata']) {
+      const nested = record[key];
+      if (nested && typeof nested === 'object' && !Array.isArray(nested)) {
+        addRecord(nested as RuntimeTimelineEventRecord);
+      }
+    }
+  }
+  return records;
 }
 
 function runtimeEventTraceString(
