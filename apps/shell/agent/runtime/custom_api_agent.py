@@ -8469,6 +8469,10 @@ def _auto_replan_recovery_requests(
                 replan_payloads,
                 allowed_tools,
             ),
+            *_auto_replan_runtime_recovery_action_requests(
+                replan_payloads,
+                allowed_tools,
+            ),
         ]
     )
 
@@ -8594,6 +8598,62 @@ def _auto_replan_fallback_recovery_requests(
                 request["capability_id"] = capability_id
             if _replan_fallback_request_needs_model_followup(tool_name, payload):
                 request["continue_to_model"] = True
+            _attach_replan_payload_trace_metadata(request, payload)
+            requests.append(request)
+    return _dedupe_replan_recovery_requests(requests)
+
+
+def _auto_replan_runtime_recovery_action_requests(
+    replan_payloads: list[dict[str, Any]],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return []
+    requests: list[dict[str, Any]] = []
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+        trigger = str(payload.get("trigger") or "").strip()
+        if trigger not in {"tool_failure", "tool_unavailable", "verification_failed"}:
+            continue
+        request_id = str(payload.get("request_id") or "").strip()
+        step_id = str(payload.get("source_step_id") or payload.get("planner_step_id") or "").strip()
+        capability_id = str(payload.get("target_capability_id") or payload.get("capability_id") or "").strip()
+        for action in _mapping_list(metadata.get("recovery_actions")):
+            tool_name = str(action.get("tool") or "").strip()
+            if not tool_name or tool_name not in allowed:
+                continue
+            request_input = (
+                dict(action.get("input"))
+                if isinstance(action.get("input"), Mapping)
+                else {}
+            )
+            request = _request_like(
+                tool_name,
+                request_input,
+                source="runtime_planner",
+                planning_reason="planner_replan_runtime_recovery_action",
+            )
+            if request_id:
+                request["replan_request_id"] = request_id
+            if trigger:
+                request["replan_trigger"] = trigger
+            if step_id:
+                request["step_id"] = step_id
+            if capability_id:
+                request["capability_id"] = capability_id
+            label = str(action.get("label") or "").strip()
+            if label:
+                request["recovery_action_label"] = label
+            risk_level = str(action.get("risk_level") or "").strip()
+            if risk_level:
+                request["risk_level"] = risk_level
+            permission_target = str(action.get("permission_target") or "").strip()
+            if permission_target:
+                request["permission_target"] = permission_target
+            request["continue_to_model"] = True
             _attach_replan_payload_trace_metadata(request, payload)
             requests.append(request)
     return _dedupe_replan_recovery_requests(requests)

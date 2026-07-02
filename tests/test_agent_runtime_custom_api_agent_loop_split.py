@@ -21219,6 +21219,31 @@ def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> No
     assert followup_context["recovery_actions"] == payload["metadata"]["recovery_actions"]
     assert "Runtime recovery actions:" in followup_message
     assert "desktop.list_apps" in followup_message
+    recovery_requests = custom_api_agent_module._auto_replan_recovery_requests_with_task_context(
+        replan_payloads,
+        [
+            "desktop.list_apps",
+            "app.open",
+            "app.focus_and_safe_scroll",
+            "screen.capture",
+        ],
+        timeline,
+    )
+    assert len(recovery_requests) == 1
+    recovery_request = recovery_requests[0]
+    assert recovery_request["tool"] == "desktop.list_apps"
+    assert recovery_request["input"] == {"query": "pdf", "limit": 20}
+    assert recovery_request["planning_reason"] == "planner_replan_runtime_recovery_action"
+    assert recovery_request["replan_request_id"] == payload["request_id"]
+    assert recovery_request["replan_trigger"] == "tool_failure"
+    assert recovery_request["step_id"] == "open-selected-discovered-app"
+    assert recovery_request["planner_step_id"] == "open-selected-discovered-app"
+    assert recovery_request["continue_to_model"] is True
+    assert recovery_request["recovery_action_label"] == "重新发现应用"
+    assert recovery_request["permission_target"] == "app_discovery"
+    assert recovery_request["task_todo"]["step_id"] == "open-selected-discovered-app"
+    assert recovery_request["task_checkpoints"][0]["after_step_id"] == "open-selected-discovered-app"
+    assert recovery_request["workspace_id"]
 
 
 def test_runtime_tool_runner_projects_task_progress_from_tool_result() -> None:
