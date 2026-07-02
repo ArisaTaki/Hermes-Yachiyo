@@ -1127,10 +1127,20 @@ def _has_unavailable_required_desktop_step(decision: Any) -> bool:
         step_id = str(getattr(step, "step_id", "") or "").strip()
         capability_id = str(getattr(step, "capability_id", "") or "").strip()
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        input_preview = getattr(step, "input_preview", None)
+        payload = input_preview if isinstance(input_preview, Mapping) else {}
         if step_id == "verify-desktop-result":
             continue
         if not tool_name and step_id == "submit-foreground-ui":
             continue
+        if (
+            capability_id in {"desktop.app_control", "desktop.ui_operation"}
+            and (
+                payload.get("blocking_conditions")
+                or payload.get("missing_permissions")
+            )
+        ):
+            return True
         if has_actionable_discovery and capability_id in {
             "desktop.app_control",
             "desktop.ui_operation",
