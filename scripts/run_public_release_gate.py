@@ -918,6 +918,8 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
         "",
         f"Status: {summary.get('status')}",
         f"Release ready: {str(bool(summary.get('release_ready'))).lower()}",
+        f"Release blockers: {summary.get('release_blocker_count')}",
+        f"External requirements: {summary.get('external_requirement_count')}",
         f"Checks: {summary.get('passed_count')}/{summary.get('check_count')} passed",
         "",
         "## Checks",

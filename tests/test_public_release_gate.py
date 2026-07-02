@@ -637,6 +637,8 @@ def test_public_release_gate_keeps_more_informative_public_demo_blocker(
     ]
     markdown = gate.render_markdown(summary)
     assert "## External Requirements" in markdown
+    assert "Release blockers: 1" in markdown
+    assert "External requirements: 1" in markdown
     assert "`provider_smoke_credentials`" in markdown
     assert "Opt-in flags: `--include-provider-workflow`" in markdown
     assert "Opt-in reasons: requires live provider smoke credentials" in markdown
