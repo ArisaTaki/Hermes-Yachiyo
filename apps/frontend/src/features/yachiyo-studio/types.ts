@@ -30,6 +30,7 @@ export type {
   PlannerTraceSummarySnapshot,
   PublicRunEvent,
   RerunRunRequest,
+  ReplanRecoverySnapshot,
   RuntimeExecutionEnvelopeSnapshot,
   RuntimeExecutionRequestSnapshot,
   RunEventPageSnapshot,
@@ -51,6 +52,7 @@ export type {
   ReplanSignalSnapshot,
   TaskCheckpointSnapshot,
   TaskCoreSnapshot,
+  TaskProgressSummarySnapshot,
   TaskReplanRequestSnapshot,
   TaskTodoItemSnapshot,
   UpdateRestrictedToolPluginRequest,
@@ -84,6 +86,8 @@ export type YachiyoRunTimelineSnapshot = RuntimeRunTimelineSnapshot & {
   task_run_link_run_status?: string | null;
   task_run_link_last_event_sequence?: number | null;
   task_core?: RuntimeRunTimelineSnapshot['task_core'];
+  task_progress?: RuntimeRunTimelineSnapshot['task_progress'];
+  replan_recoveries?: RuntimeRunTimelineSnapshot['replan_recoveries'];
   workflow_id?: RuntimeWorkflowRunSnapshot['workflow_id'];
   objective?: RuntimeWorkflowRunSnapshot['objective'];
   current_node_id?: RuntimeWorkflowRunSnapshot['current_node_id'];

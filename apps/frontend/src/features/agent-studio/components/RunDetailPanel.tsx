@@ -391,8 +391,10 @@ export function RunDetailPanel({
           <PlannerTraceInspector
             events={selectedRunPlannerEvents}
             plannerSummary={selectedPublicRunTimeline?.planner_summary}
+            replanRecoveries={selectedPublicRunTimeline?.replan_recoveries || []}
             sourceLabel={plannerTraceSource}
             taskCore={selectedPublicRunTimeline?.task_core}
+            taskProgress={selectedPublicRunTimeline?.task_progress || null}
           />
           {selectedPublicRunTimeline || selectedRunToolCalls.length ? (
             <ToolCallInspector

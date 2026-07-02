@@ -6,9 +6,11 @@ import type {
   PlannerTraceSummarySnapshot,
   PublicRunEvent,
   RuntimePlanSnapshot,
+  ReplanRecoverySnapshot,
   TaskCheckpointSnapshot,
   TaskCoreSnapshot,
   TaskIntentSnapshot,
+  TaskProgressSummarySnapshot,
   TaskReplanRequestSnapshot,
   TaskTodoItemSnapshot,
   TaskWorkspaceItemSnapshot,
@@ -102,16 +104,20 @@ type PlannerFollowupTarget = {
 type PlannerTraceInspectorProps = {
   events?: PublicRunEvent[];
   plannerSummary?: PlannerTraceSummarySnapshot | null;
+  replanRecoveries?: ReplanRecoverySnapshot[];
   sourceLabel?: string;
   taskCore?: TaskCoreSnapshot | null;
+  taskProgress?: TaskProgressSummarySnapshot | null;
   testId?: string;
 };
 
 export function PlannerTraceInspector({
   events = [],
   plannerSummary = null,
+  replanRecoveries = [],
   sourceLabel = 'Intent / Capability / Plan 的 Runtime Planner replay 事实',
   taskCore: taskCoreFallback = null,
+  taskProgress = null,
   testId = 'agent-run-detail-planner-trace',
 }: PlannerTraceInspectorProps) {
   const trace = plannerTraceFromEvents(events)
@@ -250,6 +256,12 @@ export function PlannerTraceInspector({
         ) : null}
 
         {taskCore ? <TaskCoreInspector taskCore={taskCore} /> : null}
+        {taskProgress || replanRecoveries.length ? (
+          <TaskProgressInspector
+            replanRecoveries={replanRecoveries}
+            taskProgress={taskProgress}
+          />
+        ) : null}
 
         {replanRequests.length ? <ReplanRequestInspector requests={replanRequests} /> : null}
         {capabilityRecovery.length ? (
@@ -628,6 +640,77 @@ export function TaskCoreInspector({ taskCore }: { taskCore: TaskCoreSnapshot }) 
             title={signal.reason || signal.condition || signal.target}
           >
             replan · {signal.trigger}
+          </span>
+        ))}
+      </div>
+    </section>
+  );
+}
+
+export function TaskProgressInspector({
+  replanRecoveries,
+  taskProgress,
+}: {
+  replanRecoveries: ReplanRecoverySnapshot[];
+  taskProgress: TaskProgressSummarySnapshot | null;
+}) {
+  const recoveries = replanRecoveries || [];
+  if (!taskProgress && !recoveries.length) return null;
+  return (
+    <section
+      data-latest-replan-request-id={taskProgress?.latest_replan_request_id || ''}
+      data-latest-replan-step-id={taskProgress?.latest_replan_step_id || ''}
+      data-needs-replan={String(taskProgress?.needs_replan === true)}
+      data-replan-recovery-count={recoveries.length}
+      data-task-progress-status={taskProgress?.status || ''}
+      data-testid="agent-run-detail-task-progress"
+    >
+      <div className="studio-tool-inspector-heading">
+        <h3>Task Progress</h3>
+        <span>{taskProgress?.progress_text || taskProgress?.status || `${recoveries.length} replan recoveries`}</span>
+      </div>
+      <div className="studio-tool-pill-row">
+        {taskProgress ? (
+          <>
+            <span className="studio-tool-permission" data-task-progress-count-kind="todo">
+              todos · {taskProgress.completed_todos ?? 0}/{taskProgress.total_todos ?? 0}
+            </span>
+            <span className="studio-tool-permission" data-task-progress-count-kind="checkpoint">
+              checkpoints · {taskProgress.completed_checkpoints ?? 0}/{taskProgress.total_checkpoints ?? 0}
+            </span>
+            <span className="studio-tool-permission" data-task-progress-count-kind="workspace">
+              workspace · {taskProgress.completed_workspace_items ?? 0}/{taskProgress.total_workspace_items ?? 0}
+            </span>
+            {taskProgress.current_step_title || taskProgress.current_step_id ? (
+              <span
+                className="studio-tool-permission"
+                data-current-step-id={taskProgress.current_step_id || ''}
+                title={taskProgress.current_tool_name || ''}
+              >
+                current · {taskProgress.current_step_title || taskProgress.current_step_id}
+              </span>
+            ) : null}
+            {taskProgress.blocked_step_ids?.slice(0, 6).map((stepId) => (
+              <span className="studio-tool-permission missing" data-blocked-step-id={stepId} key={`blocked:${stepId}`}>
+                blocked · {stepId}
+              </span>
+            ))}
+            {taskProgress.approval_step_ids?.slice(0, 6).map((stepId) => (
+              <span className="studio-tool-permission missing" data-approval-step-id={stepId} key={`approval:${stepId}`}>
+                approval · {stepId}
+              </span>
+            ))}
+          </>
+        ) : null}
+        {recoveries.slice(0, 6).map((recovery) => (
+          <span
+            className={recovery.status === 'completed' ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+            data-replan-recovery-id={recovery.request_id}
+            data-replan-recovery-status={recovery.status || 'requested'}
+            key={`recovery:${recovery.request_id}`}
+            title={recovery.failure_detail || recovery.planning_reason || recovery.target_capability_id}
+          >
+            recovery · {recovery.trigger} · {recovery.status || 'requested'}
           </span>
         ))}
       </div>

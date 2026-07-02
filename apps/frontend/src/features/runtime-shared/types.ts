@@ -228,6 +228,37 @@ export type TaskCoreSnapshot = {
   source?: string;
 };
 
+export type TaskProgressSummarySnapshot = {
+  core_id?: string | null;
+  workspace_id?: string | null;
+  status?: string;
+  current_step_id?: string | null;
+  current_step_title?: string | null;
+  current_tool_name?: string | null;
+  total_todos?: number;
+  completed_todos?: number;
+  active_todos?: number;
+  blocked_todos?: number;
+  skipped_todos?: number;
+  total_checkpoints?: number;
+  completed_checkpoints?: number;
+  blocked_checkpoints?: number;
+  waiting_approval_checkpoints?: number;
+  total_workspace_items?: number;
+  completed_workspace_items?: number;
+  blocked_workspace_items?: number;
+  replan_request_count?: number;
+  latest_replan_request_id?: string | null;
+  latest_replan_trigger?: string | null;
+  latest_replan_step_id?: string | null;
+  needs_replan?: boolean;
+  needs_user_action?: boolean;
+  blocked_step_ids?: string[];
+  approval_step_ids?: string[];
+  progress_text?: string;
+  source?: string;
+};
+
 export type TaskReplanRequestSnapshot = {
   request_id: string;
   trigger: string;
@@ -249,6 +280,36 @@ export type TaskReplanRequestSnapshot = {
   route_to_studio?: boolean;
   metadata?: Record<string, unknown>;
   created_at?: string;
+  source?: string;
+};
+
+export type ReplanRecoverySnapshot = {
+  request_id: string;
+  trigger: string;
+  status?: 'requested' | 'planned' | 'running' | 'completed' | 'blocked' | string;
+  run_id?: string | null;
+  task_id?: string | null;
+  group_run_id?: string | null;
+  workflow_run_id?: string | null;
+  decision_id?: string | null;
+  plan_id?: string | null;
+  core_id?: string | null;
+  source_step_id?: string | null;
+  source_tool_name?: string | null;
+  target_capability_id?: string;
+  fallback_tools?: string[];
+  selected_tool_name?: string | null;
+  selected_step_id?: string | null;
+  planning_reason?: string;
+  tool_call_id?: string | null;
+  tool_status?: string | null;
+  todo_status?: string | null;
+  checkpoint_status?: string | null;
+  failure_detail?: string;
+  result_preview?: Record<string, unknown>;
+  recovery_event_ids?: string[];
+  created_at?: string;
+  updated_at?: string;
   source?: string;
 };
 
@@ -598,6 +659,8 @@ export type AgentTaskSnapshot = {
   metadata?: Record<string, unknown>;
   planner_summary?: PlannerTraceSummarySnapshot | null;
   task_core?: TaskCoreSnapshot | null;
+  task_progress?: TaskProgressSummarySnapshot | null;
+  replan_recoveries?: ReplanRecoverySnapshot[];
   open_in_studio_url?: string | null;
   created_at?: string;
   updated_at?: string;
@@ -656,6 +719,8 @@ export type RunTimelineSnapshot = {
   rerun_original_updated_at?: string | null;
   planner_summary?: PlannerTraceSummarySnapshot | null;
   task_core?: TaskCoreSnapshot | null;
+  task_progress?: TaskProgressSummarySnapshot | null;
+  replan_recoveries?: ReplanRecoverySnapshot[];
   events?: PublicRunEvent[];
   tool_calls?: ToolCallSnapshot[];
   memory_traces?: MemoryTraceSnapshot[];
@@ -831,6 +896,8 @@ export type GroupRunSnapshot = {
   participants: AgentGroupMemberSnapshot[];
   active_speaker_agent_id?: string | null;
   task_core?: TaskCoreSnapshot | null;
+  task_progress?: TaskProgressSummarySnapshot | null;
+  replan_recoveries?: ReplanRecoverySnapshot[];
   events?: PublicRunEvent[];
   runs?: RunTimelineSnapshot[];
   child_run_ids?: string[];

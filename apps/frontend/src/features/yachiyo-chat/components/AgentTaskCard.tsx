@@ -342,13 +342,19 @@ type TaskPlannerSummarySnapshot = {
 type TaskCoreTodo = NonNullable<NonNullable<AgentTaskSnapshot['task_core']>['todos']>[number];
 
 function TaskCoreProgress({ task }: { task: AgentTaskSnapshot }) {
+  const progress = task.task_progress;
   const todos = (task.task_core?.todos || [])
     .filter((todo) => todo.todo_id || todo.title);
-  if (!todos.length) return null;
+  if (!todos.length && !progress) return null;
 
   const visibleTodos = todos.slice(0, 4);
-  const completedCount = todos.filter((todo) => todo.status === 'completed').length;
-  const blockedCount = todos.filter((todo) => todo.status === 'blocked').length;
+  const totalCount = progress?.total_todos ?? todos.length;
+  const completedCount = progress?.completed_todos ?? todos.filter((todo) => todo.status === 'completed').length;
+  const blockedCount = progress?.blocked_todos ?? todos.filter((todo) => todo.status === 'blocked').length;
+  const activeCount = progress?.active_todos ?? todos.filter((todo) => todo.status === 'in_progress').length;
+  const checkpointCount = progress?.total_checkpoints ?? (task.task_core?.checkpoints || []).length;
+  const progressDetail = progress?.progress_text
+    || (totalCount ? `${completedCount}/${totalCount}` : progress?.status || '');
   const activeTodo = todos.find((todo) => todo.status === 'in_progress' || todo.status === 'blocked')
     || todos.find((todo) => todo.status === 'pending')
     || todos[todos.length - 1];
@@ -356,37 +362,44 @@ function TaskCoreProgress({ task }: { task: AgentTaskSnapshot }) {
   return (
     <div
       className="yachiyo-agent-task-core"
+      data-active-count={activeCount}
       data-blocked-count={blockedCount}
+      data-checkpoint-count={checkpointCount}
       data-completed-count={completedCount}
+      data-latest-replan-request-id={progress?.latest_replan_request_id || ''}
+      data-needs-replan={String(progress?.needs_replan === true)}
+      data-progress-status={progress?.status || ''}
       data-testid="yachiyo-agent-task-core"
-      data-todo-count={todos.length}
+      data-todo-count={totalCount}
     >
       <UiIcon name="activity" title="Task Core" />
       <div className="yachiyo-agent-task-core-body">
         <div className="yachiyo-agent-task-core-head">
           <strong>Task Core</strong>
           <span>
-            {completedCount}/{todos.length}
+            {progressDetail || `${completedCount}/${totalCount}`}
             {activeTodo ? ` · ${activeTodo.title || activeTodo.step_id || 'ready'}` : ''}
           </span>
         </div>
-        <div className="yachiyo-agent-task-core-todos">
-          {visibleTodos.map((todo) => (
-            <span
-              className={`yachiyo-agent-task-core-todo ${taskCoreTodoTone(todo.status)}`}
-              data-task-todo-id={todo.todo_id}
-              data-task-todo-status={todo.status || 'pending'}
-              key={todo.todo_id || todo.step_id || todo.title}
-              title={taskCoreTodoTitle(todo)}
-            >
-              <i aria-hidden="true" />
-              <span>{todo.title || todo.step_id || todo.tool_name || 'Task step'}</span>
-            </span>
-          ))}
-          {todos.length > visibleTodos.length ? (
-            <span className="yachiyo-agent-task-core-more">+{todos.length - visibleTodos.length}</span>
-          ) : null}
-        </div>
+        {visibleTodos.length ? (
+          <div className="yachiyo-agent-task-core-todos">
+            {visibleTodos.map((todo) => (
+              <span
+                className={`yachiyo-agent-task-core-todo ${taskCoreTodoTone(todo.status)}`}
+                data-task-todo-id={todo.todo_id}
+                data-task-todo-status={todo.status || 'pending'}
+                key={todo.todo_id || todo.step_id || todo.title}
+                title={taskCoreTodoTitle(todo)}
+              >
+                <i aria-hidden="true" />
+                <span>{todo.title || todo.step_id || todo.tool_name || 'Task step'}</span>
+              </span>
+            ))}
+            {todos.length > visibleTodos.length ? (
+              <span className="yachiyo-agent-task-core-more">+{todos.length - visibleTodos.length}</span>
+            ) : null}
+          </div>
+        ) : null}
       </div>
     </div>
   );
