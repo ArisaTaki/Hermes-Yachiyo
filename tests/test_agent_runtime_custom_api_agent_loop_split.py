@@ -23539,6 +23539,273 @@ def test_custom_api_agent_loop_observes_media_search_results_before_default_clic
     assert not any(event["event"] == "agent.model.response" for event in timeline)
 
 
+def test_custom_api_agent_loop_recovers_failed_media_result_click_with_observed_center(
+    monkeypatch,
+) -> None:
+    def fail_legacy_daily_planner(*_args, **_kwargs):
+        raise AssertionError("legacy desktop planner should not run for media result click recovery")
+
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_tool_requests",
+        fail_legacy_daily_planner,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
+        fail_legacy_daily_planner,
+    )
+
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+        "desktop.safe_click",
+        "desktop.ui_elements",
+    ]
+    budget = FakeBudget()
+    tool_batches: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def append_tool_event(
+        request: dict[str, Any],
+        payload: dict[str, Any],
+        result: dict[str, Any],
+        messages_arg: list[dict[str, Any]],
+        timeline_arg: list[dict[str, Any]],
+    ) -> None:
+        timeline_arg.append(
+            _timeline(
+                "agent.tool.call",
+                request["tool"],
+                input_preview=payload,
+                result=result,
+                **{
+                    key: request[key]
+                    for key in (
+                        "planning_reason",
+                        "decision_id",
+                        "plan_id",
+                        "core_id",
+                        "task_id",
+                        "step_id",
+                        "planner_step_id",
+                        "capability_id",
+                        "replan_request_id",
+                        "replan_trigger",
+                        "followup_target",
+                        "action_target",
+                        "observation_evidence",
+                    )
+                    if key in request
+                },
+            )
+        )
+        messages_arg.append(
+            {"role": "user", "content": f"Tool result for {request['tool']}: {result}"}
+        )
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_batches.append([dict(request) for request in tool_requests])
+        batch_index = len(tool_batches)
+        for index, request in enumerate(tool_requests):
+            tool = str(request.get("tool") or "")
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if batch_index == 1:
+                if tool == "desktop.list_apps":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.list_apps",
+                        "data": {"best_match": {"name": "Music"}},
+                    }
+                elif tool == "app.open":
+                    result = {
+                        "ok": True,
+                        "action": "app.open",
+                        "data": {"app_name": "Music"},
+                    }
+                elif tool == "desktop.ui_elements":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {
+                            "elements": [
+                                {
+                                    "role": "AXTextField",
+                                    "label": "search 搜索",
+                                    "center": {"x": 180, "y": 90},
+                                }
+                            ],
+                            "count": 1,
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected initial media tool: {tool}")
+            elif batch_index == 2:
+                if tool == "app.focus_and_type_into_ui_element":
+                    result = {"ok": True, "action": tool, "data": dict(payload)}
+                elif tool == "desktop.search_submit":
+                    result = {"ok": True, "action": "desktop.search_submit"}
+                elif tool == "desktop.ui_elements" and index == 1:
+                    result = {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {
+                            "elements": [
+                                {
+                                    "role": "AXTextField",
+                                    "label": "search 搜索",
+                                    "value": "超时空辉夜姬",
+                                }
+                            ],
+                            "count": 1,
+                        },
+                    }
+                elif tool == "desktop.ui_elements":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {
+                            "elements": [
+                                {
+                                    "role": "AXStaticText",
+                                    "name": "超时空辉夜姬 - Apple Music",
+                                    "center": {"x": 260, "y": 360},
+                                }
+                            ],
+                            "count": 1,
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected observed media result tool: {tool}")
+            elif batch_index == 3:
+                if tool == "app.focus_and_click_ui_element":
+                    result = {
+                        "ok": False,
+                        "error": "target not found",
+                        "data": {"app_name": "Music", "target": payload.get("target")},
+                    }
+                    append_tool_event(request, payload, result, messages_arg, timeline_arg)
+                    return
+                raise AssertionError(f"unexpected failed result click tool: {tool}")
+            elif batch_index == 4:
+                if tool != "desktop.ui_elements":
+                    raise AssertionError(f"unexpected result click recovery observation: {tool}")
+                result = {
+                    "ok": True,
+                    "action": "desktop.ui_elements",
+                    "data": {
+                        "elements": [
+                            {
+                                "role": "AXStaticText",
+                                "name": "超时空辉夜姬 - Apple Music",
+                                "center": {"x": 260, "y": 360},
+                            }
+                        ],
+                        "count": 1,
+                    },
+                }
+            elif batch_index == 5:
+                if tool == "desktop.safe_click":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.safe_click",
+                        "data": {"x": payload.get("x"), "y": payload.get("y")},
+                    }
+                elif tool == "desktop.ui_elements":
+                    result = {
+                        "ok": True,
+                        "action": "desktop.ui_elements",
+                        "data": {
+                            "elements": [
+                                {
+                                    "role": "AXStaticText",
+                                    "name": "正在播放 超时空辉夜姬",
+                                    "center": {"x": 260, "y": 360},
+                                }
+                            ],
+                            "count": 1,
+                        },
+                    }
+                else:
+                    raise AssertionError(f"unexpected safe result click tool: {tool}")
+            else:
+                raise AssertionError(f"unexpected tool batch {batch_index}: {tool}")
+            append_tool_event(request, payload, result, messages_arg, timeline_arg)
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": allowed_tools}},
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda tools: [{"name": tool} for tool in tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use planner media app search with observed result click recovery.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("failed observed result click should recover without model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "帮我用 Apple Music 播放超时空辉夜姬",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-planner-media-result-click-recovery",
+    )
+
+    assert "Music" in str(result)
+    assert [[request["tool"] for request in batch] for batch in tool_batches] == [
+        ["desktop.list_apps", "app.open", "desktop.ui_elements"],
+        [
+            "app.focus_and_type_into_ui_element",
+            "desktop.ui_elements",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+        ["app.focus_and_click_ui_element", "desktop.ui_elements"],
+        ["desktop.ui_elements"],
+        ["desktop.safe_click", "desktop.ui_elements"],
+    ]
+    safe_click_request = tool_batches[4][0]
+    assert safe_click_request["planning_reason"] == "planner_replan_ui_observed_action"
+    assert safe_click_request["replan_request_id"]
+    assert safe_click_request["replan_trigger"] == "tool_failure"
+    assert safe_click_request["input"] == {"x": 260, "y": 360}
+    assert safe_click_request["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "observed_center",
+        "center": {"x": 260, "y": 360},
+    }
+    assert not any(event["event"] == "agent.model.response" for event in timeline)
+
+
 def test_custom_api_agent_loop_recovers_failed_media_search_type_with_ui_observation_without_model(
     monkeypatch,
 ) -> None:

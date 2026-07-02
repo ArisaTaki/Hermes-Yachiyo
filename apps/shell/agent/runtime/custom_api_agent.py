@@ -1196,6 +1196,24 @@ class RuntimeCustomApiAgentLoop:
                                 tool_timeline_start=nested_tool_timeline_start,
                                 run_id=run_id,
                             )
+                            nested_deferred_direct_result = (
+                                self._run_deferred_observed_ui_replan_recovery(
+                                    runtime_planner_decision,
+                                    nested_deferred_observed_ui_requests,
+                                    allowed_tools,
+                                    broker,
+                                    messages,
+                                    timeline,
+                                    artifacts,
+                                    agent=agent,
+                                    run_id=run_id,
+                                    budget=budget,
+                                    next_iteration=start_iteration,
+                                    tool_timeline_start=nested_tool_timeline_start,
+                                )
+                            )
+                            if nested_deferred_direct_result:
+                                return nested_deferred_direct_result
                             direct_result = self._direct_daily_desktop_sequence_result(
                                 nested_deferred_observed_ui_requests,
                                 timeline,
