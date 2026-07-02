@@ -646,6 +646,22 @@ def test_public_release_gate_keeps_more_informative_public_demo_blocker(
     assert "scripts/run_public_demo_smokes.py --include-provider-workflow" in markdown
 
 
+def test_public_release_gate_markdown_defaults_missing_blocker_counts():
+    markdown = gate.render_markdown(
+        {
+            "status": "needs_release_evidence",
+            "release_ready": False,
+            "passed_count": 0,
+            "check_count": 0,
+            "checks": [],
+        }
+    )
+
+    assert "Release blockers: 0" in markdown
+    assert "External requirements: 0" in markdown
+    assert "None" not in markdown
+
+
 def test_public_release_gate_passes_granular_real_desktop_demo_flags(
     tmp_path,
     monkeypatch,
