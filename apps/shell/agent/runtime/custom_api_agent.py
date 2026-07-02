@@ -10224,10 +10224,42 @@ def _next_matching_followup_plan_step(
         step = steps[index]
         if str(step.get("status") or "planned").strip() not in {"", "planned"}:
             continue
-        if str(step.get("tool_name") or "").strip() != tool_name:
+        if not _followup_plan_tools_match(
+            tool_name,
+            str(step.get("tool_name") or "").strip(),
+        ):
             continue
         return index, step
     return -1, None
+
+
+_FOLLOWUP_PLAN_TOOL_EQUIVALENCE_GROUPS = (
+    {
+        "desktop.click_ui_element",
+        "desktop.safe_click",
+        "desktop.click",
+        "app.focus_and_click_ui_element",
+        "app.open_and_click_ui_element",
+    },
+    {
+        "desktop.type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "app.open_and_type_into_ui_element",
+    },
+)
+
+
+def _followup_plan_tools_match(request_tool: str, plan_tool: str) -> bool:
+    clean_request_tool = str(request_tool or "").strip()
+    clean_plan_tool = str(plan_tool or "").strip()
+    if not clean_request_tool or not clean_plan_tool:
+        return False
+    if clean_request_tool == clean_plan_tool:
+        return True
+    return any(
+        clean_request_tool in group and clean_plan_tool in group
+        for group in _FOLLOWUP_PLAN_TOOL_EQUIVALENCE_GROUPS
+    )
 
 
 def _auto_followup_plan_step_trace(step: Mapping[str, Any]) -> dict[str, str]:

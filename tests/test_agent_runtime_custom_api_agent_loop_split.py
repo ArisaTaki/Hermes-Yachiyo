@@ -19127,6 +19127,123 @@ def test_auto_discovered_app_followup_requests_inherit_tool_plan_trace() -> None
     ]
 
 
+def test_auto_discovered_app_observed_result_inherits_equivalent_tool_plan_trace() -> None:
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.list_apps",
+            input_preview={"query": "image", "limit": 20},
+            result={
+                "ok": True,
+                "action": "desktop.list_apps",
+                "data": {
+                    "query": "image",
+                    "apps": [
+                        {
+                            "name": "Figma",
+                            "path": "/Applications/Figma.app",
+                            "match_score": 94,
+                        }
+                    ],
+                },
+            },
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.search_submit",
+            input_preview={},
+            result={"ok": True, "action": "desktop.search_submit"},
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            input_preview={},
+            result={
+                "ok": True,
+                "data": {
+                    "elements": [
+                        {
+                            "role": "link",
+                            "label": "Logo template gallery",
+                            "center": {"x": 320, "y": 460},
+                        }
+                    ]
+                },
+            },
+        ),
+    ]
+
+    requests = custom_api_agent_module._auto_discovered_followup_requests(
+        {
+            "decision_id": "decision-image",
+            "plan_id": "runtime-plan-image",
+            "intent_kind": "desktop_operation",
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "image",
+                "target_action": "app_search",
+                "app_search": {
+                    "query": "logo 模板",
+                    "target": "搜索",
+                    "submit": True,
+                    "result_selection": {
+                        "action": "click",
+                        "input": {
+                            "target": "第一个结果",
+                            "role_filter": "",
+                            "limit": 80,
+                            "click_count": 1,
+                        },
+                    },
+                },
+            },
+            "tool_plan": {
+                "plan_id": "tool-plan-image",
+                "steps": [
+                    {
+                        "step_id": "select-app-search-result",
+                        "tool_name": "desktop.click_ui_element",
+                        "capability_id": "desktop.ui_operation",
+                        "status": "planned",
+                    },
+                    {
+                        "step_id": "verify-search-result",
+                        "tool_name": "desktop.ui_elements",
+                        "capability_id": "desktop.visual_verification",
+                        "status": "planned",
+                    },
+                ],
+            },
+        },
+        [
+            "app.focus_and_click_ui_element",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ],
+        timeline,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert [request["step_id"] for request in requests] == [
+        "select-app-search-result",
+        "verify-search-result",
+    ]
+    assert requests[0]["planner_step_id"] == "select-app-search-result"
+    assert requests[0]["capability_id"] == "desktop.ui_operation"
+    assert requests[0]["target_app_name"] == "Figma"
+    assert requests[0]["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "click",
+        "target": "第一个结果",
+        "role_filter": "",
+        "app_name": "Figma",
+    }
+    assert requests[0]["input_resolution"]["resolved_app_name"] == "Figma"
+
+
 def test_auto_discovered_app_search_followup_types_submits_and_verifies() -> None:
     timeline = [
         _timeline(
