@@ -8021,7 +8021,7 @@ def _auto_discovered_media_playback_followup_requests(
                 _with_discovered_app_resolution_evidence(request, resolution_evidence)
                 for request in requests
             ]
-        return requests
+        return _annotate_auto_followup_requests_from_tool_plan(requests, selection_payload)
     if str(target.get("target_action") or "").strip() == "safe_shortcut":
         safe_shortcut_action = str(target.get("safe_shortcut_action") or "").strip()
         if not safe_shortcut_action:
@@ -8090,7 +8090,7 @@ def _auto_discovered_media_playback_followup_requests(
             _with_discovered_app_resolution_evidence(request, resolution_evidence)
             for request in requests
         ]
-    return requests
+    return _annotate_auto_followup_requests_from_tool_plan(requests, selection_payload)
 
 
 def _media_search_submit_request(

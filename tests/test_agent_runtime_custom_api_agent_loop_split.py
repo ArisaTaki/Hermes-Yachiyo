@@ -19397,6 +19397,123 @@ def test_auto_discovered_media_playback_followup_searches_clicks_and_verifies() 
     assert requests[3]["input_resolution"]["resolved_app_name"] == "VLC"
 
 
+def test_auto_discovered_media_playback_followup_inherits_tool_plan_trace() -> None:
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.list_apps",
+            input_preview={"query": "music", "limit": 20},
+            result={
+                "ok": True,
+                "action": "desktop.list_apps",
+                "data": {
+                    "query": "music",
+                    "best_match": {
+                        "name": "VLC",
+                        "path": "/Applications/VLC.app",
+                        "match_score": 94,
+                    },
+                },
+            },
+        )
+    ]
+
+    requests = custom_api_agent_module._auto_discovered_media_playback_followup_requests(
+        {
+            "decision_id": "decision-media",
+            "plan_id": "runtime-plan-media",
+            "intent_kind": "media_playback",
+            "followup_target": {
+                "kind": "desktop_discovered_media_playback",
+                "app_query": "music",
+                "target_action": "safe_shortcut",
+                "safe_shortcut_action": "find",
+                "media_playback_query": "超时空辉夜姬",
+                "result_selection": {
+                    "target": "first result",
+                    "role_filter": "",
+                    "limit": 80,
+                    "click_count": 1,
+                },
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {},
+                },
+            },
+            "tool_plan": {
+                "plan_id": "tool-plan-media",
+                "steps": [
+                    {
+                        "step_id": "discover_apps-desktop-state",
+                        "tool_name": "desktop.list_apps",
+                        "capability_id": "desktop.app_discovery",
+                        "status": "planned",
+                    },
+                    {
+                        "step_id": "focus-media-search",
+                        "tool_name": "app.open_and_safe_shortcut",
+                        "capability_id": "desktop.ui_operation",
+                        "status": "planned",
+                    },
+                    {
+                        "step_id": "type-media-query",
+                        "tool_name": "desktop.safe_type_text",
+                        "capability_id": "desktop.ui_operation",
+                        "status": "planned",
+                    },
+                    {
+                        "step_id": "submit-media-query",
+                        "tool_name": "desktop.search_submit",
+                        "capability_id": "desktop.ui_operation",
+                        "status": "planned",
+                    },
+                    {
+                        "step_id": "play-media-result",
+                        "tool_name": "app.focus_and_click_ui_element",
+                        "capability_id": "media.playback",
+                        "status": "planned",
+                    },
+                    {
+                        "step_id": "verify-media-playback",
+                        "tool_name": "desktop.ui_elements",
+                        "capability_id": "desktop.visual_verification",
+                        "status": "planned",
+                    },
+                ],
+            },
+        },
+        [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+        timeline,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert [request["step_id"] for request in requests] == [
+        "focus-media-search",
+        "type-media-query",
+        "submit-media-query",
+        "play-media-result",
+        "verify-media-playback",
+    ]
+    assert {request["decision_id"] for request in requests} == {"decision-media"}
+    assert {request["plan_id"] for request in requests} == {"runtime-plan-media"}
+    assert {request["tool_plan_id"] for request in requests} == {"tool-plan-media"}
+    assert {request["intent_kind"] for request in requests} == {"media_playback"}
+    assert requests[3]["planner_step_id"] == "play-media-result"
+    assert requests[3]["input_resolution"]["resolved_app_name"] == "VLC"
+
+
 def test_auto_discovered_media_playback_followup_clicks_play_without_query() -> None:
     timeline = [
         _timeline(
