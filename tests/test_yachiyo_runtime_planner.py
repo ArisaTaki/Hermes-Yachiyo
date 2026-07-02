@@ -4835,6 +4835,30 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
         ["group.run", "artifact.write"],
     )[0]["tool"] == "group.run"
 
+    named_role_group_prompt = "让研究组和写作组协作调研 Hanako Hermes 并输出报告"
+    named_role_group = RuntimePlanner().decision(
+        named_role_group_prompt,
+        allowed_tools=["group.run", "browser.open_url", "artifact.write"],
+    )
+    assert named_role_group.selected_intent.kind == "multi_agent"
+    assert named_role_group.selected_intent.inputs == {}
+    assert planner_tool_requests(
+        named_role_group_prompt,
+        ["group.run", "browser.open_url", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "group.run",
+            "input": {
+                "objective": named_role_group_prompt,
+                "title": "Multi-Agent Coordination",
+                "target_name": "",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_group_run",
+        }
+    ]
+
     generic_multi_agent_group = RuntimePlanner().decision(
         "开一个多 Agent 小组做竞品分析报告",
         allowed_tools=["group.run", "artifact.write"],

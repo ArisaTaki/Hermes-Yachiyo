@@ -14268,7 +14268,9 @@ def _looks_like_multi_agent_request(text: str) -> bool:
     value = _clean_prompt(text)
     lowered = value.lower()
     if re.search(
-        r"(?:group|群组|小组|团队)",
+        r"(?:group|群组|小组|团队|"
+        r"(?:研究|调研|写作|分析|设计|开发|工程|审阅|审核|内容|产品|数据|市场|"
+        r"运营|测试)(?:组|小组|团队))",
         value,
         flags=re.IGNORECASE,
     ) and re.search(
@@ -14287,6 +14289,8 @@ def _looks_like_multi_agent_request(text: str) -> bool:
         return True
     role_terms = re.search(
         r"(?:研究员|调研员|写作者|作者|分析师|设计师|开发者|工程师|审阅者|审核员|"
+        r"(?:研究|调研|写作|分析|设计|开发|工程|审阅|审核|内容|产品|数据|市场|"
+        r"运营|测试)(?:组|小组|团队)|"
         r"researcher|writer|analyst|designer|developer|engineer|reviewer)",
         value,
         flags=re.IGNORECASE,
