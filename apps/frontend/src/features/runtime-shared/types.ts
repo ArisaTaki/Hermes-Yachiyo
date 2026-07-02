@@ -485,6 +485,13 @@ export type ToolCallSnapshot = {
   capability_id?: string | null;
   replan_request_id?: string | null;
   replan_trigger?: string | null;
+  replan_triggers?: string[];
+  replan_signal_ids?: string[];
+  runtime_doctrine?: string | null;
+  runtime_stage?: string | null;
+  runtime_role?: string | null;
+  requires_observation?: boolean | null;
+  requires_post_action_verification?: boolean | null;
   tool_name: string;
   status: string;
   risk_level?: string | null;

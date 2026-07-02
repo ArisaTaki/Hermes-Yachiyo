@@ -38,6 +38,13 @@ export type RuntimeToolCallCardSnapshot = {
   capability_id?: string | null;
   replan_request_id?: string | null;
   replan_trigger?: string | null;
+  replan_triggers?: string[];
+  replan_signal_ids?: string[];
+  runtime_doctrine?: string | null;
+  runtime_stage?: string | null;
+  runtime_role?: string | null;
+  requires_observation?: boolean | null;
+  requires_post_action_verification?: boolean | null;
   tool_name: string;
   status: string;
   risk_level?: string | null;
@@ -96,6 +103,14 @@ export function RuntimeToolCallCard({
       data-group-run-id={toolCall.group_run_id || ''}
       data-risk-level={toolCall.risk_level || ''}
       data-run-id={toolCall.run_id || ''}
+      data-runtime-capability-id={runtimeToolTraceString(toolCall, 'capability_id')}
+      data-runtime-doctrine={runtimeToolTraceString(toolCall, 'runtime_doctrine')}
+      data-runtime-replan-request-id={runtimeToolTraceString(toolCall, 'replan_request_id')}
+      data-runtime-replan-signal-ids={runtimeToolTraceStringList(toolCall, 'replan_signal_ids').join(',')}
+      data-runtime-replan-trigger={runtimeToolTraceString(toolCall, 'replan_trigger') || runtimeToolTraceStringList(toolCall, 'replan_triggers')[0] || ''}
+      data-runtime-role={runtimeToolTraceString(toolCall, 'runtime_role')}
+      data-runtime-stage={runtimeToolTraceString(toolCall, 'runtime_stage')}
+      data-runtime-step-id={runtimeToolTraceString(toolCall, 'step_id', 'planner_step_id')}
       data-source-runnable-id={toolCall.source_runnable_id || ''}
       data-source-run-id={toolCall.source_run_id || ''}
       data-testid={testId}
@@ -225,6 +240,8 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
   const metadata = approvalPreviewRecord(toolCall.metadata);
   const actionTarget = approvalPreviewRecord(metadata.action_target);
   const observationEvidence = approvalPreviewRecord(metadata.observation_evidence);
+  const replanTrigger = runtimeToolTraceString(toolCall, 'replan_trigger');
+  const replanTriggers = runtimeToolTraceStringList(toolCall, 'replan_triggers');
   return [
     { label: 'run', value: toolCall.run_id || '' },
     { label: 'source', value: toolCall.source_run_id || '' },
@@ -232,12 +249,72 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
     { label: 'workflow', value: toolCall.workflow_node_label || toolCall.workflow_node_id || toolCall.workflow_run_id || toolCall.workflow_id || '' },
     { label: 'group', value: toolCall.group_run_id || toolCall.group_id || '' },
     { label: 'intent', value: toolCall.intent_kind || '' },
-    { label: 'capability', value: toolCall.capability_id || '' },
-    { label: 'step', value: toolCall.step_id || toolCall.planner_step_id || '' },
-    { label: 'replan', value: toolCall.replan_request_id || toolCall.replan_trigger || '' },
+    { label: 'capability', value: runtimeToolTraceString(toolCall, 'capability_id') },
+    { label: 'step', value: runtimeToolTraceString(toolCall, 'step_id', 'planner_step_id') },
+    { label: 'stage', value: runtimeToolTraceString(toolCall, 'runtime_stage') },
+    { label: 'role', value: runtimeToolTraceString(toolCall, 'runtime_role') },
+    { label: 'doctrine', value: runtimeToolTraceString(toolCall, 'runtime_doctrine') },
+    { label: 'observe', value: runtimeToolTraceBoolLabel(toolCall, 'requires_observation') },
+    { label: 'verify', value: runtimeToolTraceBoolLabel(toolCall, 'requires_post_action_verification') },
+    { label: 'replan', value: runtimeToolTraceString(toolCall, 'replan_request_id') || replanTrigger || replanTriggers.join(', ') },
+    { label: 'signals', value: runtimeToolTraceStringList(toolCall, 'replan_signal_ids').join(', ') },
     { label: 'action', value: observedActionTargetSummary(actionTarget) },
     { label: 'observed', value: observedActionEvidenceSummary(observationEvidence) },
   ].filter((item) => item.value);
+}
+
+function runtimeToolTraceString(
+  toolCall: RuntimeToolCallCardSnapshot,
+  ...keys: string[]
+): string {
+  for (const key of keys) {
+    for (const record of runtimeToolTraceRecords(toolCall)) {
+      const value = stringValue(record[key]);
+      if (value) return value;
+    }
+  }
+  return '';
+}
+
+function runtimeToolTraceStringList(
+  toolCall: RuntimeToolCallCardSnapshot,
+  ...keys: string[]
+): string[] {
+  const values: string[] = [];
+  for (const key of keys) {
+    for (const record of runtimeToolTraceRecords(toolCall)) {
+      for (const value of stringList(record[key])) {
+        if (!values.includes(value)) values.push(value);
+      }
+    }
+  }
+  return values;
+}
+
+function runtimeToolTraceBoolLabel(
+  toolCall: RuntimeToolCallCardSnapshot,
+  key: string,
+): string {
+  for (const record of runtimeToolTraceRecords(toolCall)) {
+    if (record[key] === true) return 'required';
+    if (record[key] === false) continue;
+    const value = stringValue(record[key]).toLowerCase();
+    if (value === 'true' || value === 'required') return 'required';
+  }
+  return '';
+}
+
+function runtimeToolTraceRecords(toolCall: RuntimeToolCallCardSnapshot): Record<string, unknown>[] {
+  const metadata = approvalPreviewRecord(toolCall.metadata);
+  return [
+    toolCall as Record<string, unknown>,
+    metadata,
+    approvalPreviewRecord(metadata.tool_request),
+    approvalPreviewRecord(metadata.planned_request),
+    approvalPreviewRecord(metadata.request),
+    approvalPreviewRecord(metadata.result),
+    approvalPreviewRecord(metadata.metadata),
+  ].filter((record) => Object.keys(record).length);
 }
 
 function observedActionTargetSummary(value: Record<string, unknown>): string {
