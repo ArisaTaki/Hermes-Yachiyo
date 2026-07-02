@@ -431,6 +431,13 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     depends_on: list[str] = Field(default_factory=list)
     fallback_tools: list[str] = Field(default_factory=list)
     status: str = "planned"
+    runtime_doctrine: str = ""
+    runtime_stage: str = ""
+    runtime_role: str = ""
+    requires_observation: bool = False
+    requires_post_action_verification: bool = False
+    replan_triggers: list[str] = Field(default_factory=list)
+    replan_signal_ids: list[str] = Field(default_factory=list)
     source: str = "runtime_planner"
 
 
@@ -445,6 +452,9 @@ class RuntimeExecutionEnvelopeSnapshot(_PublicSnapshot):
     artifacts_expected: list[str] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)
     route_to_studio: bool = False
+    runtime_doctrine: str = ""
+    runtime_stage_counts: dict[str, int] = Field(default_factory=dict)
+    replan_signal_count: int = 0
     source: str = "runtime_planner"
 
 

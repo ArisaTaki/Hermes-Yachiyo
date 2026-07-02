@@ -323,6 +323,12 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         tool_name="desktop.list_apps",
         input={"query": "PixelForge", "limit": 20},
         planning_reason="planner_desktop_app_discovery",
+        runtime_doctrine="discover_operate_verify",
+        runtime_stage="discover",
+        runtime_role="find_target_app",
+        requires_observation=True,
+        replan_triggers=["verification_failed"],
+        replan_signal_ids=["replan-1"],
     )
     envelope = RuntimeExecutionEnvelopeSnapshot(
         envelope_id="execution-envelope-runtime-plan-1",
@@ -332,6 +338,9 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         requests=[request],
         approvals_required=["operate-foreground-ui"],
         route_to_studio=True,
+        runtime_doctrine="discover_operate_verify",
+        runtime_stage_counts={"discover": 1},
+        replan_signal_count=1,
     )
 
     payload = _json(envelope)
@@ -347,10 +356,17 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         "artifacts_expected",
         "open_questions",
         "route_to_studio",
+        "runtime_doctrine",
+        "runtime_stage_counts",
+        "replan_signal_count",
         "source",
     ]
     assert payload["requests"][0]["tool_name"] == "desktop.list_apps"
     assert payload["requests"][0]["input"] == {"query": "PixelForge", "limit": 20}
+    assert payload["requests"][0]["runtime_stage"] == "discover"
+    assert payload["requests"][0]["replan_triggers"] == ["verification_failed"]
+    assert payload["runtime_stage_counts"] == {"discover": 1}
+    assert payload["replan_signal_count"] == 1
 
 
 def test_task_core_public_snapshot_exposes_workspace_todo_checkpoint_and_replan() -> None:

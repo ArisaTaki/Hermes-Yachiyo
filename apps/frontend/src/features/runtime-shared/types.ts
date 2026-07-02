@@ -273,6 +273,46 @@ export type PlannerDecisionSnapshot = {
   source?: string;
 };
 
+export type RuntimeExecutionRequestSnapshot = {
+  request_id: string;
+  step_id?: string | null;
+  capability_id?: string | null;
+  tool_name: string;
+  protocol?: string;
+  input?: Record<string, unknown>;
+  planning_reason?: string;
+  approval_required?: boolean;
+  continue_to_model?: boolean;
+  depends_on?: string[];
+  fallback_tools?: string[];
+  status?: string;
+  runtime_doctrine?: string;
+  runtime_stage?: string;
+  runtime_role?: string;
+  requires_observation?: boolean;
+  requires_post_action_verification?: boolean;
+  replan_triggers?: string[];
+  replan_signal_ids?: string[];
+  source?: string;
+};
+
+export type RuntimeExecutionEnvelopeSnapshot = {
+  envelope_id: string;
+  decision_id: string;
+  plan_id: string;
+  intent_kind: string;
+  requests?: RuntimeExecutionRequestSnapshot[];
+  task_core?: TaskCoreSnapshot | null;
+  approvals_required?: string[];
+  artifacts_expected?: string[];
+  open_questions?: string[];
+  route_to_studio?: boolean;
+  runtime_doctrine?: string;
+  runtime_stage_counts?: Record<string, number>;
+  replan_signal_count?: number;
+  source?: string;
+};
+
 export type PlannerTraceSummarySnapshot = {
   source?: string;
   decision_id?: string | null;

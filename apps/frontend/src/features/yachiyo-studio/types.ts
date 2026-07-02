@@ -30,6 +30,8 @@ export type {
   PlannerTraceSummarySnapshot,
   PublicRunEvent,
   RerunRunRequest,
+  RuntimeExecutionEnvelopeSnapshot,
+  RuntimeExecutionRequestSnapshot,
   RunEventPageSnapshot,
   RunTimelineChildSnapshot,
   RunTimelineSnapshot,

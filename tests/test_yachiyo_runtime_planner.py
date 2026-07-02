@@ -28343,14 +28343,31 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     assert envelope.plan_id == decision.plan.plan_id
     assert envelope.task_core is not None
     assert envelope.task_core.core_id == decision.plan.task_core.core_id
+    assert envelope.runtime_doctrine == "discover_operate_verify"
+    assert envelope.runtime_stage_counts == {
+        "discover": 1,
+        "operate": 1,
+        "verify": 1,
+    }
+    assert envelope.replan_signal_count == len(decision.plan.task_core.replan_signals)
     assert [request.tool_name for request in envelope.requests] == [
         "desktop.inspect_app",
         "app.open_and_click_ui_element",
         "desktop.ui_elements",
     ]
+    assert [request.runtime_stage for request in envelope.requests] == [
+        "discover",
+        "operate",
+        "verify",
+    ]
     assert envelope.requests[1].step_id == "operate-foreground-ui"
     assert envelope.requests[1].capability_id == "desktop.ui_operation"
     assert envelope.requests[1].approval_required is True
+    assert envelope.requests[1].runtime_doctrine == "discover_operate_verify"
+    assert envelope.requests[1].runtime_role == "click_ui"
+    assert envelope.requests[1].requires_post_action_verification is True
+    assert envelope.requests[1].replan_triggers == ["verification_failed"]
+    assert envelope.requests[1].replan_signal_ids
     assert envelope.requests[2].depends_on == ["operate-foreground-ui"]
     projected_requests = runtime_execution_requests_from_envelope_payload(
         envelope.model_dump(mode="json"),
@@ -28364,6 +28381,11 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     assert projected_requests[1]["step_id"] == "operate-foreground-ui"
     assert projected_requests[1]["capability_id"] == "desktop.ui_operation"
     assert projected_requests[1]["approval_required"] is True
+    assert projected_requests[1]["runtime_stage"] == "operate"
+    assert projected_requests[1]["runtime_role"] == "click_ui"
+    assert projected_requests[1]["requires_post_action_verification"] is True
+    assert projected_requests[1]["replan_triggers"] == ["verification_failed"]
+    assert projected_requests[1]["replan_signal_ids"] == envelope.requests[1].replan_signal_ids
     assert projected_requests[1]["decision_id"] == decision.decision_id
     assert projected_requests[1]["plan_id"] == decision.plan.plan_id
     assert projected_requests[1]["core_id"] == decision.plan.task_core.core_id

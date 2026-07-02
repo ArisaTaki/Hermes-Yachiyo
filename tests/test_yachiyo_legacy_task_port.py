@@ -1740,6 +1740,12 @@ def test_legacy_chat_task_starter_uses_runtime_execution_envelope_requests() -> 
             "protocol": "json_fallback",
             "input": {"app_name": "PixelForge", "open_if_needed": True, "focus": True},
             "planning_reason": "planner_desktop_operation",
+            "runtime_doctrine": "discover_operate_verify",
+            "runtime_stage": "discover",
+            "runtime_role": "inspect_ui",
+            "requires_observation": True,
+            "replan_triggers": ["verification_failed"],
+            "replan_signal_ids": ["replan-inspect"],
             "source": "runtime_planner",
         }
     ]
@@ -1763,6 +1769,11 @@ def test_legacy_chat_task_starter_uses_runtime_execution_envelope_requests() -> 
         "focus": True,
     }
     assert direct_requests[0]["step_id"] == "inspect-app"
+    assert direct_requests[0]["runtime_stage"] == "discover"
+    assert direct_requests[0]["runtime_role"] == "inspect_ui"
+    assert direct_requests[0]["requires_observation"] is True
+    assert direct_requests[0]["replan_triggers"] == ["verification_failed"]
+    assert direct_requests[0]["replan_signal_ids"] == ["replan-inspect"]
     assert direct_requests[0]["capability_id"] == "desktop.app_discovery"
 
 

@@ -40,6 +40,7 @@ def runtime_execution_envelope_from_decision(
         for index, request in enumerate(request_payloads, start=1)
     ]
     tool_plan = decision.plan.tool_plan
+    runtime_metadata = _execution_envelope_runtime_metadata(requests, decision)
     return RuntimeExecutionEnvelopeSnapshot(
         envelope_id=f"execution-envelope-{decision.plan.plan_id}",
         decision_id=decision.decision_id,
@@ -51,6 +52,9 @@ def runtime_execution_envelope_from_decision(
         artifacts_expected=list(tool_plan.artifacts_expected),
         open_questions=list(tool_plan.open_questions),
         route_to_studio=bool(decision.plan.route_to_studio),
+        runtime_doctrine=runtime_metadata["runtime_doctrine"],
+        runtime_stage_counts=runtime_metadata["runtime_stage_counts"],
+        replan_signal_count=runtime_metadata["replan_signal_count"],
     )
 
 
@@ -133,6 +137,8 @@ def _execution_request_snapshot(
         or ""
     ).strip()
     request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    runtime_metadata = _execution_request_runtime_metadata(request, step, decision)
+    replan_metadata = _execution_request_replan_metadata(step_id, step, decision)
     return RuntimeExecutionRequestSnapshot(
         request_id=str(
             request.get("request_id")
@@ -153,6 +159,15 @@ def _execution_request_snapshot(
         depends_on=list(step.depends_on) if step is not None else [],
         fallback_tools=list(step.fallback_tools) if step is not None else [],
         status=str(request.get("status") or (step.status if step is not None else "planned")),
+        runtime_doctrine=runtime_metadata["runtime_doctrine"],
+        runtime_stage=runtime_metadata["runtime_stage"],
+        runtime_role=runtime_metadata["runtime_role"],
+        requires_observation=runtime_metadata["requires_observation"],
+        requires_post_action_verification=runtime_metadata[
+            "requires_post_action_verification"
+        ],
+        replan_triggers=replan_metadata["replan_triggers"],
+        replan_signal_ids=replan_metadata["replan_signal_ids"],
         source=str(request.get("source") or "runtime_planner"),
     )
 
@@ -181,6 +196,13 @@ def _tool_request_from_execution_request(
         "approval_required",
         "continue_to_model",
         "status",
+        "runtime_doctrine",
+        "runtime_stage",
+        "runtime_role",
+        "requires_observation",
+        "requires_post_action_verification",
+        "replan_triggers",
+        "replan_signal_ids",
     ):
         value = request.get(key)
         if value not in (None, "", [], {}):
@@ -278,6 +300,143 @@ def _mapping_list(value: Any) -> list[Mapping[str, Any]]:
     return [item for item in value if isinstance(item, Mapping)]
 
 
+def _execution_envelope_runtime_metadata(
+    requests: list[RuntimeExecutionRequestSnapshot],
+    decision: PlannerDecisionSnapshot,
+) -> dict[str, Any]:
+    stage_counts: dict[str, int] = {}
+    doctrine = ""
+    for request in requests:
+        stage = str(request.runtime_stage or "").strip()
+        if not stage:
+            continue
+        stage_counts[stage] = stage_counts.get(stage, 0) + 1
+        doctrine = doctrine or str(request.runtime_doctrine or "").strip()
+    if not doctrine and stage_counts:
+        doctrine = "discover_operate_verify"
+    return {
+        "runtime_doctrine": doctrine,
+        "runtime_stage_counts": stage_counts,
+        "replan_signal_count": _task_replan_signal_count(decision),
+    }
+
+
+def _execution_request_runtime_metadata(
+    request: Mapping[str, Any],
+    step: ToolPlanStepSnapshot | None,
+    decision: PlannerDecisionSnapshot,
+) -> dict[str, Any]:
+    step_id = _text(
+        request.get("step_id")
+        or request.get("planner_step_id")
+        or (step.step_id if step is not None else "")
+    )
+    metadata = {
+        **_task_core_step_runtime_metadata(decision, step_id),
+        **_mapping_subset(
+            request,
+            (
+                "runtime_doctrine",
+                "runtime_stage",
+                "runtime_role",
+                "requires_observation",
+                "requires_post_action_verification",
+            ),
+        ),
+    }
+    runtime_stage = _text(metadata.get("runtime_stage"))
+    return {
+        "runtime_doctrine": _text(metadata.get("runtime_doctrine")),
+        "runtime_stage": runtime_stage,
+        "runtime_role": _text(metadata.get("runtime_role")),
+        "requires_observation": bool(metadata.get("requires_observation")),
+        "requires_post_action_verification": bool(
+            metadata.get("requires_post_action_verification")
+        ),
+    }
+
+
+def _execution_request_replan_metadata(
+    step_id: str,
+    step: ToolPlanStepSnapshot | None,
+    decision: PlannerDecisionSnapshot,
+) -> dict[str, list[str]]:
+    clean_step_id = _text(step_id or (step.step_id if step is not None else ""))
+    signal_ids: list[str] = []
+    triggers: list[str] = []
+    for signal in _task_replan_signals(decision):
+        if _text(signal.source_step_id) != clean_step_id:
+            continue
+        signal_id = _text(signal.signal_id)
+        trigger = _text(signal.trigger)
+        if signal_id and signal_id not in signal_ids:
+            signal_ids.append(signal_id)
+        if trigger and trigger not in triggers:
+            triggers.append(trigger)
+    return {
+        "replan_triggers": triggers,
+        "replan_signal_ids": signal_ids,
+    }
+
+
+def _task_core_step_runtime_metadata(
+    decision: PlannerDecisionSnapshot,
+    step_id: str,
+) -> dict[str, Any]:
+    if not step_id:
+        return {}
+    task_core = getattr(decision.plan, "task_core", None)
+    if task_core is None:
+        return {}
+    for todo in list(getattr(task_core, "todos", []) or []):
+        if _text(getattr(todo, "step_id", None)) == step_id:
+            metadata = _runtime_metadata_subset(getattr(todo, "metadata", {}))
+            if metadata:
+                return metadata
+    for checkpoint in list(getattr(task_core, "checkpoints", []) or []):
+        if _text(getattr(checkpoint, "after_step_id", None)) == step_id:
+            metadata = _runtime_metadata_subset(getattr(checkpoint, "payload", {}))
+            if metadata:
+                return metadata
+    workspace = getattr(task_core, "workspace", None)
+    for item in list(getattr(workspace, "items", []) or []):
+        if _text(getattr(item, "source_step_id", None)) == step_id:
+            metadata = _runtime_metadata_subset(getattr(item, "metadata", {}))
+            if metadata:
+                return metadata
+    return {}
+
+
+def _runtime_metadata_subset(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    return _mapping_subset(
+        value,
+        (
+            "runtime_doctrine",
+            "runtime_stage",
+            "runtime_role",
+            "requires_observation",
+            "requires_post_action_verification",
+        ),
+    )
+
+
+def _mapping_subset(value: Mapping[str, Any], keys: Iterable[str]) -> dict[str, Any]:
+    return {key: value[key] for key in keys if key in value}
+
+
+def _task_replan_signals(decision: PlannerDecisionSnapshot) -> list[Any]:
+    task_core = getattr(decision.plan, "task_core", None)
+    if task_core is None:
+        return []
+    return list(getattr(task_core, "replan_signals", []) or [])
+
+
+def _task_replan_signal_count(decision: PlannerDecisionSnapshot) -> int:
+    return len(_task_replan_signals(decision))
+
+
 def _allowed_tools(
     decision: PlannerDecisionSnapshot,
     allowed_tools: Iterable[str] | None,
@@ -300,6 +459,10 @@ def _allowed_tools(
             if str(tool or "").strip()
         )
     return _dedupe(tools)
+
+
+def _text(value: Any) -> str:
+    return str(value or "").strip()
 
 
 def _steps_by_id(
