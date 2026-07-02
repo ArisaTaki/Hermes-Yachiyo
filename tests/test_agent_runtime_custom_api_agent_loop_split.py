@@ -5975,6 +5975,74 @@ def test_model_followup_context_instructs_generated_artifact_write() -> None:
     ]
 
 
+def test_model_followup_artifact_target_requests_inherit_pending_plan_trace() -> None:
+    followup_context = {
+        "planning_reason": "planner_fallback_web_research",
+        "decision_id": "decision-web",
+        "plan_id": "runtime-plan-web",
+        "tool_plan_id": "tool-plan-web",
+        "intent_kind": "web_research",
+        "pending_plan_steps": [
+            {
+                "step_id": "write-research-artifact",
+                "tool_name": "artifact.write",
+                "capability_id": "artifact.write",
+                "input_preview": {"path": "Downloads/research-summary.md"},
+            }
+        ],
+    }
+    requests = custom_api_agent_module._model_followup_app_write_requests(
+        "整理后的网页摘要",
+        {
+            "kind": "artifact_write",
+            "path": "Downloads/research-summary.md",
+            "body_source": "model_generated_content",
+            "write_allowed": True,
+            "recommended_tools": ["artifact.write"],
+            "intent_kind": "web_research",
+        },
+        ["artifact.write"],
+    )
+
+    assert custom_api_agent_module._model_followup_requests_with_pending_plan_metadata(
+        requests,
+        followup_context,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "artifact.write",
+            "input": {
+                "path": "Downloads/research-summary.md",
+                "content": "整理后的网页摘要",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_artifact_write",
+            "decision_id": "decision-web",
+            "plan_id": "runtime-plan-web",
+            "tool_plan_id": "tool-plan-web",
+            "intent_kind": "web_research",
+            "step_id": "write-research-artifact",
+            "capability_id": "artifact.write",
+            "planner_step_id": "write-research-artifact",
+        }
+    ]
+    mismatch_context = {
+        **followup_context,
+        "pending_plan_steps": [
+            {
+                "step_id": "write-other-artifact",
+                "tool_name": "artifact.write",
+                "capability_id": "artifact.write",
+                "input_preview": {"path": "Downloads/other.md"},
+            }
+        ],
+    }
+    assert custom_api_agent_module._model_followup_requests_with_pending_plan_metadata(
+        requests,
+        mismatch_context,
+    ) == requests
+
+
 def test_model_followup_context_writes_artifact_before_specific_communication() -> None:
     payload = custom_api_agent_module._model_followup_context_payload(
         [

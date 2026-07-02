@@ -880,6 +880,12 @@ class RuntimeCustomApiAgentLoop:
                     followup_target,
                     allowed_tools,
                 )
+                auto_app_write_requests = (
+                    _model_followup_requests_with_pending_plan_metadata(
+                        auto_app_write_requests,
+                        followup_context,
+                    )
+                )
                 if auto_app_write_requests:
                     messages.append({"role": "assistant", "content": content})
                     self._record_auto_model_followup_app_write_plan(
@@ -918,6 +924,12 @@ class RuntimeCustomApiAgentLoop:
                                 followup_target,
                                 allowed_tools,
                                 timeline,
+                            )
+                        )
+                        discovered_app_write_requests = (
+                            _model_followup_requests_with_pending_plan_metadata(
+                                discovered_app_write_requests,
+                                followup_context,
                             )
                         )
                         if discovered_app_write_requests:
@@ -9689,6 +9701,94 @@ def _attach_model_followup_pending_plan_trace_metadata(
         request.get("planner_step_id") or ""
     ).strip():
         request["planner_step_id"] = str(request.get("step_id") or "").strip()
+
+
+def _model_followup_requests_with_pending_plan_metadata(
+    requests: list[dict[str, Any]],
+    followup_context: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not requests or not isinstance(followup_context, Mapping):
+        return requests
+    raw_steps = followup_context.get("pending_plan_steps")
+    if not isinstance(raw_steps, list):
+        return requests
+    steps = [step for step in raw_steps if isinstance(step, Mapping)]
+    if not steps:
+        return requests
+    annotated: list[dict[str, Any]] = []
+    cursor = 0
+    for request in requests:
+        if not isinstance(request, dict):
+            continue
+        item = dict(request)
+        step_index, step = _next_matching_model_followup_pending_step(
+            item,
+            steps,
+            start_index=cursor,
+        )
+        if step_index >= 0 and step:
+            cursor = step_index + 1
+            _attach_model_followup_pending_plan_trace_metadata(
+                item,
+                step,
+                followup_context,
+            )
+            if not str(item.get("step_id") or "").strip():
+                step_id = str(step.get("step_id") or "").strip()
+                if step_id:
+                    item["step_id"] = step_id
+            if not str(item.get("capability_id") or "").strip():
+                capability_id = str(step.get("capability_id") or "").strip()
+                if capability_id:
+                    item["capability_id"] = capability_id
+            if str(item.get("step_id") or "").strip() and not str(
+                item.get("planner_step_id") or ""
+            ).strip():
+                item["planner_step_id"] = str(item.get("step_id") or "").strip()
+        annotated.append(item)
+    return annotated
+
+
+def _next_matching_model_followup_pending_step(
+    request: Mapping[str, Any],
+    steps: list[Mapping[str, Any]],
+    *,
+    start_index: int = 0,
+) -> tuple[int, Mapping[str, Any] | None]:
+    tool_name = str(request.get("tool") or "").strip()
+    if not tool_name:
+        return -1, None
+    for index in range(max(0, start_index), len(steps)):
+        step = steps[index]
+        if str(step.get("tool_name") or "").strip() != tool_name:
+            continue
+        if not _model_followup_request_matches_pending_step(request, step):
+            continue
+        return index, step
+    return -1, None
+
+
+def _model_followup_request_matches_pending_step(
+    request: Mapping[str, Any],
+    step: Mapping[str, Any],
+) -> bool:
+    step_input = step.get("input_preview") if isinstance(step.get("input_preview"), Mapping) else {}
+    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    step_path = str(
+        step_input.get("path")
+        or step_input.get("artifact_path")
+        or step_input.get("target_path")
+        or ""
+    ).strip()
+    request_path = str(
+        request_input.get("path")
+        or request_input.get("artifact_path")
+        or request_input.get("target_path")
+        or ""
+    ).strip()
+    if step_path and request_path and step_path != request_path:
+        return False
+    return True
 
 
 def _model_followup_pending_plan_request(
