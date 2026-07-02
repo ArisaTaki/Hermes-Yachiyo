@@ -391,7 +391,7 @@ class LegacyChatTaskStarter:
                 )
         if not task_id:
             return None
-        if not direct_tool_request and not selected_requests:
+        if not direct_tool_request and not selected_requests and not direct_tool_requests:
             return None
         if direct_tool_request:
             metadata_tool_requests = [direct_tool_request]

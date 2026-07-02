@@ -15,7 +15,10 @@ from apps.shell.yachiyo_agent.legacy_ports import (
     LegacyRuntimePort as CompatLegacyRuntimePort,
 )
 from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort
-from apps.shell.yachiyo_agent.entrypoint_tool_selection import planner_first_direct_tool_selection
+from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
+    DirectToolSelection,
+    planner_first_direct_tool_selection,
+)
 from apps.shell.yachiyo_agent.planner_projection import planner_enriched_chat_request
 
 
@@ -1714,6 +1717,7 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     assert [request["tool"] for request in model_loop_call[1]["direct_tool_requests"]] == [
         "desktop.list_apps",
         "app.open",
+        "desktop.active_window",
     ]
 
 
@@ -1773,6 +1777,70 @@ def test_legacy_chat_task_starter_uses_runtime_execution_envelope_requests() -> 
     assert direct_requests[0]["capability_id"] == "desktop.app_discovery"
 
 
+def test_legacy_chat_task_starter_executes_metadata_envelope_without_selected_requests(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from apps.shell.yachiyo_agent import legacy_ports
+
+    monkeypatch.setattr(
+        legacy_ports,
+        "planner_first_direct_tool_selection",
+        lambda *_args, **_kwargs: DirectToolSelection(
+            decision=None,
+            requests=[],
+            event_payload={
+                "selection_source": "none",
+                "selected_tools": [],
+                "selected_reason": "no_direct_entrypoint_plan",
+            },
+            selected_source="none",
+        ),
+    )
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatPlannerEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+    request = planner_enriched_chat_request(
+        {
+            "prompt": "打开 PixelForge",
+            "metadata": {"source": "launcher", "launcher_mode": "bubble"},
+        }
+    )
+    request["metadata"]["yachiyo_execution_envelope"]["requests"] = [
+        {
+            "request_id": "runtime-plan-test:request:1:app.open",
+            "step_id": "open-or-focus-app",
+            "capability_id": "desktop.app_control",
+            "tool_name": "app.open",
+            "protocol": "json_fallback",
+            "input": {"app_name": "PixelForge"},
+            "planning_reason": "planner_desktop_operation",
+            "runtime_doctrine": "discover_operate_verify",
+            "runtime_stage": "operate",
+            "runtime_role": "prepare_target_app",
+            "requires_post_action_verification": True,
+            "source": "runtime_planner",
+        }
+    ]
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-main",
+        conversation_id="chat-1",
+        prompt=str(request["prompt"]),
+        metadata=request["metadata"],
+    )
+
+    assert task is not None
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    direct_requests = model_loop_call[1]["direct_tool_requests"]
+    assert [request["tool"] for request in direct_requests] == ["app.open"]
+    assert direct_requests[0]["input"] == {"app_name": "PixelForge"}
+    assert direct_requests[0]["step_id"] == "open-or-focus-app"
+    assert direct_requests[0]["runtime_stage"] == "operate"
+    assert direct_requests[0]["requires_post_action_verification"] is True
+
+
 def test_legacy_chat_task_starter_does_not_direct_run_approval_required_envelope_requests() -> None:
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()
@@ -1812,6 +1880,7 @@ def test_legacy_chat_task_starter_does_not_direct_run_approval_required_envelope
     assert [request["tool"] for request in direct_requests] == [
         "desktop.list_apps",
         "app.open",
+        "desktop.active_window",
     ]
     assert all(request["tool"] != "terminal.run" for request in direct_requests)
     assert all(request.get("approval_required") is not True for request in direct_requests)
