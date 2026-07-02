@@ -33,6 +33,10 @@ class _RecoveryRecord:
     selected_tool_name: str | None = None
     selected_step_id: str | None = None
     planning_reason: str = ""
+    recovery_actions: list[dict[str, Any]] = field(default_factory=list)
+    recovery_action_label: str = ""
+    permission_target: str = ""
+    risk_level: str = ""
     tool_call_id: str | None = None
     tool_status: str | None = None
     todo_status: str | None = None
@@ -122,6 +126,9 @@ def replan_recovery_snapshots_from_events(
             selected_tool_name=record.selected_tool_name or None,
             selected_step_id=record.selected_step_id or None,
             planning_reason=record.planning_reason,
+            recovery_action_label=record.recovery_action_label,
+            permission_target=record.permission_target,
+            risk_level=record.risk_level,
             tool_call_id=record.tool_call_id or None,
             tool_status=record.tool_status or None,
             todo_status=record.todo_status or None,
@@ -199,6 +206,7 @@ def _apply_request_event(
         request.get("capability_id"),
     )
     _extend_unique(record.fallback_tools, _string_list(request.get("fallback_tools")))
+    _apply_recovery_action_metadata(record, request)
     record.failure_detail = _first_text(
         record.failure_detail,
         request.get("failure_detail"),
@@ -263,6 +271,7 @@ def _apply_planned_event(
         payload.get("reason"),
     )
     _extend_unique(record.fallback_tools, _string_list(payload.get("fallback_tools")))
+    _apply_recovery_action_metadata(record, payload, selected_tool=selected_tool)
     _mark_event(record, event)
 
 
@@ -304,6 +313,16 @@ def _apply_tool_event(
         record.selected_tool_name = _first_text(record.selected_tool_name, call.tool_name)
         record.tool_call_id = _first_text(record.tool_call_id, call.tool_call_id)
         record.tool_status = _first_text(record.tool_status, call.status)
+        record.planning_reason = _first_text(
+            payload.get("planning_reason"),
+            payload.get("reason"),
+            record.planning_reason,
+        )
+        _apply_recovery_action_metadata(
+            record,
+            payload,
+            selected_tool=record.selected_tool_name or call.tool_name,
+        )
         record.result_preview = _mapping(call.output_preview)
         _mark_event(record, event)
 
@@ -403,6 +422,10 @@ def _merge_recovery_snapshots(
             "selected_tool_name": current.selected_tool_name or incoming.selected_tool_name,
             "selected_step_id": current.selected_step_id or incoming.selected_step_id,
             "planning_reason": current.planning_reason or incoming.planning_reason,
+            "recovery_action_label": current.recovery_action_label
+            or incoming.recovery_action_label,
+            "permission_target": current.permission_target or incoming.permission_target,
+            "risk_level": current.risk_level or incoming.risk_level,
             "tool_call_id": current.tool_call_id or incoming.tool_call_id,
             "tool_status": current.tool_status or incoming.tool_status,
             "todo_status": current.todo_status or incoming.todo_status,
@@ -513,6 +536,81 @@ def _mark_event(record: _RecoveryRecord, event: PublicRunEvent) -> None:
     if event_id and event_id not in record.recovery_event_ids:
         record.recovery_event_ids.append(event_id)
     record.updated_at = _first_text(event.created_at, record.updated_at)
+
+
+def _apply_recovery_action_metadata(
+    record: _RecoveryRecord,
+    payload: Mapping[str, Any],
+    *,
+    selected_tool: str = "",
+) -> None:
+    for action in _recovery_action_records(payload):
+        _append_unique_mapping(record.recovery_actions, action)
+
+    selected_action = _selected_recovery_action(
+        record.recovery_actions,
+        _first_text(selected_tool, payload.get("tool_name"), payload.get("tool")),
+    )
+    record.recovery_action_label = _first_text(
+        payload.get("recovery_action_label"),
+        payload.get("recovery_label"),
+        selected_action.get("label") if selected_action else "",
+        selected_action.get("prompt") if selected_action else "",
+        selected_action.get("tool") if selected_action else "",
+        record.recovery_action_label,
+    )
+    record.permission_target = _first_text(
+        payload.get("permission_target"),
+        payload.get("recovery_permission_target"),
+        selected_action.get("permission_target") if selected_action else "",
+        selected_action.get("permission") if selected_action else "",
+        record.permission_target,
+    )
+    record.risk_level = _first_text(
+        payload.get("risk_level"),
+        payload.get("recovery_risk_level"),
+        selected_action.get("risk_level") if selected_action else "",
+        record.risk_level,
+    )
+
+
+def _recovery_action_records(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    _extend_action_records(records, payload.get("recovery_actions"))
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    _extend_action_records(records, metadata.get("recovery_actions"))
+    return records
+
+
+def _extend_action_records(target: list[dict[str, Any]], value: Any) -> None:
+    if not isinstance(value, list):
+        return
+    for item in value:
+        if isinstance(item, Mapping):
+            _append_unique_mapping(target, item)
+
+
+def _append_unique_mapping(target: list[dict[str, Any]], value: Mapping[str, Any]) -> None:
+    clean = _mapping(value)
+    if clean and clean not in target:
+        target.append(clean)
+
+
+def _selected_recovery_action(
+    actions: list[dict[str, Any]],
+    selected_tool: str,
+) -> dict[str, Any]:
+    if not actions:
+        return {}
+    clean_tool = _text(selected_tool)
+    if clean_tool:
+        for action in actions:
+            if _text(action.get("tool") or action.get("tool_name")) == clean_tool:
+                return action
+            recommended_tools = _string_list(action.get("recommended_tools"))
+            if clean_tool in recommended_tools:
+                return action
+    return actions[0]
 
 
 def _payload(event: PublicRunEvent) -> Mapping[str, Any]:

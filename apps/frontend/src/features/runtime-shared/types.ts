@@ -301,6 +301,9 @@ export type ReplanRecoverySnapshot = {
   selected_tool_name?: string | null;
   selected_step_id?: string | null;
   planning_reason?: string;
+  recovery_action_label?: string;
+  permission_target?: string;
+  risk_level?: string;
   tool_call_id?: string | null;
   tool_status?: string | null;
   todo_status?: string | null;

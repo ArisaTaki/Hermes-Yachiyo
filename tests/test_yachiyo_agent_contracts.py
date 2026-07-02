@@ -556,6 +556,9 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         selected_tool_name="terminal.run",
         selected_step_id="run-analysis",
         planning_reason="planner_replan_fallback_recovery",
+        recovery_action_label="Run terminal fallback",
+        permission_target="terminal_execution",
+        risk_level="medium",
         tool_call_id="tool-call-1",
         tool_status="completed",
         todo_status="completed",
@@ -587,6 +590,9 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         "selected_tool_name",
         "selected_step_id",
         "planning_reason",
+        "recovery_action_label",
+        "permission_target",
+        "risk_level",
         "tool_call_id",
         "tool_status",
         "todo_status",
@@ -599,6 +605,9 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         "source",
     ]
     assert payload["selected_tool_name"] == "terminal.run"
+    assert payload["recovery_action_label"] == "Run terminal fallback"
+    assert payload["permission_target"] == "terminal_execution"
+    assert payload["risk_level"] == "medium"
     assert payload["checkpoint_status"] == "completed"
 
 
@@ -1476,6 +1485,17 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
                         "target_capability_id": "data.analysis",
                         "fallback_tools": ["terminal.run"],
                         "failure_detail": "data.analyze failed",
+                        "metadata": {
+                            "recovery_actions": [
+                                {
+                                    "label": "Run terminal fallback",
+                                    "tool": "terminal.run",
+                                    "input": {"cmd": "python analyze.py"},
+                                    "permission_target": "terminal_execution",
+                                    "risk_level": "medium",
+                                }
+                            ]
+                        },
                     },
                 },
                 {
@@ -1502,6 +1522,10 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
                         "capability_id": "data.analysis",
                         "tool_name": "terminal.run",
                         "status": "completed",
+                        "planning_reason": "planner_replan_runtime_recovery_action",
+                        "recovery_action_label": "Run terminal fallback",
+                        "permission_target": "terminal_execution",
+                        "risk_level": "medium",
                         "result": {"ok": True, "stdout": "report.md"},
                     },
                 },
@@ -1529,6 +1553,10 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
     assert recovery.request_id == "replan-1"
     assert recovery.status == "completed"
     assert recovery.selected_tool_name == "terminal.run"
+    assert recovery.planning_reason == "planner_replan_runtime_recovery_action"
+    assert recovery.recovery_action_label == "Run terminal fallback"
+    assert recovery.permission_target == "terminal_execution"
+    assert recovery.risk_level == "medium"
     assert recovery.tool_status == "completed"
     assert recovery.checkpoint_status == "completed"
     assert recovery.result_preview == {"ok": True, "stdout": "report.md"}

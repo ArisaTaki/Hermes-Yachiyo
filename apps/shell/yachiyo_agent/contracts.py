@@ -385,6 +385,9 @@ class ReplanRecoverySnapshot(_PublicSnapshot):
     selected_tool_name: str | None = None
     selected_step_id: str | None = None
     planning_reason: str = ""
+    recovery_action_label: str = ""
+    permission_target: str = ""
+    risk_level: str = ""
     tool_call_id: str | None = None
     tool_status: str | None = None
     todo_status: str | None = None

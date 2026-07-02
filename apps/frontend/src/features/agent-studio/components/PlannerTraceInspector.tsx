@@ -712,18 +712,40 @@ export function TaskProgressInspector({
           </>
         ) : null}
         {recoveries.slice(0, 6).map((recovery) => (
-          <span
-            className={recovery.status === 'completed' ? 'studio-tool-permission' : 'studio-tool-permission missing'}
-            data-replan-recovery-id={recovery.request_id}
-            data-replan-recovery-status={recovery.status || 'requested'}
-            key={`recovery:${recovery.request_id}`}
-            title={recovery.failure_detail || recovery.planning_reason || recovery.target_capability_id}
-          >
-            recovery · {recovery.trigger} · {recovery.status || 'requested'}
-          </span>
+          <ReplanRecoverySnapshotPill key={`recovery:${recovery.request_id}`} recovery={recovery} />
         ))}
       </div>
     </section>
+  );
+}
+
+function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnapshot }) {
+  const label = (
+    recovery.recovery_action_label
+    || recovery.selected_tool_name
+    || recovery.target_capability_id
+    || recovery.source_tool_name
+    || ''
+  );
+  const title = [
+    recovery.failure_detail,
+    recovery.planning_reason,
+    recovery.permission_target ? `permission: ${recovery.permission_target}` : '',
+    recovery.risk_level ? `risk: ${recovery.risk_level}` : '',
+  ].filter(Boolean).join(' · ');
+  return (
+    <span
+      className={recovery.status === 'completed' ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+      data-replan-recovery-action={label}
+      data-replan-recovery-id={recovery.request_id}
+      data-replan-recovery-permission-target={recovery.permission_target || ''}
+      data-replan-recovery-risk={recovery.risk_level || ''}
+      data-replan-recovery-status={recovery.status || 'requested'}
+      key={`recovery:${recovery.request_id}`}
+      title={title}
+    >
+      recovery · {label || recovery.trigger} · {recovery.status || 'requested'}
+    </span>
   );
 }
 
