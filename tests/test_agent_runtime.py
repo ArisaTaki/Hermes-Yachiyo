@@ -5364,9 +5364,7 @@ def test_main_chat_model_loop_auto_opens_path_with_discovered_app_without_model(
             "desktop.list_apps",
             "desktop.open_path_with_app",
         ]
-        assert planned_events[1]["payload"]["planning_reason"] == (
-            "planner_discovered_app_followup"
-        )
+        assert planned_events[1]["payload"]["planning_reason"] == "planner_desktop_operation"
         assert resolved_event["payload"]["requested_app_name"] == "code"
         assert resolved_event["payload"]["resolved_app_name"] == "Visual Studio Code"
         assert resolved_event["payload"]["resolved_app_path"] == (

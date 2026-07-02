@@ -354,10 +354,9 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
         "planned_tool_chain": planned_tools == [
             "desktop.list_apps",
             "app.open",
-            "desktop.active_window",
         ],
-        "planned_discovery_is_model_continuation": (
-            bool(_payload(planned_events[0]).get("continue_to_model"))
+        "planned_discovery_is_direct_execution": (
+            not bool(_payload(planned_events[0]).get("continue_to_model"))
             if planned_events
             else False
         ),
@@ -368,18 +367,16 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
         "planned_followup_tools": [
             _payload(event).get("planning_reason") for event in planned_events[1:]
         ]
-        == ["planner_discovered_app_followup", "planner_discovered_app_followup"]
-        if len(planned_events) > 2
+        == ["planner_desktop_operation"]
+        if len(planned_events) > 1
         else False,
         "tool_call_chain": tool_call_tools == [
             "desktop.list_apps",
             "app.open",
-            "desktop.active_window",
         ],
         "tool_results_match_chain": tool_result_actions == [
             "desktop.list_apps",
             "app.open",
-            "desktop.active_window",
         ],
         "resolved_app_from_discovery": app_open_input == {
             "app_name": "PixelForge",
@@ -391,8 +388,8 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
         },
         "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
         "completed_tools_match": completed_payload.get("tools")
-        == ["app.open", "desktop.active_window"],
-        "completed_after_active_window_verify": completed_payload.get("tool") == "desktop.active_window",
+        == ["desktop.list_apps", "app.open"],
+        "completed_after_discovered_app_open": completed_payload.get("tool") == "app.open",
     }
     return {
         "id": "main_chat_capability_discovered_app_open_before_model",
@@ -486,8 +483,8 @@ def _capability_discovered_app_open_path_case(service: AgentRuntimeService) -> d
             "desktop.list_apps",
             "desktop.open_path_with_app",
         ],
-        "planned_discovery_is_model_continuation": (
-            bool(_payload(planned_events[0]).get("continue_to_model"))
+        "planned_discovery_is_direct_execution": (
+            not bool(_payload(planned_events[0]).get("continue_to_model"))
             if planned_events
             else False
         ),
@@ -497,7 +494,7 @@ def _capability_discovered_app_open_path_case(service: AgentRuntimeService) -> d
         else False,
         "planned_followup_tool": (
             _payload(planned_events[1]).get("planning_reason")
-            == "planner_discovered_app_followup"
+            == "planner_desktop_operation"
             if len(planned_events) > 1
             else False
         ),
@@ -523,7 +520,8 @@ def _capability_discovered_app_open_path_case(service: AgentRuntimeService) -> d
         else False,
         "resolved_event_recorded": _payload(resolved_event).get("resolved_app_name") == "PixelForge",
         "completed_from_runtime_planner": completed_payload.get("source") == "runtime_planner",
-        "completed_tools_match": completed_payload.get("tools") == ["desktop.open_path_with_app"],
+        "completed_tools_match": completed_payload.get("tools")
+        == ["desktop.list_apps", "desktop.open_path_with_app"],
         "completed_after_open_path": completed_payload.get("tool") == "desktop.open_path_with_app",
     }
     return {

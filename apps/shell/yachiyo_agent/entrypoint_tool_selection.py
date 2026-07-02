@@ -529,6 +529,7 @@ _RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS = frozenset(
         "desktop.hotkey",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
+        "desktop.open_path_with_app",
         "desktop.click",
         "desktop.type_text",
         "desktop.search_submit",
@@ -606,6 +607,16 @@ def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> boo
         return True
     if tool_name == "desktop.inspect_app":
         return _runtime_app_name_is_specific(str(request_input.get("app_name") or ""))
+    if tool_name == "desktop.open_path_with_app":
+        path = str(request_input.get("path") or request_input.get("target_path") or "").strip()
+        if not path or (path.startswith("<") and path.endswith(">")):
+            return False
+        app_name = str(request_input.get("app_name") or "").strip()
+        return _runtime_app_name_is_specific(app_name) or (
+            app_name == "<selected app from desktop.list_apps>"
+            and str(request_input.get("selection_source") or "").strip() == "desktop.list_apps"
+            and bool(str(request_input.get("query") or "").strip())
+        )
     if tool_name in {
         "desktop.hide_app",
         "desktop.show_all_apps",

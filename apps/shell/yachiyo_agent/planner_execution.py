@@ -1337,6 +1337,7 @@ _EXECUTION_MUTATION_TOOLS = {
     "desktop.shortcut",
     "desktop.hotkey",
     "desktop.type",
+    "desktop.open_path_with_app",
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
     "desktop.submit_foreground",
@@ -1487,6 +1488,8 @@ def _keep_post_mutation_verification_request(
     previous_mutation_tool: str,
 ) -> bool:
     tool_name = str(request.get("tool") or "").strip()
+    if previous_mutation_tool == "desktop.open_path_with_app":
+        return False
     if tool_name in {"desktop.ui_elements", "desktop.read_ui", "desktop.windows", "desktop.list_windows"}:
         return True
     if tool_name == "desktop.active_window" and (

@@ -109,6 +109,7 @@ _DISCOVERED_APP_DIRECT_COMPLETION_TOOLS = {
     "desktop.open_app",
     "app.focus",
     "desktop.focus_app",
+    "desktop.open_path_with_app",
 }
 
 _DISCOVERED_APP_DIRECT_VERIFICATION_TOOLS = {
@@ -6001,7 +6002,14 @@ def _runtime_planner_completed_discovered_app_direct_action(
     )
     if str(target.get("kind") or "").strip() != "desktop_discovered_app_action":
         return False
-    if str(target.get("target_action") or "").strip() not in {"open_app", "open", "focus_app", "focus"}:
+    if str(target.get("target_action") or "").strip() not in {
+        "open_app",
+        "open",
+        "focus_app",
+        "focus",
+        "open_path_with_app",
+        "open_path_with_selected_app",
+    }:
         return False
     if _discovered_app_target_requires_model_followup(target):
         return False

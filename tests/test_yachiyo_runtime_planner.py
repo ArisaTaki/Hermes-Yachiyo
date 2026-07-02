@@ -7698,10 +7698,61 @@ def test_planner_execution_tool_requests_prepends_unknown_app_discovery() -> Non
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
+    ]
+
+
+def test_planner_execution_tool_requests_drops_open_path_with_app_ui_verification() -> None:
+    allowed = ["desktop.list_apps", "desktop.open_path_with_app", "desktop.ui_elements"]
+
+    assert planner_execution_tool_requests(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": "pdf", "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.open_path_with_app",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": "pdf",
+                    "target_path": "Downloads/report.pdf",
+                    "action": "open_path_with_selected_app",
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {"limit": 80},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+        ],
+        allowed,
+    ) == [
         {
             "protocol": "json_fallback",
-            "tool": "desktop.active_window",
-            "input": {},
+            "tool": "desktop.list_apps",
+            "input": {"query": "pdf", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path_with_app",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "pdf",
+                "target_path": "Downloads/report.pdf",
+                "action": "open_path_with_selected_app",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -10147,16 +10198,49 @@ def test_runtime_planner_discovers_prefixed_generic_tool_categories() -> None:
             assert _step_by_id(decision, "type-app-search-query").input_preview == {
                 "text": search_query
             }
-        assert planner_tool_requests(prompt, allowed_tools) == [
+        expected_requests = [
             {
                 "protocol": "json_fallback",
                 "tool": "desktop.list_apps",
                 "input": {"query": query, "limit": 20},
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
-                "continue_to_model": True,
-            }
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": selected_app_step.tool_name,
+                "input": dict(selected_app_step.input_preview),
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
         ]
+        if search_query:
+            expected_requests.extend(
+                [
+                    {
+                        "protocol": "json_fallback",
+                        "tool": "desktop.safe_shortcut",
+                        "input": {"action": "find"},
+                        "source": "runtime_planner",
+                        "planning_reason": "planner_desktop_operation",
+                    },
+                    {
+                        "protocol": "json_fallback",
+                        "tool": "desktop.safe_type_text",
+                        "input": {"text": search_query},
+                        "source": "runtime_planner",
+                        "planning_reason": "planner_desktop_operation",
+                    },
+                    {
+                        "protocol": "json_fallback",
+                        "tool": "desktop.search_submit",
+                        "input": {},
+                        "source": "runtime_planner",
+                        "planning_reason": "planner_desktop_operation",
+                    },
+                ]
+            )
+        assert planner_tool_requests(prompt, allowed_tools) == expected_requests
 
 
 def test_runtime_planner_carries_target_file_when_discovering_app_capabilities() -> None:
@@ -10207,8 +10291,20 @@ def test_runtime_planner_carries_target_file_when_discovering_app_capabilities()
                 "input": {"query": query, "limit": 20},
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
-                "continue_to_model": True,
-            }
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.open_path_with_app",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": query,
+                    "target_path": target_path,
+                    "action": "open_path_with_selected_app",
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
         ]
 
     assert RuntimePlanner().decision(
@@ -22390,6 +22486,52 @@ def test_entrypoint_selection_keeps_runtime_planner_for_media_app_search_fallbac
         "desktop.ui_elements",
     ]
     assert alias_legacy_calls == []
+
+
+def test_entrypoint_selection_keeps_runtime_planner_for_discovered_app_open_path() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    def legacy_requests(prompt: str, allowed_tools: list[str]) -> list[dict[str, Any]]:
+        legacy_calls.append({"prompt": prompt, "allowed_tools": list(allowed_tools)})
+        return [
+            {
+                "protocol": "json_fallback",
+                "tool": "browser.open_url",
+                "input": {"url": "https://README.md"},
+            }
+        ]
+
+    selection = planner_first_direct_tool_selection(
+        "找一个代码编辑器打开 README.md",
+        ["browser.open_url", "desktop.list_apps", "desktop.open_path_with_app", "app.open"],
+        legacy_tool_requests=legacy_requests,
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert legacy_calls == []
+    assert selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "code", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path_with_app",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "code",
+                "target_path": "README.md",
+                "action": "open_path_with_selected_app",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
 
 
 def test_entrypoint_selection_keeps_runtime_planner_for_current_page_find() -> None:

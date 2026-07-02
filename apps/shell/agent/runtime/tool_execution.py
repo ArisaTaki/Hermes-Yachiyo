@@ -224,6 +224,30 @@ def _tool_request_with_app_name_resolution(
     }
 
 
+def _tool_request_with_open_path_app_input(
+    tool_request: dict[str, Any],
+    tool_name: str,
+) -> dict[str, Any]:
+    if tool_name != "desktop.open_path_with_app":
+        return tool_request
+    raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+    app_name = str(raw_input.get("app_name") or "").strip()
+    if not app_name or app_name == _SELECTED_DESKTOP_APP_NAME:
+        return tool_request
+    if str(raw_input.get("selection_source") or "").strip() == "desktop.list_apps":
+        return tool_request
+    path = str(raw_input.get("path") or raw_input.get("target_path") or "").strip()
+    if not path or (path.startswith("<") and path.endswith(">")):
+        return tool_request
+    return {
+        **tool_request,
+        "input": {
+            "app_name": app_name,
+            "path": path,
+        },
+    }
+
+
 def _tool_request_with_verification_target(
     tool_request: dict[str, Any],
     target: dict[str, Any] | None,
@@ -718,6 +742,7 @@ class RuntimeToolRequestRunner:
                 tool_request,
                 active_window_verification_target,
             )
+            tool_request = _tool_request_with_open_path_app_input(tool_request, tool_name)
             raw_input = (
                 tool_request.get("input")
                 if isinstance(tool_request.get("input"), dict)
