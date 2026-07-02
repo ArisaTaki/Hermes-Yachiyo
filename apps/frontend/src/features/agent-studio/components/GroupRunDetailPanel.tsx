@@ -20,6 +20,7 @@ import {
   toolCallsFromRunEventReplay,
 } from '../../runtime-shared/runEventFacts';
 import { PlannerTraceInspector } from './PlannerTraceInspector';
+import { runRecoveryInputPatchForAction } from '../utils/recoveryInput';
 
 type GroupRunDetailPanelProps = {
   formatRunDate: (value?: string) => string;
@@ -244,6 +245,11 @@ export function GroupRunDetailPanel({
             testId="agent-run-detail-group-run-tool-call-inspector"
             toolCalls={groupRunToolCalls}
             onRunRecoveryAction={onRunToolRecoveryAction}
+            recoveryActionInputPatch={(toolCall, action) => runRecoveryInputPatchForAction(
+              action,
+              null,
+              toolCall,
+            )}
             recoveryActionDisabled={recoveryActionDisabled}
           />
         </section>
