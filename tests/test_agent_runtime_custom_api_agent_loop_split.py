@@ -2512,9 +2512,18 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
     assert [request["tool"] for request in recovery_requests] == [
         "desktop.active_window",
         "desktop.list_windows",
+        "desktop.ui_elements",
         "screen.capture",
     ]
-    assert all("continue_to_model" not in request for request in recovery_requests)
+    assert all(request["continue_to_model"] is True for request in recovery_requests)
+    assert {request["target_app_name"] for request in recovery_requests} == {"Figma"}
+    assert {request["target_app_query"] for request in recovery_requests} == {"design"}
+    assert {request["target_search_text"] for request in recovery_requests} == {"logo 模板"}
+    assert recovery_requests[1]["input"] == {"app_name": "Figma"}
+    assert recovery_requests[2]["input"] == {"app_name": "Figma", "limit": 80}
+    assert recovery_requests[3]["input"] == {
+        "reason": "verify Figma after action involving logo 模板"
+    }
     assert {
         request["replan_request_id"] for request in recovery_requests
     } == {payload["request_id"]}
@@ -2553,9 +2562,16 @@ def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_verifi
     assert [event["tool"] for event in recovery_plan_events] == [
         "desktop.active_window",
         "desktop.list_windows",
+        "desktop.ui_elements",
         "screen.capture",
     ]
-    assert all("continue_to_model" not in event for event in recovery_plan_events)
+    assert all(event["continue_to_model"] is True for event in recovery_plan_events)
+    assert {event["target_app_name"] for event in recovery_plan_events} == {"Figma"}
+    assert recovery_plan_events[1]["input_preview"] == {"app_name": "Figma"}
+    assert recovery_plan_events[2]["input_preview"] == {
+        "app_name": "Figma",
+        "limit": 80,
+    }
     assert {
         event["replan_request_id"] for event in recovery_plan_events
     } == {payload["request_id"]}
@@ -2682,7 +2698,7 @@ def test_model_replan_followup_context_includes_task_core_workspace() -> None:
     assert "analyze-data-file · blocked · Verify analysis output" in message
 
 
-def test_custom_api_agent_loop_completes_verification_recovery_without_model_followup() -> None:
+def test_custom_api_agent_loop_continues_after_verification_recovery_observation() -> None:
     allowed_tools = [
         "desktop.list_apps",
         "app.open",
@@ -2789,11 +2805,17 @@ def test_custom_api_agent_loop_completes_verification_recovery_without_model_fol
             "desktop.search_submit",
             "desktop.ui_elements",
         ],
-        ["desktop.active_window", "desktop.list_windows", "screen.capture"],
+        [
+            "desktop.active_window",
+            "desktop.list_windows",
+            "desktop.ui_elements",
+            "screen.capture",
+        ],
     ]
-    assert model_calls == []
-    assert "当前前台窗口是 Figma" in str(result)
-    assert not any(event["event"] == "agent.model.followup_context" for event in timeline)
+    assert len(model_calls) == 1
+    assert str(result) == "model fallback"
+    assert any(event["event"] == "agent.model.followup_context" for event in timeline)
+    assert "post-action verification did not confirm" in str(model_calls[0])
     recovery_plan_events = [
         event
         for event in timeline
@@ -2803,9 +2825,16 @@ def test_custom_api_agent_loop_completes_verification_recovery_without_model_fol
     assert [event["tool"] for event in recovery_plan_events] == [
         "desktop.active_window",
         "desktop.list_windows",
+        "desktop.ui_elements",
         "screen.capture",
     ]
-    assert all("continue_to_model" not in event for event in recovery_plan_events)
+    assert all(event["continue_to_model"] is True for event in recovery_plan_events)
+    assert {event["target_app_name"] for event in recovery_plan_events} == {"Figma"}
+    assert recovery_plan_events[1]["input_preview"] == {"app_name": "Figma"}
+    assert recovery_plan_events[2]["input_preview"] == {
+        "app_name": "Figma",
+        "limit": 80,
+    }
 
 
 def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_unavailable_steps() -> None:
@@ -17620,7 +17649,7 @@ def test_runtime_planner_replans_empty_auto_discovered_app_observation() -> None
         "desktop.list_windows",
         "screen.capture",
     ]
-    assert all("continue_to_model" not in request for request in recovery_requests)
+    assert all(request["continue_to_model"] is True for request in recovery_requests)
     assert {
         request["replan_request_id"] for request in recovery_requests
     } == {payload["request_id"]}

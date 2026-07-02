@@ -5974,6 +5974,13 @@ def _runtime_planner_verification_failure_payloads(
         )
         if not _tool_result_verification_weak(tool_name, result):
             continue
+        metadata = {
+            **_runtime_trace_metadata_from_mapping(tool_event),
+            **_runtime_planner_verification_context(
+                tool_events[: max(0, event_index - 1)],
+                tool_event,
+            ),
+        }
         payloads.append(
             {
                 "event_type": "agent.tool.call",
@@ -5989,10 +5996,152 @@ def _runtime_planner_verification_failure_payloads(
                 ),
                 "detail": "verification observation returned no UI elements or readable text",
                 "result": result,
-                **_runtime_trace_failure_payload_fields(tool_event),
+                **({"metadata": metadata} if metadata else {}),
             }
         )
     return payloads
+
+
+def _runtime_planner_verification_context(
+    events: list[dict[str, Any]],
+    current_event: Mapping[str, Any],
+) -> dict[str, Any]:
+    app_name = _runtime_planner_verification_app_name(events, current_event)
+    app_query = _runtime_planner_verification_app_query(events)
+    search_text = _runtime_planner_verification_search_text(events)
+    context = {
+        "target_app_name": app_name,
+        "target_app_query": app_query,
+        "target_search_text": search_text,
+        "recovery_observation_goal": "inspect_current_target_after_verification_gap",
+    }
+    return {key: value for key, value in context.items() if value not in ("", [], {})}
+
+
+def _runtime_planner_verification_app_name(
+    events: list[dict[str, Any]],
+    current_event: Mapping[str, Any],
+) -> str:
+    candidates: list[str] = []
+    for event in [current_event, *reversed(events)]:
+        if not isinstance(event, Mapping):
+            continue
+        candidates.extend(_runtime_planner_event_app_name_candidates(event))
+    for candidate in candidates:
+        if candidate and not _runtime_planner_placeholder_app_name(candidate):
+            return candidate
+    return candidates[0] if candidates else ""
+
+
+def _runtime_planner_event_app_name_candidates(event: Mapping[str, Any]) -> list[str]:
+    result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    input_preview = (
+        event.get("input_preview") if isinstance(event.get("input_preview"), Mapping) else {}
+    )
+    candidates = _runtime_planner_text_candidates(
+        (
+            "app_name",
+            "resolved_app_name",
+            "discovered_app_name",
+            "requested_app_name",
+            "active_app",
+            "bundle_name",
+        ),
+        input_preview,
+        data,
+        result,
+    )
+    detail = str(event.get("detail") or "").strip()
+    if detail == "desktop.list_apps":
+        candidates.extend(_runtime_planner_list_apps_result_candidates(result, data))
+    return candidates
+
+
+def _runtime_planner_list_apps_result_candidates(
+    result: Mapping[str, Any],
+    data: Mapping[str, Any],
+) -> list[str]:
+    candidates: list[str] = []
+    for source in (data, result):
+        best_match = source.get("best_match")
+        if isinstance(best_match, Mapping):
+            candidates.extend(
+                _runtime_planner_text_candidates(
+                    ("name", "app_name", "resolved_app_name"),
+                    best_match,
+                )
+            )
+        apps = source.get("apps")
+        if isinstance(apps, list):
+            for item in apps[:3]:
+                if isinstance(item, Mapping):
+                    candidates.extend(
+                        _runtime_planner_text_candidates(
+                            ("name", "app_name", "display_name"),
+                            item,
+                        )
+                    )
+    return candidates
+
+
+def _runtime_planner_verification_app_query(events: list[dict[str, Any]]) -> str:
+    for event in reversed(events):
+        if str(event.get("detail") or "").strip() != "desktop.list_apps":
+            continue
+        input_preview = (
+            event.get("input_preview")
+            if isinstance(event.get("input_preview"), Mapping)
+            else {}
+        )
+        query = str(input_preview.get("query") or "").strip()
+        if query:
+            return query
+    return ""
+
+
+def _runtime_planner_verification_search_text(events: list[dict[str, Any]]) -> str:
+    for event in reversed(events):
+        tool_name = str(event.get("detail") or "").strip()
+        if tool_name not in {
+            "desktop.safe_type_text",
+            "desktop.type",
+            "desktop.type_into_ui_element",
+            "app.open_and_safe_type_text",
+            "app.focus_and_safe_type_text",
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_type_into_ui_element",
+        }:
+            continue
+        input_preview = (
+            event.get("input_preview")
+            if isinstance(event.get("input_preview"), Mapping)
+            else {}
+        )
+        text = str(input_preview.get("text") or input_preview.get("value") or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _runtime_planner_text_candidates(
+    keys: tuple[str, ...],
+    *sources: Mapping[str, Any],
+) -> list[str]:
+    candidates: list[str] = []
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        for key in keys:
+            value = str(source.get(key) or "").strip()
+            if value:
+                candidates.append(value)
+    return candidates
+
+
+def _runtime_planner_placeholder_app_name(value: str) -> bool:
+    clean = str(value or "").strip().lower()
+    return clean.startswith("<") and "selected app" in clean
 
 
 def _runtime_planner_unavailable_failure_payloads(decision: Any) -> list[dict[str, Any]]:
@@ -7326,6 +7475,9 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
         "run_id",
         "replan_request_id",
         "replan_trigger",
+        "target_app_name",
+        "target_app_query",
+        "target_search_text",
     ):
         value = str(request.get(key) or "").strip()
         if value:
@@ -7606,20 +7758,105 @@ def _auto_replan_verification_recovery_requests(
     request_id = str(first.get("request_id") or "").strip()
     source = "runtime_planner"
     planning_reason = "planner_verification_recovery_observation"
+    target = _replan_verification_recovery_target(first)
     requests: list[dict[str, Any]] = []
     for tool_name in _verification_recovery_tool_order(allowed):
         request = _request_like(
             tool_name,
-            {},
+            _verification_recovery_tool_input(tool_name, target),
             source=source,
             planning_reason=planning_reason,
         )
         if request_id:
             request["replan_request_id"] = request_id
         request["replan_trigger"] = "verification_failed"
+        request["continue_to_model"] = True
+        for key, value in target.items():
+            if value:
+                request[key] = value
         _attach_replan_payload_trace_metadata(request, first)
         requests.append(request)
     return requests
+
+
+def _replan_verification_recovery_target(payload: Mapping[str, Any]) -> dict[str, str]:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    input_preview = (
+        payload.get("input_preview")
+        if isinstance(payload.get("input_preview"), Mapping)
+        else {}
+    )
+    app_name = _first_replan_recovery_text(
+        (
+            "target_app_name",
+            "app_name",
+            "expected_app_name",
+            "resolved_app_name",
+            "discovered_app_name",
+            "requested_app_name",
+        ),
+        metadata,
+        input_preview,
+        payload,
+    )
+    app_query = _first_replan_recovery_text(
+        ("target_app_query", "app_query", "query"),
+        metadata,
+        input_preview,
+        payload,
+    )
+    search_text = _first_replan_recovery_text(
+        ("target_search_text", "search_text", "text", "value"),
+        metadata,
+        input_preview,
+        payload,
+    )
+    return {
+        key: value
+        for key, value in {
+            "target_app_name": app_name,
+            "target_app_query": app_query,
+            "target_search_text": search_text,
+        }.items()
+        if value
+    }
+
+
+def _verification_recovery_tool_input(
+    tool_name: str,
+    target: Mapping[str, str],
+) -> dict[str, Any]:
+    clean_tool = str(tool_name or "").strip()
+    app_name = str(target.get("target_app_name") or "").strip()
+    search_text = str(target.get("target_search_text") or "").strip()
+    if clean_tool in {"desktop.list_windows", "desktop.windows"}:
+        return {"app_name": app_name} if app_name else {}
+    if clean_tool in {"desktop.read_ui", "desktop.ui_elements"}:
+        return {"app_name": app_name, "limit": 80} if app_name else {"limit": 80}
+    if clean_tool == "screen.capture":
+        reason = "runtime verification recovery"
+        if app_name and search_text:
+            reason = f"verify {app_name} after action involving {search_text}"
+        elif app_name:
+            reason = f"verify {app_name} after desktop action"
+        elif search_text:
+            reason = f"verify desktop after action involving {search_text}"
+        return {"reason": reason}
+    return {}
+
+
+def _first_replan_recovery_text(
+    keys: tuple[str, ...],
+    *sources: Mapping[str, Any],
+) -> str:
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        for key in keys:
+            value = str(source.get(key) or "").strip()
+            if value:
+                return value
+    return ""
 
 
 def _attach_replan_payload_trace_metadata(
@@ -7680,11 +7917,6 @@ _RUNTIME_TRACE_LIST_KEYS = (
     "replan_triggers",
     "replan_signal_ids",
 )
-
-
-def _runtime_trace_failure_payload_fields(value: Mapping[str, Any]) -> dict[str, Any]:
-    metadata = _runtime_trace_metadata_from_mapping(value)
-    return {"metadata": metadata} if metadata else {}
 
 
 def _runtime_trace_metadata_from_replan_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -8093,14 +8325,8 @@ def _verification_recovery_tool_order(allowed: set[str]) -> list[str]:
     for tool_name in (
         "desktop.active_window",
         _first_allowed_tool(("desktop.list_windows", "desktop.windows"), allowed),
-        "screen.capture",
-    ):
-        if tool_name and tool_name in allowed and tool_name not in tools:
-            tools.append(tool_name)
-    if tools:
-        return tools
-    for tool_name in (
         _first_allowed_tool(("desktop.read_ui", "desktop.ui_elements"), allowed),
+        "screen.capture",
     ):
         if tool_name and tool_name in allowed and tool_name not in tools:
             tools.append(tool_name)
