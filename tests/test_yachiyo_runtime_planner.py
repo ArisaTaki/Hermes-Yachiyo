@@ -28553,6 +28553,44 @@ def test_agent_studio_service_projects_full_data_analysis_execution_plan() -> No
     assert envelope.requests[1].approval_required is True
 
 
+def test_agent_studio_service_projects_full_code_and_file_execution_plans() -> None:
+    class StudioPort:
+        pass
+
+    service = AgentStudioService(StudioPort())
+    code_envelope = service.plan_execution(
+        "修改 README 中的安装说明并运行测试",
+        allowed_tools=["workspace.read", "workspace.write_patch", "terminal.run", "artifact.write"],
+        metadata={"surface": "studio"},
+    )
+    file_envelope = service.plan_execution(
+        "整理 Downloads 里的 pdf 文件",
+        allowed_tools=["workspace.list", "fs.move_file", "artifact.write"],
+        metadata={"surface": "studio"},
+    )
+
+    assert [request.tool_name for request in code_envelope.requests] == [
+        "workspace.read",
+        "terminal.run",
+        "workspace.write_patch",
+        "terminal.run",
+    ]
+    assert [request.step_id for request in code_envelope.requests] == [
+        "inspect-workspace",
+        "run-code-diagnostic",
+        "apply-code-changes",
+        "verify-code-changes",
+    ]
+    assert code_envelope.requests[1].approval_required is True
+    assert code_envelope.requests[2].approval_required is True
+    assert [request.tool_name for request in file_envelope.requests] == [
+        "workspace.list",
+        "artifact.write",
+        "fs.move_file",
+    ]
+    assert file_envelope.requests[2].approval_required is True
+
+
 def test_yachiyo_agent_service_uses_fake_runtime_planner_port() -> None:
     class FakePlannerPort:
         def plan_chat_task(

@@ -83,8 +83,12 @@ def runtime_execution_envelope_payload(
 
 def _supports_full_plan_projection(decision: PlannerDecisionSnapshot) -> bool:
     return str(decision.selected_intent.kind or "").strip() in {
+        "code_task",
         "data_analysis",
+        "file_organization",
+        "multi_agent",
         "report_generation",
+        "workflow_orchestration",
     }
 
 
