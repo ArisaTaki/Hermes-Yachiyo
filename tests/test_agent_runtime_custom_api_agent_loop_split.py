@@ -5883,6 +5883,7 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
             "planning_reason": "planner_discovered_app_followup",
             "step_id": "draw-circle",
             "capability_id": "desktop.ui_operation",
+            "intent_kind": "desktop_operation",
             "planner_step_id": "draw-circle",
         },
         {
@@ -5893,6 +5894,7 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
             "planning_reason": "planner_discovered_app_followup",
             "step_id": "save-image",
             "capability_id": "desktop.ui_operation",
+            "intent_kind": "desktop_operation",
             "planner_step_id": "save-image",
         },
         {
@@ -5903,6 +5905,7 @@ def test_model_followup_context_preserves_discovered_canvas_remaining_action() -
             "planning_reason": "planner_discovered_app_followup",
             "step_id": "verify-saved-image",
             "capability_id": "desktop.visual_verification",
+            "intent_kind": "desktop_operation",
             "planner_step_id": "verify-saved-image",
         },
     ]
@@ -6128,7 +6131,11 @@ def test_model_followup_context_skips_runtime_resolvable_discovered_app_operatio
 
     assert "pending_plan_steps" not in followup_context
     assert requests == []
-    assert [request["step_id"] for request in planner_requests] == [
+    assert [
+        step.step_id
+        for step in decision.plan.tool_plan.steps
+        if step.tool_name
+    ] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
         "scroll-selected-discovered-app",
@@ -21154,6 +21161,15 @@ def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> No
                 "blocked_by_app_resolution": True,
                 "error": "app_resolution_failed",
                 "hint": "desktop.list_apps did not return a high-confidence app match.",
+                "recovery_actions": [
+                    {
+                        "label": "重新发现应用",
+                        "tool": "desktop.list_apps",
+                        "input": {"query": "pdf", "limit": 20},
+                        "permission_target": "app_discovery",
+                        "risk_level": "low",
+                    }
+                ],
             },
             step_id="open-selected-discovered-app",
             capability_id="desktop.app_control",
@@ -21175,9 +21191,34 @@ def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> No
     assert payload["target_capability_id"] == "desktop.app_control"
     assert payload["failure_event_type"] == "agent.tool.skipped"
     assert "app_resolution_failed" in payload["failure_detail"]
+    assert payload["metadata"]["recovery_actions"] == [
+        {
+            "label": "重新发现应用",
+            "tool": "desktop.list_apps",
+            "input": {"query": "pdf", "limit": 20},
+            "permission_target": "app_discovery",
+            "risk_level": "low",
+        }
+    ]
     assert timeline[-1]["event"] == "agent.replan.requested"
     assert appended_events[-1]["event_type"] == "agent.replan.requested"
     assert appended_events[-1]["payload"]["request_id"] == payload["request_id"]
+    followup_context = custom_api_agent_module._model_replan_followup_context_payload(
+        replan_payloads,
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus_and_safe_scroll",
+            "screen.capture",
+        ],
+        timeline=timeline,
+    )
+    followup_message = custom_api_agent_module._model_replan_followup_context_message(
+        followup_context
+    )
+    assert followup_context["recovery_actions"] == payload["metadata"]["recovery_actions"]
+    assert "Runtime recovery actions:" in followup_message
+    assert "desktop.list_apps" in followup_message
 
 
 def test_runtime_tool_runner_projects_task_progress_from_tool_result() -> None:

@@ -2124,7 +2124,12 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
     )
 
     assert payload["intent_kind"] == "desktop_operation"
-    assert payload["selected_tools"] == ["desktop.list_apps"]
+    assert payload["selected_tools"] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
     assert payload["followup_target"] == {
         "kind": "desktop_discovered_app_action",
         "app_query": "markdown",
@@ -2285,8 +2290,40 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
             "input": {"query": "spreadsheet", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "spreadsheet",
+                "action": "new_document",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Q1 budget"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "confirm"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
 
     pdf_prompt = "找一个能编辑 PDF 的本机应用并打开最近的 PDF"
@@ -2342,8 +2379,6 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_file_open_target",
             "continue_to_model": True,
-            "step_id": "discover-file-open-target",
-            "capability_id": "file.workspace_read",
         },
         {
             "protocol": "json_fallback",
@@ -2352,8 +2387,6 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
             "continue_to_model": True,
-            "step_id": "discover_apps-desktop-state",
-            "capability_id": "desktop.app_discovery",
         },
     ]
 
@@ -2403,8 +2436,33 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
             "input": {"query": "presentation", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "presentation",
+                "action": "new_document",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "project review"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
     assert presentation_payload["followup_target"] == {
         "kind": "desktop_discovered_app_action",
@@ -2440,8 +2498,33 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
             "input": {"query": "diagram", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "diagram",
+                "action": "new_document",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "登录流程"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
     assert diagram_payload["followup_target"] == {
         "kind": "desktop_discovered_app_action",
@@ -2530,8 +2613,25 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
             "input": {"query": "browser", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "browser",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
     assert browser_payload["followup_target"] == {
         "kind": "desktop_discovered_app_action",
@@ -2601,7 +2701,51 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
             "continue_to_model": True,
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "image",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.click_ui_element",
+            "input": {
+                "target": "circle ellipse shape",
+                "role_filter": "button",
+                "limit": 80,
+                "click_count": 1,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.shortcut",
+            "input": {"key": "s", "modifiers": ["command"]},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_hotkey",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "verify discovered app creative result"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
     ]
     assert [step.step_id for step in draw_circle_decision.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
@@ -3095,7 +3239,10 @@ def test_planner_selection_payload_surfaces_discovered_app_open_path_target() ->
     )
 
     assert payload["intent_kind"] == "desktop_operation"
-    assert payload["selected_tools"] == ["desktop.list_apps"]
+    assert payload["selected_tools"] == [
+        "desktop.list_apps",
+        "desktop.open_path_with_app",
+    ]
     assert payload["followup_target"] == {
         "kind": "desktop_discovered_app_action",
         "app_query": "code",
@@ -20437,15 +20584,16 @@ def test_planner_selection_payload_surfaces_context_artifact_write_target() -> N
         selected_reason="runtime_planner_direct",
     )
 
-    assert payload["intent_kind"] == "web_research"
-    assert payload["artifacts_expected"] == ["Downloads/research-summary.md"]
+    assert payload["intent_kind"] == "report_generation"
+    assert payload["artifacts_expected"] == ["Downloads/report.md"]
     assert payload["followup_target"] == {
         "kind": "artifact_write",
         "target_action": "write_artifact",
-        "path": "Downloads/research-summary.md",
+        "path": "Downloads/report.md",
         "body_source": "model_generated_content",
         "tool": "artifact.write",
-        "intent_kind": "web_research",
+        "context_source": "current_page_content",
+        "intent_kind": "report_generation",
     }
     assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == payload[
         "followup_target"

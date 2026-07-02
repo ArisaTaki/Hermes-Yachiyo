@@ -1800,16 +1800,16 @@ class RuntimeCustomApiAgentLoop:
                 },
             }
             event_trace_metadata = _runtime_trace_metadata_from_mapping(event)
-            if step_metadata or input_preview:
+            recovery_metadata = _runtime_replan_failure_metadata(result)
+            if step_metadata or input_preview or event_trace_metadata or recovery_metadata:
                 metadata = {
                     **dict(step_metadata),
                     **event_trace_metadata,
+                    **recovery_metadata,
                 }
                 if input_preview:
                     metadata.setdefault("input_preview", dict(input_preview))
                 failure_payload["metadata"] = metadata
-            elif event_trace_metadata:
-                failure_payload["metadata"] = event_trace_metadata
             failure_payloads.append(failure_payload)
         failure_payloads.extend(
             _runtime_planner_verification_failure_payloads(
@@ -5004,6 +5004,8 @@ def _model_replan_followup_context_payload(
             "failure_event_type": str(payload.get("failure_event_type") or "").strip(),
             "failure_detail": str(payload.get("failure_detail") or "").strip(),
             "fallback_tools": _string_list(payload.get("fallback_tools")),
+            "recovery_actions": _mapping_list(metadata.get("recovery_actions")),
+            "recommended_tools": _string_list(metadata.get("recommended_tools")),
             "replan_prompt": str(payload.get("replan_prompt") or "").strip(),
             "metadata": metadata,
             **_replan_recovery_target(payload),
@@ -5076,6 +5078,12 @@ def _model_replan_followup_context_payload(
     )
     if capability_recovery:
         payload["capability_recovery"] = capability_recovery
+    recovery_actions = _runtime_replan_recovery_actions(
+        requests,
+        allowed_tools=allowed_tools,
+    )
+    if recovery_actions:
+        payload["recovery_actions"] = recovery_actions
     return payload
 
 
@@ -5172,6 +5180,34 @@ def _runtime_replan_capability_recovery(
             {key: value for key, value in recovery.items() if value not in ("", [], {})}
         )
     return result
+
+
+def _runtime_replan_recovery_actions(
+    requests: Iterable[Mapping[str, Any]],
+    *,
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    actions: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        for action in _mapping_list(request.get("recovery_actions")):
+            tool_name = str(action.get("tool") or "").strip()
+            if allowed and tool_name not in allowed:
+                continue
+            action_input = (
+                action.get("input")
+                if isinstance(action.get("input"), Mapping)
+                else {}
+            )
+            signature = (tool_name, repr(sorted(dict(action_input).items())))
+            if not tool_name or signature in seen:
+                continue
+            seen.add(signature)
+            actions.append(dict(action))
+    return actions
 
 
 def _runtime_replan_recovery_targets(
@@ -5293,6 +5329,26 @@ def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
         lines.append(f"Failed tools: {', '.join(failed_tools)}.")
     if fallback_tools:
         lines.append(f"Preferred fallback tools: {', '.join(fallback_tools)}.")
+    recovery_actions = [
+        item
+        for item in payload.get("recovery_actions", [])
+        if isinstance(item, dict)
+    ]
+    if recovery_actions:
+        lines.append("Runtime recovery actions:")
+        for item in recovery_actions[:5]:
+            tool_name = str(item.get("tool") or "").strip()
+            label = str(item.get("label") or tool_name).strip()
+            action_input = (
+                item.get("input")
+                if isinstance(item.get("input"), dict)
+                else {}
+            )
+            parts = [part for part in (label, tool_name) if part]
+            if action_input:
+                parts.append(f"input={_model_followup_input_preview_text(action_input)}")
+            if parts:
+                lines.append(f"- {'; '.join(parts)}")
     recovery_targets = [
         item
         for item in payload.get("recovery_targets", [])
@@ -6144,6 +6200,27 @@ def _runtime_planner_replan_payloads_only_tool_unavailable(
     if not payloads:
         return False
     return all(str(payload.get("trigger") or "").strip() == "tool_unavailable" for payload in payloads)
+
+
+def _runtime_replan_failure_metadata(result: Mapping[str, Any]) -> dict[str, Any]:
+    if not isinstance(result, Mapping):
+        return {}
+    result_dict = dict(result)
+    metadata: dict[str, Any] = {}
+    recovery_actions = _recovery_actions(result_dict)
+    if recovery_actions:
+        metadata["recovery_actions"] = recovery_actions
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    for key in (
+        "recommended_tools",
+        "blocking_conditions",
+        "permission_targets",
+        "missing_permissions",
+    ):
+        values = _string_list(result.get(key)) or _string_list(data.get(key))
+        if values:
+            metadata[key] = values
+    return metadata
 
 
 def _runtime_planner_tool_event_step_payloads(
