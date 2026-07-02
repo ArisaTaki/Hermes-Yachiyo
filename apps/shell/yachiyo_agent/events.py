@@ -98,6 +98,9 @@ def public_run_event_from_payload(
             "run_group_id",
             "group_run_id",
         ),
+        core_id=_event_context_text(payload, raw_payload, "core_id"),
+        workspace_id=_event_context_text(payload, raw_payload, "workspace_id"),
+        task_id=_event_context_text(payload, raw_payload, "task_id"),
         agent_id=_event_context_text_any(
             payload,
             raw_payload,

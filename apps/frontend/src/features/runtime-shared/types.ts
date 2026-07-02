@@ -424,6 +424,9 @@ export type PublicRunEvent = {
   group_id?: string | null;
   group_run_id?: string | null;
   run_group_id?: string | null;
+  core_id?: string | null;
+  workspace_id?: string | null;
+  task_id?: string | null;
   agent_id?: string | null;
   agent_name?: string | null;
   member_agent_id?: string | null;

@@ -508,6 +508,9 @@ class PublicRunEvent(_PublicSnapshot):
     group_id: str | None = None
     group_run_id: str | None = None
     run_group_id: str | None = None
+    core_id: str | None = None
+    workspace_id: str | None = None
+    task_id: str | None = None
     agent_id: str | None = None
     agent_name: str | None = None
     member_agent_id: str | None = None

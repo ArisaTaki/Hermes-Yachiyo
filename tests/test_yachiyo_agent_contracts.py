@@ -4809,6 +4809,9 @@ def test_public_run_event_mapping_promotes_run_correlation_fields() -> None:
                 "workflow_node_label": "Research",
                 "group_id": "group-1",
                 "run_group_id": "group-run-1",
+                "core_id": "core-1",
+                "workspace_id": "workspace-1",
+                "task_id": "task-1",
                 "member_agent_id": "agent-1",
                 "member_agent_name": "Researcher",
             },
@@ -4824,6 +4827,9 @@ def test_public_run_event_mapping_promotes_run_correlation_fields() -> None:
     assert event.group_id == "group-1"
     assert event.group_run_id == "group-run-1"
     assert event.run_group_id == "group-run-1"
+    assert event.core_id == "core-1"
+    assert event.workspace_id == "workspace-1"
+    assert event.task_id == "task-1"
     assert event.agent_id == "agent-1"
     assert event.agent_name == "Researcher"
     assert event.member_agent_id == "agent-1"
@@ -4832,6 +4838,9 @@ def test_public_run_event_mapping_promotes_run_correlation_fields() -> None:
     assert event.source_runnable_name == "Researcher"
     assert event.payload["workflow_run_id"] == "workflow-run-1"
     assert event.payload["run_group_id"] == "group-run-1"
+    assert event.payload["core_id"] == "core-1"
+    assert event.payload["workspace_id"] == "workspace-1"
+    assert event.payload["task_id"] == "task-1"
 
 
 def test_secret_public_run_event_keeps_top_level_correlation_fields() -> None:
@@ -4844,6 +4853,9 @@ def test_secret_public_run_event_keeps_top_level_correlation_fields() -> None:
             "payload": {
                 "workflow_run_id": "workflow-run-1",
                 "group_run_id": "group-run-1",
+                "core_id": "core-secret",
+                "workspace_id": "workspace-secret",
+                "task_id": "task-secret",
                 "tool": "terminal.run",
                 "command": "secret-token",
             },
@@ -4853,6 +4865,9 @@ def test_secret_public_run_event_keeps_top_level_correlation_fields() -> None:
     assert event.parent_run_id == "workflow-run-1"
     assert event.workflow_run_id == "workflow-run-1"
     assert event.group_run_id == "group-run-1"
+    assert event.core_id == "core-secret"
+    assert event.workspace_id == "workspace-secret"
+    assert event.task_id == "task-secret"
     assert event.payload == {"redacted": True, "reason": "secret_event"}
 
 
