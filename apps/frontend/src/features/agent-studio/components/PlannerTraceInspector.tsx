@@ -727,17 +727,27 @@ function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnap
     || recovery.source_tool_name
     || ''
   );
+  const actionTarget = objectRecord(recovery.action_target);
+  const observationEvidence = objectRecord(recovery.observation_evidence);
+  const actionTargetPreview = replanRecoveryActionTargetPreview(actionTarget);
+  const observationEvidencePreview = replanRecoveryObservationEvidencePreview(observationEvidence);
+  const observedCenterPreview = replanRecoveryObservedCenterPreview(observationEvidence);
   const title = [
     recovery.failure_detail,
     recovery.planning_reason,
     recovery.permission_target ? `permission: ${recovery.permission_target}` : '',
     recovery.risk_level ? `risk: ${recovery.risk_level}` : '',
+    actionTargetPreview ? `target: ${actionTargetPreview}` : '',
+    observationEvidencePreview ? `evidence: ${observationEvidencePreview}` : '',
   ].filter(Boolean).join(' · ');
   return (
     <span
       className={recovery.status === 'completed' ? 'studio-tool-permission' : 'studio-tool-permission missing'}
       data-replan-recovery-action={label}
+      data-replan-recovery-action-target={actionTargetPreview}
       data-replan-recovery-id={recovery.request_id}
+      data-replan-recovery-observation-evidence={observationEvidencePreview}
+      data-replan-recovery-observed-center={observedCenterPreview}
       data-replan-recovery-permission-target={recovery.permission_target || ''}
       data-replan-recovery-risk={recovery.risk_level || ''}
       data-replan-recovery-status={recovery.status || 'requested'}
@@ -745,8 +755,52 @@ function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnap
       title={title}
     >
       recovery · {label || recovery.trigger} · {recovery.status || 'requested'}
+      {actionTargetPreview ? ` · target: ${actionTargetPreview}` : ''}
     </span>
   );
+}
+
+function replanRecoveryActionTargetPreview(target: Record<string, unknown>): string {
+  if (!Object.keys(target).length) return '';
+  const label = (
+    stringValue(target.label)
+    || stringValue(target.name)
+    || stringValue(target.title)
+    || stringValue(target.text)
+    || stringValue(target.role)
+  );
+  const parts = [
+    stringValue(target.action),
+    label,
+    stringValue(target.app_name) || stringValue(target.app) || stringValue(target.bundle_id),
+  ].filter(Boolean);
+  return parts.length ? truncatePlannerPreview(parts.join(' · ')) : plannerValuePreview(target);
+}
+
+function replanRecoveryObservationEvidencePreview(evidence: Record<string, unknown>): string {
+  if (!Object.keys(evidence).length) return '';
+  const center = replanRecoveryObservedCenterPreview(evidence);
+  const parts = [
+    stringValue(evidence.strategy),
+    stringValue(evidence.source),
+    stringValue(evidence.reason),
+    center ? `center ${center}` : '',
+  ].filter(Boolean);
+  return parts.length ? truncatePlannerPreview(parts.join(' · ')) : plannerValuePreview(evidence);
+}
+
+function replanRecoveryObservedCenterPreview(evidence: Record<string, unknown>): string {
+  const center = objectRecord(evidence.observed_center);
+  const fallbackPoint = objectRecord(evidence.point);
+  const x = coordinateValue(center.x ?? fallbackPoint.x);
+  const y = coordinateValue(center.y ?? fallbackPoint.y);
+  return x && y ? `${x},${y}` : '';
+}
+
+function coordinateValue(value: unknown): string {
+  if (typeof value === 'number' && Number.isFinite(value)) return String(Math.round(value));
+  if (typeof value === 'string' && value.trim()) return value.trim();
+  return '';
 }
 
 function ReplanRequestInspector({ requests }: { requests: TaskReplanRequestSnapshot[] }) {
