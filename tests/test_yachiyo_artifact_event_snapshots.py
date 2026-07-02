@@ -35,6 +35,9 @@ def test_artifact_snapshots_from_events_preserve_runtime_trace_context() -> None
                     "workflow_node_label": "Report",
                     "group_id": "group-1",
                     "group_run_id": "group-run-1",
+                    "core_id": "core-1",
+                    "workspace_id": "workspace-1",
+                    "task_id": "task-1",
                 },
                 created_at="2026-06-17T00:00:00Z",
             ),
@@ -68,6 +71,9 @@ def test_artifact_snapshots_from_events_preserve_runtime_trace_context() -> None
     assert artifact.workflow_node_label == "Report"
     assert artifact.group_id == "group-1"
     assert artifact.group_run_id == "group-run-1"
+    assert artifact.core_id == "core-1"
+    assert artifact.workspace_id == "workspace-1"
+    assert artifact.task_id == "task-1"
     assert artifact.kind == "markdown"
     assert artifact.path == "reports/final.md"
     assert artifact.size_bytes == 42

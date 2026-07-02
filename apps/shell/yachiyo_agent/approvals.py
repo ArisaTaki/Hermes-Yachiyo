@@ -73,6 +73,9 @@ def approval_card_from_payload(
         group_id=_optional_text(payload.get("group_id") or input_preview.get("group_id")),
         group_run_id=approval_group_run_id
         or _optional_text(input_preview.get("group_run_id") or input_preview.get("run_group_id")),
+        core_id=_trace_text(payload, input_preview, "core_id"),
+        workspace_id=_trace_text(payload, input_preview, "workspace_id"),
+        task_id=_trace_text(payload, input_preview, "task_id"),
         source=_trace_text(payload, input_preview, "source"),
         planning_reason=_trace_text(payload, input_preview, "planning_reason"),
         step_id=_trace_text(

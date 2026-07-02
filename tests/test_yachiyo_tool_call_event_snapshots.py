@@ -129,6 +129,9 @@ def test_tool_call_snapshots_from_events_preserve_planner_trace_context() -> Non
                     "intent_kind": "data_analysis",
                     "step_id": "inspect-data-source",
                     "capability_id": "file.workspace_read",
+                    "core_id": "core-1",
+                    "workspace_id": "workspace-1",
+                    "task_id": "task-1",
                     "replan_request_id": "replan-1",
                 },
             ),
@@ -154,8 +157,14 @@ def test_tool_call_snapshots_from_events_preserve_planner_trace_context() -> Non
     assert calls[0].intent_kind == "data_analysis"
     assert calls[0].step_id == "inspect-data-source"
     assert calls[0].capability_id == "file.workspace_read"
+    assert calls[0].core_id == "core-1"
+    assert calls[0].workspace_id == "workspace-1"
+    assert calls[0].task_id == "task-1"
     assert calls[0].replan_request_id == "replan-1"
     assert calls[0].input_preview["path"] == "report.csv"
+    assert calls[0].input_preview["core_id"] == "core-1"
+    assert calls[0].input_preview["workspace_id"] == "workspace-1"
+    assert calls[0].input_preview["task_id"] == "task-1"
 
 
 def test_tool_call_payload_from_event_projects_desktop_result_status() -> None:

@@ -135,6 +135,9 @@ def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         "workflow_run_id": payload.get("workflow_run_id"),
         "workflow_node_id": payload.get("workflow_node_id"),
         "workflow_node_label": payload.get("workflow_node_label"),
+        "core_id": payload.get("core_id"),
+        "workspace_id": payload.get("workspace_id"),
+        "task_id": payload.get("task_id"),
     }
     for key in _PLANNER_TRACE_KEYS:
         if key == "source" and is_daily_desktop_intent_tool_event(event.event_type):
@@ -225,6 +228,9 @@ def merge_tool_trace_context(source: dict[str, Any], payload: dict[str, Any]) ->
         "workflow_node_label",
         "group_id",
         "group_run_id",
+        "core_id",
+        "workspace_id",
+        "task_id",
         *_PLANNER_TRACE_KEYS,
     ):
         if payload.get(key):
@@ -283,6 +289,9 @@ def merge_tool_call_snapshots(
         workflow_node_label=current.workflow_node_label or next_call.workflow_node_label,
         group_id=current.group_id or next_call.group_id,
         group_run_id=current.group_run_id or next_call.group_run_id,
+        core_id=current.core_id or next_call.core_id,
+        workspace_id=current.workspace_id or next_call.workspace_id,
+        task_id=current.task_id or next_call.task_id,
         source=current.source or next_call.source,
         planning_reason=current.planning_reason or next_call.planning_reason,
         decision_id=current.decision_id or next_call.decision_id,

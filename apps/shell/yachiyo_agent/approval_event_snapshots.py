@@ -152,6 +152,9 @@ def merge_trace_context_into_approval(source: dict[str, Any], payload: dict[str,
             "workflow_run_id",
             "workflow_node_id",
             "workflow_node_label",
+            "core_id",
+            "workspace_id",
+            "task_id",
             *_PLANNER_TRACE_KEYS,
         )
         if payload.get(key)

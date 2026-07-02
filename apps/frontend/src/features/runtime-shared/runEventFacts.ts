@@ -36,7 +36,13 @@ const RUNTIME_TRACE_KEYS = [
   'requires_observation',
   'requires_post_action_verification',
 ];
+const TASK_CONTEXT_KEYS = [
+  'core_id',
+  'workspace_id',
+  'task_id',
+];
 const TRACE_KEYS = [
+  ...TASK_CONTEXT_KEYS,
   ...PLANNER_TRACE_KEYS,
   ...RUNTIME_TRACE_KEYS,
 ];
@@ -266,6 +272,9 @@ function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | nul
       || publicRunEventPayloadString(payload, 'group_run_id')
       || publicRunEventPayloadString(payload, 'run_group_id')
       || null,
+    core_id: eventTraceString(source, payload, inputPreview, 'core_id'),
+    workspace_id: eventTraceString(source, payload, inputPreview, 'workspace_id'),
+    task_id: eventTraceString(source, payload, inputPreview, 'task_id'),
     source: eventTraceString(source, payload, inputPreview, 'source'),
     planning_reason: eventTraceString(source, payload, inputPreview, 'planning_reason'),
     decision_id: eventTraceString(source, payload, inputPreview, 'decision_id'),
@@ -361,6 +370,9 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
     group_run_id: publicRunEventPayloadString(payload, 'group_run_id')
       || publicRunEventPayloadString(payload, 'run_group_id')
       || null,
+    core_id: plannerTraceString(payload, inputPreview, 'core_id'),
+    workspace_id: plannerTraceString(payload, inputPreview, 'workspace_id'),
+    task_id: plannerTraceString(payload, inputPreview, 'task_id'),
     source: plannerTraceString(payload, inputPreview, 'source'),
     planning_reason: plannerTraceString(payload, inputPreview, 'planning_reason'),
     decision_id: plannerTraceString(payload, inputPreview, 'decision_id'),
@@ -487,6 +499,9 @@ function mergeApprovalTrace(current: ApprovalCardSnapshot, incoming: ApprovalCar
     workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
     group_id: current.group_id || incoming.group_id || null,
     group_run_id: current.group_run_id || incoming.group_run_id || null,
+    core_id: current.core_id || incoming.core_id || null,
+    workspace_id: current.workspace_id || incoming.workspace_id || null,
+    task_id: current.task_id || incoming.task_id || null,
     source: current.source || incoming.source || null,
     planning_reason: current.planning_reason || incoming.planning_reason || null,
     decision_id: current.decision_id || incoming.decision_id || null,
@@ -523,6 +538,9 @@ function mergeApprovalReplayTrace(
     workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
     group_id: current.group_id || incoming.group_id || null,
     group_run_id: current.group_run_id || incoming.group_run_id || null,
+    core_id: current.core_id || incoming.core_id || null,
+    workspace_id: current.workspace_id || incoming.workspace_id || null,
+    task_id: current.task_id || incoming.task_id || null,
     source: current.source || incoming.source || null,
     planning_reason: current.planning_reason || incoming.planning_reason || null,
     decision_id: current.decision_id || incoming.decision_id || null,
@@ -567,6 +585,9 @@ function mergeToolCallTrace(current: ToolCallSnapshot, incoming: ToolCallSnapsho
     workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
     group_id: current.group_id || incoming.group_id || null,
     group_run_id: current.group_run_id || incoming.group_run_id || null,
+    core_id: current.core_id || incoming.core_id || null,
+    workspace_id: current.workspace_id || incoming.workspace_id || null,
+    task_id: current.task_id || incoming.task_id || null,
     source: current.source || incoming.source || null,
     planning_reason: current.planning_reason || incoming.planning_reason || null,
     decision_id: current.decision_id || incoming.decision_id || null,
@@ -608,6 +629,9 @@ function mergeToolCallReplayTrace(current: ToolCallSnapshot, incoming: ToolCallS
     workflow_node_label: current.workflow_node_label || incoming.workflow_node_label || null,
     group_id: current.group_id || incoming.group_id || null,
     group_run_id: current.group_run_id || incoming.group_run_id || null,
+    core_id: current.core_id || incoming.core_id || null,
+    workspace_id: current.workspace_id || incoming.workspace_id || null,
+    task_id: current.task_id || incoming.task_id || null,
     source: current.source || incoming.source || null,
     planning_reason: current.planning_reason || incoming.planning_reason || null,
     decision_id: current.decision_id || incoming.decision_id || null,

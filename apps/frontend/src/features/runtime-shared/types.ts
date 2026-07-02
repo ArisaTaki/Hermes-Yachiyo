@@ -468,6 +468,9 @@ export type ApprovalCardSnapshot = {
   workflow_node_label?: string | null;
   group_id?: string | null;
   group_run_id?: string | null;
+  core_id?: string | null;
+  workspace_id?: string | null;
+  task_id?: string | null;
   source?: string | null;
   planning_reason?: string | null;
   step_id?: string | null;
@@ -511,6 +514,9 @@ export type ArtifactSnapshot = {
   workflow_node_label?: string | null;
   group_id?: string | null;
   group_run_id?: string | null;
+  core_id?: string | null;
+  workspace_id?: string | null;
+  task_id?: string | null;
   source?: string | null;
   planning_reason?: string | null;
   decision_id?: string | null;
@@ -565,6 +571,9 @@ export type ToolCallSnapshot = {
   workflow_node_label?: string | null;
   group_id?: string | null;
   group_run_id?: string | null;
+  core_id?: string | null;
+  workspace_id?: string | null;
+  task_id?: string | null;
   source?: string | null;
   planning_reason?: string | null;
   decision_id?: string | null;

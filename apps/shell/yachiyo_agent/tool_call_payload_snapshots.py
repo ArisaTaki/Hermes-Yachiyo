@@ -99,6 +99,11 @@ def tool_call_snapshot_from_payload(
             or input_preview.get("group_run_id")
             or input_preview.get("run_group_id")
         ),
+        core_id=_optional_text(payload.get("core_id") or input_preview.get("core_id")),
+        workspace_id=_optional_text(
+            payload.get("workspace_id") or input_preview.get("workspace_id")
+        ),
+        task_id=_optional_text(payload.get("task_id") or input_preview.get("task_id")),
         **{
             key: _optional_text(payload.get(key) or input_preview.get(key))
             for key in _PLANNER_TRACE_KEYS
@@ -226,6 +231,9 @@ def _redacted_tool_call_snapshot(snapshot: ToolCallSnapshot) -> ToolCallSnapshot
             "workflow_node_label": _optional_text(snapshot.workflow_node_label),
             "group_id": _optional_text(snapshot.group_id),
             "group_run_id": _optional_text(snapshot.group_run_id),
+            "core_id": _optional_text(snapshot.core_id),
+            "workspace_id": _optional_text(snapshot.workspace_id),
+            "task_id": _optional_text(snapshot.task_id),
             **{
                 key: _optional_text(getattr(snapshot, key))
                 for key in _PLANNER_TRACE_KEYS

@@ -77,6 +77,9 @@ def test_approval_event_mapper_projects_workflow_group_context() -> None:
                     "workflow_run_id": "workflow-run-1",
                     "workflow_node_id": "review",
                     "workflow_node_label": "Review Gate",
+                    "core_id": "core-1",
+                    "workspace_id": "workspace-1",
+                    "task_id": "task-1",
                     "pending_approval": {
                         "approval_id": "approval-workflow",
                         "input_preview": {"notes": "needs review"},
@@ -99,6 +102,9 @@ def test_approval_event_mapper_projects_workflow_group_context() -> None:
     assert approval.workflow_node_label == "Review Gate"
     assert approval.group_id == "group-1"
     assert approval.group_run_id == "group-run-1"
+    assert approval.core_id == "core-1"
+    assert approval.workspace_id == "workspace-1"
+    assert approval.task_id == "task-1"
     assert approval.input_preview == {
         "notes": "needs review",
         "group_id": "group-1",
@@ -109,6 +115,9 @@ def test_approval_event_mapper_projects_workflow_group_context() -> None:
         "workflow_run_id": "workflow-run-1",
         "workflow_node_id": "review",
         "workflow_node_label": "Review Gate",
+        "core_id": "core-1",
+        "workspace_id": "workspace-1",
+        "task_id": "task-1",
     }
 
 

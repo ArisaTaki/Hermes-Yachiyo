@@ -228,6 +228,9 @@ def merge_artifact_snapshots(
         workflow_node_label=current.workflow_node_label or next_artifact.workflow_node_label,
         group_id=current.group_id or next_artifact.group_id,
         group_run_id=current.group_run_id or next_artifact.group_run_id,
+        core_id=current.core_id or next_artifact.core_id,
+        workspace_id=current.workspace_id or next_artifact.workspace_id,
+        task_id=current.task_id or next_artifact.task_id,
         title=current.title or next_artifact.title,
         kind=current.kind or next_artifact.kind,
         planned_kind=current.planned_kind or next_artifact.planned_kind,
@@ -262,6 +265,9 @@ def _merge_artifact_trace_context(
         "workflow_run_id",
         "workflow_node_id",
         "workflow_node_label",
+        "core_id",
+        "workspace_id",
+        "task_id",
     ):
         if payload.get(key):
             artifact_payload.setdefault(key, payload.get(key))

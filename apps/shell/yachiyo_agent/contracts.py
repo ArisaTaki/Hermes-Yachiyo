@@ -542,6 +542,9 @@ class ApprovalCardSnapshot(_PublicSnapshot):
     workflow_node_label: str | None = None
     group_id: str | None = None
     group_run_id: str | None = None
+    core_id: str | None = None
+    workspace_id: str | None = None
+    task_id: str | None = None
     source: str | None = None
     planning_reason: str | None = None
     step_id: str | None = None
@@ -578,6 +581,9 @@ class ArtifactSnapshot(_PublicSnapshot):
     workflow_node_label: str | None = None
     group_id: str | None = None
     group_run_id: str | None = None
+    core_id: str | None = None
+    workspace_id: str | None = None
+    task_id: str | None = None
     title: str
     kind: str
     planned_kind: str | None = None
@@ -614,6 +620,9 @@ class ToolCallSnapshot(_PublicSnapshot):
     workflow_node_label: str | None = None
     group_id: str | None = None
     group_run_id: str | None = None
+    core_id: str | None = None
+    workspace_id: str | None = None
+    task_id: str | None = None
     source: str | None = None
     planning_reason: str | None = None
     decision_id: str | None = None
