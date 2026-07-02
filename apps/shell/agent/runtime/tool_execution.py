@@ -203,6 +203,24 @@ def _event_payload_with_artifact_context(
     return enriched
 
 
+def _event_payload_with_trace_context(
+    payload: dict[str, Any],
+    context: dict[str, Any],
+) -> dict[str, Any]:
+    if not context:
+        return payload
+    enriched = dict(payload)
+    for key, value in context.items():
+        enriched.setdefault(key, value)
+    input_preview = enriched.get("input_preview")
+    if isinstance(input_preview, dict):
+        preview = dict(input_preview)
+        for key, value in context.items():
+            preview.setdefault(key, value)
+        enriched["input_preview"] = preview
+    return enriched
+
+
 def _tool_result_requests_user_recovery(result: dict[str, Any]) -> bool:
     if not isinstance(result, dict):
         return False
@@ -781,7 +799,10 @@ class RuntimeToolCallExecutor:
                 self._append_run_event(
                     run_id,
                     trace_event["event_type"],
-                    trace_event["payload"],
+                    _event_payload_with_trace_context(
+                        trace_event["payload"],
+                        _artifact_context_from_trace_payload(trace_payload),
+                    ),
                 )
         artifact = _tool_result_artifact(tool_name, tool_result)
         extra_artifacts = _tool_result_extra_artifacts(tool_name, tool_result, artifact)

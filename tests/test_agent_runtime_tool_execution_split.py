@@ -510,6 +510,47 @@ def test_runtime_tool_call_executor_projects_trace_and_artifact_events() -> None
     assert ("run-1", "memory.write.add", {"tool": "memory.add", "input_preview": {"content": "remember"}, "ok": True}) in run_events
 
 
+def test_runtime_tool_call_executor_preserves_scope_on_memory_skill_trace_events() -> None:
+    events = FakeToolCallEvents()
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    executor = _executor(tool_call_events=events, run_events=run_events)
+
+    result = executor.execute(
+        {
+            "tool": "memory.add",
+            "input": {"content": "remember"},
+            "core_id": "core-1",
+            "workspace_id": "workspace-1",
+            "task_id": "task-1",
+            "group_run_id": "group-run-1",
+            "workflow_run_id": "workflow-run-1",
+            "workflow_node_id": "remember",
+        },
+        ["memory.add"],
+        FakeBroker({"ok": True, "memory_id": "mem-1"}),
+        [],
+        run_id="run-memory",
+        budget=FakeBudget(),
+    )
+
+    assert result["ok"] is True
+    memory_payload = next(
+        payload
+        for _run_id, event_type, payload in run_events
+        if event_type == "memory.write.add"
+    )
+    for key, value in {
+        "core_id": "core-1",
+        "workspace_id": "workspace-1",
+        "task_id": "task-1",
+        "group_run_id": "group-run-1",
+        "workflow_run_id": "workflow-run-1",
+        "workflow_node_id": "remember",
+    }.items():
+        assert memory_payload[key] == value
+        assert memory_payload["input_preview"][key] == value
+
+
 def test_runtime_tool_call_executor_projects_structured_tool_artifact_events() -> None:
     events = FakeToolCallEvents()
     run_events: list[tuple[str, str, dict[str, Any]]] = []
