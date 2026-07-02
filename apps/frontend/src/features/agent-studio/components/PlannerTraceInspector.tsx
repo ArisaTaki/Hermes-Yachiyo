@@ -5,6 +5,8 @@ import type {
   CapabilitySnapshot,
   PlannerTraceSummarySnapshot,
   PublicRunEvent,
+  RuntimeExecutionEnvelopeSnapshot,
+  RuntimeExecutionRequestSnapshot,
   RuntimePlanSnapshot,
   ReplanRecoverySnapshot,
   TaskCheckpointSnapshot,
@@ -23,6 +25,7 @@ type PlannerTrace = {
   capabilityRecovery: PlannerCapabilityRecovery[];
   decisionId: string;
   eventCount: number;
+  executionRequests: RuntimeExecutionRequestSnapshot[];
   intent: TaskIntentSnapshot | null;
   plan: RuntimePlanSnapshot | null;
   planId: string;
@@ -167,6 +170,7 @@ export function PlannerTraceInspector({
   const taskCore = trace.plan?.task_core || trace.taskCore || taskCoreFallback || null;
   const replanRequests = trace.replanRequests || [];
   const capabilityRecovery = trace.capabilityRecovery || [];
+  const executionRequests = trace.executionRequests || [];
 
   return (
     <details
@@ -264,6 +268,7 @@ export function PlannerTraceInspector({
         ) : null}
 
         {replanRequests.length ? <ReplanRequestInspector requests={replanRequests} /> : null}
+        {executionRequests.length ? <ExecutionRequestInspector requests={executionRequests} /> : null}
         {capabilityRecovery.length ? (
           <PlannerCapabilityRecoveryInspector recoveries={capabilityRecovery} />
         ) : null}
@@ -832,6 +837,80 @@ function ReplanRequestInspector({ requests }: { requests: TaskReplanRequestSnaps
   );
 }
 
+function ExecutionRequestInspector({ requests }: { requests: RuntimeExecutionRequestSnapshot[] }) {
+  return (
+    <section
+      data-execution-request-count={requests.length}
+      data-testid="agent-run-detail-planner-execution-requests"
+    >
+      <div className="studio-tool-inspector-heading">
+        <h3>Execution Requests</h3>
+        <span>{requests.length} projected</span>
+      </div>
+      <div className="studio-planner-step-list">
+        {requests.map((request, index) => (
+          <ExecutionRequestRow
+            index={index}
+            key={request.request_id || `${request.step_id || 'step'}:${request.tool_name}:${index}`}
+            request={request}
+          />
+        ))}
+      </div>
+    </section>
+  );
+}
+
+function ExecutionRequestRow({
+  index,
+  request,
+}: {
+  index: number;
+  request: RuntimeExecutionRequestSnapshot;
+}) {
+  const dependsOn = uniqueStrings(request.depends_on || []);
+  const fallbackTools = uniqueStrings(request.fallback_tools || []);
+  const replanTriggers = uniqueStrings(request.replan_triggers || []);
+  const inputPreview = plannerStepInputPreview(request.input);
+  return (
+    <div
+      className="studio-planner-step"
+      data-approval-required={String(Boolean(request.approval_required))}
+      data-capability-id={request.capability_id || ''}
+      data-continue-to-model={String(Boolean(request.continue_to_model))}
+      data-depends-on={dependsOn.join(',')}
+      data-execution-request-id={request.request_id}
+      data-fallback-tools={fallbackTools.join(',')}
+      data-input-preview={inputPreview}
+      data-planner-step-id={request.step_id || ''}
+      data-replan-triggers={replanTriggers.join(',')}
+      data-runtime-role={request.runtime_role || ''}
+      data-runtime-stage={request.runtime_stage || ''}
+      data-step-status={request.status || 'planned'}
+      data-testid="agent-run-detail-planner-execution-request"
+      data-tool-name={request.tool_name || ''}
+    >
+      <div>
+        <strong>{index + 1}. {request.tool_name || 'tool request'}</strong>
+        {request.step_id ? <span>step: {request.step_id}</span> : null}
+        {request.capability_id ? <span>capability: {request.capability_id}</span> : null}
+        {request.planning_reason ? <span>reason: {request.planning_reason}</span> : null}
+        {request.runtime_stage || request.runtime_role ? (
+          <span>runtime: {[request.runtime_stage, request.runtime_role].filter(Boolean).join(' / ')}</span>
+        ) : null}
+        {inputPreview ? <span>input: {inputPreview}</span> : null}
+        {dependsOn.length ? <span>depends on: {dependsOn.join(', ')}</span> : null}
+        {fallbackTools.length ? <span>fallbacks: {fallbackTools.join(', ')}</span> : null}
+        {replanTriggers.length ? <span>replan: {replanTriggers.join(', ')}</span> : null}
+      </div>
+      <small>
+        {request.status || 'planned'}
+        {request.approval_required ? ' / approval' : ''}
+        {request.continue_to_model ? ' / model' : ''}
+      </small>
+    </div>
+  );
+}
+
 function PlannerCapabilityRecoveryInspector({
   recoveries,
 }: {
@@ -1082,6 +1161,89 @@ function mergePlannerCapabilityRecoveries(
   return Array.from(byCapabilityId.values());
 }
 
+function runtimeExecutionRequestsFromPayload(payload: Record<string, unknown>): RuntimeExecutionRequestSnapshot[] {
+  const metadata = objectRecord(payload.metadata);
+  const envelope = runtimeExecutionEnvelopeSnapshot(payload.yachiyo_execution_envelope)
+    || runtimeExecutionEnvelopeSnapshot(payload.execution_envelope)
+    || runtimeExecutionEnvelopeSnapshot(payload.runtime_execution_envelope)
+    || runtimeExecutionEnvelopeSnapshot(metadata.yachiyo_execution_envelope)
+    || runtimeExecutionEnvelopeSnapshot(metadata.execution_envelope)
+    || runtimeExecutionEnvelopeSnapshot(payload);
+  return envelope?.requests || [];
+}
+
+function runtimeExecutionEnvelopeSnapshot(value: unknown): RuntimeExecutionEnvelopeSnapshot | null {
+  const record = objectRecord(value);
+  const requests = arrayRecords(record.requests)
+    .map(runtimeExecutionRequestSnapshot)
+    .filter((request): request is RuntimeExecutionRequestSnapshot => Boolean(request));
+  if (
+    !stringValue(record.envelope_id)
+    && !stringValue(record.decision_id)
+    && !stringValue(record.plan_id)
+    && !stringValue(record.intent_kind)
+    && !requests.length
+  ) return null;
+  return {
+    ...record,
+    envelope_id: stringValue(record.envelope_id),
+    decision_id: stringValue(record.decision_id),
+    plan_id: stringValue(record.plan_id),
+    intent_kind: stringValue(record.intent_kind),
+    requests,
+  } as RuntimeExecutionEnvelopeSnapshot;
+}
+
+function runtimeExecutionRequestSnapshot(value: unknown): RuntimeExecutionRequestSnapshot | null {
+  const record = objectRecord(value);
+  const toolName = stringValue(record.tool_name) || stringValue(record.tool);
+  const stepId = stringValue(record.step_id) || stringValue(record.planner_step_id);
+  if (!toolName && !stepId) return null;
+  return {
+    ...record,
+    request_id: stringValue(record.request_id) || `${stepId || 'step'}:${toolName || 'tool'}`,
+    step_id: stepId || null,
+    capability_id: stringValue(record.capability_id) || null,
+    tool_name: toolName || 'tool',
+    protocol: stringValue(record.protocol) || 'json_fallback',
+    input: objectRecord(record.input),
+    planning_reason: stringValue(record.planning_reason),
+    approval_required: booleanValue(record.approval_required, false) || false,
+    continue_to_model: booleanValue(record.continue_to_model, false) || false,
+    depends_on: uniqueStrings(Array.isArray(record.depends_on) ? record.depends_on : []),
+    fallback_tools: uniqueStrings(Array.isArray(record.fallback_tools) ? record.fallback_tools : []),
+    status: stringValue(record.status) || 'planned',
+    runtime_doctrine: stringValue(record.runtime_doctrine),
+    runtime_stage: stringValue(record.runtime_stage),
+    runtime_role: stringValue(record.runtime_role),
+    requires_observation: booleanValue(record.requires_observation, false) || false,
+    requires_post_action_verification: booleanValue(record.requires_post_action_verification, false) || false,
+    replan_triggers: uniqueStrings(Array.isArray(record.replan_triggers) ? record.replan_triggers : []),
+    replan_signal_ids: uniqueStrings(Array.isArray(record.replan_signal_ids) ? record.replan_signal_ids : []),
+    source: stringValue(record.source) || 'runtime_planner',
+  };
+}
+
+function mergeRuntimeExecutionRequests(
+  current: RuntimeExecutionRequestSnapshot[],
+  incoming: RuntimeExecutionRequestSnapshot[],
+): RuntimeExecutionRequestSnapshot[] {
+  if (!incoming.length) return current;
+  const byRequestId = new Map<string, RuntimeExecutionRequestSnapshot>();
+  for (const request of current) {
+    byRequestId.set(runtimeExecutionRequestKey(request), request);
+  }
+  for (const request of incoming) {
+    byRequestId.set(runtimeExecutionRequestKey(request), request);
+  }
+  return Array.from(byRequestId.values());
+}
+
+function runtimeExecutionRequestKey(request: RuntimeExecutionRequestSnapshot): string {
+  return request.request_id
+    || `${request.step_id || 'step'}:${request.tool_name || 'tool'}:${request.planning_reason || ''}`;
+}
+
 function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   let intent: TaskIntentSnapshot | null = null;
   let plan: RuntimePlanSnapshot | null = null;
@@ -1089,6 +1251,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   let candidateIntents: TaskIntentSnapshot[] = [];
   let source = '';
   let decisionId = '';
+  let executionRequests: RuntimeExecutionRequestSnapshot[] = [];
   let planId = '';
   let replanRequests: TaskReplanRequestSnapshot[] = [];
   let capabilityRecovery: PlannerCapabilityRecovery[] = [];
@@ -1108,11 +1271,18 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     const plannerEventType = runtimePlannerEventType(eventType);
     const payload = objectRecord(event.payload);
     const eventCapabilityRecovery = plannerCapabilityRecoveriesFromPayload(payload);
+    const eventExecutionRequests = runtimeExecutionRequestsFromPayload(payload);
     const isRuntimePlannerDesktopIntentEvent = runtimePlannerDesktopIntentEventType(eventType)
       && runtimePlannerDesktopIntentPayload(payload);
-    if (!plannerEventType && !isRuntimePlannerDesktopIntentEvent && !eventCapabilityRecovery.length) continue;
+    if (
+      !plannerEventType
+      && !isRuntimePlannerDesktopIntentEvent
+      && !eventCapabilityRecovery.length
+      && !eventExecutionRequests.length
+    ) continue;
     eventCount += 1;
     capabilityRecovery = mergePlannerCapabilityRecoveries(capabilityRecovery, eventCapabilityRecovery);
+    executionRequests = mergeRuntimeExecutionRequests(executionRequests, eventExecutionRequests);
     source = stringValue(payload.source) || source || (isRuntimePlannerDesktopIntentEvent ? 'runtime_planner' : '');
     decisionId = stringValue(payload.decision_id) || decisionId;
     planId = stringValue(payload.plan_id) || planId;
@@ -1253,6 +1423,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     && !taskCoreFromEvent
     && !steps.length
     && !selection
+    && !executionRequests.length
     && !replanRequests.length
     && !capabilityRecovery.length
   ) return null;
@@ -1261,6 +1432,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     capabilityRecovery,
     decisionId,
     eventCount,
+    executionRequests,
     intent: effectiveIntent,
     plan: effectivePlan,
     planId: effectivePlanId,
@@ -1280,6 +1452,7 @@ function plannerTraceFromTaskCore(taskCore: TaskCoreSnapshot | null | undefined)
     capabilityRecovery: [],
     decisionId: '',
     eventCount: 0,
+    executionRequests: [],
     intent: null,
     plan: null,
     planId: '',
@@ -1361,6 +1534,7 @@ function plannerTraceFromSummary(summary: PlannerTraceSummarySnapshot | null | u
     capabilityRecovery: [],
     decisionId,
     eventCount,
+    executionRequests: [],
     intent,
     plan: null,
     planId: planId || toolPlan?.plan_id || '',
