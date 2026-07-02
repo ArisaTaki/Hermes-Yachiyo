@@ -1477,14 +1477,22 @@ def _drop_redundant_app_foreground_prepare_requests(
         tool_name = str(request.get("tool") or "").strip()
         payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
         app_name = str(payload.get("app_name") or "").strip()
-        if app_name and tool_name in _APP_OPEN_AND_FOREGROUND_TOOLS:
+        if (
+            app_name
+            and tool_name in _APP_OPEN_AND_FOREGROUND_TOOLS
+            and not _should_keep_app_prepare_before_foreground(request)
+        ):
             while _last_prepare_request_matches(
                 filtered,
                 app_name,
                 {"app.open", "app.focus", "desktop.open_app", "desktop.focus_app"},
             ):
                 filtered.pop()
-        elif app_name and tool_name in _APP_FOCUS_AND_FOREGROUND_TOOLS:
+        elif (
+            app_name
+            and tool_name in _APP_FOCUS_AND_FOREGROUND_TOOLS
+            and not _should_keep_app_prepare_before_foreground(request)
+        ):
             while _last_prepare_request_matches(
                 filtered,
                 app_name,
@@ -1493,6 +1501,16 @@ def _drop_redundant_app_foreground_prepare_requests(
                 filtered.pop()
         filtered.append(request)
     return filtered
+
+
+def _should_keep_app_prepare_before_foreground(request: Mapping[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    action = str(payload.get("action") or "").strip()
+    return tool_name in {
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+    } and action == "find"
 
 
 def _last_prepare_request_matches(
