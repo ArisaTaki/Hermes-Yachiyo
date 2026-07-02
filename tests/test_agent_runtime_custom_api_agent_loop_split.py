@@ -3282,6 +3282,181 @@ def test_custom_api_agent_loop_traces_model_tool_after_verification_recovery() -
     assert safe_click_event["target_app_name"] == "Figma"
 
 
+def test_custom_api_agent_loop_clicks_observed_search_result_after_replan_inspect_without_model() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+        "desktop.active_window",
+        "desktop.inspect_app",
+        "desktop.safe_click",
+    ]
+    tool_batches: list[list[dict[str, Any]]] = []
+    ui_calls = 0
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        nonlocal ui_calls
+        tool_batches.append([dict(request) for request in tool_requests])
+        for request in tool_requests:
+            tool = str(request.get("tool") or "")
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if tool == "desktop.list_apps":
+                result = {"ok": True, "data": {"apps": [{"name": "Figma"}]}}
+            elif tool == "app.open":
+                result = {"ok": True, "data": {"app_name": "Figma"}}
+            elif tool in {"desktop.safe_shortcut", "desktop.safe_type_text", "desktop.search_submit"}:
+                result = {"ok": True}
+            elif tool == "desktop.active_window":
+                result = {"ok": True, "data": {"app_name": "Figma", "title": "Search"}}
+            elif tool == "desktop.inspect_app":
+                result = {
+                    "ok": True,
+                    "action": "desktop.inspect_app",
+                    "summary": "Inspected Figma: search results are visible",
+                    "data": {
+                        "app_name": "Figma",
+                        "focus_verified": True,
+                        "ready_for_foreground_action": True,
+                        "ui_elements": {
+                            "ok": True,
+                            "data": {
+                                "app_name": "Figma",
+                                "elements": [
+                                    {
+                                        "role": "AXStaticText",
+                                        "name": "Logo template starter",
+                                        "center": {"x": 320, "y": 180},
+                                    }
+                                ],
+                            },
+                        },
+                    },
+                }
+            elif tool == "desktop.ui_elements":
+                ui_calls += 1
+                result = (
+                    {"ok": True, "data": {"elements": [], "count": 0, "text_item_count": 0}}
+                    if ui_calls <= 2
+                    else {
+                        "ok": True,
+                        "data": {
+                            "elements": [{"role": "AXStaticText", "name": "Logo template starter"}],
+                            "count": 1,
+                            "text_item_count": 1,
+                        },
+                    }
+                )
+            elif tool == "desktop.safe_click":
+                result = {"ok": True, "data": {"clicked": True, "x": payload["x"], "y": payload["y"]}}
+            else:
+                raise AssertionError(f"unexpected tool: {tool}")
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool,
+                    input_preview=payload,
+                    result=result,
+                    **{
+                        key: request[key]
+                        for key in (
+                            "planning_reason",
+                            "decision_id",
+                            "plan_id",
+                            "core_id",
+                            "task_id",
+                            "capability_id",
+                            "replan_request_id",
+                            "replan_trigger",
+                            "target_app_name",
+                            "target_app_query",
+                            "target_search_text",
+                            "replan_triggers",
+                            "replan_signal_ids",
+                            "followup_target",
+                            "action_target",
+                            "observation_evidence",
+                        )
+                        if key in request
+                    },
+                )
+            )
+            messages_arg.append({"role": "user", "content": f"Tool result for {tool}: {result}"})
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": allowed_tools}},
+        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda tools: [{"name": tool} for tool in tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=4,
+        operating_doctrine="Use runtime planner for desktop actions.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("replan inspect observed result should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda *_args, **_kwargs: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+    timeline: list[dict[str, Any]] = []
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "帮我打开一个设计工具，搜索 logo 模板并点击第一个结果",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-verify-recovery-inspect-click",
+    )
+
+    assert "已点击前台位置" in str(result)
+    assert [[request["tool"] for request in batch] for batch in tool_batches] == [
+        [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ],
+        ["desktop.active_window", "desktop.inspect_app", "desktop.ui_elements"],
+        ["desktop.safe_click", "desktop.ui_elements"],
+    ]
+    click_request = tool_batches[2][0]
+    assert click_request["planning_reason"] == "planner_replan_app_search_observed_result"
+    assert click_request["input"] == {"x": 320, "y": 180}
+    assert click_request["observation_evidence"] == {
+        "source_tool": "desktop.inspect_app",
+        "strategy": "observed_center",
+        "center": {"x": 320, "y": 180},
+    }
+    assert not any(event["event"] == "agent.model.followup_context" for event in timeline)
+
+
 def test_custom_api_agent_loop_records_replan_request_for_runtime_planner_unavailable_steps() -> None:
     run_events: list[dict[str, Any]] = []
     allowed_tools = ["desktop.list_apps", "app.open"]

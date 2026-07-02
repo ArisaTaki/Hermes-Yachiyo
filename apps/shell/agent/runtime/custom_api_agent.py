@@ -594,6 +594,61 @@ class RuntimeCustomApiAgentLoop:
                                     ),
                                     *auto_replan_continuation_requests,
                                 ]
+                            auto_replan_observed_result_requests = (
+                                _auto_replan_app_search_observed_result_requests(
+                                    replan_payloads,
+                                    followup_selection_payload,
+                                    allowed_tools,
+                                    timeline,
+                                    planning_reason="planner_replan_app_search_observed_result",
+                                )
+                            )
+                            if auto_replan_observed_result_requests:
+                                auto_replan_approval_requests = [
+                                    *auto_replan_approval_requests,
+                                    *auto_replan_observed_result_requests,
+                                ]
+                                self._record_auto_model_followup_app_write_plan(
+                                    auto_replan_observed_result_requests,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                )
+                                self._record_desktop_permission_preflight(
+                                    auto_replan_observed_result_requests,
+                                    broker,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                )
+                                self._record_desktop_tool_policy_decisions(
+                                    auto_replan_observed_result_requests,
+                                    allowed_tools=allowed_tools,
+                                    agent=agent,
+                                    run_id=run_id,
+                                )
+                                observed_timeline_start = len(timeline)
+                                self._run_tool_requests(
+                                    auto_replan_observed_result_requests,
+                                    allowed_tools,
+                                    broker,
+                                    messages,
+                                    timeline,
+                                    artifacts,
+                                    next_iteration=start_iteration,
+                                    run_id=run_id,
+                                    budget=budget,
+                                )
+                                self._record_runtime_planner_task_progress_events(
+                                    runtime_planner_decision,
+                                    timeline=timeline,
+                                    tool_timeline_start=observed_timeline_start,
+                                    run_id=run_id,
+                                )
+                                auto_replan_recovery_requests = [
+                                    *_tool_requests_without_model_followup(
+                                        auto_replan_recovery_requests
+                                    ),
+                                    *auto_replan_observed_result_requests,
+                                ]
                         except AgentApprovalRequired as exc:
                             self._record_runtime_planner_task_progress_events(
                                 runtime_planner_decision,
@@ -7833,6 +7888,9 @@ def _auto_discovered_app_search_observed_result_requests(
     )
     if not observed_target:
         return []
+    latest_observation_tool = _latest_desktop_observation_tool(timeline)
+    if latest_observation_tool == "desktop.inspect_app":
+        observed_target["observation_source"] = latest_observation_tool
     requests = _auto_desktop_observed_action_followup_requests(
         {"followup_target": observed_target},
         allowed_tools,
@@ -7840,6 +7898,86 @@ def _auto_discovered_app_search_observed_result_requests(
         planning_reason=planning_reason,
     )
     return _annotate_auto_followup_requests_from_tool_plan(requests, selection_payload)
+
+
+def _auto_replan_app_search_observed_result_requests(
+    replan_payloads: Iterable[Mapping[str, Any]],
+    selection_payload: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    requests = _auto_discovered_app_search_observed_result_requests(
+        selection_payload,
+        allowed_tools,
+        timeline,
+        planning_reason=planning_reason,
+    )
+    if requests:
+        return requests
+    target = (
+        selection_payload.get("followup_target")
+        if isinstance(selection_payload.get("followup_target"), Mapping)
+        else {}
+    )
+    if str(target.get("kind") or "").strip() != "desktop_discovered_app_action":
+        return []
+    if str(target.get("target_action") or "").strip() != "app_search":
+        return []
+    if not _replan_payloads_include_blocked_step(
+        replan_payloads,
+        "select-app-search-result",
+    ):
+        return []
+    if not _latest_desktop_observation_succeeded(timeline):
+        return []
+    if not _latest_desktop_observation_follows_search_submission(timeline):
+        return []
+    observed_target = {
+        "kind": "desktop_observed_action",
+        "target_action": "click",
+        "target": "第一个结果",
+        "role_filter": "",
+        "click_count": 1,
+        "limit": 80,
+    }
+    latest_observation_tool = _latest_desktop_observation_tool(timeline)
+    if latest_observation_tool:
+        observed_target["observation_source"] = latest_observation_tool
+    requests = _auto_desktop_observed_action_followup_requests(
+        {"followup_target": observed_target},
+        allowed_tools,
+        timeline,
+        planning_reason=planning_reason,
+    )
+    return _annotate_auto_followup_requests_from_tool_plan(requests, selection_payload)
+
+
+def _replan_payloads_include_blocked_step(
+    replan_payloads: Iterable[Mapping[str, Any]],
+    step_id: str,
+) -> bool:
+    expected_step = str(step_id or "").strip()
+    if not expected_step:
+        return False
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+        task_context = (
+            metadata.get("task_core_context")
+            if isinstance(metadata.get("task_core_context"), Mapping)
+            else {}
+        )
+        todos = task_context.get("todos") if isinstance(task_context.get("todos"), list) else []
+        for todo in todos:
+            if not isinstance(todo, Mapping):
+                continue
+            if str(todo.get("step_id") or "").strip() != expected_step:
+                continue
+            return str(todo.get("status") or "").strip() == "blocked"
+    return False
 
 
 def _observed_action_target_from_app_search_result_selection(
@@ -8173,11 +8311,26 @@ def _latest_desktop_observation_succeeded(timeline: list[dict[str, Any]]) -> boo
         if str(event.get("event") or "").strip() != "agent.tool.call":
             continue
         tool_name = str(event.get("detail") or "").strip()
-        if tool_name not in {"desktop.read_ui", "desktop.ui_elements"}:
+        if tool_name not in {"desktop.read_ui", "desktop.ui_elements", "desktop.inspect_app"}:
             continue
         result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
         return result.get("ok") is True
     return False
+
+
+def _latest_desktop_observation_tool(timeline: list[dict[str, Any]]) -> str:
+    for event in reversed(timeline):
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        tool_name = str(event.get("detail") or "").strip()
+        if tool_name not in {"desktop.read_ui", "desktop.ui_elements", "desktop.inspect_app"}:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is not True:
+            return tool_name
+        if _desktop_observation_result_elements(tool_name, result):
+            return tool_name
+    return ""
 
 
 def _latest_desktop_observation_follows_search_submission(
@@ -8189,7 +8342,7 @@ def _latest_desktop_observation_follows_search_submission(
         if str(event.get("event") or "").strip() != "agent.tool.call":
             continue
         tool_name = str(event.get("detail") or "").strip()
-        if tool_name not in {"desktop.read_ui", "desktop.ui_elements"}:
+        if tool_name not in {"desktop.read_ui", "desktop.ui_elements", "desktop.inspect_app"}:
             continue
         result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
         if result.get("ok") is True:
@@ -8458,17 +8611,40 @@ def _latest_desktop_observation_elements(timeline: list[dict[str, Any]]) -> list
         if str(event.get("event") or "").strip() != "agent.tool.call":
             continue
         tool_name = str(event.get("detail") or "").strip()
-        if tool_name not in {"desktop.read_ui", "desktop.ui_elements"}:
+        if tool_name not in {"desktop.read_ui", "desktop.ui_elements", "desktop.inspect_app"}:
             continue
         result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
         if result.get("ok") is not True:
             return []
-        data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
-        elements = data.get("elements")
-        if not isinstance(elements, list):
-            elements = result.get("elements") if isinstance(result.get("elements"), list) else []
-        return elements
+        elements = _desktop_observation_result_elements(tool_name, result)
+        if elements:
+            return elements
     return []
+
+
+def _desktop_observation_result_elements(tool_name: str, result: Mapping[str, Any]) -> list[Any]:
+    if str(tool_name or "").strip() == "desktop.inspect_app":
+        return _inspect_app_observation_elements(result)
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    elements = data.get("elements")
+    if isinstance(elements, list):
+        return elements
+    elements = result.get("elements")
+    return elements if isinstance(elements, list) else []
+
+
+def _inspect_app_observation_elements(result: Mapping[str, Any]) -> list[Any]:
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    ui_result = data.get("ui_elements") if isinstance(data.get("ui_elements"), Mapping) else {}
+    ui_data = ui_result.get("data") if isinstance(ui_result.get("data"), Mapping) else {}
+    elements = ui_data.get("elements")
+    if isinstance(elements, list):
+        return elements
+    elements = ui_result.get("elements")
+    if isinstance(elements, list):
+        return elements
+    elements = data.get("elements")
+    return elements if isinstance(elements, list) else []
 
 
 def _observed_desktop_target_ordinal(target: str) -> int:
