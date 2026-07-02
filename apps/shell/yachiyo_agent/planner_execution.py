@@ -17,7 +17,7 @@ from .desktop_plan_hints import (
     media_tool_preview,
 )
 from .file_access_plan_hints import file_access_tool_preview
-from .runtime_planner import RuntimePlanner
+from .runtime_planner import RuntimePlanner, _explicit_ui_observation_before_action_requested
 from .schedule_plan_hints import schedule_tool_preview
 from .system_plan_hints import system_tool_preview
 
@@ -1552,6 +1552,9 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
         return coordinate_resolution_requests
     if _has_unavailable_required_desktop_step(decision):
         return []
+    observe_before_action_requests = _observe_before_action_direct_requests(decision, allowed)
+    if observe_before_action_requests:
+        return observe_before_action_requests
     requests: list[dict[str, Any]] = []
     steps = list(decision.plan.tool_plan.steps)
     model_selected_step_ids = _model_selected_desktop_step_ids(steps)
@@ -1587,6 +1590,41 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
     if _weak_desktop_discovery_plan(decision, requests):
         return []
     return requests
+
+
+def _observe_before_action_direct_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    prompt = str(getattr(getattr(decision, "selected_intent", None), "user_goal", "") or "")
+    if not _explicit_ui_observation_before_action_requested(prompt):
+        return []
+    steps = list(getattr(getattr(getattr(decision, "plan", None), "tool_plan", None), "steps", []) or [])
+    operation_index = next(
+        (
+            index
+            for index, step in enumerate(steps)
+            if str(getattr(step, "step_id", "") or "").strip()
+            in {"operate-foreground-ui", "operate-foreground-ui-followup-click"}
+        ),
+        -1,
+    )
+    if operation_index <= 0:
+        return []
+    for step in steps[:operation_index]:
+        step_id = str(getattr(step, "step_id", "") or "").strip()
+        if step_id != "read-foreground-ui" or not _step_available(step):
+            continue
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if tool_name not in {"desktop.ui_elements", "desktop.read_ui"} or tool_name not in allowed:
+            continue
+        input_preview = getattr(step, "input_preview", None)
+        payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        request = _request(
+            tool_name,
+            _desktop_request_payload(tool_name, payload),
+            planning_reason="planner_prefetch_desktop_observation",
+        )
+        request["continue_to_model"] = True
+        return [request]
+    return []
 
 
 def _step_available(step: Any) -> bool:

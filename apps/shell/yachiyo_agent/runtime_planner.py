@@ -4514,6 +4514,39 @@ class RuntimePlanner:
             or hotkey
             or safe_type_text
         ) and (not foreground_submit_action or pre_submit_operation):
+            if (
+                not inspect_preflight_step_id
+                and _explicit_ui_observation_before_action_requested(intent.user_goal)
+                and any(item for item in (click_target, type_target, safe_type_text, safe_click) if item)
+            ):
+                observe_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed)
+                if observe_tool:
+                    observe_payload: dict[str, Any] = {"limit": 80}
+                    if _contains_any(intent.user_goal, ["按钮", "button", "buttons"]):
+                        observe_payload["role_filter"] = "button"
+                    observe_depends_on = ["discover-desktop-state"]
+                    if focus_step_added:
+                        observe_depends_on = ["focus-app-window"]
+                    elif any(step.step_id == "focus-opened-app" for step in steps):
+                        observe_depends_on = ["focus-opened-app"]
+                    elif any(step.step_id == "open-or-focus-app" for step in steps):
+                        observe_depends_on = ["open-or-focus-app"]
+                    steps.append(
+                        _step(
+                            intent,
+                            "read-foreground-ui",
+                            "Read foreground UI",
+                            "desktop.app_discovery",
+                            observe_tool,
+                            input_preview=observe_payload,
+                            depends_on=observe_depends_on,
+                            reason=(
+                                "Observe the requested foreground UI controls before the "
+                                "follow-up operation."
+                            ),
+                        )
+                    )
+                    inspect_preflight_step_id = "read-foreground-ui"
             operation_depends_on = ["discover-desktop-state"]
             if inspect_preflight_step_id:
                 operation_depends_on = [inspect_preflight_step_id]
@@ -23192,6 +23225,29 @@ def _looks_like_ui_operation(text: str) -> bool:
     return _contains_any(
         text,
         ["click", "type", "press", "shortcut", "scroll", "点击", "输入", "按", "快捷键", "滚动", "发送"],
+    )
+
+
+def _explicit_ui_observation_before_action_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    observation = (
+        r"(?:查看|看看|看一下|看下|读取|读一下|识别|观察|列出|列一下|"
+        r"有哪些|有什么|有啥|哪些|什么|"
+        r"inspect|read|look\s+at|show|list|what|which)"
+    )
+    connector = r"(?:然后|并且|并|再|接着|之后|后|,|，|and\s+then|then|and)"
+    action = (
+        r"(?:点击|点一下|点按|单击|双击|选择|选中|打开|输入|填写|保存|提交|"
+        r"click|press|tap|select|choose|open|type|enter|fill|save|submit)"
+    )
+    return bool(
+        re.search(
+            rf"{observation}[^。！？!?]{{0,80}}{connector}[^。！？!?]{{0,80}}{action}",
+            value,
+            flags=re.IGNORECASE,
+        )
     )
 
 

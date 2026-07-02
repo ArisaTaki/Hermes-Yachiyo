@@ -11965,6 +11965,40 @@ def test_runtime_planner_routes_current_ui_inspection_to_ui_elements() -> None:
     )
 
 
+def test_runtime_planner_observes_current_ui_before_followup_click() -> None:
+    prompt = "帮我查看当前窗口有哪些按钮，然后点击保存"
+    allowed_tools = ["desktop.running_apps", "desktop.ui_elements", "desktop.click_ui_element"]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "read-foreground-ui",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(decision, "read-foreground-ui").input_preview == {
+        "limit": 80,
+        "role_filter": "button",
+    }
+    assert _step_by_id(decision, "operate-foreground-ui").depends_on == [
+        "read-foreground-ui"
+    ]
+
+    selection = planner_first_direct_tool_selection(prompt, allowed_tools)
+    assert selection.selected_source == "runtime_planner"
+    assert selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_desktop_observation",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_runtime_planner_treats_control_presence_as_observation() -> None:
     allowed_tools = [
         "desktop.running_apps",
