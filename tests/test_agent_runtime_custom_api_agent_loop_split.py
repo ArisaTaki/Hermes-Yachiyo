@@ -298,6 +298,127 @@ def test_runtime_planner_defers_unknown_app_ui_operation_until_ui_observed() -> 
     assert payload["yachiyo_execution_envelope"]["requests"][-1]["continue_to_model"] is True
 
 
+def test_runtime_loop_auto_executes_deferred_ui_action_after_observation() -> None:
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = []
+    executed_tools: list[str] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        for request in tool_requests:
+            tool_name = request["tool"]
+            executed_tools.append(tool_name)
+            if tool_name == "desktop.list_apps":
+                result = {
+                    "ok": True,
+                    "data": {
+                        "apps": [{"name": "PixelForge", "path": "/Applications/PixelForge.app"}]
+                    },
+                }
+            elif tool_name == "app.open":
+                result = {"ok": True, "data": {"app_name": "PixelForge"}}
+            elif tool_name == "desktop.ui_elements":
+                result = {
+                    "ok": True,
+                    "data": {
+                        "elements": [
+                            {"role": "button", "label": "登录"},
+                        ],
+                    },
+                }
+            elif tool_name == "app.open_and_click_ui_element":
+                result = {"ok": True, "data": {"matched_label": "登录"}}
+            else:
+                result = {"ok": True}
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool_name,
+                    input_preview=request.get("input", {}),
+                    result=result,
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "desktop.list_apps",
+                    "app.open",
+                    "desktop.ui_elements",
+                    "app.open_and_click_ui_element",
+                ]
+            }
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("deferred observed UI followup should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "打开 PixelForge 点击登录",
+        broker=object(),
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-deferred-ui",
+    )
+
+    assert executed_tools == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert "PixelForge" in str(result)
+    assert "登录" in str(result)
+    planned = [
+        event
+        for event in timeline
+        if event.get("event") == "agent.desktop.intent_planned"
+        and event.get("tool") == "app.open_and_click_ui_element"
+    ]
+    assert planned
+    assert planned[-1]["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "click",
+        "target": "登录",
+        "role_filter": "button",
+        "app_name": "PixelForge",
+    }
+
+
 def test_recovery_actions_projects_retry_input_contract_fields() -> None:
     retry_input_schema = {
         "type": "object",
@@ -5678,6 +5799,144 @@ def test_model_followup_context_surfaces_deferred_ui_execution_request() -> None
             "requires_post_action_verification": True,
         }
     ]
+
+
+def test_auto_deferred_observed_ui_followup_promotes_matching_click_request() -> None:
+    requests = custom_api_agent_module._auto_deferred_observed_ui_followup_requests(
+        [
+            {
+                "tool": "desktop.ui_elements",
+                "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
+                "deferred_tool": "app.open_and_click_ui_element",
+                "deferred_input": {
+                    "app_name": "PixelForge",
+                    "target": "登录",
+                    "role_filter": "button",
+                    "click_count": 1,
+                    "limit": 80,
+                },
+                "request_id": "runtime-plan-ui:request:3:desktop.ui_elements",
+                "decision_id": "decision-ui",
+                "plan_id": "runtime-plan-ui",
+                "intent_kind": "desktop_operation",
+                "runtime_doctrine": "discover_operate_verify",
+                "requires_post_action_verification": True,
+            }
+        ],
+        [
+            "desktop.ui_elements",
+            "app.open_and_click_ui_element",
+        ],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.ui_elements",
+                input_preview={"role_filter": "button", "limit": 80},
+                result={
+                    "ok": True,
+                    "data": {
+                        "elements": [{"role": "button", "label": "登录"}],
+                    },
+                },
+            )
+        ],
+    )
+
+    assert [
+        {
+            "tool": request["tool"],
+            "input": request["input"],
+            "request_id": request["request_id"],
+            "runtime_stage": request["runtime_stage"],
+            "runtime_role": request["runtime_role"],
+        }
+        for request in requests
+    ] == [
+        {
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "PixelForge",
+                "target": "登录",
+                "role_filter": "button",
+                "click_count": 1,
+                "limit": 80,
+            },
+            "request_id": (
+                "runtime-plan-ui:request:3:desktop.ui_elements:"
+                "deferred:app.open_and_click_ui_element"
+            ),
+            "runtime_stage": "operate",
+            "runtime_role": "click_ui",
+        },
+        {
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "request_id": (
+                "runtime-plan-ui:request:3:desktop.ui_elements:"
+                "deferred:app.open_and_click_ui_element:verify:1"
+            ),
+            "runtime_stage": "verify",
+            "runtime_role": "click_ui",
+        },
+    ]
+    assert requests[0]["followup_target"] == {
+        "kind": "desktop_observed_action",
+        "target_action": "click",
+        "target": "登录",
+        "role_filter": "button",
+        "observation_source": "desktop.ui_elements",
+        "app_name": "PixelForge",
+        "click_count": 1,
+    }
+    assert requests[0]["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "app_scoped_semantic_ui_tool",
+    }
+    assert requests[0]["decision_id"] == "decision-ui"
+    assert requests[0]["plan_id"] == "runtime-plan-ui"
+    assert requests[0]["intent_kind"] == "desktop_operation"
+    assert requests[0]["requires_post_action_verification"] is True
+
+
+def test_auto_deferred_observed_ui_followup_ignores_unmatched_target() -> None:
+    requests = custom_api_agent_module._auto_deferred_observed_ui_followup_requests(
+        [
+            {
+                "tool": "desktop.ui_elements",
+                "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
+                "deferred_tool": "app.open_and_click_ui_element",
+                "deferred_input": {
+                    "app_name": "PixelForge",
+                    "target": "登录",
+                    "role_filter": "button",
+                    "click_count": 1,
+                    "limit": 80,
+                },
+                "request_id": "runtime-plan-ui:request:3:desktop.ui_elements",
+            }
+        ],
+        [
+            "desktop.ui_elements",
+            "app.open_and_click_ui_element",
+        ],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.ui_elements",
+                input_preview={"role_filter": "button", "limit": 80},
+                result={
+                    "ok": True,
+                    "data": {
+                        "elements": [{"role": "button", "label": "注册"}],
+                    },
+                },
+            )
+        ],
+    )
+
+    assert requests == []
 
 
 def test_model_followup_pending_plan_promotes_model_terminal_command() -> None:

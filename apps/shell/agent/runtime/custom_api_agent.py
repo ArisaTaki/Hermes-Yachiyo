@@ -815,6 +815,110 @@ class RuntimeCustomApiAgentLoop:
                             )
                             if direct_result:
                                 return direct_result
+                    auto_deferred_observed_ui_requests = (
+                        _auto_deferred_observed_ui_followup_requests(
+                            planned_tool_requests,
+                            allowed_tools,
+                            timeline,
+                        )
+                    )
+                    auto_deferred_observed_ui_requests = _drop_completed_auto_followup_prefix(
+                        auto_deferred_observed_ui_requests,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    )
+                    if auto_deferred_observed_ui_requests:
+                        self._record_auto_model_followup_app_write_plan(
+                            auto_deferred_observed_ui_requests,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
+                        self._record_desktop_permission_preflight(
+                            auto_deferred_observed_ui_requests,
+                            broker,
+                            timeline=timeline,
+                            run_id=run_id,
+                        )
+                        self._record_desktop_tool_policy_decisions(
+                            auto_deferred_observed_ui_requests,
+                            allowed_tools=allowed_tools,
+                            agent=agent,
+                            run_id=run_id,
+                        )
+                        auto_tool_timeline_start = len(timeline)
+                        try:
+                            self._run_tool_requests(
+                                auto_deferred_observed_ui_requests,
+                                allowed_tools,
+                                broker,
+                                messages,
+                                timeline,
+                                artifacts,
+                                next_iteration=start_iteration,
+                                run_id=run_id,
+                                budget=budget,
+                            )
+                        except AgentApprovalRequired as exc:
+                            self._record_runtime_planner_task_progress_events(
+                                runtime_planner_decision,
+                                timeline=timeline,
+                                tool_timeline_start=auto_tool_timeline_start,
+                                run_id=run_id,
+                            )
+                            pending_approval = (
+                                exc.pending_approval
+                                if isinstance(exc.pending_approval, dict)
+                                else {}
+                            )
+                            planned_tool = str(
+                                pending_approval.get("tool")
+                                or auto_deferred_observed_ui_requests[0].get("tool")
+                                or ""
+                            )
+                            approval_request = self._planned_request_for_tool(
+                                auto_deferred_observed_ui_requests,
+                                planned_tool,
+                            )
+                            planned_input = self._pending_approval_input_preview(
+                                pending_approval,
+                                approval_request,
+                                (
+                                    auto_deferred_observed_ui_requests[0]
+                                    if auto_deferred_observed_ui_requests
+                                    else {}
+                                ),
+                            )
+                            self._record_desktop_intent_approval_required(
+                                planned_tool,
+                                planned_input,
+                                pending_approval=exc.pending_approval,
+                                timeline=timeline,
+                                run_id=run_id,
+                                planned_request=approval_request,
+                                source=self._approval_event_source(
+                                    approval_request,
+                                    planned_tool,
+                                ),
+                                planning_reason=self._approval_event_planning_reason(
+                                    approval_request,
+                                    planned_tool,
+                                ),
+                            )
+                            raise
+                        self._record_runtime_planner_task_progress_events(
+                            runtime_planner_decision,
+                            timeline=timeline,
+                            tool_timeline_start=auto_tool_timeline_start,
+                            run_id=run_id,
+                        )
+                        direct_result = self._direct_daily_desktop_sequence_result(
+                            auto_deferred_observed_ui_requests,
+                            timeline,
+                            tool_timeline_start=auto_tool_timeline_start,
+                            run_id=run_id,
+                        )
+                        if direct_result:
+                            return direct_result
                     auto_discovered_app_requests = _auto_discovered_followup_requests(
                         followup_selection_payload,
                         allowed_tools,
@@ -5066,6 +5170,169 @@ def _model_followup_deferred_execution_requests(
     return pending
 
 
+def _auto_deferred_observed_ui_followup_requests(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return []
+    for index, request in enumerate(planned_tool_requests, start=1):
+        if not isinstance(request, Mapping) or not bool(request.get("continue_to_model")):
+            continue
+        target = _deferred_observed_ui_target_from_request(request)
+        if not target:
+            continue
+        tool_name = str(request.get("deferred_tool") or "").strip()
+        if tool_name not in allowed:
+            continue
+        target_label = str(target.get("target") or "").strip()
+        role_filter = str(target.get("role_filter") or "").strip()
+        if not _latest_desktop_observation_has_target_match(
+            timeline,
+            target_label,
+            role_filter,
+        ):
+            continue
+        observation_source = _latest_desktop_observation_tool(timeline)
+        if observation_source:
+            target["observation_source"] = observation_source
+        scoped_allowed = [
+            tool
+            for tool in (
+                tool_name,
+                "desktop.read_ui",
+                "desktop.ui_elements",
+                "desktop.active_window",
+            )
+            if tool in allowed
+        ]
+        if not scoped_allowed:
+            continue
+        requests = _auto_desktop_observed_action_followup_requests(
+            {"followup_target": target},
+            scoped_allowed,
+            timeline,
+            planning_reason=str(
+                request.get("planning_reason") or "planner_followup_deferred_ui_action"
+            ).strip()
+            or "planner_followup_deferred_ui_action",
+        )
+        if requests:
+            return _annotate_deferred_observed_ui_followup_requests(
+                requests,
+                request,
+                tool_name=tool_name,
+                index=index,
+            )
+    return []
+
+
+def _deferred_observed_ui_target_from_request(
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    tool_name = str(request.get("deferred_tool") or "").strip()
+    raw_input = (
+        request.get("deferred_input")
+        if isinstance(request.get("deferred_input"), Mapping)
+        else {}
+    )
+    if not tool_name or not raw_input:
+        return {}
+    click_tools = {
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "desktop.click_ui_element",
+    }
+    type_tools = {
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "desktop.type_into_ui_element",
+    }
+    if tool_name in click_tools:
+        target_action = "click"
+    elif tool_name in type_tools:
+        target_action = "type_text"
+    else:
+        return {}
+    target_label = str(raw_input.get("target") or "").strip()
+    if not target_label:
+        return {}
+    target: dict[str, Any] = {
+        "kind": "desktop_observed_action",
+        "target_action": target_action,
+        "target": target_label,
+        "role_filter": str(raw_input.get("role_filter") or "").strip(),
+        "limit": _clean_model_followup_int(raw_input.get("limit"), default=80),
+    }
+    app_name = str(raw_input.get("app_name") or request.get("target_app_name") or "").strip()
+    if app_name:
+        target["app_name"] = app_name
+    app_query = str(
+        raw_input.get("app_query")
+        or request.get("target_app_query")
+        or request.get("app_query")
+        or ""
+    ).strip()
+    if app_query:
+        target["app_query"] = app_query
+    if target_action == "click":
+        target["click_count"] = _clean_model_followup_int(
+            raw_input.get("click_count"),
+            default=1,
+        )
+    else:
+        text = str(raw_input.get("text") or "")
+        if not text:
+            return {}
+        target["text"] = text
+    return {key: value for key, value in target.items() if value not in ("", None, [], {})}
+
+
+def _annotate_deferred_observed_ui_followup_requests(
+    requests: list[dict[str, Any]],
+    source_request: Mapping[str, Any],
+    *,
+    tool_name: str,
+    index: int,
+) -> list[dict[str, Any]]:
+    request_id = _deferred_execution_request_id(
+        source_request,
+        tool_name=tool_name,
+        index=index,
+    )
+    annotated: list[dict[str, Any]] = []
+    for request_index, request in enumerate(requests):
+        item = dict(request)
+        if request_id:
+            item["request_id"] = (
+                request_id if request_index == 0 else f"{request_id}:verify:{request_index}"
+            )
+        for key in (
+            "decision_id",
+            "plan_id",
+            "tool_plan_id",
+            "intent_kind",
+            "core_id",
+            "workspace_id",
+            "task_id",
+            "run_id",
+            "runtime_doctrine",
+            "requires_post_action_verification",
+            "replan_signal_ids",
+            "replan_triggers",
+        ):
+            value = source_request.get(key)
+            if value in (None, "", [], {}) or key in item:
+                continue
+            item[key] = value
+        item.setdefault("runtime_stage", "operate" if request_index == 0 else "verify")
+        item.setdefault("runtime_role", _deferred_ui_runtime_role(tool_name))
+        annotated.append(item)
+    return annotated
+
+
 def _deferred_execution_request_id(
     request: Mapping[str, Any],
     *,
@@ -8945,6 +9212,37 @@ def _latest_desktop_observation_match_center(
     if x is None or y is None:
         return {}
     return {"x": x, "y": y}
+
+
+def _latest_desktop_observation_has_target_match(
+    timeline: list[dict[str, Any]],
+    target: str,
+    role_filter: str,
+) -> bool:
+    elements = _latest_desktop_observation_elements(timeline)
+    if not elements:
+        return False
+    target_text = _normalize_observed_desktop_text(target)
+    if not target_text:
+        return False
+    normalized_filter = _normalize_observed_desktop_text(role_filter)
+    for raw_element in elements:
+        if not isinstance(raw_element, Mapping):
+            continue
+        element = dict(raw_element)
+        if element.get("enabled") is False:
+            continue
+        searchable = _normalize_observed_desktop_text(
+            " ".join(
+                str(element.get(key) or "")
+                for key in ("role", "subrole", "name", "description", "value", "label")
+            )
+        )
+        if normalized_filter and normalized_filter not in searchable:
+            continue
+        if _observed_desktop_element_match_score(element, target_text, role_filter) > 0:
+            return True
+    return False
 
 
 def _latest_desktop_observation_elements(timeline: list[dict[str, Any]]) -> list[Any]:
