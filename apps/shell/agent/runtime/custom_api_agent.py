@@ -10018,17 +10018,12 @@ def _auto_replan_ui_observed_action_requests(
         if observation_source:
             target["observation_source"] = observation_source
         source_tool = _replan_source_tool_name(payload)
-        scoped_allowed = [
-            tool
-            for tool in (
-                source_tool,
-                "desktop.read_ui",
-                "desktop.ui_elements",
-                "desktop.active_window",
-                "screen.capture",
-            )
-            if tool and tool in allowed
-        ]
+        scoped_allowed = _replan_ui_observed_action_scoped_allowed_tools(
+            source_tool,
+            target,
+            allowed,
+            timeline,
+        )
         if not scoped_allowed:
             continue
         requests = _auto_desktop_observed_action_followup_requests(
@@ -10041,6 +10036,48 @@ def _auto_replan_ui_observed_action_requests(
             continue
         return _annotate_replan_ui_observed_action_requests(requests, payload)
     return []
+
+
+def _replan_ui_observed_action_scoped_allowed_tools(
+    source_tool: str,
+    target: Mapping[str, Any],
+    allowed: set[str],
+    timeline: list[dict[str, Any]],
+) -> list[str]:
+    observation_tools = (
+        "desktop.read_ui",
+        "desktop.ui_elements",
+        "desktop.active_window",
+        "screen.capture",
+    )
+    target_action = str(target.get("target_action") or "").strip()
+    if (
+        target_action == "click"
+        and source_tool in {
+            "app.open_and_click_ui_element",
+            "app.focus_and_click_ui_element",
+            "desktop.click_ui_element",
+        }
+    ):
+        target_label = str(target.get("target") or "").strip()
+        role_filter = str(target.get("role_filter") or "").strip()
+        if _latest_desktop_observation_match_center(timeline, target_label, role_filter):
+            low_level_tools = [
+                tool for tool in ("desktop.safe_click", "desktop.click") if tool in allowed
+            ]
+            if low_level_tools:
+                return [
+                    *low_level_tools,
+                    *[tool for tool in observation_tools if tool in allowed],
+                ]
+    return [
+        tool
+        for tool in (
+            source_tool,
+            *observation_tools,
+        )
+        if tool and tool in allowed
+    ]
 
 
 def _replan_ui_observed_action_target(payload: Mapping[str, Any]) -> dict[str, Any]:

@@ -3182,6 +3182,78 @@ def test_auto_replan_ui_observed_action_retries_after_matching_observation() -> 
     assert all("continue_to_model" not in request for request in requests)
 
 
+def test_auto_replan_ui_observed_click_uses_observed_center_after_semantic_failure() -> None:
+    requests = custom_api_agent_module._auto_replan_ui_observed_action_requests(
+        [
+            {
+                "request_id": "replan-ui-click",
+                "trigger": "tool_failure",
+                "decision_id": "decision-ui-click",
+                "plan_id": "plan-ui-click",
+                "source_step_id": "play-media-search-result",
+                "source_tool_name": "desktop.click_ui_element",
+                "target_capability_id": "desktop.ui_operation",
+                "input_preview": {
+                    "target": "播放",
+                    "role_filter": "button",
+                    "click_count": 1,
+                    "limit": 80,
+                },
+                "metadata": {
+                    "runtime_stage": "operate",
+                    "runtime_role": "click_ui",
+                },
+            }
+        ],
+        ["desktop.click_ui_element", "desktop.safe_click", "desktop.ui_elements"],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.ui_elements",
+                input_preview={"role_filter": "button", "limit": 80},
+                result={
+                    "ok": True,
+                    "data": {
+                        "elements": [
+                            {
+                                "role": "AXButton",
+                                "label": "播放",
+                                "center": {"x": 320, "y": 180},
+                            }
+                        ],
+                        "count": 1,
+                    },
+                },
+            )
+        ],
+        planning_reason="planner_replan_ui_observed_action",
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.safe_click",
+        "desktop.ui_elements",
+    ]
+    click_request = requests[0]
+    assert click_request["input"] == {"x": 320, "y": 180}
+    assert click_request["planning_reason"] == "planner_replan_ui_observed_action"
+    assert click_request["replan_request_id"] == "replan-ui-click"
+    assert click_request["replan_trigger"] == "tool_failure"
+    assert click_request["step_id"] == "play-media-search-result"
+    assert click_request["capability_id"] == "desktop.ui_operation"
+    assert click_request["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "click",
+        "target": "播放",
+        "role_filter": "button",
+    }
+    assert click_request["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "observed_center",
+        "center": {"x": 320, "y": 180},
+    }
+    assert all("continue_to_model" not in request for request in requests)
+
+
 def test_auto_replan_ui_continuation_runs_remaining_plan_after_retry() -> None:
     payload = {
         "request_id": "replan-ui-continuation",
