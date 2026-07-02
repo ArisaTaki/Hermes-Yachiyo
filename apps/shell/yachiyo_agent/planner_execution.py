@@ -78,6 +78,10 @@ def planner_execution_tool_requests(
         normalized_requests,
         allowed,
     )
+    normalized_requests = _defer_semantic_ui_clicks_to_observation(
+        normalized_requests,
+        allowed,
+    )
     return _drop_redundant_execution_verification_requests(normalized_requests)
 
 
@@ -352,6 +356,170 @@ def _search_result_observation_request(
     observe["deferred_context"] = _deferred_request_context(click_request)
     _inherit_request_context_without_step(observe, click_request)
     return observe
+
+
+def _defer_semantic_ui_clicks_to_observation(
+    requests: list[dict[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    if not requests or not {"desktop.ui_elements", "desktop.read_ui"}.intersection(allowed):
+        return requests
+    normalized: list[dict[str, Any]] = []
+    skip_indexes: set[int] = set()
+    for index, request in enumerate(requests):
+        if index in skip_indexes:
+            continue
+        if not _should_defer_semantic_ui_click_request(request):
+            normalized.append(request)
+            continue
+        if _has_recent_ui_observation_for_click(normalized, request):
+            normalized.append(request)
+            continue
+        observation = _semantic_ui_click_observation_request(request, allowed)
+        if not observation:
+            normalized.append(request)
+            continue
+        prepare = _semantic_ui_click_observation_prepare_request(request, allowed)
+        if _semantic_ui_click_requires_prepare(request) and not prepare:
+            normalized.append(request)
+            continue
+        if prepare and not _last_request_matches_tool_and_input(normalized, prepare):
+            normalized.append(prepare)
+        normalized.append(observation)
+        after_click = requests[index + 1] if index + 1 < len(requests) else {}
+        if _is_execution_verification_request(after_click):
+            skip_indexes.add(index + 1)
+    return normalized
+
+
+def _should_defer_semantic_ui_click_request(request: Mapping[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in {
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "desktop.click_ui_element",
+    }:
+        return False
+    if str(request.get("source") or "").strip() != "runtime_planner":
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return bool(str(payload.get("target") or "").strip())
+
+
+def _has_recent_ui_observation_for_click(
+    previous_requests: list[dict[str, Any]],
+    click_request: Mapping[str, Any],
+) -> bool:
+    skipped_prepare = False
+    for previous in reversed(previous_requests):
+        previous_tool = str(previous.get("tool") or "").strip()
+        if (
+            not skipped_prepare
+            and previous_tool in {"app.open", "app.focus", "desktop.open_app", "desktop.focus_app"}
+            and _prepare_request_matches_click_target(previous, click_request)
+        ):
+            skipped_prepare = True
+            continue
+        return _ui_observation_matches_click_target(previous, click_request)
+    return False
+
+
+def _prepare_request_matches_click_target(
+    prepare_request: Mapping[str, Any],
+    click_request: Mapping[str, Any],
+) -> bool:
+    click_payload = (
+        click_request.get("input") if isinstance(click_request.get("input"), Mapping) else {}
+    )
+    app_name = str(click_payload.get("app_name") or "").strip()
+    if not app_name:
+        return True
+    prepare_payload = (
+        prepare_request.get("input") if isinstance(prepare_request.get("input"), Mapping) else {}
+    )
+    return str(prepare_payload.get("app_name") or "").strip() == app_name
+
+
+def _ui_observation_matches_click_target(
+    observation_request: Mapping[str, Any],
+    click_request: Mapping[str, Any],
+) -> bool:
+    observation_tool = str(observation_request.get("tool") or "").strip()
+    if observation_tool not in {"desktop.ui_elements", "desktop.read_ui", "desktop.inspect_app"}:
+        return False
+    click_payload = (
+        click_request.get("input") if isinstance(click_request.get("input"), Mapping) else {}
+    )
+    observation_payload = (
+        observation_request.get("input")
+        if isinstance(observation_request.get("input"), Mapping)
+        else {}
+    )
+    click_app_name = str(click_payload.get("app_name") or "").strip()
+    observation_app_name = str(observation_payload.get("app_name") or "").strip()
+    if click_app_name and observation_app_name and click_app_name != observation_app_name:
+        return False
+    return True
+
+
+def _semantic_ui_click_observation_request(
+    click_request: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    payload = click_request.get("input") if isinstance(click_request.get("input"), Mapping) else {}
+    observe_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed)
+    if not observe_tool:
+        return {}
+    observe_payload = {
+        key: payload[key]
+        for key in ("app_name", "role_filter", "limit")
+        if key in payload and payload[key] not in (None, "")
+    }
+    if "limit" not in observe_payload:
+        observe_payload["limit"] = 80
+    observe = _request(
+        observe_tool,
+        observe_payload,
+        planning_reason=str(
+            click_request.get("planning_reason") or "planner_desktop_operation"
+        ).strip()
+        or "planner_desktop_operation",
+    )
+    observe["continue_to_model"] = True
+    observe["deferred_tool"] = str(click_request.get("tool") or "").strip()
+    observe["deferred_input"] = dict(payload)
+    observe["deferred_context"] = _deferred_request_context(click_request)
+    _inherit_request_context_without_step(observe, click_request)
+    return observe
+
+
+def _semantic_ui_click_observation_prepare_request(
+    click_request: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    tool_name = str(click_request.get("tool") or "").strip()
+    if not tool_name.startswith("app.open_and_") and not tool_name.startswith("app.focus_and_"):
+        return {}
+    return _unknown_app_ui_observation_prepare_request(tool_name, click_request, allowed)
+
+
+def _semantic_ui_click_requires_prepare(click_request: Mapping[str, Any]) -> bool:
+    tool_name = str(click_request.get("tool") or "").strip()
+    return tool_name.startswith("app.open_and_") or tool_name.startswith("app.focus_and_")
+
+
+def _last_request_matches_tool_and_input(
+    requests: list[dict[str, Any]],
+    request: Mapping[str, Any],
+) -> bool:
+    if not requests:
+        return False
+    previous = requests[-1]
+    if str(previous.get("tool") or "").strip() != str(request.get("tool") or "").strip():
+        return False
+    previous_input = previous.get("input") if isinstance(previous.get("input"), Mapping) else {}
+    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return dict(previous_input) == dict(request_input)
 
 
 def _deferred_request_context(source: Mapping[str, Any]) -> dict[str, Any]:
