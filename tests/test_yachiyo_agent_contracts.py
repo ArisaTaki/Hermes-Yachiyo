@@ -929,6 +929,116 @@ def test_agent_task_snapshot_updates_task_core_from_desktop_approval_event() -> 
     )
 
 
+def test_agent_task_snapshot_replays_explicit_task_core_update_events_by_id() -> None:
+    core_payload = {
+        "core_id": "task-core-1",
+        "workspace": {
+            "workspace_id": "task-workspace-1",
+            "title": "Report Workspace",
+            "items": [
+                {
+                    "item_id": "input-1",
+                    "title": "sales.csv",
+                    "kind": "input",
+                    "path": "sales.csv",
+                }
+            ],
+        },
+        "todos": [
+            {
+                "todo_id": "todo-1",
+                "title": "Read source",
+                "step_id": "read-source",
+                "tool_name": "workspace.read",
+            }
+        ],
+        "checkpoints": [
+            {
+                "checkpoint_id": "checkpoint-1",
+                "title": "Verify read",
+                "after_step_id": "read-source",
+            }
+        ],
+        "replan_signals": [],
+    }
+
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-1",
+            "run_id": "run-1",
+            "title": "Write report",
+            "status": "running",
+            "metadata": {"yachiyo_task_core": core_payload},
+            "events": [
+                {
+                    "event_type": "agent.task.workspace_item.updated",
+                    "payload": {
+                        "workspace_item_id": "input-1",
+                        "status": "completed",
+                        "source_event": {"event": "agent.tool.call"},
+                        "workspace_item": {
+                            "item_id": "input-1",
+                            "title": "sales.csv",
+                            "kind": "input",
+                            "path": "sales.csv",
+                            "status": "completed",
+                            "metadata": {"observed_path": "sales.csv"},
+                        },
+                    },
+                },
+                {
+                    "event_type": "group.run.task.todo.updated",
+                    "payload": {
+                        "todo_id": "todo-1",
+                        "status": "completed",
+                        "source_event": {"event": "agent.tool.call"},
+                        "todo": {
+                            "todo_id": "todo-1",
+                            "title": "Read source",
+                            "step_id": "read-source",
+                            "tool_name": "workspace.read",
+                            "status": "completed",
+                            "metadata": {"runtime_note": "read ok"},
+                        },
+                    },
+                },
+                {
+                    "event_type": "workflow.run.task.checkpoint.updated",
+                    "payload": {
+                        "checkpoint_id": "checkpoint-1",
+                        "status": "completed",
+                        "source_event": {"event": "agent.tool.call"},
+                        "checkpoint": {
+                            "checkpoint_id": "checkpoint-1",
+                            "title": "Verify read",
+                            "after_step_id": "read-source",
+                            "status": "completed",
+                            "payload": {"verified": True},
+                        },
+                    },
+                },
+            ],
+        }
+    )
+
+    assert snapshot.task_core is not None
+    item = snapshot.task_core.workspace.items[0]
+    todo = snapshot.task_core.todos[0]
+    checkpoint = snapshot.task_core.checkpoints[0]
+    assert item.status == "completed"
+    assert item.metadata["observed_path"] == "sales.csv"
+    assert item.metadata["runtime_event_type"] == "agent.tool.call"
+    assert item.metadata["runtime_update_event_type"] == "agent.task.workspace_item.updated"
+    assert todo.status == "completed"
+    assert todo.metadata["runtime_note"] == "read ok"
+    assert todo.metadata["runtime_update_event_type"] == "group.run.task.todo.updated"
+    assert checkpoint.status == "completed"
+    assert checkpoint.payload["verified"] is True
+    assert checkpoint.payload["runtime_update_event_type"] == (
+        "workflow.run.task.checkpoint.updated"
+    )
+
+
 def test_run_timeline_snapshot_projects_task_core_from_plan_event() -> None:
     core_payload = {
         "core_id": "task-core-1",
