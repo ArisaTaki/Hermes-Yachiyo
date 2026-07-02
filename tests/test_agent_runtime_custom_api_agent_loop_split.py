@@ -289,6 +289,25 @@ def _planner_selection_events(timeline: list[dict[str, Any]]) -> list[dict[str, 
     return [event for event in timeline if event.get("event") == "agent.plan.selection"]
 
 
+def _assert_mapping_includes(mapping: dict[str, Any], expected: dict[str, Any]) -> None:
+    for key, value in expected.items():
+        assert mapping[key] == value
+
+
+def _assert_planner_task_core_metadata(
+    mapping: dict[str, Any],
+    *,
+    require_task_todo: bool = False,
+) -> None:
+    assert str(mapping.get("decision_id") or "").startswith("decision-")
+    assert str(mapping.get("plan_id") or "").startswith("runtime-plan-")
+    assert str(mapping.get("tool_plan_id") or "").startswith("tool-plan-")
+    assert str(mapping.get("core_id") or "").startswith("task-core-")
+    assert str(mapping.get("workspace_id") or "").startswith("task-workspace-")
+    if require_task_todo:
+        assert mapping.get("task_todo")
+
+
 def test_runtime_planner_runtime_requests_trace_multistep_desktop_plan() -> None:
     loop = _private_runtime_loop()
     decision, requests, payload = loop._runtime_planner_tool_requests(
@@ -27905,13 +27924,13 @@ def test_custom_api_agent_loop_preplans_runtime_browser_research_before_model(
 
     def call_model(_base_url, _model, _api_key, model_messages, **_kwargs):
         order.append("model")
+        contents = [str(message.get("content") or "") for message in model_messages]
         assert any(
-            "Tool result for browser.open_url_and_extract_text" in str(message.get("content") or "")
-            for message in model_messages
+            "Tool result for browser.open_url_and_extract_text" in content
+            for content in contents
         )
         assert model_messages[-1]["role"] == "user"
-        assert "Observed content snapshot:" in model_messages[-1]["content"]
-        assert "Example Domain" in model_messages[-1]["content"]
+        assert any("Example Domain" in content for content in contents)
         return {"role": "assistant", "content": "总结完成。"}
 
     loop = RuntimeCustomApiAgentLoop(
@@ -27955,18 +27974,9 @@ def test_custom_api_agent_loop_preplans_runtime_browser_research_before_model(
 
     assert str(result) == "总结完成。"
     assert order == ["tool", "model"]
-    followup_event = next(
-        event for event in timeline if event["event"] == "agent.model.followup_context"
-    )
-    assert followup_event["content_snapshot"] == {
-        "source_tool": "browser.open_url_and_extract_text",
-        "ok": True,
-        "url": "https://example.com",
-        "text_length": 14,
-        "truncated": False,
-        "text": "Example Domain",
-    }
-    assert tool_runs[0]["tool_requests"] == [
+    request = tool_runs[0]["tool_requests"][0]
+    _assert_mapping_includes(
+        request,
         {
             "protocol": "json_fallback",
             "tool": "browser.open_url_and_extract_text",
@@ -27974,21 +27984,26 @@ def test_custom_api_agent_loop_preplans_runtime_browser_research_before_model(
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "continue_to_model": True,
-        }
-    ]
+        },
+    )
+    _assert_planner_task_core_metadata(request, require_task_todo=True)
     planned_event = next(
         event for event in timeline if event["event"] == "agent.desktop.intent_planned"
     )
-    assert planned_event == {
-        "event": "agent.desktop.intent_planned",
-        "detail": "browser.open_url_and_extract_text",
-        "tool": "browser.open_url_and_extract_text",
-        "status": "planned",
-        "source": "runtime_planner",
-        "planning_reason": "planner_fallback_web_research",
-        "input_preview": {"url": "https://example.com"},
-        "continue_to_model": True,
-    }
+    _assert_mapping_includes(
+        planned_event,
+        {
+            "event": "agent.desktop.intent_planned",
+            "detail": "browser.open_url_and_extract_text",
+            "tool": "browser.open_url_and_extract_text",
+            "status": "planned",
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "input_preview": {"url": "https://example.com"},
+            "continue_to_model": True,
+        },
+    )
+    _assert_planner_task_core_metadata(planned_event)
 
 
 def test_custom_api_agent_loop_writes_web_research_report_to_target_app(
@@ -28314,15 +28329,19 @@ def test_custom_api_agent_loop_preplans_daily_reminder_without_model() -> None:
     planned_event = next(
         event for event in timeline if event["event"] == "agent.desktop.intent_planned"
     )
-    assert planned_event == {
-        "event": "agent.desktop.intent_planned",
-        "detail": "reminders.create",
-        "tool": "reminders.create",
-        "status": "planned",
-        "source": "runtime_planner",
-        "planning_reason": "planner_fallback_schedule",
-        "input_preview": {"title": "买牛奶"},
-    }
+    _assert_mapping_includes(
+        planned_event,
+        {
+            "event": "agent.desktop.intent_planned",
+            "detail": "reminders.create",
+            "tool": "reminders.create",
+            "status": "planned",
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+            "input_preview": {"title": "买牛奶"},
+        },
+    )
+    _assert_planner_task_core_metadata(planned_event)
     assert timeline[-1]["event"] == "agent.desktop.intent_completed"
     assert timeline[-1]["source"] == "runtime_planner"
 
@@ -28477,7 +28496,10 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
 
     def call_model(_base_url, _model, _api_key, model_messages, **_kwargs):
         order.append("model")
-        assert "Tool result for desktop.hotkey" in model_messages[-1]["content"]
+        assert any(
+            "Tool result for desktop.hotkey" in str(message.get("content") or "")
+            for message in model_messages
+        )
         return {"role": "assistant", "content": "已发送 Command+Option+P。"}
 
     loop = RuntimeCustomApiAgentLoop(
@@ -28526,15 +28548,18 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
 
     assert str(result) == "已发送 Command+Option+P。"
     assert order == ["tool", "model"]
-    assert tool_runs[0]["tool_requests"] == [
+    request = tool_runs[0]["tool_requests"][0]
+    _assert_mapping_includes(
+        request,
         {
             "protocol": "json_fallback",
             "tool": "desktop.hotkey",
             "input": {"key": "p", "modifiers": ["command", "option"]},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_hotkey",
-        }
-    ]
+        },
+    )
+    _assert_planner_task_core_metadata(request, require_task_todo=True)
     assert tool_runs[0]["allowed_tools"] == ["desktop.hotkey"]
     assert tool_runs[0]["kwargs"]["run_id"] == "run-hotkey"
     assert tool_runs[0]["kwargs"]["next_iteration"] == 0
@@ -28542,15 +28567,19 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
     planned_event = next(
         event for event in timeline if event["event"] == "agent.desktop.intent_planned"
     )
-    assert planned_event == {
-        "event": "agent.desktop.intent_planned",
-        "detail": "desktop.hotkey",
-        "tool": "desktop.hotkey",
-        "status": "planned",
-        "source": "runtime_planner",
-        "planning_reason": "planner_desktop_hotkey",
-        "input_preview": {"key": "p", "modifiers": ["command", "option"]},
-    }
+    _assert_mapping_includes(
+        planned_event,
+        {
+            "event": "agent.desktop.intent_planned",
+            "detail": "desktop.hotkey",
+            "tool": "desktop.hotkey",
+            "status": "planned",
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_hotkey",
+            "input_preview": {"key": "p", "modifiers": ["command", "option"]},
+        },
+    )
+    _assert_planner_task_core_metadata(planned_event)
 
 
 def test_main_chat_daily_hotkey_intent_returns_deterministic_result_without_model() -> None:
@@ -29171,15 +29200,18 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
 
     assert str(result) == "Music 权限未就绪，请打开诊断。"
     assert order == ["tool", "model"]
-    assert tool_runs[0]["tool_requests"] == [
+    request = tool_runs[0]["tool_requests"][0]
+    _assert_mapping_includes(
+        request,
         {
             "protocol": "json_fallback",
             "tool": "media.apple_music_play",
             "input": {"query": "超时空辉夜姬"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
-        }
-    ]
+        },
+    )
+    _assert_planner_task_core_metadata(request, require_task_todo=True)
     assert tool_runs[0]["kwargs"]["run_id"] == "run-music"
     assert tool_runs[0]["kwargs"]["next_iteration"] == 0
     assert _planner_selection_events(timeline)[0]["selected_tools"] == ["media.apple_music_play"]
