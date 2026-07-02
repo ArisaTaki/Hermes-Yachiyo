@@ -12020,6 +12020,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         score += 0.18
     if intent.kind == "communication" and _looks_like_data_analysis_delivery_request(text):
         score -= 0.32
+    if intent.kind == "communication" and _looks_like_explicit_workflow_orchestration_request(text):
+        score -= 0.72
     if (
         intent.kind == "communication"
         and (
@@ -12043,6 +12045,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         ["workflow", "flow", "工作流", "流程"],
     ):
         score += 0.26
+        if _looks_like_explicit_workflow_orchestration_request(text):
+            score += 0.24
     if intent.kind == "multi_agent" and (
         _contains_any(text, ["multi-agent", "group", "agents", "群组", "多 agent", "多Agent", "协作"])
         or _looks_like_multi_agent_request(text)
@@ -14391,6 +14395,31 @@ def _workflow_action_hint(text: str) -> str:
     ):
         return "run"
     return ""
+
+
+def _looks_like_explicit_workflow_orchestration_request(value: str) -> bool:
+    text = _clean_prompt(value)
+    if not text or not _workflow_action_hint(text):
+        return False
+    if re.search(
+        r"^(?:给|向|发|发送|message|send|email)\s*"
+        r"[^。！？!?，,]{0,40}?"
+        r"(?:说|内容(?:是|为)?|saying|that)\s*"
+        r"[^。！？!?，,]{0,60}?"
+        r"(?:workflow|flow|工作流|流程)",
+        text,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    workflow_terms = r"(?:workflow|flow|工作流|流程)"
+    action_terms = (
+        r"(?:运行|启动|执行|跑|创建|新建|建立|搭建|设计|调试|"
+        r"run|start|execute|create|build|design|debug)"
+    )
+    return bool(
+        re.search(rf"{action_terms}[^。！？!?]{{0,80}}{workflow_terms}", text, flags=re.IGNORECASE)
+        or re.search(rf"{workflow_terms}[^。！？!?]{{0,24}}{action_terms}", text, flags=re.IGNORECASE)
+    )
 
 
 def _known_orchestration_target_hint(

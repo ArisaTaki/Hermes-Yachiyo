@@ -4733,6 +4733,52 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
         "workflow_action_hint": "run"
     }
 
+    workflow_with_delivery_prompt = "启动工作流分析 sales.csv 然后发消息给我"
+    workflow_with_delivery = RuntimePlanner().decision(
+        workflow_with_delivery_prompt,
+        allowed_tools=["workflow.run", "workspace.list", "desktop.type_into_ui_element"],
+    )
+    assert workflow_with_delivery.selected_intent.kind == "workflow_orchestration"
+    assert workflow_with_delivery.selected_intent.inputs == {
+        "workflow_action_hint": "run"
+    }
+    assert planner_tool_requests(
+        workflow_with_delivery_prompt,
+        ["workflow.run", "workspace.list", "desktop.type_into_ui_element"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workflow.run",
+            "input": {
+                "objective": workflow_with_delivery_prompt,
+                "title": "Workflow Orchestration",
+                "target_name": "",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_workflow_orchestration",
+        }
+    ]
+
+    create_workflow_with_delivery_prompt = "创建一个工作流：分析 sales.csv 然后发消息给我"
+    create_workflow_with_delivery = RuntimePlanner().decision(
+        create_workflow_with_delivery_prompt,
+        allowed_tools=["workflow.create", "workflow.run", "workspace.list"],
+    )
+    assert create_workflow_with_delivery.selected_intent.kind == "workflow_orchestration"
+    assert create_workflow_with_delivery.selected_intent.inputs == {
+        "workflow_action_hint": "create"
+    }
+    assert planner_tool_requests(
+        create_workflow_with_delivery_prompt,
+        ["workflow.create", "workflow.run", "workspace.list"],
+    )[0]["tool"] == "workflow.create"
+
+    workflow_message_content = RuntimePlanner().decision(
+        "给 Alice 发消息说启动 workflow",
+        allowed_tools=["workflow.run", "desktop.type_into_ui_element", "artifact.write"],
+    )
+    assert workflow_message_content.selected_intent.kind == "communication"
+
     role_workflow_prompt = "启动一个工作流，让研究员和写作者一起产出竞品分析报告"
     role_workflow_group = RuntimePlanner().decision(
         role_workflow_prompt,
