@@ -1047,6 +1047,7 @@ def _desktop_request_needs_basic_step_metadata(decision: Any, step_id: str) -> b
 
 def _model_selected_desktop_step_ids(steps: list[Any]) -> set[str]:
     selected_step_ids: set[str] = set()
+    defer_selected_communication = _has_selected_communication_compose_steps(steps)
     changed = True
     while changed:
         changed = False
@@ -1063,6 +1064,11 @@ def _model_selected_desktop_step_ids(steps: list[Any]) -> set[str]:
                 if str(item or "").strip()
             ]
             if (
+                (
+                    defer_selected_communication
+                    and step_id == "open-selected-discovered-app"
+                )
+                or
                 _selected_discovered_app_step_requires_model(step_id, payload, tool_name)
                 or step_id == "open-discovered-file-with-app"
                 or _selected_discovered_app_payload_requires_model(payload, tool_name)
@@ -1073,6 +1079,19 @@ def _model_selected_desktop_step_ids(steps: list[Any]) -> set[str]:
                 selected_step_ids.add(step_id)
                 changed = True
     return selected_step_ids
+
+
+def _has_selected_communication_compose_steps(steps: list[Any]) -> bool:
+    return any(
+        str(getattr(step, "step_id", "") or "").strip()
+        in {
+            "inspect-selected-communication-compose-ui",
+            "fill-selected-communication-recipient",
+            "draft-selected-communication-message",
+            "send-selected-communication-message",
+        }
+        for step in steps
+    )
 
 
 def _selected_discovered_app_step_requires_model(

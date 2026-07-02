@@ -4456,7 +4456,7 @@ def test_custom_api_agent_loop_pauses_followup_communication_send_for_approval()
     assert len(model_calls) == 1
     assert len(tool_runs) == 2
     approval_event = timeline[-1]
-    assert approval_event == {
+    expected_approval = {
         "event": "agent.desktop.intent_approval_required",
         "detail": "desktop.submit_foreground",
         "tool": "desktop.submit_foreground",
@@ -4469,21 +4469,21 @@ def test_custom_api_agent_loop_pauses_followup_communication_send_for_approval()
         "policy_reason": "发送前台内容需要确认。",
         "planning_reason": "planner_followup_communication",
     }
-    assert appended_events[-1] == {
-        "run_id": "run-visible-text-send-approval",
-        "event_type": "agent.desktop.intent_approval_required",
-        "payload": {
-            "tool": "desktop.submit_foreground",
-            "status": "approval_required",
-            "source": "runtime_planner",
-            "reason": "tool_policy_requires_approval",
-            "input_preview": {"action": "send"},
-            "approval_id": "approval-followup-send",
-            "risk_level": "high",
-            "policy_reason": "发送前台内容需要确认。",
-            "planning_reason": "planner_followup_communication",
-        },
+    assert {key: approval_event[key] for key in expected_approval} == expected_approval
+    assert approval_event["capability_id"] == "communication.compose"
+    assert approval_event["step_id"]
+    assert approval_event["planner_step_id"] == approval_event["step_id"]
+    expected_appended_payload = {
+        key: value
+        for key, value in expected_approval.items()
+        if key not in {"event", "detail"}
     }
+    assert appended_events[-1]["run_id"] == "run-visible-text-send-approval"
+    assert appended_events[-1]["event_type"] == "agent.desktop.intent_approval_required"
+    assert {
+        key: appended_events[-1]["payload"][key]
+        for key in expected_appended_payload
+    } == expected_appended_payload
 
 
 def test_model_followup_context_payload_preserves_multiple_content_snapshots() -> None:
@@ -18045,7 +18045,7 @@ def test_custom_api_agent_loop_preserves_discovered_app_compose_remaining_reques
     approval_events = [
         event for event in timeline if event["event"] == "agent.desktop.intent_approval_required"
     ]
-    assert approval_events[-1] == {
+    expected_approval = {
         "event": "agent.desktop.intent_approval_required",
         "detail": "app.focus_and_type_into_ui_element",
         "tool": "app.focus_and_type_into_ui_element",
@@ -18064,6 +18064,13 @@ def test_custom_api_agent_loop_preserves_discovered_app_compose_remaining_reques
         "risk_level": "medium",
         "policy_reason": "Typing into a foreground app needs review.",
     }
+    assert {
+        key: approval_events[-1][key]
+        for key in expected_approval
+    } == expected_approval
+    assert approval_events[-1]["capability_id"] == "communication.compose"
+    assert approval_events[-1]["step_id"] == "fill-selected-communication-recipient"
+    assert approval_events[-1]["planner_step_id"] == "fill-selected-communication-recipient"
     assert appended_events[-1]["event_type"] == "agent.desktop.intent_approval_required"
     assert appended_events[-1]["payload"]["source"] == "runtime_planner"
     assert appended_events[-1]["payload"]["planning_reason"] == "planner_discovered_app_followup"
