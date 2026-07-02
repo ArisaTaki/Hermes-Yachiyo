@@ -69,6 +69,7 @@ from apps.shell.yachiyo_agent import (
     SkillTraceSnapshot,
     StartChatTaskRequest,
     StartPlannerOrchestrationRequest,
+    ReplanRecoverySnapshot,
     ReplanSignalSnapshot,
     TaskCheckpointSnapshot,
     TaskCoreSnapshot,
@@ -518,6 +519,71 @@ def test_task_replan_request_contract_links_failure_to_planner_state() -> None:
     assert payload["status"] == "requested"
     assert payload["route_to_studio"] is True
     assert payload["fallback_tools"] == ["terminal.run"]
+
+
+def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> None:
+    recovery = ReplanRecoverySnapshot(
+        request_id="replan-request-1",
+        trigger="tool_failure",
+        status="completed",
+        run_id="run-1",
+        task_id="task-1",
+        group_run_id="group-run-1",
+        workflow_run_id="workflow-run-1",
+        decision_id="decision-1",
+        plan_id="plan-1",
+        core_id="core-1",
+        source_step_id="run-analysis",
+        source_tool_name="data.analyze",
+        target_capability_id="data.analysis",
+        fallback_tools=["terminal.run"],
+        selected_tool_name="terminal.run",
+        selected_step_id="run-analysis",
+        planning_reason="planner_replan_fallback_recovery",
+        tool_call_id="tool-call-1",
+        tool_status="completed",
+        todo_status="completed",
+        checkpoint_status="completed",
+        failure_detail="data.analyze failed",
+        result_preview={"ok": True},
+        recovery_event_ids=["event-1", "event-2"],
+        created_at="2026-06-27T00:00:00Z",
+        updated_at="2026-06-27T00:00:01Z",
+    )
+
+    payload = _json(recovery)
+
+    assert list(payload) == [
+        "request_id",
+        "trigger",
+        "status",
+        "run_id",
+        "task_id",
+        "group_run_id",
+        "workflow_run_id",
+        "decision_id",
+        "plan_id",
+        "core_id",
+        "source_step_id",
+        "source_tool_name",
+        "target_capability_id",
+        "fallback_tools",
+        "selected_tool_name",
+        "selected_step_id",
+        "planning_reason",
+        "tool_call_id",
+        "tool_status",
+        "todo_status",
+        "checkpoint_status",
+        "failure_detail",
+        "result_preview",
+        "recovery_event_ids",
+        "created_at",
+        "updated_at",
+        "source",
+    ]
+    assert payload["selected_tool_name"] == "terminal.run"
+    assert payload["checkpoint_status"] == "completed"
 
 
 def test_planner_orchestration_start_contract_links_decision_and_started_run() -> None:
@@ -1353,14 +1419,104 @@ def test_run_timeline_snapshot_synthesizes_replan_event_from_failed_tool() -> No
     assert snapshot.task_progress.latest_replan_step_id == "run-analysis"
     assert snapshot.task_progress.latest_replan_trigger == "tool_failure"
     assert snapshot.task_progress.blocked_step_ids == ["analyze-data-file"]
+    assert snapshot.replan_recoveries
+    assert snapshot.replan_recoveries[0].request_id == replan_event.payload["request_id"]
+    assert snapshot.replan_recoveries[0].status == "requested"
+    assert snapshot.replan_recoveries[0].source_step_id == "run-analysis"
+    assert snapshot.replan_recoveries[0].source_tool_name == "data.analyze"
+    assert snapshot.replan_recoveries[0].fallback_tools == ["terminal.run"]
     assert task.task_core is not None
     assert task.task_progress is not None
     assert task.task_progress.status == snapshot.task_progress.status
     assert task.task_progress.latest_replan_step_id == "run-analysis"
+    assert task.replan_recoveries[0].request_id == snapshot.replan_recoveries[0].request_id
     failed_todo = next(
         todo for todo in task.task_core.todos if todo.tool_name == "data.analyze"
     )
     assert failed_todo.status == "blocked"
+
+
+def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "status": "completed",
+            "events": [
+                {
+                    "event_id": "event-1",
+                    "sequence": 1,
+                    "event_type": "agent.replan.requested",
+                    "payload": {
+                        "request_id": "replan-1",
+                        "trigger": "tool_failure",
+                        "run_id": "run-1",
+                        "task_id": "task-1",
+                        "decision_id": "decision-1",
+                        "plan_id": "plan-1",
+                        "core_id": "task-core-1",
+                        "source_step_id": "analyze-data-file",
+                        "source_tool_name": "data.analyze",
+                        "target_capability_id": "data.analysis",
+                        "fallback_tools": ["terminal.run"],
+                        "failure_detail": "data.analyze failed",
+                    },
+                },
+                {
+                    "event_id": "event-2",
+                    "sequence": 2,
+                    "event_type": "agent.desktop.intent_planned",
+                    "payload": {
+                        "replan_request_id": "replan-1",
+                        "replan_trigger": "tool_failure",
+                        "step_id": "analyze-data-file",
+                        "capability_id": "data.analysis",
+                        "tool_name": "terminal.run",
+                        "planning_reason": "planner_replan_fallback_recovery",
+                    },
+                },
+                {
+                    "event_id": "event-3",
+                    "sequence": 3,
+                    "event_type": "agent.tool.call",
+                    "payload": {
+                        "replan_request_id": "replan-1",
+                        "replan_trigger": "tool_failure",
+                        "step_id": "analyze-data-file",
+                        "capability_id": "data.analysis",
+                        "tool_name": "terminal.run",
+                        "status": "completed",
+                        "result": {"ok": True, "stdout": "report.md"},
+                    },
+                },
+                {
+                    "event_id": "event-4",
+                    "sequence": 4,
+                    "event_type": "agent.task.checkpoint.updated",
+                    "payload": {
+                        "replan_request_id": "replan-1",
+                        "checkpoint_id": "checkpoint:analyze-data-file",
+                        "status": "completed",
+                        "checkpoint": {
+                            "checkpoint_id": "checkpoint:analyze-data-file",
+                            "title": "Verify analysis",
+                            "after_step_id": "analyze-data-file",
+                            "status": "completed",
+                        },
+                    },
+                },
+            ],
+        }
+    )
+
+    recovery = snapshot.replan_recoveries[0]
+    assert recovery.request_id == "replan-1"
+    assert recovery.status == "completed"
+    assert recovery.selected_tool_name == "terminal.run"
+    assert recovery.tool_status == "completed"
+    assert recovery.checkpoint_status == "completed"
+    assert recovery.result_preview == {"ok": True, "stdout": "report.md"}
+    assert recovery.recovery_event_ids == ["event-1", "event-2", "event-3", "event-4"]
 
 
 def test_run_timeline_snapshot_synthesizes_scoped_workflow_replan_event() -> None:
@@ -1513,6 +1669,10 @@ def test_group_run_snapshot_synthesizes_scoped_replan_event() -> None:
     assert snapshot.task_progress is not None
     assert snapshot.task_progress.status == "replan_requested"
     assert snapshot.task_progress.latest_replan_step_id == analysis_step.step_id
+    assert snapshot.replan_recoveries
+    assert snapshot.replan_recoveries[0].status == "requested"
+    assert snapshot.replan_recoveries[0].group_run_id == "group-run-1"
+    assert snapshot.replan_recoveries[0].source_step_id == analysis_step.step_id
     failed_todo = next(
         todo for todo in snapshot.task_core.todos if todo.step_id == analysis_step.step_id
     )
@@ -1847,6 +2007,7 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
         "planner_summary",
         "task_core",
         "task_progress",
+        "replan_recoveries",
         "open_in_studio_url",
         "created_at",
         "updated_at",
@@ -3709,6 +3870,7 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
         "planner_summary",
         "task_core",
         "task_progress",
+        "replan_recoveries",
         "events",
         "tool_calls",
         "memory_traces",

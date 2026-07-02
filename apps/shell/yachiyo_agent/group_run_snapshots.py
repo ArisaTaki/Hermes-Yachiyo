@@ -13,12 +13,17 @@ from .contracts import (
     ArtifactSnapshot,
     GroupRunSnapshot,
     MemoryTraceSnapshot,
+    ReplanRecoverySnapshot,
     RunTimelineSnapshot,
     SkillTraceSnapshot,
     ToolCallSnapshot,
 )
 from .group_member_snapshots import group_run_participants_from_payload
 from .replan_event_projection import run_events_with_replan_requests
+from .replan_recovery_snapshots import (
+    merge_replan_recovery_snapshot_lists,
+    replan_recovery_snapshots_from_events,
+)
 from .run_snapshots import RunSnapshotProjector
 from .task_core_snapshots import task_core_snapshot_from_payload
 from .task_progress_snapshots import task_progress_summary_from_task_core
@@ -88,6 +93,11 @@ def group_run_snapshot_from_payload(
         events=events,
         needs_user_action=bool(pending_approvals),
     )
+    replan_recoveries = _group_run_replan_recoveries(
+        runs,
+        events,
+        group_run_id=group_run_id,
+    )
     return GroupRunSnapshot(
         group_run_id=group_run_id,
         run_group_id=legacy_run_group_id or group_run_id or None,
@@ -105,6 +115,7 @@ def group_run_snapshot_from_payload(
         active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
         task_core=task_core,
         task_progress=task_progress,
+        replan_recoveries=replan_recoveries,
         events=events,
         runs=runs,
         child_run_ids=child_run_ids,
@@ -304,6 +315,35 @@ def _group_run_pending_approvals(
         [*direct_and_event_approvals, *child_approvals],
         lambda approval: approval.approval_id,
     )
+
+
+def _group_run_replan_recoveries(
+    runs: list[RunTimelineSnapshot],
+    events: list[Any],
+    *,
+    group_run_id: str,
+) -> list[ReplanRecoverySnapshot]:
+    direct_recoveries = replan_recovery_snapshots_from_events(
+        events,
+        run_id=group_run_id,
+        group_run_id=group_run_id,
+    )
+    child_recoveries = [
+        _group_context_replan_recovery(recovery, group_run_id=group_run_id)
+        for run in runs
+        for recovery in run.replan_recoveries
+    ]
+    return merge_replan_recovery_snapshot_lists(direct_recoveries, child_recoveries)
+
+
+def _group_context_replan_recovery(
+    recovery: ReplanRecoverySnapshot,
+    *,
+    group_run_id: str,
+) -> ReplanRecoverySnapshot:
+    if recovery.group_run_id:
+        return recovery
+    return recovery.model_copy(update={"group_run_id": group_run_id or None})
 
 
 def _group_context_artifact(

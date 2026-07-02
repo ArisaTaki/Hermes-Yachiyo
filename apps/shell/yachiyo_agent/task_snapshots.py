@@ -25,6 +25,7 @@ from .events import public_run_event_from_payload
 from .links import studio_run_url
 from .recovery_actions import RECOVERY_RETRY_CONTEXT_EVENT_TYPE
 from .replan_event_projection import run_events_with_replan_requests
+from .replan_recovery_snapshots import replan_recovery_snapshots_from_events
 from .timeline_metadata_snapshots import planner_trace_summary_from_payload
 from .tool_call_snapshots import tool_call_snapshots_from_payloads
 from .task_core_snapshots import task_core_snapshot_from_payload
@@ -137,6 +138,12 @@ def agent_task_snapshot_from_payload(
         events=all_events,
         needs_user_action=needs_user_action,
     )
+    replan_recoveries = replan_recovery_snapshots_from_events(
+        all_events,
+        run_id=run_id,
+        task_id=task_id,
+        group_run_id=group_run_id,
+    )
 
     return AgentTaskSnapshot(
         task_id=task_id,
@@ -164,6 +171,7 @@ def agent_task_snapshot_from_payload(
         ),
         task_core=task_core,
         task_progress=task_progress,
+        replan_recoveries=replan_recoveries,
         open_in_studio_url=_optional_text(payload.get("open_in_studio_url"))
         or studio_run_url(run_id, group_run_id=group_run_id),
         created_at=_text(payload.get("created_at")),

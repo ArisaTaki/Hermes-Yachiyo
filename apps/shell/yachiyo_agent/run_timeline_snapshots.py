@@ -27,6 +27,7 @@ from .task_snapshots import run_events_from_payload, task_status_from_value
 from .task_core_snapshots import task_core_snapshot_from_payload
 from .task_progress_snapshots import task_progress_summary_from_task_core
 from .replan_event_projection import run_events_with_replan_requests
+from .replan_recovery_snapshots import replan_recovery_snapshots_from_events
 from .timeline_metadata_snapshots import (
     merge_timeline_child_snapshots,
     planner_trace_summary_from_payload,
@@ -75,6 +76,13 @@ def run_timeline_snapshot_from_payload(
         events=events,
         needs_user_action=pending_approval is not None,
     )
+    replan_recoveries = replan_recovery_snapshots_from_events(
+        events,
+        run_id=run_id,
+        task_id=_text(payload.get("task_id")),
+        group_run_id=group_run_id or "",
+        workflow_run_id=workflow_run_id_from_payload(payload, run_id),
+    )
 
     return RunTimelineSnapshot(
         run_id=run_id,
@@ -103,6 +111,7 @@ def run_timeline_snapshot_from_payload(
         planner_summary=planner_trace_summary_from_payload(payload),
         task_core=task_core,
         task_progress=task_progress,
+        replan_recoveries=replan_recoveries,
         events=events,
         tool_calls=tool_call_snapshots_from_payloads(
             payload.get("tool_calls"),
