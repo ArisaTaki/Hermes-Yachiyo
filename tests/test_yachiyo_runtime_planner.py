@@ -9889,6 +9889,89 @@ def test_runtime_planner_routes_capability_app_search_to_desktop_operation() -> 
         ]
 
 
+def test_runtime_planner_keeps_scoped_capability_app_search_off_web_research() -> None:
+    allowed_tools = [
+        "browser.open_url",
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+
+    prompt = "打开一个代码编辑器，然后在里面搜索 README.md"
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "code",
+    }
+    assert decision.selected_intent.inputs["app_search_hint"] == {
+        "query": "README.md",
+        "target": "搜索",
+    }
+    assert "selected_app_target_path_hint" not in decision.selected_intent.inputs
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "verify-desktop-result",
+    ]
+    assert planner_tool_requests(prompt, allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "code", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "code",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "README.md"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_runtime_planner_discovers_generic_design_tool_before_searching() -> None:
     allowed_tools = [
         "desktop.list_apps",
@@ -9952,7 +10035,6 @@ def test_runtime_planner_discovers_generic_design_tool_before_searching() -> Non
             "input": {"query": "image", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
         },
         {
             "protocol": "json_fallback",
@@ -10311,6 +10393,108 @@ def test_runtime_planner_carries_target_file_when_discovering_app_capabilities()
         "总结 ~/Downloads/report.pdf",
         allowed_tools=allowed_tools,
     ).selected_intent.kind == "report_generation"
+
+
+def test_runtime_planner_opens_file_with_discovered_app_before_in_app_search() -> None:
+    allowed_tools = [
+        "browser.open_url",
+        "desktop.list_apps",
+        "desktop.open_path_with_app",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+        "workspace.list",
+    ]
+
+    prompt = "在任意 PDF 应用里打开 Downloads/report.pdf 并搜索 revenue"
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "pdf",
+    }
+    assert decision.selected_intent.inputs["app_search_hint"] == {
+        "query": "revenue",
+        "target": "搜索",
+    }
+    assert decision.selected_intent.inputs["selected_app_target_path_hint"] == (
+        "Downloads/report.pdf"
+    )
+    assert "file_open_discovery_hint" not in decision.selected_intent.inputs
+    assert "desktop_content_artifact_hint" not in decision.selected_intent.inputs
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "pdf",
+        "target_path": "Downloads/report.pdf",
+        "action": "open_path_with_selected_app",
+    }
+
+    expected_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "pdf", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path_with_app",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "pdf",
+                "target_path": "Downloads/report.pdf",
+                "action": "open_path_with_selected_app",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "revenue"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+    assert planner_tool_requests(prompt, allowed_tools) == expected_requests
+
+    selection = planner_first_direct_tool_selection(prompt, allowed_tools)
+    assert selection.selected_source == "runtime_planner"
+    assert selection.requests == expected_requests
 
 
 def test_runtime_planner_discovers_dynamic_file_before_opening_with_app() -> None:

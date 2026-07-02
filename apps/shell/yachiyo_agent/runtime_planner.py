@@ -382,13 +382,20 @@ class TaskIntentRouter:
         generic_browser_search = _generic_browser_app_search_hint(text)
         if generic_browser_search and not app_capability:
             app_capability = {"query": "browser", "description": "browser"}
-        file_open_discovery = _app_file_open_discovery_hint(
-            text,
-            metadata,
-        ) or _generic_app_file_open_discovery_hint(
-            text,
-            metadata,
-            app_capability=app_capability,
+        selected_app_target_path = (
+            _selected_discovered_app_target_path_hint(text) if app_capability else ""
+        )
+        file_open_discovery = (
+            {}
+            if selected_app_target_path
+            else _app_file_open_discovery_hint(
+                text,
+                metadata,
+            ) or _generic_app_file_open_discovery_hint(
+                text,
+                metadata,
+                app_capability=app_capability,
+            )
         )
         app_search_app_hint = "" if app_capability else _app_name_hint(text)
         if (
@@ -1012,9 +1019,6 @@ class TaskIntentRouter:
             app_search = {}
             foreground_submit_action = ""
             foreground_search_submit = False
-        selected_app_target_path = (
-            _selected_discovered_app_target_path_hint(text) if app_capability else ""
-        )
         inputs: dict[str, Any] = {
             "app_name_hint": app_name_hint,
             "operation_hint": operation_hint,
@@ -3357,11 +3361,14 @@ class RuntimePlanner:
             selected_app_tool = _selected_discovered_app_tool(
                 allowed,
                 safe_shortcut=safe_shortcut,
+                target_path=str(intent.inputs.get("selected_app_target_path_hint") or "").strip(),
                 mode=mode,
             )
             if action == "discover_apps" and _discovered_app_open_requested(intent) and selected_app_tool:
                 selected_app_capability = (
-                    "desktop.app_control"
+                    "file.desktop_access"
+                    if selected_app_tool == "desktop.open_path_with_app"
+                    else "desktop.app_control"
                     if selected_app_tool in {"app.open", "desktop.open_app"}
                     else "desktop.ui_operation"
                 )
@@ -3370,6 +3377,22 @@ class RuntimePlanner:
                     if selected_app_tool == "app.open_and_safe_shortcut"
                     else "open_app"
                 )
+                selected_app_target_path = str(
+                    intent.inputs.get("selected_app_target_path_hint") or ""
+                ).strip()
+                selected_app_input_preview = {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": str(input_preview.get("query") or "").strip(),
+                    **_selected_discovered_app_operation_preview(
+                        selected_app_tool,
+                        safe_shortcut=safe_shortcut,
+                    ),
+                }
+                if selected_app_target_path:
+                    selected_app_input_preview["target_path"] = selected_app_target_path
+                    selected_app_input_preview["action"] = "open_path_with_selected_app"
+                    selected_app_action = "open_path_with_selected_app"
                 steps.append(
                     _step(
                         intent,
@@ -3377,15 +3400,7 @@ class RuntimePlanner:
                         "Open selected discovered app",
                         selected_app_capability,
                         selected_app_tool,
-                        input_preview={
-                            "app_name": "<selected app from desktop.list_apps>",
-                            "selection_source": "desktop.list_apps",
-                            "query": str(input_preview.get("query") or "").strip(),
-                            **_selected_discovered_app_operation_preview(
-                                selected_app_tool,
-                                safe_shortcut=safe_shortcut,
-                            ),
-                        },
+                        input_preview=selected_app_input_preview,
                         depends_on=[desktop_discovery_step_id],
                         action=selected_app_action,
                         reason=(
@@ -16415,15 +16430,25 @@ def _desktop_content_artifact_requested(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
         return False
-    return _contains_any(
+    value_without_paths = re.sub(
+        r"(?:~|/|\./|\../)?[^\s\"'“”‘’，,。；;]+"
+        r"\.(?:pdf|md|markdown|txt|csv|tsv|xlsx|xls|json|jsonl|doc|docx|rtf|"
+        r"pages|numbers|py|js|jsx|ts|tsx|java|go|rs|swift|kt|kts|c|cc|cpp|h|hpp|"
+        r"png|jpg|jpeg|heic|gif|webp|ppt|pptx|key)",
+        "",
         value,
+        flags=re.IGNORECASE,
+    )
+    if re.search(r"(?<![\w.])md(?![\w.])", value_without_paths, flags=re.IGNORECASE):
+        return True
+    return _contains_any(
+        value_without_paths,
         (
             "报告",
             "总结",
             "摘要",
             "整理",
             "markdown",
-            "md",
             "report",
             "summary",
             "summarize",
@@ -19414,6 +19439,14 @@ def _app_capability_search_hint(text: str, app_capability: Mapping[str, str]) ->
     if not value:
         return {}
     patterns = (
+        r"(?:并|然后|再|接着|之后|后|\band\s+then\b|\bthen\b|\band\b)\s*"
+        r"(?:(?:在|到)?(?:里面|其中|应用(?:程序)?(?:里|中|内|上)?|"
+        r"app|application|tool|program|client|editor|reader|viewer)\s*)?"
+        r"(?:搜索|查找|检索|找|search|find|look\s+up)(?:一下|下|for)?\s*(?P<followup_query>.+)$",
+        r"(?:在|到)?(?:里面|其中|里|中|内|上)\s*"
+        r"(?:搜索|查找|检索|找)(?:一下|下)?\s*(?P<scoped_query>.+)$",
+        r"\b(?:inside|within|in)\s+(?:it|the\s+app|the\s+application|the\s+tool|the\s+program)"
+        r"\s+(?:search|find|look\s+up)(?:\s+for)?\s+(?P<scoped_query_en>.+)$",
         r"(?:应用(?:程序)?|app|软件|工具|程序|客户端|编辑器|阅读器|查看器|浏览器)"
         r"(?:里|中|内|上)?\s*(?:并|然后|再|去|来|用于|用来)?\s*"
         r"(?:搜索|查找|检索|找)(?:一下|下)?\s*(?P<query>.+)$",
@@ -19426,7 +19459,10 @@ def _app_capability_search_hint(text: str, app_capability: Mapping[str, str]) ->
         if not match:
             continue
         query = _clean_app_search_query(
-            match.groupdict().get("query")
+            match.groupdict().get("followup_query")
+            or match.groupdict().get("scoped_query")
+            or match.groupdict().get("scoped_query_en")
+            or match.groupdict().get("query")
             or match.groupdict().get("query_en")
             or ""
         ).strip(" .，,。?？!！")
@@ -22315,7 +22351,7 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
         r"(?:app|application|client|tool|program|editor)\b",
-        r"(?:打开|启动|找|找个|找一个|找一款|使用|用|通过)\s*"
+        r"(?:打开|启动|找|找个|找一个|找一款|使用|在|用|通过)\s*"
         rf"{local_scope_prefix}"
         rf"{generic_prefix}"
         r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
@@ -22332,7 +22368,7 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
         r"(?:app|application|client|tool|program|editor)\b",
-        r"(?:打开|启动|找|找个|找一个|找一款|使用|用|通过)\s*"
+        r"(?:打开|启动|找|找个|找一个|找一款|使用|在|用|通过)\s*"
         rf"{local_scope_prefix}"
         rf"{required_generic_prefix}"
         r"(?P<generic_prefixed_capability_cn>[^。！？!?，,]{1,24}?)"
@@ -22771,6 +22807,8 @@ def _looks_like_dynamic_file_open_target(text: str) -> bool:
 def _selected_discovered_app_target_path_hint(text: str) -> str:
     source_hint = data_source_hint(text)
     if source_hint:
+        if _path_hint_is_app_search_query(text, source_hint):
+            return ""
         return source_hint
     file_hint = file_access_hint(text)
     if str(file_hint.get("action") or "").strip() == "open_path":
@@ -22788,7 +22826,26 @@ def _selected_discovered_app_target_path_hint(text: str) -> str:
     )
     if not match:
         return ""
+    if _path_hint_is_app_search_query(value, str(match.group("path") or "")):
+        return ""
     return str(match.group("path") or "").rstrip("。.,，；;")
+
+
+def _path_hint_is_app_search_query(text: str, path: str) -> bool:
+    value = _clean_prompt(text)
+    target = str(path or "").strip()
+    if not value or not target:
+        return False
+    index = value.lower().find(target.lower())
+    if index <= 0:
+        return False
+    return bool(
+        re.search(
+            r"(?:搜索|查找|检索|找|search|find|look\s+up)(?:一下|下|for)?\s*$",
+            value[:index],
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _clean_app_capability_description(value: str) -> str:
