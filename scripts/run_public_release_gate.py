@@ -723,6 +723,8 @@ def _merge_external_requirement(
             "status": "missing",
             "missing_required_flow_ids": [],
             "missing_env": [],
+            "opt_in_flags": [],
+            "opt_in_reasons": [],
             "blocking_conditions": [],
             "commands": [],
             "release_blockers": [],
@@ -740,6 +742,20 @@ def _merge_external_requirement(
         requirement["release_blockers"].extend(blockers)
     for blocker in blockers:
         evidence_summary = _dict(blocker.get("evidence_summary"))
+        flow_id = str(blocker.get("id") or "").strip()
+        flow_flag_info = PUBLIC_DEMO_FLOW_FLAGS.get(flow_id)
+        fallback_opt_in_flag = flow_flag_info[1] if flow_flag_info else ""
+        _append_unique(
+            requirement["opt_in_flags"],
+            _string_list(blocker.get("opt_in_flag") or fallback_opt_in_flag),
+        )
+        _append_unique(
+            requirement["opt_in_reasons"],
+            _string_list(
+                blocker.get("opt_in_reason")
+                or PUBLIC_DEMO_FLOW_OPT_IN_REASONS.get(flow_id, "")
+            ),
+        )
         _append_unique(
             requirement["missing_env"],
             _string_list(evidence_summary.get("missing_env")),
@@ -772,6 +788,12 @@ PUBLIC_DEMO_FLOW_FLAGS: dict[str, tuple[str, str]] = {
     "workflow_provider": ("provider", "--include-provider-workflow"),
     "studio_replay_ui": ("ui", "--include-ui"),
     "workflow_ui": ("ui", "--include-ui"),
+}
+
+PUBLIC_DEMO_FLOW_OPT_IN_REASONS: dict[str, str] = {
+    flow.id: flow.opt_in_reason
+    for flow in demo_flows(Path("tmp/public-demo-flow-catalog"))
+    if flow.opt_in_reason
 }
 
 PUBLIC_DEMO_GROUP_LABELS: dict[str, str] = {
@@ -942,6 +964,18 @@ def render_markdown(summary: Mapping[str, Any]) -> str:
                 lines.append(
                     "  Missing env: "
                     + ", ".join(f"`{item}`" for item in missing_env)
+                )
+            opt_in_flags = _string_list(requirement.get("opt_in_flags"))
+            if opt_in_flags:
+                lines.append(
+                    "  Opt-in flags: "
+                    + ", ".join(f"`{item}`" for item in opt_in_flags)
+                )
+            opt_in_reasons = _string_list(requirement.get("opt_in_reasons"))
+            if opt_in_reasons:
+                lines.append(
+                    "  Opt-in reasons: "
+                    + "; ".join(opt_in_reasons)
                 )
             blocking_conditions = _string_list(requirement.get("blocking_conditions"))
             if blocking_conditions:

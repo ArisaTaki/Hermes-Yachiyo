@@ -523,6 +523,15 @@ def test_public_release_gate_does_not_double_count_public_demo_release_smoke_blo
         "real_desktop_smoke_opt_in",
         "provider_smoke_credentials",
     ]
+    real_desktop_requirement = summary["external_requirements"][0]
+    assert real_desktop_requirement["opt_in_flags"] == [
+        "--include-real-desktop-ui-inspection",
+        "--include-real-desktop-interaction",
+    ]
+    assert real_desktop_requirement["opt_in_reasons"] == [
+        "opens and inspects a real macOS application",
+        "types and clicks in a real macOS application",
+    ]
 
 
 def test_public_release_gate_keeps_more_informative_public_demo_blocker(
@@ -618,6 +627,10 @@ def test_public_release_gate_keeps_more_informative_public_demo_blocker(
         for item in summary["external_requirements"]
         if item["id"] == "provider_smoke_credentials"
     )
+    assert provider_requirement["opt_in_flags"] == ["--include-provider-workflow"]
+    assert provider_requirement["opt_in_reasons"] == [
+        "requires live provider smoke credentials"
+    ]
     assert provider_requirement["missing_env"] == [
         "OHA_YACHIYO_SMOKE_BASE_URL",
         "OHA_YACHIYO_SMOKE_MODEL",
@@ -625,6 +638,8 @@ def test_public_release_gate_keeps_more_informative_public_demo_blocker(
     markdown = gate.render_markdown(summary)
     assert "## External Requirements" in markdown
     assert "`provider_smoke_credentials`" in markdown
+    assert "Opt-in flags: `--include-provider-workflow`" in markdown
+    assert "Opt-in reasons: requires live provider smoke credentials" in markdown
     assert "`OHA_YACHIYO_SMOKE_BASE_URL`" in markdown
     assert "scripts/run_public_demo_smokes.py --include-provider-workflow" in markdown
 
