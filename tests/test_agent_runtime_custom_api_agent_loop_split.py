@@ -21116,6 +21116,70 @@ def test_runtime_tool_runner_skips_unresolved_selected_discovered_app() -> None:
     assert run_events[-1]["payload"]["result"]["error"] == "app_resolution_failed"
 
 
+def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> None:
+    decision = RuntimePlanner().decision(
+        "找一个 PDF 阅读器，向下滚动两页",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus_and_safe_scroll",
+            "screen.capture",
+        ],
+    )
+    appended_events: list[dict[str, Any]] = []
+    loop = _private_runtime_loop(
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        )
+    )
+    timeline: list[dict[str, Any]] = []
+    loop._record_runtime_planner_events(
+        decision,
+        timeline=timeline,
+        run_id="run-unresolved-app-replan",
+    )
+    tool_timeline_start = len(timeline)
+    timeline.append(
+        _timeline(
+            "agent.tool.skipped",
+            "app.open",
+            input_preview={
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "pdf",
+            },
+            result={
+                "ok": False,
+                "skipped": True,
+                "blocked_by_app_resolution": True,
+                "error": "app_resolution_failed",
+                "hint": "desktop.list_apps did not return a high-confidence app match.",
+            },
+            step_id="open-selected-discovered-app",
+            capability_id="desktop.app_control",
+        )
+    )
+
+    replan_payloads = loop._record_runtime_planner_replan_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=tool_timeline_start,
+        run_id="run-unresolved-app-replan",
+    )
+
+    assert len(replan_payloads) == 1
+    payload = replan_payloads[0]
+    assert payload["trigger"] == "tool_failure"
+    assert payload["source_step_id"] == "open-selected-discovered-app"
+    assert payload["source_tool_name"] == "app.open"
+    assert payload["target_capability_id"] == "desktop.app_control"
+    assert payload["failure_event_type"] == "agent.tool.skipped"
+    assert "app_resolution_failed" in payload["failure_detail"]
+    assert timeline[-1]["event"] == "agent.replan.requested"
+    assert appended_events[-1]["event_type"] == "agent.replan.requested"
+    assert appended_events[-1]["payload"]["request_id"] == payload["request_id"]
+
+
 def test_runtime_tool_runner_projects_task_progress_from_tool_result() -> None:
     budget = FakeBudget()
     timeline: list[dict[str, Any]] = []

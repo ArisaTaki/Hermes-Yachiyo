@@ -1768,7 +1768,7 @@ class RuntimeCustomApiAgentLoop:
             for event in list(timeline[tool_timeline_start:])
             if isinstance(event, dict)
             and str(event.get("event") or "").strip()
-            in {"agent.tool.call", "agent.tool.failed"}
+            in {"agent.tool.call", "agent.tool.failed", "agent.tool.skipped"}
         ]
         step_payloads = _runtime_planner_tool_event_step_payloads(decision, tool_events)
         failure_payloads: list[dict[str, Any]] = []
