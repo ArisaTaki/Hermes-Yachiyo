@@ -2210,10 +2210,15 @@ class RuntimePlanner:
         metadata: Mapping[str, Any] | None = None,
     ) -> PlannerDecisionSnapshot:
         candidates = self._intent_router.candidate_intents(prompt, metadata)
-        selected = candidates[0] if candidates else self._intent_router.route(prompt, metadata)
+        allowed = _allowed_tool_set(allowed_tools)
+        selected = (
+            _select_intent_for_allowed_tools(candidates, allowed)
+            if candidates
+            else self._intent_router.route(prompt, metadata)
+        )
         selected = _normalize_intent_for_allowed_tools(
             selected,
-            _allowed_tool_set(allowed_tools),
+            allowed,
         )
         plan = self.plan_intent(selected, allowed_tools=allowed_tools, metadata=metadata)
         return PlannerDecisionSnapshot(
@@ -9981,6 +9986,35 @@ def _normalize_intent_for_allowed_tools(
     return intent
 
 
+def _select_intent_for_allowed_tools(
+    candidates: list[TaskIntentSnapshot],
+    allowed: set[str] | None,
+) -> TaskIntentSnapshot:
+    selected = candidates[0]
+    if allowed is None:
+        return selected
+    browser_open_available = bool(
+        {"browser.open_url", "browser.search", "browser.open"} & allowed
+    )
+    if not browser_open_available:
+        return selected
+    if selected.kind != "desktop_operation":
+        return selected
+    if not (
+        isinstance(selected.inputs.get("generic_browser_discovery_hint"), Mapping)
+        and isinstance(selected.inputs.get("app_search_hint"), Mapping)
+    ):
+        return selected
+    for candidate in candidates[1:]:
+        if candidate.kind != "web_research":
+            continue
+        if str(candidate.inputs.get("browser_action") or "").strip() != "open_search":
+            continue
+        if str(candidate.inputs.get("query") or "").strip():
+            return candidate
+    return selected
+
+
 def _missing_capabilities(
     snapshots: list[Any],
     *,
@@ -16693,8 +16727,8 @@ def _normalized_generic_browser_label(value: str) -> bool:
     if compact in {"browser", "webbrowser", "浏览器", "网页", "页面"}:
         return True
     compact_without_qualifiers = re.sub(
-        r"^(?:一个|一款)?(?:(?:任意|任何|默认|当前|可用|可使用|能用|已安装|本地|"
-        r"系统自带|内置|合适|适合|推荐)(?:的)?)+",
+        r"^(?:(?:一个|一款|个)(?:的)?|(?:任意|任何|默认|当前|可用|可使用|能用|"
+        r"已安装|本地|系统自带|内置|合适|适合|推荐)(?:的)?)+",
         "",
         compact,
     )
@@ -21022,14 +21056,18 @@ def _direct_web_search_query(text: str) -> str:
         r"(?:并|然后|再)?\s*(?:搜索|查找|检索)\s*(?P<query>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?:在|用|通过|打开|启动|开启)\s*)?"
+        r"(?:(?:一个|一款|个|任意|任何|默认|当前|可用|可使用|能用|已安装|本地|"
+        r"系统自带|内置|合适|适合|推荐)(?:的)?\s*)*"
         r"(?:Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave|浏览器)"
-        r"(?:里|中|上|内)?\s*"
+        r"(?:里|中|上|内)?\s*[，,、]?\s*"
         r"(?:打开|访问|浏览|搜索|搜一下|搜|查找|查询|查一下|查查|检索)\s*"
         r"(?!新标签页?|新标签|new\s+tab)(?P<query>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:在|用|通过)?\s*"
+        r"(?:(?:一个|一款|个|任意|任何|默认|当前|可用|可使用|能用|已安装|本地|"
+        r"系统自带|内置|合适|适合|推荐)(?:的)?\s*)*"
         r"(?:Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave|浏览器)"
-        r"(?:里|中|上|内)?\s*"
+        r"(?:里|中|上|内)?\s*[，,、]?\s*"
         r"(?:(?:打开|启动|开启|新建|开)\s*(?:一个|个)?\s*"
         r"(?:新标签页?|新标签|new\s+tab)?\s*)?"
         r"(?:并|然后|再)?\s*(?:搜索|搜一下|搜|查找|查询|查一下|查查|检索)\s*(?P<query>[^。！？!?]+)$",
@@ -21179,8 +21217,10 @@ def _web_search_surface_hint(text: str) -> str:
     direct_browser = re.search(
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:(?:在|用|通过|打开|启动|开启)\s*)?"
+        r"(?:(?:一个|一款|个|任意|任何|默认|当前|可用|可使用|能用|已安装|本地|"
+        r"系统自带|内置|合适|适合|推荐)(?:的)?\s*)*"
         r"(?P<surface>Chrome|Google\s*Chrome|谷歌浏览器|Safari|Firefox|Edge|Brave|浏览器)"
-        r"(?:里|中|上|内)?\s*"
+        r"(?:里|中|上|内)?\s*[，,、]?\s*"
         r"(?:打开|访问|浏览|搜索|搜一下|搜|查找|查询|查一下|查查|检索)",
         text,
         flags=re.IGNORECASE,

@@ -5389,6 +5389,8 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
     for prompt in (
         "用默认浏览器搜索 Oha Yachiyo desktop agent",
         "用任意可用的浏览器搜索 Oha Yachiyo desktop agent",
+        "打开一个浏览器，搜索 Oha Yachiyo desktop agent",
+        "打开任意一个可用的浏览器搜索 Oha Yachiyo desktop agent",
     ):
         generic_browser_search = RuntimePlanner().decision(
             prompt,
@@ -5417,6 +5419,21 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
                 "planning_reason": "planner_fallback_web_research",
             }
         ]
+
+    entrypoint_selection = planner_first_direct_tool_selection(
+        "打开一个浏览器，搜索 OpenAI API pricing",
+        ["browser.open_url", "desktop.list_apps", "app.open", "desktop.safe_type_text"],
+    )
+    assert entrypoint_selection.selected_source == "runtime_planner"
+    assert entrypoint_selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=OpenAI+API+pricing"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
 
     english_decision = RuntimePlanner().decision(
         "research OpenAI latest news and write a report",
