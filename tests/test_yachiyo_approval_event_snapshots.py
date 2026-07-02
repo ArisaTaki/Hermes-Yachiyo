@@ -152,6 +152,44 @@ def test_approval_event_mapper_uses_top_level_run_context() -> None:
     assert approval.input_preview["group_run_id"] == "group-run-1"
 
 
+def test_approval_event_mapper_projects_scoped_desktop_intent_approval() -> None:
+    approvals = approval_snapshots_from_events(
+        [
+            PublicRunEvent(
+                run_id="workflow-run-desktop",
+                sequence=1,
+                event_type="workflow.run.desktop.intent_approval_required",
+                created_at="2026-06-27T00:00:00Z",
+                payload={
+                    "tool": "desktop.hotkey",
+                    "approval_id": "approval-hotkey",
+                    "risk_level": "medium",
+                    "policy_reason": "前台快捷键需要确认。",
+                    "workflow_id": "workflow-1",
+                    "workflow_run_id": "workflow-run-1",
+                    "workflow_node_id": "desktop",
+                    "workflow_node_label": "Desktop Action",
+                    "group_id": "group-1",
+                    "group_run_id": "group-run-1",
+                    "input_preview": {"key": "l", "modifiers": ["command"]},
+                },
+            )
+        ]
+    )
+
+    assert len(approvals) == 1
+    approval = approvals[0]
+    assert approval.approval_id == "approval-hotkey"
+    assert approval.status == "pending"
+    assert approval.tool_name == "desktop.hotkey"
+    assert approval.workflow_run_id == "workflow-run-1"
+    assert approval.workflow_node_id == "desktop"
+    assert approval.group_run_id == "group-run-1"
+    assert approval.input_preview["key"] == "l"
+    assert approval.input_preview["workflow_run_id"] == "workflow-run-1"
+    assert approval.input_preview["group_run_id"] == "group-run-1"
+
+
 def test_merge_approval_snapshot_lists_preserves_order_and_fills_resolution() -> None:
     pending = approval_card_from_payload(
         {

@@ -49,7 +49,9 @@ def tool_call_snapshots_from_events(events: list[PublicRunEvent]) -> list[ToolCa
             call = tool_call_snapshot_from_payload(payload, run_id=event.run_id)
             key = tool_call_correlation_key(payload, call)
             active_index = active_by_key.get(key) if key else None
-            if active_index is None and event.event_type in _DAILY_DESKTOP_INTENT_TOOL_EVENTS:
+            if active_index is None and is_daily_desktop_intent_tool_event(
+                event.event_type
+            ):
                 active_index = latest_matching_tool_call_index(calls, call)
             if active_index is None:
                 active_index = len(calls)
@@ -65,7 +67,7 @@ def tool_call_snapshots_from_events(events: list[PublicRunEvent]) -> list[ToolCa
 
 
 def tool_call_payloads_from_event(event: PublicRunEvent) -> list[dict[str, Any]]:
-    if event.event_type == "agent.desktop.intent_completed":
+    if is_desktop_intent_event(event.event_type, "completed"):
         step_payloads = daily_desktop_intent_step_payloads(event)
         if step_payloads:
             return [
@@ -111,7 +113,7 @@ def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         "status": tool_status_from_event_payload(event.event_type, payload),
         "created_at": event.created_at,
     }
-    if event.event_type in _DAILY_DESKTOP_INTENT_TOOL_EVENTS:
+    if is_daily_desktop_intent_tool_event(event.event_type):
         output_preview = daily_desktop_intent_output_preview(event.event_type, payload)
         if output_preview:
             normalized.setdefault("output_preview", output_preview)
@@ -120,22 +122,26 @@ def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
     if risk_level:
         normalized.setdefault("risk_level", risk_level)
     merge_tool_trace_context(normalized, payload)
+    trace_context = {
+        "approval_id": approval_id,
+        "risk_level": risk_level,
+        "policy_reason": policy_reason,
+        "group_id": payload.get("group_id"),
+        "group_run_id": payload.get("group_run_id") or payload.get("run_group_id"),
+        "member_agent_id": payload.get("member_agent_id"),
+        "member_agent_name": payload.get("member_agent_name"),
+        "workflow_id": payload.get("workflow_id"),
+        "workflow_run_id": payload.get("workflow_run_id"),
+        "workflow_node_id": payload.get("workflow_node_id"),
+        "workflow_node_label": payload.get("workflow_node_label"),
+    }
+    for key in _PLANNER_TRACE_KEYS:
+        if key == "source" and is_daily_desktop_intent_tool_event(event.event_type):
+            continue
+        trace_context[key] = payload.get(key)
     merge_tool_trace_into_input_preview(
         normalized,
-        {
-            "approval_id": approval_id,
-            "risk_level": risk_level,
-            "policy_reason": policy_reason,
-            "group_id": payload.get("group_id"),
-            "group_run_id": payload.get("group_run_id") or payload.get("run_group_id"),
-            "member_agent_id": payload.get("member_agent_id"),
-            "member_agent_name": payload.get("member_agent_name"),
-            "workflow_id": payload.get("workflow_id"),
-            "workflow_run_id": payload.get("workflow_run_id"),
-            "workflow_node_id": payload.get("workflow_node_id"),
-            "workflow_node_label": payload.get("workflow_node_label"),
-            **{key: payload.get(key) for key in _PLANNER_TRACE_KEYS if key != "source"},
-        },
+        trace_context,
     )
     return normalized
 
@@ -327,7 +333,7 @@ def tool_call_snapshot_match_key(call: ToolCallSnapshot) -> str:
 
 
 def is_tool_event(event_type: str) -> bool:
-    return event_type in _DAILY_DESKTOP_INTENT_TOOL_EVENTS or event_type in {
+    return is_daily_desktop_intent_tool_event(event_type) or event_type in {
         "agent.tool.call",
         "agent.tool.denied",
         _TOOL_INPUT_RESOLUTION_EVENT_TYPE,
@@ -407,11 +413,11 @@ def tool_status_from_event_type(event_type: str) -> str:
 
 
 def tool_status_from_event_payload(event_type: str, payload: Mapping[str, Any]) -> str:
-    if event_type == "agent.desktop.intent_approval_required":
+    if is_desktop_intent_event(event_type, "approval_required"):
         return "waiting_approval"
-    if event_type == "agent.desktop.intent_unavailable":
+    if is_desktop_intent_event(event_type, "unavailable"):
         return "blocked"
-    if event_type == "agent.desktop.intent_completed":
+    if is_desktop_intent_event(event_type, "completed"):
         result = payload.get("result")
         if isinstance(result, Mapping):
             result_status = tool_result_status(result)
@@ -469,7 +475,7 @@ def daily_desktop_intent_output_preview(
     result = payload.get("result")
     if isinstance(result, Mapping):
         return dict(result)
-    if event_type == "agent.desktop.intent_unavailable":
+    if is_desktop_intent_event(event_type, "unavailable"):
         return {
             key: payload[key]
             for key in (
@@ -481,13 +487,29 @@ def daily_desktop_intent_output_preview(
             )
             if payload.get(key)
         }
-    if event_type == "agent.desktop.intent_approval_required":
+    if is_desktop_intent_event(event_type, "approval_required"):
         return {
             key: payload[key]
             for key in ("reason", "approval_id", "risk_level", "policy_reason")
             if payload.get(key)
         }
     return {}
+
+
+def is_daily_desktop_intent_tool_event(event_type: str) -> bool:
+    return event_type in _DAILY_DESKTOP_INTENT_TOOL_EVENTS or any(
+        is_desktop_intent_event(event_type, suffix)
+        for suffix in ("approval_required", "completed", "unavailable")
+    )
+
+
+def is_desktop_intent_event(event_type: str, suffix: str) -> bool:
+    return event_type in {
+        f"agent.desktop.intent_{suffix}",
+        f"group.run.desktop.intent_{suffix}",
+        f"workflow.desktop.intent_{suffix}",
+        f"workflow.run.desktop.intent_{suffix}",
+    }
 
 
 def _payload_foreground_lock_is_busy(payload: Mapping[str, Any]) -> bool:

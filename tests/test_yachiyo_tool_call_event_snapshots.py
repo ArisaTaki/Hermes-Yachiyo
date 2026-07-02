@@ -323,3 +323,80 @@ def test_tool_call_snapshots_merge_resolved_app_with_completed_desktop_steps() -
     assert [call.tool_name for call in calls] == ["app.focus", "desktop.ui_elements"]
     assert calls[0].input_preview["app_name"] == "Google Chrome"
     assert calls[0].input_preview["requested_app_name"] == "Chrome"
+
+
+def test_tool_call_snapshots_project_scoped_desktop_intent_events() -> None:
+    calls = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                run_id="group-run-desktop",
+                sequence=1,
+                event_type="group.run.desktop.intent_approval_required",
+                detail="desktop.hotkey",
+                created_at="2026-06-27T00:00:00Z",
+                payload={
+                    "tool": "desktop.hotkey",
+                    "approval_id": "approval-hotkey",
+                    "risk_level": "medium",
+                    "policy_reason": "前台快捷键需要确认。",
+                    "group_run_id": "group-run-1",
+                    "input_preview": {"key": "l", "modifiers": ["command"]},
+                },
+            ),
+            PublicRunEvent(
+                run_id="workflow-run-desktop",
+                sequence=2,
+                event_type="workflow.run.desktop.intent_completed",
+                detail="desktop.ui_elements",
+                created_at="2026-06-27T00:00:01Z",
+                payload={
+                    "tool": "desktop.ui_elements",
+                    "workflow_run_id": "workflow-run-1",
+                    "steps": [
+                        {
+                            "tool": "app.focus",
+                            "input_preview": {"app_name": "Music"},
+                            "result": {"ok": True},
+                        },
+                        {
+                            "tool": "desktop.ui_elements",
+                            "input_preview": {"limit": 80},
+                            "result": {"ok": True, "count": 4},
+                        },
+                    ],
+                    "result": {"ok": True},
+                },
+            ),
+            PublicRunEvent(
+                run_id="workflow-run-desktop",
+                sequence=3,
+                event_type="workflow.run.desktop.intent_unavailable",
+                detail="media.apple_music_play",
+                created_at="2026-06-27T00:00:02Z",
+                payload={
+                    "tool": "media.apple_music_play",
+                    "workflow_run_id": "workflow-run-1",
+                    "reason": "tool_not_allowed",
+                    "blocked_by": "agent_tool_policy",
+                    "blocked_summary": "这个 Agent 当前没有开启 media.apple_music_play。",
+                },
+            ),
+        ]
+    )
+
+    assert [call.tool_name for call in calls] == [
+        "desktop.hotkey",
+        "app.focus",
+        "desktop.ui_elements",
+        "media.apple_music_play",
+    ]
+    assert calls[0].status == "waiting_approval"
+    assert calls[0].approval_id == "approval-hotkey"
+    assert calls[0].group_run_id == "group-run-1"
+    assert calls[1].status == "completed"
+    assert calls[1].workflow_run_id == "workflow-run-1"
+    assert calls[2].status == "completed"
+    assert calls[2].workflow_run_id == "workflow-run-1"
+    assert calls[2].output_preview["count"] == 4
+    assert calls[3].status == "blocked"
+    assert calls[3].output_preview["blocked_by"] == "agent_tool_policy"
