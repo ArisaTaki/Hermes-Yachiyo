@@ -5537,7 +5537,11 @@ def _model_followup_context_payload(
     ]
     if not content_requests:
         return {}
-    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    allowed = {
+        str(tool or "").strip()
+        for tool in allowed_tools
+        if str(tool or "").strip()
+    }
     artifacts_expected = _string_list(selection_payload.get("artifacts_expected"))
     planning_reasons = _ordered_text_list(
         [
@@ -9055,6 +9059,7 @@ def _auto_discovered_followup_requests(
 ) -> list[dict[str, Any]]:
     for factory in (
         _auto_desktop_observed_action_followup_requests,
+        _auto_communication_message_followup_requests,
         _auto_discovered_app_search_observed_result_requests,
         _auto_discovered_app_observed_pending_action_requests,
         _auto_discovered_app_followup_requests,
@@ -9064,6 +9069,140 @@ def _auto_discovered_followup_requests(
         if requests:
             return requests
     return []
+
+
+def _auto_communication_message_followup_requests(
+    selection_payload: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    planning_reason: str = "planner_followup_communication_observed_compose",
+) -> list[dict[str, Any]]:
+    target = (
+        selection_payload.get("followup_target")
+        if isinstance(selection_payload.get("followup_target"), Mapping)
+        else {}
+    )
+    if str(target.get("kind") or "").strip() != "communication_message":
+        return []
+    if not _latest_desktop_observation_succeeded(timeline):
+        return []
+    app_name = str(target.get("app_name") or "").strip()
+    recipient = str(target.get("recipient") or "").strip()
+    body = str(target.get("body") or "").strip()
+    if not app_name or not recipient or not body:
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return []
+    channel = str(target.get("channel") or "").strip()
+    recipient_target = {
+        "kind": "desktop_observed_action",
+        "target_action": "type_text",
+        "target": _discovered_communication_recipient_target(channel),
+        "text": recipient,
+        "role_filter": "text",
+        "limit": 80,
+        "app_name": app_name,
+        "submit_action": "confirm",
+    }
+    observation_source = _latest_desktop_observation_tool(timeline)
+    if observation_source:
+        recipient_target["observation_source"] = observation_source
+    recipient_requests = _auto_desktop_observed_action_followup_requests(
+        {"followup_target": recipient_target},
+        allowed,
+        timeline,
+        planning_reason=planning_reason,
+    )
+    if not recipient_requests:
+        return []
+    body_observation = _communication_message_body_observation_request(
+        app_name,
+        body,
+        target,
+        allowed,
+        source="runtime_planner",
+        planning_reason=planning_reason,
+    )
+    if body_observation:
+        recipient_requests.append(body_observation)
+    return recipient_requests
+
+
+def _communication_message_body_observation_request(
+    app_name: str,
+    body: str,
+    target: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> dict[str, Any]:
+    type_tool = _communication_observed_deferred_type_tool(allowed)
+    observe_tool = _first_allowed_tool(
+        ("desktop.ui_elements", "desktop.read_ui"),
+        allowed,
+    )
+    if not type_tool or not observe_tool:
+        return {}
+    channel = str(target.get("channel") or "").strip()
+    deferred_input = {
+        "app_name": app_name,
+        "target": _discovered_communication_body_target(channel),
+        "text": body,
+        "role_filter": "text",
+        "limit": 80,
+    }
+    request = _request_like(
+        observe_tool,
+        {"app_name": app_name, "role_filter": "text", "limit": 80},
+        source=source,
+        planning_reason=planning_reason,
+    )
+    request["continue_to_model"] = True
+    request["deferred_tool"] = type_tool
+    request["deferred_input"] = deferred_input
+    send_action = str(target.get("send_action") or "send").strip() or "send"
+    if send_action == "send" and "desktop.submit_foreground" in allowed:
+        send_request = _request_like(
+            "desktop.submit_foreground",
+            {"action": "send"},
+            source=source,
+            planning_reason=planning_reason,
+        )
+        send_request["approval_required"] = True
+        send_request["risk_level"] = "high"
+        request["deferred_continuation"] = [send_request]
+    return request
+
+
+def _communication_observed_deferred_type_tool(allowed: set[str]) -> str:
+    return _first_allowed_tool(
+        (
+            "app.focus_and_type_into_ui_element",
+            "app.open_and_type_into_ui_element",
+            "desktop.type_into_ui_element",
+        ),
+        allowed,
+    ) or (
+        "desktop.type_into_ui_element"
+        if _first_allowed_tool(
+            ("desktop.safe_type_text", "desktop.type_text", "desktop.type"),
+            allowed,
+        )
+        and _first_allowed_tool(
+            (
+                "app.focus_and_click_ui_element",
+                "app.open_and_click_ui_element",
+                "desktop.click_ui_element",
+                "desktop.safe_click",
+                "desktop.click",
+            ),
+            allowed,
+        )
+        else ""
+    )
 
 
 def _auto_discovered_app_observed_pending_action_requests(
@@ -9849,8 +9988,9 @@ def _observed_type_submit_request(
         source="runtime_planner",
         planning_reason=planning_reason,
     )
-    request["approval_required"] = True
-    request["risk_level"] = "high"
+    if _observed_submit_action_risk_level(submit_action) == "high":
+        request["approval_required"] = True
+        request["risk_level"] = "high"
     return _with_observed_action_metadata(
         request,
         target,
@@ -9859,6 +9999,13 @@ def _observed_type_submit_request(
         role_filter=role_filter,
         evidence={"strategy": "focused_after_observed_target"},
     )
+
+
+def _observed_submit_action_risk_level(action: str) -> str:
+    normalized = str(action or "").strip().lower().replace("-", "_")
+    if normalized in {"confirm", "search", "select", "choose", "continue"}:
+        return "low"
+    return "high"
 
 
 def _observed_click_input(

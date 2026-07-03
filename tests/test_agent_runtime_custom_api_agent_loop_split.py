@@ -7509,6 +7509,86 @@ def test_auto_deferred_observed_ui_followup_uses_safe_tools_for_virtual_type_req
     assert requests[-1]["deferred_input"]["target"] == "first result"
 
 
+def test_auto_communication_followup_uses_observed_safe_compose() -> None:
+    requests = custom_api_agent_module._auto_communication_message_followup_requests(
+        {
+            "followup_target": {
+                "kind": "communication_message",
+                "app_name": "Slack",
+                "recipient": "Alice",
+                "body": "我晚点到",
+                "body_source": "explicit_user_text",
+                "send_action": "send",
+                "mode": "open",
+            }
+        },
+        [
+            "desktop.ui_elements",
+            "desktop.read_ui",
+            "desktop.safe_click",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+        ],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.ui_elements",
+                input_preview={"app_name": "Slack", "role_filter": "text", "limit": 80},
+                result={
+                    "ok": True,
+                    "data": {
+                        "elements": [
+                            {
+                                "role": "text field",
+                                "label": "To recipient",
+                                "center": {"x": 100, "y": 200},
+                            },
+                            {
+                                "role": "text field",
+                                "label": "message",
+                                "center": {"x": 120, "y": 300},
+                            },
+                        ],
+                    },
+                },
+            )
+        ],
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.safe_click",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "desktop.read_ui",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["input"] == {"x": 100, "y": 200}
+    assert requests[1]["input"] == {"text": "Alice"}
+    assert requests[2]["input"] == {"action": "confirm"}
+    assert "approval_required" not in requests[2]
+    body_observation = requests[-1]
+    assert body_observation["continue_to_model"] is True
+    assert body_observation["deferred_tool"] == "desktop.type_into_ui_element"
+    assert body_observation["deferred_input"] == {
+        "app_name": "Slack",
+        "target": "message",
+        "text": "我晚点到",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert body_observation["deferred_continuation"] == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.submit_foreground",
+            "input": {"action": "send"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_communication_observed_compose",
+            "approval_required": True,
+            "risk_level": "high",
+        }
+    ]
+
+
 def test_auto_deferred_observed_ui_followup_ignores_unmatched_target() -> None:
     requests = custom_api_agent_module._auto_deferred_observed_ui_followup_requests(
         [

@@ -7993,7 +7993,135 @@ def _direct_communication_steps(
             )
         )
 
+    observed_safe_compose = _communication_observed_safe_compose_available(
+        allowed,
+        require_send=send_action != "draft",
+    )
     focus_depends_on = [source_step_id] if source_step_id else []
+    if (
+        observed_safe_compose
+        and not app_shortcut_tool
+        and not (app_tool and shortcut_tool)
+        and body
+        and not body_source
+    ):
+        if mode == "open":
+            open_tool = _first_allowed(
+                ("app.open", "desktop.open_app", "app.focus", "desktop.focus_app"),
+                allowed,
+            )
+        else:
+            open_tool = _first_allowed(
+                ("app.focus", "desktop.focus_app", "app.open", "desktop.open_app"),
+                allowed,
+            )
+        observe_tool = _first_allowed(
+            ("desktop.ui_elements", "desktop.read_ui"),
+            allowed,
+        )
+        steps.extend(
+            [
+                _step(
+                    intent,
+                    "open-or-focus-app",
+                    "Open or focus app",
+                    "desktop.app_control",
+                    open_tool,
+                    input_preview={"app_name": app_name},
+                    depends_on=focus_depends_on,
+                    reason="Prepare the requested communication app before observing its compose UI.",
+                ),
+                _step(
+                    intent,
+                    "inspect-communication-compose-ui",
+                    "Inspect communication compose UI",
+                    "desktop.app_discovery",
+                    observe_tool,
+                    input_preview={"app_name": app_name, "role_filter": "text", "limit": 80},
+                    depends_on=["open-or-focus-app"],
+                    action="read_ui",
+                    reason="Observe the communication UI before focusing recipient and message fields.",
+                ),
+                _step(
+                    intent,
+                    "type-communication-recipient",
+                    "Type communication recipient",
+                    "communication.compose",
+                    "desktop.type_into_ui_element",
+                    input_preview={
+                        "app_name": app_name,
+                        "target": _communication_compose_recipient_target(channel),
+                        "text": recipient,
+                        "role_filter": "text",
+                        "limit": 80,
+                    },
+                    depends_on=["inspect-communication-compose-ui"],
+                    action="type",
+                    reason="Type only the explicit recipient after observing the communication UI.",
+                ),
+                _step(
+                    intent,
+                    "submit-communication-recipient-search",
+                    "Submit communication recipient search",
+                    "communication.compose",
+                    send_tool,
+                    input_preview={"action": "confirm"},
+                    depends_on=["type-communication-recipient"],
+                    action="submit_search",
+                    reason="Confirm the recipient using the foreground submit tool before drafting.",
+                ),
+                _step(
+                    intent,
+                    "inspect-communication-message-ui",
+                    "Inspect communication message UI",
+                    "desktop.app_discovery",
+                    observe_tool,
+                    input_preview={"app_name": app_name, "role_filter": "text", "limit": 80},
+                    depends_on=["submit-communication-recipient-search"],
+                    action="read_ui",
+                    reason="Observe the message field after recipient selection.",
+                ),
+                _step(
+                    intent,
+                    "draft-communication-message",
+                    "Draft communication message",
+                    "communication.compose",
+                    "desktop.type_into_ui_element",
+                    input_preview={
+                        "app_name": app_name,
+                        "target": _communication_compose_body_target(channel),
+                        "text": body,
+                        "role_filter": "text",
+                        "limit": 80,
+                    },
+                    depends_on=["inspect-communication-message-ui"],
+                    action="draft_message",
+                    reason=(
+                        "Type only the explicit message body and stop before sending."
+                        if send_action == "draft"
+                        else "Type only the explicit message body before the approval-gated send step."
+                    ),
+                ),
+            ]
+        )
+        if send_action == "send":
+            steps.append(
+                _step(
+                    intent,
+                    "send-communication-message",
+                    "Send communication message",
+                    "communication.compose",
+                    send_tool,
+                    input_preview={"action": "send"},
+                    risk_level="high",
+                    approval_required=True,
+                    depends_on=["draft-communication-message"],
+                    action="send_message",
+                    reason="Final message sending remains approval-gated.",
+                )
+            )
+        return steps
+
     if app_tool and shortcut_tool:
         steps.append(
             _step(
@@ -8313,6 +8441,30 @@ def _communication_desktop_compose_tools_available(
             or _first_allowed(("desktop.submit_foreground",), allowed)
         )
     )
+
+
+def _communication_observed_safe_compose_available(
+    allowed: set[str] | None,
+    *,
+    require_send: bool,
+) -> bool:
+    if allowed is None:
+        return True
+    if not _first_allowed(
+        ("app.open", "app.focus", "desktop.open_app", "desktop.focus_app"),
+        allowed,
+    ):
+        return False
+    if not _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed):
+        return False
+    if not _first_allowed(("desktop.safe_click", "desktop.click"), allowed):
+        return False
+    if not _first_allowed(
+        ("desktop.safe_type_text", "desktop.type_text", "desktop.type"),
+        allowed,
+    ):
+        return False
+    return bool(not require_send or _first_allowed(("desktop.submit_foreground",), allowed))
 
 
 def _communication_recipient_focus_action(channel: str) -> str:

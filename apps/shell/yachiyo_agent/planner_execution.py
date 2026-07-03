@@ -3591,6 +3591,10 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
     )
     if selected_app_requests:
         return selected_app_requests
+    observed_prepare_requests = _observed_direct_communication_prepare_requests(
+        direct_hint,
+        allowed,
+    )
     if body_source in {"selection", "current_page_link"}:
         required_step_ids = ("copy-communication-body-source",)
     else:
@@ -3615,9 +3619,9 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
         step = steps_by_id.get(step_id)
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if not _step_available(step):
-            return []
+            return observed_prepare_requests
         if not tool_name or tool_name not in allowed:
-            return []
+            return observed_prepare_requests
         input_preview = getattr(step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
         direct_mode = str(direct_hint.get("mode") or "").strip()
@@ -3652,6 +3656,59 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
             )
         )
     return requests
+
+
+def _observed_direct_communication_prepare_requests(
+    direct_hint: Mapping[str, Any],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    app_name = str(direct_hint.get("app_name") or "").strip()
+    recipient = str(direct_hint.get("recipient") or "").strip()
+    body = str(direct_hint.get("body") or "").strip()
+    body_source = str(direct_hint.get("body_source") or "").strip()
+    if not app_name or not recipient or not body or body_source:
+        return []
+    if not _first_allowed(
+        ("desktop.safe_type_text", "desktop.type_text", "desktop.type"),
+        allowed,
+    ):
+        return []
+    if not _first_allowed(("desktop.safe_click", "desktop.click"), allowed):
+        return []
+    if not _first_allowed(("desktop.submit_foreground",), allowed):
+        return []
+    observe_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed)
+    if not observe_tool:
+        return []
+    mode = str(direct_hint.get("mode") or "focus").strip() or "focus"
+    open_tool = ""
+    if mode == "open":
+        open_tool = _first_allowed(
+            ("app.open", "desktop.open_app", "app.focus", "desktop.focus_app"),
+            allowed,
+        )
+    else:
+        open_tool = _first_allowed(
+            ("app.focus", "desktop.focus_app", "app.open", "desktop.open_app"),
+            allowed,
+        )
+    if not open_tool:
+        return []
+    observe_input = {"app_name": app_name, "role_filter": "text", "limit": 80}
+    observe_request = _request(
+        observe_tool,
+        _desktop_request_payload(observe_tool, observe_input),
+        planning_reason="planner_fallback_communication_send",
+    )
+    observe_request["continue_to_model"] = True
+    return [
+        _request(
+            open_tool,
+            _desktop_request_payload(open_tool, {"app_name": app_name}),
+            planning_reason="planner_fallback_communication_send",
+        ),
+        observe_request,
+    ]
 
 
 def _selected_communication_tool_requests(

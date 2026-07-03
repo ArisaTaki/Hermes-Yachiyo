@@ -18696,6 +18696,97 @@ def test_runtime_planner_routes_direct_communication_send_sequence() -> None:
     ]
 
 
+def test_runtime_planner_uses_observed_safe_communication_when_shortcut_is_missing() -> None:
+    allowed_tools = [
+        "app.open",
+        "app.focus",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.safe_click",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+    ]
+    decision = RuntimePlanner().decision(
+        "打开 Slack 给 Alice 发消息说我晚点到",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs == {
+        "direct_message_hint": {
+            "recipient": "Alice",
+            "body": "我晚点到",
+            "mode": "open",
+            "send_action": "send",
+            "app_name": "Slack",
+        }
+    }
+    assert decision.plan.tool_plan.missing_capabilities == []
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "open-or-focus-app",
+        "inspect-communication-compose-ui",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "inspect-communication-message-ui",
+        "draft-communication-message",
+        "send-communication-message",
+    ]
+    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+        "app.open",
+        "desktop.ui_elements",
+        "desktop.type_into_ui_element",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+        "desktop.type_into_ui_element",
+        "desktop.submit_foreground",
+    ]
+    assert _step_by_id(decision, "type-communication-recipient").input_preview == {
+        "app_name": "Slack",
+        "target": "recipient",
+        "text": "Alice",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert _step_by_id(decision, "draft-communication-message").input_preview == {
+        "app_name": "Slack",
+        "target": "message",
+        "text": "我晚点到",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    send_step = _step_by_id(decision, "send-communication-message")
+    assert send_step.approval_required is True
+    assert send_step.risk_level == "high"
+    assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == {
+        "kind": "communication_message",
+        "recipient": "Alice",
+        "body_source": "explicit_user_text",
+        "send_action": "send",
+        "mode": "open",
+        "body": "我晚点到",
+        "app_name": "Slack",
+    }
+
+    requests = planner_tool_requests(
+        "打开 Slack 给 Alice 发消息说我晚点到",
+        allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    execution_requests = planner_execution_tool_requests(requests, allowed_tools)
+
+    assert [request["tool"] for request in execution_requests] == [
+        "app.open",
+        "desktop.ui_elements",
+    ]
+    observation = execution_requests[-1]
+    assert observation["continue_to_model"] is True
+    assert observation["input"] == {
+        "app_name": "Slack",
+        "role_filter": "text",
+        "limit": 80,
+    }
+
+
 def test_runtime_planner_routes_implicit_chinese_direct_communication_send_sequence() -> None:
     requests = planner_direct_tool_requests(
         "打开微信发消息给张三你好",

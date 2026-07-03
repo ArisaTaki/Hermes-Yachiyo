@@ -419,13 +419,16 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
     if communication_target:
         recipient = str(communication_target.get("recipient") or "").strip()
         if recipient:
+            body = str(communication_target.get("body") or "").strip()
             payload = {
                 "kind": "communication_message",
                 "recipient": recipient,
-                "body_source": "model_generated_content",
+                "body_source": "explicit_user_text" if body else "model_generated_content",
                 "send_action": str(communication_target.get("send_action") or "send").strip(),
                 "mode": str(communication_target.get("mode") or "focus").strip() or "focus",
             }
+            if body:
+                payload["body"] = body
             for source_key, target_key in (
                 ("app_name", "app_name"),
                 ("channel", "channel"),
