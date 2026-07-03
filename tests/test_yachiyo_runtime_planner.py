@@ -32944,3 +32944,47 @@ def test_yachiyo_agent_service_uses_fake_runtime_planner_port() -> None:
     assert isinstance(decision, PlannerDecisionSnapshot)
     assert decision.selected_intent.kind == "desktop_operation"
     assert _step_by_id(decision, "open-or-focus-app").input_preview == {"app_name": "PixelForge"}
+
+
+def test_runtime_planner_keeps_app_search_as_desktop_operation_when_analysis_is_query_text() -> None:
+    decision = RuntimePlanner().decision("打开 Obsidian 并搜索昨天的数据分析笔记")
+    envelope = runtime_execution_envelope_from_decision(decision, full_plan=True)
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert _step_by_id(decision, "open-or-focus-app").input_preview == {"app_name": "Obsidian"}
+    assert _step_by_id(decision, "type-app-search-query").input_preview == {
+        "text": "昨天的数据分析笔记"
+    }
+    assert envelope is not None
+    assert [request.tool_name for request in envelope.requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+
+
+def test_runtime_planner_escalates_app_search_to_data_analysis_when_user_requests_analysis() -> None:
+    decision = RuntimePlanner().decision("打开 Obsidian 搜索 sales 数据，然后分析成报告")
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert _step_by_id(decision, "type-app-search-query").input_preview == {"text": "sales 数据"}
+    assert _step_by_id(decision, "analyze-data-context").tool_name == "data.analyze"
+
+
+def test_runtime_planner_projects_current_app_paste_as_focus_safe_shortcut() -> None:
+    decision = RuntimePlanner().decision("在任意当前打开的表格应用里粘贴这段结果")
+    envelope = runtime_execution_envelope_from_decision(decision, full_plan=True)
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert _step_by_id(decision, "open-selected-discovered-app").tool_name == (
+        "app.focus_and_safe_shortcut"
+    )
+    assert _step_by_id(decision, "open-selected-discovered-app").input_preview["action"] == "paste"
+    assert envelope is not None
+    assert [request.tool_name for request in envelope.requests].count(
+        "app.focus_and_safe_shortcut"
+    ) == 1

@@ -216,6 +216,14 @@ class TaskIntentRouter:
             and context_source not in {"selection", "clipboard"}
         ):
             context_source = "visible_text"
+        if (
+            app_search_result_source
+            and not _app_search_result_analysis_action_requested(
+                text,
+                app_search_result_source,
+            )
+        ):
+            return _empty_intent("data_analysis", text)
         can_discover_source = _contains_any(
             text,
             ["数据", "数据集", "表格", "data", "dataset", "table", "csv", "xlsx", "json"],
@@ -3098,6 +3106,8 @@ class RuntimePlanner:
             or ""
         ).strip()
         mode = app_control_mode(intent.user_goal)
+        if foreground_paste and _current_or_foreground_app_scope_hint(intent.user_goal):
+            mode = "focus"
         if app_name and safe_shortcut and not _contains_any(
             intent.user_goal,
             ["打开", "启动", "开启", "运行", "拉起", "open ", "launch ", "start "],
@@ -3495,7 +3505,7 @@ class RuntimePlanner:
                 }
                 selected_app_action = (
                     "safe_shortcut"
-                    if selected_app_tool == "app.open_and_safe_shortcut"
+                    if selected_app_tool in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}
                     else "open_app"
                 )
                 if selected_app_target_path:
@@ -3643,7 +3653,7 @@ class RuntimePlanner:
                 )
                 selected_app_action = (
                     "safe_shortcut"
-                    if selected_app_tool == "app.open_and_safe_shortcut"
+                    if selected_app_tool in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}
                     else "open_app"
                 )
                 selected_app_target_path = str(
@@ -8995,7 +9005,12 @@ def _selected_discovered_app_tool(
         if tool_name:
             return tool_name
     if isinstance(safe_shortcut, Mapping) and str(safe_shortcut.get("action") or "").strip():
-        tool_name = _first_allowed(("app.open_and_safe_shortcut",), allowed)
+        shortcut_tools = (
+            ("app.focus_and_safe_shortcut", "app.open_and_safe_shortcut")
+            if mode == "focus"
+            else ("app.open_and_safe_shortcut", "app.focus_and_safe_shortcut")
+        )
+        tool_name = _first_allowed(shortcut_tools, allowed)
         if tool_name:
             return tool_name
     tool_name = _first_allowed(app_control_tool_candidates(mode), allowed)
@@ -9009,7 +9024,7 @@ def _selected_discovered_app_operation_preview(
     *,
     safe_shortcut: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    if tool_name != "app.open_and_safe_shortcut":
+    if tool_name not in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}:
         return {}
     action = str((safe_shortcut or {}).get("action") or "").strip()
     return {"action": action} if action else {}
@@ -9923,7 +9938,11 @@ def _selected_discovered_open_step_already_runs_shortcut(
     for step in steps:
         if step.step_id != "open-selected-discovered-app":
             continue
-        if step.tool_name not in {"app.open_and_safe_shortcut", "desktop.safe_shortcut"}:
+        if step.tool_name not in {
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
+        }:
             continue
         input_preview = step.input_preview if isinstance(step.input_preview, Mapping) else {}
         if str(input_preview.get("action") or "").strip() == action:
@@ -11576,7 +11595,7 @@ def _append_analysis_discovered_app_write_target_steps(
     )
     selected_app_action = (
         "safe_shortcut"
-        if selected_app_tool == "app.open_and_safe_shortcut"
+        if selected_app_tool in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}
         else "open_app"
     )
     next_steps = [
@@ -11987,7 +12006,7 @@ def _append_web_research_discovered_app_write_target_steps(
     )
     selected_app_action = (
         "safe_shortcut"
-        if selected_app_tool == "app.open_and_safe_shortcut"
+        if selected_app_tool in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}
         else "open_app"
     )
     artifact_path = _artifact_output_path(intent.user_goal, "research-summary.md")
@@ -12242,7 +12261,7 @@ def _append_report_discovered_app_write_target_steps(
     )
     selected_app_action = (
         "safe_shortcut"
-        if selected_app_tool == "app.open_and_safe_shortcut"
+        if selected_app_tool in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}
         else "open_app"
     )
     next_steps = [
@@ -15226,6 +15245,27 @@ def _data_analysis_action_requested(text: str) -> bool:
             "trend",
             "report",
         ),
+    )
+
+
+def _app_search_result_analysis_action_requested(
+    text: str,
+    app_search_result_source: Mapping[str, Any],
+) -> bool:
+    value = _clean_prompt(text)
+    query = str(app_search_result_source.get("source_app_search_query") or "").strip()
+    value_outside_query = value.replace(query, "", 1) if query else value
+    if _data_analysis_action_requested(value_outside_query):
+        return True
+    return bool(
+        re.search(
+            r"(?:并|然后|再|接着|之后|后|\band\s+then\b|\bthen\b)\s*"
+            r"(?:帮我|请|please\s+)?"
+            r"(?:分析|统计|汇总|可视化|生成(?:图表|报告)?|输出报告|整理成报告|"
+            r"analy[sz]e|summari[sz]e|chart|plot|graph|report)",
+            value,
+            flags=re.IGNORECASE,
+        )
     )
 
 
@@ -18438,6 +18478,32 @@ def _foreground_paste_hint(text: str) -> bool:
     return bool(
         _contains_any(value, ("发送", "提交", "send", "submit"))
         or _looks_like_foreground_submit_scope(value, value.lower())
+        or _current_or_foreground_app_scope_hint(value)
+    )
+
+
+def _current_or_foreground_app_scope_hint(text: str) -> bool:
+    value = _clean_prompt(text)
+    return _contains_any(
+        value,
+        (
+            "当前打开",
+            "已打开",
+            "打开的",
+            "当前应用",
+            "当前 app",
+            "当前App",
+            "当前软件",
+            "当前窗口",
+            "前台应用",
+            "前台窗口",
+            "foreground app",
+            "foreground window",
+            "current app",
+            "current window",
+            "opened app",
+            "open app",
+        ),
     )
 
 
