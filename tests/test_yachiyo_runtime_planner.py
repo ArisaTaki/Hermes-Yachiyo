@@ -27875,6 +27875,10 @@ def test_planner_tool_requests_maps_system_control_plan() -> None:
             "source": "runtime_verification",
             "planning_reason": "runtime_desktop_app_foreground_verification",
             "continue_to_model": True,
+            "requires_observation": True,
+            "runtime_stage": "verify",
+            "runtime_role": "verify_result",
+            "replan_triggers": ["verification_failed"],
             "target_app_name": "Music",
         },
     ]
@@ -27897,6 +27901,10 @@ def test_planner_tool_requests_maps_system_control_plan() -> None:
             "source": "runtime_verification",
             "planning_reason": "runtime_desktop_app_operation_verification",
             "continue_to_model": True,
+            "requires_observation": True,
+            "runtime_stage": "verify",
+            "runtime_role": "verify_result",
+            "replan_triggers": ["verification_failed"],
             "target_app_name": "Music",
         },
     ]
@@ -27919,6 +27927,10 @@ def test_planner_tool_requests_maps_system_control_plan() -> None:
             "source": "runtime_verification",
             "planning_reason": "runtime_desktop_app_operation_verification",
             "continue_to_model": True,
+            "requires_observation": True,
+            "runtime_stage": "verify",
+            "runtime_role": "verify_result",
+            "replan_triggers": ["verification_failed"],
         },
     ]
     assert planner_tool_requests(

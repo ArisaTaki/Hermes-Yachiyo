@@ -4179,6 +4179,10 @@ def _model_app_foreground_verification_request(
     )
     request["source"] = "runtime_verification"
     request["continue_to_model"] = True
+    request["requires_observation"] = True
+    request["runtime_stage"] = "verify"
+    request["runtime_role"] = "verify_result"
+    request["replan_triggers"] = ["verification_failed"]
     if app_name:
         request["target_app_name"] = app_name
     return request

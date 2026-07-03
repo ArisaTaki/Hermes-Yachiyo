@@ -24354,6 +24354,10 @@ def test_custom_api_agent_loop_verifies_model_app_open_tool_call() -> None:
                 "source": "runtime_verification",
                 "planning_reason": "runtime_desktop_app_foreground_verification",
                 "continue_to_model": True,
+                "requires_observation": True,
+                "runtime_stage": "verify",
+                "runtime_role": "verify_result",
+                "replan_triggers": ["verification_failed"],
                 "target_app_name": "Music",
             },
         ]
@@ -24447,6 +24451,10 @@ def test_custom_api_agent_loop_verifies_model_app_ui_operation_tool_call() -> No
                 "source": "runtime_verification",
                 "planning_reason": "runtime_desktop_app_operation_verification",
                 "continue_to_model": True,
+                "requires_observation": True,
+                "runtime_stage": "verify",
+                "runtime_role": "verify_result",
+                "replan_triggers": ["verification_failed"],
                 "target_app_name": "Music",
             },
         ]
@@ -24540,6 +24548,10 @@ def test_custom_api_agent_loop_verifies_model_desktop_ui_operation_tool_call() -
                 "source": "runtime_verification",
                 "planning_reason": "runtime_desktop_app_operation_verification",
                 "continue_to_model": True,
+                "requires_observation": True,
+                "runtime_stage": "verify",
+                "runtime_role": "verify_result",
+                "replan_triggers": ["verification_failed"],
             },
         ]
     ]
