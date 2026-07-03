@@ -3183,6 +3183,11 @@ def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoi
     monkeypatch,
 ):
     play_calls: list[str] = []
+    list_app_queries: list[str] = []
+    shortcut_calls: list[tuple[str, str]] = []
+    typed_texts: list[str] = []
+    submit_calls: list[bool] = []
+    music_app_calls: list[str] = []
 
     def fake_apple_music_play(query: str) -> dict:
         play_calls.append(query)
@@ -3197,9 +3202,106 @@ def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoi
             },
         }
 
+    def fake_list_apps(query: str = "", limit: int = 200) -> dict:
+        list_app_queries.append(query)
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": f"Installed apps matching {query}: Music",
+            "data": {
+                "query": query,
+                "count": 1,
+                "apps": [
+                    {
+                        "name": "Music",
+                        "path": "/System/Applications/Music.app",
+                        "match_confidence": "high",
+                        "match_score": 100,
+                    }
+                ],
+                "best_match": {
+                    "name": "Music",
+                    "path": "/System/Applications/Music.app",
+                    "match_confidence": "high",
+                    "match_score": 100,
+                },
+            },
+        }
+
+    def fake_app_open(app_name: str) -> dict:
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name, "launch_verified": True},
+        }
+
+    def fake_app_focus(app_name: str) -> dict:
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name, "focus_verified": True},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        shortcut_calls.append(("Music", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": f"Executed safe shortcut: {action}",
+            "data": {"shortcut_action": action},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        typed_texts.append(text)
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": f"Typed {len(text)} characters",
+            "data": {"character_count": len(text), "explicit_user_text": True},
+        }
+
+    def fake_search_submit() -> dict:
+        submit_calls.append(True)
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "summary": "Submitted foreground search query",
+            "data": {"key": "return"},
+        }
+
+    def fake_music_app_open_and_play(app_name: str) -> dict:
+        music_app_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "media.music_app_open_and_play",
+            "summary": f"Opened {app_name} and started playback",
+            "data": {"app_name": app_name, "playback_started": True},
+        }
+
     monkeypatch.setattr(
         "apps.shell.agent.tools.desktop.apple_music_play",
         fake_apple_music_play,
+    )
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_focus", fake_app_focus)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
+        fake_safe_shortcut,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_type_text",
+        fake_safe_type_text,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_search_submit",
+        fake_search_submit,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.music_app_open_and_play",
+        fake_music_app_open_and_play,
     )
     result, agent_task, run, event_types = _run_launcher_daily_desktop_quick_message(
         tmp_path,
@@ -3212,13 +3314,14 @@ def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoi
     )
 
     assert result["ok"] is True
-    assert play_calls == ["超时空辉夜姬"]
-    assert agent_task["summary"] == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
-    assert agent_task["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+    assert play_calls == []
+    assert typed_texts[-1] == "超时空辉夜姬"
+    assert music_app_calls[-1] == "Music"
+    assert agent_task["tool_calls"][-1]["tool_name"] == "media.music_app_open_and_play"
     assert agent_task["tool_calls"][-1]["status"] == "completed"
-    assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+    assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "media.music_app_open_and_play"
     assert result["_task_timeline"]["tool_calls"][-1]["status"] == "completed"
-    assert result["_task_timeline"]["tool_calls"][-1]["output_preview"]["data"]["track"] == "超时空辉夜姬"
+    assert result["_task_timeline"]["tool_calls"][-1]["input_preview"]["app_name"] == "Music"
     run_event_types = [event["event_type"] for event in result["_events"]]
     assert run_event_types.index("agent.desktop.intent_planned") < run_event_types.index(
         "agent.tool.call"
@@ -3256,12 +3359,13 @@ def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoi
         )
 
         assert result["ok"] is True
-        assert play_calls[-1] == query
-        assert agent_task["summary"] == f"已在 Apple Music 播放：{query} - Yachiyo。"
-        assert agent_task["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
-        assert agent_task["tool_calls"][-1]["input_preview"] == {"query": query}
+        assert play_calls == []
+        assert typed_texts[-1] == query
+        assert music_app_calls[-1] == "Music"
+        assert agent_task["tool_calls"][-1]["tool_name"] == "media.music_app_open_and_play"
+        assert agent_task["tool_calls"][-1]["input_preview"]["app_name"] == "Music"
         assert agent_task["tool_calls"][-1]["status"] == "completed"
-        assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+        assert result["_task_timeline"]["tool_calls"][-1]["tool_name"] == "media.music_app_open_and_play"
         assert result["_task_timeline"]["tool_calls"][-1]["status"] == "completed"
         assert run["status"] == "completed"
         assert "agent.desktop.intent_planned" in event_types
@@ -3270,7 +3374,10 @@ def test_chat_bridge_quick_message_executes_music_followup_for_launcher_entrypoi
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
 
-    assert play_calls == ["超时空辉夜姬"] + [query for _prompt, _launcher_mode, query in direct_prompts]
+    assert len(music_app_calls) == 1 + len(direct_prompts)
+    assert len(submit_calls) == 1 + len(direct_prompts)
+    assert list_app_queries
+    assert shortcut_calls
 
 
 def test_chat_bridge_quick_message_executes_music_control_for_launcher_entrypoints(

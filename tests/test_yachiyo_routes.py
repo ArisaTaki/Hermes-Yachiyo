@@ -7107,15 +7107,15 @@ async def test_yachiyo_task_route_uses_chat_backed_main_agent_entry(monkeypatch:
     assert started["task_id"] == "chat-task-1"
     assert started["status"] == "running"
     assert started["conversation_id"] == "chat-1"
-    assert started["current_step"] == "准备执行 · 播放 Apple Music"
+    assert started["current_step"] == "准备执行 · 发现已安装应用"
     assert started["recent_events"][0]["event_type"] == "agent.desktop.intent_planned"
-    assert started["recent_events"][0]["detail"] == "media.apple_music_play"
+    assert started["recent_events"][0]["detail"] == "desktop.list_apps"
     assert started["recent_events"][0]["payload"] == {
-        "input_preview": {"query": "超时空辉夜姬"},
+        "input_preview": {"query": "music", "limit": 20},
         "planning_reason": "planner_fallback_media_playback",
         "source": "runtime_planner",
         "status": "planned",
-        "tool": "media.apple_music_play",
+        "tool": "desktop.list_apps",
     }
     assert len(app_runtime.chat_calls) == 1
     chat_call = app_runtime.chat_calls[0]

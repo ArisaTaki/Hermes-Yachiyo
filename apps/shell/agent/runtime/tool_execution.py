@@ -861,6 +861,8 @@ def _tool_request_input_accepts_app_name_resolution(tool_name: str) -> bool:
         "desktop.ui_elements",
         "desktop.open_path_with_app",
         "app.open_path_with_app",
+        "media.music_app_open_and_play",
+        "media.music_app_control",
     }
 
 

@@ -158,6 +158,11 @@ def _legacy_direct_execution_override_requests(
         return []
     legacy_tools = _tool_names_for_requests(legacy_requests)
     if "media.apple_music_play" in legacy_tools:
+        if _planner_media_requests_cover_legacy_apple_music(
+            legacy_requests,
+            planner_requests,
+        ):
+            return []
         return legacy_requests
     if _has_approval_plan_tool(legacy_requests) and _planner_requests_need_model_followup(
         planner_requests
@@ -276,6 +281,30 @@ def _tool_names_for_requests(requests: list[dict[str, Any]]) -> list[str]:
         for request in requests
         if isinstance(request, dict) and str(request.get("tool") or "").strip()
     ]
+
+
+def _planner_media_requests_cover_legacy_apple_music(
+    legacy_requests: list[dict[str, Any]],
+    planner_requests: list[dict[str, Any]],
+) -> bool:
+    legacy_tools = set(_tool_names_for_requests(legacy_requests))
+    if "media.apple_music_play" not in legacy_tools:
+        return False
+    planner_tools = set(_tool_names_for_requests(planner_requests))
+    if "media.music_app_open_and_play" not in planner_tools:
+        return False
+    return bool(
+        planner_tools
+        & {
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "app.open_and_safe_type_text",
+            "app.focus_and_safe_type_text",
+            "desktop.search_submit",
+        }
+    )
 
 
 def _visible_daily_desktop_metadata_requests(
@@ -512,23 +541,17 @@ class LegacyChatTaskStarter:
             self._runtime,
             fallback=allowed_daily_desktop_tools,
         )
+        legacy_timeline_requests: list[dict[str, Any]] = []
         if _prefer_legacy_planned_timeline_for_metadata(metadata):
-            legacy_requests = daily_desktop_entrypoint_requests(
+            legacy_timeline_requests = daily_desktop_entrypoint_requests(
                 prompt,
                 metadata=metadata,
                 allowed_tools=allowed_daily_desktop_tools,
             )
-            legacy_requests = _runtime_planner_compatible_legacy_plan_requests(
-                legacy_requests,
+            legacy_timeline_requests = _runtime_planner_compatible_legacy_plan_requests(
+                legacy_timeline_requests,
                 metadata,
             )
-            if legacy_requests:
-                return daily_desktop_planned_timeline(
-                    prompt,
-                    requests=legacy_requests,
-                    metadata=metadata,
-                    allowed_tools=allowed_entrypoint_tools,
-                )
         planned_requests = planner_first_daily_desktop_entrypoint_requests(
             prompt,
             metadata=metadata,
@@ -536,6 +559,16 @@ class LegacyChatTaskStarter:
             metadata_allowed_tools=allowed_daily_desktop_tools,
             execution_normalized=True,
         )
+        if legacy_timeline_requests and not _planner_media_requests_cover_legacy_apple_music(
+            legacy_timeline_requests,
+            planned_requests,
+        ):
+            return daily_desktop_planned_timeline(
+                prompt,
+                requests=legacy_timeline_requests,
+                metadata=metadata,
+                allowed_tools=allowed_entrypoint_tools,
+            )
         if _prefer_execution_requests_for_metadata(metadata):
             planned_requests = [
                 {
