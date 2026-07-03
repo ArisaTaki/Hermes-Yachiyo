@@ -32386,6 +32386,47 @@ def test_runtime_execution_requests_preserve_replan_fallback_tools() -> None:
     assert projected_requests[0]["replan_signal_ids"] == envelope.requests[0].replan_signal_ids
 
 
+def test_runtime_execution_envelope_can_project_full_web_research_plan() -> None:
+    allowed_tools = ["browser.open_url_and_extract_text", "artifact.write"]
+    decision = RuntimePlanner().decision(
+        "研究 https://example.com 并输出报告",
+        allowed_tools=allowed_tools,
+    )
+
+    default_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+    full_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert default_envelope is not None
+    assert full_envelope is not None
+    assert [request.tool_name for request in default_envelope.requests] == [
+        "browser.open_url_and_extract_text"
+    ]
+    assert default_envelope.runtime_stage_counts == {"discover": 1}
+    assert [request.tool_name for request in full_envelope.requests] == [
+        "browser.open_url_and_extract_text",
+        "artifact.write",
+    ]
+    assert [request.runtime_stage for request in full_envelope.requests] == [
+        "discover",
+        "produce",
+    ]
+    assert [request.runtime_role for request in full_envelope.requests] == [
+        "inspect_web_context",
+        "artifact",
+    ]
+    assert full_envelope.runtime_stage_counts == {
+        "discover": 1,
+        "produce": 1,
+    }
+
+
 def test_runtime_execution_envelope_can_project_full_report_app_write_plan() -> None:
     allowed_tools = [
         "browser.extract_text",
@@ -32414,6 +32455,9 @@ def test_runtime_execution_envelope_can_project_full_report_app_write_plan() -> 
     assert [request.tool_name for request in default_envelope.requests] == [
         "browser.extract_text"
     ]
+    assert default_envelope.runtime_stage_counts == {"discover": 1}
+    assert default_envelope.requests[0].runtime_stage == "discover"
+    assert default_envelope.requests[0].runtime_role == "inspect_web_context"
     assert [request.tool_name for request in full_envelope.requests] == [
         "browser.extract_text",
         "artifact.write",
@@ -32421,12 +32465,32 @@ def test_runtime_execution_envelope_can_project_full_report_app_write_plan() -> 
         "desktop.safe_type_text",
         "desktop.ui_elements",
     ]
+    assert full_envelope.runtime_stage_counts == {
+        "discover": 1,
+        "produce": 1,
+        "operate": 2,
+        "verify": 1,
+    }
     assert [request.step_id for request in full_envelope.requests] == [
         "read-report-context",
         "write-report-artifact",
         "prepare-report-target-app",
         "insert-report-into-target-app",
         "verify-report-target-app",
+    ]
+    assert [request.runtime_stage for request in full_envelope.requests] == [
+        "discover",
+        "produce",
+        "operate",
+        "operate",
+        "verify",
+    ]
+    assert [request.runtime_role for request in full_envelope.requests] == [
+        "inspect_web_context",
+        "artifact",
+        "prepare_target_app",
+        "type_ui",
+        "verify_result",
     ]
     assert full_envelope.requests[1].input == {
         "path": "report.md",
@@ -32463,6 +32527,25 @@ def test_runtime_execution_envelope_can_project_full_report_app_write_plan() -> 
         projected_requests[3]["workspace_id"]
         == decision.plan.task_core.workspace.workspace_id
     )
+
+
+def test_runtime_execution_envelope_marks_browser_open_url_as_web_operation() -> None:
+    allowed_tools = ["browser.open_url"]
+    decision = RuntimePlanner().decision(
+        "打开 https://example.com",
+        allowed_tools=allowed_tools,
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+
+    assert envelope is not None
+    assert [request.tool_name for request in envelope.requests] == ["browser.open_url"]
+    assert envelope.runtime_stage_counts == {"operate": 1}
+    assert envelope.requests[0].runtime_stage == "operate"
+    assert envelope.requests[0].runtime_role == "open_web_url"
+    assert envelope.requests[0].task_todo["metadata"]["runtime_role"] == "open_web_url"
 
 
 def test_runtime_execution_envelope_can_project_full_analysis_app_write_plan() -> None:

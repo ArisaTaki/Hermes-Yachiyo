@@ -13389,6 +13389,12 @@ def _runtime_dov_stage(step: ToolPlanStepSnapshot) -> str:
     tool_name = str(step.tool_name or "").strip()
     if "verify" in step_id or action == "verify":
         return "verify"
+    if tool_name.startswith("browser.") and action in {
+        "extract_text",
+        "current_page",
+        "screenshot",
+    }:
+        return "discover"
     if (
         step_id == "write-code-report"
         or action == "write_artifact"
@@ -13456,6 +13462,10 @@ def _runtime_dov_role(step: ToolPlanStepSnapshot, stage: str) -> str:
         return "analyze_data"
     if step_id == "run-terminal-command" or tool_name == "terminal.run":
         return "execute"
+    if tool_name.startswith("browser."):
+        if action == "open_url":
+            return "open_web_url"
+        return "inspect_web_context"
     if step_id == "apply-code-changes" or action == "apply_patch":
         return "apply_patch"
     if action in {"open_app", "focus_app"} or step_id.startswith(("open-", "focus-", "prepare-")):

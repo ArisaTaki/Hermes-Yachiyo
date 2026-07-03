@@ -88,6 +88,7 @@ def _supports_full_plan_projection(decision: PlannerDecisionSnapshot) -> bool:
         "file_organization",
         "multi_agent",
         "report_generation",
+        "web_research",
         "workflow_orchestration",
     }
 
