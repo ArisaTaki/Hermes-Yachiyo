@@ -12146,9 +12146,93 @@ def test_runtime_planner_discovers_generic_communication_app_before_composing() 
             assert send.tool_name == "desktop.submit_foreground"
             assert send.approval_required is True
             assert send.input_preview == {"action": "send"}
-        assert planner_tool_requests(prompt, allowed_tools) == [
-            {**_app_discovery_request(query), "continue_to_model": True},
+        expected_requests = [
+            _app_discovery_request(query),
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open_and_safe_shortcut",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": query,
+                    "action": "new_message",
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.inspect_app",
+                "input": {
+                    "open_if_needed": False,
+                    "focus": True,
+                    "role_filter": "text",
+                    "limit": 80,
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": query,
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "app.focus_and_type_into_ui_element",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "target": "To" if query == "mail" else "recipient",
+                    "text": "Alice",
+                    "role_filter": "text",
+                    "limit": 80,
+                    "selection_source": "desktop.list_apps",
+                    "query": query,
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.search_submit",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
         ]
+        if "body" in compose_hint:
+            expected_requests.append(
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus_and_type_into_ui_element",
+                    "input": {
+                        "app_name": "<selected app from desktop.list_apps>",
+                        "target": "message body" if query == "mail" else "message",
+                        "text": compose_hint["body"],
+                        "role_filter": "text",
+                        "limit": 80,
+                        "selection_source": "desktop.list_apps",
+                        "query": query,
+                    },
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_desktop_operation",
+                }
+            )
+        if (
+            query == "mail"
+            and "body" in compose_hint
+            and compose_hint["send_action"] == "draft"
+        ):
+            expected_requests[2]["continue_to_model"] = True
+        if compose_hint["send_action"] == "send":
+            expected_requests.append(
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.submit_foreground",
+                    "input": {"action": "send"},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_desktop_operation",
+                }
+            )
+        assert planner_tool_requests(prompt, allowed_tools) == expected_requests
 
     assert RuntimePlanner().decision(
         "给张三发邮件说明会议改期",
@@ -12160,6 +12244,68 @@ def test_runtime_planner_discovers_generic_communication_app_before_composing() 
             "desktop.submit_foreground",
         ],
     ).selected_intent.kind == "communication"
+
+
+def test_runtime_planner_preserves_selected_app_resolution_for_deferred_compose_body() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.focus",
+        "app.open_and_safe_shortcut",
+        "desktop.ui_elements",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+    ]
+
+    decision = RuntimePlanner().decision(
+        "找一个邮件 app 给小王写一封邮件，内容是明天上午十点开会",
+        allowed_tools=allowed_tools,
+    )
+    requests = planner_tool_requests_for_decision(
+        decision,
+        allowed_tools,
+        direct=True,
+        execution_normalized=True,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus",
+        "desktop.ui_elements",
+    ]
+    assert requests[1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "mail",
+        "action": "new_message",
+    }
+    assert requests[2]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "target": "To",
+        "text": "小王",
+        "role_filter": "text",
+        "limit": 80,
+        "selection_source": "desktop.list_apps",
+        "query": "mail",
+    }
+    assert requests[4]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "mail",
+    }
+    assert requests[5]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "role_filter": "text",
+        "limit": 80,
+        "selection_source": "desktop.list_apps",
+        "query": "mail",
+    }
+    assert requests[5]["continue_to_model"] is True
+    assert requests[5]["deferred_tool"] == "app.focus_and_type_into_ui_element"
+    assert requests[5]["deferred_input"]["query"] == "mail"
 
 
 def test_runtime_planner_discovers_unscoped_communication_app_before_direct_send() -> None:

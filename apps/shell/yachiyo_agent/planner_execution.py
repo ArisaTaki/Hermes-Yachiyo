@@ -279,15 +279,20 @@ def _unknown_app_ui_observation_prepare_request(
     )
     if not prepare_tool:
         return {}
+    prepare_payload = {"app_name": app_name}
+    _copy_app_selection_metadata(payload, prepare_payload)
     prepare = _request(
         prepare_tool,
-        {"app_name": app_name},
+        prepare_payload,
         planning_reason=str(
             request.get("planning_reason") or "planner_desktop_operation"
         ).strip()
         or "planner_desktop_operation",
     )
-    if _request_targets_unknown_discovered_app(tool_name, payload, request):
+    if (
+        _request_targets_unknown_discovered_app(tool_name, payload, request)
+        and not str(prepare_payload.get("query") or "").strip()
+    ):
         prepare = _request_with_desktop_app_selection_source(prepare, app_name)
     _inherit_request_context_without_step(prepare, request)
     return prepare
@@ -301,9 +306,11 @@ def _unknown_app_ui_observation_request(
     observe_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed)
     observe_payload = {
         key: payload[key]
-        for key in ("role_filter", "limit")
+        for key in ("app_name", "role_filter", "limit")
         if key in payload and payload[key] not in (None, "")
     }
+    if observe_payload.get("app_name"):
+        _copy_app_selection_metadata(payload, observe_payload)
     if "limit" not in observe_payload:
         observe_payload["limit"] = 80
     observe = _request(
@@ -409,6 +416,8 @@ def _search_result_observation_request(
         for key in ("app_name", "role_filter", "limit")
         if key in payload and payload[key] not in (None, "")
     }
+    if observe_payload.get("app_name"):
+        _copy_app_selection_metadata(payload, observe_payload)
     if "limit" not in observe_payload:
         observe_payload["limit"] = 80
     observe = _request(
@@ -590,6 +599,8 @@ def _semantic_ui_type_observation_request(
         for key in ("app_name", "role_filter", "limit")
         if key in payload and payload[key] not in (None, "")
     }
+    if observe_payload.get("app_name"):
+        _copy_app_selection_metadata(payload, observe_payload)
     if "limit" not in observe_payload:
         observe_payload["limit"] = 80
     observe = _request(
@@ -692,6 +703,8 @@ def _semantic_ui_click_observation_request(
         for key in ("app_name", "role_filter", "limit")
         if key in payload and payload[key] not in (None, "")
     }
+    if observe_payload.get("app_name"):
+        _copy_app_selection_metadata(payload, observe_payload)
     if "limit" not in observe_payload:
         observe_payload["limit"] = 80
     observe = _request(
@@ -1657,6 +1670,8 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
         return []
     requests: list[dict[str, Any]] = []
     steps = list(decision.plan.tool_plan.steps)
+    steps_by_id = _steps_by_id(steps)
+    selected_communication_query = _selected_communication_app_query(steps_by_id)
     model_selected_step_ids = _model_selected_desktop_step_ids(steps)
     for step in steps:
         if not _step_available(step):
@@ -1669,6 +1684,8 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
             continue
         input_preview = getattr(step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        if step_id in _SELECTED_COMMUNICATION_COMPOSE_STEP_IDS:
+            payload = _selected_communication_payload(payload, selected_communication_query)
         request = _request(
             tool_name,
             _desktop_request_payload(tool_name, payload),
@@ -1703,7 +1720,8 @@ def _desktop_request_needs_basic_step_metadata(decision: Any, step_id: str) -> b
 
 def _model_selected_desktop_step_ids(steps: list[Any]) -> set[str]:
     selected_step_ids: set[str] = set()
-    defer_selected_communication = _has_selected_communication_compose_steps(steps)
+    steps_by_id = _steps_by_id(steps)
+    selected_communication_query = _selected_communication_app_query(steps_by_id)
     changed = True
     while changed:
         changed = False
@@ -1719,18 +1737,25 @@ def _model_selected_desktop_step_ids(steps: list[Any]) -> set[str]:
                 for item in (getattr(step, "depends_on", None) or [])
                 if str(item or "").strip()
             ]
+            payload_requires_model = _selected_discovered_app_payload_requires_model(
+                payload,
+                tool_name,
+            )
+            if payload_requires_model and _selected_communication_step_can_resolve_app(
+                step_id,
+                payload,
+                selected_communication_query,
+            ):
+                payload_requires_model = False
             if (
-                (
-                    defer_selected_communication
-                    and step_id == "open-selected-discovered-app"
-                )
+                _selected_communication_step_requires_model(step_id, payload)
                 or
                 _selected_discovered_app_step_requires_model(step_id, payload, tool_name)
                 or (
                     step_id == "open-discovered-file-with-app"
                     and not _runtime_resolvable_dynamic_file_open_step(step)
                 )
-                or _selected_discovered_app_payload_requires_model(payload, tool_name)
+                or payload_requires_model
                 or (
                     str(payload.get("target_path") or "").strip()
                     == "<selected file from workspace.list>"
@@ -1743,17 +1768,52 @@ def _model_selected_desktop_step_ids(steps: list[Any]) -> set[str]:
     return selected_step_ids
 
 
-def _has_selected_communication_compose_steps(steps: list[Any]) -> bool:
-    return any(
-        str(getattr(step, "step_id", "") or "").strip()
-        in {
-            "inspect-selected-communication-compose-ui",
-            "fill-selected-communication-recipient",
-            "draft-selected-communication-message",
-            "send-selected-communication-message",
-        }
+_SELECTED_COMMUNICATION_COMPOSE_STEP_IDS = {
+    "inspect-selected-communication-compose-ui",
+    "fill-selected-communication-recipient",
+    "draft-selected-communication-message",
+    "send-selected-communication-message",
+}
+
+
+def _steps_by_id(steps: Iterable[Any]) -> dict[str, Any]:
+    return {
+        step_id: step
         for step in steps
-    )
+        for step_id in [str(getattr(step, "step_id", "") or "").strip()]
+        if step_id
+    }
+
+
+def _selected_communication_step_can_resolve_app(
+    step_id: str,
+    payload: Mapping[str, Any],
+    selected_query: str,
+) -> bool:
+    if step_id not in _SELECTED_COMMUNICATION_COMPOSE_STEP_IDS:
+        return False
+    if _selected_communication_step_requires_model(step_id, payload):
+        return False
+    if str(payload.get("app_name") or "").strip() != "<selected app from desktop.list_apps>":
+        return False
+    return bool(str(selected_query or "").strip())
+
+
+def _selected_communication_step_requires_model(
+    step_id: str,
+    payload: Mapping[str, Any],
+) -> bool:
+    if step_id == "draft-selected-communication-message" and (
+        str(payload.get("body_source") or "").strip()
+        or str(payload.get("transform") or "").strip()
+        or str(payload.get("content_transform_hint") or "").strip()
+    ):
+        return True
+    if step_id == "fill-selected-communication-recipient":
+        return not bool(str(payload.get("text") or "").strip())
+    if step_id == "draft-selected-communication-message":
+        return not bool(str(payload.get("text") or "").strip())
+    return False
 
 
 def _selected_discovered_app_step_requires_model(
@@ -1840,6 +1900,8 @@ def _runtime_resolvable_discovered_app_plan(decision: Any) -> bool:
     steps = list(getattr(getattr(getattr(decision, "plan", None), "tool_plan", None), "steps", []) or [])
     if not steps or _discovered_app_plan_needs_model_reasoning(decision, steps):
         return False
+    steps_by_id = _steps_by_id(steps)
+    selected_communication_query = _selected_communication_app_query(steps_by_id)
     has_resolvable_open_step = False
     for step in steps:
         if not _step_available(step):
@@ -1855,7 +1917,17 @@ def _runtime_resolvable_discovered_app_plan(decision: Any) -> bool:
             )
         if step_id == "open-discovered-file-with-app":
             has_resolvable_open_step = _runtime_resolvable_dynamic_file_open_step(step)
-        if _selected_discovered_app_payload_requires_model(payload, tool_name):
+        payload_requires_model = _selected_discovered_app_payload_requires_model(
+            payload,
+            tool_name,
+        )
+        if payload_requires_model and _selected_communication_step_can_resolve_app(
+            step_id,
+            payload,
+            selected_communication_query,
+        ):
+            payload_requires_model = False
+        if payload_requires_model:
             return False
     return has_resolvable_open_step
 
@@ -2496,6 +2568,8 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
         return observe_before_action_requests
     requests: list[dict[str, Any]] = []
     steps = list(decision.plan.tool_plan.steps)
+    steps_by_id = _steps_by_id(steps)
+    selected_communication_query = _selected_communication_app_query(steps_by_id)
     model_selected_step_ids = _model_selected_desktop_step_ids(steps)
     for step in steps:
         if not _step_available(step):
@@ -2510,6 +2584,8 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
             continue
         input_preview = getattr(step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        if step_id in _SELECTED_COMMUNICATION_COMPOSE_STEP_IDS:
+            payload = _selected_communication_payload(payload, selected_communication_query)
         request = _request(
             tool_name,
             _desktop_request_payload(tool_name, payload),
@@ -3024,6 +3100,7 @@ def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[st
         }
         if app_name:
             request_payload["app_name"] = _canonical_app_name(app_name)
+            _copy_app_selection_metadata(payload, request_payload)
         return request_payload
     if tool_name in {"desktop.running_apps", "desktop.active_window"}:
         return {}
@@ -3040,6 +3117,7 @@ def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[st
             request_payload["app_name"] = _canonical_app_name(
                 str(request_payload["app_name"] or "")
             )
+            _copy_app_selection_metadata(payload, request_payload)
         return request_payload
     if tool_name in {"desktop.windows", "desktop.list_windows", "desktop.verify"}:
         app_name = str(payload.get("app_name") or "").strip()
@@ -3050,8 +3128,23 @@ def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[st
         }
         if app_name:
             request_payload["app_name"] = _canonical_app_name(app_name)
+            _copy_app_selection_metadata(payload, request_payload)
         return request_payload
     return payload
+
+
+def _copy_app_selection_metadata(
+    source: Mapping[str, Any],
+    target: dict[str, Any],
+) -> None:
+    if str(source.get("selection_source") or "").strip():
+        target["selection_source"] = str(source.get("selection_source") or "").strip()
+    if str(source.get("app_selection_source") or "").strip():
+        target["app_selection_source"] = str(
+            source.get("app_selection_source") or ""
+        ).strip()
+    if str(source.get("query") or "").strip():
+        target["query"] = str(source.get("query") or "").strip()
 
 
 def _canonicalize_app_payload(payload: dict[str, Any]) -> dict[str, Any]:
