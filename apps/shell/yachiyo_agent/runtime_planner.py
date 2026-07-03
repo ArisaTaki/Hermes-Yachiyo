@@ -73,6 +73,7 @@ from .desktop_plan_hints import (
     ui_control_presence_hint,
     ui_inspection_hint,
     window_list_hint,
+    _looks_like_ui_click_advice_request,
 )
 from .file_access_plan_hints import file_access_hint
 from .policy import (
@@ -15252,6 +15253,8 @@ def _url_hint(text: str) -> str:
 
 def _app_name_hint(text: str) -> str:
     if _app_capability_discovery_hint(text):
+        return ""
+    if _looks_like_ui_click_advice_request(text):
         return ""
     if re.fullmatch(
         r"(?:press|hit|tap)\s+(?:the\s+)?(?:enter|return|"

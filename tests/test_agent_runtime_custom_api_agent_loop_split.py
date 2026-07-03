@@ -22577,6 +22577,22 @@ def test_runtime_planner_click_advice_inspects_buttons_without_clicking() -> Non
     assert "deferred_tool" not in observation_request
 
 
+def test_runtime_planner_english_click_advice_does_not_extract_fake_app_name() -> None:
+    allowed_tools = ["desktop.click_ui_element", "desktop.ui_elements"]
+
+    requests = planner_tool_requests(
+        "what buttons can I click in the current window",
+        allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    execution_requests = planner_execution_tool_requests(requests, allowed_tools)
+
+    assert [request["tool"] for request in execution_requests] == ["desktop.ui_elements"]
+    observation_request = execution_requests[0]
+    assert observation_request["input"] == {"role_filter": "button", "limit": 80}
+    assert "deferred_tool" not in observation_request
+
+
 def test_custom_api_agent_loop_observes_generic_desktop_click_target_before_default_click(
     monkeypatch,
 ) -> None:
