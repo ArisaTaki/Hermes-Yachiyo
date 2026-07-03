@@ -4023,11 +4023,14 @@ _MODEL_APP_FOREGROUND_MUTATION_TOOLS = frozenset(
 )
 
 
+_MODEL_APP_OPERATION_MUTATION_PREFIXES = ("app.open_and_", "app.focus_and_")
+
+
 def _append_model_app_foreground_verification_requests(
     requests: list[dict[str, Any]],
     allowed: set[str],
 ) -> list[dict[str, Any]]:
-    verification_tool = _first_allowed(
+    foreground_verification_tool = _first_allowed(
         (
             "desktop.active_window",
             "desktop.running_apps",
@@ -4036,17 +4039,32 @@ def _append_model_app_foreground_verification_requests(
         ),
         allowed,
     )
-    if not verification_tool:
+    operation_verification_tool = _first_allowed(
+        (
+            "desktop.ui_elements",
+            "desktop.read_ui",
+            "desktop.active_window",
+            "screen.capture",
+        ),
+        allowed,
+    )
+    if not foreground_verification_tool and not operation_verification_tool:
         return requests
     if _has_native_tool_call_protocol(requests):
         return _append_model_app_foreground_verification_after_native_tool_calls(
             requests,
-            verification_tool,
+            foreground_verification_tool,
+            operation_verification_tool,
         )
     normalized: list[dict[str, Any]] = []
     for index, request in enumerate(requests):
         normalized.append(request)
-        if not _model_app_foreground_request_needs_verification(request):
+        verification_tool = _model_app_verification_tool_for_request(
+            request,
+            foreground_verification_tool,
+            operation_verification_tool,
+        )
+        if not verification_tool:
             continue
         if _has_later_execution_verification_before_mutation(requests, index):
             continue
@@ -4058,14 +4076,22 @@ def _append_model_app_foreground_verification_requests(
 
 def _append_model_app_foreground_verification_after_native_tool_calls(
     requests: list[dict[str, Any]],
-    verification_tool: str,
+    foreground_verification_tool: str,
+    operation_verification_tool: str,
 ) -> list[dict[str, Any]]:
     mutation_request: dict[str, Any] | None = None
     mutation_index = -1
+    verification_tool = ""
     for index, request in enumerate(requests):
-        if _model_app_foreground_request_needs_verification(request):
+        request_verification_tool = _model_app_verification_tool_for_request(
+            request,
+            foreground_verification_tool,
+            operation_verification_tool,
+        )
+        if request_verification_tool:
             mutation_request = request
             mutation_index = index
+            verification_tool = request_verification_tool
     if mutation_request is None:
         return requests
     if _has_later_execution_verification_before_mutation(requests, mutation_index):
@@ -4074,6 +4100,26 @@ def _append_model_app_foreground_verification_after_native_tool_calls(
         *requests,
         _model_app_foreground_verification_request(mutation_request, verification_tool),
     ]
+
+
+def _model_app_verification_tool_for_request(
+    request: Mapping[str, Any],
+    foreground_verification_tool: str,
+    operation_verification_tool: str,
+) -> str:
+    if _model_app_operation_request_needs_verification(request):
+        return operation_verification_tool
+    if _model_app_foreground_request_needs_verification(request):
+        return foreground_verification_tool
+    return ""
+
+
+def _model_app_operation_request_needs_verification(request: Mapping[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if not tool_name.startswith(_MODEL_APP_OPERATION_MUTATION_PREFIXES):
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return bool(str(payload.get("app_name") or "").strip())
 
 
 def _model_app_foreground_request_needs_verification(request: Mapping[str, Any]) -> bool:
@@ -4094,16 +4140,24 @@ def _model_app_foreground_verification_request(
         else {}
     )
     app_name = str(payload.get("app_name") or "").strip()
+    is_operation = _model_app_operation_request_needs_verification(source_request)
     if verification_tool in {"desktop.ui_elements", "desktop.read_ui"}:
         input_preview: dict[str, Any] = {"limit": 80}
+        if app_name and verification_tool == "desktop.ui_elements":
+            input_preview["app_name"] = app_name
     elif verification_tool == "screen.capture":
-        input_preview = {"reason": f"verify {app_name} foreground"}
+        detail = "app operation" if is_operation else "foreground"
+        input_preview = {"reason": f"verify {app_name} {detail}"}
     else:
         input_preview = {}
     request = _request(
         verification_tool,
         input_preview,
-        planning_reason="runtime_desktop_app_foreground_verification",
+        planning_reason=(
+            "runtime_desktop_app_operation_verification"
+            if is_operation
+            else "runtime_desktop_app_foreground_verification"
+        ),
     )
     request["source"] = "runtime_verification"
     request["continue_to_model"] = True

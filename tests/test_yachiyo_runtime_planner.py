@@ -27878,6 +27878,28 @@ def test_planner_tool_requests_maps_system_control_plan() -> None:
             "target_app_name": "Music",
         },
     ]
+    app_click_request = {
+        "protocol": "tool_calls",
+        "tool": "app.open_and_click_ui_element",
+        "input": {"app_name": "Music", "target": "Play"},
+        "tool_call_id": "call_click",
+    }
+    assert runtime_execution_verified_tool_requests(
+        [app_click_request],
+        allowed_tools=["app.open_and_click_ui_element", "desktop.ui_elements"],
+        include_model_app_foreground=True,
+    ) == [
+        app_click_request,
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80, "app_name": "Music"},
+            "source": "runtime_verification",
+            "planning_reason": "runtime_desktop_app_operation_verification",
+            "continue_to_model": True,
+            "target_app_name": "Music",
+        },
+    ]
     assert planner_tool_requests(
         "open sound settings",
         allowed_tools=["app.open"],
