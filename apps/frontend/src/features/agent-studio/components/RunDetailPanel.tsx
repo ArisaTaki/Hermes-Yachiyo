@@ -5,6 +5,7 @@ import type {
   GroupRunSnapshot,
   PublicRunEvent,
   RerunRunRequest,
+  RecoveryRunProvenanceSnapshot,
   ToolCallSnapshot,
   YachiyoRunTimelineSnapshot,
 } from '../../yachiyo-studio/types';
@@ -242,6 +243,11 @@ export function RunDetailPanel({
     && selectedRun.kind !== 'workflow_run'
     && rerunSourceRunId,
   );
+  const recoverySource = selectedPublicRunTimeline?.recovery_source || selectedRun?.recovery_source || null;
+  const recoverySourceRunId = String(recoverySource?.source_run_id || '').trim();
+  const recoverySourceLabel = recoveryRunSourceLabel(recoverySource);
+  const recoverySourceMeta = recoveryRunSourceMeta(recoverySource);
+  const showRunDetailRecoverySource = Boolean(selectedRun && recoverySource);
   const selectedRunScopedWorkflowRerunDisabledReason = selectedRun?.kind === 'workflow_run'
     ? isActiveRunStatus(selectedRun.status)
       ? '当前 Workflow Run 还在进行中，请完成、失败或取消后再重跑。'
@@ -296,6 +302,43 @@ export function RunDetailPanel({
               >
                 rerun of {rerunSourceLabel}
               </button>
+            ) : null}
+            {showRunDetailRecoverySource ? (
+              recoverySourceRunId ? (
+                <button
+                  type="button"
+                  className="run-recovery-source-link"
+                  data-recovery-action-id={recoverySource?.recovery_action_id || ''}
+                  data-recovery-kind={recoverySource?.kind || ''}
+                  data-recovery-source-run-id={recoverySourceRunId}
+                  data-recovery-tool={recoverySource?.recovery_tool || ''}
+                  data-testid="agent-run-detail-recovery-source"
+                  onClick={() => onOpenRunDetail(recoverySourceRunId)}
+                >
+                  recovery of {recoverySourceLabel}
+                </button>
+              ) : (
+                <span
+                  className="run-recovery-source-link"
+                  data-recovery-action-id={recoverySource?.recovery_action_id || ''}
+                  data-recovery-kind={recoverySource?.kind || ''}
+                  data-recovery-tool={recoverySource?.recovery_tool || ''}
+                  data-testid="agent-run-detail-recovery-source"
+                >
+                  recovery of {recoverySourceLabel}
+                </span>
+              )
+            ) : null}
+            {recoverySourceMeta ? (
+              <span
+                className="run-recovery-source-tool"
+                data-recovery-action-kind={recoverySource?.recovery_action_kind || ''}
+                data-recovery-permission-target={recoverySource?.recovery_permission_target || ''}
+                data-recovery-risk={recoverySource?.recovery_risk_level || ''}
+                data-testid="agent-run-detail-recovery-source-meta"
+              >
+                {recoverySourceMeta}
+              </span>
             ) : null}
             <code>{selectedRun.run_id}</code>
             <button
@@ -532,6 +575,29 @@ function AgentAvatar({ avatarUrl, name }: { avatarUrl?: string; name: string }):
 function agentInitial(name: string): string {
   const clean = name.trim();
   return clean ? clean.slice(0, 1).toUpperCase() : 'A';
+}
+
+function recoveryRunSourceLabel(source: RecoveryRunProvenanceSnapshot | null | undefined): string {
+  if (!source) return 'source run';
+  return source.source_task_title
+    || source.source_tool_name
+    || source.replan_request_id
+    || source.source_run_id
+    || source.source_group_run_id
+    || source.source_workflow_run_id
+    || 'source run';
+}
+
+function recoveryRunSourceMeta(source: RecoveryRunProvenanceSnapshot | null | undefined): string {
+  if (!source) return '';
+  const parts = [
+    source.kind ? `kind ${source.kind}` : '',
+    source.recovery_tool ? `tool ${source.recovery_tool}` : '',
+    source.recovery_action_kind ? `action ${source.recovery_action_kind}` : '',
+    source.recovery_permission_target ? `permission ${source.recovery_permission_target}` : '',
+    source.recovery_risk_level ? `risk ${source.recovery_risk_level}` : '',
+  ].filter(Boolean);
+  return parts.join(' · ');
 }
 
 function runRecoveryScreenPointContractFromToolCalls(

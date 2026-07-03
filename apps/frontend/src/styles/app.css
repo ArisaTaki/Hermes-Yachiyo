@@ -19324,6 +19324,19 @@ button.studio-tool-permission:disabled {
   color: var(--hy-fg);
 }
 
+.run-detail-meta .run-recovery-source-link,
+.run-detail-meta .run-recovery-source-tool {
+  border-color: oklch(76% 0.14 84 / 0.3);
+  background: oklch(76% 0.14 84 / 0.08);
+  color: oklch(86% 0.12 84);
+}
+
+.run-detail-meta .run-recovery-source-link:hover {
+  border-color: oklch(76% 0.14 84 / 0.44);
+  background: oklch(76% 0.14 84 / 0.12);
+  color: var(--hy-fg);
+}
+
 .run-detail-meta .run-workflow-link {
   border-color: oklch(74% 0.13 300 / 0.28);
   background: oklch(74% 0.13 300 / 0.08);

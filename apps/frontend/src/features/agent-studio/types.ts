@@ -3,6 +3,7 @@ import type {
   ApprovalCardSnapshot,
   ArtifactSnapshot,
   PublicRunEvent,
+  RecoveryRunProvenanceSnapshot,
 } from '../runtime-shared/types';
 
 export type AgentModelMode = 'follow_main' | 'profile' | 'custom_api';
@@ -179,6 +180,7 @@ export type RunSpec = {
   rerun_of_runnable_name?: string;
   rerun_original_created_at?: string;
   rerun_original_updated_at?: string;
+  recovery_source?: RecoveryRunProvenanceSnapshot | null;
   kind: 'agent_run' | 'workflow_run' | string;
   runnable_id: string;
   runnable_name?: string;

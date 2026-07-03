@@ -1,5 +1,6 @@
 import type {
   PlannerTraceSummarySnapshot,
+  RecoveryRunProvenanceSnapshot,
   RunTimelineChildSnapshot,
   YachiyoRunTimelineSnapshot,
 } from '../../yachiyo-studio/types';
@@ -33,6 +34,7 @@ export function WorkflowRunDetailPanel({
   );
   const publicSnapshotName = workflowRunSnapshotActive ? 'WorkflowRunSnapshot' : 'RunTimelineSnapshot';
   const childSnapshots = selectedPublicRunTimeline.children || [];
+  const recoverySource = selectedPublicRunTimeline.recovery_source || null;
 
   return (
     <section
@@ -67,6 +69,24 @@ export function WorkflowRunDetailPanel({
             rerun of {selectedPublicRunTimeline.rerun_of_runnable_name || selectedPublicRunTimeline.rerun_of_run_id}
           </button>
         ) : null}
+        {recoverySource ? (
+          <button
+            type="button"
+            data-recovery-action-id={recoverySource.recovery_action_id || ''}
+            data-recovery-kind={recoverySource.kind || ''}
+            data-recovery-source-run-id={recoverySource.source_run_id || ''}
+            data-recovery-tool={recoverySource.recovery_tool || ''}
+            data-testid="agent-run-detail-public-recovery-source"
+            disabled={!recoverySource.source_run_id}
+            onClick={() => {
+              if (recoverySource.source_run_id) onOpenRunDetail(recoverySource.source_run_id);
+            }}
+          >
+            recovery of {publicRecoverySourceLabel(recoverySource)}
+          </button>
+        ) : null}
+        {recoverySource?.recovery_tool ? <span>recovery tool {recoverySource.recovery_tool}</span> : null}
+        {recoverySource?.source_tool_call_id ? <code>tool call {recoverySource.source_tool_call_id}</code> : null}
         <span>events {selectedPublicRunTimeline.events?.length || 0}</span>
         <span>approvals {selectedPublicRunTimeline.approvals?.length || 0}</span>
         <span>artifacts {selectedPublicRunTimeline.artifacts?.length || 0}</span>
@@ -121,6 +141,16 @@ export function WorkflowRunDetailPanel({
 
 function publicChildRunTitle(child: RunTimelineChildSnapshot): string {
   return child.title || child.agent_id || child.workflow_id || child.run_id;
+}
+
+function publicRecoverySourceLabel(source: RecoveryRunProvenanceSnapshot): string {
+  return source.source_task_title
+    || source.source_tool_name
+    || source.replan_request_id
+    || source.source_run_id
+    || source.source_group_run_id
+    || source.source_workflow_run_id
+    || 'source run';
 }
 
 function publicChildRunMeta(child: RunTimelineChildSnapshot, statusLabel: string): string {

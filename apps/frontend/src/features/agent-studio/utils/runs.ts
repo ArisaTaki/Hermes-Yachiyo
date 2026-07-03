@@ -143,6 +143,7 @@ export function publicRunTimelineToRunSpec(
     rerun_of_runnable_name: snapshot.rerun_of_runnable_name || undefined,
     rerun_original_created_at: snapshot.rerun_original_created_at || undefined,
     rerun_original_updated_at: snapshot.rerun_original_updated_at || undefined,
+    recovery_source: snapshot.recovery_source || undefined,
     kind,
     runnable_id: fallback.runnableId || (kind === 'workflow_run' ? workflowId || workflowRunId : agentId) || snapshot.run_id,
     runnable_name: snapshot.title || legacyRunnableName || fallback.runnableName || undefined,
