@@ -148,9 +148,28 @@ def run_public_release_gate(
         _check_result(check, plan_only=plan_only)
         for check in checks
     ]
+    release_smoke_report_paths = [
+        _resolve_path(Path(path))
+        for path in release_smoke_reports
+    ]
     public_demo_report_paths = [
         _resolve_path(Path(path))
         for path in public_demo_reports
+    ]
+    freshness_check = _external_report_freshness_check(
+        [*release_smoke_report_paths, *public_demo_report_paths],
+        plan_only=plan_only,
+    )
+    stale_report_paths = _stale_external_report_paths(freshness_check)
+    release_smoke_report_paths = [
+        path
+        for path in release_smoke_report_paths
+        if _stable_path(path) not in stale_report_paths
+    ]
+    public_demo_report_paths = [
+        path
+        for path in public_demo_report_paths
+        if _stable_path(path) not in stale_report_paths
     ]
     extra_public_demo_report_count = len(public_demo_report_paths)
     for check in checks:
@@ -160,14 +179,6 @@ def run_public_release_gate(
         check_results,
         public_demo_report_paths,
         has_external_reports=extra_public_demo_report_count > 0,
-        plan_only=plan_only,
-    )
-    external_report_paths = [
-        *[_resolve_path(Path(path)) for path in release_smoke_reports],
-        *public_demo_report_paths,
-    ]
-    freshness_check = _external_report_freshness_check(
-        external_report_paths,
         plan_only=plan_only,
     )
     if freshness_check:
@@ -192,7 +203,7 @@ def run_public_release_gate(
         _release_smoke_assessment(
             tmp_dir=resolved_tmp_dir,
             checks=checks,
-            extra_reports=release_smoke_reports,
+            extra_reports=release_smoke_report_paths,
             public_demo_reports=public_demo_report_paths,
             diagnostics_zips=[*generated_diagnostics_zips, *diagnostics_zips],
             plan_only=plan_only,
@@ -685,6 +696,14 @@ def _external_report_freshness_check(
     }
 
 
+def _stale_external_report_paths(freshness_check: Mapping[str, Any]) -> set[Path]:
+    return {
+        _stable_path(_resolve_path(Path(str(blocker.get("report_json") or ""))))
+        for blocker in _dict_list(freshness_check.get("release_blockers"))
+        if str(blocker.get("report_json") or "").strip()
+    }
+
+
 def _current_git_commit() -> str:
     try:
         result = subprocess.run(
@@ -726,6 +745,10 @@ def _report_source_commit(report: Mapping[str, Any]) -> str:
 
 def _short_commit(commit: str) -> str:
     return commit[:8] if commit else "unknown"
+
+
+def _stable_path(path: Path) -> Path:
+    return path.resolve(strict=False)
 
 
 def _next_actions(

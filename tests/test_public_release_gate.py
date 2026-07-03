@@ -668,7 +668,15 @@ def test_public_release_gate_reports_stale_external_release_reports(
 ):
     monkeypatch.setattr(gate, "ROOT", tmp_path)
     monkeypatch.setattr(gate, "_current_git_commit", lambda: "b" * 40)
-    monkeypatch.setattr(gate, "_run_command", lambda command: _completed(list(command)))
+    commands: list[list[str]] = []
+
+    def fake_run(command):
+        command = list(command)
+        commands.append(command)
+        _write_release_smoke_report(command, ok=True)
+        return _completed(command)
+
+    monkeypatch.setattr(gate, "_run_command", fake_run)
     report_path = tmp_path / "tmp" / "old-rc.json"
     report_path.parent.mkdir(parents=True, exist_ok=True)
     report_path.write_text(
@@ -686,7 +694,6 @@ def test_public_release_gate_reports_stale_external_release_reports(
     summary = gate.run_public_release_gate(
         tmp_dir="tmp/gate",
         include_public_demo=False,
-        include_release_smoke=False,
         include_diagnostics_bundle=False,
         release_smoke_reports=["tmp/old-rc.json"],
     )
@@ -700,8 +707,14 @@ def test_public_release_gate_reports_stale_external_release_reports(
     assert freshness["status"] == "passed"
     assert freshness["release_blockers"][0]["status"] == "stale"
     assert "old-rc.json was generated for aaaaaaaa" in freshness["release_blockers"][0]["reason"]
-    action = next(item for item in summary["next_actions"] if item["id"] == "external_report_freshness")
+    action = next(
+        item for item in summary["next_actions"] if item["id"] == "external_report_freshness"
+    )
     assert "verify_release_candidate.py" in action["command"]
+    release_smoke_command = next(
+        command for command in commands if "scripts/summarize_release_smoke.py" in command
+    )
+    assert str(report_path) not in release_smoke_command
 
 
 def test_public_release_gate_passes_granular_real_desktop_demo_flags(
