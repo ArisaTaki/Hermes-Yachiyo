@@ -11977,6 +11977,36 @@ def test_runtime_planner_discovers_dynamic_file_before_opening_with_app() -> Non
     ]
 
 
+def test_planner_execution_continues_after_dynamic_file_open_with_pending_action() -> None:
+    allowed_tools = [
+        "workspace.list",
+        "desktop.open_path_with_app",
+        "desktop.active_window",
+    ]
+
+    simple_open_requests = planner_tool_requests(
+        "用 Preview 打开桌面的 logo.png",
+        allowed_tools,
+    )
+    assert [request["tool"] for request in simple_open_requests] == [
+        "workspace.list",
+        "desktop.open_path_with_app",
+        "desktop.active_window",
+    ]
+    assert "continue_to_model" not in simple_open_requests[-1]
+
+    followup_requests = planner_tool_requests(
+        "打开 Photoshop，导入桌面的 logo.png，然后调整大小",
+        allowed_tools,
+    )
+    assert [request["tool"] for request in followup_requests] == [
+        "workspace.list",
+        "desktop.open_path_with_app",
+        "desktop.active_window",
+    ]
+    assert followup_requests[-1]["continue_to_model"] is True
+
+
 def test_runtime_planner_keeps_selected_app_target_path_when_open_with_app_tool_is_missing() -> None:
     allowed_tools = ["desktop.list_apps", "app.open"]
 

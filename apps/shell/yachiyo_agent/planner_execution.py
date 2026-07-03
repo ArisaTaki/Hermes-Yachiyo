@@ -2746,6 +2746,8 @@ def _desktop_observation_step_needs_model_followup(
     step_id: str,
     tool_name: str,
 ) -> bool:
+    if step_id == "verify-opened-file":
+        return _dynamic_file_open_step_needs_model_followup(decision)
     planned_step = _planned_step_by_id(decision, step_id)
     if str(getattr(planned_step, "action", "") or "").strip() == "observe_ui_target":
         return True
@@ -2880,6 +2882,73 @@ def _selected_discovered_app_observation_needs_model_followup(
             continue
         return False
     return saw_observation
+
+
+def _dynamic_file_open_step_needs_model_followup(decision: Any) -> bool:
+    if not _runtime_resolvable_dynamic_file_open_plan(decision):
+        return False
+    intent = getattr(decision, "selected_intent", None)
+    prompt = str(getattr(intent, "user_goal", "") or "").strip()
+    if not prompt:
+        return False
+    inputs = getattr(intent, "inputs", None)
+    file_hint = (
+        inputs.get("file_open_discovery_hint")
+        if isinstance(inputs, Mapping)
+        and isinstance(inputs.get("file_open_discovery_hint"), Mapping)
+        else {}
+    )
+    candidates = _dynamic_file_open_target_candidates(file_hint)
+    for candidate in candidates:
+        index = prompt.lower().find(candidate.lower())
+        if index < 0:
+            continue
+        tail = prompt[index + len(candidate) :]
+        if _dynamic_file_open_tail_has_pending_action(tail):
+            return True
+    return bool(
+        re.search(
+            r"(?:打开|导入|载入|使用|用|open|import|load|use).{0,160}"
+            r"(?:，|,|并且|并|然后|再|接着|之后|后|\band\b|\bthen\b).{0,80}"
+            r"(?:调整|缩放|裁剪|筛选|过滤|排序|编辑|处理|压缩|转换|保存|导出|标注|"
+            r"设计|绘制|画|搜索|查找|替换|resize|scale|crop|filter|sort|edit|"
+            r"process|compress|convert|save|export|annotate|design|draw|search|find|replace)",
+            prompt,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _dynamic_file_open_target_candidates(file_hint: Mapping[str, Any]) -> list[str]:
+    candidates: list[str] = []
+    for key in ("pattern", "target_path", "path"):
+        value = str(file_hint.get(key) or "").strip()
+        if not value or "*" in value or "{" in value:
+            continue
+        candidates.append(value.rsplit("/", 1)[-1])
+        candidates.append(value)
+    return [
+        candidate
+        for index, candidate in enumerate(candidates)
+        if candidate and candidate not in candidates[:index]
+    ]
+
+
+def _dynamic_file_open_tail_has_pending_action(tail: str) -> bool:
+    value = str(tail or "").strip()
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"^(?:[，,。；;:：\s]*(?:并且|并|然后|再|接着|之后|后|and\s+then|then|and)?"
+            r"[，,。；;:：\s]*){0,3}"
+            r".{0,80}(?:调整|缩放|裁剪|筛选|过滤|排序|编辑|处理|压缩|转换|保存|导出|"
+            r"标注|设计|绘制|画|搜索|查找|替换|resize|scale|crop|filter|sort|"
+            r"edit|process|compress|convert|save|export|annotate|design|draw|search|find|replace)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _control_presence_prompt_needs_model_followup(prompt: str) -> bool:
