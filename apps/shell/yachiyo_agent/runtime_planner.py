@@ -1339,6 +1339,8 @@ class TaskIntentRouter:
         text: str,
         metadata: Mapping[str, Any],
     ) -> TaskIntentSnapshot:
+        if _looks_like_archive_extract_request(text):
+            return _empty_intent("web_research", text)
         if _explicit_hotkey_request(text):
             return _empty_intent("web_research", text)
         if _browser_internal_page_hint(text):
@@ -1981,6 +1983,8 @@ class TaskIntentRouter:
         )
         if score <= 0 and _looks_like_file_organization_request(text):
             score = 0.16
+        if _looks_like_archive_extract_request(text):
+            score = max(score, 0.28)
         if score <= 0:
             return _empty_intent("file_organization", text)
         location_hint = _file_location_hint(text)
@@ -1988,6 +1992,7 @@ class TaskIntentRouter:
         file_type_hint = _file_type_hint(text)
         file_pattern_hint = _file_pattern_hint(file_type_hint)
         destination_hint = _file_destination_hint(text, source_hint=location_hint)
+        selection_hint = _file_open_selection_hint(text)
         inputs: dict[str, Any] = {
             "location_hint": location_hint,
             "operation_hint": operation_hint,
@@ -1998,6 +2003,8 @@ class TaskIntentRouter:
             inputs["file_pattern_hint"] = file_pattern_hint
         if destination_hint:
             inputs["destination_hint"] = destination_hint
+        if selection_hint:
+            inputs["selection_hint"] = selection_hint
         inventory_only = operation_hint in {"inventory", "duplicate_inventory"}
         destructive = operation_hint in {
             "delete",
@@ -2031,6 +2038,8 @@ class TaskIntentRouter:
         if _app_file_open_discovery_hint(text, metadata):
             return _empty_intent("file_access", text)
         if _explicit_browser_url_hint(text) or _browser_internal_page_hint(text):
+            return _empty_intent("file_access", text)
+        if _looks_like_archive_extract_request(text):
             return _empty_intent("file_access", text)
         if _looks_like_scoped_data_analysis_request(text):
             return _empty_intent("file_access", text)
@@ -6356,6 +6365,7 @@ class RuntimePlanner:
         file_type_hint = str(intent.inputs.get("file_type_hint") or "").strip()
         file_pattern_hint = str(intent.inputs.get("file_pattern_hint") or "").strip()
         destination_hint = str(intent.inputs.get("destination_hint") or "").strip()
+        selection_hint = str(intent.inputs.get("selection_hint") or "").strip()
         inventory_only = operation_hint in {"inventory", "duplicate_inventory"}
         duplicate_inventory = operation_hint == "duplicate_inventory"
         artifact_path = "file-organization-plan.md"
@@ -6375,7 +6385,7 @@ class RuntimePlanner:
             if duplicate_inventory
             else "Create a replayable file inventory artifact without changing files."
             if inventory_only
-            else "Create a reviewable plan before moving, renaming, archiving, or deleting files."
+            else "Create a reviewable plan before moving, renaming, archiving, extracting, or deleting files."
         )
         steps = [
             _step(
@@ -6397,6 +6407,7 @@ class RuntimePlanner:
                     location_hint,
                     file_type_hint,
                     file_pattern_hint,
+                    selection_hint,
                 ),
                 reason="List or reveal the requested file scope before planning changes.",
             ),
@@ -6427,6 +6438,7 @@ class RuntimePlanner:
                     file_type_hint,
                     file_pattern_hint,
                     destination_hint,
+                    selection_hint,
                 ),
                 action="apply_file_changes",
                 risk_level="high",
@@ -7938,6 +7950,7 @@ def _file_scope_input_preview(
     location_hint: str,
     file_type_hint: str,
     file_pattern_hint: str,
+    selection_hint: str = "",
 ) -> dict[str, str]:
     preview: dict[str, str] = {}
     if location_hint:
@@ -7946,6 +7959,8 @@ def _file_scope_input_preview(
         preview["file_type"] = file_type_hint
     if file_pattern_hint:
         preview["pattern"] = file_pattern_hint
+    if selection_hint:
+        preview["selection"] = selection_hint
     return preview
 
 
@@ -8030,6 +8045,7 @@ def _file_apply_input_preview(
     file_type_hint: str = "",
     file_pattern_hint: str = "",
     destination_hint: str = "",
+    selection_hint: str = "",
 ) -> dict[str, str]:
     preview: dict[str, str] = {}
     if location_hint:
@@ -8042,6 +8058,8 @@ def _file_apply_input_preview(
         preview["pattern"] = file_pattern_hint
     if destination_hint:
         preview["destination"] = destination_hint
+    if selection_hint:
+        preview["selection"] = selection_hint
     return preview
 
 
@@ -15909,9 +15927,12 @@ def _canonical_spreadsheet_app_hint(value: str) -> str:
 
 
 def _file_location_hint(text: str) -> str:
-    path_match = re.search(r"((?:~|/)[^\s，,。]+)", text)
+    path_match = re.search(
+        r"(?<![A-Za-z0-9_.-])(?P<path>(?:~/|/|[A-Za-z]:[\\/])[^\s，,。]+)",
+        text,
+    )
     if path_match:
-        return path_match.group(1).rstrip("。.,")
+        return path_match.group("path").rstrip("。.,")
     lowered = text.lower()
     known_locations = (
         ("downloads", "Downloads"),
@@ -15943,6 +15964,11 @@ def _file_destination_hint(text: str, *, source_hint: str = "") -> str:
         re.compile(
             r"(?:整理|分类|移动|搬|挪|归档|复制|放|放入|放进|移到|移入)"
             r".{0,24}?(?:到|至|进|入)\s*(?P<target>[^，。；,;]+)",
+            flags=re.IGNORECASE,
+        ),
+        re.compile(
+            r"(?:解压|解压缩|展开压缩包|extract|unzip|decompress)"
+            r".{0,24}?(?:到|至|进|入|\bto\b|\binto\b)\s*(?P<target>[^，。；,;]+)",
             flags=re.IGNORECASE,
         ),
         re.compile(
@@ -16058,6 +16084,11 @@ def _text_before_file_destination(text: str) -> str:
         re.compile(
             r"(?:整理|分类|移动|搬|挪|归档|复制|放|放入|放进|移到|移入)"
             r".{0,24}?(?:到|至|进|入)\s*(?P<target>[^，。；,;]+)",
+            flags=re.IGNORECASE,
+        ),
+        re.compile(
+            r"(?:解压|解压缩|展开压缩包|extract|unzip|decompress)"
+            r".{0,24}?(?:到|至|进|入|\bto\b|\binto\b)\s*(?P<target>[^，。；,;]+)",
             flags=re.IGNORECASE,
         ),
         re.compile(
@@ -16240,8 +16271,9 @@ def _looks_like_file_organization_request(text: str) -> bool:
             "文档",
         ],
     )
+    archive_extract = _looks_like_archive_extract_request(text)
     if not file_scope:
-        return False
+        return archive_extract
     inventory_query = _contains_any(
         text,
         [
@@ -16307,9 +16339,111 @@ def _looks_like_file_organization_request(text: str) -> bool:
     )
     return (
         file_operation
+        or archive_extract
         or _file_duplicate_hint(text)
         or (inventory_query and (explicit_file_inventory_scope or bool(file_type)))
     )
+
+
+def _looks_like_archive_extract_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    archive_target = _contains_any(
+        value,
+        [
+            "zip",
+            ".zip",
+            "rar",
+            ".rar",
+            "7z",
+            ".7z",
+            "tar",
+            ".tar",
+            "gz",
+            ".gz",
+            "tgz",
+            ".tgz",
+            "archive",
+            "archives",
+            "压缩包",
+            "归档包",
+        ],
+    )
+    if not archive_target:
+        return False
+    extract_action = _contains_any(
+        value,
+        [
+            "unzip",
+            "decompress",
+            "extract archive",
+            "extract zip",
+            "extract the zip",
+            "extract this zip",
+            "解压",
+            "解压缩",
+            "展开压缩包",
+        ],
+    ) or bool(
+        re.search(
+            r"\bextract\b.{0,32}\b(?:zip|archive|rar|7z|tar|gz|tgz)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+    if not extract_action:
+        return False
+    concrete_scope = _contains_any(
+        value,
+        [
+            "download",
+            "downloads",
+            "desktop",
+            "documents",
+            "finder",
+            "~/",
+            "/",
+            "下载",
+            "桌面",
+            "文档",
+            "当前",
+            "这个",
+            "这份",
+            "this",
+        ],
+    ) or bool(_file_open_selection_hint(value))
+    if (
+        _contains_any(value, ["how to", "guide", "tutorial", "如何", "怎么", "怎样", "教程"])
+        and not concrete_scope
+    ):
+        return False
+    local_scope = _contains_any(
+        value,
+        [
+            "download",
+            "downloads",
+            "desktop",
+            "documents",
+            "finder",
+            "file",
+            "folder",
+            "directory",
+            "下载",
+            "桌面",
+            "文档",
+            "文件",
+            "文件夹",
+            "目录",
+            "当前",
+            "这个",
+            "这份",
+            "this",
+        ],
+    )
+    if local_scope:
+        return True
+    return _contains_any(value, ["把", "将", "帮我", "请", "please"])
 
 
 def _file_duplicate_hint(text: str) -> bool:
@@ -16680,6 +16814,8 @@ def _file_operation_hint(text: str) -> str:
         return "delete"
     if _contains_any(text, ["rename", "重命名", "改名"]):
         return "rename"
+    if _looks_like_archive_extract_request(text):
+        return "extract"
     if _contains_any(text, ["archive", "归档", "压缩"]):
         return "archive"
     if _contains_any(text, ["move", "移动"]):

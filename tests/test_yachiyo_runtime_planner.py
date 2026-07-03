@@ -5079,6 +5079,7 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
         "file_type_hint": "screenshot",
         "file_pattern_hint": "*.{png,jpg,jpeg,heic,gif,webp}",
         "destination_hint": "demo.png",
+        "selection_hint": "latest",
     }
     rename_apply_step = _step_by_id(
         screenshot_rename_decision,
@@ -5090,6 +5091,7 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
         "file_type": "screenshot",
         "pattern": "*.{png,jpg,jpeg,heic,gif,webp}",
         "destination": "demo.png",
+        "selection": "latest",
     }
     assert rename_apply_step.approval_required is True
 
@@ -5142,6 +5144,89 @@ def test_runtime_planner_prefers_structured_file_organize_tool() -> None:
         "file_type": "invoice",
     }
     assert desktop_apply_step.approval_required is True
+
+
+def test_runtime_planner_routes_archive_extraction_through_file_organization() -> None:
+    allowed_tools = ["workspace.list", "artifact.write", "terminal.run", "desktop.open_path"]
+    finder_prefixed = RuntimePlanner().decision(
+        "帮我打开 Finder，把下载文件夹里最大的 zip 解压",
+        allowed_tools=allowed_tools,
+    )
+    latest_to_destination = RuntimePlanner().decision(
+        "把 Downloads 里最新的 zip 解压到 Downloads/extracted",
+        allowed_tools=allowed_tools,
+    )
+    chinese_archive = RuntimePlanner().decision(
+        "把下载文件夹里最近的压缩包解压",
+        allowed_tools=allowed_tools,
+    )
+    how_to = RuntimePlanner().decision(
+        "研究一下如何解压 zip 文件",
+        allowed_tools=[
+            "browser.search",
+            "browser.open_url_and_extract_text",
+            "artifact.write",
+            "workspace.list",
+            "terminal.run",
+        ],
+    )
+
+    assert finder_prefixed.selected_intent.kind == "file_organization"
+    assert finder_prefixed.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "extract",
+        "file_type_hint": "archive",
+        "file_pattern_hint": "*.{zip,rar,7z,tar,gz}",
+        "selection_hint": "largest",
+    }
+    assert [step.step_id for step in finder_prefixed.plan.tool_plan.steps] == [
+        "inspect-file-scope",
+        "write-file-organization-plan",
+        "apply-file-organization",
+    ]
+    assert _step_by_id(finder_prefixed, "inspect-file-scope").input_preview == {
+        "path": "Downloads",
+        "file_type": "archive",
+        "pattern": "*.{zip,rar,7z,tar,gz}",
+        "selection": "largest",
+    }
+    finder_apply = _step_by_id(finder_prefixed, "apply-file-organization")
+    assert finder_apply.tool_name == "terminal.run"
+    assert finder_apply.input_preview == {
+        "path": "Downloads",
+        "operation": "extract",
+        "file_type": "archive",
+        "pattern": "*.{zip,rar,7z,tar,gz}",
+        "selection": "largest",
+    }
+    assert finder_apply.approval_required is True
+
+    assert latest_to_destination.selected_intent.kind == "file_organization"
+    assert latest_to_destination.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "extract",
+        "file_type_hint": "archive",
+        "file_pattern_hint": "*.{zip,rar,7z,tar,gz}",
+        "destination_hint": "Downloads/extracted",
+        "selection_hint": "latest",
+    }
+    assert _step_by_id(latest_to_destination, "apply-file-organization").input_preview == {
+        "path": "Downloads",
+        "operation": "extract",
+        "file_type": "archive",
+        "pattern": "*.{zip,rar,7z,tar,gz}",
+        "destination": "Downloads/extracted",
+        "selection": "latest",
+    }
+    assert chinese_archive.selected_intent.kind == "file_organization"
+    assert chinese_archive.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "extract",
+        "file_type_hint": "archive",
+        "file_pattern_hint": "*.{zip,rar,7z,tar,gz}",
+        "selection_hint": "latest",
+    }
+    assert how_to.selected_intent.kind == "web_research"
 
 
 def test_runtime_planner_routes_duplicate_file_cleanup_through_approval() -> None:
