@@ -62,7 +62,10 @@ import {
   type RuntimeToolRecoveryAction,
 } from '../features/runtime-shared/toolRecoveryActions';
 import { startYachiyoTask } from '../features/yachiyo-chat/api';
-import { startYachiyoRunReplanRecoveryAction } from '../features/yachiyo-studio/api';
+import {
+  startYachiyoGroupRunReplanRecoveryAction,
+  startYachiyoRunReplanRecoveryAction,
+} from '../features/yachiyo-studio/api';
 import type {
   PlannerOrchestrationStartSnapshot,
   ToolCallSnapshot,
@@ -266,6 +269,28 @@ export function AgentStudioView() {
     return {
       selectedRunId: run.run_id,
       statusMessage: `已启动恢复 Run：${run.title || action.label || action.tool}`,
+    };
+  };
+  const runGroupReplanRecoveryAction = async (
+    groupRunId: string,
+    requestId: string,
+    action: RuntimeToolRecoveryAction,
+  ) => {
+    if (!action.action_id) throw new Error('恢复动作缺少 action_id');
+    const run = await startYachiyoGroupRunReplanRecoveryAction(groupRunId, {
+      request_id: requestId,
+      action_id: action.action_id,
+      title: action.label || action.prompt || action.tool,
+      continue_to_model: true,
+      metadata: {
+        permission_target: action.permission_target,
+        source: 'agent_studio_group_replan_recovery',
+        source_group_run_id: groupRunId,
+      },
+    });
+    return {
+      selectedRunId: run.run_id,
+      statusMessage: `已启动 GroupRun 恢复 Run：${run.title || action.label || action.tool}`,
     };
   };
 
@@ -1125,6 +1150,10 @@ export function AgentStudioView() {
           onRequestDeleteSelectedRuns={requestDeleteSelectedRuns}
           onRerunSelectedRun={rerunSelectedRun}
           onRerunWorkflowScope={rerunWorkflowScope}
+          onRunGroupReplanRecoveryAction={(groupRunId, requestId, action) => void runAction(
+            () => runGroupReplanRecoveryAction(groupRunId, requestId, action),
+            `启动 GroupRun 恢复 Run：${action.label || action.prompt || action.tool}`,
+          )}
           onRunReplanRecoveryAction={(runId, requestId, action) => void runAction(
             () => runReplanRecoveryAction(runId, requestId, action),
             `启动恢复 Run：${action.label || action.prompt || action.tool}`,

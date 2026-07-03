@@ -64,6 +64,7 @@ export function RunDetailPanel({
   onRejectRunById,
   onRejectSelectedRun,
   onRequestCancelSelectedRun,
+  onRunGroupReplanRecoveryAction,
   onRunReplanRecoveryAction,
   onRunToolRecoveryAction,
   onRerunSelectedRun,
@@ -125,6 +126,11 @@ export function RunDetailPanel({
   onRejectRunById: (runId: string, nextSelectedRunId?: string) => Promise<unknown>;
   onRejectSelectedRun: () => Promise<unknown>;
   onRequestCancelSelectedRun: () => void;
+  onRunGroupReplanRecoveryAction?: (
+    groupRunId: string,
+    requestId: string,
+    action: RuntimeToolRecoveryAction,
+  ) => Promise<unknown> | unknown;
   onRunReplanRecoveryAction?: (
     runId: string,
     requestId: string,
@@ -345,6 +351,7 @@ export function RunDetailPanel({
             formatRunDate={formatRunDate}
             onOpenArtifact={onOpenArtifact}
             onOpenRunDetail={onOpenRunDetail}
+            onRunGroupReplanRecoveryAction={onRunGroupReplanRecoveryAction}
             onRunToolRecoveryAction={onRunToolRecoveryAction}
             recoveryActionDisabled={busy}
             runById={runById}

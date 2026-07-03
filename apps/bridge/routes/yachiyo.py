@@ -574,6 +574,19 @@ async def get_studio_group_run(
     return await yachiyo_studio_handlers.get_group_run(group_run_id, http_request)
 
 
+@router.post("/studio/group-runs/{group_run_id}/replan-recovery-actions/start")
+async def start_studio_group_run_replan_recovery_action(
+    group_run_id: str,
+    request: RunReplanRecoveryActionBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.start_group_replan_recovery_action(
+        group_run_id,
+        request,
+        http_request,
+    )
+
+
 @router.get("/studio/group-runs/{group_run_id}/events")
 async def get_studio_group_run_events(
     group_run_id: str,

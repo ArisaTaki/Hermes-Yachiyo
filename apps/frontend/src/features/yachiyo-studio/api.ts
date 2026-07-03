@@ -463,6 +463,16 @@ export async function getYachiyoGroupRun(groupRunId: string): Promise<GroupRunSn
   return apiGet(`/yachiyo/studio/group-runs/${encodeURIComponent(groupRunId)}`);
 }
 
+export async function startYachiyoGroupRunReplanRecoveryAction(
+  groupRunId: string,
+  request: YachiyoStudioRunReplanRecoveryActionRequest,
+): Promise<YachiyoRunTimelineSnapshot> {
+  return apiPost<YachiyoRunTimelineSnapshot>(
+    `/yachiyo/studio/group-runs/${encodeURIComponent(groupRunId)}/replan-recovery-actions/start`,
+    request,
+  );
+}
+
 export async function listYachiyoGroupRunEvents(
   groupRunId: string,
   afterSequence = 0,

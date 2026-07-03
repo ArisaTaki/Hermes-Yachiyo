@@ -27,6 +27,11 @@ type GroupRunDetailPanelProps = {
   onLoadMoreGroupRunEvents: () => Promise<unknown> | unknown;
   onOpenArtifact: (run: RunSpec | string, path: string) => Promise<void> | void;
   onOpenRunDetail: (runId: string) => void;
+  onRunGroupReplanRecoveryAction?: (
+    groupRunId: string,
+    requestId: string,
+    action: RuntimeToolRecoveryAction,
+  ) => Promise<unknown> | unknown;
   onRunToolRecoveryAction?: (
     toolCall: ToolCallSnapshot,
     action: RuntimeToolRecoveryAction,
@@ -58,6 +63,7 @@ export function GroupRunDetailPanel({
   onLoadMoreGroupRunEvents,
   onOpenArtifact,
   onOpenRunDetail,
+  onRunGroupReplanRecoveryAction,
   onRunToolRecoveryAction,
   recoveryActionDisabled = false,
   replayError,
@@ -211,6 +217,10 @@ export function GroupRunDetailPanel({
       ) : null}
       <PlannerTraceInspector
         events={groupRunReplayEvents}
+        onRunReplanRecoveryAction={groupOverviewId ? (requestId, action) => {
+          void onRunGroupReplanRecoveryAction?.(groupOverviewId, requestId, action);
+        } : undefined}
+        recoveryActionDisabled={recoveryActionDisabled || !onRunGroupReplanRecoveryAction}
         replanRecoveries={selectedGroupRunSnapshot?.replan_recoveries || []}
         sourceLabel="GroupRun planner facts · Intent / Capability / Plan / Selection"
         taskCore={selectedGroupRunSnapshot?.task_core}

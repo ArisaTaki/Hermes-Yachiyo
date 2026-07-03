@@ -468,34 +468,48 @@ class _FakeStudioPort:
 class _ReplanRecoveryActionPort(_FakeStudioPort):
     def get_run_timeline(self, run_id: str) -> dict[str, Any]:
         self.calls.append(("get_run_timeline", run_id))
+        if run_id == "workflow-run-1":
+            return _run_payload(
+                run_id=run_id,
+                runnable_id="workflow-1",
+                kind="workflow_run",
+                user_goal="Open Apple Music",
+            ) | {
+                "workflow_run_id": run_id,
+                "workflow_id": "workflow-1",
+                "children": [
+                    {
+                        "run_id": "child-run-1",
+                        "kind": "agent_run",
+                        "agent_id": "agent-2",
+                    }
+                ],
+                "events": [self._replan_event(source_run_id="child-run-1")],
+            }
         return _run_payload(run_id=run_id, user_goal="Open Apple Music") | {
             "agent_id": "agent-1",
-            "events": [
+            "events": [self._replan_event(source_run_id=run_id)],
+        }
+
+    def get_group_run(self, group_run_id: str) -> dict[str, Any]:
+        self.calls.append(("get_group_run", group_run_id))
+        return _group_run_payload(group_run_id=group_run_id) | {
+            "runs": [
+                _run_payload(
+                    run_id="child-run-1",
+                    runnable_id="agent-2",
+                    user_goal="Open Apple Music",
+                ) | {"agent_id": "agent-2"}
+            ],
+            "participants": [
                 {
-                    "event_type": "agent.replan.requested",
-                    "payload": {
-                        "request_id": "replan-1",
-                        "trigger": "tool_failure",
-                        "run_id": run_id,
-                        "source_step_id": "open-app",
-                        "source_tool_name": "desktop.open_app",
-                        "target_capability_id": "desktop.app_discovery",
-                        "planning_reason": "planner_replan_runtime_recovery_action",
-                        "metadata": {
-                            "recovery_actions": [
-                                {
-                                    "action_id": "replan-1:action:1:desktop.list_apps",
-                                    "label": "Find Apple Music",
-                                    "tool": "desktop.list_apps",
-                                    "input": {"query": "Apple Music"},
-                                    "permission_target": "app_discovery",
-                                    "risk_level": "low",
-                                }
-                            ],
-                        },
-                    },
+                    "agent_id": "agent-2",
+                    "name": "Operator",
+                    "role": "operator",
+                    "run_id": "child-run-1",
                 }
             ],
+            "events": [self._replan_event(source_run_id="child-run-1")],
         }
 
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -507,6 +521,33 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
         ) | {
             "status": "running",
             "timeline": [],
+        }
+
+    @staticmethod
+    def _replan_event(source_run_id: str) -> dict[str, Any]:
+        return {
+            "event_type": "agent.replan.requested",
+            "payload": {
+                "request_id": "replan-1",
+                "trigger": "tool_failure",
+                "run_id": source_run_id,
+                "source_step_id": "open-app",
+                "source_tool_name": "desktop.open_app",
+                "target_capability_id": "desktop.app_discovery",
+                "planning_reason": "planner_replan_runtime_recovery_action",
+                "metadata": {
+                    "recovery_actions": [
+                        {
+                            "action_id": "replan-1:action:1:desktop.list_apps",
+                            "label": "Find Apple Music",
+                            "tool": "desktop.list_apps",
+                            "input": {"query": "Apple Music"},
+                            "permission_target": "app_discovery",
+                            "risk_level": "low",
+                        }
+                    ],
+                },
+            },
         }
 
 
@@ -1416,6 +1457,46 @@ def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None
     assert direct_request["planning_reason"] == "planner_replan_runtime_recovery_action"
     assert direct_request["continue_to_model"] is True
     assert direct_request["replan_request_id"] == "replan-1"
+
+
+def test_agent_studio_service_starts_group_replan_recovery_action_from_child_agent() -> None:
+    port = _ReplanRecoveryActionPort()
+    service = AgentStudioService(port)
+
+    run = service.start_group_replan_recovery_action(
+        "group-run-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.list_apps",
+        },
+    )
+
+    assert run.run_id == "recovery-run-1"
+    request = _port_call_payload(port, "start_agent_run")
+    assert request["agent_id"] == "agent-2"
+    assert request["metadata"]["source_run_id"] == "group-run-1"
+    assert request["metadata"]["source_group_run_id"] == "group-run-1"
+    assert request["direct_tool_requests"][0]["tool"] == "desktop.list_apps"
+
+
+def test_agent_studio_service_starts_workflow_replan_recovery_action_from_child_agent() -> None:
+    port = _ReplanRecoveryActionPort()
+    service = AgentStudioService(port)
+
+    run = service.start_replan_recovery_action(
+        "workflow-run-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.list_apps",
+        },
+    )
+
+    assert run.run_id == "recovery-run-1"
+    request = _port_call_payload(port, "start_agent_run")
+    assert request["agent_id"] == "agent-2"
+    assert request["metadata"]["source_run_id"] == "workflow-run-1"
+    assert request["metadata"]["source_workflow_run_id"] == "workflow-run-1"
+    assert request["direct_tool_requests"][0]["replan_request_id"] == "replan-1"
 
 
 def test_agent_studio_service_paginates_group_run_events_after_child_sequence_renumbering() -> None:

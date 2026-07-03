@@ -691,6 +691,13 @@ class AgentStudioService:
     ) -> RunTimelineSnapshot:
         payload = _request_payload(request)
         source_run = self.get_run_timeline(run_id)
+        return self._start_replan_recovery_action_from_snapshot(source_run, payload)
+
+    def _start_replan_recovery_action_from_snapshot(
+        self,
+        source_run: Any,
+        payload: Mapping[str, Any],
+    ) -> RunTimelineSnapshot:
         request_id = str(payload.get("request_id") or "").strip()
         if not request_id:
             raise AgentRuntimeError("Replan recovery request_id is required")
@@ -699,7 +706,7 @@ class AgentStudioService:
             request_id=request_id,
             action_id=str(payload.get("action_id") or "").strip(),
         )
-        agent_id = str(payload.get("agent_id") or getattr(source_run, "agent_id", "") or "").strip()
+        agent_id = _replan_recovery_action_agent_id(payload, source_run, recovery)
         if not agent_id:
             raise AgentRuntimeError("Replan recovery action requires an agent_id")
 
@@ -762,6 +769,15 @@ class AgentStudioService:
 
     def get_group_run(self, group_run_id: str) -> GroupRunSnapshot:
         return group_run_snapshot_from_payload(self._studio_port.get_group_run(group_run_id))
+
+    def start_group_replan_recovery_action(
+        self,
+        group_run_id: str,
+        request: Mapping[str, Any],
+    ) -> RunTimelineSnapshot:
+        payload = _request_payload(request)
+        source_run = self.get_group_run(group_run_id)
+        return self._start_replan_recovery_action_from_snapshot(source_run, payload)
 
     def get_group_run_event_stream(self, group_run_id: str) -> Iterable[PublicRunEvent]:
         port_event_stream = getattr(self._studio_port, "get_group_run_event_stream", None)
@@ -1170,6 +1186,45 @@ def _replan_recovery_action_direct_request(
     return request
 
 
+def _replan_recovery_action_agent_id(
+    payload: Mapping[str, Any],
+    source_run: Any,
+    recovery: ReplanRecoverySnapshot,
+) -> str:
+    explicit = str(payload.get("agent_id") or "").strip()
+    if explicit:
+        return explicit
+    direct = str(getattr(source_run, "agent_id", "") or "").strip()
+    if direct:
+        return direct
+    source_run_id = str(recovery.run_id or "").strip()
+    if source_run_id:
+        for run in getattr(source_run, "runs", []) or []:
+            if str(getattr(run, "run_id", "") or "").strip() == source_run_id:
+                agent_id = str(getattr(run, "agent_id", "") or "").strip()
+                if agent_id:
+                    return agent_id
+        for participant in getattr(source_run, "participants", []) or []:
+            if str(getattr(participant, "run_id", "") or "").strip() == source_run_id:
+                agent_id = str(getattr(participant, "agent_id", "") or "").strip()
+                if agent_id:
+                    return agent_id
+        for child in getattr(source_run, "children", []) or []:
+            if str(getattr(child, "run_id", "") or "").strip() == source_run_id:
+                agent_id = str(getattr(child, "agent_id", "") or "").strip()
+                if agent_id:
+                    return agent_id
+    participants = [
+        str(getattr(participant, "agent_id", "") or "").strip()
+        for participant in getattr(source_run, "participants", []) or []
+        if str(getattr(participant, "agent_id", "") or "").strip()
+    ]
+    unique_participants = list(dict.fromkeys(participants))
+    if len(unique_participants) == 1:
+        return unique_participants[0]
+    return ""
+
+
 def _replan_recovery_action_metadata(
     source_run: Any,
     recovery: ReplanRecoverySnapshot,
@@ -1177,6 +1232,7 @@ def _replan_recovery_action_metadata(
     extra: Mapping[str, Any],
 ) -> dict[str, Any]:
     metadata = dict(extra)
+    source_id = _replan_recovery_source_id(source_run)
     metadata.update(
         {
             "daily_desktop_intent": True,
@@ -1191,9 +1247,17 @@ def _replan_recovery_action_metadata(
             "replan_recovery_action_id": str(action.action_id or ""),
             "replan_trigger": str(recovery.trigger or ""),
             "source": "agent_studio_replan_recovery",
-            "source_run_id": str(getattr(source_run, "run_id", "") or ""),
+            "source_run_id": source_id,
         }
     )
+    group_run_id = str(getattr(source_run, "group_run_id", "") or recovery.group_run_id or "").strip()
+    if group_run_id:
+        metadata["source_group_run_id"] = group_run_id
+    workflow_run_id = str(
+        getattr(source_run, "workflow_run_id", "") or recovery.workflow_run_id or ""
+    ).strip()
+    if workflow_run_id:
+        metadata["source_workflow_run_id"] = workflow_run_id
     source_task_id = str(getattr(source_run, "task_id", "") or recovery.task_id or "").strip()
     if source_task_id:
         metadata["source_task_id"] = source_task_id
@@ -1203,6 +1267,14 @@ def _replan_recovery_action_metadata(
     if action.approval_required:
         metadata["recovery_action_approval_required"] = True
     return metadata
+
+
+def _replan_recovery_source_id(source_run: Any) -> str:
+    for key in ("run_id", "group_run_id", "workflow_run_id", "run_group_id"):
+        value = str(getattr(source_run, key, "") or "").strip()
+        if value:
+            return value
+    return ""
 
 
 def _rejection_payload(
