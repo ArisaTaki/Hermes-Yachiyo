@@ -32561,6 +32561,12 @@ def test_planner_first_direct_selection_can_include_task_execution_context() -> 
         verify_request["task_verification_targets"][0]["checkpoints"][0]["after_step_id"]
         == "operate-foreground-ui"
     )
+    assert (
+        verify_request["task_verification_targets"][0]["workspace_items"][0][
+            "source_step_id"
+        ]
+        == "operate-foreground-ui"
+    )
 
 
 def test_runtime_planner_routes_app_scoped_meeting_minutes_to_desktop_create_flow() -> None:
@@ -32764,6 +32770,9 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     assert envelope.requests[2].task_verification_targets[0]["step_id"] == (
         "operate-foreground-ui"
     )
+    assert envelope.requests[2].task_verification_targets[0]["workspace_items"][0][
+        "source_step_id"
+    ] == "operate-foreground-ui"
     projected_requests = runtime_execution_requests_from_envelope_payload(
         envelope.model_dump(mode="json"),
         allowed_tools=allowed_tools,
@@ -32804,6 +32813,9 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     )
     assert projected_requests[2]["task_verification_targets"][0]["checkpoints"][0][
         "after_step_id"
+    ] == "operate-foreground-ui"
+    assert projected_requests[2]["task_verification_targets"][0]["workspace_items"][0][
+        "source_step_id"
     ] == "operate-foreground-ui"
 
     scoped_payload = envelope.model_dump(mode="json")

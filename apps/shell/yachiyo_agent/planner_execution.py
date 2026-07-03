@@ -1552,13 +1552,17 @@ def _task_verification_targets_for_step(
             continue
         todo = _task_todo_for_step(task_core, dependency_id)
         checkpoints = _task_checkpoints_for_step(task_core, dependency_id)
-        if not todo and not checkpoints:
+        workspace = getattr(task_core, "workspace", None)
+        workspace_items = _task_workspace_items_for_step(workspace, dependency_id)
+        if not todo and not checkpoints and not workspace_items:
             continue
         target: dict[str, Any] = {"step_id": dependency_id}
         if todo:
             target["todo"] = todo
         if checkpoints:
             target["checkpoints"] = checkpoints
+        if workspace_items:
+            target["workspace_items"] = workspace_items
         targets.append(target)
     return targets
 

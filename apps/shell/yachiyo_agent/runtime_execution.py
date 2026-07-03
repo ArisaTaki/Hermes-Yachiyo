@@ -557,13 +557,16 @@ def _task_verification_targets_for_request(
     for dependency in _string_list(payload.get("depends_on")):
         todo = _task_todo_for_step(task_core, dependency)
         checkpoints = _task_checkpoints_for_step(task_core, dependency)
-        if not todo and not checkpoints:
+        workspace_items = _task_workspace_items_for_step(task_core, dependency)
+        if not todo and not checkpoints and not workspace_items:
             continue
         target: dict[str, Any] = {"step_id": dependency}
         if todo:
             target["todo"] = todo
         if checkpoints:
             target["checkpoints"] = checkpoints
+        if workspace_items:
+            target["workspace_items"] = workspace_items
         targets.append(target)
     return targets
 
