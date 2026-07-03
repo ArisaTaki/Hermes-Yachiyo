@@ -9362,6 +9362,50 @@ def test_model_followup_context_instructs_discovered_app_search_result_selection
     assert "until the approval-gated confirm tool has executed" in confirm_message
 
 
+def test_model_followup_context_instructs_discovered_dynamic_context_paste() -> None:
+    payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "desktop.list_apps",
+                "planning_reason": "planner_desktop_operation",
+                "continue_to_model": True,
+            }
+        ],
+        {
+            "intent_kind": "desktop_operation",
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "notes",
+                "app_name_source": "desktop.list_apps",
+                "target_action": "safe_shortcut",
+                "safe_shortcut_action": "paste",
+                "body_source": "current_page_link",
+                "context_source": "current_page_link",
+                "source_action": "copy_current_page_link",
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {"limit": 80},
+                },
+            },
+        },
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.ui_elements",
+        ],
+        timeline=[],
+    )
+    message = custom_api_agent_module._model_followup_context_message(payload)
+
+    assert payload["followup_target"]["body_source"] == "current_page_link"
+    assert "runtime-captured current page link" in message
+    assert "source shortcut 'copy_current_page_link'" in message
+    assert "paste with the allowed desktop shortcut tools" in message
+    assert "Do not ask the user to copy or paste manually" in message
+    assert "do not replace the captured context with newly generated content" in message
+
+
 def test_model_followup_context_instructs_generated_discovered_app_write() -> None:
     payload = custom_api_agent_module._model_followup_context_payload(
         [

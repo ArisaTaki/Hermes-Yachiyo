@@ -383,6 +383,12 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
     generated_app_write_target = _desktop_generated_app_write_followup_target(inputs)
     if generated_app_write_target:
         return generated_app_write_target
+    dynamic_context_discovered_app_target = _dynamic_context_discovered_app_followup_target(
+        inputs,
+        decision,
+    )
+    if dynamic_context_discovered_app_target:
+        return dynamic_context_discovered_app_target
     desktop_discovered_app_target = _desktop_discovered_app_followup_target(
         inputs,
         decision,
@@ -969,6 +975,74 @@ def _desktop_discovered_app_followup_target(
         if pending_user_action:
             payload["pending_user_action"] = pending_user_action
     return payload
+
+
+def _dynamic_context_discovered_app_followup_target(
+    inputs: Mapping[str, Any],
+    decision: Any | None = None,
+) -> dict[str, Any]:
+    transfer = inputs.get("dynamic_context_ui_transfer_hint")
+    if not isinstance(transfer, Mapping):
+        return {}
+    if str(transfer.get("action") or "").strip() != "transfer_context":
+        return {}
+    if str(transfer.get("target_kind") or "").strip() != "app_paste":
+        return {}
+    desktop_discovery = inputs.get("desktop_discovery_hint")
+    if not isinstance(desktop_discovery, Mapping):
+        return {}
+    if str(desktop_discovery.get("action") or "").strip() != "discover_apps":
+        return {}
+    app_capability = _desktop_discovery_capability_hint(inputs)
+    query = str(desktop_discovery.get("query") or app_capability.get("query") or "").strip()
+    if not query:
+        return {}
+    source = str(transfer.get("source") or "").strip()
+    if source not in {"clipboard", "selection", "current_page_link", "current_page_content"}:
+        return {}
+    payload: dict[str, Any] = {
+        "kind": "desktop_discovered_app_action",
+        "app_query": query,
+        "app_name_source": "desktop.list_apps",
+        "target_action": "safe_shortcut",
+        "safe_shortcut_action": "paste",
+        "body_source": source,
+        "context_source": source,
+        "dynamic_context_transfer": {
+            key: str(transfer.get(key) or "").strip()
+            for key in ("source", "action", "target_kind", "target", "mode")
+            if str(transfer.get(key) or "").strip()
+        },
+        "post_action_observation": _dynamic_context_discovered_app_observation(decision),
+    }
+    source_action = _dynamic_context_source_action(source)
+    if source_action:
+        payload["source_action"] = source_action
+    description = str(app_capability.get("description") or "").strip()
+    if description:
+        payload["capability_description"] = description
+    return payload
+
+
+def _dynamic_context_discovered_app_observation(decision: Any | None) -> dict[str, Any]:
+    verify_step = _decision_plan_step(decision, "verify-selected-discovered-app-action")
+    action_payload = _decision_step_action_payload(verify_step)
+    if action_payload:
+        return action_payload
+    return {"tool": "desktop.ui_elements", "input": {"limit": 80}}
+
+
+def _dynamic_context_source_action(source: str) -> str:
+    clean_source = str(source or "").strip()
+    if clean_source == "selection":
+        return "copy"
+    if clean_source == "current_page_link":
+        return "copy_current_page_link"
+    if clean_source == "current_page_content":
+        return "select_all_then_copy"
+    if clean_source == "clipboard":
+        return "use_existing_clipboard"
+    return ""
 
 
 def _desktop_discovered_app_search_payload(

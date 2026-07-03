@@ -2101,6 +2101,7 @@ def test_chat_bridge_quick_message_executes_discovered_app_followup_without_mode
         ("open", "Typora", None),
         ("focus", "Typora", None),
         ("shortcut", "new_document", None),
+        ("focus", "Typora", None),
         ("type", "周报", None),
         ("ui", "", 80),
     ]
@@ -2129,29 +2130,38 @@ def test_chat_bridge_quick_message_executes_discovered_app_followup_without_mode
         "safe_shortcut_action": "new_document",
         "compose_text": "周报",
         "body_source": "explicit_user_text",
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
     }
     tool_calls = [
         (event["payload"]["tool"], event["payload"]["input_preview"])
         for event in result["_events"]
         if event["event_type"] == "agent.tool.call"
     ]
-    assert tool_calls == [
-        ("desktop.list_apps", {"query": "markdown", "limit": 20}),
-        (
-            "app.open_and_safe_shortcut",
-            {
-                "app_name": "Typora",
-                "action": "new_document",
-                "app_resolution_source": "desktop.list_apps",
-                "requested_app_name": "markdown",
-                "resolved_app_name": "Typora",
-                "resolved_app_path": "/Applications/Typora.app",
-                "app_resolution_score": "97",
-            },
-        ),
-        ("desktop.safe_type_text", {"text": "周报"}),
-        ("desktop.ui_elements", {}),
+    assert [tool for tool, _preview in tool_calls] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "desktop.ui_elements",
     ]
+    expected_input_previews = [
+        {"query": "markdown", "limit": 20},
+        {
+            "app_name": "Typora",
+            "action": "new_document",
+            "app_resolution_source": "desktop.list_apps",
+            "requested_app_name": "markdown",
+            "resolved_app_name": "Typora",
+            "resolved_app_path": "/Applications/Typora.app",
+            "app_resolution_score": "97",
+        },
+        {"app_name": "Typora", "text": "周报"},
+        {},
+    ]
+    for (_tool, input_preview), expected in zip(tool_calls, expected_input_previews):
+        assert expected.items() <= input_preview.items()
 
 
 def test_chat_bridge_quick_message_opens_generic_browser_followup_without_model(

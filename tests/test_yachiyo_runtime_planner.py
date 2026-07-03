@@ -2269,6 +2269,66 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
     )
     assert enriched["metadata"]["yachiyo_followup_target"] == payload["followup_target"]
 
+    context_prompt = "找一个笔记应用，把当前网页链接写进去"
+    context_allowed_tools = [
+        "desktop.safe_shortcut",
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+    ]
+    context_decision = RuntimePlanner().decision(
+        context_prompt,
+        allowed_tools=context_allowed_tools,
+    )
+    context_requests = planner_tool_requests(context_prompt, context_allowed_tools)
+    context_payload = planner_selection_payload(
+        decision=context_decision,
+        planner_requests=context_requests,
+        legacy_requests=[],
+        selected_requests=context_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert [request["tool"] for request in context_requests] == [
+        "desktop.safe_shortcut",
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    assert context_payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "notes",
+        "app_name_source": "desktop.list_apps",
+        "target_action": "safe_shortcut",
+        "safe_shortcut_action": "paste",
+        "body_source": "current_page_link",
+        "context_source": "current_page_link",
+        "dynamic_context_transfer": {
+            "source": "current_page_link",
+            "action": "transfer_context",
+            "target_kind": "app_paste",
+            "mode": "focus",
+        },
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80},
+        },
+        "source_action": "copy_current_page_link",
+        "capability_description": "笔记",
+    }
+    assert runtime_planner_metadata(context_decision)["yachiyo_followup_target"] == (
+        context_payload["followup_target"]
+    )
+    context_enriched = planner_enriched_chat_request(
+        {"prompt": context_prompt, "agent_id": "builtin:yachiyo-main", "metadata": {}},
+        allowed_tools=context_allowed_tools,
+    )
+    assert context_enriched["metadata"]["yachiyo_followup_target"] == (
+        context_payload["followup_target"]
+    )
+
     image_prompt = "打开一个能编辑图片的应用，新建一张 1024x1024 图片"
     image_decision = RuntimePlanner().decision(image_prompt, allowed_tools=allowed_tools)
     image_requests = planner_tool_requests(image_prompt, allowed_tools)

@@ -9212,6 +9212,19 @@ def _model_followup_desktop_discovered_app_target_payload(
     body_source = str(target.get("body_source") or "").strip()
     if body_source and "body_source" not in payload:
         payload["body_source"] = body_source
+    context_source = str(target.get("context_source") or "").strip()
+    if context_source:
+        payload["context_source"] = context_source
+    source_action = str(target.get("source_action") or "").strip()
+    if source_action:
+        payload["source_action"] = source_action
+    dynamic_context_transfer = (
+        target.get("dynamic_context_transfer")
+        if isinstance(target.get("dynamic_context_transfer"), Mapping)
+        else {}
+    )
+    if dynamic_context_transfer:
+        payload["dynamic_context_transfer"] = dict(dynamic_context_transfer)
     app_search = _discovered_app_search_payload(target)
     if app_search:
         payload["app_search"] = app_search
@@ -14950,6 +14963,41 @@ def _model_followup_desktop_discovered_app_instruction(target: Mapping[str, Any]
             f"{target_path!r} with the discovered app using the allowed desktop tools. "
             f"Prefer {tool_text}.{verify_text} If direct open-with-app tooling is unavailable, "
             "explain the missing capability and do not claim the file was opened. "
+        )
+    target_action = str(target.get("target_action") or "").strip()
+    safe_shortcut_action = str(target.get("safe_shortcut_action") or "").strip()
+    body_source = str(
+        target.get("body_source")
+        or target.get("context_source")
+        or ""
+    ).strip()
+    if (
+        target_action == "safe_shortcut"
+        and safe_shortcut_action == "paste"
+        and body_source
+        in {"clipboard", "selection", "current_page_link", "current_page_content"}
+    ):
+        source_text = {
+            "clipboard": "the existing clipboard contents",
+            "selection": "the runtime-captured selected text",
+            "current_page_link": "the runtime-captured current page link",
+            "current_page_content": "the runtime-captured current page content",
+        }[body_source]
+        source_action = str(target.get("source_action") or "").strip()
+        source_action_text = (
+            f" If that context has not been captured yet, first run the source shortcut "
+            f"{source_action!r}."
+            if source_action and source_action != "use_existing_clipboard"
+            else ""
+        )
+        return (
+            f"The user requested transferring {source_text} into an app matching "
+            f"{app_query!r}.{source_action_text} Continue by selecting the best discovered "
+            "app, opening or focusing it, then paste with the allowed desktop shortcut "
+            f"tools. Prefer {tool_text}.{verify_text} Do not ask the user to copy or paste "
+            "manually, and do not replace the captured context with newly generated content. "
+            "If app discovery or paste tools are unavailable, explain the missing capability "
+            "instead of claiming the app was updated. "
         )
     if str(target.get("body_source") or "").strip() == "model_generated_content":
         safe_shortcut_action = str(target.get("safe_shortcut_action") or "").strip()
