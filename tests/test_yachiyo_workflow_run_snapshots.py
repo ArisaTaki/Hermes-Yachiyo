@@ -122,3 +122,95 @@ def test_workflow_run_snapshot_projects_planner_summary_from_workflow_events() -
     assert workflow_run.planner_summary.plan_capabilities == ["data.analysis"]
     assert workflow_run.planner_summary.artifacts_expected == ["markdown_report"]
     assert workflow_run.planner_summary.event_count == 2
+
+
+def test_workflow_run_snapshot_projects_task_core_progress_from_workflow_events() -> None:
+    workflow_run = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-task-core",
+            "workflow_run_id": "workflow-run-task-core",
+            "workflow_id": "workflow-1",
+            "kind": "workflow_run",
+            "status": "completed",
+            "objective": "Analyze shared report",
+            "events": _completed_task_core_events(),
+        }
+    )
+
+    event_types = [event.event_type for event in workflow_run.events]
+    assert "workflow.run.task_core.created" in event_types
+    assert "workflow.run.task.todo.updated" in event_types
+    assert "workflow.run.task.checkpoint.updated" in event_types
+    assert workflow_run.task_core is not None
+    assert workflow_run.task_core.workspace.workspace_id == "task-workspace-1"
+    assert workflow_run.task_core.todos[0].status == "completed"
+    assert workflow_run.task_core.checkpoints[0].status == "completed"
+    assert workflow_run.task_progress is not None
+    assert workflow_run.task_progress.status == "completed"
+    assert workflow_run.task_progress.completed_todos == 1
+    assert workflow_run.task_progress.completed_checkpoints == 1
+    assert workflow_run.runtime_debug is not None
+    assert workflow_run.runtime_debug.needs_replan is False
+
+
+def _completed_task_core_events() -> list[dict]:
+    return [
+        {
+            "event_type": "agent.task_core.created",
+            "payload": {
+                "core_id": "task-core-1",
+                "task_core": {
+                    "core_id": "task-core-1",
+                    "workspace": {
+                        "workspace_id": "task-workspace-1",
+                        "title": "Analysis Workspace",
+                    },
+                    "todos": [
+                        {
+                            "todo_id": "todo-analyze",
+                            "title": "Analyze data",
+                            "step_id": "analyze-data",
+                            "tool_name": "data.analyze",
+                            "status": "pending",
+                        }
+                    ],
+                    "checkpoints": [
+                        {
+                            "checkpoint_id": "checkpoint-analyze",
+                            "title": "Verify analysis",
+                            "after_step_id": "analyze-data",
+                            "status": "planned",
+                        }
+                    ],
+                    "replan_signals": [],
+                },
+            },
+        },
+        {
+            "event_type": "agent.task.todo.updated",
+            "payload": {
+                "todo_id": "todo-analyze",
+                "status": "completed",
+                "todo": {
+                    "todo_id": "todo-analyze",
+                    "title": "Analyze data",
+                    "step_id": "analyze-data",
+                    "tool_name": "data.analyze",
+                    "status": "completed",
+                },
+            },
+        },
+        {
+            "event_type": "agent.task.checkpoint.updated",
+            "payload": {
+                "checkpoint_id": "checkpoint-analyze",
+                "status": "completed",
+                "checkpoint": {
+                    "checkpoint_id": "checkpoint-analyze",
+                    "title": "Verify analysis",
+                    "after_step_id": "analyze-data",
+                    "status": "completed",
+                },
+            },
+        },
+    ]

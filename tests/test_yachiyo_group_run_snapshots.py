@@ -76,6 +76,34 @@ def test_group_run_events_with_lifecycle_keeps_source_run_sequence_for_replay() 
     assert "sequence" not in events[1]
 
 
+def test_group_run_snapshot_projects_task_core_progress_from_group_events() -> None:
+    group_run = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "group-run-task-core",
+            "group_id": "group-1",
+            "title": "Group analysis",
+            "status": "completed",
+            "objective": "Analyze shared report",
+            "events": _completed_task_core_events(),
+        }
+    )
+
+    event_types = [event.event_type for event in group_run.events]
+    assert "group.run.task_core.created" in event_types
+    assert "group.run.task.todo.updated" in event_types
+    assert "group.run.task.checkpoint.updated" in event_types
+    assert group_run.task_core is not None
+    assert group_run.task_core.workspace.workspace_id == "task-workspace-1"
+    assert group_run.task_core.todos[0].status == "completed"
+    assert group_run.task_core.checkpoints[0].status == "completed"
+    assert group_run.task_progress is not None
+    assert group_run.task_progress.status == "completed"
+    assert group_run.task_progress.completed_todos == 1
+    assert group_run.task_progress.completed_checkpoints == 1
+    assert group_run.runtime_debug is not None
+    assert group_run.runtime_debug.needs_replan is False
+
+
 def test_group_run_snapshot_rolls_up_blocked_foreground_tool_calls() -> None:
     group_run = group_run_snapshot_from_payload(
         {
@@ -130,3 +158,66 @@ def test_group_run_snapshot_rolls_up_blocked_foreground_tool_calls() -> None:
     assert len(operator.tool_calls) == 1
     assert operator.tool_calls[0].tool_call_id == "call-foreground-lock"
     assert operator.tool_calls[0].status == "blocked"
+
+
+def _completed_task_core_events() -> list[dict]:
+    return [
+        {
+            "event_type": "agent.task_core.created",
+            "payload": {
+                "core_id": "task-core-1",
+                "task_core": {
+                    "core_id": "task-core-1",
+                    "workspace": {
+                        "workspace_id": "task-workspace-1",
+                        "title": "Analysis Workspace",
+                    },
+                    "todos": [
+                        {
+                            "todo_id": "todo-analyze",
+                            "title": "Analyze data",
+                            "step_id": "analyze-data",
+                            "tool_name": "data.analyze",
+                            "status": "pending",
+                        }
+                    ],
+                    "checkpoints": [
+                        {
+                            "checkpoint_id": "checkpoint-analyze",
+                            "title": "Verify analysis",
+                            "after_step_id": "analyze-data",
+                            "status": "planned",
+                        }
+                    ],
+                    "replan_signals": [],
+                },
+            },
+        },
+        {
+            "event_type": "agent.task.todo.updated",
+            "payload": {
+                "todo_id": "todo-analyze",
+                "status": "completed",
+                "todo": {
+                    "todo_id": "todo-analyze",
+                    "title": "Analyze data",
+                    "step_id": "analyze-data",
+                    "tool_name": "data.analyze",
+                    "status": "completed",
+                },
+            },
+        },
+        {
+            "event_type": "agent.task.checkpoint.updated",
+            "payload": {
+                "checkpoint_id": "checkpoint-analyze",
+                "status": "completed",
+                "checkpoint": {
+                    "checkpoint_id": "checkpoint-analyze",
+                    "title": "Verify analysis",
+                    "after_step_id": "analyze-data",
+                    "status": "completed",
+                },
+            },
+        },
+    ]
