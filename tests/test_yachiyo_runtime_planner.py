@@ -5895,6 +5895,26 @@ def test_runtime_planner_routes_code_test_diagnostics_to_approval_terminal_plan(
         "apply-code-changes",
         "verify-code-changes",
     ]
+    assert decision.plan.timeline_preview[1]["payload"]["runtime_doctrine"] == (
+        "discover_operate_verify"
+    )
+    assert decision.plan.timeline_preview[1]["payload"]["runtime_stage_counts"] == {
+        "discover": 2,
+        "operate": 1,
+        "verify": 1,
+    }
+    assert {
+        todo.step_id: (
+            todo.metadata.get("runtime_stage"),
+            todo.metadata.get("runtime_role"),
+        )
+        for todo in decision.plan.task_core.todos
+    } == {
+        "inspect-workspace": ("discover", "inspect_workspace"),
+        "run-code-diagnostic": ("discover", "diagnose"),
+        "apply-code-changes": ("operate", "apply_patch"),
+        "verify-code-changes": ("verify", "verify_result"),
+    }
     run_step = _step_by_id(decision, "run-code-diagnostic")
     assert run_step.tool_name == "terminal.run"
     assert run_step.input_preview == {"command": "python -m pytest"}
@@ -8686,7 +8706,13 @@ def test_planner_execution_tool_requests_discovers_unknown_app_scoped_operations
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"role_filter": "button", "limit": 80},
+            "input": {
+                "app_name": "PixelForge",
+                "role_filter": "button",
+                "limit": 80,
+                "selection_source": "desktop.list_apps",
+                "query": "PixelForge",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
             "continue_to_model": True,
@@ -31210,6 +31236,76 @@ def test_runtime_execution_envelope_can_project_full_data_analysis_plan() -> Non
     ]
     assert projected_requests[1]["depends_on"] == ["inspect-data-source"]
     assert projected_requests[2]["depends_on"] == ["run-analysis"]
+
+
+def test_runtime_execution_envelope_can_project_full_code_task_plan() -> None:
+    allowed_tools = [
+        "workspace.list",
+        "workspace.read",
+        "workspace.write_patch",
+        "terminal.run",
+        "artifact.write",
+    ]
+    decision = RuntimePlanner().decision(
+        "修复这个仓库里的 failing tests",
+        allowed_tools=allowed_tools,
+    )
+
+    full_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert full_envelope is not None
+    assert [request.tool_name for request in full_envelope.requests] == [
+        "workspace.list",
+        "terminal.run",
+        "workspace.write_patch",
+        "terminal.run",
+    ]
+    assert [request.step_id for request in full_envelope.requests] == [
+        "inspect-workspace",
+        "run-code-diagnostic",
+        "apply-code-changes",
+        "verify-code-changes",
+    ]
+    assert [request.runtime_stage for request in full_envelope.requests] == [
+        "discover",
+        "discover",
+        "operate",
+        "verify",
+    ]
+    assert [request.runtime_role for request in full_envelope.requests] == [
+        "inspect_workspace",
+        "diagnose",
+        "apply_patch",
+        "verify_result",
+    ]
+    assert full_envelope.runtime_stage_counts == {
+        "discover": 2,
+        "operate": 1,
+        "verify": 1,
+    }
+    assert full_envelope.requests[2].approval_required is True
+    assert full_envelope.requests[2].requires_post_action_verification is True
+    assert full_envelope.requests[3].requires_observation is True
+
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        full_envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+
+    assert projected_requests[2]["task_todo"]["step_id"] == "apply-code-changes"
+    assert projected_requests[2]["task_checkpoints"][0]["after_step_id"] == (
+        "apply-code-changes"
+    )
+    assert projected_requests[3]["task_verification_targets"][0]["step_id"] == (
+        "apply-code-changes"
+    )
+    assert projected_requests[3]["task_verification_targets"][0]["todo"]["metadata"][
+        "runtime_role"
+    ] == "apply_patch"
 
 
 def test_runtime_execution_requests_preserve_replan_fallback_tools() -> None:

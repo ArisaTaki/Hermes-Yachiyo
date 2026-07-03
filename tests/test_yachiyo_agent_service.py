@@ -713,7 +713,12 @@ def test_agent_studio_service_plans_discovered_desktop_app_execution() -> None:
         "query": "PixelForge",
     }
     assert envelope.requests[1].requires_post_action_verification is True
-    assert envelope.requests[2].input == {"limit": 80}
+    assert envelope.requests[2].input == {
+        "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
+        "limit": 80,
+    }
     assert envelope.requests[2].requires_post_action_verification is True
 
 

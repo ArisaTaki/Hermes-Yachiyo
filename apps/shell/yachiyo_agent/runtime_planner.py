@@ -13045,10 +13045,28 @@ def _runtime_dov_step_metadata(step: ToolPlanStepSnapshot) -> dict[str, Any]:
 def _runtime_dov_step_applies(step: ToolPlanStepSnapshot) -> bool:
     tool_name = str(step.tool_name or "").strip()
     capability_id = str(step.capability_id or "").strip()
+    step_id = str(step.step_id or "").strip()
     return bool(
         tool_name.startswith(("app.", "desktop."))
         or tool_name == "screen.capture"
         or capability_id.startswith("desktop.")
+        or _runtime_dov_code_step_applies(step_id)
+    )
+
+
+def _runtime_dov_code_step_applies(step_id: str) -> bool:
+    return bool(
+        step_id
+        in {
+            "inspect-workspace",
+            "read-code-target-file",
+            "run-code-diagnostic",
+            "apply-code-changes",
+            "verify-code-changes",
+            "run-terminal-command",
+            "write-code-report",
+        }
+        or step_id.startswith("inspect-code-area-")
     )
 
 
@@ -13057,6 +13075,14 @@ def _runtime_dov_stage(step: ToolPlanStepSnapshot) -> str:
     action = str(step.action or "").strip()
     if "verify" in step_id or action == "verify":
         return "verify"
+    if step_id == "write-code-report":
+        return "produce"
+    if step_id == "run-terminal-command":
+        return "operate"
+    if action in {"apply_patch", "write_file"} or step_id.startswith(
+        ("apply-", "insert-", "send-", "submit-", "operate-")
+    ):
+        return "operate"
     if (
         step_id.startswith(("discover", "inspect", "list-", "read-", "capture-"))
         or action
@@ -13070,6 +13096,8 @@ def _runtime_dov_stage(step: ToolPlanStepSnapshot) -> str:
             "read_running_apps",
             "read_ui",
         }
+        or step_id.startswith("inspect-code-area-")
+        or step_id in {"run-code-diagnostic", "read-code-target-file"}
     ):
         return "discover"
     return "operate"
@@ -13078,7 +13106,17 @@ def _runtime_dov_stage(step: ToolPlanStepSnapshot) -> str:
 def _runtime_dov_role(step: ToolPlanStepSnapshot, stage: str) -> str:
     step_id = str(step.step_id or "").strip()
     action = str(step.action or "").strip()
+    if stage == "produce":
+        if step_id == "write-code-report":
+            return "artifact"
+        return "produce_output"
     if stage == "discover":
+        if step_id == "run-code-diagnostic":
+            return "diagnose"
+        if step_id in {"inspect-workspace", "read-code-target-file"} or step_id.startswith(
+            "inspect-code-area-"
+        ):
+            return "inspect_workspace"
         if action == "list_apps" or "discover_apps" in step_id:
             return "find_target_app"
         if action in {"inspect_app", "read_ui"}:
@@ -13090,6 +13128,10 @@ def _runtime_dov_role(step: ToolPlanStepSnapshot, stage: str) -> str:
         return "inspect_desktop_state"
     if stage == "verify":
         return "verify_result"
+    if step_id == "run-terminal-command":
+        return "execute"
+    if step_id == "apply-code-changes" or action == "apply_patch":
+        return "apply_patch"
     if action in {"open_app", "focus_app"} or step_id.startswith(("open-", "focus-", "prepare-")):
         return "prepare_target_app"
     if action in {"click", "type", "shortcut", "key", "scroll", "submit"}:
@@ -13606,6 +13648,15 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     if intent.kind == "data_analysis" and _looks_like_current_page_data_context_source(text):
         score += 0.28
     if (
+        intent.kind == "data_analysis"
+        and str(intent.inputs.get("context_source") or "").strip()
+        and (
+            isinstance(intent.inputs.get("target_app_capability_hint"), Mapping)
+            or str(intent.inputs.get("target_app_hint") or "").strip()
+        )
+    ):
+        score += 0.18
+    if (
         intent.kind == "report_generation"
         and _data_source_or_output_mentioned(text)
         and _data_analysis_action_requested(text)
@@ -13731,6 +13782,14 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     if intent.kind == "report_generation":
         if _contains_any(text, ["report", "summary", "报告", "总结", "文档", "输出", "生成"]):
             score += 0.04
+        if (
+            _data_analysis_action_requested(text)
+            and (
+                str(intent.inputs.get("context_source") or "").strip()
+                or _contains_any(text, ["data", "table", "数据", "表格", "统计"])
+            )
+        ):
+            score -= 0.26
         if _url_hint(text) and _contains_any(
             text,
             ["research", "search", "调研", "研究", "搜索", "查询", "检索"],
@@ -13761,6 +13820,13 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
             ],
         ):
             score += 0.36
+        if (
+            isinstance(intent.inputs.get("target_app_capability_hint"), Mapping)
+            and not str(intent.inputs.get("context_source") or "").strip()
+            and _contains_any(text, ["新建", "打开", "任意", "可用", "应用", "app"])
+            and not _contains_any(text, ["根据", "总结", "分析", "读取", "从"])
+        ):
+            score -= 0.24
         if (
             screen_capture_hint(text) is not None
             and str(intent.inputs.get("context_source") or "").strip() == "visible_text"
