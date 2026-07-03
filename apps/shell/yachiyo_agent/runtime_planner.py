@@ -25059,20 +25059,25 @@ def _app_file_open_discovery_hint(
         return {}
     if data_source_hint(value, metadata):
         return {}
-    scope = data_source_scope_hint(value, metadata) or _file_open_location_hint(value)
+    explicit_target_path, explicit_target_name = _file_open_explicit_target_parts(value)
+    scope = (
+        data_source_scope_hint(value, metadata)
+        or explicit_target_path
+        or _file_open_location_hint(value)
+    )
     file_type = data_source_kind_hint("", value) or _file_open_type_hint(value)
     if file_type == "unknown":
         file_type = _file_open_type_hint(value)
     if not scope or not file_type:
         return {}
-    if not _looks_like_dynamic_file_open_target(value):
+    if not explicit_target_name and not _looks_like_dynamic_file_open_target(value):
         return {}
-    pattern = _file_open_pattern(file_type)
+    pattern = explicit_target_name or _file_open_pattern(file_type)
     hint = {
         "app_name": app_name,
         "path": scope,
         "file_type": file_type,
-        "selection": _file_open_selection_hint(value),
+        "selection": "" if explicit_target_name else _file_open_selection_hint(value),
     }
     if pattern:
         hint["pattern"] = pattern
@@ -25096,7 +25101,12 @@ def _generic_app_file_open_discovery_hint(
         return {}
     if not _looks_like_dynamic_file_open_target(value):
         return {}
-    scope = data_source_scope_hint(value, metadata) or _file_open_location_hint(value)
+    explicit_target_path, explicit_target_name = _file_open_explicit_target_parts(value)
+    scope = (
+        data_source_scope_hint(value, metadata)
+        or explicit_target_path
+        or _file_open_location_hint(value)
+    )
     selection = _file_open_selection_hint(value)
     if not scope and selection:
         scope = "Downloads"
@@ -25105,11 +25115,11 @@ def _generic_app_file_open_discovery_hint(
         file_type = _file_open_type_hint(value)
     if not scope or not file_type:
         return {}
-    pattern = _file_open_pattern(file_type)
+    pattern = explicit_target_name or _file_open_pattern(file_type)
     hint = {
         "path": scope,
         "file_type": file_type,
-        "selection": selection,
+        "selection": "" if explicit_target_name else selection,
     }
     if pattern:
         hint["pattern"] = pattern
@@ -25133,6 +25143,9 @@ def _file_open_location_hint(text: str) -> str:
 def _file_open_type_hint(text: str) -> str:
     value = _clean_prompt(text)
     lowered = value.lower()
+    extension_type = _file_open_extension_type(value)
+    if extension_type:
+        return extension_type
     type_markers = (
         ("csv", "csv"),
         ("tsv", "tsv"),
@@ -25155,6 +25168,34 @@ def _file_open_type_hint(text: str) -> str:
         if marker in lowered or marker in value:
             return file_type
     return ""
+
+
+def _file_open_extension_type(text: str) -> str:
+    match = re.search(
+        r"\.(?P<ext>csv|tsv|xlsx|xls|pdf|md|markdown|txt|png|jpg|jpeg|heic|gif|webp)"
+        r"(?:$|[\s\"'“”‘’，,。；;])",
+        _clean_prompt(text),
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    ext = str(match.group("ext") or "").strip().lower()
+    return {
+        "csv": "csv",
+        "tsv": "tsv",
+        "xlsx": "xlsx",
+        "xls": "xls",
+        "pdf": "pdf",
+        "md": "markdown",
+        "markdown": "markdown",
+        "txt": "text",
+        "png": "image",
+        "jpg": "image",
+        "jpeg": "image",
+        "heic": "image",
+        "gif": "image",
+        "webp": "image",
+    }.get(ext, "")
 
 
 def _file_open_pattern(file_type: str) -> str:
@@ -25185,6 +25226,8 @@ def _file_open_selection_hint(text: str) -> str:
 
 def _looks_like_dynamic_file_open_target(text: str) -> bool:
     value = _clean_prompt(text)
+    if _file_open_explicit_path_hint(value):
+        return True
     if _file_open_selection_hint(value):
         return True
     return bool(
@@ -25228,7 +25271,42 @@ def _selected_discovered_app_target_path_hint(text: str) -> str:
         return ""
     if _path_hint_is_app_search_query(value, str(match.group("path") or "")):
         return ""
-    return str(match.group("path") or "").rstrip("。.,，；;")
+    path = str(match.group("path") or "").rstrip("。.,，；;")
+    location = _file_open_location_hint(value)
+    if location and path and "/" not in path and not path.startswith(("~", ".")):
+        return f"{location}/{path}"
+    return path
+
+
+def _file_open_explicit_target_parts(text: str) -> tuple[str, str]:
+    target = _file_open_explicit_path_hint(text)
+    if not target:
+        return "", ""
+    if "/" not in target:
+        return "", target
+    path, name = target.rsplit("/", 1)
+    return path or ".", name
+
+
+def _file_open_explicit_path_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    match = re.search(
+        r"(?P<path>(?:~|/|\./|\../)?[^\s\"'“”‘’，,。；;]+"
+        r"\.(?:pdf|md|markdown|txt|csv|tsv|xlsx|xls|json|jsonl|doc|docx|rtf|"
+        r"pages|numbers|py|js|jsx|ts|tsx|java|go|rs|swift|kt|kts|c|cc|cpp|h|hpp|"
+        r"png|jpg|jpeg|heic|gif|webp|ppt|pptx|key))",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return ""
+    path = str(match.group("path") or "").rstrip("。.,，；;")
+    if _path_hint_is_app_search_query(value, path):
+        return ""
+    location = _file_open_location_hint(value)
+    if location and path and "/" not in path and not path.startswith(("~", ".")):
+        return f"{location}/{path}"
+    return path
 
 
 def _path_hint_is_app_search_query(text: str, path: str) -> bool:

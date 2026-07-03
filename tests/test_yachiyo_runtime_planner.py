@@ -11670,6 +11670,11 @@ def test_runtime_planner_observes_discovered_file_app_for_pending_followup_actio
             "Desktop/photo.png",
         ),
         (
+            "用一个图片编辑器打开桌面的 logo.png 并裁剪",
+            "image",
+            "Desktop/logo.png",
+        ),
+        (
             "打开一个压缩工具把 Downloads/report.pdf 压缩成 zip",
             "archive",
             "Downloads/report.pdf",
@@ -11912,6 +11917,64 @@ def test_runtime_planner_discovers_dynamic_file_before_opening_with_app() -> Non
         "selection": "largest",
         "pattern": "*.{png,jpg,jpeg,heic,gif,webp}",
     }
+
+    named_image_decision = RuntimePlanner().decision(
+        "用 Preview 打开桌面的 logo.png",
+        allowed_tools=allowed_tools,
+    )
+    assert named_image_decision.selected_intent.kind == "desktop_operation"
+    assert named_image_decision.selected_intent.inputs["app_name_hint"] == "Preview"
+    assert named_image_decision.selected_intent.inputs["file_open_discovery_hint"] == {
+        "app_name": "Preview",
+        "path": "Desktop",
+        "file_type": "image",
+        "pattern": "logo.png",
+    }
+    assert [step.step_id for step in named_image_decision.plan.tool_plan.steps] == [
+        "discover-file-open-target",
+        "open-discovered-file-with-app",
+    ]
+    assert _step_by_id(named_image_decision, "discover-file-open-target").input_preview == {
+        "path": "Desktop",
+        "pattern": "logo.png",
+        "file_type": "image",
+        "include_metadata": True,
+    }
+    assert _step_by_id(
+        named_image_decision,
+        "open-discovered-file-with-app",
+    ).input_preview == {
+        "app_name": "Preview",
+        "target_path": "<selected file from workspace.list>",
+        "selection_source": "workspace.list",
+        "action": "open_path_with_app",
+    }
+    assert planner_tool_requests("用 Preview 打开桌面的 logo.png", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {
+                "path": "Desktop",
+                "pattern": "logo.png",
+                "file_type": "image",
+                "include_metadata": True,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_file_open_target",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path_with_app",
+            "input": {
+                "app_name": "Preview",
+                "target_path": "<selected file from workspace.list>",
+                "selection_source": "workspace.list",
+                "action": "open_path_with_app",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
 
 
 def test_runtime_planner_keeps_selected_app_target_path_when_open_with_app_tool_is_missing() -> None:
