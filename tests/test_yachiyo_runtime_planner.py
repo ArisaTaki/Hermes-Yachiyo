@@ -32924,6 +32924,7 @@ def test_runtime_execution_envelope_can_project_full_information_capture_plan() 
         "inspect_desktop_state",
         "create_note",
     ]
+    assert full_envelope.requests[1].continue_to_model is True
     assert full_envelope.requests[1].depends_on == ["read-note-context"]
     assert full_envelope.requests[1].input == {"body_source": "clipboard"}
 
@@ -32937,6 +32938,7 @@ def test_runtime_execution_envelope_can_project_full_information_capture_plan() 
     ]
     assert projected_requests[1]["runtime_stage"] == "produce"
     assert projected_requests[1]["runtime_role"] == "create_note"
+    assert projected_requests[1]["continue_to_model"] is True
     assert projected_requests[1]["task_todo"]["step_id"] == "create-note-from-context"
 
 
@@ -33303,6 +33305,7 @@ def test_agent_studio_service_projects_full_information_capture_execution_plan()
     ]
     assert envelope.runtime_stage_counts == {"discover": 1, "produce": 1}
     assert envelope.requests[1].runtime_role == "create_note"
+    assert envelope.requests[1].continue_to_model is True
     assert envelope.requests[1].task_todo["step_id"] == "create-note-from-context"
 
 

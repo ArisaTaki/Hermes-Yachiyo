@@ -124,8 +124,25 @@ def _full_plan_tool_requests_from_decision(
             request["planner_step_id"] = step_id
         if capability_id:
             request["capability_id"] = capability_id
+        if _request_needs_model_materialization(tool_name, request_input):
+            request["continue_to_model"] = True
         requests.append(request)
     return requests
+
+
+def _request_needs_model_materialization(
+    tool_name: str,
+    request_input: Mapping[str, Any],
+) -> bool:
+    if tool_name == "notes.create":
+        return bool(request_input.get("body_source")) and not str(
+            request_input.get("body") or ""
+        ).strip()
+    if tool_name == "artifact.write":
+        return bool(request_input.get("body_source")) and not str(
+            request_input.get("content") or ""
+        ).strip()
+    return False
 
 
 def runtime_execution_requests_from_metadata(
