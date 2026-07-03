@@ -1640,6 +1640,12 @@ def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None
     assert request["metadata"]["task_core_context"]["core_id"] == "task-core-1"
     assert request["metadata"]["task_core_context"]["workspace_id"] == "task-workspace-1"
     assert request["metadata"]["task_core_context"]["todos"][0]["todo_id"] == "todo-open-app"
+    assert (
+        request["metadata"]["task_core_context"]["task_verification_targets"][0][
+            "workspace_items"
+        ][0]["item_id"]
+        == "workspace-open-app"
+    )
     direct_request = request["direct_tool_requests"][0]
     assert direct_request["tool"] == "desktop.list_apps"
     assert direct_request["input"] == {"query": "Apple Music"}
@@ -1655,6 +1661,10 @@ def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None
     assert direct_request["verification_targets"][0]["todo_id"] == "todo-open-app"
     assert direct_request["task_verification_targets"][0]["todo"]["todo_id"] == "todo-open-app"
     assert direct_request["task_verification_targets"][0]["checkpoints"][0]["checkpoint_id"] == "checkpoint:open-app"
+    assert (
+        direct_request["task_verification_targets"][0]["workspace_items"][0]["item_id"]
+        == "workspace-open-app"
+    )
 
 
 def test_agent_studio_service_starts_tool_recovery_action_direct_run() -> None:

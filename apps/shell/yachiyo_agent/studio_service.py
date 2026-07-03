@@ -1403,11 +1403,14 @@ def _replan_recovery_task_context(
         fallback_step_id=source_step_id,
         fallback_todo=todo,
         fallback_checkpoints=checkpoints,
+        fallback_workspace_items=workspace_items,
     )
     if not todo and task_verification_targets:
         todo = _mapping(task_verification_targets[0].get("todo"))
     if not checkpoints and task_verification_targets:
         checkpoints = _mapping_list(task_verification_targets[0].get("checkpoints"))
+    if not workspace_items and task_verification_targets:
+        workspace_items = _mapping_list(task_verification_targets[0].get("workspace_items"))
 
     context: dict[str, Any] = {}
     for key, value in (
@@ -1501,9 +1504,14 @@ def _replan_recovery_task_verification_targets(
     fallback_step_id: str,
     fallback_todo: Mapping[str, Any],
     fallback_checkpoints: Iterable[Mapping[str, Any]],
+    fallback_workspace_items: Iterable[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
     raw_targets = _mapping_list(action.verification_targets or recovery.verification_targets)
-    if not raw_targets and (fallback_todo or list(fallback_checkpoints)):
+    fallback_checkpoint_items = [dict(checkpoint) for checkpoint in fallback_checkpoints]
+    fallback_workspace_item_records = [dict(item) for item in fallback_workspace_items]
+    if not raw_targets and (
+        fallback_todo or fallback_checkpoint_items or fallback_workspace_item_records
+    ):
         raw_targets = [{"step_id": fallback_step_id}]
     targets: list[dict[str, Any]] = []
     for target in raw_targets:
@@ -1518,15 +1526,23 @@ def _replan_recovery_task_verification_targets(
         checkpoints = _mapping_list(target.get("checkpoints")) or _verification_target_checkpoints(
             target,
             step_id=step_id,
-            fallback_checkpoints=fallback_checkpoints,
+            fallback_checkpoints=fallback_checkpoint_items,
         )
-        targets.append(
-            {
-                "step_id": step_id,
-                "todo": todo,
-                "checkpoints": checkpoints,
-            }
+        workspace_items = (
+            _mapping_list(target.get("workspace_items"))
+            or _mapping_list(target.get("task_workspace_items"))
+            or _verification_target_workspace_items(
+                fallback_workspace_items=fallback_workspace_item_records,
+            )
         )
+        item = {
+            "step_id": step_id,
+            "todo": todo,
+            "checkpoints": checkpoints,
+        }
+        if workspace_items:
+            item["workspace_items"] = workspace_items
+        targets.append(item)
     return targets
 
 
@@ -1578,6 +1594,13 @@ def _verification_target_checkpoints(
         }
         for index, checkpoint_id in enumerate(checkpoint_ids)
     ]
+
+
+def _verification_target_workspace_items(
+    *,
+    fallback_workspace_items: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    return [dict(item) for item in fallback_workspace_items]
 
 
 def _snapshot_record(value: Any) -> dict[str, Any]:
