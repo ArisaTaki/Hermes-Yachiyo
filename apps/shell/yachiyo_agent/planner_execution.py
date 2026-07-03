@@ -3977,6 +3977,8 @@ def _direct_communication_tool_requests(decision: Any, allowed: set[str]) -> lis
         return []
     body_source = str(direct_hint.get("body_source") or "").strip()
     send_action = str(direct_hint.get("send_action") or "send").strip() or "send"
+    if body_source == "current_page_link":
+        return []
     if _direct_communication_requires_model_body(direct_hint):
         return []
     steps_by_id = {

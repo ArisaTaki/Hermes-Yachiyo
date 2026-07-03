@@ -21838,6 +21838,28 @@ def test_runtime_planner_uses_browser_current_page_for_link_delivery() -> None:
             "continue_to_model": True,
         }
     ]
+    assert planner_tool_requests(
+        "把当前网页链接发给小王",
+        [
+            "browser.current_page",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+            "desktop.type_into_ui_element",
+            "desktop.search_submit",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.current_page",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
 
     wechat_link = RuntimePlanner().decision(
         "把当前浏览器页面链接发给微信文件传输助手",
