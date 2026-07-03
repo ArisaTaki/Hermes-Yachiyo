@@ -1257,6 +1257,22 @@ def test_yachiyo_agent_service_pages_task_events() -> None:
     assert port.calls == [("get_task_event_stream", "task-1")]
 
 
+def test_yachiyo_agent_service_stream_fallback_first_page_includes_key_status_window() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    page = service.get_task_event_page("task-1", after_sequence=0, limit=1)
+
+    assert [event.event_type for event in page.events] == [
+        "task.started",
+        "tool.requested",
+        "task.completed",
+    ]
+    assert page.next_after_sequence == 3
+    assert page.has_more is True
+    assert port.calls == [("get_task_event_stream", "task-1")]
+
+
 def test_yachiyo_agent_service_prefers_runtime_port_task_event_pages() -> None:
     port = _PagedRuntimePort()
     service = YachiyoAgentService(port)

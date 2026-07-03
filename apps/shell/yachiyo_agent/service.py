@@ -235,19 +235,27 @@ class YachiyoAgentService:
             for event in events
             if int(event.sequence or 0) > clean_after_sequence
         ]
-        page = filtered_events[:clean_limit]
+        page_events = filtered_events[:clean_limit]
         next_after_sequence = max(
-            [int(event.sequence or 0) for event in page] or [clean_after_sequence]
+            [int(event.sequence or 0) for event in page_events] or [clean_after_sequence]
         )
         run_id = events[0].run_id if events else task_id
-        return RunEventPageSnapshot(
+        page = RunEventPageSnapshot(
             run_id=run_id,
             after_sequence=clean_after_sequence,
             limit=clean_limit,
             next_after_sequence=next_after_sequence,
             has_more=len(filtered_events) > clean_limit,
-            events=page,
+            events=page_events,
         )
+        if clean_after_sequence == 0 and page.has_more:
+            page_events = events_with_first_page_key_event_window(
+                page_events,
+                events,
+                page=page,
+                event_types=_TASK_FIRST_PAGE_KEY_EVENT_TYPES,
+            )
+        return run_event_page_with_projected_events(page, page_events)
 
     def read_task_artifact(self, task_id: str, artifact_path: str) -> ArtifactContentSnapshot:
         return artifact_content_snapshot_from_payload(

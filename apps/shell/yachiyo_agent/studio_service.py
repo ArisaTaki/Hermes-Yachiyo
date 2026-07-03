@@ -932,18 +932,26 @@ class AgentStudioService:
             for event in self.get_group_run_event_stream(group_run_id)
             if int(event.sequence or 0) > clean_after_sequence
         ]
-        page = events[:clean_limit]
+        page_events = events[:clean_limit]
         next_after_sequence = max(
-            [int(event.sequence or 0) for event in page] or [clean_after_sequence]
+            [int(event.sequence or 0) for event in page_events] or [clean_after_sequence]
         )
-        return RunEventPageSnapshot(
+        page = RunEventPageSnapshot(
             run_id=group_run_id,
             after_sequence=clean_after_sequence,
             limit=clean_limit,
             next_after_sequence=next_after_sequence,
             has_more=len(events) > clean_limit,
-            events=page,
+            events=page_events,
         )
+        if clean_after_sequence == 0 and page.has_more:
+            page_events = events_with_first_page_key_event_window(
+                page_events,
+                events,
+                page=page,
+                event_types=_GROUP_RUN_FIRST_PAGE_KEY_EVENT_TYPES,
+            )
+        return run_event_page_with_projected_events(page, page_events)
 
     def list_workflows(self) -> list[WorkflowSnapshot]:
         return [
@@ -1083,18 +1091,26 @@ class AgentStudioService:
             for event in self.get_run_event_stream(run_id)
             if int(event.sequence or 0) > clean_after_sequence
         ]
-        page = filtered_events[:clean_limit]
+        page_events = filtered_events[:clean_limit]
         next_after_sequence = max(
-            [int(event.sequence or 0) for event in page] or [clean_after_sequence]
+            [int(event.sequence or 0) for event in page_events] or [clean_after_sequence]
         )
-        return RunEventPageSnapshot(
+        page = RunEventPageSnapshot(
             run_id=run_id,
             after_sequence=clean_after_sequence,
             limit=clean_limit,
             next_after_sequence=next_after_sequence,
             has_more=len(filtered_events) > clean_limit,
-            events=page,
+            events=page_events,
         )
+        if clean_after_sequence == 0 and page.has_more:
+            page_events = events_with_first_page_key_event_window(
+                page_events,
+                filtered_events,
+                page=page,
+                event_types=_RUN_OR_WORKFLOW_FIRST_PAGE_KEY_EVENT_TYPES,
+            )
+        return run_event_page_with_projected_events(page, page_events)
 
 
 @dataclass(frozen=True)
@@ -2064,6 +2080,9 @@ _WORKFLOW_RUN_FIRST_PAGE_KEY_EVENT_TYPES = {
     "workflow.run.desktop.intent_approval_required",
     "workflow.node.approval_required",
 }
+_RUN_OR_WORKFLOW_FIRST_PAGE_KEY_EVENT_TYPES = (
+    _RUN_FIRST_PAGE_KEY_EVENT_TYPES | _WORKFLOW_RUN_FIRST_PAGE_KEY_EVENT_TYPES
+)
 
 
 def _group_run_events_from_port_payload(

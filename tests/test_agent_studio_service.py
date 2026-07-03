@@ -1918,6 +1918,52 @@ def test_agent_studio_service_prefers_runtime_group_run_event_page_port() -> Non
     assert ("get_group_run", "group-run-1") not in port.calls
 
 
+def test_agent_studio_service_group_stream_fallback_first_page_includes_key_status_window() -> None:
+    class GroupRunStreamOnlyPort(_FakeStudioPort):
+        def get_group_run_event_stream(self, group_run_id: str) -> dict[str, Any]:
+            self.calls.append(("get_group_run_event_stream", group_run_id))
+            return {
+                "run_id": group_run_id,
+                "events": [
+                    {
+                        "event_id": "group-stream-1",
+                        "run_id": group_run_id,
+                        "sequence": 1,
+                        "event_type": "group.member.started",
+                        "payload": {"member_agent_id": "agent-1"},
+                    },
+                    {
+                        "event_id": "group-stream-2",
+                        "run_id": group_run_id,
+                        "sequence": 2,
+                        "event_type": "group.member.completed",
+                        "payload": {"member_agent_id": "agent-1"},
+                    },
+                    {
+                        "event_id": "group-stream-3",
+                        "run_id": group_run_id,
+                        "sequence": 3,
+                        "event_type": "group.run.completed",
+                        "payload": {"group_run_id": group_run_id},
+                    },
+                ],
+            }
+
+    port = GroupRunStreamOnlyPort()
+    service = AgentStudioService(port)
+
+    page = service.get_group_run_event_page("group-run-1", after_sequence=0, limit=1)
+
+    assert [event.event_type for event in page.events] == [
+        "group.member.started",
+        "group.member.completed",
+        "group.run.completed",
+    ]
+    assert page.next_after_sequence == 3
+    assert page.has_more is True
+    assert port.calls == [("get_group_run_event_stream", "group-run-1")]
+
+
 def test_agent_studio_service_projects_group_run_replan_events_from_port_stream() -> None:
     class ReplanGroupRunEventPort(_FakeStudioPort):
         def get_group_run_event_stream(self, group_run_id: str) -> dict[str, Any]:
@@ -1998,6 +2044,22 @@ def test_agent_studio_service_prefers_runtime_run_event_page_port() -> None:
         {"run_id": "run-1", "after_sequence": 3, "limit": 1},
     ) in port.calls
     assert ("get_run_event_stream", "run-1") not in port.calls
+
+
+def test_agent_studio_service_run_stream_fallback_first_page_includes_key_status_window() -> None:
+    port = _FakeStudioPort()
+    service = AgentStudioService(port)
+
+    page = service.get_run_event_page("run-1", after_sequence=0, limit=1)
+
+    assert [event.event_type for event in page.events] == [
+        "agent.started",
+        "agent.tool.call",
+        "agent.completed",
+    ]
+    assert page.next_after_sequence == 3
+    assert page.has_more is True
+    assert port.calls == [("get_run_event_stream", "run-1")]
 
 
 def test_agent_studio_service_run_event_first_page_includes_key_status_window() -> None:
