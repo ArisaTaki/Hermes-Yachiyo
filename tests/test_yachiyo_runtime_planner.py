@@ -18133,6 +18133,33 @@ def test_runtime_planner_routes_media_query_to_apple_music_search_play() -> None
         assert step.input_preview == {"query": query}
 
 
+def test_runtime_planner_falls_back_to_generic_music_app_for_apple_music_query() -> None:
+    decision = RuntimePlanner().decision(
+        "用 Apple Music 播放 超时空净夜",
+        allowed_tools=["media.music_app_open_and_play", "desktop.ui_elements"],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert decision.selected_intent.inputs == {
+        "action": "play",
+        "app_name": "Music",
+        "query": "超时空净夜",
+        "control_only": "",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "control-media-playback",
+        "verify-media-playback",
+    ]
+    playback = _step_by_id(decision, "control-media-playback")
+    assert playback.tool_name == "media.music_app_open_and_play"
+    assert playback.input_preview == {"app_name": "Music"}
+    assert playback.status == "planned"
+    assert _step_by_id(decision, "verify-media-playback").depends_on == [
+        "control-media-playback"
+    ]
+    assert decision.plan.tool_plan.missing_capabilities == []
+
+
 def test_runtime_planner_prefers_discovered_media_app_operation_for_apple_music_query() -> None:
     decision = RuntimePlanner().decision(
         "打开 Apple Music 播放超时空辉夜姬",
@@ -25432,6 +25459,30 @@ def test_planner_desktop_tool_requests_verifies_simple_media_playback_when_avail
             "protocol": "json_fallback",
             "tool": "media.music_app_open_and_play",
             "input": {"app_name": "Spotify"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_falls_back_to_generic_music_app_for_apple_music_query() -> None:
+    requests = planner_desktop_tool_requests(
+        "用 Apple Music 播放 超时空净夜",
+        allowed_tools=["media.music_app_open_and_play", "desktop.ui_elements"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Music"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },

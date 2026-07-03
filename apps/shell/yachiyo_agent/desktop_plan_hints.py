@@ -979,7 +979,13 @@ def media_tool_preview(
     if action == "status":
         return _first_allowed(("media.apple_music_status",), allowed), {}
     if query and is_apple_music:
-        return _first_allowed(("media.apple_music_play",), allowed), {"query": query}
+        apple_tool = _first_allowed(("media.apple_music_play",), allowed)
+        if apple_tool:
+            return apple_tool, {"query": query}
+        generic_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
+        if generic_tool:
+            return generic_tool, {"app_name": app_name or "Music"}
+        return None, {}
     if app_name and not is_apple_music:
         if action == "play":
             return _first_allowed(("media.music_app_open_and_play",), allowed), {"app_name": app_name}
