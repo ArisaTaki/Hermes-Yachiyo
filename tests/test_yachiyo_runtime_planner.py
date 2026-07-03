@@ -32548,6 +32548,42 @@ def test_runtime_execution_envelope_marks_browser_open_url_as_web_operation() ->
     assert envelope.requests[0].task_todo["metadata"]["runtime_role"] == "open_web_url"
 
 
+def test_runtime_execution_envelope_marks_orchestration_runs_as_operate() -> None:
+    cases = [
+        (
+            "运行 Daily Summary workflow",
+            ["workflow.run"],
+            "workflow_orchestration",
+            "workflow.run",
+            "start_workflow",
+        ),
+        (
+            "启动 Research squad group 调研 Hanako",
+            ["group.run", "agent.group_run"],
+            "multi_agent",
+            "group.run",
+            "start_group_run",
+        ),
+    ]
+
+    for prompt, allowed_tools, intent_kind, tool_name, runtime_role in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+        envelope = runtime_execution_envelope_from_decision(
+            decision,
+            allowed_tools=allowed_tools,
+            full_plan=True,
+        )
+
+        assert decision.selected_intent.kind == intent_kind
+        assert decision.plan.route_to_studio is True
+        assert envelope is not None
+        assert [request.tool_name for request in envelope.requests] == [tool_name]
+        assert envelope.runtime_stage_counts == {"operate": 1}
+        assert envelope.requests[0].runtime_stage == "operate"
+        assert envelope.requests[0].runtime_role == runtime_role
+        assert envelope.requests[0].task_todo["metadata"]["runtime_role"] == runtime_role
+
+
 def test_runtime_execution_envelope_can_project_full_analysis_app_write_plan() -> None:
     allowed_tools = [
         "desktop.ui_elements",

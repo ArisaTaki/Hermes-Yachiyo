@@ -13350,8 +13350,11 @@ def _runtime_dov_step_applies(step: ToolPlanStepSnapshot) -> bool:
                 "artifact.",
                 "terminal.",
                 "browser.",
+                "workflow.",
+                "group.",
             )
         )
+        or tool_name == "agent.group_run"
         or tool_name == "screen.capture"
         or capability_id.startswith(
             (
@@ -13361,6 +13364,8 @@ def _runtime_dov_step_applies(step: ToolPlanStepSnapshot) -> bool:
                 "artifact.",
                 "terminal.",
                 "browser.",
+                "workflow.",
+                "group.",
             )
         )
         or _runtime_dov_code_step_applies(step_id)
@@ -13466,6 +13471,14 @@ def _runtime_dov_role(step: ToolPlanStepSnapshot, stage: str) -> str:
         if action == "open_url":
             return "open_web_url"
         return "inspect_web_context"
+    if tool_name.startswith("workflow.") or action == "start_workflow":
+        return "start_workflow"
+    if (
+        tool_name.startswith("group.")
+        or tool_name == "agent.group_run"
+        or action == "start_group_run"
+    ):
+        return "start_group_run"
     if step_id == "apply-code-changes" or action == "apply_patch":
         return "apply_patch"
     if action in {"open_app", "focus_app"} or step_id.startswith(("open-", "focus-", "prepare-")):
