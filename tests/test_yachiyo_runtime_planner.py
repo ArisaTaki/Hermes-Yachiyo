@@ -33128,12 +33128,20 @@ def test_runtime_execution_requests_preserve_replan_fallback_tools() -> None:
     assert envelope.requests[0].runtime_role == "analyze_data"
     assert envelope.requests[0].requires_post_action_verification is True
     assert envelope.requests[0].fallback_tools == ["terminal.run"]
+    assert envelope.requests[0].replan_triggers == [
+        "tool_failure",
+        "verification_failed",
+    ]
     projected_requests = runtime_execution_requests_from_envelope_payload(
         envelope.model_dump(mode="json"),
         allowed_tools=allowed_tools,
     )
     assert projected_requests[0]["tool"] == "data.analyze"
     assert projected_requests[0]["fallback_tools"] == ["terminal.run"]
+    assert projected_requests[0]["replan_triggers"] == [
+        "tool_failure",
+        "verification_failed",
+    ]
     assert projected_requests[0]["replan_signal_ids"] == envelope.requests[0].replan_signal_ids
 
 

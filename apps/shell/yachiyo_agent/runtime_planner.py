@@ -13493,6 +13493,7 @@ def _task_replan_signals(steps: list[ToolPlanStepSnapshot]) -> list[ReplanSignal
                     reason="Try the declared fallback tools before giving up.",
                 )
             )
+        if fallback_tools and not _step_requires_post_action_verification(step):
             continue
         if _step_should_verify_before_continuing(step):
             signals.append(
@@ -13506,6 +13507,10 @@ def _task_replan_signals(steps: list[ToolPlanStepSnapshot]) -> list[ReplanSignal
                 )
             )
     return signals
+
+
+def _step_requires_post_action_verification(step: ToolPlanStepSnapshot) -> bool:
+    return bool(_runtime_dov_step_metadata(step).get("requires_post_action_verification"))
 
 
 def _step_should_verify_before_continuing(step: ToolPlanStepSnapshot) -> bool:
