@@ -9800,6 +9800,68 @@ def test_runtime_planner_observes_semantic_ui_target_when_type_tool_unavailable(
     )
 
 
+def test_runtime_planner_defers_observed_type_submit_until_followup() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.ui_elements",
+        "desktop.safe_click",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+    ]
+    prompt = "打开 PixelForge，在搜索框输入 apple music 并回车"
+    metadata = {"runtime_planner_execution_context": True}
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=allowed_tools,
+        metadata=metadata,
+    )
+
+    assert decision.selected_intent.inputs["foreground_submit_action_hint"] == "confirm"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "focus-opened-app",
+        "operate-foreground-ui",
+    ]
+    operation = _step_by_id(decision, "operate-foreground-ui")
+    assert operation.action == "observe_ui_target"
+    assert operation.tool_name == "desktop.ui_elements"
+
+    requests = planner_execution_tool_requests(
+        planner_tool_requests(prompt, allowed_tools, metadata=metadata),
+        allowed_tools,
+    )
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.ui_elements",
+    ]
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+    assert payload["followup_target"] == {
+        "kind": "desktop_observed_action",
+        "target_action": "type_text",
+        "target": "搜索",
+        "role_filter": "text",
+        "limit": 80,
+        "observation_source": "desktop.ui_elements",
+        "app_name": "PixelForge",
+        "text": "apple music",
+        "body_source": "explicit_user_text",
+        "submit_action": "confirm",
+    }
+
+
 def test_runtime_planner_exposes_desktop_discover_operate_action_layer() -> None:
     allowed_tools = [
         "desktop.list_apps",

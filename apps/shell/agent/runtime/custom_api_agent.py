@@ -9566,6 +9566,15 @@ def _auto_desktop_observed_type_requests(
             evidence={"strategy": "focused_after_observed_target"},
         ),
     ]
+    submit_request = _observed_type_submit_request(
+        target,
+        allowed,
+        target_label=execution_target,
+        role_filter=role_filter,
+        planning_reason=planning_reason,
+    )
+    if submit_request:
+        requests.append(submit_request)
     return _with_observed_action_verification(
         requests,
         target,
@@ -9573,6 +9582,38 @@ def _auto_desktop_observed_type_requests(
         target_label=execution_target,
         role_filter=role_filter,
         planning_reason=planning_reason,
+    )
+
+
+def _observed_type_submit_request(
+    target: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    target_label: str,
+    role_filter: str,
+    planning_reason: str,
+) -> dict[str, Any]:
+    submit_action = str(target.get("submit_action") or "").strip()
+    if not submit_action:
+        return {}
+    submit_tool = _first_allowed_tool(("desktop.submit_foreground",), allowed)
+    if not submit_tool:
+        return {}
+    request = _request_like(
+        submit_tool,
+        {"action": submit_action},
+        source="runtime_planner",
+        planning_reason=planning_reason,
+    )
+    request["approval_required"] = True
+    request["risk_level"] = "high"
+    return _with_observed_action_metadata(
+        request,
+        target,
+        action="submit_after_type",
+        target_label=target_label,
+        role_filter=role_filter,
+        evidence={"strategy": "focused_after_observed_target"},
     )
 
 
@@ -9725,6 +9766,9 @@ def _compact_observed_action_target(target: Mapping[str, Any]) -> dict[str, Any]
     text = str(target.get("text") or "")
     if text:
         payload["text"] = text
+    submit_action = str(target.get("submit_action") or "").strip()
+    if submit_action:
+        payload["submit_action"] = submit_action
     click_count = target.get("click_count")
     if click_count not in (None, ""):
         payload["click_count"] = _clean_model_followup_int(click_count, default=1)

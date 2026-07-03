@@ -6593,6 +6593,88 @@ def test_auto_followup_uses_runtime_planner_observed_ui_type_target() -> None:
     }
 
 
+def test_auto_followup_defers_observed_ui_type_submit_until_after_text() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.ui_elements",
+        "desktop.safe_click",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+    ]
+    prompt = "打开 PixelForge，在搜索框输入 apple music 并回车"
+    metadata = {"runtime_planner_execution_context": True}
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=allowed_tools,
+        metadata=metadata,
+    )
+    planner_requests = planner_tool_requests(
+        prompt,
+        allowed_tools,
+        metadata=metadata,
+    )
+    execution_requests = planner_execution_tool_requests(
+        planner_requests,
+        allowed_tools,
+    )
+    selection_payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=planner_requests,
+        legacy_requests=[],
+        selected_requests=execution_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_full_plan_execution",
+    )
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            step_id="operate-foreground-ui",
+            input_preview={"role_filter": "text", "limit": 80},
+            result={
+                "ok": True,
+                "data": {
+                    "elements": [
+                        {
+                            "label": "搜索",
+                            "role": "AXTextField",
+                            "center": {"x": 300, "y": 90},
+                        }
+                    ],
+                    "count": 1,
+                },
+            },
+        )
+    ]
+
+    requests = custom_api_agent_module._auto_discovered_followup_requests(
+        selection_payload,
+        allowed_tools,
+        timeline,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.safe_click",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    assert requests[2]["input"] == {"action": "confirm"}
+    assert requests[2]["approval_required"] is True
+    assert requests[2]["risk_level"] == "high"
+    assert requests[2]["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "submit_after_type",
+        "target": "搜索",
+        "role_filter": "text",
+        "app_name": "PixelForge",
+    }
+    assert requests[2]["followup_target"]["submit_action"] == "confirm"
+    assert requests[3]["action_target"]["action"] == "verify_after_action"
+
+
 def test_auto_followup_dispatches_observed_desktop_type_action() -> None:
     selection_payload = {
         "followup_target": {

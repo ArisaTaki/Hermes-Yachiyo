@@ -1147,8 +1147,15 @@ class TaskIntentRouter:
             inputs["model_generated_content_hint"] = model_generated_content
         if foreground_paste:
             inputs["foreground_paste_hint"] = {"action": "paste"}
-        if foreground_submit_action:
-            inputs["foreground_submit_action_hint"] = foreground_submit_action
+        explicit_submit_action = foreground_submit_action
+        if not explicit_submit_action and (
+            _explicit_return_key_followup_hint(text)
+            or _return_hotkey_followup_hint(text)
+            or _foreground_search_submit_hint(text)
+        ):
+            explicit_submit_action = "confirm"
+        if explicit_submit_action:
+            inputs["foreground_submit_action_hint"] = explicit_submit_action
         if (
             str((safe_shortcut or {}).get("action") or "").strip() == "new_message"
             and desktop_discovery is not None
@@ -4851,7 +4858,19 @@ class RuntimePlanner:
                     reason="Press Return only after the explicit foreground input sequence is complete.",
                 )
             )
-        if submit_action and any(step.step_id == "operate-foreground-ui" for step in steps):
+        operation_step = next(
+            (step for step in steps if step.step_id == "operate-foreground-ui"),
+            None,
+        )
+        operation_observes_target = (
+            str(getattr(operation_step, "action", "") or "").strip()
+            == "observe_ui_target"
+        )
+        if (
+            submit_action
+            and operation_step is not None
+            and not operation_observes_target
+        ):
             steps.append(
                 _step(
                     intent,
@@ -4878,11 +4897,7 @@ class RuntimePlanner:
             if followup_step_ids:
                 verify_depends_on = [followup_step_ids[-1]]
         if not verify_depends_on and any(step.step_id == "operate-foreground-ui" for step in steps):
-            operation_step = next(
-                (step for step in steps if step.step_id == "operate-foreground-ui"),
-                None,
-            )
-            if str(getattr(operation_step, "action", "") or "").strip() != "observe_ui_target":
+            if not operation_observes_target:
                 verify_depends_on = ["operate-foreground-ui"]
         elif not verify_depends_on and any(step.step_id == "focus-app-window" for step in steps):
             verify_depends_on = ["focus-app-window"]

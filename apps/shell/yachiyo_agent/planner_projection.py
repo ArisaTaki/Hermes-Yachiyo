@@ -619,6 +619,9 @@ def _desktop_observed_action_followup_target_from_plan(
         return {}
     result["text"] = text
     result["body_source"] = "explicit_user_text"
+    submit_action = str(inputs.get("foreground_submit_action_hint") or "").strip()
+    if submit_action:
+        result["submit_action"] = submit_action
     return {
         key: value
         for key, value in result.items()
