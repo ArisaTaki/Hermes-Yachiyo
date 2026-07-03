@@ -4117,6 +4117,12 @@ def _selected_communication_tool_requests(
     steps_by_id: Mapping[str, Any],
     allowed: set[str],
 ) -> list[dict[str, Any]]:
+    if str(direct_hint.get("body_source") or "").strip() in {
+        "clipboard",
+        "current_page_link",
+        "selection",
+    }:
+        return []
     if (
         "discover_apps-desktop-state" not in steps_by_id
         or "open-selected-discovered-app" not in steps_by_id

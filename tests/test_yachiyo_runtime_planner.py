@@ -29617,6 +29617,58 @@ def test_planner_tool_requests_prefetches_dynamic_communication_context() -> Non
         },
     ]
     assert planner_tool_requests(
+        "把选中的文字发给小王",
+        allowed_tools=[
+            "desktop.safe_shortcut",
+            "clipboard.read",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+            "desktop.type_into_ui_element",
+            "desktop.search_submit",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "copy"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        },
+    ]
+    assert planner_tool_requests(
+        "把剪贴板内容发给小王",
+        allowed_tools=[
+            "clipboard.read",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.ui_elements",
+            "desktop.type_into_ui_element",
+            "desktop.search_submit",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+        ],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "clipboard.read",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_communication_context",
+            "continue_to_model": True,
+        }
+    ]
+    assert planner_tool_requests(
         "把当前网页链接发给微信文件传输助手",
         allowed_tools=["browser.current_page", "artifact.write"],
     ) == [
