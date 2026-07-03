@@ -1483,6 +1483,7 @@ class RuntimeCustomApiAgentLoop:
                     content,
                     followup_target,
                     allowed_tools,
+                    followup_context=followup_context,
                 )
                 auto_app_write_requests = (
                     _model_followup_requests_with_pending_plan_metadata(
@@ -6276,6 +6277,13 @@ def _model_replan_followup_context_payload(
     task_core = _runtime_replan_task_core_payload(replan_payloads, timeline or [])
     if task_core:
         payload["task_core"] = task_core
+        followup_target = _model_followup_target_from_task_core_context(payload)
+        if followup_target:
+            normalized_target = _model_followup_target_payload(
+                {"followup_target": followup_target},
+                allowed,
+            )
+            payload["followup_target"] = normalized_target or followup_target
     capability_recovery = _runtime_replan_capability_recovery(
         requests,
         allowed_tools=allowed_tools,
@@ -6529,6 +6537,14 @@ def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
     failed_tools = _string_list(payload.get("failed_tools"))
     planning_reason = str(payload.get("planning_reason") or "").strip()
     lines = _runtime_replan_message_preamble(planning_reason)
+    followup_target = (
+        payload.get("followup_target")
+        if isinstance(payload.get("followup_target"), Mapping)
+        else {}
+    )
+    target_instruction = _model_followup_target_instruction(followup_target)
+    if target_instruction:
+        lines.append(target_instruction.strip())
     if failed_tools:
         lines.append(f"Failed tools: {', '.join(failed_tools)}.")
     if fallback_tools:
@@ -13585,19 +13601,101 @@ def _latest_model_followup_context(timeline: list[dict[str, Any]]) -> dict[str, 
             continue
         if str(event.get("event") or "").strip() != "agent.model.followup_context":
             continue
-        if not _followup_event_has_readable_source(event):
-            return {}
-        return {
+        context = {
             str(key): value
             for key, value in event.items()
             if key not in {"timestamp"}
         }
+        if (
+            not _followup_event_has_readable_source(event)
+            and not _model_followup_target_from_task_core_context(context)
+        ):
+            return {}
+        return context
     return {}
 
 
 def _model_followup_context_target(context: Mapping[str, Any]) -> dict[str, Any]:
     target = context.get("followup_target") if isinstance(context, Mapping) else {}
-    return dict(target) if isinstance(target, dict) else {}
+    if isinstance(target, dict):
+        return dict(target)
+    return _model_followup_target_from_task_core_context(context)
+
+
+def _model_followup_target_from_task_core_context(
+    context: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(context, Mapping):
+        return {}
+    task_core = context.get("task_core") if isinstance(context.get("task_core"), Mapping) else {}
+    if not task_core:
+        return {}
+    workspace = task_core.get("workspace") if isinstance(task_core.get("workspace"), Mapping) else {}
+    workspace_items = workspace.get("items") if isinstance(workspace.get("items"), list) else []
+    for item in workspace_items:
+        if not isinstance(item, Mapping):
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), Mapping) else {}
+        tool_name = str(metadata.get("tool_name") or "").strip()
+        if tool_name not in _MODEL_FOLLOWUP_TEXT_ENTRY_TOOLS:
+            continue
+        raw_input = (
+            metadata.get("input_preview")
+            if isinstance(metadata.get("input_preview"), Mapping)
+            else {}
+        )
+        app_name = str(raw_input.get("app_name") or "").strip()
+        if not app_name:
+            app_name = _model_followup_task_core_input_value(task_core, "target_app_hint")
+        if not app_name:
+            continue
+        payload: dict[str, Any] = {
+            "kind": "app_write",
+            "app_name": app_name,
+            "target_action": str(
+                raw_input.get("target_action")
+                or _model_followup_task_core_input_value(task_core, "target_action_hint")
+                or "app_paste"
+            ).strip(),
+            "body_source": str(raw_input.get("body_source") or "model_generated_content").strip(),
+        }
+        container_action = str(
+            raw_input.get("container_action")
+            or _model_followup_task_core_input_value(
+                task_core,
+                "target_container_action_hint",
+            )
+            or ""
+        ).strip()
+        if container_action:
+            payload["container_action"] = container_action
+        artifact_path = str(raw_input.get("artifact_path") or "").strip()
+        if artifact_path:
+            payload["artifact_write"] = {
+                "path": artifact_path,
+                "body_source": payload["body_source"],
+                "tool": "artifact.write",
+            }
+        return payload
+    return {}
+
+
+def _model_followup_task_core_input_value(
+    task_core: Mapping[str, Any],
+    key: str,
+) -> str:
+    workspace = task_core.get("workspace") if isinstance(task_core.get("workspace"), Mapping) else {}
+    workspace_items = workspace.get("items") if isinstance(workspace.get("items"), list) else []
+    expected = str(key or "").strip()
+    if not expected:
+        return ""
+    for item in workspace_items:
+        if not isinstance(item, Mapping):
+            continue
+        if str(item.get("title") or "").strip() != expected:
+            continue
+        return str(item.get("description") or "").strip()
+    return ""
 
 
 def _followup_event_has_readable_source(event: Mapping[str, Any]) -> bool:
@@ -13885,6 +13983,7 @@ def _model_followup_pending_plan_request(
         input_payload = _model_followup_artifact_pending_input(
             raw_input,
             generated_content,
+            followup_context or {},
         )
         if not input_payload:
             return {}
@@ -13898,6 +13997,15 @@ def _model_followup_pending_plan_request(
     elif tool_name == "data.analyze":
         input_payload = _model_followup_data_analyze_pending_input(
             raw_input,
+            followup_context or {},
+        )
+        if not input_payload:
+            return {}
+    elif tool_name in _MODEL_FOLLOWUP_TEXT_ENTRY_TOOLS:
+        input_payload = _model_followup_text_entry_pending_input(
+            tool_name,
+            raw_input,
+            generated_content,
             followup_context or {},
         )
         if not input_payload:
@@ -13965,6 +14073,113 @@ def _pending_plan_placeholder_value(value: Any, source: str) -> bool:
         (text.startswith("<") and text.endswith(">"))
         or source.lower() in lowered
     )
+
+
+_MODEL_FOLLOWUP_TEXT_ENTRY_TOOLS = {
+    "app.focus_and_safe_type_text",
+    "app.open_and_safe_type_text",
+    "desktop.safe_type_text",
+    "desktop.type",
+    "desktop.type_text",
+}
+
+_MODEL_FOLLOWUP_SNAPSHOT_BODY_SOURCES = {
+    "analysis_artifact",
+    "analysis_result",
+    "artifact",
+    "artifact_content",
+    "data_analysis",
+    "report_artifact",
+}
+
+_MODEL_FOLLOWUP_SNAPSHOT_BODY_SOURCE_TOOLS = {
+    "artifact.write",
+    "data.analyze",
+}
+
+
+def _model_followup_text_entry_pending_input(
+    tool_name: str,
+    raw_input: Mapping[str, Any],
+    generated_content: str,
+    followup_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(raw_input, Mapping):
+        raw_input = {}
+    content = _model_followup_resolved_body_content(
+        generated_content,
+        raw_input,
+        followup_context,
+    )
+    if not content:
+        return {}
+    payload: dict[str, Any] = {"text": content}
+    if tool_name in {"app.focus_and_safe_type_text", "app.open_and_safe_type_text"}:
+        app_name = str(raw_input.get("app_name") or "").strip()
+        if not app_name or _pending_plan_placeholder_value(app_name, "desktop.list_apps"):
+            return {}
+        payload["app_name"] = app_name
+    return payload
+
+
+def _model_followup_resolved_body_content(
+    generated_content: str,
+    source: Mapping[str, Any],
+    followup_context: Mapping[str, Any],
+) -> str:
+    if not isinstance(source, Mapping):
+        source = {}
+    direct = str(source.get("content") or source.get("text") or "").strip()
+    if direct and not _pending_plan_placeholder_value(direct, "captured"):
+        return direct
+    body_source = str(source.get("body_source") or "").strip()
+    snapshot_content = _model_followup_snapshot_body_content(
+        followup_context,
+        body_source,
+    )
+    if snapshot_content and body_source in _MODEL_FOLLOWUP_SNAPSHOT_BODY_SOURCES:
+        return snapshot_content
+    content = str(generated_content or "").strip()
+    if content:
+        return content
+    return snapshot_content
+
+
+def _model_followup_snapshot_body_content(
+    followup_context: Mapping[str, Any],
+    body_source: str,
+) -> str:
+    source = str(body_source or "").strip()
+    if source not in _MODEL_FOLLOWUP_SNAPSHOT_BODY_SOURCES:
+        return ""
+    snapshots = _model_followup_readable_content_snapshots(followup_context)
+    for snapshot in reversed(snapshots):
+        source_tool = str(snapshot.get("source_tool") or "").strip()
+        if source_tool not in _MODEL_FOLLOWUP_SNAPSHOT_BODY_SOURCE_TOOLS:
+            continue
+        text = str(snapshot.get("text") or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def _model_followup_readable_content_snapshots(
+    followup_context: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    if not isinstance(followup_context, Mapping):
+        return []
+    snapshots: list[Mapping[str, Any]] = []
+    raw_snapshots = followup_context.get("content_snapshots")
+    if isinstance(raw_snapshots, list):
+        snapshots.extend(snapshot for snapshot in raw_snapshots if isinstance(snapshot, Mapping))
+    raw_snapshot = followup_context.get("content_snapshot")
+    if isinstance(raw_snapshot, Mapping):
+        snapshots.append(raw_snapshot)
+    return [
+        snapshot
+        for snapshot in snapshots
+        if snapshot.get("ok") is not False and str(snapshot.get("text") or "").strip()
+    ]
 
 
 def _resolved_followup_workspace_path(
@@ -14332,15 +14547,18 @@ def _model_followup_clipboard_pending_input(
 def _model_followup_artifact_pending_input(
     raw_input: Mapping[str, Any],
     generated_content: str,
+    followup_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     if not isinstance(raw_input, Mapping):
         return {}
     path = str(raw_input.get("path") or "").strip()
     if not path:
         return {}
-    content = str(raw_input.get("content") or "").strip()
-    if not content:
-        content = str(generated_content or "").strip()
+    content = _model_followup_resolved_body_content(
+        generated_content,
+        raw_input,
+        followup_context or {},
+    )
     if not content:
         return {}
     return {"path": path, "content": content}
@@ -14555,9 +14773,17 @@ def _model_followup_app_write_requests(
     generated_content: str,
     target: Mapping[str, Any] | None,
     allowed_tools: Iterable[str],
+    *,
+    followup_context: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
-    content = str(generated_content or "").strip()
-    if not content or not isinstance(target, Mapping):
+    if not isinstance(target, Mapping):
+        return []
+    content = _model_followup_resolved_body_content(
+        generated_content,
+        target,
+        followup_context or {},
+    )
+    if not content:
         return []
     artifact_requests = _model_followup_chained_artifact_write_requests(
         content,

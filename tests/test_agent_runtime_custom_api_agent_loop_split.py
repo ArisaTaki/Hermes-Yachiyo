@@ -7130,6 +7130,99 @@ def test_model_followup_pending_plan_promotes_model_artifact_content() -> None:
     ]
 
 
+def test_model_followup_pending_plan_writes_analysis_snapshot_artifact_content() -> None:
+    analysis_text = (
+        "Data analysis result for data/sales.csv (csv).\n"
+        "2 rows\n"
+        "Columns: region, revenue\n"
+        "Analyzed data/sales.csv. Report: analysis-report.md."
+    )
+    requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            "planning_reason": "planner_builtin_data_analysis",
+            "content_snapshot": {
+                "source_tool": "data.analyze",
+                "ok": True,
+                "path": "data/sales.csv",
+                "source_kind": "csv",
+                "text": analysis_text,
+            },
+            "pending_plan_steps": [
+                {
+                    "step_id": "write-analysis-artifact",
+                    "tool_name": "artifact.write",
+                    "capability_id": "artifact.write",
+                    "input_preview": {
+                        "path": "reports/analysis.md",
+                        "body_source": "report_artifact",
+                    },
+                }
+            ],
+        },
+        ["artifact.write"],
+        generated_content="继续把分析报告写入文件。",
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "artifact.write",
+            "input": {
+                "path": "reports/analysis.md",
+                "content": analysis_text,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+            "step_id": "write-analysis-artifact",
+            "capability_id": "artifact.write",
+            "planner_step_id": "write-analysis-artifact",
+        }
+    ]
+
+
+def test_model_followup_pending_plan_types_analysis_snapshot_content() -> None:
+    analysis_text = "Data analysis result for Numbers (text_table).\nEast revenue 10."
+    requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            "planning_reason": "planner_builtin_data_analysis",
+            "content_snapshot": {
+                "source_tool": "data.analyze",
+                "ok": True,
+                "path": "Numbers",
+                "source_kind": "text_table",
+                "text": analysis_text,
+            },
+            "pending_plan_steps": [
+                {
+                    "step_id": "type-analysis-report",
+                    "tool_name": "desktop.safe_type_text",
+                    "capability_id": "desktop.ui",
+                    "input_preview": {
+                        "body_source": "analysis_artifact",
+                    },
+                }
+            ],
+        },
+        ["desktop.safe_type_text"],
+        generated_content="继续把报告写入前台应用。",
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {
+                "text": analysis_text,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+            "step_id": "type-analysis-report",
+            "capability_id": "desktop.ui",
+            "planner_step_id": "type-analysis-report",
+        }
+    ]
+
+
 def test_model_followup_pending_plan_promotes_model_clipboard_content() -> None:
     requests = custom_api_agent_module._model_followup_pending_plan_requests(
         {
@@ -7770,6 +7863,41 @@ def test_model_followup_context_instructs_generated_app_write() -> None:
             )
         ]
     ) == {}
+
+
+def test_model_followup_app_write_uses_analysis_snapshot_body_source() -> None:
+    analysis_text = "Data analysis result for data/sales.csv (csv).\nEast revenue 10."
+
+    assert custom_api_agent_module._model_followup_app_write_requests(
+        "继续把分析报告写入 Obsidian。",
+        {
+            "kind": "app_write",
+            "app_name": "Obsidian",
+            "target_action": "app_paste",
+            "body_source": "analysis_artifact",
+        },
+        ["app.focus_and_safe_type_text"],
+        followup_context={
+            "content_snapshot": {
+                "source_tool": "data.analyze",
+                "ok": True,
+                "path": "data/sales.csv",
+                "source_kind": "csv",
+                "text": analysis_text,
+            },
+        },
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_type_text",
+            "input": {
+                "app_name": "Obsidian",
+                "text": analysis_text,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_app_write",
+        }
+    ]
 
 
 def test_model_followup_context_instructs_discovered_app_search_result_selection() -> None:

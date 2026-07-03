@@ -1857,11 +1857,15 @@ def _has_unavailable_required_desktop_step(decision: Any) -> bool:
         if not tool_name and step_id == "submit-foreground-ui":
             continue
         if capability_id == "desktop.ui_operation" and not tool_name:
+            if payload.get("blocking_conditions") or payload.get("missing_permissions"):
+                return True
             if _unavailable_desktop_ui_step_can_continue_with_model(
                 steps,
                 index,
                 has_actionable_discovery=has_actionable_discovery,
             ):
+                continue
+            if has_actionable_discovery:
                 continue
             return True
         if (

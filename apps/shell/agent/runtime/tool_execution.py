@@ -452,6 +452,8 @@ def _tool_request_with_verification_target(
 
 _FOREGROUND_APP_CONTEXT_TOOLS = {
     "desktop.inspect_app",
+    "desktop.read_ui",
+    "desktop.ui_elements",
     "desktop.verify",
 }
 
