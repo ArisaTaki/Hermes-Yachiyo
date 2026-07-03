@@ -12,6 +12,7 @@ from .contracts import (
     ToolPlanStepSnapshot,
 )
 from .planner_execution import planner_tool_requests_for_decision
+from .task_progress_snapshots import task_progress_summary_from_task_core
 
 
 def runtime_execution_envelope_from_decision(
@@ -53,6 +54,7 @@ def runtime_execution_envelope_from_decision(
         intent_kind=str(decision.selected_intent.kind or ""),
         requests=requests,
         task_core=decision.plan.task_core,
+        task_progress=task_progress_summary_from_task_core(decision.plan.task_core),
         approvals_required=list(tool_plan.approvals_required),
         artifacts_expected=list(tool_plan.artifacts_expected),
         open_questions=list(tool_plan.open_questions),

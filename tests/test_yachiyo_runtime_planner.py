@@ -32772,6 +32772,10 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     assert envelope.plan_id == decision.plan.plan_id
     assert envelope.task_core is not None
     assert envelope.task_core.core_id == decision.plan.task_core.core_id
+    assert envelope.task_progress is not None
+    assert envelope.task_progress.core_id == decision.plan.task_core.core_id
+    assert envelope.task_progress.workspace_id == decision.plan.task_core.workspace.workspace_id
+    assert envelope.task_progress.total_todos == len(decision.plan.task_core.todos)
     assert envelope.runtime_doctrine == "discover_operate_verify"
     assert envelope.runtime_stage_counts == {
         "discover": 1,

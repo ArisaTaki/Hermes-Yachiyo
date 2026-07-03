@@ -412,6 +412,7 @@ export type RuntimeExecutionEnvelopeSnapshot = {
   intent_kind: string;
   requests?: RuntimeExecutionRequestSnapshot[];
   task_core?: TaskCoreSnapshot | null;
+  task_progress?: TaskProgressSummarySnapshot | null;
   approvals_required?: string[];
   artifacts_expected?: string[];
   open_questions?: string[];

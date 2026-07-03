@@ -41,6 +41,7 @@ type PlannerTrace = {
   steps: ToolPlanStepSnapshot[];
   summaryFallback?: boolean;
   taskCore?: TaskCoreSnapshot | null;
+  taskProgress?: TaskProgressSummarySnapshot | null;
   toolPlan: ToolPlanSnapshot | null;
 };
 
@@ -177,6 +178,7 @@ export function PlannerTraceInspector({
   ]);
   const confidence = confidenceLabel(intent?.confidence);
   const taskCore = trace.plan?.task_core || trace.taskCore || taskCoreFallback || null;
+  const effectiveTaskProgress = taskProgress || trace.taskProgress || null;
   const replanRequests = trace.replanRequests || [];
   const capabilityRecovery = trace.capabilityRecovery || [];
   const executionRequests = trace.executionRequests || [];
@@ -269,12 +271,12 @@ export function PlannerTraceInspector({
         ) : null}
 
         {taskCore ? <TaskCoreInspector taskCore={taskCore} /> : null}
-        {taskProgress || replanRecoveries.length ? (
+        {effectiveTaskProgress || replanRecoveries.length ? (
           <TaskProgressInspector
             onRunReplanRecoveryAction={onRunReplanRecoveryAction}
             recoveryActionDisabled={recoveryActionDisabled}
             replanRecoveries={replanRecoveries}
-            taskProgress={taskProgress}
+            taskProgress={effectiveTaskProgress}
           />
         ) : null}
 
@@ -1471,14 +1473,18 @@ function mergePlannerCapabilityRecoveries(
 }
 
 function runtimeExecutionRequestsFromPayload(payload: Record<string, unknown>): RuntimeExecutionRequestSnapshot[] {
+  const envelope = runtimeExecutionEnvelopeFromPayload(payload);
+  return envelope?.requests || [];
+}
+
+function runtimeExecutionEnvelopeFromPayload(payload: Record<string, unknown>): RuntimeExecutionEnvelopeSnapshot | null {
   const metadata = objectRecord(payload.metadata);
-  const envelope = runtimeExecutionEnvelopeSnapshot(payload.yachiyo_execution_envelope)
+  return runtimeExecutionEnvelopeSnapshot(payload.yachiyo_execution_envelope)
     || runtimeExecutionEnvelopeSnapshot(payload.execution_envelope)
     || runtimeExecutionEnvelopeSnapshot(payload.runtime_execution_envelope)
     || runtimeExecutionEnvelopeSnapshot(metadata.yachiyo_execution_envelope)
     || runtimeExecutionEnvelopeSnapshot(metadata.execution_envelope)
     || runtimeExecutionEnvelopeSnapshot(payload);
-  return envelope?.requests || [];
 }
 
 function runtimeExecutionEnvelopeSnapshot(value: unknown): RuntimeExecutionEnvelopeSnapshot | null {
@@ -1500,6 +1506,7 @@ function runtimeExecutionEnvelopeSnapshot(value: unknown): RuntimeExecutionEnvel
     plan_id: stringValue(record.plan_id),
     intent_kind: stringValue(record.intent_kind),
     requests,
+    task_progress: taskProgressSummarySnapshot(record.task_progress),
   } as RuntimeExecutionEnvelopeSnapshot;
 }
 
@@ -1596,6 +1603,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
   let routeToStudio: boolean | undefined;
   let selection: PlannerSelection | null = null;
   let taskCoreFromEvent: TaskCoreSnapshot | null = null;
+  let taskProgressFromEvent: TaskProgressSummarySnapshot | null = null;
   let eventCount = 0;
   const stepById = new Map<string, ToolPlanStepSnapshot>();
   const desktopFallbackStepById = new Map<string, ToolPlanStepSnapshot>();
@@ -1609,7 +1617,11 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     const plannerEventType = runtimePlannerEventType(eventType);
     const payload = objectRecord(event.payload);
     const eventCapabilityRecovery = plannerCapabilityRecoveriesFromPayload(payload);
-    const eventExecutionRequests = runtimeExecutionRequestsFromPayload(payload);
+    const eventExecutionEnvelope = runtimeExecutionEnvelopeFromPayload(payload);
+    const eventExecutionRequests = eventExecutionEnvelope?.requests || [];
+    const eventTaskProgress = taskProgressSummarySnapshot(payload.task_progress)
+      || eventExecutionEnvelope?.task_progress
+      || null;
     const isRuntimePlannerDesktopIntentEvent = runtimePlannerDesktopIntentEventType(eventType)
       && runtimePlannerDesktopIntentPayload(payload);
     if (
@@ -1617,10 +1629,12 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
       && !isRuntimePlannerDesktopIntentEvent
       && !eventCapabilityRecovery.length
       && !eventExecutionRequests.length
+      && !eventTaskProgress
     ) continue;
     eventCount += 1;
     capabilityRecovery = mergePlannerCapabilityRecoveries(capabilityRecovery, eventCapabilityRecovery);
     executionRequests = mergeRuntimeExecutionRequests(executionRequests, eventExecutionRequests);
+    taskProgressFromEvent = eventTaskProgress || taskProgressFromEvent;
     source = stringValue(payload.source) || source || (isRuntimePlannerDesktopIntentEvent ? 'runtime_planner' : '');
     decisionId = stringValue(payload.decision_id) || decisionId;
     planId = stringValue(payload.plan_id) || planId;
@@ -1764,6 +1778,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     && !executionRequests.length
     && !replanRequests.length
     && !capabilityRecovery.length
+    && !taskProgressFromEvent
   ) return null;
   return {
     candidateIntents,
@@ -1780,6 +1795,7 @@ function plannerTraceFromEvents(events: PublicRunEvent[]): PlannerTrace | null {
     source,
     steps,
     toolPlan: effectiveToolPlan,
+    taskProgress: taskProgressFromEvent,
   };
 }
 
@@ -1801,6 +1817,7 @@ function plannerTraceFromTaskCore(taskCore: TaskCoreSnapshot | null | undefined)
     steps: [],
     summaryFallback: true,
     taskCore,
+    taskProgress: null,
     toolPlan: null,
   };
 }
@@ -1882,6 +1899,7 @@ function plannerTraceFromSummary(summary: PlannerTraceSummarySnapshot | null | u
     source,
     steps,
     summaryFallback: true,
+    taskProgress: null,
     toolPlan,
   };
 }
@@ -2170,6 +2188,17 @@ function taskCoreSnapshot(value: unknown): TaskCoreSnapshot | null {
   const record = objectRecord(value);
   if (!stringValue(record.core_id) && !objectRecord(record.workspace).workspace_id) return null;
   return record as TaskCoreSnapshot;
+}
+
+function taskProgressSummarySnapshot(value: unknown): TaskProgressSummarySnapshot | null {
+  const record = objectRecord(value);
+  if (
+    !stringValue(record.core_id)
+    && !stringValue(record.workspace_id)
+    && !stringValue(record.status)
+    && !stringValue(record.progress_text)
+  ) return null;
+  return record as TaskProgressSummarySnapshot;
 }
 
 function applyTaskCoreFromEvent(

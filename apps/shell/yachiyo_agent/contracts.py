@@ -496,6 +496,7 @@ class RuntimeExecutionEnvelopeSnapshot(_PublicSnapshot):
     intent_kind: str
     requests: list[RuntimeExecutionRequestSnapshot] = Field(default_factory=list)
     task_core: TaskCoreSnapshot | None = None
+    task_progress: TaskProgressSummarySnapshot | None = None
     approvals_required: list[str] = Field(default_factory=list)
     artifacts_expected: list[str] = Field(default_factory=list)
     open_questions: list[str] = Field(default_factory=list)

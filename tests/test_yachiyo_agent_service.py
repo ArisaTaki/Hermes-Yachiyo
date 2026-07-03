@@ -635,7 +635,10 @@ def test_yachiyo_agent_service_plans_shared_chat_execution_envelope() -> None:
 
     assert envelope.intent_kind == "data_analysis"
     assert envelope.task_core is not None
+    assert envelope.task_progress is not None
     assert envelope.task_core.workspace.workspace_id.startswith("task-workspace-")
+    assert envelope.task_progress.workspace_id == envelope.task_core.workspace.workspace_id
+    assert envelope.task_progress.total_todos == len(envelope.task_core.todos)
     assert [request.tool_name for request in envelope.requests] == ["data.analyze"]
     request = envelope.requests[0]
     assert request.step_id == "analyze-data-file"
@@ -686,7 +689,9 @@ def test_agent_studio_service_plans_shared_execution_envelope() -> None:
 
     assert envelope.intent_kind == "data_analysis"
     assert envelope.task_core is not None
+    assert envelope.task_progress is not None
     assert envelope.requests[0].tool_name == "data.analyze"
+    assert envelope.task_progress.core_id == envelope.task_core.core_id
     assert envelope.requests[0].step_id == "analyze-data-file"
     assert envelope.requests[0].capability_id == "data.analysis"
     assert envelope.requests[0].replan_signal_ids
