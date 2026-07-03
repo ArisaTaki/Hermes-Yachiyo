@@ -837,6 +837,13 @@ def _inherit_request_context_without_step(
         target[key] = value
 
 
+_OPEN_PATH_WITH_APP_TOOLS = frozenset({"desktop.open_path_with_app", "app.open_path_with_app"})
+
+
+def _is_open_path_with_app_tool(tool_name: str) -> bool:
+    return str(tool_name or "").strip() in _OPEN_PATH_WITH_APP_TOOLS
+
+
 def _tool_uses_app_name_for_foreground_execution(tool_name: str) -> bool:
     clean_tool = str(tool_name or "").strip()
     return bool(
@@ -846,8 +853,8 @@ def _tool_uses_app_name_for_foreground_execution(tool_name: str) -> bool:
             "desktop.open_app",
             "desktop.focus_app",
             "desktop.inspect_app",
-            "desktop.open_path_with_app",
         }
+        or _is_open_path_with_app_tool(clean_tool)
         or clean_tool.startswith("app.open_and_")
         or clean_tool.startswith("app.focus_and_")
     )
@@ -927,8 +934,8 @@ def _tool_changes_unknown_app_foreground_state(tool_name: str) -> bool:
             "app.focus",
             "desktop.open_app",
             "desktop.focus_app",
-            "desktop.open_path_with_app",
         }
+        or _is_open_path_with_app_tool(clean_tool)
         or clean_tool.startswith("app.open_and_")
         or clean_tool.startswith("app.focus_and_")
     )
@@ -1917,7 +1924,7 @@ def _selected_discovered_app_payload_requires_model(
         return False
     if (
         _selected_discovered_app_payload_needs_open_path_tool(payload)
-        and str(tool_name or "").strip() != "desktop.open_path_with_app"
+        and not _is_open_path_with_app_tool(tool_name)
     ):
         return True
     return not _runtime_resolvable_selected_app_payload(payload, tool_name)
@@ -1936,7 +1943,7 @@ def _runtime_resolvable_selected_app_payload(
     ):
         return False
     if _selected_discovered_app_payload_needs_open_path_tool(payload):
-        return str(tool_name or "").strip() == "desktop.open_path_with_app"
+        return _is_open_path_with_app_tool(tool_name)
     return True
 
 
@@ -1946,7 +1953,7 @@ def _runtime_resolvable_workspace_file_payload(
 ) -> bool:
     selected_path = str(payload.get("target_path") or payload.get("path") or "").strip()
     return bool(
-        str(tool_name or "").strip() == "desktop.open_path_with_app"
+        _is_open_path_with_app_tool(tool_name)
         and selected_path == "<selected file from workspace.list>"
         and str(payload.get("selection_source") or "").strip() == "workspace.list"
     )
@@ -2394,6 +2401,7 @@ _EXECUTION_MUTATION_TOOLS = {
     "desktop.hotkey",
     "desktop.type",
     "desktop.open_path_with_app",
+    "app.open_path_with_app",
     "desktop.click_ui_element",
     "desktop.type_into_ui_element",
     "desktop.submit_foreground",
@@ -2572,7 +2580,7 @@ def _keep_post_mutation_verification_request(
     tool_name = str(request.get("tool") or "").strip()
     if request.get("continue_to_model"):
         return True
-    if previous_mutation_tool == "desktop.open_path_with_app":
+    if _is_open_path_with_app_tool(previous_mutation_tool):
         return False
     if tool_name in {"desktop.ui_elements", "desktop.read_ui", "desktop.windows", "desktop.list_windows"}:
         return True
@@ -3683,7 +3691,11 @@ def _artifact_reveal_tool_requests(
     tool_name = str(getattr(step, "tool_name", "") or "").strip()
     if not _step_available(step):
         return []
-    if tool_name not in {"desktop.reveal_path", "desktop.open_path_with_app", "desktop.open_path"}:
+    if tool_name not in {
+        "desktop.reveal_path",
+        "desktop.open_path",
+        *_OPEN_PATH_WITH_APP_TOOLS,
+    }:
         return []
     if tool_name not in allowed:
         return []
@@ -3696,7 +3708,7 @@ def _artifact_reveal_tool_requests(
         str(getattr(step, "step_id", "") or "").strip()
         == "open-analysis-artifact-with-app"
     )
-    if tool_name == "desktop.open_path_with_app":
+    if _is_open_path_with_app_tool(tool_name):
         app_name = str(payload.get("app_name") or "").strip()
         if not app_name:
             return []

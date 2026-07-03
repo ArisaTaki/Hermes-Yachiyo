@@ -814,6 +814,7 @@ def _fallback_detail(result: Mapping[str, Any]) -> str:
         "desktop.reveal_path": "Finder 定位",
         "desktop.open_path": "打开本地路径",
         "desktop.open_path_with_app": "用应用打开本地路径",
+        "app.open_path_with_app": "用应用打开本地路径",
         "desktop.safe_shortcut": "执行快捷动作",
         "desktop.safe_key": "前台按键",
         "desktop.safe_type_text": "桌面输入",

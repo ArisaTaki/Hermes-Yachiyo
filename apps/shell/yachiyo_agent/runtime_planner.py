@@ -3495,7 +3495,7 @@ class RuntimePlanner:
             ):
                 selected_app_capability = (
                     "file.desktop_access"
-                    if selected_app_tool == "desktop.open_path_with_app"
+                    if _is_open_path_with_app_tool(selected_app_tool)
                     else "desktop.app_control"
                     if selected_app_tool in {"app.open", "desktop.open_app"}
                     else "desktop.ui_operation"
@@ -3652,7 +3652,7 @@ class RuntimePlanner:
             ):
                 selected_app_capability = (
                     "file.desktop_access"
-                    if selected_app_tool == "desktop.open_path_with_app"
+                    if _is_open_path_with_app_tool(selected_app_tool)
                     else "desktop.app_control"
                     if selected_app_tool in {"app.open", "desktop.open_app"}
                     else "desktop.ui_operation"
@@ -7213,6 +7213,13 @@ _DESKTOP_OPERATION_TOOL_ALIASES = {
 }
 
 
+_OPEN_PATH_WITH_APP_TOOL_CANDIDATES = ("desktop.open_path_with_app", "app.open_path_with_app")
+
+
+def _is_open_path_with_app_tool(tool_name: str | None) -> bool:
+    return str(tool_name or "").strip() in _OPEN_PATH_WITH_APP_TOOL_CANDIDATES
+
+
 def _first_allowed(tools: Iterable[str], allowed: set[str] | None) -> str | None:
     for tool in tools:
         if allowed is None or tool in allowed:
@@ -9011,7 +9018,7 @@ def _selected_discovered_app_tool(
     mode: str = "open",
 ) -> str:
     if str(target_path or "").strip():
-        tool_name = _first_allowed(("desktop.open_path_with_app",), allowed)
+        tool_name = _first_allowed(_OPEN_PATH_WITH_APP_TOOL_CANDIDATES, allowed)
         if tool_name:
             return tool_name
     if isinstance(safe_shortcut, Mapping) and str(safe_shortcut.get("action") or "").strip():
@@ -11426,9 +11433,12 @@ def _append_analysis_result_open_app_steps(
     path = _analysis_result_open_path(intent.user_goal, artifact_paths, app_name)
     if not path:
         return steps
-    tool_name = _first_allowed(("desktop.open_path_with_app", "desktop.open_path"), allowed)
+    tool_name = _first_allowed(
+        (*_OPEN_PATH_WITH_APP_TOOL_CANDIDATES, "desktop.open_path"),
+        allowed,
+    )
     input_preview = {"path": path}
-    if tool_name == "desktop.open_path_with_app":
+    if _is_open_path_with_app_tool(tool_name):
         input_preview["app_name"] = app_name
     return [
         *steps,
@@ -11440,7 +11450,7 @@ def _append_analysis_result_open_app_steps(
             tool_name,
             input_preview=input_preview,
             depends_on=[depends_on],
-            action="open_path_with_app" if tool_name == "desktop.open_path_with_app" else "open_path",
+            action="open_path_with_app" if _is_open_path_with_app_tool(tool_name) else "open_path",
             reason=(
                 "Open the generated analysis artifact only after the analysis step has "
                 "produced it."

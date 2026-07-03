@@ -60,6 +60,7 @@ LOW_RISK_DESKTOP_TOOLS = frozenset(
         "desktop.reveal_path",
         "desktop.open_path",
         "desktop.open_path_with_app",
+        "app.open_path_with_app",
         "media.apple_music_play",
         "media.apple_music_status",
         "media.apple_music_open_and_play",
@@ -269,7 +270,7 @@ DESKTOP_ACTION_TOOL_HINTS: dict[str, tuple[str, ...]] = {
     "quit_app": ("app.quit", "desktop.quit_app"),
     "reveal_path": ("desktop.reveal_path",),
     "open_path": ("desktop.open_path",),
-    "open_path_with_app": ("desktop.open_path_with_app",),
+    "open_path_with_app": ("desktop.open_path_with_app", "app.open_path_with_app"),
     "play_or_pause_media": (
         "media.apple_music_play",
         "media.apple_music_open_and_play",

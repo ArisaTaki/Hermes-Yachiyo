@@ -16,6 +16,8 @@ DAILY_DESKTOP_TOOL_LABELS = {
     "data.analyze": "分析数据",
     "desktop.reveal_path": "在 Finder 中显示",
     "desktop.open_path": "打开本地路径",
+    "desktop.open_path_with_app": "用应用打开本地路径",
+    "app.open_path_with_app": "用应用打开本地路径",
     "app.open": "打开应用",
     "app.focus": "聚焦应用",
     "app.focus_window": "聚焦应用窗口",

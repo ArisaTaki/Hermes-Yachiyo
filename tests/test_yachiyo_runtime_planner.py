@@ -746,6 +746,64 @@ def test_runtime_planner_opens_generated_analysis_result_with_requested_app() ->
     ]
 
 
+def test_runtime_planner_projects_app_open_path_with_app_alias() -> None:
+    prompt = "分析 Downloads 里的 sales.csv，生成图表和报告，然后用 Numbers 打开结果"
+    allowed_tools = [
+        "data.analyze",
+        "app.open_path_with_app",
+        "desktop.open_path",
+        "app.open",
+        "workspace.read",
+        "terminal.run",
+        "artifact.write",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.plan.tool_plan.missing_capabilities == []
+    open_result = _step_by_id(decision, "open-analysis-artifact-with-app")
+    assert open_result.tool_name == "app.open_path_with_app"
+    assert open_result.capability_id == "file.desktop_access"
+
+    assert planner_tool_requests(prompt, allowed_tools=allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "path": "Downloads/sales.csv",
+                "artifact_path": "analysis-report.md",
+                "source_kind": "csv",
+                "requested_outputs": ["chart", "report", "table"],
+                "artifact_manifest": [
+                    {"path": "analysis-report.md", "kind": "markdown"},
+                    {"path": "analysis-chart.png", "kind": "chart"},
+                    {"path": "analysis-summary.csv", "kind": "csv"},
+                ],
+                "artifact_paths": [
+                    "analysis-report.md",
+                    "analysis-chart.png",
+                    "analysis-summary.csv",
+                ],
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+            "step_id": "analyze-data-file",
+            "capability_id": "data.analysis",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_path_with_app",
+            "input": {
+                "path": "analysis-summary.csv",
+                "app_name": "Numbers",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+            "step_id": "open-analysis-artifact-with-app",
+            "capability_id": "file.desktop_access",
+        },
+    ]
+
+
 def test_runtime_planner_opens_requested_data_file_before_model_followup_without_builtin_analysis() -> None:
     decision = RuntimePlanner().decision(
         "打开 Excel 分析 ~/Downloads/sales.csv 并生成报告",
