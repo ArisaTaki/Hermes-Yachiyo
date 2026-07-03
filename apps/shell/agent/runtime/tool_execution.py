@@ -1828,6 +1828,8 @@ def _tool_event_requests_runtime_replan(
 ) -> bool:
     if result.get("approval_required") or tool_event.get("approval_required"):
         return False
+    if result.get("verification_failed") is True or tool_event.get("verification_failed") is True:
+        return True
     if result.get("ok") is False:
         return True
     status = str(tool_event.get("status") or result.get("status") or "").strip().lower()

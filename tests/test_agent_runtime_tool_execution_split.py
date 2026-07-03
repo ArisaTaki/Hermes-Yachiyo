@@ -864,6 +864,67 @@ def test_runtime_tool_request_runner_records_replan_request_for_failed_planned_s
     assert run_replan_event["replan_signal_ids"] == ["signal-analyze-failed"]
 
 
+def test_runtime_tool_request_runner_records_explicit_verification_failure_replan() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    runner = _runner(
+        call_agent_tool=lambda *_args, **_kwargs: {
+            "ok": True,
+            "verification_failed": True,
+            "summary": "The generated report did not include the requested chart.",
+        },
+        run_events=run_events,
+    )
+
+    runner.run(
+        [
+            {
+                "tool": "data.analyze",
+                "input": {"path": "data/sales.csv"},
+                "source": "runtime_planner",
+                "step_id": "analyze-data-file",
+                "capability_id": "data.analysis",
+                "core_id": "task-core-1",
+                "workspace_id": "task-workspace-1",
+                "decision_id": "decision-1",
+                "plan_id": "plan-1",
+                "task_id": "task-1",
+                "replan_signal_ids": ["signal-analyze-verify-failed"],
+                "replan_triggers": ["verification_failed"],
+                "fallback_tools": ["terminal.run"],
+            }
+        ],
+        ["data.analyze", "terminal.run"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "analyze data"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-verify-1",
+        budget=FakeBudget(),
+    )
+
+    replan_event = next(event for event in timeline if event["event"] == "agent.replan.requested")
+    assert replan_event["payload"]["trigger"] == "verification_failed"
+    assert replan_event["payload"]["source_step_id"] == "analyze-data-file"
+    assert replan_event["payload"]["source_tool_name"] == "data.analyze"
+    assert replan_event["payload"]["target_capability_id"] == "data.analysis"
+    assert replan_event["payload"]["fallback_tools"] == ["terminal.run"]
+    assert (
+        replan_event["payload"]["failure_detail"]
+        == "The generated report did not include the requested chart."
+    )
+
+    run_replan_event = next(
+        payload
+        for _run_id, event_type, payload in run_events
+        if event_type == "agent.replan.requested"
+    )
+    assert run_replan_event["request_id"] == replan_event["payload"]["request_id"]
+    assert run_replan_event["replan_signal_ids"] == ["signal-analyze-verify-failed"]
+
+
 def test_runtime_tool_call_executor_denies_unallowed_tools_before_broker_call() -> None:
     events = FakeToolCallEvents()
     executor = _executor(tool_call_events=events)
