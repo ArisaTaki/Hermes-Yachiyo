@@ -688,7 +688,9 @@ def _tool_request_input_accepts_app_name_resolution(tool_name: str) -> bool:
         "desktop.hide_app",
         "desktop.quit_app",
         "desktop.inspect_app",
+        "desktop.list_windows",
         "desktop.windows",
+        "desktop.verify",
         "desktop.read_ui",
         "desktop.ui_elements",
         "desktop.open_path_with_app",
@@ -747,6 +749,7 @@ def _tool_request_with_verification_target(
 
 _FOREGROUND_APP_CONTEXT_TOOLS = {
     "desktop.inspect_app",
+    "desktop.list_windows",
     "desktop.windows",
     "desktop.read_ui",
     "desktop.ui_elements",

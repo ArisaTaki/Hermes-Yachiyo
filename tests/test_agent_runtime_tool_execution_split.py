@@ -1791,6 +1791,162 @@ def test_runtime_tool_request_runner_scopes_windows_to_recent_foreground_app() -
     ]
 
 
+def test_runtime_tool_request_runner_resolves_selected_app_for_desktop_verify() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        ToolDescriptorRegistry.validate_payload(tool_name, payload)
+        calls.append((tool_name, payload))
+        if tool_name == "desktop.list_apps":
+            result = {
+                "ok": True,
+                "action": "desktop.list_apps",
+                "data": {
+                    "query": payload["query"],
+                    "best_match": {
+                        "name": "Pixelmator Pro",
+                        "path": "/Applications/Pixelmator Pro.app",
+                        "match_score": 94,
+                        "match_confidence": "high",
+                    },
+                },
+            }
+        else:
+            result = {
+                "ok": True,
+                "action": "desktop.verify",
+                "data": {"app_name": payload["app_name"], "ready_for_foreground_action": True},
+            }
+        timeline_arg.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+
+    runner.run(
+        [
+            {"tool": "desktop.list_apps", "input": {"query": "image editor", "limit": 20}},
+            {
+                "tool": "desktop.verify",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": "image editor",
+                    "role_filter": "button",
+                    "limit": 80,
+                },
+            },
+        ],
+        ["desktop.list_apps", "desktop.verify"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "找一个图片编辑应用并验证它的界面"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-selected-app-verify",
+        budget=FakeBudget(),
+    )
+
+    assert calls == [
+        ("desktop.list_apps", {"query": "image editor", "limit": 20}),
+        (
+            "desktop.verify",
+            {"app_name": "Pixelmator Pro", "role_filter": "button", "limit": 80},
+        ),
+    ]
+    resolution_payload = {
+        "tool": "desktop.verify",
+        "field": "app_name",
+        "requested_app_name": "image editor",
+        "resolved_app_name": "Pixelmator Pro",
+        "source_tool": "desktop.list_apps",
+        "resolved_app_path": "/Applications/Pixelmator Pro.app",
+        "app_resolution_score": "94",
+        "app_resolution_confidence": "high",
+    }
+    assert [
+        event for event in timeline if event["event"] == "agent.tool.input_resolved"
+    ] == [
+        {
+            "event": "agent.tool.input_resolved",
+            "detail": "desktop.verify",
+            **resolution_payload,
+        }
+    ]
+    assert (
+        "run-selected-app-verify",
+        "agent.tool.input_resolved",
+        resolution_payload,
+    ) in run_events
+
+
+def test_runtime_tool_request_runner_scopes_list_windows_to_recent_foreground_app() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        ToolDescriptorRegistry.validate_payload(tool_name, payload)
+        calls.append((tool_name, payload))
+        result = (
+            {
+                "ok": True,
+                "action": "app.focus",
+                "data": {"app_name": payload["app_name"], "focus_status": "frontmost"},
+            }
+            if tool_name == "app.focus"
+            else {
+                "ok": True,
+                "action": "desktop.list_windows",
+                "data": {"app_name": payload["app_name"], "windows": []},
+            }
+        )
+        timeline_arg.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool)
+
+    runner.run(
+        [
+            {"tool": "app.focus", "input": {"app_name": "Notes"}},
+            {"tool": "desktop.list_windows", "input": {}},
+        ],
+        ["app.focus", "desktop.list_windows"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "聚焦 Notes 后看它的窗口"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-foreground-list-windows",
+        budget=FakeBudget(),
+    )
+
+    assert calls == [
+        ("app.focus", {"app_name": "Notes"}),
+        ("desktop.list_windows", {"app_name": "Notes"}),
+    ]
+
+
 def test_runtime_tool_request_runner_normalizes_discovered_app_open_path_input() -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
     run_events: list[tuple[str, str, dict[str, Any]]] = []
