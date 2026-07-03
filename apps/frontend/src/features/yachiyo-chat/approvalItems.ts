@@ -14,6 +14,10 @@ export type ChatApprovalPending = {
   tool?: unknown;
   input_preview?: unknown;
   requested_at?: unknown;
+  task_workspace_items?: unknown;
+  task_verification_targets?: unknown;
+  workspace_items?: unknown;
+  verification_targets?: unknown;
 };
 
 export type ChatApprovalMetadata = {
@@ -136,7 +140,26 @@ export function approvalRequestDetails(message: ChatApprovalMessage): ApprovalRe
     }
   }
 
-  return { requester, tool, goal, codeLanguage, codeText, summary };
+  return {
+    requester,
+    tool,
+    goal,
+    codeLanguage,
+    codeText,
+    summary,
+    task_workspace_items: approvalRecordList(
+      pending.task_workspace_items,
+      isRecord(preview) ? preview.task_workspace_items : undefined,
+      pending.workspace_items,
+      isRecord(preview) ? preview.workspace_items : undefined,
+    ),
+    task_verification_targets: approvalRecordList(
+      pending.task_verification_targets,
+      isRecord(preview) ? preview.task_verification_targets : undefined,
+      pending.verification_targets,
+      isRecord(preview) ? preview.verification_targets : undefined,
+    ),
+  };
 }
 
 export function approvalRequestDetailsFromRun(
@@ -471,6 +494,42 @@ function approvalPreviewFallback(value: unknown) {
   } catch {
     return String(value);
   }
+}
+
+function approvalRecordList(...values: unknown[]): Array<Record<string, unknown>> {
+  const seen = new Set<string>();
+  const records: Array<Record<string, unknown>> = [];
+  values.forEach((value) => {
+    if (!Array.isArray(value)) return;
+    value.forEach((item) => {
+      if (!isRecord(item)) return;
+      const key = stableApprovalRecordKey(item);
+      if (seen.has(key)) return;
+      seen.add(key);
+      records.push(item);
+    });
+  });
+  return records;
+}
+
+function stableApprovalRecordKey(value: Record<string, unknown>) {
+  try {
+    return JSON.stringify(stableApprovalRecordValue(value));
+  } catch {
+    return String(value);
+  }
+}
+
+function stableApprovalRecordValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stableApprovalRecordValue);
+  if (isRecord(value)) {
+    return Object.fromEntries(
+      Object.keys(value)
+        .sort()
+        .map((key) => [key, stableApprovalRecordValue(value[key])]),
+    );
+  }
+  return value;
 }
 
 function participantDisplayName(participant?: ChatApprovalParticipant | null) {

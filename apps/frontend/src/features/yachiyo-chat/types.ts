@@ -98,6 +98,10 @@ export type ChatMessageMetadata = {
     tool?: string;
     input_preview?: unknown;
     requested_at?: string;
+    task_workspace_items?: Array<Record<string, unknown>>;
+    task_verification_targets?: Array<Record<string, unknown>>;
+    workspace_items?: Array<Record<string, unknown>>;
+    verification_targets?: Array<Record<string, unknown>>;
   };
   run_progress_title?: string;
   run_progress_detail?: string;
@@ -114,6 +118,10 @@ export type ChatMessageMetadata = {
     tool?: string;
     input_preview?: unknown;
     requested_at?: string;
+    task_workspace_items?: Array<Record<string, unknown>>;
+    task_verification_targets?: Array<Record<string, unknown>>;
+    workspace_items?: Array<Record<string, unknown>>;
+    verification_targets?: Array<Record<string, unknown>>;
   };
   planner_summary?: PlannerTraceSummarySnapshot | null;
   group_dispatch_count?: number;
