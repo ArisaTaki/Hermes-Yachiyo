@@ -25,6 +25,10 @@ from .contracts import (
     StartChatTaskRequest,
 )
 from .events import public_run_event_page_from_payload
+from .event_page_windows import (
+    events_with_first_page_key_event_window,
+    run_event_page_with_projected_events,
+)
 from .planner_projection import planner_enriched_chat_request
 from .ports import ChatTaskStarter, RuntimePort
 from .runtime_execution import runtime_execution_envelope_from_decision
@@ -214,7 +218,16 @@ class YachiyoAgentService:
                 after_sequence=clean_after_sequence,
                 limit=clean_limit,
             )
-            return page.model_copy(update={"events": _chat_visible_events(page.events)})
+            events = _chat_visible_events(page.events)
+            port_event_stream = getattr(self._runtime_port, "get_task_event_stream", None)
+            if clean_after_sequence == 0 and page.has_more and callable(port_event_stream):
+                events = events_with_first_page_key_event_window(
+                    events,
+                    _chat_visible_events(list(self.get_task_event_stream(task_id))),
+                    page=page,
+                    event_types=_TASK_FIRST_PAGE_KEY_EVENT_TYPES,
+                )
+            return run_event_page_with_projected_events(page, events)
 
         events = _chat_visible_events(list(self.get_task_event_stream(task_id)))
         filtered_events = [
@@ -408,3 +421,23 @@ def _chat_visible_events(events: list[PublicRunEvent]) -> list[PublicRunEvent]:
         for event in events
         if event.visibility == "user" and event.sensitivity == "public"
     ]
+
+
+_TASK_FIRST_PAGE_KEY_EVENT_TYPES = {
+    "task.completed",
+    "task.failed",
+    "task.cancelled",
+    "run.completed",
+    "run.failed",
+    "run.cancelled",
+    "agent.completed",
+    "agent.failed",
+    "agent.cancelled",
+    "agent.run.completed",
+    "agent.run.failed",
+    "agent.run.cancelled",
+    "agent.tool.approval_required",
+    "agent.desktop.intent_approval_required",
+    "tool.approval_required",
+    "workflow.run.approval_required",
+}

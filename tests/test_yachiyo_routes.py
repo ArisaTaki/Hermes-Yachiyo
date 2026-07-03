@@ -603,9 +603,12 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
     assert task_events["run_id"] == "run-1"
     assert task_events["after_sequence"] == 0
     assert task_events["limit"] == 1
-    assert task_events["next_after_sequence"] == 1
+    assert task_events["next_after_sequence"] == 4
     assert task_events["has_more"] is True
-    assert task_events["events"][0]["event_type"] == "agent.started"
+    assert [event["event_type"] for event in task_events["events"]] == [
+        "agent.started",
+        "agent.completed",
+    ]
     full_task_events = await yachiyo.get_task_events(
         "run-1",
         request,
