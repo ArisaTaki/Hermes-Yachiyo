@@ -2377,6 +2377,11 @@ def test_custom_api_agent_loop_guides_code_patch_after_diagnostic_when_write_too
             "risk_level": "high",
             "approval_required": True,
             "depends_on": ["run-code-diagnostic"],
+            "runtime_doctrine": "discover_operate_verify",
+            "runtime_stage": "operate",
+            "runtime_role": "apply_patch",
+            "requires_observation": False,
+            "requires_post_action_verification": True,
         },
         {
             "step_id": "verify-code-changes",
@@ -2387,6 +2392,11 @@ def test_custom_api_agent_loop_guides_code_patch_after_diagnostic_when_write_too
             "risk_level": "high",
             "approval_required": True,
             "depends_on": ["apply-code-changes"],
+            "runtime_doctrine": "discover_operate_verify",
+            "runtime_stage": "verify",
+            "runtime_role": "verify_result",
+            "requires_observation": True,
+            "requires_post_action_verification": False,
         }
     ]
     assert not any(
@@ -2400,6 +2410,8 @@ def test_custom_api_agent_loop_guides_code_patch_after_diagnostic_when_write_too
     )
     followup_message = str(model_calls[0][-1]["content"])
     assert "Runtime follow-up context" in followup_message
+    assert "operate role=apply_patch approval required" in followup_message
+    assert "verify role=verify_result approval required" in followup_message
     assert "workspace.write_patch with path and patch" in followup_message
     assert "missing permission" in followup_message
     assert "Do not skip directly to final prose" in followup_message

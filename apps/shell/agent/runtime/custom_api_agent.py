@@ -5841,10 +5841,17 @@ def _model_followup_pending_plan_steps(
         return []
 
     pending_steps: list[dict[str, Any]] = []
+    task_core = _model_followup_task_core_payload(selection_payload)
     for step in steps[start_index:]:
         step_payload = _model_followup_plan_step_payload(step)
         if not step_payload:
             continue
+        step_payload.update(
+            _model_followup_task_core_step_runtime_trace(
+                task_core,
+                str(step_payload.get("step_id") or ""),
+            )
+        )
         pending_steps.append(step_payload)
         if len(pending_steps) >= 5:
             break
@@ -6498,7 +6505,41 @@ def _model_followup_plan_step_payload(step: Mapping[str, Any]) -> dict[str, Any]
     depends_on = _string_list(step.get("depends_on"))
     if depends_on:
         payload["depends_on"] = depends_on
+    for key in (
+        "runtime_doctrine",
+        "runtime_stage",
+        "runtime_role",
+        "requires_observation",
+        "requires_post_action_verification",
+    ):
+        value = step.get(key)
+        if value not in (None, "", [], {}):
+            payload[key] = value
     return {key: value for key, value in payload.items() if value not in ("", [], {})}
+
+
+def _model_followup_task_core_step_runtime_trace(
+    task_core: Mapping[str, Any],
+    step_id: str,
+) -> dict[str, Any]:
+    clean_step_id = str(step_id or "").strip()
+    if not clean_step_id or not isinstance(task_core, Mapping):
+        return {}
+    for todo in _mapping_list(task_core.get("todos")):
+        if str(todo.get("step_id") or "").strip() != clean_step_id:
+            continue
+        metadata = todo.get("metadata") if isinstance(todo.get("metadata"), Mapping) else {}
+        trace = _runtime_trace_metadata_from_mapping(metadata)
+        if trace:
+            return trace
+    for checkpoint in _mapping_list(task_core.get("checkpoints")):
+        if str(checkpoint.get("after_step_id") or "").strip() != clean_step_id:
+            continue
+        payload = checkpoint.get("payload") if isinstance(checkpoint.get("payload"), Mapping) else {}
+        trace = _runtime_trace_metadata_from_mapping(payload)
+        if trace:
+            return trace
+    return {}
 
 
 def _model_replan_followup_context_payload(
