@@ -73,7 +73,13 @@ def group_run_snapshot_from_payload(
         for item in runs_payload
         if isinstance(item, Mapping)
     ]
-    tool_calls = _group_run_tool_calls(payload, runs, events, group_run_id=group_run_id)
+    tool_calls = _group_run_tool_calls(
+        payload,
+        runs,
+        events,
+        group_run_id=group_run_id,
+        group_id=group_id,
+    )
     shared_artifacts = _group_run_shared_artifacts(
         payload,
         runs,
@@ -86,6 +92,7 @@ def group_run_snapshot_from_payload(
         runs,
         events,
         group_run_id=group_run_id,
+        group_id=group_id,
     )
     task_core = task_core_snapshot_from_payload(payload, events=events)
     task_progress = task_progress_summary_from_task_core(
@@ -217,6 +224,7 @@ def _group_run_tool_calls(
     events: list[Any],
     *,
     group_run_id: str,
+    group_id: str,
 ) -> list[ToolCallSnapshot]:
     direct_tool_calls = (
         _RUN_PROJECTOR.tool_calls_from_payload(payload.get("tool_calls"), run_id=group_run_id)
@@ -231,7 +239,11 @@ def _group_run_tool_calls(
     )
     return _unique_by(
         [
-            _group_context_tool_call(tool_call, group_run_id=group_run_id)
+            _group_context_tool_call(
+                tool_call,
+                group_run_id=group_run_id,
+                group_id=group_id,
+            )
             for tool_call in [*direct_tool_calls, *child_tool_calls, *event_tool_calls]
         ],
         lambda tool_call: tool_call.tool_call_id,
@@ -296,6 +308,7 @@ def _group_run_pending_approvals(
     events: list[Any],
     *,
     group_run_id: str,
+    group_id: str,
 ) -> list[ApprovalCardSnapshot]:
     direct_and_event_approvals = [
         approval
@@ -315,7 +328,14 @@ def _group_run_pending_approvals(
         if approval.status == "pending"
     ]
     return _unique_by(
-        [*direct_and_event_approvals, *child_approvals],
+        [
+            _group_context_approval(
+                approval,
+                group_run_id=group_run_id,
+                group_id=group_id,
+            )
+            for approval in [*direct_and_event_approvals, *child_approvals]
+        ],
         lambda approval: approval.approval_id,
     )
 
@@ -353,10 +373,30 @@ def _group_context_tool_call(
     tool_call: ToolCallSnapshot,
     *,
     group_run_id: str,
+    group_id: str,
 ) -> ToolCallSnapshot:
-    if tool_call.group_run_id:
-        return tool_call
-    return tool_call.model_copy(update={"group_run_id": group_run_id or None})
+    return tool_call.model_copy(
+        update={
+            "source_run_id": tool_call.source_run_id or tool_call.run_id,
+            "group_run_id": tool_call.group_run_id or group_run_id or None,
+            "group_id": tool_call.group_id or group_id or None,
+        }
+    )
+
+
+def _group_context_approval(
+    approval: ApprovalCardSnapshot,
+    *,
+    group_run_id: str,
+    group_id: str,
+) -> ApprovalCardSnapshot:
+    return approval.model_copy(
+        update={
+            "source_run_id": approval.source_run_id or approval.run_id,
+            "group_run_id": approval.group_run_id or group_run_id or None,
+            "group_id": approval.group_id or group_id or None,
+        }
+    )
 
 
 def _group_context_artifact(

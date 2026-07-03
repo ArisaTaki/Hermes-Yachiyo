@@ -8,8 +8,11 @@ from typing import Any
 from apps.shell.agent.runtime.events import redact_secrets
 
 from .contracts import (
+    ApprovalCardSnapshot,
+    ArtifactSnapshot,
     PublicRunEvent,
     RunTimelineSnapshot,
+    ToolCallSnapshot,
     WorkflowRunSnapshot,
 )
 from .run_snapshots import RunSnapshotProjector, run_timeline_snapshot_from_payload
@@ -46,7 +49,55 @@ def workflow_run_snapshot_from_payload(
     ]
     child_approvals = _child_approvals(child_runs)
     timeline_payload = timeline.model_dump(mode="python")
+    timeline_payload.update(
+        {
+            "tool_calls": _unique_by(
+                _workflow_context_tool_calls(
+                    timeline.tool_calls,
+                    workflow_id=workflow_id or "",
+                    workflow_run_id=workflow_run_id,
+                ),
+                lambda item: item.tool_call_id,
+            ),
+            "approvals": _unique_by(
+                _workflow_context_approvals(
+                    timeline.approvals,
+                    workflow_id=workflow_id or "",
+                    workflow_run_id=workflow_run_id,
+                ),
+                lambda item: item.approval_id,
+            ),
+            "pending_approval": _workflow_context_approval(
+                timeline.pending_approval,
+                workflow_id=workflow_id or "",
+                workflow_run_id=workflow_run_id,
+            ),
+            "artifacts": _unique_by(
+                _workflow_context_artifacts(
+                    timeline.artifacts,
+                    workflow_id=workflow_id or "",
+                    workflow_run_id=workflow_run_id,
+                ),
+                _artifact_identity,
+            ),
+        }
+    )
     if child_runs:
+        workflow_tool_calls = _workflow_context_tool_calls(
+            [*timeline.tool_calls, *_child_items(child_runs, "tool_calls")],
+            workflow_id=workflow_id or "",
+            workflow_run_id=workflow_run_id,
+        )
+        workflow_approvals = _workflow_context_approvals(
+            [*timeline.approvals, *child_approvals],
+            workflow_id=workflow_id or "",
+            workflow_run_id=workflow_run_id,
+        )
+        workflow_artifacts = _workflow_context_artifacts(
+            [*timeline.artifacts, *_child_items(child_runs, "artifacts")],
+            workflow_id=workflow_id or "",
+            workflow_run_id=workflow_run_id,
+        )
         timeline_payload.update(
             {
                 "children": merge_timeline_child_snapshots(
@@ -54,17 +105,20 @@ def workflow_run_snapshot_from_payload(
                     _RUN_PROJECTOR.timeline_children_from_payloads(child_payloads),
                 ),
                 "tool_calls": _unique_by(
-                    [*timeline.tool_calls, *_child_items(child_runs, "tool_calls")],
+                    workflow_tool_calls,
                     lambda item: item.tool_call_id,
                 ),
                 "approvals": _unique_by(
-                    [*timeline.approvals, *child_approvals],
+                    workflow_approvals,
                     lambda item: item.approval_id,
                 ),
-                "pending_approval": timeline.pending_approval
-                or _first_pending(child_approvals),
+                "pending_approval": _workflow_context_approval(
+                    timeline.pending_approval or _first_pending(child_approvals),
+                    workflow_id=workflow_id or "",
+                    workflow_run_id=workflow_run_id,
+                ),
                 "artifacts": _unique_by(
-                    [*timeline.artifacts, *_child_items(child_runs, "artifacts")],
+                    workflow_artifacts,
                     _artifact_identity,
                 ),
                 "memory_traces": _unique_by(
@@ -278,6 +332,87 @@ def _first_pending(items: list[Any]) -> Any | None:
         if getattr(item, "status", "") == "pending":
             return item
     return None
+
+
+def _workflow_context_tool_calls(
+    tool_calls: list[ToolCallSnapshot],
+    *,
+    workflow_id: str,
+    workflow_run_id: str,
+) -> list[ToolCallSnapshot]:
+    return [
+        _workflow_context_tool_call(
+            tool_call,
+            workflow_id=workflow_id,
+            workflow_run_id=workflow_run_id,
+        )
+        for tool_call in tool_calls
+    ]
+
+
+def _workflow_context_tool_call(
+    tool_call: ToolCallSnapshot,
+    *,
+    workflow_id: str,
+    workflow_run_id: str,
+) -> ToolCallSnapshot:
+    return tool_call.model_copy(
+        update={
+            "source_run_id": tool_call.source_run_id or tool_call.run_id,
+            "workflow_id": tool_call.workflow_id or workflow_id or None,
+            "workflow_run_id": tool_call.workflow_run_id or workflow_run_id or None,
+        }
+    )
+
+
+def _workflow_context_approvals(
+    approvals: list[ApprovalCardSnapshot],
+    *,
+    workflow_id: str,
+    workflow_run_id: str,
+) -> list[ApprovalCardSnapshot]:
+    return [
+        _workflow_context_approval(
+            approval,
+            workflow_id=workflow_id,
+            workflow_run_id=workflow_run_id,
+        )
+        for approval in approvals
+    ]
+
+
+def _workflow_context_approval(
+    approval: ApprovalCardSnapshot | None,
+    *,
+    workflow_id: str,
+    workflow_run_id: str,
+) -> ApprovalCardSnapshot | None:
+    if approval is None:
+        return None
+    return approval.model_copy(
+        update={
+            "source_run_id": approval.source_run_id or approval.run_id,
+            "workflow_id": approval.workflow_id or workflow_id or None,
+            "workflow_run_id": approval.workflow_run_id or workflow_run_id or None,
+        }
+    )
+
+
+def _workflow_context_artifacts(
+    artifacts: list[ArtifactSnapshot],
+    *,
+    workflow_id: str,
+    workflow_run_id: str,
+) -> list[ArtifactSnapshot]:
+    return [
+        artifact.model_copy(
+            update={
+                "workflow_id": artifact.workflow_id or workflow_id or None,
+                "workflow_run_id": artifact.workflow_run_id or workflow_run_id or None,
+            }
+        )
+        for artifact in artifacts
+    ]
 
 
 def _artifact_identity(artifact: Any) -> str:
