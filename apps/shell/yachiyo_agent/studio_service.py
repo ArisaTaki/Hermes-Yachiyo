@@ -712,9 +712,11 @@ class AgentStudioService:
             raise AgentRuntimeError("Replan recovery action requires an agent_id")
 
         objective = _replan_recovery_action_objective(action)
+        task_context = _replan_recovery_task_context(source_run, recovery, action)
         direct_request = _replan_recovery_action_direct_request(
             recovery,
             action,
+            task_context=task_context,
             continue_to_model=bool(payload.get("continue_to_model", True)),
         )
         start_payload: dict[str, Any] = {
@@ -726,7 +728,8 @@ class AgentStudioService:
                 source_run,
                 recovery,
                 action,
-                payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {},
+                task_context=task_context,
+                extra=payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {},
             ),
             "direct_tool_requests": [direct_request],
             "daily_desktop_planning_context": objective,
@@ -1211,6 +1214,7 @@ def _replan_recovery_action_direct_request(
     recovery: ReplanRecoverySnapshot,
     action: ReplanRecoveryActionSnapshot,
     *,
+    task_context: Mapping[str, Any],
     continue_to_model: bool,
 ) -> dict[str, Any]:
     request = {
@@ -1245,7 +1249,228 @@ def _replan_recovery_action_direct_request(
     verification_targets = action.verification_targets or recovery.verification_targets
     if verification_targets:
         request["verification_targets"] = [dict(target) for target in verification_targets]
+    _apply_replan_recovery_task_context(request, task_context)
     return request
+
+
+def _apply_replan_recovery_task_context(
+    request: dict[str, Any],
+    task_context: Mapping[str, Any],
+) -> None:
+    for context_key, request_key in (
+        ("core_id", "core_id"),
+        ("workspace_id", "workspace_id"),
+        ("task_id", "task_id"),
+        ("task_todo", "task_todo"),
+        ("task_checkpoints", "task_checkpoints"),
+        ("task_workspace_items", "task_workspace_items"),
+        ("task_verification_targets", "task_verification_targets"),
+    ):
+        value = task_context.get(context_key)
+        if value not in (None, "", [], {}):
+            request[request_key] = value
+
+
+def _replan_recovery_task_context(
+    source_run: Any,
+    recovery: ReplanRecoverySnapshot,
+    action: ReplanRecoveryActionSnapshot,
+) -> dict[str, Any]:
+    source_step_id = str(recovery.source_step_id or "").strip()
+    task_core = _source_task_core_for_recovery(source_run, recovery)
+    workspace = getattr(task_core, "workspace", None) if task_core is not None else None
+    todo = _task_todo_context_for_step(task_core, source_step_id)
+    checkpoints = _task_checkpoints_context_for_step(task_core, source_step_id)
+    workspace_items = _task_workspace_items_context_for_step(workspace, source_step_id)
+    task_verification_targets = _replan_recovery_task_verification_targets(
+        recovery,
+        action,
+        fallback_step_id=source_step_id,
+        fallback_todo=todo,
+        fallback_checkpoints=checkpoints,
+    )
+    if not todo and task_verification_targets:
+        todo = _mapping(task_verification_targets[0].get("todo"))
+    if not checkpoints and task_verification_targets:
+        checkpoints = _mapping_list(task_verification_targets[0].get("checkpoints"))
+
+    context: dict[str, Any] = {}
+    for key, value in (
+        ("core_id", _first_text(recovery.core_id, getattr(task_core, "core_id", ""))),
+        ("workspace_id", _first_text(getattr(workspace, "workspace_id", ""))),
+        ("workspace_title", _first_text(getattr(workspace, "title", ""))),
+        ("task_id", _first_text(recovery.task_id, getattr(source_run, "task_id", ""))),
+        ("source_step_id", source_step_id),
+        ("planner_step_id", source_step_id),
+    ):
+        if value:
+            context[key] = value
+    if todo:
+        context["task_todo"] = todo
+        context["todos"] = [todo]
+    if checkpoints:
+        context["task_checkpoints"] = checkpoints
+        context["checkpoints"] = checkpoints
+    if workspace_items:
+        context["task_workspace_items"] = workspace_items
+        context["workspace_items"] = workspace_items
+    if task_verification_targets:
+        context["task_verification_targets"] = task_verification_targets
+    verification_targets = action.verification_targets or recovery.verification_targets
+    if verification_targets:
+        context["verification_targets"] = [dict(target) for target in verification_targets]
+    return context
+
+
+def _source_task_core_for_recovery(
+    source_run: Any,
+    recovery: ReplanRecoverySnapshot,
+) -> Any:
+    source_run_id = str(recovery.run_id or "").strip()
+    fallback = None
+    for candidate in _iter_source_run_nodes(source_run):
+        task_core = getattr(candidate, "task_core", None)
+        if task_core is None:
+            continue
+        if fallback is None:
+            fallback = task_core
+        if source_run_id and str(getattr(candidate, "run_id", "") or "").strip() == source_run_id:
+            return task_core
+    return fallback
+
+
+def _iter_source_run_nodes(source_run: Any) -> Iterable[Any]:
+    yield source_run
+    for child_key in ("runs", "children"):
+        for child in getattr(source_run, child_key, []) or []:
+            yield from _iter_source_run_nodes(child)
+
+
+def _task_todo_context_for_step(task_core: Any, step_id: str) -> dict[str, Any]:
+    if task_core is None or not step_id:
+        return {}
+    for todo in list(getattr(task_core, "todos", []) or []):
+        if str(getattr(todo, "step_id", "") or "").strip() == step_id:
+            return _snapshot_record(todo)
+    return {}
+
+
+def _task_checkpoints_context_for_step(task_core: Any, step_id: str) -> list[dict[str, Any]]:
+    if task_core is None or not step_id:
+        return []
+    return [
+        record
+        for checkpoint in list(getattr(task_core, "checkpoints", []) or [])
+        if str(getattr(checkpoint, "after_step_id", "") or "").strip() == step_id
+        for record in [_snapshot_record(checkpoint)]
+        if record
+    ]
+
+
+def _task_workspace_items_context_for_step(workspace: Any, step_id: str) -> list[dict[str, Any]]:
+    if workspace is None or not step_id:
+        return []
+    return [
+        record
+        for item in list(getattr(workspace, "items", []) or [])
+        if str(getattr(item, "source_step_id", "") or "").strip() == step_id
+        for record in [_snapshot_record(item)]
+        if record
+    ]
+
+
+def _replan_recovery_task_verification_targets(
+    recovery: ReplanRecoverySnapshot,
+    action: ReplanRecoveryActionSnapshot,
+    *,
+    fallback_step_id: str,
+    fallback_todo: Mapping[str, Any],
+    fallback_checkpoints: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    raw_targets = _mapping_list(action.verification_targets or recovery.verification_targets)
+    if not raw_targets and (fallback_todo or list(fallback_checkpoints)):
+        raw_targets = [{"step_id": fallback_step_id}]
+    targets: list[dict[str, Any]] = []
+    for target in raw_targets:
+        step_id = _first_text(target.get("step_id"), fallback_step_id)
+        if not step_id:
+            continue
+        todo = _mapping(target.get("todo")) or _verification_target_todo(
+            target,
+            step_id=step_id,
+            fallback_todo=fallback_todo,
+        )
+        checkpoints = _mapping_list(target.get("checkpoints")) or _verification_target_checkpoints(
+            target,
+            step_id=step_id,
+            fallback_checkpoints=fallback_checkpoints,
+        )
+        targets.append(
+            {
+                "step_id": step_id,
+                "todo": todo,
+                "checkpoints": checkpoints,
+            }
+        )
+    return targets
+
+
+def _verification_target_todo(
+    target: Mapping[str, Any],
+    *,
+    step_id: str,
+    fallback_todo: Mapping[str, Any],
+) -> dict[str, Any]:
+    if fallback_todo:
+        return dict(fallback_todo)
+    todo_id = _first_text(target.get("todo_id"))
+    if not todo_id:
+        return {}
+    return {
+        key: value
+        for key, value in {
+            "todo_id": todo_id,
+            "title": _first_text(target.get("todo_title"), target.get("title"), step_id),
+            "status": _first_text(target.get("status"), "blocked"),
+            "step_id": step_id,
+            "tool_name": _first_text(target.get("tool_name"), target.get("tool")),
+        }.items()
+        if value
+    }
+
+
+def _verification_target_checkpoints(
+    target: Mapping[str, Any],
+    *,
+    step_id: str,
+    fallback_checkpoints: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    fallback = [dict(checkpoint) for checkpoint in fallback_checkpoints]
+    if fallback:
+        return fallback
+    checkpoint_ids = _string_list_from_any(target.get("checkpoint_ids"))
+    checkpoint_titles = _string_list_from_any(target.get("checkpoint_titles"))
+    return [
+        {
+            "checkpoint_id": checkpoint_id,
+            "title": (
+                checkpoint_titles[index]
+                if index < len(checkpoint_titles)
+                else checkpoint_id
+            ),
+            "status": "blocked",
+            "after_step_id": step_id,
+        }
+        for index, checkpoint_id in enumerate(checkpoint_ids)
+    ]
+
+
+def _snapshot_record(value: Any) -> dict[str, Any]:
+    model_dump = getattr(value, "model_dump", None)
+    if callable(model_dump):
+        payload = model_dump(mode="json")
+        return dict(payload) if isinstance(payload, Mapping) else {}
+    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _replan_recovery_action_agent_id(
@@ -1291,6 +1516,8 @@ def _replan_recovery_action_metadata(
     source_run: Any,
     recovery: ReplanRecoverySnapshot,
     action: ReplanRecoveryActionSnapshot,
+    *,
+    task_context: Mapping[str, Any],
     extra: Mapping[str, Any],
 ) -> dict[str, Any]:
     metadata = dict(extra)
@@ -1326,6 +1553,8 @@ def _replan_recovery_action_metadata(
     source_title = str(getattr(source_run, "title", "") or "").strip()
     if source_title:
         metadata["source_task_title"] = source_title
+    if task_context:
+        metadata["task_core_context"] = dict(task_context)
     if action.approval_required:
         metadata["recovery_action_approval_required"] = True
     return metadata

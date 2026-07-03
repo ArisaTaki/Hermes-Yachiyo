@@ -484,11 +484,17 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
                         "agent_id": "agent-2",
                     }
                 ],
-                "events": [self._replan_event(source_run_id="child-run-1")],
+                "events": [
+                    self._task_core_event(event_type="workflow.run.task_core.created"),
+                    self._replan_event(source_run_id="child-run-1"),
+                ],
             }
         return _run_payload(run_id=run_id, user_goal="Open Apple Music") | {
             "agent_id": "agent-1",
-            "events": [self._replan_event(source_run_id=run_id)],
+            "events": [
+                self._task_core_event(),
+                self._replan_event(source_run_id=run_id),
+            ],
             "tool_calls": [self._tool_recovery_call(run_id)],
         }
 
@@ -514,7 +520,10 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
                     "run_id": "child-run-1",
                 }
             ],
-            "events": [self._replan_event(source_run_id="child-run-1")],
+            "events": [
+                self._task_core_event(event_type="group.run.task_core.created"),
+                self._replan_event(source_run_id="child-run-1"),
+            ],
         }
 
     def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -536,10 +545,22 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
                 "request_id": "replan-1",
                 "trigger": "tool_failure",
                 "run_id": source_run_id,
+                "task_id": "task-1",
+                "core_id": "task-core-1",
                 "source_step_id": "open-app",
                 "source_tool_name": "desktop.open_app",
                 "target_capability_id": "desktop.app_discovery",
                 "planning_reason": "planner_replan_runtime_recovery_action",
+                "verification_targets": [
+                    {
+                        "step_id": "open-app",
+                        "todo_id": "todo-open-app",
+                        "todo_title": "Open Apple Music",
+                        "tool_name": "desktop.open_app",
+                        "checkpoint_ids": ["checkpoint:open-app"],
+                        "checkpoint_titles": ["Verify Apple Music opened"],
+                    }
+                ],
                 "metadata": {
                     "recovery_actions": [
                         {
@@ -551,6 +572,50 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
                             "risk_level": "low",
                         }
                     ],
+                },
+            },
+        }
+
+    @staticmethod
+    def _task_core_event(event_type: str = "agent.task_core.created") -> dict[str, Any]:
+        return {
+            "event_type": event_type,
+            "payload": {
+                "core_id": "task-core-1",
+                "workspace_id": "task-workspace-1",
+                "task_core": {
+                    "core_id": "task-core-1",
+                    "workspace": {
+                        "workspace_id": "task-workspace-1",
+                        "title": "Desktop Recovery Workspace",
+                        "items": [
+                            {
+                                "item_id": "workspace-open-app",
+                                "title": "Apple Music app target",
+                                "kind": "scratch",
+                                "source_step_id": "open-app",
+                                "status": "blocked",
+                            }
+                        ],
+                    },
+                    "todos": [
+                        {
+                            "todo_id": "todo-open-app",
+                            "title": "Open Apple Music",
+                            "status": "blocked",
+                            "step_id": "open-app",
+                            "tool_name": "desktop.open_app",
+                        }
+                    ],
+                    "checkpoints": [
+                        {
+                            "checkpoint_id": "checkpoint:open-app",
+                            "title": "Verify Apple Music opened",
+                            "status": "blocked",
+                            "after_step_id": "open-app",
+                        }
+                    ],
+                    "replan_signals": [],
                 },
             },
         }
@@ -1482,6 +1547,9 @@ def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None
     assert request["metadata"]["recovery_tool"] == "desktop.list_apps"
     assert request["metadata"]["replan_request_id"] == "replan-1"
     assert request["metadata"]["source_run_id"] == "run-1"
+    assert request["metadata"]["task_core_context"]["core_id"] == "task-core-1"
+    assert request["metadata"]["task_core_context"]["workspace_id"] == "task-workspace-1"
+    assert request["metadata"]["task_core_context"]["todos"][0]["todo_id"] == "todo-open-app"
     direct_request = request["direct_tool_requests"][0]
     assert direct_request["tool"] == "desktop.list_apps"
     assert direct_request["input"] == {"query": "Apple Music"}
@@ -1489,6 +1557,14 @@ def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None
     assert direct_request["planning_reason"] == "planner_replan_runtime_recovery_action"
     assert direct_request["continue_to_model"] is True
     assert direct_request["replan_request_id"] == "replan-1"
+    assert direct_request["core_id"] == "task-core-1"
+    assert direct_request["workspace_id"] == "task-workspace-1"
+    assert direct_request["task_todo"]["todo_id"] == "todo-open-app"
+    assert direct_request["task_checkpoints"][0]["checkpoint_id"] == "checkpoint:open-app"
+    assert direct_request["task_workspace_items"][0]["item_id"] == "workspace-open-app"
+    assert direct_request["verification_targets"][0]["todo_id"] == "todo-open-app"
+    assert direct_request["task_verification_targets"][0]["todo"]["todo_id"] == "todo-open-app"
+    assert direct_request["task_verification_targets"][0]["checkpoints"][0]["checkpoint_id"] == "checkpoint:open-app"
 
 
 def test_agent_studio_service_starts_tool_recovery_action_direct_run() -> None:
@@ -1561,7 +1637,10 @@ def test_agent_studio_service_starts_group_replan_recovery_action_from_child_age
     assert request["agent_id"] == "agent-2"
     assert request["metadata"]["source_run_id"] == "group-run-1"
     assert request["metadata"]["source_group_run_id"] == "group-run-1"
+    assert request["metadata"]["task_core_context"]["core_id"] == "task-core-1"
     assert request["direct_tool_requests"][0]["tool"] == "desktop.list_apps"
+    assert request["direct_tool_requests"][0]["core_id"] == "task-core-1"
+    assert request["direct_tool_requests"][0]["task_verification_targets"][0]["step_id"] == "open-app"
 
 
 def test_agent_studio_service_starts_group_tool_recovery_action_from_child_agent() -> None:
@@ -1603,6 +1682,8 @@ def test_agent_studio_service_starts_workflow_replan_recovery_action_from_child_
     assert request["metadata"]["source_run_id"] == "workflow-run-1"
     assert request["metadata"]["source_workflow_run_id"] == "workflow-run-1"
     assert request["direct_tool_requests"][0]["replan_request_id"] == "replan-1"
+    assert request["direct_tool_requests"][0]["core_id"] == "task-core-1"
+    assert request["direct_tool_requests"][0]["task_todo"]["todo_id"] == "todo-open-app"
 
 
 def test_agent_studio_service_paginates_group_run_events_after_child_sequence_renumbering() -> None:

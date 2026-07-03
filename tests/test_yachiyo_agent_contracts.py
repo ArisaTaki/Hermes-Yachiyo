@@ -360,6 +360,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         "intent_kind",
         "requests",
         "task_core",
+        "task_progress",
         "approvals_required",
         "artifacts_expected",
         "open_questions",
