@@ -13358,6 +13358,8 @@ def _runtime_dov_step_applies(step: ToolPlanStepSnapshot) -> bool:
                 "calendar.",
                 "notification.",
                 "clipboard.",
+                "media.",
+                "system.",
             )
         )
         or tool_name == "agent.group_run"
@@ -13374,6 +13376,8 @@ def _runtime_dov_step_applies(step: ToolPlanStepSnapshot) -> bool:
                 "group.",
                 "schedule.",
                 "clipboard.",
+                "media.",
+                "system.",
             )
         )
         or _runtime_dov_code_step_applies(step_id)
@@ -13508,6 +13512,10 @@ def _runtime_dov_role(step: ToolPlanStepSnapshot, stage: str) -> str:
         "rename_file",
     }:
         return "organize_files"
+    if tool_name.startswith("media.") or action == "play":
+        return "play_media"
+    if tool_name.startswith("system.") or action in {"open_settings", "control_system"}:
+        return "open_settings" if action == "open_settings" else "control_system"
     if step_id == "apply-code-changes" or action == "apply_patch":
         return "apply_patch"
     if action in {"open_app", "focus_app"} or step_id.startswith(("open-", "focus-", "prepare-")):

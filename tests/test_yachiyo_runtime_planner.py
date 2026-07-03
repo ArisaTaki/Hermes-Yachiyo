@@ -32636,6 +32636,56 @@ def test_runtime_execution_envelope_marks_local_utility_tools() -> None:
     ]
 
 
+def test_runtime_execution_envelope_marks_media_and_system_tools() -> None:
+    media = RuntimePlanner().decision(
+        "播放 Apple Music 的 超时空浮夜姬",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ],
+    )
+    media_envelope = runtime_execution_envelope_from_decision(
+        media,
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ],
+        full_plan=True,
+    )
+
+    assert media_envelope is not None
+    assert media_envelope.runtime_stage_counts == {
+        "discover": 1,
+        "operate": 4,
+        "verify": 1,
+    }
+    assert media_envelope.requests[4].tool_name == "media.music_app_open_and_play"
+    assert media_envelope.requests[4].runtime_stage == "operate"
+    assert media_envelope.requests[4].runtime_role == "play_media"
+
+    system = RuntimePlanner().decision(
+        "打开系统设置里的蓝牙",
+        allowed_tools=["system.settings_open"],
+    )
+    system_envelope = runtime_execution_envelope_from_decision(
+        system,
+        allowed_tools=["system.settings_open"],
+    )
+
+    assert system_envelope is not None
+    assert system_envelope.runtime_stage_counts == {"operate": 1}
+    assert system_envelope.requests[0].runtime_stage == "operate"
+    assert system_envelope.requests[0].runtime_role == "open_settings"
+
+
 def test_runtime_execution_envelope_can_project_full_analysis_app_write_plan() -> None:
     allowed_tools = [
         "desktop.ui_elements",
