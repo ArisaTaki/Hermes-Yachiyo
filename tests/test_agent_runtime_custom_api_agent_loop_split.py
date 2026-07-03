@@ -8028,6 +8028,13 @@ def test_model_followup_context_defers_materialization_execution_requests() -> N
                         "status": "planned",
                         "runtime_stage": "operate",
                         "runtime_role": "type_ui",
+                        "group_run_id": "group-run-note",
+                        "run_group_id": "group-run-note",
+                        "group_id": "group-note",
+                        "workflow_run_id": "workflow-run-note",
+                        "workflow_id": "workflow-note",
+                        "workflow_node_id": "node-note",
+                        "workflow_node_label": "Draft Note",
                         "task_todo": {
                             "todo_id": "todo-insert-generated-note",
                             "step_id": "insert-generated-note",
@@ -8099,6 +8106,14 @@ def test_model_followup_context_defers_materialization_execution_requests() -> N
     assert payload["pending_execution_requests"][0]["task_workspace_items"][0][
         "item_id"
     ] == "workspace-note-draft"
+    assert payload["pending_execution_requests"][0]["group_run_id"] == "group-run-note"
+    assert payload["pending_execution_requests"][0]["run_group_id"] == "group-run-note"
+    assert payload["pending_execution_requests"][0]["group_id"] == "group-note"
+    assert payload["pending_execution_requests"][0]["workflow_run_id"] == (
+        "workflow-run-note"
+    )
+    assert payload["pending_execution_requests"][0]["workflow_node_id"] == "node-note"
+    assert payload["pending_execution_requests"][0]["workflow_node_label"] == "Draft Note"
 
     pending_requests = custom_api_agent_module._model_followup_pending_plan_requests(
         payload,
@@ -8123,6 +8138,10 @@ def test_model_followup_context_defers_materialization_execution_requests() -> N
     assert pending_requests[0]["task_workspace_items"][0]["source_step_id"] == (
         "insert-generated-note"
     )
+    assert pending_requests[0]["group_run_id"] == "group-run-note"
+    assert pending_requests[0]["run_group_id"] == "group-run-note"
+    assert pending_requests[0]["workflow_run_id"] == "workflow-run-note"
+    assert pending_requests[0]["workflow_node_id"] == "node-note"
     assert pending_requests[1]["input"] == {"limit": 80}
 
 
@@ -8160,6 +8179,13 @@ def test_custom_api_agent_loop_defers_materialization_until_model_content(
             "capability_id": "desktop.ui_operation",
             "runtime_stage": "operate",
             "runtime_role": "type_ui",
+            "group_run_id": "group-run-note",
+            "run_group_id": "group-run-note",
+            "group_id": "group-note",
+            "workflow_run_id": "workflow-run-note",
+            "workflow_id": "workflow-note",
+            "workflow_node_id": "node-note",
+            "workflow_node_label": "Draft Note",
             "task_todo": {
                 "todo_id": "todo-insert-generated-note",
                 "step_id": "insert-generated-note",
@@ -8217,6 +8243,13 @@ def test_custom_api_agent_loop_defers_materialization_until_model_content(
                     "task_todo": request.get("task_todo", {}),
                     "task_checkpoints": request.get("task_checkpoints", []),
                     "task_workspace_items": request.get("task_workspace_items", []),
+                    "group_run_id": request.get("group_run_id", ""),
+                    "run_group_id": request.get("run_group_id", ""),
+                    "group_id": request.get("group_id", ""),
+                    "workflow_run_id": request.get("workflow_run_id", ""),
+                    "workflow_id": request.get("workflow_id", ""),
+                    "workflow_node_id": request.get("workflow_node_id", ""),
+                    "workflow_node_label": request.get("workflow_node_label", ""),
                 }
                 for request in planner_requests
             ],
@@ -8314,6 +8347,10 @@ def test_custom_api_agent_loop_defers_materialization_until_model_content(
     assert tool_runs[1][0]["task_workspace_items"][0]["item_id"] == (
         "workspace-note-draft"
     )
+    assert tool_runs[1][0]["group_run_id"] == "group-run-note"
+    assert tool_runs[1][0]["run_group_id"] == "group-run-note"
+    assert tool_runs[1][0]["workflow_run_id"] == "workflow-run-note"
+    assert tool_runs[1][0]["workflow_node_id"] == "node-note"
     assert len(model_calls) == 1
     followup_context = next(
         event

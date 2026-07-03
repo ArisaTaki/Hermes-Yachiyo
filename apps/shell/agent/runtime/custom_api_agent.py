@@ -6566,6 +6566,7 @@ def _model_followup_execution_request_payload(
         "runtime_stage",
         "runtime_role",
         "source",
+        *_RUNTIME_ORCHESTRATION_SCOPE_KEYS,
     ):
         value = str(request.get(key) or "").strip()
         if value:
@@ -15541,6 +15542,17 @@ _MODEL_FOLLOWUP_AUTO_PENDING_TOOLS = {
 
 _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS = 6
 
+_RUNTIME_ORCHESTRATION_SCOPE_KEYS = (
+    "group_run_id",
+    "run_group_id",
+    "group_id",
+    "workflow_run_id",
+    "workflow_id",
+    "workflow_node_id",
+    "workflow_node_label",
+    "workflow_node_kind",
+)
+
 
 def _model_followup_pending_plan_requests(
     followup_context: Mapping[str, Any] | None,
@@ -15611,6 +15623,12 @@ def _attach_model_followup_pending_plan_trace_metadata(
         request.get("planner_step_id") or ""
     ).strip():
         request["planner_step_id"] = str(request.get("step_id") or "").strip()
+    for key in _RUNTIME_ORCHESTRATION_SCOPE_KEYS:
+        if key in request:
+            continue
+        value = str(step.get(key) or followup_context.get(key) or "").strip()
+        if value:
+            request[key] = value
     for key in (
         "runtime_doctrine",
         "runtime_stage",
@@ -15784,6 +15802,10 @@ def _model_followup_task_core_pending_trace_items(
         core_id = str(task_core.get("core_id") or "").strip()
         if core_id:
             payload["core_id"] = core_id
+        for key in _RUNTIME_ORCHESTRATION_SCOPE_KEYS:
+            value = str(followup_context.get(key) or "").strip()
+            if value:
+                payload[key] = value
         items.append(payload)
         if len(items) >= _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS:
             break
