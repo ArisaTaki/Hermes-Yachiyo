@@ -226,7 +226,14 @@ def _daily_desktop_compatible_plan_tools(
         return []
     intent = decision.selected_intent
     if intent.kind == "media_playback" and str(intent.inputs.get("query") or "").strip():
-        return ["media.apple_music_play", "desktop.ui_elements"]
+        return [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ]
     return []
 
 

@@ -1803,6 +1803,63 @@ def test_planner_first_daily_desktop_entrypoint_verifies_simple_media_playback()
         ],
     }
 
+    query_requests = planner_first_daily_desktop_entrypoint_requests(
+        "放点周杰伦",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+            "media.apple_music_play",
+        ],
+    )
+    assert query_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Music", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Music", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "周杰伦"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.search_submit",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Music"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+
     search_requests = planner_first_daily_desktop_entrypoint_requests(
         "打开任意音乐 app，搜索 lo-fi beats，然后播放第一个结果",
         allowed_tools=[
@@ -1853,6 +1910,7 @@ def test_planner_first_daily_desktop_entrypoint_verifies_simple_media_playback()
             "input": {"role_filter": "", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
+            "continue_to_model": True,
         },
     ]
 

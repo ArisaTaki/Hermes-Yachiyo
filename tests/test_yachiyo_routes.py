@@ -7129,7 +7129,14 @@ async def test_yachiyo_task_route_uses_chat_backed_main_agent_entry(monkeypatch:
     assert metadata["yachiyo_runtime_planner"] is True
     assert metadata["yachiyo_intent_kind"] == "media_playback"
     assert metadata["yachiyo_plan_source"] == "runtime_planner"
-    assert metadata["yachiyo_plan_tools"] == ["media.apple_music_play", "desktop.ui_elements"]
+    assert metadata["yachiyo_plan_tools"] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "media.music_app_open_and_play",
+        "desktop.ui_elements",
+    ]
     assert not any(call[0] == "link_task_run" for call in runtime.calls)
     assert not any(call[0] == "create_run_for_runnable_async" for call in runtime.calls)
 

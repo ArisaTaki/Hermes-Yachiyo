@@ -949,6 +949,8 @@ def media_playback_hint(text: str) -> dict[str, str]:
     query = media_query_hint(text) if action == "play" else ""
     if not app_name and action == "play" and query:
         app_name = media_app_scope_hint(text)
+    if not app_name and action == "play" and query:
+        app_name = "Music"
     if not app_name and _implicit_apple_music_control_hint(text, action=action):
         app_name = "Music"
     return {
