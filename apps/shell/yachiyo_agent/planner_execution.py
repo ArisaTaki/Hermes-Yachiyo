@@ -1139,7 +1139,11 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
         return _context_prefetch_tool_requests(
             decision,
             allowed,
-            step_ids=("inspect-report-file-scope", "gather-context"),
+            step_ids=(
+                "read-report-file-context",
+                "inspect-report-file-scope",
+                "gather-context",
+            ),
             planning_reason="planner_prefetch_report_context",
         )
     if decision.selected_intent.kind == "code_task":

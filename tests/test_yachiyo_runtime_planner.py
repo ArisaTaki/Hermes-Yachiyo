@@ -8680,6 +8680,60 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
     assert decision.selected_intent.kind == "report_generation"
     assert _step_by_id(decision, "gather-context").tool_name == "workspace.list"
 
+    readme_report = RuntimePlanner().decision(
+        "读取 README 并总结成 markdown artifact",
+        allowed_tools=[
+            "workspace.read",
+            "workspace.list",
+            "artifact.write",
+            "terminal.run",
+        ],
+    )
+    explicit_path_report = RuntimePlanner().decision(
+        "根据 docs/guide.md 写摘要报告",
+        allowed_tools=[
+            "workspace.read",
+            "workspace.list",
+            "artifact.write",
+            "terminal.run",
+        ],
+    )
+
+    assert readme_report.selected_intent.kind == "report_generation"
+    assert readme_report.selected_intent.inputs == {
+        "file_context_hint": {"path": "README.md"}
+    }
+    assert readme_report.selected_intent.required_capabilities == [
+        "file.workspace_read",
+        "artifact.write",
+    ]
+    assert [step.step_id for step in readme_report.plan.tool_plan.steps] == [
+        "read-report-file-context",
+        "write-report-artifact",
+    ]
+    assert _step_by_id(readme_report, "read-report-file-context").tool_name == (
+        "workspace.read"
+    )
+    assert _step_by_id(readme_report, "read-report-file-context").input_preview == {
+        "path": "README.md"
+    }
+    assert planner_tool_requests(
+        "读取 README 并总结成 markdown artifact",
+        ["workspace.read", "workspace.list", "artifact.write", "terminal.run"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.read",
+            "input": {"path": "README.md"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        }
+    ]
+    assert explicit_path_report.selected_intent.inputs == {
+        "file_context_hint": {"path": "docs/guide.md"}
+    }
+
     current_page_report = RuntimePlanner().decision(
         "把当前页面内容做成研究报告并保存到桌面",
         allowed_tools=["browser.extract_text", "browser.current_page", "artifact.write"],

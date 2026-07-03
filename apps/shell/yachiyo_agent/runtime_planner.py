@@ -8,6 +8,7 @@ steps. Execution remains owned by the existing runtime and policy gates.
 from __future__ import annotations
 
 import hashlib
+import posixpath
 import re
 from collections.abc import Iterable, Mapping
 from datetime import datetime, timezone
@@ -1726,7 +1727,11 @@ class TaskIntentRouter:
                 (
                     [
                         "file.workspace_read",
-                        "terminal.execution",
+                        *(
+                            []
+                            if _report_file_context_uses_direct_read(file_context)
+                            else ["terminal.execution"]
+                        ),
                         output_capability,
                     ]
                 )
@@ -5731,9 +5736,62 @@ class RuntimePlanner:
         context_source = str(intent.inputs.get("context_source") or "").strip()
         file_context = intent.inputs.get("file_context_hint")
         if isinstance(file_context, Mapping) and file_context:
+            target_path = str(file_context.get("path") or "").strip()
             location = str(file_context.get("location") or "").strip()
             file_type = str(file_context.get("file_type") or "").strip()
             pattern = str(file_context.get("pattern") or "").strip()
+            if target_path and _report_text_file_path(target_path):
+                artifact_path = _artifact_output_path(
+                    intent.user_goal,
+                    _report_artifact_filename(intent.user_goal),
+                )
+                steps = [
+                    _step(
+                        intent,
+                        "read-report-file-context",
+                        "Read report file context",
+                        "file.workspace_read",
+                        _first_allowed(
+                            ("workspace.read", "fs.read_file", "file.read"),
+                            allowed,
+                        ),
+                        input_preview={"path": target_path},
+                        reason="Read the explicit text file before summarizing it into an artifact.",
+                    ),
+                    (
+                        _clipboard_output_step(
+                            intent,
+                            allowed,
+                            depends_on=["read-report-file-context"],
+                            body_source="local_file_context",
+                        )
+                        if _task_output_target_hint(intent.user_goal) == "clipboard"
+                        else _step(
+                            intent,
+                            "write-report-artifact",
+                            "Write report artifact",
+                            "artifact.write",
+                            _first_allowed(("artifact.write",), allowed),
+                            input_preview={
+                                "path": artifact_path,
+                                "body_source": "local_file_context",
+                            },
+                            depends_on=["read-report-file-context"],
+                            reason="Produce the requested durable output from the explicit text file.",
+                        )
+                    ),
+                ]
+                return _append_artifact_reveal_step(
+                    intent,
+                    allowed,
+                    steps,
+                    artifact_paths=(
+                        []
+                        if _task_output_target_hint(intent.user_goal) == "clipboard"
+                        else [artifact_path]
+                    ),
+                    depends_on="write-report-artifact",
+                )
             list_preview = {
                 key: value
                 for key, value in {
@@ -15383,9 +15441,16 @@ def _file_pattern_hint(file_type: str) -> str:
 
 
 def _report_file_context_hint(text: str) -> dict[str, str]:
+    target_path = _code_task_target_file_hint(text)
+    if target_path:
+        return {"path": target_path}
     if not _contains_any(
         text,
         [
+            "readme",
+            "changelog",
+            "license",
+            "agents.md",
             "file",
             "files",
             "folder",
@@ -15426,6 +15491,31 @@ def _report_file_context_hint(text: str) -> dict[str, str]:
     if name_pattern and not _looks_like_specific_data_source_path(location):
         hint["pattern"] = name_pattern
     return hint
+
+
+def _report_file_context_uses_direct_read(file_context: Any) -> bool:
+    if not isinstance(file_context, Mapping):
+        return False
+    return _report_text_file_path(str(file_context.get("path") or "").strip())
+
+
+def _report_text_file_path(path: str) -> bool:
+    clean = str(path or "").strip().lower()
+    if not clean:
+        return False
+    name = posixpath.basename(clean)
+    if name in {"readme", "readme.md", "changelog", "license", "agents.md"}:
+        return True
+    return posixpath.splitext(clean)[1] in {
+        ".md",
+        ".markdown",
+        ".rst",
+        ".txt",
+        ".json",
+        ".toml",
+        ".yaml",
+        ".yml",
+    }
 
 
 def _report_file_type_hint(text: str) -> str:
