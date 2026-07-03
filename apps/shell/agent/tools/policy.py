@@ -71,6 +71,7 @@ TOOL_FUNCTION_NAMES = {
     "desktop.reveal_path": "desktop_reveal_path",
     "desktop.open_path": "desktop_open_path",
     "desktop.open_path_with_app": "desktop_open_path_with_app",
+    "app.open_path_with_app": "app_open_path_with_app",
     "media.apple_music_play": "media_apple_music_play",
     "media.apple_music_status": "media_apple_music_status",
     "media.apple_music_open_and_play": "media_apple_music_open_and_play",
@@ -223,6 +224,7 @@ LOW_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.reveal_path",
     "desktop.open_path",
     "desktop.open_path_with_app",
+    "app.open_path_with_app",
     "media.apple_music_play",
     "media.apple_music_status",
     "media.apple_music_open_and_play",
@@ -506,11 +508,11 @@ class ToolDescriptor:
             raise AgentRuntimeError("desktop.reveal_path 参数 path 必须是非空字符串")
         if self.name == "desktop.open_path" and not str(payload.get("path") or "").strip():
             raise AgentRuntimeError("desktop.open_path 参数 path 必须是非空字符串")
-        if self.name == "desktop.open_path_with_app":
+        if self.name in {"desktop.open_path_with_app", "app.open_path_with_app"}:
             if not str(payload.get("path") or "").strip():
-                raise AgentRuntimeError("desktop.open_path_with_app 参数 path 必须是非空字符串")
+                raise AgentRuntimeError(f"{self.name} 参数 path 必须是非空字符串")
             if not str(payload.get("app_name") or "").strip():
-                raise AgentRuntimeError("desktop.open_path_with_app 参数 app_name 必须是非空字符串")
+                raise AgentRuntimeError(f"{self.name} 参数 app_name 必须是非空字符串")
         if self.name == "system.settings_open":
             if not isinstance(payload.get("target"), str):
                 raise AgentRuntimeError("system.settings_open 参数 target 必须是字符串")
@@ -1991,6 +1993,21 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "Open a local folder or safe document/media file with a specific local desktop "
             "application selected from discovery. Reject executable, app bundle, script, "
             "or unknown file types instead of opening them."
+        ),
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            "path": {
+                "type": "string",
+                "description": "Absolute, relative, or ~/ local filesystem path to open.",
+            },
+        },
+        required=("app_name", "path"),
+    ),
+    "app.open_path_with_app": ToolDescriptor(
+        name="app.open_path_with_app",
+        description=(
+            "Alias of desktop.open_path_with_app for app-scoped runtimes: open a local "
+            "folder or safe document/media file with a specific local desktop application."
         ),
         properties={
             "app_name": {"type": "string", "description": "Application name."},

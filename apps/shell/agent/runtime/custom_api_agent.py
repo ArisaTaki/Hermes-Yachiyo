@@ -109,12 +109,14 @@ _APP_FOREGROUND_ACTION_TOOLS = {
     "app.focus_and_type_into_ui_element",
 }
 
+_OPEN_PATH_WITH_APP_TOOLS = {"desktop.open_path_with_app", "app.open_path_with_app"}
+
 _DISCOVERED_APP_DIRECT_COMPLETION_TOOLS = {
     "app.open",
     "desktop.open_app",
     "app.focus",
     "desktop.focus_app",
-    "desktop.open_path_with_app",
+    *_OPEN_PATH_WITH_APP_TOOLS,
 }
 
 _DISCOVERED_APP_DIRECT_VERIFICATION_TOOLS = {
@@ -3865,7 +3867,7 @@ class RuntimeCustomApiAgentLoop:
                 return f"已在 Finder 中显示：{path}。" if path else (result_summary or "已在 Finder 中显示。")
             if tool_name == "desktop.open_path":
                 return _desktop_open_path_summary(result, planned_input) or result_summary or "已打开本地路径。"
-            if tool_name == "desktop.open_path_with_app":
+            if tool_name in _OPEN_PATH_WITH_APP_TOOLS:
                 return (
                     _desktop_open_path_with_app_summary(result, planned_input)
                     or result_summary
@@ -9185,6 +9187,7 @@ def _model_followup_desktop_discovered_app_target_payload(
             "app.open",
             "app.focus",
             "desktop.open_path_with_app",
+            "app.open_path_with_app",
             "desktop.safe_shortcut",
             "desktop.safe_type_text",
             "desktop.click_ui_element",
@@ -14054,11 +14057,12 @@ def _discovered_app_open_path_request(
     source: str,
     planning_reason: str,
 ) -> dict[str, Any]:
-    if "desktop.open_path_with_app" not in allowed:
+    tool_name = _first_allowed_open_path_with_app_tool(allowed)
+    if not tool_name:
         return {}
     return _with_discovered_app_resolution(
         _request_like(
-            "desktop.open_path_with_app",
+            tool_name,
             {"app_name": app_name, "path": path},
             source=source,
             planning_reason=planning_reason,
@@ -14066,6 +14070,13 @@ def _discovered_app_open_path_request(
         app_query,
         app_name,
     )
+
+
+def _first_allowed_open_path_with_app_tool(allowed: set[str]) -> str:
+    for tool_name in ("desktop.open_path_with_app", "app.open_path_with_app"):
+        if tool_name in allowed:
+            return tool_name
+    return ""
 
 
 def _discovered_app_open_request(
@@ -15310,6 +15321,7 @@ _MODEL_FOLLOWUP_AUTO_PENDING_TOOLS = {
     "desktop.click_ui_element",
     "desktop.hotkey",
     "desktop.open_path_with_app",
+    "app.open_path_with_app",
     "desktop.read_ui",
     "desktop.safe_click",
     "desktop.safe_key",
@@ -15644,7 +15656,9 @@ def _model_followup_pending_plan_request(
         )
         if not input_payload:
             return {}
-    elif tool_name == "desktop.open_path_with_app":
+        if input_resolution:
+            input_resolution["tool"] = tool_name
+    elif tool_name in _OPEN_PATH_WITH_APP_TOOLS:
         input_payload, input_resolution = _model_followup_open_path_with_app_pending_input(
             raw_input,
             followup_context or {},
@@ -16182,7 +16196,7 @@ def _resolve_dynamic_pending_plan_request_input(
     step: Mapping[str, Any],
     followup_context: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if str(request.get("tool") or "").strip() != "desktop.open_path_with_app":
+    if str(request.get("tool") or "").strip() not in _OPEN_PATH_WITH_APP_TOOLS:
         return request
     request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     step_input = step.get("input_preview") if isinstance(step.get("input_preview"), Mapping) else {}
@@ -16194,6 +16208,8 @@ def _resolve_dynamic_pending_plan_request_input(
     if not resolved_input:
         return request
     resolved_request = {**request, "input": resolved_input}
+    if input_resolution:
+        input_resolution["tool"] = str(request.get("tool") or "").strip()
     if input_resolution and not isinstance(resolved_request.get("input_resolution"), Mapping):
         resolved_request["input_resolution"] = input_resolution
     return resolved_request

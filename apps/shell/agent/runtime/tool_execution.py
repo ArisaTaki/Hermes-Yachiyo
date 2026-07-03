@@ -860,6 +860,7 @@ def _tool_request_input_accepts_app_name_resolution(tool_name: str) -> bool:
         "desktop.read_ui",
         "desktop.ui_elements",
         "desktop.open_path_with_app",
+        "app.open_path_with_app",
     }
 
 
@@ -867,7 +868,7 @@ def _tool_request_with_open_path_app_input(
     tool_request: dict[str, Any],
     tool_name: str,
 ) -> dict[str, Any]:
-    if tool_name != "desktop.open_path_with_app":
+    if tool_name not in {"desktop.open_path_with_app", "app.open_path_with_app"}:
         return tool_request
     raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
     app_name = str(raw_input.get("app_name") or "").strip()
@@ -2511,6 +2512,7 @@ def _tool_can_change_active_app(tool_name: str) -> bool:
             "desktop.open_app",
             "desktop.focus_app",
             "desktop.open_path_with_app",
+            "app.open_path_with_app",
         }
         or clean_tool.startswith("app.open_and_")
         or clean_tool.startswith("app.focus_and_")

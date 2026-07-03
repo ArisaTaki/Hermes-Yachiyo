@@ -795,6 +795,7 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "desktop_reveal_path",
         "desktop_open_path",
         "desktop_open_path_with_app",
+        "app_open_path_with_app",
         "media_apple_music_play",
         "media_apple_music_open_and_play",
         "media_apple_music_control",
@@ -1389,6 +1390,10 @@ def test_desktop_open_path_with_app_schema_accepts_local_path_and_app() -> None:
         "desktop.open_path_with_app",
         {"app_name": "Preview", "path": "~/Downloads/report.pdf"},
     )
+    ToolDescriptorRegistry.validate_payload(
+        "app.open_path_with_app",
+        {"app_name": "Preview", "path": "~/Downloads/report.pdf"},
+    )
 
     with pytest.raises(
         AgentRuntimeError,
@@ -1404,6 +1409,14 @@ def test_desktop_open_path_with_app_schema_accepts_local_path_and_app() -> None:
     ):
         ToolDescriptorRegistry.validate_payload(
             "desktop.open_path_with_app",
+            {"app_name": "", "path": "~/Downloads/report.pdf"},
+        )
+    with pytest.raises(
+        AgentRuntimeError,
+        match="app.open_path_with_app 参数 app_name 必须是非空字符串",
+    ):
+        ToolDescriptorRegistry.validate_payload(
+            "app.open_path_with_app",
             {"app_name": "", "path": "~/Downloads/report.pdf"},
         )
 
@@ -1805,6 +1818,12 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     )
     monkeypatch.setattr(
         broker,
+        "desktop_open_path_with_app",
+        lambda path, app_name: calls.append(("open_path_with_app", path, app_name))
+        or {"ok": True, "path": path, "app_name": app_name},
+    )
+    monkeypatch.setattr(
+        broker,
         "system_settings_open",
         lambda target: calls.append(("settings_open", target)) or {"ok": True, "target": target},
     )
@@ -2188,6 +2207,11 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
     ) == {"ok": True, "path": "~/Downloads/report.pdf"}
     assert dispatch_tool_call(
         broker,
+        "app.open_path_with_app",
+        {"path": "~/Downloads/report.pdf", "app_name": "Preview"},
+    ) == {"ok": True, "path": "~/Downloads/report.pdf", "app_name": "Preview"}
+    assert dispatch_tool_call(
+        broker,
         "system.settings_open",
         {"target": "辅助功能权限"},
     ) == {"ok": True, "target": "辅助功能权限"}
@@ -2276,6 +2300,7 @@ def test_tool_dispatch_registry_routes_desktop_tools(tmp_path, monkeypatch) -> N
         ("close_window",),
         ("quit_app",),
         ("reveal", "~/Downloads/report.pdf"),
+        ("open_path_with_app", "~/Downloads/report.pdf", "Preview"),
         ("settings_open", "辅助功能权限"),
         ("permissions",),
         ("running",),

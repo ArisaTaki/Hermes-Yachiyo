@@ -970,6 +970,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.reveal_path": _desktop_reveal_path,
     "desktop.open_path": _desktop_open_path,
     "desktop.open_path_with_app": _desktop_open_path_with_app,
+    "app.open_path_with_app": _desktop_open_path_with_app,
     "media.apple_music_play": _media_apple_music_play,
     "media.apple_music_status": _media_apple_music_status,
     "media.apple_music_open_and_play": _media_apple_music_open_and_play,
