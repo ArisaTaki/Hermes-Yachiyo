@@ -6425,6 +6425,86 @@ def test_auto_followup_dispatches_observed_desktop_click_action() -> None:
     ) == []
 
 
+def test_auto_followup_uses_runtime_planner_observed_ui_target() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.ui_elements",
+        "desktop.safe_click",
+    ]
+    prompt = "打开 PixelForge 并点击导出按钮"
+    metadata = {"runtime_planner_execution_context": True}
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=allowed_tools,
+        metadata=metadata,
+    )
+    planner_requests = planner_tool_requests(
+        prompt,
+        allowed_tools,
+        metadata=metadata,
+    )
+    execution_requests = planner_execution_tool_requests(
+        planner_requests,
+        allowed_tools,
+    )
+    selection_payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=planner_requests,
+        legacy_requests=[],
+        selected_requests=execution_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_full_plan_execution",
+    )
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            step_id="operate-foreground-ui",
+            input_preview={"role_filter": "button", "limit": 80},
+            result={
+                "ok": True,
+                "data": {
+                    "elements": [
+                        {
+                            "label": "导出",
+                            "role": "AXButton",
+                            "center": {"x": 420, "y": 160},
+                        }
+                    ],
+                    "count": 1,
+                },
+            },
+        )
+    ]
+
+    requests = custom_api_agent_module._auto_discovered_followup_requests(
+        selection_payload,
+        allowed_tools,
+        timeline,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.safe_click",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["input"] == {"x": 420, "y": 160}
+    assert requests[0]["planning_reason"] == "planner_followup_desktop_observed_action"
+    assert requests[0]["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "click",
+        "target": "导出",
+        "role_filter": "button",
+        "app_name": "PixelForge",
+    }
+    assert requests[0]["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "observed_center",
+        "center": {"x": 420, "y": 160},
+    }
+
+
 def test_auto_followup_dispatches_observed_desktop_type_action() -> None:
     selection_payload = {
         "followup_target": {
