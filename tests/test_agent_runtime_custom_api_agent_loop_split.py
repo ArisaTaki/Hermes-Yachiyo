@@ -6447,6 +6447,56 @@ def test_auto_followup_dispatches_observed_desktop_type_action() -> None:
     ]
 
 
+def test_runtime_planner_routes_meeting_notes_markdown_to_report_generation() -> None:
+    prompt = "把桌面上的会议记录整理成 markdown 文件"
+    allowed_tools = ["workspace.list", "terminal.run", "artifact.write"]
+
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    intent = decision.selected_intent
+
+    assert intent.kind == "report_generation"
+    assert intent.inputs["file_context_hint"] == {
+        "location": "Desktop",
+        "pattern": "*会议*",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-report-file-scope",
+        "extract-report-file-context",
+        "write-report-artifact",
+    ]
+    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+        "workspace.list",
+        "terminal.run",
+        "artifact.write",
+    ]
+    assert decision.plan.tool_plan.steps[-1].input_preview == {
+        "path": "meeting-minutes.md",
+        "body_source": "local_file_context",
+    }
+
+
+def test_runtime_planner_keeps_plain_file_organization_as_file_organization() -> None:
+    prompt = "整理桌面上的文件"
+    allowed_tools = ["workspace.list", "terminal.run", "artifact.write"]
+
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+
+    assert decision.selected_intent.kind == "file_organization"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-file-scope",
+        "write-file-organization-plan",
+        "apply-file-organization",
+    ]
+
+
 def test_model_followup_context_instructs_pending_report_plan_steps() -> None:
     payload = custom_api_agent_module._model_followup_context_payload(
         [

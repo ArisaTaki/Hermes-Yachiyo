@@ -1522,10 +1522,12 @@ class TaskIntentRouter:
         shortcut_action = str((shortcut or {}).get("action") or "").strip()
         clipboard_hint = clipboard_operation_hint(text)
         transform_target = _dynamic_context_transform_target_hint(text)
+        document_artifact_transform = _looks_like_document_artifact_transform_request(text)
         if (
             (
                 _looks_like_file_organization_request(text)
                 and not _looks_like_context_artifact_request(text)
+                and not document_artifact_transform
             )
             or shortcut_action in {"new_document", "new_note"}
             or _looks_like_schedule_request(text)
@@ -1605,6 +1607,8 @@ class TaskIntentRouter:
         file_context = {} if artifact_context_source else _report_file_context_hint(text)
         if score <= 0 and transform_target:
             score = 0.24
+        if score <= 0 and document_artifact_transform:
+            score = 0.22
         if score <= 0 and context_source == "visible_text" and _contains_any(
             text,
             [
@@ -1843,6 +1847,8 @@ class TaskIntentRouter:
         if _looks_like_external_docs_lookup(text):
             return _empty_intent("file_organization", text)
         if _looks_like_context_artifact_request(text):
+            return _empty_intent("file_organization", text)
+        if _looks_like_document_artifact_transform_request(text):
             return _empty_intent("file_organization", text)
         score = _score_terms(
             text,
@@ -13487,6 +13493,57 @@ def _looks_like_document_report_analysis_request(
     return _looks_like_document_report_source(value)
 
 
+def _looks_like_document_artifact_transform_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if _contains_any(
+        value,
+        (
+            "数据",
+            "数据集",
+            "表格",
+            "电子表格",
+            "csv",
+            "tsv",
+            "xlsx",
+            "xls",
+            "json",
+            "jsonl",
+            "dataset",
+            "table",
+            "spreadsheet",
+        ),
+    ):
+        return False
+    source_hint = (
+        _looks_like_meeting_content_task(value)
+        or _looks_like_document_report_source(value)
+        or bool(_report_file_context_hint(value))
+    )
+    if not source_hint:
+        return False
+    return bool(
+        re.search(
+            r"(?:整理|转换|转|输出|导出|生成|写|保存|另存|format|convert|export|output|write|save)"
+            r".{0,24}(?:成|为|as|to)\s*"
+            r"(?:markdown|\bmd\b|文档|文件|报告|纪要|摘要|summary|report|document|file)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:输出|导出|生成|写|保存|另存|export|output|write|save)"
+            r".{0,24}(?:markdown|\bmd\b|报告|纪要|摘要|summary|report|document)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or (
+            _looks_like_meeting_content_task(value)
+            and _contains_any(value, ("markdown", "md", "文件", "文档", "纪要", "摘要"))
+        )
+    )
+
+
 def _looks_like_document_report_source(value: str) -> bool:
     return bool(
         re.search(
@@ -14589,13 +14646,18 @@ def _report_file_context_hint(text: str) -> dict[str, str]:
             "files",
             "folder",
             "directory",
+            "desktop",
             "pdf",
             "docx",
             "downloads",
             "文件",
             "文件夹",
             "目录",
+            "桌面",
             "下载",
+            "会议记录",
+            "会议纪要",
+            "会议笔记",
         ],
     ):
         return {}
@@ -14616,6 +14678,9 @@ def _report_file_context_hint(text: str) -> dict[str, str]:
         pattern = _report_file_pattern(file_type)
         if pattern:
             hint["pattern"] = pattern
+    name_pattern = _report_named_file_pattern(text)
+    if name_pattern and not _looks_like_specific_data_source_path(location):
+        hint["pattern"] = name_pattern
     return hint
 
 
@@ -14633,9 +14698,37 @@ def _report_file_type_hint(text: str) -> str:
         ("文本", "text"),
     )
     for marker, file_type in file_types:
+        if file_type == "markdown" and _markdown_marker_is_output_format(text):
+            continue
         if marker in lowered:
             return file_type
     return ""
+
+
+def _report_named_file_pattern(text: str) -> str:
+    value = _clean_prompt(text)
+    if _looks_like_meeting_content_task(value):
+        return "*会议*" if _contains_any(value, ("会议", "纪要")) else "*meeting*"
+    return ""
+
+
+def _markdown_marker_is_output_format(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"(?:整理|转换|转|输出|导出|生成|写|保存|另存|format|convert|export|output|write|save)"
+            r".{0,12}(?:成|为|到|至|as|to)?\s*(?:markdown|\bmd\b)\s*(?:文件|文档|file|document)?",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:成|为|as|to)\s*(?:markdown|\bmd\b)\s*(?:文件|文档|file|document)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _report_file_pattern(file_type: str) -> str:
