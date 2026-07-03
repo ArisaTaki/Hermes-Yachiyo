@@ -2555,6 +2555,9 @@ def _desktop_observation_step_needs_model_followup(
     step_id: str,
     tool_name: str,
 ) -> bool:
+    planned_step = _planned_step_by_id(decision, step_id)
+    if str(getattr(planned_step, "action", "") or "").strip() == "observe_ui_target":
+        return True
     if _desktop_observation_step_depends_on_model_resolved_ui_step(decision, step_id):
         return True
     if _selected_discovered_app_observation_needs_model_followup(decision, step_id):

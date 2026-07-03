@@ -9668,6 +9668,50 @@ def test_runtime_planner_routes_unknown_desktop_app_without_known_alias() -> Non
     assert _step_by_id(decision, "verify-desktop-result").depends_on == ["operate-foreground-ui"]
 
 
+def test_runtime_planner_observes_semantic_ui_target_when_click_tool_unavailable() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge 并点击导出按钮",
+        allowed_tools=allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+
+    operation = _step_by_id(decision, "operate-foreground-ui")
+    assert operation.tool_name == "desktop.ui_elements"
+    assert operation.title == "Observe foreground UI target"
+    assert operation.action == "observe_ui_target"
+    assert operation.approval_required is False
+    assert operation.risk_level == "low"
+    assert operation.input_preview == {
+        "target": "导出",
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert operation.depends_on == ["focus-opened-app"]
+
+    requests = planner_execution_tool_requests(
+        planner_tool_requests(
+            "打开 PixelForge 并点击导出按钮",
+            allowed_tools,
+            metadata={"runtime_planner_execution_context": True},
+        ),
+        allowed_tools,
+    )
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.ui_elements",
+    ]
+    assert requests[-1]["step_id"] == "operate-foreground-ui"
+    assert requests[-1]["continue_to_model"] is True
+
+
 def test_runtime_planner_exposes_desktop_discover_operate_action_layer() -> None:
     allowed_tools = [
         "desktop.list_apps",

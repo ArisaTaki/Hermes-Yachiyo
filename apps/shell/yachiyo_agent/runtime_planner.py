@@ -4639,18 +4639,47 @@ class RuntimePlanner:
                 type_target=type_target,
                 safe_type_text=operation_safe_type_text,
             )
+            operation_title = "Operate foreground UI"
+            operation_action = ""
+            operation_reason = "Use observable UI operations after discovery, then verify."
+            operation_risk_level = _desktop_operation_risk_level(resolved_operation_tool)
+            operation_approval_required = _desktop_operation_approval_required(
+                resolved_operation_tool
+            )
+            if resolved_operation_tool is None and (
+                click_target or type_target or _looks_like_ui_operation(intent.user_goal)
+            ):
+                observation_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed)
+                if observation_tool:
+                    resolved_operation_tool = observation_tool
+                    operation_title = "Observe foreground UI target"
+                    operation_action = "observe_ui_target"
+                    operation_reason = (
+                        "No direct semantic UI operation tool is available; observe foreground "
+                        "controls so the model can choose a concrete safe action from evidence."
+                    )
+                    operation_risk_level = "low"
+                    operation_approval_required = False
+                    operation_preview = {
+                        key: value
+                        for key, value in operation_preview.items()
+                        if key in {"target", "role_filter", "limit"}
+                    }
+                    if "limit" not in operation_preview:
+                        operation_preview["limit"] = 80
             steps.append(
                 _step(
                     intent,
                     "operate-foreground-ui",
-                    "Operate foreground UI",
+                    operation_title,
                     "desktop.ui_operation",
                     resolved_operation_tool,
                     input_preview=operation_preview,
-                    risk_level=_desktop_operation_risk_level(resolved_operation_tool),
-                    approval_required=_desktop_operation_approval_required(resolved_operation_tool),
+                    risk_level=operation_risk_level,
+                    approval_required=operation_approval_required,
                     depends_on=operation_depends_on,
-                    reason="Use observable UI operations after discovery, then verify.",
+                    reason=operation_reason,
+                    action=operation_action,
                 )
             )
         if (
@@ -4830,7 +4859,12 @@ class RuntimePlanner:
             if followup_step_ids:
                 verify_depends_on = [followup_step_ids[-1]]
         if not verify_depends_on and any(step.step_id == "operate-foreground-ui" for step in steps):
-            verify_depends_on = ["operate-foreground-ui"]
+            operation_step = next(
+                (step for step in steps if step.step_id == "operate-foreground-ui"),
+                None,
+            )
+            if str(getattr(operation_step, "action", "") or "").strip() != "observe_ui_target":
+                verify_depends_on = ["operate-foreground-ui"]
         elif not verify_depends_on and any(step.step_id == "focus-app-window" for step in steps):
             verify_depends_on = ["focus-app-window"]
         elif not verify_depends_on and any(step.step_id == "open-or-focus-app" for step in steps):
