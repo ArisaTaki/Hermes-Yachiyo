@@ -24324,6 +24324,14 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
         "remind me in 2 hours to check the oven",
         allowed_tools=["reminders.create"],
     )
+    absolute_en = RuntimePlanner().decision(
+        "tomorrow at 3pm remind me to submit expenses",
+        allowed_tools=["reminders.create"],
+    )
+    absolute_en_middle = RuntimePlanner().decision(
+        "remind me tomorrow at 3pm to submit expenses",
+        allowed_tools=["reminders.create"],
+    )
 
     assert decision.selected_intent.kind == "schedule"
     step = _step_by_id(decision, "create-schedule-item")
@@ -24384,6 +24392,12 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
         "title": "check the oven",
         "due_at": today_1200,
     }
+    for absolute_decision in (absolute_en, absolute_en_middle):
+        assert absolute_decision.selected_intent.kind == "schedule"
+        assert _step_by_id(absolute_decision, "create-schedule-item").input_preview == {
+            "title": "submit expenses",
+            "due_at": f"{(date.today() + timedelta(days=1)).isoformat()}T15:00",
+        }
 
 
 def test_runtime_planner_falls_back_to_future_task_for_timed_reminders() -> None:
@@ -24492,12 +24506,20 @@ def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability(m
         "创建一个明天下午三点的项目评审日历事件",
         allowed_tools=["calendar.create_event"],
     )
+    colon_time_first = RuntimePlanner().decision(
+        "明天 15:00 创建日历事件 提交报销",
+        allowed_tools=["calendar.create_event"],
+    )
     with_alice = RuntimePlanner().decision(
         "创建明天下午三点和 Alice 的日程",
         allowed_tools=["calendar.create_event"],
     )
     next_week_meeting = RuntimePlanner().decision(
         "下周一上午十点安排项目复盘会议",
+        allowed_tools=["calendar.create_event"],
+    )
+    next_week_plain_meeting = RuntimePlanner().decision(
+        "下周一上午十点安排会议",
         allowed_tools=["calendar.create_event"],
     )
     team_retro = RuntimePlanner().decision(
@@ -24539,6 +24561,13 @@ def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability(m
             "start_at": tomorrow_1500,
             "end_at": tomorrow_1600,
         }
+    colon_time_first_step = _step_by_id(colon_time_first, "create-schedule-item")
+    assert colon_time_first_step.tool_name == "calendar.create_event"
+    assert colon_time_first_step.input_preview == {
+        "title": "提交报销",
+        "start_at": tomorrow_1500,
+        "end_at": tomorrow_1600,
+    }
     with_alice_step = _step_by_id(with_alice, "create-schedule-item")
     assert with_alice_step.tool_name == "calendar.create_event"
     assert with_alice_step.input_preview == {
@@ -24550,6 +24579,13 @@ def test_runtime_planner_routes_relative_calendar_event_to_schedule_capability(m
     assert next_week_step.tool_name == "calendar.create_event"
     assert next_week_step.input_preview == {
         "title": "项目复盘会议",
+        "start_at": next_monday_1000,
+        "end_at": next_monday_1100,
+    }
+    next_week_plain_step = _step_by_id(next_week_plain_meeting, "create-schedule-item")
+    assert next_week_plain_step.tool_name == "calendar.create_event"
+    assert next_week_plain_step.input_preview == {
+        "title": "会议",
         "start_at": next_monday_1000,
         "end_at": next_monday_1100,
     }
@@ -30908,6 +30944,21 @@ def test_planner_tool_requests_maps_relative_schedule_plans(monkeypatch: Any) ->
         }
     ]
     assert planner_tool_requests(
+        "tomorrow at 3pm remind me to submit expenses",
+        allowed_tools=["reminders.create"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "reminders.create",
+            "input": {
+                "title": "submit expenses",
+                "due_at": f"{(date.today() + timedelta(days=1)).isoformat()}T15:00",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
         "明天下午三点日历上加一个开会",
         allowed_tools=["calendar.create_event"],
     ) == [
@@ -30972,6 +31023,22 @@ def test_planner_tool_requests_maps_relative_schedule_plans(monkeypatch: Any) ->
         }
     ]
     assert planner_tool_requests(
+        "明天 15:00 创建日历事件 提交报销",
+        allowed_tools=["calendar.create_event"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "提交报销",
+                "start_at": tomorrow_1500,
+                "end_at": tomorrow_1600,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
         "创建明天下午三点和 Alice 的日程",
         allowed_tools=["calendar.create_event"],
     ) == [
@@ -30996,6 +31063,22 @@ def test_planner_tool_requests_maps_relative_schedule_plans(monkeypatch: Any) ->
             "tool": "calendar.create_event",
             "input": {
                 "title": "项目复盘会议",
+                "start_at": next_monday_1000,
+                "end_at": next_monday_1100,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_schedule",
+        }
+    ]
+    assert planner_tool_requests(
+        "下周一上午十点安排会议",
+        allowed_tools=["calendar.create_event"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "calendar.create_event",
+            "input": {
+                "title": "会议",
                 "start_at": next_monday_1000,
                 "end_at": next_monday_1100,
             },

@@ -27,6 +27,17 @@ _RELATIVE_DELAY_TEXT_RE = (
     rf"\b(?:in|after)\s+(?:{_ENGLISH_RELATIVE_NUMBER_RE})\s*"
     r"(?:minutes?|mins?|hours?|hrs?|days?)\b"
 )
+_CHINESE_COLON_TIME_TEXT_RE = (
+    rf"(?:(?:{_CHINESE_DAY_MARKER_RE})\s*)?"
+    r"(?:(?:上午|早上|下午|晚上|今晚|中午|凌晨)\s*)?"
+    r"\d{1,2}\s*[:：]\s*\d{1,2}"
+)
+_ENGLISH_DAY_TIME_TEXT_RE = (
+    r"\b(?:today|tomorrow|tonight)\b\s*(?:at\s*)?"
+    r"\d{1,2}(?::\d{2})?\s*(?:a\.?m\.?|p\.?m\.?)?|"
+    r"\b(?:at\s*)?\d{1,2}(?::\d{2})?\s*"
+    r"(?:a\.?m\.?|p\.?m\.?)\s*(?:today|tomorrow|tonight)\b"
+)
 _DEFAULT_REMINDER_TITLE = "提醒"
 _SCHEDULE_APP_SURFACE_PREFIX_RE = re.compile(
     r"^\s*(?:帮我|给我|请|麻烦|能否|能不能|可以)?\s*(?:直接)?\s*"
@@ -288,11 +299,15 @@ def _reminder_body(text: str) -> str:
         r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
         r"thirty|forty|fifty|sixty)\s*(?:minutes?|mins?|hours?|hrs?|days?))\s+"
         r"remind\s+me\s+(?:to\s+)?(?P<body_time_after_en>[^.!?]+)$",
+        rf"^(?:please\s+)?(?P<body_time_first_en_abs>{_ENGLISH_DAY_TIME_TEXT_RE})\s+"
+        r"remind\s+me\s+(?:to\s+)?(?P<body_time_after_en_abs>[^.!?]+)$",
         r"^(?:please\s+)?remind\s+me\s+(?P<body_time_mid_en>(?:in|after)\s+"
         r"(?:\d+|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|"
         r"thirteen|fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
         r"thirty|forty|fifty|sixty)\s*(?:minutes?|mins?|hours?|hrs?|days?))\s+"
         r"(?:to\s+)?(?P<body_after_mid_en>[^.!?]+)$",
+        rf"^(?:please\s+)?remind\s+me\s+(?P<body_time_mid_en_abs>{_ENGLISH_DAY_TIME_TEXT_RE})\s+"
+        r"(?:to\s+)?(?P<body_after_mid_en_abs>[^.!?]+)$",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
@@ -311,9 +326,17 @@ def _reminder_body(text: str) -> str:
             return _strip_schedule_prefix(
                 f"{groups['body_time_first_en']} {groups['body_time_after_en']}"
             )
+        if groups.get("body_time_first_en_abs") and groups.get("body_time_after_en_abs"):
+            return _strip_schedule_prefix(
+                f"{groups['body_time_first_en_abs']} {groups['body_time_after_en_abs']}"
+            )
         if groups.get("body_time_mid_en") and groups.get("body_after_mid_en"):
             return _strip_schedule_prefix(
                 f"{groups['body_time_mid_en']} {groups['body_after_mid_en']}"
+            )
+        if groups.get("body_time_mid_en_abs") and groups.get("body_after_mid_en_abs"):
+            return _strip_schedule_prefix(
+                f"{groups['body_time_mid_en_abs']} {groups['body_after_mid_en_abs']}"
             )
         body = _strip_schedule_prefix(
             groups.get("body")
@@ -360,6 +383,11 @@ def _calendar_body(text: str) -> str:
         r"(?:(?:半)|(?:\d{1,2}|[零一二两三四五六七八九十]{1,3})\s*分?)?)"
         r"\s*(?:帮我)?\s*"
         r"(?:加|新建|创建|添加|新增|安排)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?P<title_after_time>[^。！？!?]+)$",
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        rf"(?P<time_first>{_CHINESE_COLON_TIME_TEXT_RE})\s*(?:帮我)?\s*"
+        r"(?:加|新建|创建|添加|新增|安排)\s*(?:一个|一条|一项|新的?)?\s*"
+        r"(?:日历事件|日历日程|日程|事件|会议)?\s*"
         r"(?P<title_after_time>[^。！？!?]+)$",
         r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?:安排)\s*(?:一个|一条|一项|新的?)?\s*"
@@ -464,7 +492,7 @@ def _strip_schedule_prefix(value: str) -> str:
     title = re.sub(r"^(?:to|for|about|that|please)\s+", "", title, flags=re.IGNORECASE)
     title = re.sub(r"\s*(?:的时候|时|在|于)$", "", title).strip()
     title = title.strip(" .，,。")
-    if title in {"个", "一个", "一条", "一项", "新的", "我", "提醒", "提醒事项", "日程", "事件", "会议"}:
+    if title in {"个", "一个", "一条", "一项", "新的", "我", "提醒", "提醒事项", "日程", "事件"}:
         return ""
     if title.lower() in {"a", "an", "new", "reminder", "event", "meeting"}:
         return ""
