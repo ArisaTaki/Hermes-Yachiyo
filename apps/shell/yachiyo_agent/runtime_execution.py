@@ -191,6 +191,14 @@ def _execution_request_snapshot(
     request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     runtime_metadata = _execution_request_runtime_metadata(request, step, decision)
     replan_metadata = _execution_request_replan_metadata(step_id, step, decision)
+    depends_on = list(step.depends_on) if step is not None else []
+    task_context = _execution_request_task_context(
+        decision,
+        step_id=step_id,
+        depends_on=depends_on,
+        runtime_stage=runtime_metadata["runtime_stage"],
+    )
+    tool_plan_id = str(getattr(decision.plan.tool_plan, "plan_id", "") or "").strip()
     return RuntimeExecutionRequestSnapshot(
         request_id=str(
             request.get("request_id")
@@ -199,6 +207,16 @@ def _execution_request_snapshot(
         ),
         step_id=step_id or None,
         capability_id=capability_id or None,
+        decision_id=decision.decision_id,
+        plan_id=decision.plan.plan_id,
+        tool_plan_id=(
+            tool_plan_id
+            if tool_plan_id and tool_plan_id != decision.plan.plan_id
+            else None
+        ),
+        intent_kind=str(decision.selected_intent.kind or "") or None,
+        core_id=task_context["core_id"] or None,
+        workspace_id=task_context["workspace_id"] or None,
         tool_name=tool_name or "tool",
         protocol=str(request.get("protocol") or "json_fallback"),
         input=dict(request_input),
@@ -208,7 +226,7 @@ def _execution_request_snapshot(
             or (step.approval_required if step is not None else False)
         ),
         continue_to_model=bool(request.get("continue_to_model")),
-        depends_on=list(step.depends_on) if step is not None else [],
+        depends_on=depends_on,
         fallback_tools=list(step.fallback_tools) if step is not None else [],
         status=str(request.get("status") or (step.status if step is not None else "planned")),
         runtime_doctrine=runtime_metadata["runtime_doctrine"],
@@ -224,6 +242,10 @@ def _execution_request_snapshot(
         action_target=_mapping(request.get("action_target")),
         observation_evidence=_mapping(request.get("observation_evidence")),
         observation_retry=_mapping(request.get("observation_retry")),
+        task_todo=task_context["task_todo"],
+        task_checkpoints=task_context["task_checkpoints"],
+        task_workspace_items=task_context["task_workspace_items"],
+        task_verification_targets=task_context["task_verification_targets"],
         source=str(request.get("source") or "runtime_planner"),
     )
 
@@ -249,6 +271,8 @@ def _tool_request_from_execution_request(
         "plan_id",
         "tool_plan_id",
         "intent_kind",
+        "core_id",
+        "workspace_id",
         "approval_required",
         "continue_to_model",
         "depends_on",
@@ -261,6 +285,9 @@ def _tool_request_from_execution_request(
         "requires_post_action_verification",
         "replan_triggers",
         "replan_signal_ids",
+        "task_todo",
+        "task_checkpoints",
+        "task_workspace_items",
         "task_verification_targets",
     ):
         value = request.get(key)
@@ -307,6 +334,54 @@ def _apply_envelope_task_context(
     verification_targets = _task_verification_targets_for_request(task_core, payload)
     if verification_targets and "task_verification_targets" not in payload:
         payload["task_verification_targets"] = verification_targets
+
+
+def _execution_request_task_context(
+    decision: PlannerDecisionSnapshot,
+    *,
+    step_id: str,
+    depends_on: list[str],
+    runtime_stage: str,
+) -> dict[str, Any]:
+    task_core = _task_core_payload_from_decision(decision)
+    if not task_core:
+        return {
+            "core_id": "",
+            "workspace_id": "",
+            "task_todo": {},
+            "task_checkpoints": [],
+            "task_workspace_items": [],
+            "task_verification_targets": [],
+        }
+    payload = {
+        "step_id": step_id,
+        "runtime_stage": runtime_stage,
+        "depends_on": list(depends_on),
+    }
+    return {
+        "core_id": str(task_core.get("core_id") or "").strip(),
+        "workspace_id": _task_workspace_id(task_core),
+        "task_todo": _task_todo_for_step(task_core, step_id),
+        "task_checkpoints": _task_checkpoints_for_step(task_core, step_id),
+        "task_workspace_items": _task_workspace_items_for_step(task_core, step_id),
+        "task_verification_targets": _task_verification_targets_for_request(
+            task_core,
+            payload,
+        ),
+    }
+
+
+def _task_core_payload_from_decision(
+    decision: PlannerDecisionSnapshot,
+) -> Mapping[str, Any]:
+    task_core = getattr(decision.plan, "task_core", None)
+    if task_core is None:
+        return {}
+    model_dump = getattr(task_core, "model_dump", None)
+    if callable(model_dump):
+        payload = model_dump(mode="json")
+        return payload if isinstance(payload, Mapping) else {}
+    return task_core if isinstance(task_core, Mapping) else {}
 
 
 def _task_core_payload(envelope: Mapping[str, Any]) -> Mapping[str, Any]:

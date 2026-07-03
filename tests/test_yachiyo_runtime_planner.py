@@ -32097,7 +32097,26 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     assert envelope.requests[1].requires_post_action_verification is True
     assert envelope.requests[1].replan_triggers == ["verification_failed"]
     assert envelope.requests[1].replan_signal_ids
+    assert envelope.requests[1].decision_id == decision.decision_id
+    assert envelope.requests[1].plan_id == decision.plan.plan_id
+    assert envelope.requests[1].intent_kind == "desktop_operation"
+    assert envelope.requests[1].core_id == decision.plan.task_core.core_id
+    assert (
+        envelope.requests[1].workspace_id
+        == decision.plan.task_core.workspace.workspace_id
+    )
+    assert envelope.requests[1].task_todo["step_id"] == "operate-foreground-ui"
+    assert envelope.requests[1].task_todo["tool_name"] == "app.open_and_click_ui_element"
+    assert envelope.requests[1].task_checkpoints[0]["after_step_id"] == (
+        "operate-foreground-ui"
+    )
+    assert envelope.requests[1].task_workspace_items[0]["source_step_id"] == (
+        "operate-foreground-ui"
+    )
     assert envelope.requests[2].depends_on == ["operate-foreground-ui"]
+    assert envelope.requests[2].task_verification_targets[0]["step_id"] == (
+        "operate-foreground-ui"
+    )
     projected_requests = runtime_execution_requests_from_envelope_payload(
         envelope.model_dump(mode="json"),
         allowed_tools=allowed_tools,
@@ -32296,6 +32315,13 @@ def test_runtime_execution_envelope_can_project_full_code_task_plan() -> None:
     assert full_envelope.requests[2].approval_required is True
     assert full_envelope.requests[2].requires_post_action_verification is True
     assert full_envelope.requests[3].requires_observation is True
+    assert full_envelope.requests[2].task_todo["step_id"] == "apply-code-changes"
+    assert full_envelope.requests[2].task_checkpoints[0]["after_step_id"] == (
+        "apply-code-changes"
+    )
+    assert full_envelope.requests[3].task_verification_targets[0]["step_id"] == (
+        "apply-code-changes"
+    )
 
     projected_requests = runtime_execution_requests_from_envelope_payload(
         full_envelope.model_dump(mode="json"),
@@ -32503,6 +32529,8 @@ def test_agent_studio_service_projects_full_data_analysis_execution_plan() -> No
         "artifact.write",
     ]
     assert envelope.requests[1].approval_required is True
+    assert envelope.requests[1].task_todo["step_id"] == "run-analysis"
+    assert envelope.requests[1].task_checkpoints[0]["after_step_id"] == "run-analysis"
 
 
 def test_agent_studio_service_projects_full_code_and_file_execution_plans() -> None:
@@ -32533,6 +32561,13 @@ def test_agent_studio_service_projects_full_code_and_file_execution_plans() -> N
         "apply-code-changes",
         "verify-code-changes",
     ]
+    assert code_envelope.requests[2].task_todo["step_id"] == "apply-code-changes"
+    assert code_envelope.requests[2].task_checkpoints[0]["after_step_id"] == (
+        "apply-code-changes"
+    )
+    assert code_envelope.requests[3].task_verification_targets[0]["step_id"] == (
+        "apply-code-changes"
+    )
     assert code_envelope.requests[0].input == {"path": "README.md"}
     assert code_envelope.requests[1].approval_required is True
     assert code_envelope.requests[2].approval_required is True

@@ -429,6 +429,12 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     request_id: str
     step_id: str | None = None
     capability_id: str | None = None
+    decision_id: str | None = None
+    plan_id: str | None = None
+    tool_plan_id: str | None = None
+    intent_kind: str | None = None
+    core_id: str | None = None
+    workspace_id: str | None = None
     tool_name: str
     protocol: str = "json_fallback"
     input: dict[str, Any] = Field(default_factory=dict)
@@ -449,6 +455,10 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     action_target: dict[str, Any] = Field(default_factory=dict)
     observation_evidence: dict[str, Any] = Field(default_factory=dict)
     observation_retry: dict[str, Any] = Field(default_factory=dict)
+    task_todo: dict[str, Any] = Field(default_factory=dict)
+    task_checkpoints: list[dict[str, Any]] = Field(default_factory=list)
+    task_workspace_items: list[dict[str, Any]] = Field(default_factory=list)
+    task_verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     source: str = "runtime_planner"
 
 
