@@ -1851,11 +1851,12 @@ def _clean_window_title_hint(value: str) -> str:
 
 
 def _looks_like_ui_inspection_request(value: str, lowered: str) -> bool:
+    if _looks_like_ui_click_advice_request(value):
+        return True
     if _looks_like_foreground_mutation(value, lowered):
         return False
     return bool(
-        _looks_like_ui_click_advice_request(value)
-        or re.search(
+        re.search(
             r"(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui)"
             r".{0,8}(?:文字|文本|内容|正文)"
             r".{0,8}(?:是什么|是啥|有哪些|有什么|读取|读一下|查看|看看|识别)?",
@@ -2029,7 +2030,21 @@ def _looks_like_ui_click_advice_request(value: str) -> bool:
             flags=re.IGNORECASE,
         )
         or re.search(
+            r"(?:检查|查看|看看|列出|列一下|显示|读取|识别)?"
+            r".{0,12}(?:当前|现在|这个|前台|该)?(?:窗口|界面|屏幕|应用|app|ui)?"
+            r".{0,16}(?:有哪些|有什么|哪些|可用|可见|可以|能)"
+            r".{0,16}(?:按钮|控件|元素|选项|ui|可点击|可操作)"
+            r".{0,12}(?:可以|能)?(?:点击|点|点按|按|操作)?",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
             r"\b(?:what|where)\s+(?:can|should)\s+i\s+"
+            r"(?:click|press|tap|do|use)\b",
+            lowered,
+        )
+        or re.search(
+            r"\b(?:what|which)\s+(?:buttons|controls|ui elements)\s+can\s+i\s+"
             r"(?:click|press|tap|do|use)\b",
             lowered,
         )
