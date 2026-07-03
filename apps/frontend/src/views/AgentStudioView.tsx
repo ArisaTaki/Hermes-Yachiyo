@@ -59,12 +59,15 @@ import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWork
 import {
   runtimeToolRecoveryActionRunStartRequest,
   runtimeToolRecoveryActionTaskStart,
+  runtimeToolRecoveryActionToolRunStartRequest,
   type RuntimeToolRecoveryAction,
 } from '../features/runtime-shared/toolRecoveryActions';
 import { startYachiyoTask } from '../features/yachiyo-chat/api';
 import {
   startYachiyoGroupRunReplanRecoveryAction,
+  startYachiyoGroupRunToolRecoveryAction,
   startYachiyoRunReplanRecoveryAction,
+  startYachiyoRunToolRecoveryAction,
 } from '../features/yachiyo-studio/api';
 import type {
   PlannerOrchestrationStartSnapshot,
@@ -232,10 +235,45 @@ export function AgentStudioView() {
     toolCall: ToolCallSnapshot,
     action: RuntimeToolRecoveryAction,
   ) => {
+    const sourceRunId = String(toolCall.run_id || toolCall.source_run_id || '').trim();
+    const sourceGroupRunId = String(toolCall.group_run_id || '').trim();
+    const studioRunRequest = sourceRunId
+      ? runtimeToolRecoveryActionToolRunStartRequest(toolCall, action, {
+        source: 'agent_studio_tool_recovery',
+        source_run_id: sourceRunId,
+        source_tool_call_id: toolCall.tool_call_id || '',
+        source_tool_name: toolCall.tool_name || '',
+      })
+      : null;
+    const studioGroupRunRequest = sourceGroupRunId
+      ? runtimeToolRecoveryActionToolRunStartRequest(toolCall, action, {
+        source: 'agent_studio_group_tool_recovery',
+        source_group_run_id: sourceGroupRunId,
+        source_tool_call_id: toolCall.tool_call_id || '',
+        source_tool_name: toolCall.tool_name || '',
+      })
+      : null;
+    if (sourceGroupRunId && studioGroupRunRequest) {
+      const run = await startYachiyoGroupRunToolRecoveryAction(
+        sourceGroupRunId,
+        studioGroupRunRequest,
+      );
+      return {
+        selectedRunId: run.run_id,
+        statusMessage: `已启动 GroupRun 工具恢复 Run：${run.title || action.label || action.tool}`,
+      };
+    }
+    if (sourceRunId && studioRunRequest) {
+      const run = await startYachiyoRunToolRecoveryAction(sourceRunId, studioRunRequest);
+      return {
+        selectedRunId: run.run_id,
+        statusMessage: `已启动工具恢复 Run：${run.title || action.label || action.tool}`,
+      };
+    }
     const recoveryStart = runtimeToolRecoveryActionTaskStart(action, {
       permission_target: action.permission_target,
       source: 'agent_studio_tool_recovery',
-      source_run_id: toolCall.run_id || '',
+      source_run_id: sourceRunId,
       source_tool_call_id: toolCall.tool_call_id || '',
       source_tool_name: toolCall.tool_name || '',
     });

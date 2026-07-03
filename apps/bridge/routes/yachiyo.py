@@ -17,6 +17,7 @@ from apps.bridge.routes.yachiyo_models import (
     PlanTaskBody,
     RerunRunBody,
     RunReplanRecoveryActionBody,
+    RunToolRecoveryActionBody,
     RestrictedToolPluginInstallBody,
     RestrictedToolPluginUpdateBody,
     SkillFolderBody,
@@ -587,6 +588,19 @@ async def start_studio_group_run_replan_recovery_action(
     )
 
 
+@router.post("/studio/group-runs/{group_run_id}/tool-recovery-actions/start")
+async def start_studio_group_run_tool_recovery_action(
+    group_run_id: str,
+    request: RunToolRecoveryActionBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_group_handlers.start_group_tool_recovery_action(
+        group_run_id,
+        request,
+        http_request,
+    )
+
+
 @router.get("/studio/group-runs/{group_run_id}/events")
 async def get_studio_group_run_events(
     group_run_id: str,
@@ -689,6 +703,19 @@ async def start_studio_run_replan_recovery_action(
     http_request: Request = None,  # type: ignore[assignment]
 ) -> dict[str, Any]:
     return await yachiyo_studio_handlers.start_replan_recovery_action(
+        run_id,
+        request,
+        http_request,
+    )
+
+
+@router.post("/studio/runs/{run_id}/tool-recovery-actions/start")
+async def start_studio_run_tool_recovery_action(
+    run_id: str,
+    request: RunToolRecoveryActionBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.start_tool_recovery_action(
         run_id,
         request,
         http_request,

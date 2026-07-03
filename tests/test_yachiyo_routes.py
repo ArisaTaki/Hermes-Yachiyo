@@ -8543,11 +8543,13 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.get("/studio/group-runs")' in source
     assert '@router.get("/studio/group-runs/{group_run_id}")' in source
     assert '@router.post("/studio/group-runs/{group_run_id}/replan-recovery-actions/start")' in source
+    assert '@router.post("/studio/group-runs/{group_run_id}/tool-recovery-actions/start")' in source
     assert '@router.get("/studio/group-runs/{group_run_id}/events")' in source
     assert '@router.get("/studio/runs")' in source
     assert '@router.get("/studio/runs/{run_id}")' in source
     assert '@router.post("/studio/runs/{run_id}/rerun")' in source
     assert '@router.post("/studio/runs/{run_id}/replan-recovery-actions/start")' in source
+    assert '@router.post("/studio/runs/{run_id}/tool-recovery-actions/start")' in source
     assert '@router.post("/studio/runs/{run_id}/cancel")' in source
     assert '@router.delete("/studio/runs/{run_id}")' in source
     assert '@router.post("/studio/runs/{run_id}/approval/approve")' in source

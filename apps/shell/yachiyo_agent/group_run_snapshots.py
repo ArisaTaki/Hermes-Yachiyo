@@ -230,7 +230,10 @@ def _group_run_tool_calls(
         else _RUN_PROJECTOR.tool_calls_from_events(events)
     )
     return _unique_by(
-        [*direct_tool_calls, *child_tool_calls, *event_tool_calls],
+        [
+            _group_context_tool_call(tool_call, group_run_id=group_run_id)
+            for tool_call in [*direct_tool_calls, *child_tool_calls, *event_tool_calls]
+        ],
         lambda tool_call: tool_call.tool_call_id,
     )
 
@@ -344,6 +347,16 @@ def _group_context_replan_recovery(
     if recovery.group_run_id:
         return recovery
     return recovery.model_copy(update={"group_run_id": group_run_id or None})
+
+
+def _group_context_tool_call(
+    tool_call: ToolCallSnapshot,
+    *,
+    group_run_id: str,
+) -> ToolCallSnapshot:
+    if tool_call.group_run_id:
+        return tool_call
+    return tool_call.model_copy(update={"group_run_id": group_run_id or None})
 
 
 def _group_context_artifact(

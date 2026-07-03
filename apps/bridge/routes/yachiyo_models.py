@@ -134,3 +134,17 @@ class RunReplanRecoveryActionBody(BaseModel):
     client_run_id: str | None = Field(default=None, max_length=160)
     continue_to_model: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RunToolRecoveryActionBody(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    tool_call_id: str = Field(..., min_length=1, max_length=240)
+    action_id: str = Field(..., min_length=1, max_length=240)
+    action_kind: str | None = Field(default=None, max_length=80)
+    agent_id: str | None = Field(default=None, max_length=160)
+    title: str | None = Field(default=None, max_length=1000)
+    client_run_id: str | None = Field(default=None, max_length=160)
+    continue_to_model: bool = True
+    input_override: dict[str, Any] = Field(default_factory=dict)
+    metadata: dict[str, Any] = Field(default_factory=dict)

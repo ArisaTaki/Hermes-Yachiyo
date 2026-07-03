@@ -7,7 +7,11 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
-from apps.bridge.routes.yachiyo_models import RunReplanRecoveryActionBody, StartGroupRunBody
+from apps.bridge.routes.yachiyo_models import (
+    RunReplanRecoveryActionBody,
+    RunToolRecoveryActionBody,
+    StartGroupRunBody,
+)
 from apps.bridge.routes.yachiyo_services import (
     bad_request,
     snapshot,
@@ -113,6 +117,24 @@ async def start_group_replan_recovery_action(
     try:
         run_snapshot = await asyncio.to_thread(
             studio_service(http_request).start_group_replan_recovery_action,
+            group_run_id,
+            request,
+        )
+        return snapshot(run_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="GroupRun 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise bad_request(exc) from exc
+
+
+async def start_group_tool_recovery_action(
+    group_run_id: str,
+    request: RunToolRecoveryActionBody,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        run_snapshot = await asyncio.to_thread(
+            studio_service(http_request).start_group_tool_recovery_action,
             group_run_id,
             request,
         )

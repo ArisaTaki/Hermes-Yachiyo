@@ -489,6 +489,7 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
         return _run_payload(run_id=run_id, user_goal="Open Apple Music") | {
             "agent_id": "agent-1",
             "events": [self._replan_event(source_run_id=run_id)],
+            "tool_calls": [self._tool_recovery_call(run_id)],
         }
 
     def get_group_run(self, group_run_id: str) -> dict[str, Any]:
@@ -499,7 +500,11 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
                     run_id="child-run-1",
                     runnable_id="agent-2",
                     user_goal="Open Apple Music",
-                ) | {"agent_id": "agent-2"}
+                )
+                | {
+                    "agent_id": "agent-2",
+                    "tool_calls": [self._tool_recovery_call("child-run-1")],
+                }
             ],
             "participants": [
                 {
@@ -547,6 +552,32 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
                         }
                     ],
                 },
+            },
+        }
+
+    @staticmethod
+    def _tool_recovery_call(run_id: str) -> dict[str, Any]:
+        return {
+            "tool_call_id": "tool-call-1",
+            "run_id": run_id,
+            "tool_name": "desktop.open_app",
+            "status": "failed",
+            "risk_level": "low",
+            "input_preview": {"app_name": "Apple Music"},
+            "output_preview": {
+                "error": "Application not found",
+                "recovery_actions": [
+                    {
+                        "action_id": "tool-action-1",
+                        "label": "Find Apple Music",
+                        "tool": "desktop.list_apps",
+                        "input": {"query": "Apple Music"},
+                        "permission_target": "app_discovery",
+                        "risk_level": "low",
+                        "recovery_retry_tool": "desktop.open_app",
+                        "recovery_retry_input": {"app_name": "Music"},
+                    }
+                ],
             },
         }
 
@@ -1380,6 +1411,7 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
     assert group_run.participants[0].run_id == "run-1"
     assert group_run.participants[0].run_status == "approval_required"
     assert group_run.participants[0].tool_calls[0].tool_name == "workspace.read"
+    assert group_run.tool_calls[0].group_run_id == "group-run-1"
     assert group_run.participants[0].pending_approvals[0].approval_id == "approval-1"
     assert group_run.participants[0].artifacts[0].path == "report.md"
     assert group_run.pending_approvals[0].approval_id == "approval-1"
@@ -1459,6 +1491,59 @@ def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None
     assert direct_request["replan_request_id"] == "replan-1"
 
 
+def test_agent_studio_service_starts_tool_recovery_action_direct_run() -> None:
+    port = _ReplanRecoveryActionPort()
+    service = AgentStudioService(port)
+
+    run = service.start_tool_recovery_action(
+        "run-1",
+        {
+            "tool_call_id": "tool-call-1",
+            "action_id": "tool-action-1",
+        },
+    )
+
+    assert run.run_id == "recovery-run-1"
+    request = _port_call_payload(port, "start_agent_run")
+    assert request["agent_id"] == "agent-1"
+    assert request["metadata"]["desktop_permission_recovery"] is True
+    assert request["metadata"]["recovery_tool"] == "desktop.list_apps"
+    assert request["metadata"]["tool_recovery_action_id"] == "tool-action-1"
+    assert request["metadata"]["source_run_id"] == "run-1"
+    assert request["metadata"]["source_tool_call_id"] == "tool-call-1"
+    direct_request = request["direct_tool_requests"][0]
+    assert direct_request["tool"] == "desktop.list_apps"
+    assert direct_request["input"] == {"query": "Apple Music"}
+    assert direct_request["source"] == "agent_studio_tool_recovery"
+    assert direct_request["tool_call_id"] == "tool-call-1"
+    assert direct_request["continue_to_model"] is True
+
+
+def test_agent_studio_service_starts_tool_recovery_retry_direct_run() -> None:
+    port = _ReplanRecoveryActionPort()
+    service = AgentStudioService(port)
+
+    run = service.start_tool_recovery_action(
+        "run-1",
+        {
+            "tool_call_id": "tool-call-1",
+            "action_id": "tool-action-1",
+            "action_kind": "retry_original",
+            "input_override": {"app_name": "Music"},
+        },
+    )
+
+    assert run.run_id == "recovery-run-1"
+    request = _port_call_payload(port, "start_agent_run")
+    assert request["metadata"]["desktop_permission_retry"] is True
+    assert request["metadata"]["recovery_action_kind"] == "retry_original"
+    assert request["metadata"]["recovery_tool"] == "desktop.open_app"
+    direct_request = request["direct_tool_requests"][0]
+    assert direct_request["tool"] == "desktop.open_app"
+    assert direct_request["input"] == {"app_name": "Music"}
+    assert direct_request["action_kind"] == "retry_original"
+
+
 def test_agent_studio_service_starts_group_replan_recovery_action_from_child_agent() -> None:
     port = _ReplanRecoveryActionPort()
     service = AgentStudioService(port)
@@ -1476,6 +1561,27 @@ def test_agent_studio_service_starts_group_replan_recovery_action_from_child_age
     assert request["agent_id"] == "agent-2"
     assert request["metadata"]["source_run_id"] == "group-run-1"
     assert request["metadata"]["source_group_run_id"] == "group-run-1"
+    assert request["direct_tool_requests"][0]["tool"] == "desktop.list_apps"
+
+
+def test_agent_studio_service_starts_group_tool_recovery_action_from_child_agent() -> None:
+    port = _ReplanRecoveryActionPort()
+    service = AgentStudioService(port)
+
+    run = service.start_group_tool_recovery_action(
+        "group-run-1",
+        {
+            "tool_call_id": "tool-call-1",
+            "action_id": "tool-action-1",
+        },
+    )
+
+    assert run.run_id == "recovery-run-1"
+    request = _port_call_payload(port, "start_agent_run")
+    assert request["agent_id"] == "agent-2"
+    assert request["metadata"]["source_run_id"] == "group-run-1"
+    assert request["metadata"]["source_group_run_id"] == "group-run-1"
+    assert request["metadata"]["source_tool_call_id"] == "tool-call-1"
     assert request["direct_tool_requests"][0]["tool"] == "desktop.list_apps"
 
 

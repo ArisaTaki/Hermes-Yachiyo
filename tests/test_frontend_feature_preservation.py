@@ -2600,6 +2600,22 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
     )
     _assert_function_contains(
         "apps/frontend/src/features/yachiyo-studio/api.ts",
+        "startYachiyoRunToolRecoveryAction",
+        [
+            "Promise<YachiyoRunTimelineSnapshot>",
+            "/yachiyo/studio/runs/${encodeURIComponent(runId)}/tool-recovery-actions/start",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
+        "startYachiyoGroupRunToolRecoveryAction",
+        [
+            "Promise<YachiyoRunTimelineSnapshot>",
+            "/yachiyo/studio/group-runs/${encodeURIComponent(groupRunId)}/tool-recovery-actions/start",
+        ],
+    )
+    _assert_function_contains(
+        "apps/frontend/src/features/yachiyo-studio/api.ts",
         "listYachiyoRunTimelines",
         [
             "Promise<YachiyoRunTimelineSnapshot[]>",
@@ -3000,6 +3016,11 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         [
             "import { startYachiyoTask } from '../features/yachiyo-chat/api';",
             "const runToolRecoveryAction = async (",
+            "runtimeToolRecoveryActionToolRunStartRequest(toolCall, action, {",
+            "startYachiyoGroupRunToolRecoveryAction(",
+            "statusMessage: `已启动 GroupRun 工具恢复 Run：${run.title || action.label || action.tool}`",
+            "startYachiyoRunToolRecoveryAction(sourceRunId, studioRunRequest)",
+            "statusMessage: `已启动工具恢复 Run：${run.title || action.label || action.tool}`",
             "runtimeToolRecoveryActionTaskStart(action, {",
             "metadata: recoveryStart.metadata",
             "source: 'agent_studio_tool_recovery'",
@@ -4215,6 +4236,9 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "export function runtimeToolRecoveryActionTaskStart",
             "export type RuntimeToolRecoveryActionRunStartRequest",
             "export function runtimeToolRecoveryActionRunStartRequest",
+            "export type RuntimeToolRecoveryActionToolRunStartRequest",
+            "export function runtimeToolRecoveryActionToolRunStartRequest",
+            "input_override: input",
             "export function runtimeToolRecoveryRetryAction",
             "export function runtimeToolRecoveryMissingRequiredFields",
             "export function runtimeToolRecoveryActionsFromRecords",

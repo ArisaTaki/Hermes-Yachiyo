@@ -53,6 +53,18 @@ export type YachiyoStudioRunReplanRecoveryActionRequest = {
   metadata?: Record<string, unknown>;
 };
 
+export type YachiyoStudioRunToolRecoveryActionRequest = {
+  tool_call_id: string;
+  action_id: string;
+  action_kind?: string;
+  agent_id?: string;
+  title?: string;
+  client_run_id?: string;
+  continue_to_model?: boolean;
+  input_override?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+};
+
 export type YachiyoSkillSyncResult = {
   source?: string;
   source_type?: string;
@@ -473,6 +485,16 @@ export async function startYachiyoGroupRunReplanRecoveryAction(
   );
 }
 
+export async function startYachiyoGroupRunToolRecoveryAction(
+  groupRunId: string,
+  request: YachiyoStudioRunToolRecoveryActionRequest,
+): Promise<YachiyoRunTimelineSnapshot> {
+  return apiPost<YachiyoRunTimelineSnapshot>(
+    `/yachiyo/studio/group-runs/${encodeURIComponent(groupRunId)}/tool-recovery-actions/start`,
+    request,
+  );
+}
+
 export async function listYachiyoGroupRunEvents(
   groupRunId: string,
   afterSequence = 0,
@@ -499,6 +521,16 @@ export async function startYachiyoRunReplanRecoveryAction(
 ): Promise<YachiyoRunTimelineSnapshot> {
   return apiPost<YachiyoRunTimelineSnapshot>(
     `/yachiyo/studio/runs/${encodeURIComponent(runId)}/replan-recovery-actions/start`,
+    request,
+  );
+}
+
+export async function startYachiyoRunToolRecoveryAction(
+  runId: string,
+  request: YachiyoStudioRunToolRecoveryActionRequest,
+): Promise<YachiyoRunTimelineSnapshot> {
+  return apiPost<YachiyoRunTimelineSnapshot>(
+    `/yachiyo/studio/runs/${encodeURIComponent(runId)}/tool-recovery-actions/start`,
     request,
   );
 }

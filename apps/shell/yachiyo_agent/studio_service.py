@@ -43,6 +43,7 @@ from .contracts import (
     StartPlannerOrchestrationRequest,
     StartWorkflowRunRequest,
     ToolCatalogSnapshot,
+    ToolCallSnapshot,
     UpdateRestrictedToolPluginRequest,
     WorkflowRunSnapshot,
     WorkflowSnapshot,
@@ -732,6 +733,58 @@ class AgentStudioService:
         }
         return self.start_agent_run(start_payload)
 
+    def start_tool_recovery_action(
+        self,
+        run_id: str,
+        request: Mapping[str, Any],
+    ) -> RunTimelineSnapshot:
+        payload = _request_payload(request)
+        source_run = self.get_run_timeline(run_id)
+        return self._start_tool_recovery_action_from_snapshot(source_run, payload)
+
+    def _start_tool_recovery_action_from_snapshot(
+        self,
+        source_run: Any,
+        payload: Mapping[str, Any],
+    ) -> RunTimelineSnapshot:
+        tool_call_id = str(payload.get("tool_call_id") or "").strip()
+        if not tool_call_id:
+            raise AgentRuntimeError("Tool recovery tool_call_id is required")
+        action_id = str(payload.get("action_id") or "").strip()
+        if not action_id:
+            raise AgentRuntimeError("Tool recovery action_id is required")
+        tool_call = _find_tool_recovery_tool_call(source_run, tool_call_id)
+        action = _find_tool_call_recovery_action(tool_call, action_id)
+        action_kind = str(payload.get("action_kind") or action.get("action_kind") or "").strip()
+        agent_id = _tool_recovery_action_agent_id(payload, source_run, tool_call)
+        if not agent_id:
+            raise AgentRuntimeError("Tool recovery action requires an agent_id")
+        direct_request = _tool_recovery_action_direct_request(
+            tool_call,
+            action,
+            action_kind=action_kind,
+            input_override=payload.get("input_override"),
+            continue_to_model=bool(payload.get("continue_to_model", True)),
+        )
+        objective = _tool_recovery_action_objective(action, direct_request)
+        start_payload: dict[str, Any] = {
+            "agent_id": agent_id,
+            "objective": objective,
+            "title": str(payload.get("title") or objective).strip(),
+            "client_run_id": str(payload.get("client_run_id") or "").strip() or None,
+            "metadata": _tool_recovery_action_metadata(
+                source_run,
+                tool_call,
+                action,
+                direct_request,
+                action_kind=action_kind,
+                extra=payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {},
+            ),
+            "direct_tool_requests": [direct_request],
+            "daily_desktop_planning_context": objective,
+        }
+        return self.start_agent_run(start_payload)
+
     def list_groups(self) -> list[AgentGroupSnapshot]:
         return [
             agent_group_snapshot_from_payload(item)
@@ -778,6 +831,15 @@ class AgentStudioService:
         payload = _request_payload(request)
         source_run = self.get_group_run(group_run_id)
         return self._start_replan_recovery_action_from_snapshot(source_run, payload)
+
+    def start_group_tool_recovery_action(
+        self,
+        group_run_id: str,
+        request: Mapping[str, Any],
+    ) -> RunTimelineSnapshot:
+        payload = _request_payload(request)
+        source_run = self.get_group_run(group_run_id)
+        return self._start_tool_recovery_action_from_snapshot(source_run, payload)
 
     def get_group_run_event_stream(self, group_run_id: str) -> Iterable[PublicRunEvent]:
         port_event_stream = getattr(self._studio_port, "get_group_run_event_stream", None)
@@ -1274,6 +1336,335 @@ def _replan_recovery_source_id(source_run: Any) -> str:
         value = str(getattr(source_run, key, "") or "").strip()
         if value:
             return value
+    return ""
+
+
+def _find_tool_recovery_tool_call(source_run: Any, tool_call_id: str) -> ToolCallSnapshot:
+    for tool_call in _iter_source_run_tool_calls(source_run):
+        if str(tool_call.tool_call_id or "").strip() == tool_call_id:
+            return tool_call
+    raise AgentRuntimeError("Tool recovery tool_call_id was not found")
+
+
+def _iter_source_run_tool_calls(source_run: Any) -> Iterable[ToolCallSnapshot]:
+    for tool_call in getattr(source_run, "tool_calls", []) or []:
+        if isinstance(tool_call, ToolCallSnapshot):
+            yield tool_call
+    for child_key in ("runs", "children"):
+        for child in getattr(source_run, child_key, []) or []:
+            yield from _iter_source_run_tool_calls(child)
+
+
+def _find_tool_call_recovery_action(
+    tool_call: ToolCallSnapshot,
+    action_id: str,
+) -> dict[str, Any]:
+    actions = [
+        action
+        for action in _tool_call_recovery_actions(tool_call)
+        if str(action.get("tool") or action.get("retry_tool") or action.get("recovery_retry_tool") or "").strip()
+    ]
+    if not actions:
+        raise AgentRuntimeError("Tool call has no executable recovery actions")
+    for action in actions:
+        if _tool_recovery_action_id(action) == action_id:
+            return action
+    raise AgentRuntimeError("Tool recovery action_id was not found")
+
+
+def _tool_call_recovery_actions(tool_call: ToolCallSnapshot) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    for source in (tool_call.output_preview, tool_call.input_preview, tool_call.metadata):
+        actions.extend(_mapping_list_from_record(source, "recovery_actions"))
+        data = source.get("data") if isinstance(source, Mapping) else None
+        if isinstance(data, Mapping):
+            actions.extend(_mapping_list_from_record(data, "recovery_actions"))
+    return actions
+
+
+def _tool_recovery_action_direct_request(
+    tool_call: ToolCallSnapshot,
+    action: Mapping[str, Any],
+    *,
+    action_kind: str,
+    input_override: Any,
+    continue_to_model: bool,
+) -> dict[str, Any]:
+    is_retry = action_kind == "retry_original"
+    override = _mapping(input_override) if is_retry else {}
+    if is_retry:
+        tool = _first_text(
+            action.get("retry_tool"),
+            action.get("recovery_retry_tool"),
+            tool_call.tool_name,
+        )
+        tool_input = (
+            override
+            or _mapping(action.get("retry_input"))
+            or _mapping(action.get("recovery_retry_input"))
+            or dict(tool_call.input_preview)
+        )
+        planning_reason = _first_text(
+            action.get("planning_reason"),
+            action.get("recovery_planning_reason"),
+            tool_call.planning_reason,
+            "agent_studio_tool_recovery_retry",
+        )
+    else:
+        tool = _first_text(action.get("tool"), action.get("recovery_tool"))
+        tool_input = (
+            override
+            or _mapping(action.get("input"))
+            or _mapping(action.get("recovery_input"))
+        )
+        planning_reason = _first_text(
+            action.get("planning_reason"),
+            action.get("recovery_planning_reason"),
+            tool_call.planning_reason,
+            "agent_studio_tool_recovery",
+        )
+    if not tool:
+        raise AgentRuntimeError("Tool recovery action has no executable tool")
+    request: dict[str, Any] = {
+        "tool": tool,
+        "input": tool_input,
+        "source": "agent_studio_tool_recovery",
+        "planning_reason": planning_reason,
+        "tool_call_id": str(tool_call.tool_call_id or ""),
+        "source_tool_name": str(tool_call.tool_name or ""),
+        "permission_target": _first_text(action.get("permission_target")),
+        "risk_level": _first_text(action.get("risk_level"), tool_call.risk_level),
+        "recovery_action_label": _first_text(action.get("label"), action.get("prompt"), tool),
+        "selected": True,
+    }
+    if action_kind:
+        request["action_kind"] = action_kind
+    if continue_to_model:
+        request["continue_to_model"] = True
+    for key, value in _tool_call_trace_fields(tool_call).items():
+        if value:
+            request[key] = value
+    action_id = _tool_recovery_action_id(action)
+    if action_id:
+        request["action_id"] = action_id
+    for key in (
+        "action_target",
+        "observation_evidence",
+        "observation_retry",
+        "followup_input",
+        "retry_input_schema",
+    ):
+        value = action.get(key) or action.get(f"recovery_{key}")
+        if isinstance(value, Mapping) and value:
+            request[key] = dict(value)
+    verification_targets = _mapping_list(action.get("verification_targets"))
+    if verification_targets:
+        request["verification_targets"] = verification_targets
+    recommended_tools = _string_list_from_any(action.get("recommended_tools"))
+    if recommended_tools:
+        request["recommended_tools"] = recommended_tools
+    required_retry_fields = _string_list_from_any(action.get("required_retry_fields"))
+    if required_retry_fields:
+        request["required_retry_fields"] = required_retry_fields
+    return request
+
+
+def _tool_recovery_action_agent_id(
+    payload: Mapping[str, Any],
+    source_run: Any,
+    tool_call: ToolCallSnapshot,
+) -> str:
+    explicit = str(payload.get("agent_id") or "").strip()
+    if explicit:
+        return explicit
+    direct = str(getattr(source_run, "agent_id", "") or "").strip()
+    if direct:
+        return direct
+    for source_run_id in (
+        tool_call.run_id,
+        tool_call.source_run_id,
+        tool_call.source_runnable_id,
+    ):
+        clean_source_run_id = str(source_run_id or "").strip()
+        if not clean_source_run_id:
+            continue
+        agent_id = _agent_id_for_source_run_id(source_run, clean_source_run_id)
+        if agent_id:
+            return agent_id
+    participants = [
+        str(getattr(participant, "agent_id", "") or "").strip()
+        for participant in getattr(source_run, "participants", []) or []
+        if str(getattr(participant, "agent_id", "") or "").strip()
+    ]
+    unique_participants = list(dict.fromkeys(participants))
+    if len(unique_participants) == 1:
+        return unique_participants[0]
+    return ""
+
+
+def _agent_id_for_source_run_id(source_run: Any, source_run_id: str) -> str:
+    for child_key in ("runs", "children"):
+        for run in getattr(source_run, child_key, []) or []:
+            if str(getattr(run, "run_id", "") or "").strip() != source_run_id:
+                continue
+            agent_id = str(getattr(run, "agent_id", "") or "").strip()
+            if agent_id:
+                return agent_id
+    for participant in getattr(source_run, "participants", []) or []:
+        if str(getattr(participant, "run_id", "") or "").strip() != source_run_id:
+            continue
+        agent_id = str(getattr(participant, "agent_id", "") or "").strip()
+        if agent_id:
+            return agent_id
+    return ""
+
+
+def _tool_recovery_action_metadata(
+    source_run: Any,
+    tool_call: ToolCallSnapshot,
+    action: Mapping[str, Any],
+    direct_request: Mapping[str, Any],
+    *,
+    action_kind: str,
+    extra: Mapping[str, Any],
+) -> dict[str, Any]:
+    metadata = dict(extra)
+    is_retry = action_kind == "retry_original"
+    metadata.update(
+        {
+            "daily_desktop_intent": True,
+            "desktop_permission_recovery": True,
+            "recovery_tool": str(direct_request.get("tool") or ""),
+            "recovery_input": dict(_mapping(direct_request.get("input"))),
+            "recovery_permission_target": str(direct_request.get("permission_target") or ""),
+            "recovery_risk_level": str(direct_request.get("risk_level") or ""),
+            "source": "agent_studio_tool_recovery",
+            "source_run_id": _replan_recovery_source_id(source_run),
+            "source_tool_call_id": str(tool_call.tool_call_id or ""),
+            "source_tool_name": str(tool_call.tool_name or ""),
+            "tool_recovery_action_id": _tool_recovery_action_id(action),
+        }
+    )
+    if action_kind:
+        metadata["recovery_action_kind"] = action_kind
+    if is_retry:
+        metadata["desktop_permission_retry"] = True
+    for key, value in _tool_call_trace_fields(tool_call).items():
+        if key == "source_run_id":
+            continue
+        if value:
+            metadata[f"source_{key}"] = value
+    for key, metadata_key in (
+        ("retry_tool", "recovery_retry_tool"),
+        ("recovery_retry_tool", "recovery_retry_tool"),
+        ("retry_input", "recovery_retry_input"),
+        ("recovery_retry_input", "recovery_retry_input"),
+        ("retry_input_schema", "recovery_retry_input_schema"),
+        ("recovery_retry_input_schema", "recovery_retry_input_schema"),
+        ("retry_input_source", "recovery_retry_input_source"),
+        ("recovery_retry_input_source", "recovery_retry_input_source"),
+        ("retry_artifact_tool", "recovery_retry_artifact_tool"),
+        ("recovery_retry_artifact_tool", "recovery_retry_artifact_tool"),
+        ("retry_artifact_kind", "recovery_retry_artifact_kind"),
+        ("recovery_retry_artifact_kind", "recovery_retry_artifact_kind"),
+        ("retry_prompt", "recovery_retry_prompt"),
+        ("recovery_retry_prompt", "recovery_retry_prompt"),
+        ("retry_source_event_type", "recovery_retry_source_event_type"),
+        ("recovery_retry_source_event_type", "recovery_retry_source_event_type"),
+        ("retry_source_tool_call_id", "recovery_retry_source_tool_call_id"),
+        ("recovery_retry_source_tool_call_id", "recovery_retry_source_tool_call_id"),
+        ("followup_tool", "recovery_followup_tool"),
+        ("recovery_followup_tool", "recovery_followup_tool"),
+        ("followup_input", "recovery_followup_input"),
+        ("recovery_followup_input", "recovery_followup_input"),
+    ):
+        value = action.get(key)
+        if value:
+            metadata[metadata_key] = dict(value) if isinstance(value, Mapping) else value
+    recommended_tools = _string_list_from_any(action.get("recommended_tools"))
+    if recommended_tools:
+        metadata["recommended_tools"] = recommended_tools
+    required_retry_fields = _string_list_from_any(action.get("required_retry_fields"))
+    if required_retry_fields:
+        metadata["required_retry_fields"] = required_retry_fields
+    source_task_id = str(getattr(source_run, "task_id", "") or tool_call.task_id or "").strip()
+    if source_task_id:
+        metadata["source_task_id"] = source_task_id
+    source_title = str(getattr(source_run, "title", "") or "").strip()
+    if source_title:
+        metadata["source_task_title"] = source_title
+    if action.get("approval_required") or action.get("requires_approval"):
+        metadata["recovery_action_approval_required"] = True
+    return metadata
+
+
+def _tool_recovery_action_objective(
+    action: Mapping[str, Any],
+    direct_request: Mapping[str, Any],
+) -> str:
+    label = _first_text(action.get("label"), action.get("prompt"))
+    tool = str(direct_request.get("tool") or "").strip()
+    if label and label != tool:
+        return f"执行恢复动作：{label}"
+    return f"执行恢复动作：{tool}"
+
+
+def _tool_recovery_action_id(action: Mapping[str, Any]) -> str:
+    return _first_text(action.get("action_id"), action.get("id"))
+
+
+def _tool_call_trace_fields(tool_call: ToolCallSnapshot) -> dict[str, str]:
+    return {
+        key: str(getattr(tool_call, key) or "").strip()
+        for key in (
+            "source_run_id",
+            "workflow_id",
+            "workflow_run_id",
+            "workflow_node_id",
+            "workflow_node_label",
+            "group_id",
+            "group_run_id",
+            "core_id",
+            "workspace_id",
+            "task_id",
+            "decision_id",
+            "plan_id",
+            "tool_plan_id",
+            "intent_kind",
+            "step_id",
+            "planner_step_id",
+            "capability_id",
+            "replan_request_id",
+            "replan_trigger",
+        )
+    }
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _mapping_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, Iterable) or isinstance(value, (str, bytes, Mapping)):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _mapping_list_from_record(record: Mapping[str, Any], key: str) -> list[dict[str, Any]]:
+    return _mapping_list(record.get(key))
+
+
+def _string_list_from_any(value: Any) -> list[str]:
+    if not isinstance(value, Iterable) or isinstance(value, (str, bytes, Mapping)):
+        return []
+    return [str(item or "").strip() for item in value if str(item or "").strip()]
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
     return ""
 
 

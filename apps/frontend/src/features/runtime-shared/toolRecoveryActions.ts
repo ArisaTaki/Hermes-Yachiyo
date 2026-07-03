@@ -80,6 +80,24 @@ export type RuntimeToolRecoveryActionRunStartRequest = {
   metadata: Record<string, unknown>;
 };
 
+export type RuntimeToolRecoveryActionToolCallSource = {
+  group_run_id?: string | null;
+  run_id?: string | null;
+  source_run_id?: string | null;
+  tool_call_id?: string | null;
+  tool_name?: string | null;
+};
+
+export type RuntimeToolRecoveryActionToolRunStartRequest = {
+  tool_call_id: string;
+  action_id: string;
+  action_kind?: RuntimeToolRecoveryAction['action_kind'];
+  title: string;
+  continue_to_model: true;
+  input_override?: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+};
+
 export const RUNTIME_TOOL_RECOVERY_TASK_METADATA_KEYS = [
   'daily_desktop_intent',
   'desktop_permission_recovery',
@@ -182,6 +200,35 @@ export function runtimeToolRecoveryActionRunStartRequest(
   };
 }
 
+export function runtimeToolRecoveryActionToolRunStartRequest(
+  toolCall: RuntimeToolRecoveryActionToolCallSource,
+  action: RuntimeToolRecoveryAction,
+  extra: Record<string, unknown> = {},
+): RuntimeToolRecoveryActionToolRunStartRequest | null {
+  const toolCallId = String(toolCall.tool_call_id || '').trim();
+  const actionId = String(action.action_id || '').trim();
+  if (!toolCallId || !actionId) return null;
+  const input = objectValue(action.input);
+  return {
+    tool_call_id: toolCallId,
+    action_id: actionId,
+    ...(action.action_kind ? { action_kind: action.action_kind } : {}),
+    title: action.label || action.prompt || action.tool,
+    continue_to_model: true,
+    ...(action.action_kind === 'retry_original' && Object.keys(input).length
+      ? { input_override: input }
+      : {}),
+    metadata: {
+      permission_target: action.permission_target,
+      source_group_run_id: toolCall.group_run_id || '',
+      source_run_id: toolCall.run_id || toolCall.source_run_id || '',
+      source_tool_call_id: toolCallId,
+      source_tool_name: toolCall.tool_name || '',
+      ...extra,
+    },
+  };
+}
+
 export function runtimeToolRecoveryRetryAction(
   action: RuntimeToolRecoveryAction,
 ): RuntimeToolRecoveryAction | null {
@@ -192,13 +239,17 @@ export function runtimeToolRecoveryRetryAction(
     || runtimeToolRecoveryRetryPrompt(retryTool, retryInput);
   if (!prompt) return null;
   return {
+    action_id: action.action_id,
     action_kind: 'retry_original',
+    approval_required: action.approval_required,
     input: retryInput,
     label: '恢复后重试原操作',
     permission_target: action.permission_target,
     prompt,
     recommended_tools: action.recommended_tools,
+    replan_request_id: action.replan_request_id,
     required_retry_fields: action.required_retry_fields,
+    risk_level: action.risk_level,
     retry_input: retryInput,
     retry_input_schema: action.retry_input_schema,
     retry_input_source: action.retry_input_source,
