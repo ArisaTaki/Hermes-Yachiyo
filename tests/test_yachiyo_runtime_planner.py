@@ -4266,6 +4266,65 @@ def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -
     ]
 
 
+def test_runtime_planner_routes_current_page_table_analysis_to_discovered_spreadsheet_app() -> None:
+    prompt = "找一个表格应用，把当前网页表格整理进去"
+    allowed_tools = [
+        "browser.extract_text",
+        "data.analyze",
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "text_table",
+        "context_source": "current_page_content",
+        "target_app_capability_hint": {
+            "query": "spreadsheet",
+            "description": "表格",
+        },
+        "target_action_hint": "app_paste",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-data-context",
+        "analyze-data-context",
+        "discover-analysis-target-app",
+        "prepare-analysis-discovered-target-app",
+        "insert-analysis-into-target-app",
+        "verify-analysis-target-app",
+    ]
+    assert _step_by_id(decision, "discover-analysis-target-app").input_preview == {
+        "query": "spreadsheet",
+        "limit": 20,
+    }
+    assert _step_by_id(
+        decision,
+        "prepare-analysis-discovered-target-app",
+    ).input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "spreadsheet",
+        "target_action": "app_paste",
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
+    }
+    assert planner_tool_requests(prompt, allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_runtime_planner_routes_web_research_report_to_app_write_target() -> None:
     prompt = "调研 https://example.com 的信息并把报告写进 Notion 新页面"
     allowed_tools = [

@@ -294,7 +294,11 @@ class TaskIntentRouter:
             else _app_write_followup_target_hint(text)
         )
         if not app_write_target and not communication_target:
-            app_write_target = _discovered_app_write_followup_target_hint(text)
+            app_capability_target = _app_capability_discovery_hint(text)
+            app_write_target = _discovered_app_write_followup_target_hint(
+                text,
+                require_data_analysis=not bool(context_source and app_capability_target),
+            )
         if app_write_target:
             inputs.update(app_write_target)
         output_target = _task_output_target_hint(text)
