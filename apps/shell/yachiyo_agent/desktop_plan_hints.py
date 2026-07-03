@@ -208,7 +208,9 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
 
 def type_into_ui_hint(text: str, *, app_name: str = "") -> dict[str, Any] | None:
     patterns = (
-        r"(?P<target>[^。！？!?，,]{1,40}?(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏))\s*(?:输入|键入|填写|填入|写入|写)\s*(?P<text>[^。！？!?，,]+)",
+        r"(?P<target>[^。！？!?，,]{1,40}?(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
+        r"收件人|发件人|联系人|主题|标题|姓名|名称|邮箱|邮件地址|电话|用户名|账号|账户|密码))"
+        r"\s*(?:输入|键入|填写|填入|写入|写)\s*(?P<text>[^。！？!?，,]+)",
         r"(?:type|enter|fill)\s+(?P<text_en2>[^.!?,]+?)\s+"
         r"(?:into|in|inside)\s+(?:the\s+)?"
         r"(?P<target_en2>[^.!?,]{1,40}?(?:search box|search field|message field|address bar|input|field|text box))",

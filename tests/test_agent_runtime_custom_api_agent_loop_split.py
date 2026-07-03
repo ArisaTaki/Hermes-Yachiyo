@@ -22986,6 +22986,65 @@ def test_runtime_planner_foreground_desktop_type_strips_scope_from_target() -> N
     assert observation_request["input"] == {"role_filter": "text", "limit": 80}
 
 
+def test_runtime_planner_discovered_app_types_into_named_form_field() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.type_into_ui_element",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+        "screen.capture",
+    ]
+
+    requests = planner_tool_requests(
+        "打开一个聊天应用，在收件人输入 Alice",
+        allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    execution_requests = planner_execution_tool_requests(requests, allowed_tools)
+
+    assert [request["tool"] for request in execution_requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "desktop.type_into_ui_element",
+        "screen.capture",
+    ]
+    assert execution_requests[3]["input"] == {
+        "target": "收件人",
+        "text": "Alice",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert all(request["tool"] != "desktop.safe_type_text" for request in execution_requests)
+
+
+def test_runtime_planner_foreground_form_field_type_does_not_open_field_as_app() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.type_into_ui_element",
+        "desktop.ui_elements",
+    ]
+
+    requests = planner_tool_requests(
+        "在标题输入今天计划",
+        allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    execution_requests = planner_execution_tool_requests(requests, allowed_tools)
+
+    assert [request["tool"] for request in execution_requests] == ["desktop.ui_elements"]
+    observation_request = execution_requests[0]
+    assert observation_request["deferred_tool"] == "desktop.type_into_ui_element"
+    assert observation_request["deferred_input"] == {
+        "target": "标题",
+        "text": "今天计划",
+        "role_filter": "text",
+        "limit": 80,
+    }
+
+
 def test_runtime_planner_generic_desktop_type_with_submit_defers_continuation() -> None:
     allowed_tools = [
         "app.open",
