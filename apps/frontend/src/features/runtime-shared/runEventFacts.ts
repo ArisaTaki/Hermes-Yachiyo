@@ -391,6 +391,8 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
     runtime_role: plannerTraceString(payload, inputPreview, 'runtime_role'),
     requires_observation: plannerTraceBool(payload, inputPreview, 'requires_observation'),
     requires_post_action_verification: plannerTraceBool(payload, inputPreview, 'requires_post_action_verification'),
+    task_workspace_items: toolCallTaskWorkspaceItems(payload, inputPreview),
+    task_verification_targets: toolCallTaskVerificationTargets(payload, inputPreview),
     tool_name: toolName,
     status,
     risk_level: riskLevel || null,
@@ -606,6 +608,11 @@ function mergeToolCallTrace(current: ToolCallSnapshot, incoming: ToolCallSnapsho
     runtime_role: current.runtime_role || incoming.runtime_role || null,
     requires_observation: current.requires_observation ?? incoming.requires_observation ?? null,
     requires_post_action_verification: current.requires_post_action_verification ?? incoming.requires_post_action_verification ?? null,
+    task_workspace_items: mergeRecordLists(current.task_workspace_items, incoming.task_workspace_items),
+    task_verification_targets: mergeRecordLists(
+      current.task_verification_targets,
+      incoming.task_verification_targets,
+    ),
     metadata: {
       ...(incoming.metadata || {}),
       ...(current.metadata || {}),
@@ -650,6 +657,11 @@ function mergeToolCallReplayTrace(current: ToolCallSnapshot, incoming: ToolCallS
     runtime_role: current.runtime_role || incoming.runtime_role || null,
     requires_observation: current.requires_observation ?? incoming.requires_observation ?? null,
     requires_post_action_verification: current.requires_post_action_verification ?? incoming.requires_post_action_verification ?? null,
+    task_workspace_items: mergeRecordLists(current.task_workspace_items, incoming.task_workspace_items),
+    task_verification_targets: mergeRecordLists(
+      current.task_verification_targets,
+      incoming.task_verification_targets,
+    ),
     status: incoming.status || current.status,
     risk_level: current.risk_level || incoming.risk_level || null,
     input_preview: {
@@ -996,14 +1008,18 @@ function toolCallCorrelationPreview(preview: Record<string, unknown>): Record<st
     'source_run_id',
     'source_runnable_id',
     'source_runnable_name',
+    'task_verification_targets',
+    'task_workspace_items',
     'source_tool',
     'tool_call_id',
+    'verification_targets',
     'workflow_id',
     'workflow_node_id',
     'workflow_node_kind',
     'workflow_node_label',
     'workflow_run_id',
     'workflow_step_label',
+    'workspace_items',
     ...TRACE_KEYS,
   ]);
   return Object.fromEntries(
@@ -1057,6 +1073,30 @@ function toolCallMetadata(payload: Record<string, unknown>): Record<string, unkn
   return metadata;
 }
 
+function toolCallTaskWorkspaceItems(
+  payload: Record<string, unknown>,
+  inputPreview: Record<string, unknown>,
+): Array<Record<string, unknown>> {
+  return mergeRecordLists(
+    recordList(payload.task_workspace_items),
+    recordList(inputPreview.task_workspace_items),
+    recordList(payload.workspace_items),
+    recordList(inputPreview.workspace_items),
+  );
+}
+
+function toolCallTaskVerificationTargets(
+  payload: Record<string, unknown>,
+  inputPreview: Record<string, unknown>,
+): Array<Record<string, unknown>> {
+  return mergeRecordLists(
+    recordList(payload.task_verification_targets),
+    recordList(inputPreview.task_verification_targets),
+    recordList(payload.verification_targets),
+    recordList(inputPreview.verification_targets),
+  );
+}
+
 function toolCallInputPreviewWithTraceContext(
   inputPreview: Record<string, unknown>,
   traceContext: Record<string, unknown>,
@@ -1072,6 +1112,27 @@ function traceContextValuePresent(value: unknown): boolean {
   if (typeof value === 'string') return Boolean(value.trim());
   if (Array.isArray(value)) return value.length > 0;
   return value !== undefined && value !== null && value !== false;
+}
+
+function recordList(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => (
+    Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+  ));
+}
+
+function mergeRecordLists(
+  ...lists: Array<Array<Record<string, unknown>> | undefined>
+): Array<Record<string, unknown>> {
+  const seen = new Set<string>();
+  const records: Array<Record<string, unknown>> = [];
+  lists.flatMap((list) => list || []).forEach((record) => {
+    const key = stableJson(record);
+    if (seen.has(key)) return;
+    seen.add(key);
+    records.push(record);
+  });
+  return records;
 }
 
 function stableJson(value: unknown): string {
