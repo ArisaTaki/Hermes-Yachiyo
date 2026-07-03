@@ -7,8 +7,15 @@ from typing import Any
 
 from apps.shell.agent.runtime.events import redact_secrets
 
-from .contracts import PublicRunEvent, WorkflowRunSnapshot
-from .run_snapshots import run_timeline_snapshot_from_payload
+from .contracts import (
+    PublicRunEvent,
+    RunTimelineSnapshot,
+    WorkflowRunSnapshot,
+)
+from .run_snapshots import RunSnapshotProjector, run_timeline_snapshot_from_payload
+from .timeline_metadata_snapshots import merge_timeline_child_snapshots
+
+_RUN_PROJECTOR = RunSnapshotProjector()
 
 
 def workflow_run_snapshot_from_payload(
@@ -19,13 +26,67 @@ def workflow_run_snapshot_from_payload(
 
     timeline = run_timeline_snapshot_from_payload(workflow_run_payload_with_lifecycle(payload))
     workflow_event_context = workflow_event_context_from_events(timeline.events)
+    workflow_id = _optional_text(
+        payload.get("workflow_id")
+        or workflow_event_context.get("workflow_id")
+        or payload.get("runnable_id")
+    )
+    workflow_run_id = _text(
+        payload.get("workflow_run_id") or payload.get("run_id") or timeline.run_id
+    )
+    child_payloads = _workflow_child_run_payloads(
+        payload,
+        workflow_id=workflow_id or "",
+        workflow_run_id=workflow_run_id,
+    )
+    child_runs = [
+        run_timeline_snapshot_from_payload(item)
+        for item in child_payloads
+        if isinstance(item, Mapping)
+    ]
+    child_approvals = _child_approvals(child_runs)
+    timeline_payload = timeline.model_dump(mode="python")
+    if child_runs:
+        timeline_payload.update(
+            {
+                "children": merge_timeline_child_snapshots(
+                    timeline.children,
+                    _RUN_PROJECTOR.timeline_children_from_payloads(child_payloads),
+                ),
+                "tool_calls": _unique_by(
+                    [*timeline.tool_calls, *_child_items(child_runs, "tool_calls")],
+                    lambda item: item.tool_call_id,
+                ),
+                "approvals": _unique_by(
+                    [*timeline.approvals, *child_approvals],
+                    lambda item: item.approval_id,
+                ),
+                "pending_approval": timeline.pending_approval
+                or _first_pending(child_approvals),
+                "artifacts": _unique_by(
+                    [*timeline.artifacts, *_child_items(child_runs, "artifacts")],
+                    _artifact_identity,
+                ),
+                "memory_traces": _unique_by(
+                    [*timeline.memory_traces, *_child_items(child_runs, "memory_traces")],
+                    lambda item: item.trace_id,
+                ),
+                "skill_traces": _unique_by(
+                    [*timeline.skill_traces, *_child_items(child_runs, "skill_traces")],
+                    lambda item: item.trace_id,
+                ),
+                "replan_recoveries": _unique_by(
+                    [
+                        *timeline.replan_recoveries,
+                        *_child_items(child_runs, "replan_recoveries"),
+                    ],
+                    lambda item: item.request_id,
+                ),
+            }
+        )
     return WorkflowRunSnapshot(
-        **timeline.model_dump(mode="python"),
-        workflow_id=_optional_text(
-            payload.get("workflow_id")
-            or workflow_event_context.get("workflow_id")
-            or payload.get("runnable_id")
-        ),
+        **timeline_payload,
+        workflow_id=workflow_id,
         objective=_text(payload.get("objective") or payload.get("user_goal") or timeline.title),
         current_node_id=_optional_text(
             payload.get("current_node_id")
@@ -123,6 +184,119 @@ def _raw_events_from_payload(
         if value and isinstance(value, list):
             return [dict(item) for item in value if isinstance(item, Mapping)]
     return []
+
+
+def _workflow_child_run_payloads(
+    payload: Mapping[str, Any],
+    *,
+    workflow_id: str,
+    workflow_run_id: str,
+) -> list[dict[str, Any]]:
+    raw_children = (
+        payload.get("runs") or payload.get("child_runs") or payload.get("children") or []
+    )
+    if not isinstance(raw_children, list):
+        return []
+    return [
+        _workflow_child_run_payload(
+            item,
+            workflow_id=workflow_id,
+            workflow_run_id=workflow_run_id,
+        )
+        for item in raw_children
+        if isinstance(item, Mapping)
+    ]
+
+
+def _workflow_child_run_payload(
+    payload: Mapping[str, Any],
+    *,
+    workflow_id: str,
+    workflow_run_id: str,
+) -> dict[str, Any]:
+    child = dict(payload)
+    if workflow_id:
+        child.setdefault("workflow_id", workflow_id)
+    if workflow_run_id:
+        child.setdefault("workflow_run_id", workflow_run_id)
+        child.setdefault("parent_run_id", workflow_run_id)
+    for key in ("events", "run_events", "recent_events", "timeline"):
+        value = child.get(key)
+        if isinstance(value, list):
+            child[key] = [
+                _workflow_child_event_context(
+                    item,
+                    workflow_id=workflow_id,
+                    workflow_run_id=workflow_run_id,
+                    workflow_node_id=_text(child.get("workflow_node_id")),
+                    workflow_node_label=_text(child.get("workflow_node_label")),
+                )
+                for item in value
+                if isinstance(item, Mapping)
+            ]
+    return child
+
+
+def _workflow_child_event_context(
+    event: Mapping[str, Any],
+    *,
+    workflow_id: str,
+    workflow_run_id: str,
+    workflow_node_id: str,
+    workflow_node_label: str,
+) -> dict[str, Any]:
+    item = dict(event)
+    payload = dict(item.get("payload")) if isinstance(item.get("payload"), Mapping) else {}
+    if workflow_id:
+        payload.setdefault("workflow_id", workflow_id)
+    if workflow_run_id:
+        payload.setdefault("workflow_run_id", workflow_run_id)
+    if workflow_node_id:
+        payload.setdefault("workflow_node_id", workflow_node_id)
+    if workflow_node_label:
+        payload.setdefault("workflow_node_label", workflow_node_label)
+    if payload:
+        item["payload"] = payload
+    return item
+
+
+def _child_items(child_runs: list[RunTimelineSnapshot], attr: str) -> list[Any]:
+    return [item for run in child_runs for item in getattr(run, attr)]
+
+
+def _child_approvals(child_runs: list[RunTimelineSnapshot]) -> list[Any]:
+    approvals = []
+    for run in child_runs:
+        approvals.extend(run.approvals)
+        if run.pending_approval:
+            approvals.append(run.pending_approval)
+    return approvals
+
+
+def _first_pending(items: list[Any]) -> Any | None:
+    for item in items:
+        if getattr(item, "status", "") == "pending":
+            return item
+    return None
+
+
+def _artifact_identity(artifact: Any) -> str:
+    return _text(
+        artifact.artifact_id
+        or f"{artifact.source_run_id or artifact.run_id or ''}:{artifact.path or artifact.title}"
+    )
+
+
+def _unique_by(items: list[Any], key_fn: Any) -> list[Any]:
+    seen: set[str] = set()
+    unique: list[Any] = []
+    for item in items:
+        key = _text(key_fn(item))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        unique.append(item)
+    return unique
 
 
 _WORKFLOW_PLANNER_EVENT_TYPES = {

@@ -2254,6 +2254,78 @@ def test_workflow_run_snapshot_scopes_agent_planner_events_to_workflow_run() -> 
     assert planned_event.payload["replan_request_id"] == "replan-workflow-1"
 
 
+def test_workflow_run_snapshot_rolls_child_debug_state_into_timeline() -> None:
+    snapshot = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-rollup-1",
+            "workflow_run_id": "workflow-run-rollup-1",
+            "workflow_id": "workflow-1",
+            "status": "running",
+            "objective": "Analyze a CSV and approve export",
+            "runs": [
+                {
+                    "run_id": "workflow-node-run-1",
+                    "status": "approval_required",
+                    "kind": "agent_run",
+                    "agent_id": "agent-1",
+                    "workflow_node_id": "analyze",
+                    "workflow_node_label": "Analyze data",
+                    "events": [
+                        {
+                            "event_type": "agent.tool.call",
+                            "payload": {
+                                "tool_call_id": "tool-call-1",
+                                "tool_name": "data.analyze",
+                                "status": "completed",
+                                "result": {"ok": True, "rows": 42},
+                            },
+                        },
+                        {
+                            "event_type": "artifact.created",
+                            "payload": {
+                                "artifact_id": "artifact-1",
+                                "title": "Analysis report",
+                                "kind": "markdown_report",
+                                "path": "artifacts/report.md",
+                            },
+                        },
+                        {
+                            "event_type": "agent.tool.approval_required",
+                            "payload": {
+                                "approval_id": "approval-1",
+                                "tool_name": "desktop.click_ui_element",
+                                "title": "Approve export",
+                                "risk_level": "medium",
+                                "input_preview": {"label": "Export"},
+                            },
+                        },
+                    ],
+                }
+            ],
+        }
+    )
+
+    child = snapshot.children[0]
+    assert child.run_id == "workflow-node-run-1"
+    assert child.parent_run_id == "workflow-run-rollup-1"
+    assert child.workflow_run_id == "workflow-run-rollup-1"
+    assert child.workflow_node_id == "analyze"
+    assert child.agent_id == "agent-1"
+
+    assert snapshot.tool_calls[0].tool_name == "data.analyze"
+    assert snapshot.tool_calls[0].run_id == "workflow-node-run-1"
+    assert snapshot.tool_calls[0].workflow_run_id == "workflow-run-rollup-1"
+    assert snapshot.tool_calls[0].workflow_node_id == "analyze"
+    assert snapshot.artifacts[0].artifact_id == "artifact-1"
+    assert snapshot.artifacts[0].source_run_id == "workflow-node-run-1"
+    assert snapshot.artifacts[0].workflow_run_id == "workflow-run-rollup-1"
+    assert snapshot.pending_approval is not None
+    assert snapshot.pending_approval.approval_id == "approval-1"
+    assert snapshot.pending_approval.run_id == "workflow-node-run-1"
+    assert snapshot.pending_approval.workflow_node_label == "Analyze data"
+    assert snapshot.approvals[0].workflow_run_id == "workflow-run-rollup-1"
+
+
 def test_run_timeline_snapshot_projects_desktop_approval_event() -> None:
     snapshot = run_timeline_snapshot_from_payload(
         {
