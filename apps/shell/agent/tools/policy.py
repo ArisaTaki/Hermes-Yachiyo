@@ -107,12 +107,15 @@ TOOL_FUNCTION_NAMES = {
     "desktop.type_text": "desktop_type_text",
     "desktop.click": "desktop_click",
     "desktop.verify": "desktop_verify",
+    "browser.search": "browser_search",
+    "browser.open": "browser_open",
     "browser.open_url": "browser_open_url",
     "browser.open_url_and_extract_text": "browser_open_url_and_extract_text",
     "browser.open_url_and_screenshot": "browser_open_url_and_screenshot",
     "browser.current_page": "browser_current_page",
     "browser.click": "browser_click",
     "browser.type_text": "browser_type_text",
+    "browser.extract": "browser_extract",
     "browser.extract_text": "browser_extract_text",
     "browser.screenshot": "browser_screenshot",
 }
@@ -274,10 +277,13 @@ HIGH_RISK_DESKTOP_TOOL_NAMES = (
     "desktop.submit_foreground",
 )
 LOW_RISK_BROWSER_TOOL_NAMES = (
+    "browser.search",
+    "browser.open",
     "browser.open_url",
     "browser.open_url_and_extract_text",
     "browser.open_url_and_screenshot",
     "browser.current_page",
+    "browser.extract",
     "browser.extract_text",
     "browser.screenshot",
 )
@@ -2496,6 +2502,24 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         },
         required=("x", "y"),
     ),
+    "browser.search": ToolDescriptor(
+        name="browser.search",
+        description=(
+            "Open a web search for a user-provided query. This portable browser alias "
+            "uses the same low-risk browser opening path as browser.open_url."
+        ),
+        properties={"query": {"type": "string", "description": "Search query to open."}},
+        required=("query",),
+    ),
+    "browser.open": ToolDescriptor(
+        name="browser.open",
+        description=(
+            "Open an absolute http(s) URL in a browser. This portable browser alias "
+            "uses the same low-risk opening path as browser.open_url."
+        ),
+        properties={"url": {"type": "string", "description": "Absolute http(s) URL."}},
+        required=("url",),
+    ),
     "browser.open_url": ToolDescriptor(
         name="browser.open_url",
         description=(
@@ -2596,6 +2620,19 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             },
         },
         required=("selector", "text"),
+    ),
+    "browser.extract": ToolDescriptor(
+        name="browser.extract",
+        description=(
+            "Extract visible text from the current browser page or a CSS selector. "
+            "This portable browser alias uses the same path as browser.extract_text."
+        ),
+        properties={
+            "selector": {
+                "type": "string",
+                "description": "Optional CSS selector. Defaults to document.body.",
+            }
+        },
     ),
     "browser.extract_text": ToolDescriptor(
         name="browser.extract_text",

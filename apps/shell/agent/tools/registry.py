@@ -7,6 +7,7 @@ preserving the legacy ToolBroker.call surface.
 from __future__ import annotations
 
 from typing import Any, Callable
+from urllib.parse import quote_plus
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 
@@ -844,6 +845,15 @@ def _browser_open_url(broker: Any, payload: dict[str, Any], _approved: bool) -> 
     return broker.browser_open_url(str(payload.get("url") or ""))
 
 
+def _browser_search(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    query = str(payload.get("query") or "").strip()
+    return broker.browser_open_url(f"https://www.google.com/search?q={quote_plus(query)}")
+
+
+def _browser_open(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return _browser_open_url(broker, payload, _approved)
+
+
 def _browser_open_url_and_extract_text(
     broker: Any,
     payload: dict[str, Any],
@@ -902,6 +912,10 @@ def _browser_extract_text(
     _approved: bool,
 ) -> dict[str, Any]:
     return broker.browser_extract_text(str(payload.get("selector") or ""))
+
+
+def _browser_extract(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
+    return _browser_extract_text(broker, payload, _approved)
 
 
 def _browser_screenshot(
@@ -1006,12 +1020,15 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "desktop.type": _desktop_type,
     "desktop.click": _desktop_click,
     "desktop.verify": _desktop_verify,
+    "browser.search": _browser_search,
+    "browser.open": _browser_open,
     "browser.open_url": _browser_open_url,
     "browser.open_url_and_extract_text": _browser_open_url_and_extract_text,
     "browser.open_url_and_screenshot": _browser_open_url_and_screenshot,
     "browser.current_page": _browser_current_page,
     "browser.click": _browser_click,
     "browser.type_text": _browser_type_text,
+    "browser.extract": _browser_extract,
     "browser.extract_text": _browser_extract_text,
     "browser.screenshot": _browser_screenshot,
 }

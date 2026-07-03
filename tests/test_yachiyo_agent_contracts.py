@@ -4206,7 +4206,10 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     type_into_ui_element = tools["desktop.type_into_ui_element"]
     minimize_window = tools["desktop.minimize_window"]
     close_window = tools["desktop.close_window"]
+    browser_search = tools["browser.search"]
+    browser_open = tools["browser.open"]
     browser = tools["browser.open_url"]
+    browser_extract = tools["browser.extract"]
     browser_open_extract = tools["browser.open_url_and_extract_text"]
     browser_open_screenshot = tools["browser.open_url_and_screenshot"]
     terminal = tools["terminal.run"]
@@ -4456,6 +4459,18 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert browser.risk_level == "low"
     assert browser.missing_permissions == ["chrome_cdp"]
     assert any("Chrome CDP" in note for note in browser.fallback_notes)
+    assert browser_search.capability_id == "browser_control"
+    assert browser_search.risk_level == "low"
+    assert browser_search.input_schema["required"] == ["query"]
+    assert any("Portable alias" in note for note in browser_search.fallback_notes)
+    assert browser_open.capability_id == "browser_control"
+    assert browser_open.risk_level == "low"
+    assert browser_open.input_schema["required"] == ["url"]
+    assert any("browser.open_url" in note for note in browser_open.fallback_notes)
+    assert browser_extract.capability_id == "browser_control"
+    assert browser_extract.risk_level == "low"
+    assert browser_extract.input_schema["required"] == []
+    assert any("browser.extract_text" in note for note in browser_extract.fallback_notes)
     assert browser_open_extract.capability_id == "browser_control"
     assert browser_open_extract.risk_level == "low"
     assert browser_open_extract.input_schema["required"] == ["url"]

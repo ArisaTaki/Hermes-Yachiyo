@@ -273,10 +273,13 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         category="browser",
         description="Open, read, screenshot, click, or type in browser pages.",
         tools=(
+            "browser.search",
+            "browser.open",
             "browser.open_url",
             "browser.open_url_and_extract_text",
             "browser.open_url_and_screenshot",
             "browser.current_page",
+            "browser.extract",
             "browser.extract_text",
             "browser.screenshot",
             "browser.click",

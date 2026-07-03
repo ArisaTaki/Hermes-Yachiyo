@@ -825,10 +825,13 @@ def test_desktop_tools_have_schemas_and_do_not_relax_terminal_approval() -> None
         "desktop_submit_foreground",
         "desktop_type_text",
         "desktop_click",
+        "browser_search",
+        "browser_open",
         "browser_open_url",
         "browser_current_page",
         "browser_click",
         "browser_type_text",
+        "browser_extract",
         "browser_extract_text",
         "browser_screenshot",
     }.issubset(schemas)
@@ -848,6 +851,18 @@ def test_desktop_list_apps_schema_accepts_optional_query_and_limit() -> None:
         ToolDescriptorRegistry.validate_payload("desktop.list_apps", {"query": 123})
     with pytest.raises(AgentRuntimeError, match="desktop.list_apps 参数 limit 必须是 1-500 的整数"):
         ToolDescriptorRegistry.validate_payload("desktop.list_apps", {"limit": 0})
+
+
+def test_browser_portable_alias_schemas_validate_payloads() -> None:
+    ToolDescriptorRegistry.validate_payload("browser.search", {"query": "open hanako"})
+    ToolDescriptorRegistry.validate_payload("browser.open", {"url": "https://example.com"})
+    ToolDescriptorRegistry.validate_payload("browser.extract", {})
+    ToolDescriptorRegistry.validate_payload("browser.extract", {"selector": "main"})
+
+    with pytest.raises(AgentRuntimeError, match="browser.search 参数 query 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload("browser.search", {})
+    with pytest.raises(AgentRuntimeError, match="browser.open 参数 url 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload("browser.open", {})
 
 
 def test_desktop_permissions_schema_accepts_empty_payload() -> None:
@@ -2904,6 +2919,22 @@ def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> N
         lambda selector, text, **kwargs: calls.append(("type", selector, text, kwargs))
         or {"ok": True},
     )
+    monkeypatch.setattr(
+        broker,
+        "browser_extract_text",
+        lambda selector="": calls.append(("extract", selector)) or {"ok": True},
+    )
+
+    assert dispatch_tool_call(
+        broker,
+        "browser.search",
+        {"query": "open hanako"},
+    ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
+        "browser.open",
+        {"url": "https://example.com/alias"},
+    ) == {"ok": True}
 
     assert dispatch_tool_call(
         broker,
@@ -2930,12 +2961,20 @@ def test_tool_dispatch_registry_routes_browser_tools(tmp_path, monkeypatch) -> N
         "browser.type_text",
         {"selector": "point=12,34", "text": "八千代", "fallback_x": 12, "fallback_y": 34},
     ) == {"ok": True}
+    assert dispatch_tool_call(
+        broker,
+        "browser.extract",
+        {"selector": "main"},
+    ) == {"ok": True}
     assert calls == [
+        ("open", "https://www.google.com/search?q=open+hanako"),
+        ("open", "https://example.com/alias"),
         ("open", "https://example.com"),
         ("open_extract", "https://example.com/docs", "main"),
         ("open_screenshot", "https://example.com/docs", "capture docs"),
         ("click", "#go", 12, 34, 2),
         ("type", "point=12,34", "八千代", {"fallback_x": 12, "fallback_y": 34}),
+        ("extract", "main"),
     ]
 
 

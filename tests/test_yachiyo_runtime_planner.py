@@ -23942,6 +23942,12 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
             "desktop.ui_elements",
             "screen.capture",
         ],
+        "browser.research": [
+            "browser.search",
+            "browser.open",
+            "browser.extract",
+            "browser.open_url",
+        ],
         "clipboard.read_write": ["clipboard.read", "clipboard.write"],
         "schedule.reminder": [
             "reminders.create",
