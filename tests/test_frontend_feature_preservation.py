@@ -3383,6 +3383,9 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export function runnableCapabilityLine",
             "export function agentCapabilityLine",
             "screen.capture",
+            "media.music_app_open_and_play",
+            "media.music_app_control",
+            "legacyMediaControlTools",
             "media.apple_music_play",
             "app.open_and_safe_type_text",
             "app.focus_and_safe_type_text",
@@ -3393,6 +3396,16 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "desktop.safe_click",
             "desktop.type_text",
             "desktop.click",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/utils/groups.ts",
+        [
+            "id: 'desktop_execution'",
+            "media.music_app_open_and_play",
+            "media.music_app_control",
+            "summary: 'Open, play, and control discovered media apps.'",
+            "tools: ['media.music_app_open_and_play', 'media.music_app_control']",
         ],
     )
     _assert_contains(

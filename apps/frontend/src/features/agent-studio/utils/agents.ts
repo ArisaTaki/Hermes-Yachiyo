@@ -62,7 +62,9 @@ function policyTools(agent: AgentSpec): Set<string> {
 
 export const screenContextTools = ['screen.capture', 'desktop.active_window'];
 export const appControlTools = ['app.open', 'app.focus'];
-export const mediaControlTools = ['media.apple_music_play', 'media.apple_music_control'];
+export const mediaControlTools = ['media.music_app_open_and_play', 'media.music_app_control'];
+const legacyMediaControlTools = ['media.apple_music_play', 'media.apple_music_control'];
+const readableMediaControlTools = [...mediaControlTools, ...legacyMediaControlTools];
 export const foregroundInputTools = [
   'app.open_and_safe_type_text',
   'app.focus_and_safe_type_text',
@@ -96,6 +98,7 @@ const coreToolLabels = new Set([
   ...screenContextTools,
   ...appControlTools,
   ...mediaControlTools,
+  ...legacyMediaControlTools,
   ...foregroundInputTools,
   ...browserControlTools,
 ]);
@@ -157,7 +160,7 @@ export function agentToDraft(agent: AgentSpec): AgentDraft {
     allow_artifacts: agent.tool_policy?.allowed_tools === undefined ? true : tools.has('artifact.write'),
     allow_screen_context: hasAnyTool(tools, screenContextTools),
     allow_app_control: hasAnyTool(tools, appControlTools),
-    allow_media_control: hasAnyTool(tools, mediaControlTools),
+    allow_media_control: hasAnyTool(tools, readableMediaControlTools),
     allow_foreground_input: hasAnyTool(tools, foregroundInputTools),
     allow_browser_control: hasAnyTool(tools, browserControlTools),
     default_workdir: String(workspace.default_workdir || ''),
@@ -192,7 +195,7 @@ export function toolPolicyCapabilityLine(policy: unknown): string {
   if (tools.includes('artifact.write')) add('产物');
   if (hasAnyTool(new Set(tools), screenContextTools)) add('屏幕上下文');
   if (hasAnyTool(new Set(tools), appControlTools)) add('App 控制');
-  if (hasAnyTool(new Set(tools), mediaControlTools)) add('媒体控制');
+  if (hasAnyTool(new Set(tools), readableMediaControlTools)) add('媒体控制');
   if (hasAnyTool(new Set(tools), foregroundInputTools)) add('前台输入');
   if (hasAnyTool(new Set(tools), browserControlTools)) add('浏览器控制');
   tools.forEach((tool) => {
