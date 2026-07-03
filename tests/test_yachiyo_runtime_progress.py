@@ -39,6 +39,34 @@ def test_public_task_progress_events_preserve_task_group_workflow_context() -> N
         assert event.payload["status"] == "completed"
 
 
+def test_public_task_progress_events_block_explicit_verification_failure() -> None:
+    events = public_task_progress_events_for_tool_result(
+        tool_request=_tool_request(),
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "artifact.write",
+            "result": {
+                "ok": True,
+                "verification_failed": True,
+                "summary": "Report artifact was written but failed verification.",
+            },
+        },
+        run_id="run-1",
+        after_sequence=30,
+    )
+
+    assert [event.event_type for event in events] == [
+        "agent.task.workspace_item.updated",
+        "agent.task.todo.updated",
+        "agent.task.checkpoint.updated",
+    ]
+    assert [event.payload["status"] for event in events] == [
+        "blocked",
+        "blocked",
+        "blocked",
+    ]
+
+
 def test_task_progress_payloads_can_be_scoped_for_group_and_workflow_runs() -> None:
     tool_event = {
         "event": "agent.tool.call",

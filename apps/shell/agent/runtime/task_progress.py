@@ -275,12 +275,16 @@ def _verification_target_todo_status(result: Mapping[str, Any]) -> str:
         return "blocked"
     if result.get("approval_required"):
         return "blocked"
+    if result.get("verification_failed") is True:
+        return "blocked"
     return "completed" if result.get("ok") is True else "blocked"
 
 
 def _verification_target_checkpoint_status(result: Mapping[str, Any]) -> str:
     if isinstance(result, Mapping) and result.get("approval_required"):
         return "waiting_approval"
+    if isinstance(result, Mapping) and result.get("verification_failed") is True:
+        return "blocked"
     return "completed" if isinstance(result, Mapping) and result.get("ok") is True else "blocked"
 
 
@@ -288,7 +292,7 @@ def _verification_targets_from_replan_recovery(
     tool_request: Mapping[str, Any],
     result: Mapping[str, Any],
 ) -> list[dict[str, Any]]:
-    if result.get("ok") is not True:
+    if result.get("ok") is not True or result.get("verification_failed") is True:
         return []
     targets: list[dict[str, Any]] = []
     for target in _mapping_items(tool_request.get("verification_targets")):
@@ -551,6 +555,8 @@ def _task_checkpoint_status_for_todo_status(
 
 def _tool_result_requests_replan(result: Mapping[str, Any]) -> bool:
     if not isinstance(result, Mapping):
+        return True
+    if result.get("verification_failed") is True:
         return True
     if result.get("ok") is True and not result.get("approval_required"):
         return False

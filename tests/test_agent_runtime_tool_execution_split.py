@@ -893,6 +893,21 @@ def test_runtime_tool_request_runner_records_explicit_verification_failure_repla
                 "replan_signal_ids": ["signal-analyze-verify-failed"],
                 "replan_triggers": ["verification_failed"],
                 "fallback_tools": ["terminal.run"],
+                "task_todo": {
+                    "todo_id": "todo-analyze-data",
+                    "title": "Analyze data",
+                    "status": "pending",
+                    "step_id": "analyze-data-file",
+                    "tool_name": "data.analyze",
+                },
+                "task_checkpoints": [
+                    {
+                        "checkpoint_id": "checkpoint-analyze-data",
+                        "title": "Verify analysis",
+                        "status": "planned",
+                        "after_step_id": "analyze-data-file",
+                    }
+                ],
             }
         ],
         ["data.analyze", "terminal.run"],
@@ -915,6 +930,22 @@ def test_runtime_tool_request_runner_records_explicit_verification_failure_repla
         replan_event["payload"]["failure_detail"]
         == "The generated report did not include the requested chart."
     )
+    todo_event = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["todo_id"] == "todo-analyze-data"
+    )
+    checkpoint_event = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event["checkpoint_id"] == "checkpoint-analyze-data"
+    )
+    assert todo_event["status"] == "blocked"
+    assert todo_event["todo"]["status"] == "blocked"
+    assert checkpoint_event["status"] == "blocked"
+    assert checkpoint_event["checkpoint"]["status"] == "blocked"
 
     run_replan_event = next(
         payload
