@@ -23,6 +23,7 @@ export type RuntimeToolRecoveryAction = {
   retry_tool?: string;
   selected?: boolean;
   tool: string;
+  verification_targets?: Array<Record<string, unknown>>;
 };
 
 export type RuntimeToolRecoveryRetryContext = Pick<
@@ -64,6 +65,7 @@ export type RuntimeToolRecoveryActionTaskMetadata = {
   recommended_tools?: string[];
   required_retry_fields?: string[];
   recovery_tool: string;
+  verification_targets?: Array<Record<string, unknown>>;
 } & Record<string, unknown>;
 
 export type RuntimeToolRecoveryActionTaskStart = {
@@ -117,6 +119,7 @@ export const RUNTIME_TOOL_RECOVERY_TASK_METADATA_KEYS = [
   'recovery_followup_input',
   'required_retry_fields',
   'recommended_tools',
+  'verification_targets',
   'recovery_retry_prompt',
   'recovery_retry_source_event_type',
   'recovery_retry_source_tool_call_id',
@@ -161,6 +164,7 @@ export function runtimeToolRecoveryActionTaskMetadata(
     ...(action.followup_input ? { recovery_followup_input: action.followup_input } : {}),
     ...(action.required_retry_fields?.length ? { required_retry_fields: action.required_retry_fields } : {}),
     ...(action.recommended_tools?.length ? { recommended_tools: action.recommended_tools } : {}),
+    ...(action.verification_targets?.length ? { verification_targets: action.verification_targets } : {}),
     ...(action.retry_prompt ? { recovery_retry_prompt: action.retry_prompt } : {}),
     ...(action.retry_source_event_type ? { recovery_retry_source_event_type: action.retry_source_event_type } : {}),
     ...(action.retry_source_tool_call_id ? { recovery_retry_source_tool_call_id: action.retry_source_tool_call_id } : {}),
@@ -195,6 +199,7 @@ export function runtimeToolRecoveryActionRunStartRequest(
     continue_to_model: true,
     metadata: {
       permission_target: action.permission_target,
+      ...(action.verification_targets?.length ? { verification_targets: action.verification_targets } : {}),
       ...extra,
     },
   };
@@ -224,6 +229,7 @@ export function runtimeToolRecoveryActionToolRunStartRequest(
       source_run_id: toolCall.run_id || toolCall.source_run_id || '',
       source_tool_call_id: toolCallId,
       source_tool_name: toolCall.tool_name || '',
+      ...(action.verification_targets?.length ? { verification_targets: action.verification_targets } : {}),
       ...extra,
     },
   };
@@ -260,6 +266,7 @@ export function runtimeToolRecoveryRetryAction(
     retry_source_tool_call_id: action.retry_source_tool_call_id,
     retry_tool: retryTool,
     tool: retryTool,
+    verification_targets: action.verification_targets,
   };
 }
 
@@ -343,10 +350,18 @@ export function runtimeToolRecoveryActionsFromRecord(
       required_retry_fields: recoveryStringList(action.required_retry_fields),
       risk_level: String(action.risk_level || '').trim() || undefined,
       selected: Boolean(action.selected),
+      verification_targets: recoveryRecordList(action.verification_targets),
       ...actionRetryContext,
       tool,
     }];
   });
+}
+
+function recoveryRecordList(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => (
+    Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+  ));
 }
 
 function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, unknown>): string {

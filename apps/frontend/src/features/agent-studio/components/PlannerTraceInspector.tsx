@@ -1086,6 +1086,9 @@ function ReplanRecoveryActionPill({
 }) {
   const inputPreview = plannerValuePreview(action.input);
   const recommendedTools = uniqueStrings(action.recommended_tools || []);
+  const verificationTargetsPreview = replanRecoveryVerificationTargetsPreview(
+    arrayRecords(action.verification_targets),
+  );
   const canRun = Boolean(onRunReplanRecoveryAction && action.action_id);
   const label = action.label || action.prompt || action.tool;
   return (
@@ -1103,13 +1106,19 @@ function ReplanRecoveryActionPill({
       data-replan-recovery-tool={action.tool}
       data-replan-recovery-tool-index={index}
       data-replan-recovery-tools={recommendedTools.join(',')}
+      data-replan-recovery-verification-targets={verificationTargetsPreview}
       disabled={recoveryActionDisabled || !canRun}
       onClick={() => void onRunReplanRecoveryAction?.(requestId, action)}
-      title={[action.prompt, inputPreview].filter(Boolean).join(' · ')}
+      title={[
+        action.prompt,
+        inputPreview ? `input: ${inputPreview}` : '',
+        verificationTargetsPreview ? `verification: ${verificationTargetsPreview}` : '',
+      ].filter(Boolean).join(' · ')}
     >
       recovery · {action.label || action.tool}
       {action.tool ? ` · ${action.tool}` : ''}
       {inputPreview ? ` · input: ${inputPreview}` : ''}
+      {verificationTargetsPreview ? ` · verifies: ${verificationTargetsPreview}` : ''}
     </button>
   );
 }
