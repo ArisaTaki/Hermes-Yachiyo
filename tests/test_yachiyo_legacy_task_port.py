@@ -300,6 +300,14 @@ def test_planner_first_direct_selection_owns_system_control_without_legacy() -> 
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_system_control",
         },
+        {
+            "protocol": "json_fallback",
+            "tool": "system.volume",
+            "input": {"action": "status"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
+            "continue_to_model": True,
+        },
     ]
     assert volume_selection.event_payload["legacy_request_count"] == 0
     assert screen_saver_selection.selected_source == "runtime_planner"
