@@ -8954,6 +8954,9 @@ def _auto_replan_app_search_observed_result_requests(
     *,
     planning_reason: str,
 ) -> list[dict[str, Any]]:
+    payloads = [
+        dict(payload) for payload in replan_payloads if isinstance(payload, Mapping)
+    ]
     requests = _auto_discovered_app_search_observed_result_requests(
         selection_payload,
         allowed_tools,
@@ -8961,7 +8964,7 @@ def _auto_replan_app_search_observed_result_requests(
         planning_reason=planning_reason,
     )
     if requests:
-        return requests
+        return _replan_recovery_requests_with_task_context(requests, payloads, timeline)
     target = (
         selection_payload.get("followup_target")
         if isinstance(selection_payload.get("followup_target"), Mapping)
@@ -8972,7 +8975,7 @@ def _auto_replan_app_search_observed_result_requests(
     if str(target.get("target_action") or "").strip() != "app_search":
         return []
     if not _replan_payloads_include_blocked_step(
-        replan_payloads,
+        payloads,
         "select-app-search-result",
     ):
         return []
@@ -8992,7 +8995,7 @@ def _auto_replan_app_search_observed_result_requests(
         observed_target,
         target,
         timeline,
-        replan_payloads=replan_payloads,
+        replan_payloads=payloads,
     )
     latest_observation_tool = _latest_desktop_observation_tool(timeline)
     if latest_observation_tool:
@@ -9003,7 +9006,11 @@ def _auto_replan_app_search_observed_result_requests(
         timeline,
         planning_reason=planning_reason,
     )
-    return _annotate_auto_followup_requests_from_tool_plan(requests, selection_payload)
+    requests = _annotate_auto_followup_requests_from_tool_plan(
+        requests,
+        selection_payload,
+    )
+    return _replan_recovery_requests_with_task_context(requests, payloads, timeline)
 
 
 def _replan_payloads_include_blocked_step(
@@ -10296,7 +10303,12 @@ def _auto_replan_ui_observed_action_requests(
         )
         if not requests:
             continue
-        return _annotate_replan_ui_observed_action_requests(requests, payload)
+        requests = _annotate_replan_ui_observed_action_requests(requests, payload)
+        return _replan_recovery_requests_with_task_context(
+            requests,
+            [dict(payload)],
+            timeline,
+        )
     return []
 
 
@@ -10566,7 +10578,12 @@ def _auto_replan_ui_continuation_requests(
             tool_timeline_start=tool_timeline_start,
         )
         requests.extend(continuation)
-    return _dedupe_replan_recovery_requests(requests)
+    requests = _dedupe_replan_recovery_requests(requests)
+    return _replan_recovery_requests_with_task_context(
+        requests,
+        replan_payloads,
+        timeline,
+    )
 
 
 def _replan_ui_observed_action_retry_succeeded(
@@ -10734,10 +10751,15 @@ def _auto_replan_ui_search_observed_result_requests(
         )
         if not requests:
             continue
-        return _annotate_replan_ui_search_observed_result_requests(
+        requests = _annotate_replan_ui_search_observed_result_requests(
             requests,
             payload,
             result_request,
+        )
+        return _replan_recovery_requests_with_task_context(
+            requests,
+            [dict(payload)],
+            timeline,
         )
     return []
 
@@ -11259,6 +11281,18 @@ def _auto_replan_recovery_requests_with_task_context(
     timeline: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     requests = _auto_replan_recovery_requests(replan_payloads, allowed_tools)
+    return _replan_recovery_requests_with_task_context(
+        requests,
+        replan_payloads,
+        timeline,
+    )
+
+
+def _replan_recovery_requests_with_task_context(
+    requests: list[dict[str, Any]],
+    replan_payloads: list[dict[str, Any]],
+    timeline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
     if not requests:
         return []
     task_core = _runtime_replan_task_core_payload(replan_payloads, timeline)
@@ -11300,7 +11334,12 @@ def _auto_replan_discovered_app_continuation_requests(
                 allowed,
             )
         )
-    return _dedupe_replan_recovery_requests(requests)
+    requests = _dedupe_replan_recovery_requests(requests)
+    return _replan_recovery_requests_with_task_context(
+        requests,
+        replan_payloads,
+        timeline,
+    )
 
 
 def _replan_payload_is_app_resolution_failure(payload: Mapping[str, Any]) -> bool:

@@ -3624,6 +3624,7 @@ def test_auto_replan_ui_continuation_runs_remaining_plan_after_retry() -> None:
         "trigger": "tool_failure",
         "decision_id": "decision-ui-continuation",
         "plan_id": "plan-ui-continuation",
+        "core_id": "core-ui-continuation",
         "source_step_id": "type-media-search-query",
         "source_tool_name": "app.focus_and_type_into_ui_element",
         "target_capability_id": "desktop.ui_operation",
@@ -3685,6 +3686,38 @@ def test_auto_replan_ui_continuation_runs_remaining_plan_after_retry() -> None:
             "capability_id": "desktop.ui_operation",
         },
     ]
+    task_core = {
+        "core_id": "core-ui-continuation",
+        "workspace": {
+            "workspace_id": "workspace-ui-continuation",
+            "title": "Media Playback Workspace",
+            "items": [
+                {
+                    "item_id": "media-query",
+                    "kind": "input",
+                    "source_step_id": "submit-media-search",
+                    "status": "available",
+                }
+            ],
+        },
+        "todos": [
+            {
+                "todo_id": "todo-submit-media-search",
+                "step_id": "submit-media-search",
+                "title": "Submit media search",
+                "tool_name": "desktop.search_submit",
+                "status": "planned",
+            }
+        ],
+        "checkpoints": [
+            {
+                "checkpoint_id": "checkpoint-submit-media-search",
+                "after_step_id": "submit-media-search",
+                "title": "Verify submitted media search",
+                "status": "planned",
+            }
+        ],
+    }
 
     requests = custom_api_agent_module._auto_replan_ui_continuation_requests(
         [payload],
@@ -3697,6 +3730,17 @@ def test_auto_replan_ui_continuation_runs_remaining_plan_after_retry() -> None:
             "desktop.ui_elements",
         ],
         [
+            _timeline(
+                "agent.task_core.created",
+                "Media Playback Workspace",
+                core_id="core-ui-continuation",
+                plan_id="plan-ui-continuation",
+                payload={
+                    "core_id": "core-ui-continuation",
+                    "plan_id": "plan-ui-continuation",
+                    "task_core": task_core,
+                },
+            ),
             _timeline(
                 "agent.tool.call",
                 "app.focus_and_type_into_ui_element",
@@ -3723,6 +3767,13 @@ def test_auto_replan_ui_continuation_runs_remaining_plan_after_retry() -> None:
     assert requests[0]["step_id"] == "submit-media-search"
     assert requests[0]["planner_step_id"] == "submit-media-search"
     assert requests[0]["capability_id"] == "desktop.ui_operation"
+    assert requests[0]["core_id"] == "core-ui-continuation"
+    assert requests[0]["workspace_id"] == "workspace-ui-continuation"
+    assert requests[0]["task_todo"]["step_id"] == "submit-media-search"
+    assert requests[0]["task_checkpoints"][0]["after_step_id"] == "submit-media-search"
+    assert requests[0]["task_workspace_items"][0]["source_step_id"] == (
+        "submit-media-search"
+    )
     assert "step_id" not in requests[1]
     assert requests[1]["input"] == {"limit": 80, "app_name": "Music"}
 
@@ -25395,7 +25446,7 @@ def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> No
                     },
                     "source": "runtime_planner",
                     "planning_reason": "planner_desktop_operation",
-                    "step_id": "operate-selected-discovered-app-ui",
+                    "step_id": "scroll-selected-discovered-app",
                     "capability_id": "desktop.ui_operation",
                 },
                 {
@@ -25404,7 +25455,7 @@ def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> No
                     "input": {},
                     "source": "runtime_planner",
                     "planning_reason": "planner_desktop_operation",
-                    "step_id": "verify-desktop-result",
+                    "step_id": "verify-selected-discovered-app-action",
                     "capability_id": "desktop.app_discovery",
                 },
             ],
@@ -25456,6 +25507,16 @@ def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> No
     assert all("continue_to_model" not in request for request in continuation_requests)
     assert continuation_requests[0]["input"]["query"] == "pdf"
     assert continuation_requests[1]["input"]["amount"] == 2
+    assert continuation_requests[0]["task_todo"]["step_id"] == (
+        "open-selected-discovered-app"
+    )
+    assert continuation_requests[0]["workspace_id"]
+    assert continuation_requests[1]["task_todo"]["step_id"] == (
+        "scroll-selected-discovered-app"
+    )
+    assert continuation_requests[2]["task_todo"]["step_id"] == (
+        "verify-selected-discovered-app-action"
+    )
 
 
 def test_custom_api_agent_loop_continues_after_replan_app_rediscovery_without_model() -> None:
