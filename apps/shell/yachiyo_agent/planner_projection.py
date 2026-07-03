@@ -380,6 +380,9 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
     media_app_target = _media_app_playback_followup_target(inputs)
     if media_app_target:
         return media_app_target
+    generated_app_write_target = _desktop_generated_app_write_followup_target(inputs)
+    if generated_app_write_target:
+        return generated_app_write_target
     desktop_discovered_app_target = _desktop_discovered_app_followup_target(
         inputs,
         decision,
@@ -558,6 +561,33 @@ def _desktop_observed_action_followup_target(inputs: Mapping[str, Any]) -> dict[
         "body_source": "explicit_user_text",
         "observation_source": "desktop.read_ui",
     }
+
+
+def _model_generated_content_hint_payload(inputs: Mapping[str, Any]) -> Mapping[str, Any]:
+    value = inputs.get("model_generated_content_hint")
+    return value if isinstance(value, Mapping) else {}
+
+
+def _desktop_generated_app_write_followup_target(
+    inputs: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not _model_generated_content_hint_payload(inputs):
+        return {}
+    app_name = str(inputs.get("app_name_hint") or "").strip()
+    if not app_name:
+        return {}
+    payload: dict[str, Any] = {
+        "kind": "app_write",
+        "app_name": app_name,
+        "target_action": "app_paste",
+        "body_source": "model_generated_content",
+    }
+    safe_shortcut = inputs.get("safe_shortcut_hint")
+    if isinstance(safe_shortcut, Mapping):
+        action = str(safe_shortcut.get("action") or "").strip()
+        if action in {"new_document", "new_note"}:
+            payload["container_action"] = action
+    return payload
 
 
 def _desktop_target_from_observed_selector(selector: str) -> str:
@@ -784,7 +814,14 @@ def _desktop_discovered_app_followup_target(
     if "target_action" not in payload:
         payload["target_action"] = "open_app"
     compose_text = str(inputs.get("foreground_compose_text_hint") or "").strip()
-    if compose_text:
+    generated_content = _model_generated_content_hint_payload(inputs)
+    if generated_content:
+        payload["body_source"] = "model_generated_content"
+        payload["post_action_observation"] = {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        }
+    elif compose_text:
         payload["compose_text"] = compose_text
         payload["body_source"] = "explicit_user_text"
         payload["post_action_observation"] = {

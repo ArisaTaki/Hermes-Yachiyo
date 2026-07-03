@@ -1820,6 +1820,7 @@ def _discovered_app_plan_needs_model_reasoning(
     if isinstance(inputs, Mapping) and (
         isinstance(inputs.get("creative_canvas_hint"), Mapping)
         or isinstance(inputs.get("desktop_content_artifact_hint"), Mapping)
+        or isinstance(inputs.get("model_generated_content_hint"), Mapping)
     ):
         return True
     for step in steps:
@@ -2579,7 +2580,10 @@ def _desktop_observation_step_needs_model_followup(
     if (
         step_id == "verify-desktop-result"
         and isinstance(inputs, Mapping)
-        and isinstance(inputs.get("creative_canvas_hint"), Mapping)
+        and (
+            isinstance(inputs.get("creative_canvas_hint"), Mapping)
+            or isinstance(inputs.get("model_generated_content_hint"), Mapping)
+        )
     ):
         return True
     if _desktop_observation_step_is_direct_readback(prompt, inputs):

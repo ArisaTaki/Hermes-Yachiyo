@@ -2838,6 +2838,153 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
     }
 
 
+def test_runtime_planner_routes_generated_desktop_app_content_to_model_followup() -> None:
+    known_prompt = "打开 Keynote 新建一个演示文稿并写入三页项目计划"
+    known_allowed_tools = [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    known_decision = RuntimePlanner().decision(
+        known_prompt,
+        allowed_tools=known_allowed_tools,
+    )
+    known_requests = planner_tool_requests(known_prompt, known_allowed_tools)
+    known_payload = planner_selection_payload(
+        decision=known_decision,
+        planner_requests=known_requests,
+        legacy_requests=[],
+        selected_requests=known_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert known_decision.selected_intent.kind == "desktop_operation"
+    assert known_decision.selected_intent.inputs == {
+        "app_name_hint": "Keynote",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "new_document"},
+        "model_generated_content_hint": {
+            "body_source": "model_generated_content",
+            "brief": "三页项目计划",
+        },
+    }
+    assert [step.step_id for step in known_decision.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert known_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Keynote", "action": "new_document"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+        },
+    ]
+    assert known_payload["followup_target"] == {
+        "kind": "app_write",
+        "app_name": "Keynote",
+        "target_action": "app_paste",
+        "body_source": "model_generated_content",
+        "container_action": "new_document",
+    }
+
+    generic_prompt = "用任意可用的表格应用创建预算表并填入三行示例数据"
+    generic_allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    generic_decision = RuntimePlanner().decision(
+        generic_prompt,
+        allowed_tools=generic_allowed_tools,
+    )
+    generic_requests = planner_tool_requests(generic_prompt, generic_allowed_tools)
+    generic_payload = planner_selection_payload(
+        decision=generic_decision,
+        planner_requests=generic_requests,
+        legacy_requests=[],
+        selected_requests=generic_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+
+    assert generic_decision.selected_intent.inputs == {
+        "app_name_hint": "",
+        "operation_hint": "discover_apps",
+        "safe_shortcut_hint": {"action": "new_document"},
+        "desktop_discovery_hint": {"action": "discover_apps", "query": "spreadsheet"},
+        "app_capability_hint": {
+            "query": "spreadsheet",
+            "description": "表格",
+        },
+        "model_generated_content_hint": {
+            "body_source": "model_generated_content",
+            "brief": "三行示例数据",
+        },
+    }
+    assert "operate-foreground-ui-followup-type" not in [
+        step.step_id for step in generic_decision.plan.tool_plan.steps
+    ]
+    assert [request["tool"] for request in generic_requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    assert generic_requests[0]["continue_to_model"] is True
+    assert generic_requests[-1]["continue_to_model"] is True
+    assert generic_payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "spreadsheet",
+        "app_name_source": "desktop.list_apps",
+        "capability_description": "表格",
+        "target_action": "safe_shortcut",
+        "safe_shortcut_action": "new_document",
+        "body_source": "model_generated_content",
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
+    }
+
+    literal_prompt = "用任意可用的表格应用创建预算表，输入 Q1 budget，然后确认"
+    literal_allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    literal_decision = RuntimePlanner().decision(
+        literal_prompt,
+        allowed_tools=literal_allowed_tools,
+    )
+    literal_requests = planner_tool_requests(literal_prompt, literal_allowed_tools)
+
+    assert literal_decision.selected_intent.inputs["foreground_compose_text_hint"] == (
+        "Q1 budget"
+    )
+    assert "model_generated_content_hint" not in literal_decision.selected_intent.inputs
+    assert [request["tool"] for request in literal_requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+
+
 def test_runtime_planner_discovers_generic_browser_before_specific_search() -> None:
     allowed_tools = [
         "desktop.list_apps",

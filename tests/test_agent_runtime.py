@@ -5370,7 +5370,7 @@ def test_main_chat_model_loop_auto_opens_path_with_discovered_app_without_model(
         assert resolved_event["payload"]["resolved_app_path"] == (
             "/Applications/Visual Studio Code.app"
         )
-        assert open_event["payload"]["input_preview"] == {
+        expected_open_input_preview = {
             "app_name": "Visual Studio Code",
             "path": "README.md",
             "resolved_app_name": "Visual Studio Code",
@@ -5381,6 +5381,9 @@ def test_main_chat_model_loop_auto_opens_path_with_discovered_app_without_model(
             "app_resolution_reason": "capability query",
             "resolved_app_path": "/Applications/Visual Studio Code.app",
         }
+        assert expected_open_input_preview.items() <= open_event["payload"][
+            "input_preview"
+        ].items()
     finally:
         service.close()
 

@@ -488,6 +488,12 @@ class TaskIntentRouter:
             and not _generic_followup_compose_text_hint(text)
         ):
             foreground_compose_text = ""
+        model_generated_content = _model_generated_foreground_content_hint(
+            text,
+            foreground_compose_text,
+        )
+        if model_generated_content:
+            foreground_compose_text = ""
         if control_presence_inspection:
             foreground_compose_text = ""
         if str((safe_shortcut or {}).get("action") or "").strip() == "new_message":
@@ -1117,6 +1123,8 @@ class TaskIntentRouter:
             inputs["operation_mode_hint"] = finder_operation_mode
         if foreground_compose_text:
             inputs["foreground_compose_text_hint"] = foreground_compose_text
+        if model_generated_content:
+            inputs["model_generated_content_hint"] = model_generated_content
         if foreground_paste:
             inputs["foreground_paste_hint"] = {"action": "paste"}
         if foreground_submit_action:
@@ -3011,7 +3019,12 @@ class RuntimePlanner:
             app_search = {}
         foreground_compose_text = (
             ""
-            if type_target or defer_ambiguous_type_target or control_presence_inspection
+            if (
+                type_target
+                or defer_ambiguous_type_target
+                or control_presence_inspection
+                or isinstance(intent.inputs.get("model_generated_content_hint"), Mapping)
+            )
             else str(
                 intent.inputs.get("foreground_compose_text_hint")
                 or _foreground_compose_text_hint(intent.user_goal)
@@ -3028,6 +3041,7 @@ class RuntimePlanner:
                 or defer_ambiguous_type_target
                 or control_presence_inspection
                 or str((safe_shortcut or {}).get("action") or "").strip() == "new_message"
+                or isinstance(intent.inputs.get("model_generated_content_hint"), Mapping)
             )
             else (
                 foreground_compose_text
@@ -8381,6 +8395,8 @@ def _append_selected_discovered_foreground_compose_steps(
     depends_on: str,
 ) -> None:
     if isinstance(intent.inputs.get("communication_compose_hint"), Mapping):
+        return
+    if isinstance(intent.inputs.get("model_generated_content_hint"), Mapping):
         return
     compose_text = str(intent.inputs.get("foreground_compose_text_hint") or "").strip()
     if not compose_text:
@@ -15874,6 +15890,144 @@ def _explicit_return_key_followup_hint(text: str) -> dict[str, Any] | None:
     if re.search(r"(?:发送|提交|send|submit).{0,8}(?:回车|enter|return)", value, flags=re.IGNORECASE):
         return None
     return {"key": "return", "modifiers": []}
+
+
+def _model_generated_foreground_content_hint(
+    text: str,
+    compose_text: str = "",
+) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value:
+        return {}
+    if re.search(r"(?:粘贴|paste)", value, flags=re.IGNORECASE):
+        return {}
+    if re.search(
+        r"(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)|\b(?:titled|called|named)\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return {}
+    brief = _clean_foreground_compose_text(compose_text)
+    if not brief:
+        brief = _model_generated_foreground_content_brief(value)
+    if not brief:
+        return {}
+    if _looks_like_explicit_literal_foreground_content_brief(brief):
+        return {}
+    if not _looks_like_model_generated_foreground_content_request(value, brief):
+        return {}
+    return {
+        "body_source": "model_generated_content",
+        "brief": brief,
+    }
+
+
+def _model_generated_foreground_content_brief(text: str) -> str:
+    value = _clean_prompt(text)
+    patterns = (
+        r"(?:画|绘制|画出|绘出|生成|创建|制作|做|输出|撰写|写一份|写一篇)\s*"
+        r"(?P<brief>[^。！？!?，,]{1,80}?"
+        r"(?:流程图|思维导图|脑图|图表|图像|图片|报告|计划|方案|大纲|演示文稿|演示|幻灯片|表格|预算表|数据)"
+        r"[^。！？!?，,]{0,80})",
+        r"\b(?:draw|create|make|generate|write|produce|fill)\s+"
+        r"(?P<brief_en>[^.!?]{1,100}?"
+        r"(?:flowchart|diagram|chart|report|plan|outline|presentation|slides?|spreadsheet|table|budget|sample data)"
+        r"[^.!?]{0,100})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        brief = _clean_foreground_compose_text(
+            match.groupdict().get("brief") or match.groupdict().get("brief_en") or ""
+        )
+        if brief:
+            return brief
+    return ""
+
+
+def _looks_like_explicit_literal_foreground_content_brief(brief: str) -> bool:
+    value = _clean_foreground_compose_text(brief)
+    if not value:
+        return True
+    if _contains_any(
+        value,
+        (
+            "页",
+            "行",
+            "列",
+            "张",
+            "段",
+            "示例",
+            "样例",
+            "数据",
+            "项目计划",
+            "预算表",
+            "流程图",
+            "思维导图",
+            "脑图",
+            "图表",
+            "报告",
+            "方案",
+            "大纲",
+            "演示文稿",
+            "幻灯片",
+            "表格",
+            "slide",
+            "slides",
+            "row",
+            "rows",
+            "sample",
+            "data",
+            "flowchart",
+            "diagram",
+            "chart",
+            "report",
+            "plan",
+            "outline",
+            "presentation",
+            "table",
+        ),
+    ):
+        return False
+    if re.search(r"[A-Za-z0-9]", value) and len(value) <= 40:
+        return True
+    return len(value) <= 12
+
+
+def _looks_like_model_generated_foreground_content_request(text: str, brief: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    content_shape = (
+        r"(?:\d+\s*(?:页|行|列|张|段)|[一二两三四五六七八九十几多]+\s*(?:页|行|列|张|段)|"
+        r"示例数据|样例数据|项目计划|预算表|流程图|思维导图|脑图|图表|报告|方案|大纲|"
+        r"演示文稿|幻灯片|表格|工作簿|"
+        r"slides?|rows?|columns?|sample\s+data|project\s+plan|budget|flowchart|diagram|chart|report|outline|presentation|table)"
+    )
+    generation_verb = (
+        r"(?:写入|填入|填写|生成|创建|制作|做|画|绘制|输出|撰写|写一份|写一篇|"
+        r"\b(?:write|fill|generate|create|make|draw|produce)\b)"
+    )
+    if re.search(
+        rf"{generation_verb}.{{0,60}}{content_shape}",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(
+        rf"{content_shape}.{{0,40}}{generation_verb}",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    if re.search(content_shape, brief, flags=re.IGNORECASE) and re.search(
+        generation_verb,
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return False
 
 
 def _foreground_compose_text_hint(text: str) -> str:

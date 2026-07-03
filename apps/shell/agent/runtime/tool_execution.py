@@ -362,6 +362,12 @@ def _tool_request_with_app_name_resolution(
 ) -> dict[str, Any]:
     if not resolution:
         return tool_request
+    tool_name = str(tool_request.get("tool") or "").strip()
+    if not _tool_request_input_accepts_app_name_resolution(tool_name):
+        return {
+            **tool_request,
+            "input_resolution": resolution,
+        }
     raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
     resolved_input = {
         **raw_input,
@@ -377,6 +383,20 @@ def _tool_request_with_app_name_resolution(
         **tool_request,
         "input_resolution": resolution,
         "input": resolved_input,
+    }
+
+
+def _tool_request_input_accepts_app_name_resolution(tool_name: str) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool.startswith("app."):
+        return True
+    return clean_tool in {
+        "desktop.open_app",
+        "desktop.focus_app",
+        "desktop.show_app",
+        "desktop.hide_app",
+        "desktop.quit_app",
+        "desktop.open_path_with_app",
     }
 
 
@@ -432,11 +452,7 @@ def _tool_request_with_verification_target(
 
 _FOREGROUND_APP_CONTEXT_TOOLS = {
     "desktop.inspect_app",
-    "desktop.ui_elements",
-    "desktop.read_ui",
     "desktop.verify",
-    "desktop.windows",
-    "desktop.list_windows",
 }
 
 
