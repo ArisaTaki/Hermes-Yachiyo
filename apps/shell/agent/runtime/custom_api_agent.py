@@ -598,6 +598,66 @@ class RuntimeCustomApiAgentLoop:
                                     ),
                                     *auto_replan_continuation_requests,
                                 ]
+                            auto_replan_verification_continuation_requests = (
+                                _auto_replan_verification_continuation_requests(
+                                    replan_payloads,
+                                    execution_tool_requests,
+                                    allowed_tools,
+                                    timeline,
+                                    tool_timeline_start=tool_timeline_start,
+                                    planning_reason=(
+                                        "planner_replan_verification_continuation"
+                                    ),
+                                )
+                            )
+                            if auto_replan_verification_continuation_requests:
+                                auto_replan_approval_requests = [
+                                    *auto_replan_approval_requests,
+                                    *auto_replan_verification_continuation_requests,
+                                ]
+                                self._record_auto_model_followup_app_write_plan(
+                                    auto_replan_verification_continuation_requests,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                )
+                                self._record_desktop_permission_preflight(
+                                    auto_replan_verification_continuation_requests,
+                                    broker,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                )
+                                self._record_desktop_tool_policy_decisions(
+                                    auto_replan_verification_continuation_requests,
+                                    allowed_tools=allowed_tools,
+                                    agent=agent,
+                                    run_id=run_id,
+                                )
+                                verification_continuation_timeline_start = len(timeline)
+                                self._run_tool_requests(
+                                    auto_replan_verification_continuation_requests,
+                                    allowed_tools,
+                                    broker,
+                                    messages,
+                                    timeline,
+                                    artifacts,
+                                    next_iteration=start_iteration,
+                                    run_id=run_id,
+                                    budget=budget,
+                                )
+                                self._record_runtime_planner_task_progress_events(
+                                    runtime_planner_decision,
+                                    timeline=timeline,
+                                    tool_timeline_start=(
+                                        verification_continuation_timeline_start
+                                    ),
+                                    run_id=run_id,
+                                )
+                                auto_replan_recovery_requests = [
+                                    *_tool_requests_without_model_followup(
+                                        auto_replan_recovery_requests
+                                    ),
+                                    *auto_replan_verification_continuation_requests,
+                                ]
                             auto_replan_ui_observed_action_requests = (
                                 _auto_replan_ui_observed_action_requests(
                                     replan_payloads,
@@ -11352,6 +11412,113 @@ def _auto_replan_ui_continuation_requests(
         requests,
         replan_payloads,
         timeline,
+    )
+
+
+def _auto_replan_verification_continuation_requests(
+    replan_payloads: list[dict[str, Any]],
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return []
+    planned = [request for request in planned_tool_requests if isinstance(request, Mapping)]
+    if not planned:
+        return []
+    requests: list[dict[str, Any]] = []
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        if str(payload.get("trigger") or "").strip() != "verification_failed":
+            continue
+        if not _replan_payload_is_focus_mismatch(payload):
+            continue
+        if not _replan_focus_recovery_succeeded(payload, timeline):
+            continue
+        source_index = _replan_source_request_index(planned, payload)
+        if source_index < 0:
+            continue
+        continuation = _replan_ui_continuation_slice(
+            planned[source_index + 1 :],
+            payload,
+            allowed,
+            planning_reason=planning_reason,
+        )
+        continuation = _drop_completed_auto_followup_prefix(
+            continuation,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        )
+        requests.extend(continuation)
+    requests = _dedupe_replan_recovery_requests(requests)
+    return _replan_recovery_requests_with_task_context(
+        requests,
+        replan_payloads,
+        timeline,
+    )
+
+
+def _replan_focus_recovery_succeeded(
+    payload: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+) -> bool:
+    target_app_name = _replan_focus_recovery_app_name(payload)
+    if not target_app_name:
+        return False
+    request_id = str(payload.get("request_id") or "").strip()
+    for event in reversed(timeline):
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        if str(event.get("detail") or "").strip() != "desktop.active_window":
+            continue
+        event_request_id = str(event.get("replan_request_id") or "").strip()
+        planning_reason = str(event.get("planning_reason") or "").strip()
+        if request_id:
+            if event_request_id != request_id:
+                continue
+        elif planning_reason != "planner_replan_focus_recovery":
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is not True or result.get("approval_required"):
+            continue
+        active_app_name = _replan_active_window_app_name(event, result)
+        if _replan_app_names_match(target_app_name, active_app_name):
+            return True
+    return False
+
+
+def _replan_active_window_app_name(
+    event: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> str:
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    for key in (
+        "app_name",
+        "active_app_name",
+        "frontmost_app",
+        "frontmost_app_name",
+        "observed_app_name",
+    ):
+        value = str(data.get(key) or result.get(key) or event.get(key) or "").strip()
+        if value:
+            return value
+    return ""
+
+
+def _replan_app_names_match(expected: str, observed: str) -> bool:
+    expected_compact = compact_app_name_hint(expected)
+    observed_compact = compact_app_name_hint(observed)
+    if not expected_compact or not observed_compact:
+        return False
+    return (
+        expected_compact == observed_compact
+        or expected_compact in observed_compact
+        or observed_compact in expected_compact
     )
 
 

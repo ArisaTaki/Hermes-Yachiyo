@@ -4301,6 +4301,147 @@ def test_auto_replan_ui_continuation_runs_remaining_plan_after_retry() -> None:
     assert requests[1]["input"] == {"limit": 80, "app_name": "Music"}
 
 
+def test_auto_replan_verification_continuation_runs_remaining_plan_after_focus_recovery() -> None:
+    payload = {
+        "request_id": "replan-verify-focus-continuation",
+        "trigger": "verification_failed",
+        "decision_id": "decision-verify-focus-continuation",
+        "plan_id": "plan-verify-focus-continuation",
+        "core_id": "core-verify-focus-continuation",
+        "source_step_id": "verify-opened-file",
+        "source_tool_name": "desktop.active_window",
+        "target_capability_id": "desktop.visual_verification",
+        "failure_detail": "foreground_focus_unverified",
+        "metadata": {
+            "expected_app_name": "Preview",
+            "blocking_conditions": ["foreground_focus_unverified"],
+        },
+    }
+    planned = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path_with_app",
+            "input": {"path": "/tmp/report.pdf", "app_name": "Preview"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_open_file",
+            "step_id": "open-report-file",
+            "capability_id": "desktop.app_control",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_open_file",
+            "step_id": "verify-opened-file",
+            "capability_id": "desktop.visual_verification",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"app_name": "Preview", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_open_file",
+            "step_id": "find-in-opened-file",
+            "capability_id": "desktop.ui_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "revenue"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_open_file",
+            "step_id": "type-search-query",
+            "capability_id": "desktop.ui_operation",
+        },
+    ]
+    task_core = {
+        "core_id": "core-verify-focus-continuation",
+        "workspace": {
+            "workspace_id": "workspace-verify-focus-continuation",
+            "title": "Opened File Workspace",
+            "items": [
+                {
+                    "item_id": "opened-file",
+                    "kind": "file",
+                    "source_step_id": "find-in-opened-file",
+                    "status": "available",
+                }
+            ],
+        },
+        "todos": [
+            {
+                "todo_id": "todo-find-in-opened-file",
+                "step_id": "find-in-opened-file",
+                "title": "Find content in opened file",
+                "tool_name": "desktop.safe_shortcut",
+                "status": "planned",
+            }
+        ],
+        "checkpoints": [
+            {
+                "checkpoint_id": "checkpoint-find-in-opened-file",
+                "after_step_id": "find-in-opened-file",
+                "title": "Verify file search opened",
+                "status": "planned",
+            }
+        ],
+    }
+
+    requests = custom_api_agent_module._auto_replan_verification_continuation_requests(
+        [payload],
+        planned,
+        [
+            "desktop.open_path_with_app",
+            "desktop.active_window",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+        ],
+        [
+            _timeline(
+                "agent.task_core.created",
+                "Opened File Workspace",
+                core_id="core-verify-focus-continuation",
+                plan_id="plan-verify-focus-continuation",
+                payload={
+                    "core_id": "core-verify-focus-continuation",
+                    "plan_id": "plan-verify-focus-continuation",
+                    "task_core": task_core,
+                },
+            ),
+            _timeline(
+                "agent.tool.call",
+                "desktop.active_window",
+                input_preview={},
+                result={"ok": True, "data": {"app_name": "Preview", "title": "report.pdf"}},
+                planning_reason="planner_replan_focus_recovery",
+                replan_request_id="replan-verify-focus-continuation",
+            ),
+        ],
+        tool_timeline_start=0,
+        planning_reason="planner_replan_verification_continuation",
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+    ]
+    assert {request["planning_reason"] for request in requests} == {
+        "planner_replan_verification_continuation"
+    }
+    assert {request["replan_request_id"] for request in requests} == {
+        "replan-verify-focus-continuation"
+    }
+    assert {request["replan_trigger"] for request in requests} == {"verification_failed"}
+    assert requests[0]["step_id"] == "find-in-opened-file"
+    assert requests[0]["planner_step_id"] == "find-in-opened-file"
+    assert requests[0]["core_id"] == "core-verify-focus-continuation"
+    assert requests[0]["workspace_id"] == "workspace-verify-focus-continuation"
+    assert requests[0]["task_todo"]["step_id"] == "find-in-opened-file"
+    assert requests[0]["task_checkpoints"][0]["after_step_id"] == "find-in-opened-file"
+    assert requests[0]["task_workspace_items"][0]["source_step_id"] == "find-in-opened-file"
+
+
 def test_auto_replan_ui_search_observed_result_clicks_after_result_observation() -> None:
     payload = {
         "request_id": "replan-ui-result",
