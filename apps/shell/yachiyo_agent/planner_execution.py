@@ -5106,10 +5106,13 @@ def _context_prefetch_payload(
         request_payload: dict[str, Any] = {"path": path} if path else {}
         pattern = str(payload.get("pattern") or "").strip()
         file_type = str(payload.get("file_type") or "").strip()
+        selection = str(payload.get("selection") or "").strip()
         if pattern:
             request_payload["pattern"] = pattern
         if file_type:
             request_payload["file_type"] = file_type
+        if selection:
+            request_payload["selection"] = selection
         if bool(payload.get("include_metadata")):
             request_payload["include_metadata"] = True
         return request_payload

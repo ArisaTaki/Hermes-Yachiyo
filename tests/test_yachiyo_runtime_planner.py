@@ -27537,7 +27537,7 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",
-            "input": {"path": "Downloads"},
+            "input": {"path": "Downloads", "selection": "latest"},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_data_source",
             "continue_to_model": True,
@@ -27547,7 +27547,7 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",
-            "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+            "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv", "selection": "latest"},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_data_source",
             "continue_to_model": True,
@@ -27618,7 +27618,7 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",
-            "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+            "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv", "selection": "latest"},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_data_source",
             "continue_to_model": True,
@@ -27628,7 +27628,7 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",
-            "input": {"pattern": "*.csv", "file_type": "csv"},
+            "input": {"pattern": "*.csv", "file_type": "csv", "selection": "latest"},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_data_source",
             "continue_to_model": True,
@@ -27810,7 +27810,7 @@ def test_planner_tool_requests_continues_after_data_analysis_for_clipboard() -> 
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",
-            "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+            "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv", "selection": "latest"},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_data_source",
             "continue_to_model": True,
@@ -29708,7 +29708,12 @@ def test_planner_tool_requests_prefetches_dynamic_communication_context() -> Non
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",
-            "input": {"path": "Downloads", "pattern": "*.pdf", "file_type": "pdf"},
+            "input": {
+                "path": "Downloads",
+                "pattern": "*.pdf",
+                "file_type": "pdf",
+                "selection": "latest",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_communication_context",
             "continue_to_model": True,
