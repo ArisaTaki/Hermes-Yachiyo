@@ -5904,6 +5904,72 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
     assert _step_by_id(browser_surface_decision, "open-web-search").tool_name == (
         "browser.open_url"
     )
+
+    readback_summary_prompt = "打开任意浏览器搜索 Hermes agent architecture 并总结"
+    readback_summary_allowed = ["browser.open_url", "browser.extract_text", "browser.search"]
+    readback_summary = RuntimePlanner().decision(
+        readback_summary_prompt,
+        allowed_tools=readback_summary_allowed,
+    )
+    assert readback_summary.selected_intent.kind == "web_research"
+    assert readback_summary.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=Hermes+agent+architecture",
+        "browser_action": "open_search",
+        "query": "Hermes agent architecture",
+        "post_open_action": "extract_text",
+    }
+    assert [step.step_id for step in readback_summary.plan.tool_plan.steps] == [
+        "open-web-search",
+        "extract-opened-web-content",
+    ]
+    assert _step_by_id(readback_summary, "open-web-search").tool_name == (
+        "browser.open_url"
+    )
+    assert _step_by_id(readback_summary, "extract-opened-web-content").tool_name == (
+        "browser.extract_text"
+    )
+    expected_readback_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://www.google.com/search?q=Hermes+agent+architecture"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        },
+    ]
+    assert planner_tool_requests(
+        readback_summary_prompt,
+        readback_summary_allowed,
+    ) == expected_readback_requests
+    readback_selection = planner_first_direct_tool_selection(
+        readback_summary_prompt,
+        readback_summary_allowed,
+    )
+    assert readback_selection.selected_source == "runtime_planner"
+    assert readback_selection.requests == expected_readback_requests
+
+    search_summary_requests = planner_tool_requests(
+        readback_summary_prompt,
+        ["browser.search"],
+    )
+    assert search_summary_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.search",
+            "input": {"query": "Hermes agent architecture"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
     for prompt in (
         "用默认浏览器搜索 Oha Yachiyo desktop agent",
         "用任意可用的浏览器搜索 Oha Yachiyo desktop agent",

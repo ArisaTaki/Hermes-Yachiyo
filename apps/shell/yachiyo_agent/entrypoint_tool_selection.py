@@ -316,10 +316,12 @@ def _runtime_planner_web_research_owns_selection(requests: list[dict[str, Any]])
         "desktop.focus_app",
         "browser.current_page",
         "browser.click",
+        "browser.extract",
         "browser.extract_text",
         "browser.open_url",
         "browser.open_url_and_extract_text",
         "browser.open_url_and_screenshot",
+        "browser.search",
         "browser.screenshot",
         "browser.type_text",
     }

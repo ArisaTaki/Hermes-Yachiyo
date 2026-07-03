@@ -5640,6 +5640,7 @@ class RuntimePlanner:
                 *([prepare_step] if prepare_step is not None else []),
                 main_step,
             ]
+            content_depends_on = main_step.step_id
             if browser_action in {"open_search", "open_url"}:
                 steps = _append_web_open_followup_steps(
                     intent,
@@ -5647,6 +5648,34 @@ class RuntimePlanner:
                     steps,
                     depends_on=main_step.step_id,
                 )
+                if steps:
+                    content_depends_on = steps[-1].step_id
+            if (
+                browser_action in {"open_search", "open_url"}
+                and str(intent.inputs.get("post_open_action") or "").strip() == "extract_text"
+                and tool_name not in {"browser.search"}
+            ):
+                readback_tool = _first_allowed(
+                    ("browser.extract_text", "browser.current_page", "browser.extract"),
+                    allowed,
+                )
+                if readback_tool:
+                    readback_step = _step(
+                        intent,
+                        "extract-opened-web-content",
+                        "Extract opened web content",
+                        "browser.research",
+                        readback_tool,
+                        input_preview={},
+                        depends_on=[content_depends_on],
+                        action="extract_text",
+                        reason=(
+                            "Read the opened search or URL result before producing the "
+                            "requested summary or report."
+                        ),
+                    )
+                    steps.append(readback_step)
+                    content_depends_on = readback_step.step_id
             artifact_path = ""
             if (
                 not target_app
@@ -5671,7 +5700,7 @@ class RuntimePlanner:
                         input_preview={
                             "path": artifact_path
                         },
-                        depends_on=[main_step.step_id],
+                        depends_on=[content_depends_on],
                         reason="Persist the requested browser-derived report as a replayable artifact.",
                     )
                 )
@@ -5680,14 +5709,14 @@ class RuntimePlanner:
                     intent,
                     allowed,
                     steps,
-                    depends_on=main_step.step_id,
+                    depends_on=content_depends_on,
                 )
             if _task_output_target_hint(intent.user_goal) == "clipboard":
                 steps.append(
                     _clipboard_output_step(
                         intent,
                         allowed,
-                        depends_on=[main_step.step_id],
+                        depends_on=[content_depends_on],
                         body_source=_web_clipboard_body_source(browser_action),
                     )
                 )
@@ -10675,6 +10704,9 @@ def _normalize_intent_for_allowed_tools(
     if allowed is None or intent.kind != "web_research":
         return intent
     browser_action = str(intent.inputs.get("browser_action") or "").strip()
+    readable_after_open = bool(
+        allowed & {"browser.extract_text", "browser.current_page", "browser.extract"}
+    )
     if (
         browser_action == "open_url_extract"
         and "browser.open_url_and_extract_text" not in allowed
@@ -10685,6 +10717,8 @@ def _normalize_intent_for_allowed_tools(
         )
     ):
         inputs = dict(intent.inputs)
+        if readable_after_open:
+            inputs["post_open_action"] = "extract_text"
         if inputs.get("query") and ("browser.open_url" in allowed or "browser.search" in allowed):
             inputs["browser_action"] = "open_search"
         else:

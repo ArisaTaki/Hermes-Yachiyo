@@ -4274,6 +4274,8 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
     requests = [*prepare_requests, request]
     if browser_action in {"open_search", "open_url", "open_url_screenshot"}:
         requests.extend(_web_open_followup_tool_requests(decision, allowed))
+    if browser_action in {"open_search", "open_url"}:
+        requests.extend(_web_open_readback_tool_requests(decision, allowed))
     return requests
 
 
@@ -4299,6 +4301,26 @@ def _web_open_followup_tool_requests(decision: Any, allowed: set[str]) -> list[d
             )
         )
     return requests
+
+
+def _web_open_readback_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+    step = _tool_plan_step(decision, "extract-opened-web-content")
+    tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if not tool_name or tool_name not in allowed or not _step_available(step):
+        return []
+    if tool_name not in {"browser.extract_text", "browser.current_page", "browser.extract"}:
+        return []
+    request = _request(
+        tool_name,
+        {},
+        planning_reason="planner_fallback_web_research",
+    )
+    presentation = str(decision.selected_intent.inputs.get("presentation") or "").strip()
+    if presentation:
+        request["presentation"] = presentation
+    if _web_read_request_needs_model_followup(decision, tool_name, presentation):
+        request["continue_to_model"] = True
+    return [request]
 
 
 def _tool_plan_step(decision: Any, step_id: str) -> Any | None:
