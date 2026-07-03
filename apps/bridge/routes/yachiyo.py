@@ -16,6 +16,7 @@ from apps.bridge.routes.yachiyo_models import (
     PlanExecutionBody,
     PlanTaskBody,
     RerunRunBody,
+    RunReplanRecoveryActionBody,
     RestrictedToolPluginInstallBody,
     RestrictedToolPluginUpdateBody,
     SkillFolderBody,
@@ -666,6 +667,19 @@ async def rerun_studio_run(
     request_body: RerunRunBody | None = None,
 ) -> dict[str, Any]:
     return await yachiyo_studio_handlers.rerun_run(run_id, request_body, http_request)
+
+
+@router.post("/studio/runs/{run_id}/replan-recovery-actions/start")
+async def start_studio_run_replan_recovery_action(
+    run_id: str,
+    request: RunReplanRecoveryActionBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_studio_handlers.start_replan_recovery_action(
+        run_id,
+        request,
+        http_request,
+    )
 
 
 @router.post("/studio/runs/{run_id}/cancel")

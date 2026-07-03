@@ -111,7 +111,9 @@ type PlannerFollowupTarget = {
 
 type PlannerTraceInspectorProps = {
   events?: PublicRunEvent[];
+  onRunReplanRecoveryAction?: (requestId: string, action: RuntimeToolRecoveryAction) => void | Promise<void>;
   plannerSummary?: PlannerTraceSummarySnapshot | null;
+  recoveryActionDisabled?: boolean;
   replanRecoveries?: ReplanRecoverySnapshot[];
   sourceLabel?: string;
   taskCore?: TaskCoreSnapshot | null;
@@ -121,7 +123,9 @@ type PlannerTraceInspectorProps = {
 
 export function PlannerTraceInspector({
   events = [],
+  onRunReplanRecoveryAction,
   plannerSummary = null,
+  recoveryActionDisabled = false,
   replanRecoveries = [],
   sourceLabel = 'Intent / Capability / Plan 的 Runtime Planner replay 事实',
   taskCore: taskCoreFallback = null,
@@ -267,12 +271,20 @@ export function PlannerTraceInspector({
         {taskCore ? <TaskCoreInspector taskCore={taskCore} /> : null}
         {taskProgress || replanRecoveries.length ? (
           <TaskProgressInspector
+            onRunReplanRecoveryAction={onRunReplanRecoveryAction}
+            recoveryActionDisabled={recoveryActionDisabled}
             replanRecoveries={replanRecoveries}
             taskProgress={taskProgress}
           />
         ) : null}
 
-        {replanRequests.length ? <ReplanRequestInspector requests={replanRequests} /> : null}
+        {replanRequests.length ? (
+          <ReplanRequestInspector
+            onRunReplanRecoveryAction={onRunReplanRecoveryAction}
+            recoveryActionDisabled={recoveryActionDisabled}
+            requests={replanRequests}
+          />
+        ) : null}
         {executionRequests.length ? <ExecutionRequestInspector requests={executionRequests} /> : null}
         {capabilityRecovery.length ? (
           <PlannerCapabilityRecoveryInspector recoveries={capabilityRecovery} />
@@ -658,9 +670,13 @@ export function TaskCoreInspector({ taskCore }: { taskCore: TaskCoreSnapshot }) 
 }
 
 export function TaskProgressInspector({
+  onRunReplanRecoveryAction,
+  recoveryActionDisabled = false,
   replanRecoveries,
   taskProgress,
 }: {
+  onRunReplanRecoveryAction?: (requestId: string, action: RuntimeToolRecoveryAction) => void | Promise<void>;
+  recoveryActionDisabled?: boolean;
   replanRecoveries: ReplanRecoverySnapshot[];
   taskProgress: TaskProgressSummarySnapshot | null;
 }) {
@@ -713,14 +729,27 @@ export function TaskProgressInspector({
           </>
         ) : null}
         {recoveries.slice(0, 6).map((recovery) => (
-          <ReplanRecoverySnapshotPill key={`recovery:${recovery.request_id}`} recovery={recovery} />
+          <ReplanRecoverySnapshotPill
+            key={`recovery:${recovery.request_id}`}
+            onRunReplanRecoveryAction={onRunReplanRecoveryAction}
+            recovery={recovery}
+            recoveryActionDisabled={recoveryActionDisabled}
+          />
         ))}
       </div>
     </section>
   );
 }
 
-function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnapshot }) {
+function ReplanRecoverySnapshotPill({
+  onRunReplanRecoveryAction,
+  recovery,
+  recoveryActionDisabled = false,
+}: {
+  onRunReplanRecoveryAction?: (requestId: string, action: RuntimeToolRecoveryAction) => void | Promise<void>;
+  recovery: ReplanRecoverySnapshot;
+  recoveryActionDisabled?: boolean;
+}) {
   const label = (
     recovery.recovery_action_label
     || recovery.selected_tool_name
@@ -782,6 +811,8 @@ function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnap
           action={action}
           index={index}
           key={`${recovery.request_id}:recovery-action:${action.tool}:${index}`}
+          onRunReplanRecoveryAction={onRunReplanRecoveryAction}
+          recoveryActionDisabled={recoveryActionDisabled}
           requestId={recovery.request_id}
         />
       ))}
@@ -861,7 +892,15 @@ function coordinateValue(value: unknown): string {
   return '';
 }
 
-function ReplanRequestInspector({ requests }: { requests: TaskReplanRequestSnapshot[] }) {
+function ReplanRequestInspector({
+  onRunReplanRecoveryAction,
+  recoveryActionDisabled = false,
+  requests,
+}: {
+  onRunReplanRecoveryAction?: (requestId: string, action: RuntimeToolRecoveryAction) => void | Promise<void>;
+  recoveryActionDisabled?: boolean;
+  requests: TaskReplanRequestSnapshot[];
+}) {
   return (
     <section data-replan-request-count={requests.length} data-testid="agent-run-detail-replan-requests">
       <div className="studio-tool-inspector-heading">
@@ -955,6 +994,8 @@ function ReplanRequestInspector({ requests }: { requests: TaskReplanRequestSnaps
                   action={action}
                   index={index}
                   key={`${request.request_id}:recovery:${action.tool}:${index}`}
+                  onRunReplanRecoveryAction={onRunReplanRecoveryAction}
+                  recoveryActionDisabled={recoveryActionDisabled}
                   requestId={request.request_id}
                 />
               ))}
@@ -987,21 +1028,28 @@ function ReplanRequestInspector({ requests }: { requests: TaskReplanRequestSnaps
 function ReplanRecoveryActionPill({
   action,
   index,
+  onRunReplanRecoveryAction,
+  recoveryActionDisabled = false,
   requestId,
 }: {
   action: RuntimeToolRecoveryAction;
   index: number;
+  onRunReplanRecoveryAction?: (requestId: string, action: RuntimeToolRecoveryAction) => void | Promise<void>;
+  recoveryActionDisabled?: boolean;
   requestId: string;
 }) {
   const inputPreview = plannerValuePreview(action.input);
   const recommendedTools = uniqueStrings(action.recommended_tools || []);
+  const canRun = Boolean(onRunReplanRecoveryAction && action.action_id);
+  const label = action.label || action.prompt || action.tool;
   return (
-    <span
+    <button
+      type="button"
       className="studio-tool-permission"
       data-replan-recovery-action-approval-required={String(action.approval_required === true)}
       data-replan-recovery-action-id={action.action_id || ''}
       data-replan-recovery-input={inputPreview}
-      data-replan-recovery-label={action.label || action.prompt || action.tool}
+      data-replan-recovery-label={label}
       data-replan-recovery-permission-target={action.permission_target || ''}
       data-replan-recovery-request-id={requestId}
       data-replan-recovery-risk={action.risk_level || ''}
@@ -1009,12 +1057,14 @@ function ReplanRecoveryActionPill({
       data-replan-recovery-tool={action.tool}
       data-replan-recovery-tool-index={index}
       data-replan-recovery-tools={recommendedTools.join(',')}
+      disabled={recoveryActionDisabled || !canRun}
+      onClick={() => void onRunReplanRecoveryAction?.(requestId, action)}
       title={[action.prompt, inputPreview].filter(Boolean).join(' · ')}
     >
       recovery · {action.label || action.tool}
       {action.tool ? ` · ${action.tool}` : ''}
       {inputPreview ? ` · input: ${inputPreview}` : ''}
-    </span>
+    </button>
   );
 }
 

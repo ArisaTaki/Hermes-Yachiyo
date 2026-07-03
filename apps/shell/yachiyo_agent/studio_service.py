@@ -23,6 +23,8 @@ from .contracts import (
     PlannerDecisionSnapshot,
     PlannerOrchestrationStartSnapshot,
     PublicRunEvent,
+    ReplanRecoveryActionSnapshot,
+    ReplanRecoverySnapshot,
     RerunRunRequest,
     RuntimeExecutionEnvelopeSnapshot,
     RunEventPageSnapshot,
@@ -682,6 +684,47 @@ class AgentStudioService:
             )
         )
 
+    def start_replan_recovery_action(
+        self,
+        run_id: str,
+        request: Mapping[str, Any],
+    ) -> RunTimelineSnapshot:
+        payload = _request_payload(request)
+        source_run = self.get_run_timeline(run_id)
+        request_id = str(payload.get("request_id") or "").strip()
+        if not request_id:
+            raise AgentRuntimeError("Replan recovery request_id is required")
+        recovery, action = _find_replan_recovery_action(
+            getattr(source_run, "replan_recoveries", []),
+            request_id=request_id,
+            action_id=str(payload.get("action_id") or "").strip(),
+        )
+        agent_id = str(payload.get("agent_id") or getattr(source_run, "agent_id", "") or "").strip()
+        if not agent_id:
+            raise AgentRuntimeError("Replan recovery action requires an agent_id")
+
+        objective = _replan_recovery_action_objective(action)
+        direct_request = _replan_recovery_action_direct_request(
+            recovery,
+            action,
+            continue_to_model=bool(payload.get("continue_to_model", True)),
+        )
+        start_payload: dict[str, Any] = {
+            "agent_id": agent_id,
+            "objective": objective,
+            "title": str(payload.get("title") or action.label or objective).strip(),
+            "client_run_id": str(payload.get("client_run_id") or "").strip() or None,
+            "metadata": _replan_recovery_action_metadata(
+                source_run,
+                recovery,
+                action,
+                payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {},
+            ),
+            "direct_tool_requests": [direct_request],
+            "daily_desktop_planning_context": objective,
+        }
+        return self.start_agent_run(start_payload)
+
     def list_groups(self) -> list[AgentGroupSnapshot]:
         return [
             agent_group_snapshot_from_payload(item)
@@ -1049,6 +1092,117 @@ def _request_payload(request: Any) -> dict[str, Any]:
     if hasattr(request, "model_dump"):
         return request.model_dump(exclude_none=True, by_alias=True)
     return dict(request)
+
+
+def _find_replan_recovery_action(
+    recoveries: Iterable[ReplanRecoverySnapshot],
+    *,
+    request_id: str,
+    action_id: str,
+) -> tuple[ReplanRecoverySnapshot, ReplanRecoveryActionSnapshot]:
+    for recovery in recoveries:
+        if str(recovery.request_id or "").strip() != request_id:
+            continue
+        actions = [
+            action
+            for action in recovery.recovery_actions
+            if str(action.tool or "").strip()
+        ]
+        if not actions:
+            raise AgentRuntimeError("Replan recovery has no executable actions")
+        if action_id:
+            for action in actions:
+                if str(action.action_id or "").strip() == action_id:
+                    return recovery, action
+            raise AgentRuntimeError("Replan recovery action_id was not found")
+        if len(actions) == 1:
+            return recovery, actions[0]
+        raise AgentRuntimeError("Replan recovery action_id is required")
+    raise AgentRuntimeError("Replan recovery request_id was not found")
+
+
+def _replan_recovery_action_objective(action: ReplanRecoveryActionSnapshot) -> str:
+    label = str(action.label or "").strip()
+    tool = str(action.tool or "").strip()
+    if label and label != tool:
+        return f"执行恢复动作：{label}"
+    return f"执行恢复动作：{tool}"
+
+
+def _replan_recovery_action_direct_request(
+    recovery: ReplanRecoverySnapshot,
+    action: ReplanRecoveryActionSnapshot,
+    *,
+    continue_to_model: bool,
+) -> dict[str, Any]:
+    request = {
+        "tool": str(action.tool or "").strip(),
+        "input": dict(action.input or {}),
+        "source": "agent_studio_replan_recovery",
+        "planning_reason": str(
+            action.planning_reason
+            or recovery.planning_reason
+            or "planner_replan_runtime_recovery_action"
+        ),
+        "replan_request_id": str(recovery.request_id or ""),
+        "replan_trigger": str(recovery.trigger or ""),
+        "recovery_action_label": str(action.label or recovery.recovery_action_label or ""),
+        "permission_target": str(action.permission_target or recovery.permission_target or ""),
+        "risk_level": str(action.risk_level or recovery.risk_level or ""),
+        "selected": True,
+    }
+    if continue_to_model:
+        request["continue_to_model"] = True
+    for key, value in (
+        ("step_id", recovery.source_step_id),
+        ("capability_id", recovery.target_capability_id),
+        ("action_id", action.action_id),
+    ):
+        if value:
+            request[key] = value
+    for key in ("action_target", "observation_evidence", "observation_retry"):
+        value = getattr(action, key) or getattr(recovery, key)
+        if isinstance(value, Mapping) and value:
+            request[key] = dict(value)
+    verification_targets = action.verification_targets or recovery.verification_targets
+    if verification_targets:
+        request["verification_targets"] = [dict(target) for target in verification_targets]
+    return request
+
+
+def _replan_recovery_action_metadata(
+    source_run: Any,
+    recovery: ReplanRecoverySnapshot,
+    action: ReplanRecoveryActionSnapshot,
+    extra: Mapping[str, Any],
+) -> dict[str, Any]:
+    metadata = dict(extra)
+    metadata.update(
+        {
+            "daily_desktop_intent": True,
+            "desktop_permission_recovery": True,
+            "recovery_tool": str(action.tool or "").strip(),
+            "recovery_input": dict(action.input or {}),
+            "recovery_permission_target": str(
+                action.permission_target or recovery.permission_target or ""
+            ),
+            "recovery_risk_level": str(action.risk_level or recovery.risk_level or ""),
+            "replan_request_id": str(recovery.request_id or ""),
+            "replan_recovery_action_id": str(action.action_id or ""),
+            "replan_trigger": str(recovery.trigger or ""),
+            "source": "agent_studio_replan_recovery",
+            "source_run_id": str(getattr(source_run, "run_id", "") or ""),
+        }
+    )
+    source_task_id = str(getattr(source_run, "task_id", "") or recovery.task_id or "").strip()
+    if source_task_id:
+        metadata["source_task_id"] = source_task_id
+    source_title = str(getattr(source_run, "title", "") or "").strip()
+    if source_title:
+        metadata["source_task_title"] = source_title
+    if action.approval_required:
+        metadata["recovery_action_approval_required"] = True
+    return metadata
 
 
 def _rejection_payload(

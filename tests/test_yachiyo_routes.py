@@ -7895,12 +7895,13 @@ async def test_yachiyo_studio_routes_wrap_legacy_runtime_shapes(tmp_path: Path) 
         {
             "agent_id": "agent-1",
             "user_goal": "Draft summary",
-            "source": "yachiyo_studio",
-            "client_run_id": "client-agent-1",
-            "run_group_id": None,
-            "runtime_planner_entrypoint": True,
-        },
-    ) in runtime.calls
+                "source": "yachiyo_studio",
+                "client_run_id": "client-agent-1",
+                "run_group_id": None,
+                "daily_desktop_policy_overlay": True,
+                "runtime_planner_entrypoint": True,
+            },
+        ) in runtime.calls
     group_started_events = [
         call[1]
         for call in runtime.calls
@@ -8545,6 +8546,7 @@ def test_yachiyo_studio_routes_include_run_action_facade() -> None:
     assert '@router.get("/studio/runs")' in source
     assert '@router.get("/studio/runs/{run_id}")' in source
     assert '@router.post("/studio/runs/{run_id}/rerun")' in source
+    assert '@router.post("/studio/runs/{run_id}/replan-recovery-actions/start")' in source
     assert '@router.post("/studio/runs/{run_id}/cancel")' in source
     assert '@router.delete("/studio/runs/{run_id}")' in source
     assert '@router.post("/studio/runs/{run_id}/approval/approve")' in source

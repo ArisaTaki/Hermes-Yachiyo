@@ -122,3 +122,15 @@ class RerunRunBody(BaseModel):
     workflow_node_selected_target: str | None = Field(default=None, max_length=240)
     reason: str | None = Field(default=None, max_length=2000)
     metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class RunReplanRecoveryActionBody(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    request_id: str = Field(..., min_length=1, max_length=240)
+    action_id: str | None = Field(default=None, max_length=240)
+    agent_id: str | None = Field(default=None, max_length=160)
+    title: str | None = Field(default=None, max_length=1000)
+    client_run_id: str | None = Field(default=None, max_length=160)
+    continue_to_model: bool = True
+    metadata: dict[str, Any] = Field(default_factory=dict)

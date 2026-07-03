@@ -43,6 +43,16 @@ export type YachiyoStudioPlanExecutionRequest = YachiyoStudioPlanTaskRequest & {
 
 export type YachiyoStudioStartPlannerOrchestrationRequest = StartPlannerOrchestrationRequest;
 
+export type YachiyoStudioRunReplanRecoveryActionRequest = {
+  request_id: string;
+  action_id?: string;
+  agent_id?: string;
+  title?: string;
+  client_run_id?: string;
+  continue_to_model?: boolean;
+  metadata?: Record<string, unknown>;
+};
+
 export type YachiyoSkillSyncResult = {
   source?: string;
   source_type?: string;
@@ -471,6 +481,16 @@ export async function getYachiyoRunTimeline(runId: string): Promise<YachiyoRunTi
   return apiGet<YachiyoRunTimelineSnapshot>(publicPath).catch(() => (
     apiGet<YachiyoRunTimelineSnapshot>(legacyPath)
   ));
+}
+
+export async function startYachiyoRunReplanRecoveryAction(
+  runId: string,
+  request: YachiyoStudioRunReplanRecoveryActionRequest,
+): Promise<YachiyoRunTimelineSnapshot> {
+  return apiPost<YachiyoRunTimelineSnapshot>(
+    `/yachiyo/studio/runs/${encodeURIComponent(runId)}/replan-recovery-actions/start`,
+    request,
+  );
 }
 
 export async function listYachiyoWorkflows(): Promise<WorkflowSnapshot[]> {

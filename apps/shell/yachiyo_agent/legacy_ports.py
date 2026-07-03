@@ -1141,17 +1141,27 @@ class LegacyStudioPort:
         metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
         planner_metadata = _planner_metadata_with_desktop_readiness(metadata)
         agent_id = request.get("agent_id")
-        run = self._runtime.create_agent_run(
-            {
-                "agent_id": agent_id,
-                "user_goal": user_goal,
-                "source": "yachiyo_studio",
-                "client_run_id": request.get("client_run_id"),
-                "run_group_id": request.get("run_group_id"),
-                "daily_desktop_policy_overlay": True,
-                "runtime_planner_entrypoint": True,
-            }
-        )
+        run_payload: dict[str, Any] = {
+            "agent_id": agent_id,
+            "user_goal": user_goal,
+            "source": "yachiyo_studio",
+            "client_run_id": request.get("client_run_id"),
+            "run_group_id": request.get("run_group_id"),
+            "daily_desktop_policy_overlay": True,
+            "runtime_planner_entrypoint": True,
+        }
+        direct_tool_request = request.get("direct_tool_request")
+        if isinstance(direct_tool_request, dict):
+            run_payload["direct_tool_request"] = dict(direct_tool_request)
+        direct_tool_requests = request.get("direct_tool_requests")
+        if isinstance(direct_tool_requests, list):
+            run_payload["direct_tool_requests"] = [
+                dict(item) for item in direct_tool_requests if isinstance(item, dict)
+            ]
+        planning_context = str(request.get("daily_desktop_planning_context") or "").strip()
+        if planning_context:
+            run_payload["daily_desktop_planning_context"] = planning_context
+        run = self._runtime.create_agent_run(run_payload)
         self._append_planner_run_events(
             _run_id_from_payload(run),
             runtime_planner_decision(

@@ -62,6 +62,7 @@ import {
   type RuntimeToolRecoveryAction,
 } from '../features/runtime-shared/toolRecoveryActions';
 import { startYachiyoTask } from '../features/yachiyo-chat/api';
+import { startYachiyoRunReplanRecoveryAction } from '../features/yachiyo-studio/api';
 import type {
   PlannerOrchestrationStartSnapshot,
   ToolCallSnapshot,
@@ -243,6 +244,28 @@ export function AgentStudioView() {
     });
     return {
       statusMessage: `已创建恢复任务：${task.title || prompt}`,
+    };
+  };
+  const runReplanRecoveryAction = async (
+    runId: string,
+    requestId: string,
+    action: RuntimeToolRecoveryAction,
+  ) => {
+    if (!action.action_id) throw new Error('恢复动作缺少 action_id');
+    const run = await startYachiyoRunReplanRecoveryAction(runId, {
+      request_id: requestId,
+      action_id: action.action_id,
+      title: action.label || action.prompt || action.tool,
+      continue_to_model: true,
+      metadata: {
+        permission_target: action.permission_target,
+        source: 'agent_studio_replan_recovery',
+        source_run_id: runId,
+      },
+    });
+    return {
+      selectedRunId: run.run_id,
+      statusMessage: `已启动恢复 Run：${run.title || action.label || action.tool}`,
     };
   };
 
@@ -1102,6 +1125,10 @@ export function AgentStudioView() {
           onRequestDeleteSelectedRuns={requestDeleteSelectedRuns}
           onRerunSelectedRun={rerunSelectedRun}
           onRerunWorkflowScope={rerunWorkflowScope}
+          onRunReplanRecoveryAction={(runId, requestId, action) => void runAction(
+            () => runReplanRecoveryAction(runId, requestId, action),
+            `启动恢复 Run：${action.label || action.prompt || action.tool}`,
+          )}
           onRunAction={(action, label) => void runAction(action, label)}
           onRunToolRecoveryAction={(toolCall, action) => void runAction(
             () => runToolRecoveryAction(toolCall, action),

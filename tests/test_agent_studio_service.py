@@ -465,6 +465,51 @@ class _FakeStudioPort:
         }
 
 
+class _ReplanRecoveryActionPort(_FakeStudioPort):
+    def get_run_timeline(self, run_id: str) -> dict[str, Any]:
+        self.calls.append(("get_run_timeline", run_id))
+        return _run_payload(run_id=run_id, user_goal="Open Apple Music") | {
+            "agent_id": "agent-1",
+            "events": [
+                {
+                    "event_type": "agent.replan.requested",
+                    "payload": {
+                        "request_id": "replan-1",
+                        "trigger": "tool_failure",
+                        "run_id": run_id,
+                        "source_step_id": "open-app",
+                        "source_tool_name": "desktop.open_app",
+                        "target_capability_id": "desktop.app_discovery",
+                        "planning_reason": "planner_replan_runtime_recovery_action",
+                        "metadata": {
+                            "recovery_actions": [
+                                {
+                                    "action_id": "replan-1:action:1:desktop.list_apps",
+                                    "label": "Find Apple Music",
+                                    "tool": "desktop.list_apps",
+                                    "input": {"query": "Apple Music"},
+                                    "permission_target": "app_discovery",
+                                    "risk_level": "low",
+                                }
+                            ],
+                        },
+                    },
+                }
+            ],
+        }
+
+    def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("start_agent_run", request))
+        return _run_payload(
+            run_id="recovery-run-1",
+            runnable_id=request["agent_id"],
+            user_goal=request["objective"],
+        ) | {
+            "status": "running",
+            "timeline": [],
+        }
+
+
 def _planner_events_with_failed_analysis() -> list[dict[str, Any]]:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",
@@ -1343,6 +1388,34 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
     ) in port.calls
     assert ("list_group_runs", 5) in port.calls
     assert ("list_run_timelines", 10) in port.calls
+
+
+def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None:
+    port = _ReplanRecoveryActionPort()
+    service = AgentStudioService(port)
+
+    run = service.start_replan_recovery_action(
+        "run-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.list_apps",
+        },
+    )
+
+    assert run.run_id == "recovery-run-1"
+    request = _port_call_payload(port, "start_agent_run")
+    assert request["agent_id"] == "agent-1"
+    assert request["metadata"]["desktop_permission_recovery"] is True
+    assert request["metadata"]["recovery_tool"] == "desktop.list_apps"
+    assert request["metadata"]["replan_request_id"] == "replan-1"
+    assert request["metadata"]["source_run_id"] == "run-1"
+    direct_request = request["direct_tool_requests"][0]
+    assert direct_request["tool"] == "desktop.list_apps"
+    assert direct_request["input"] == {"query": "Apple Music"}
+    assert direct_request["source"] == "agent_studio_replan_recovery"
+    assert direct_request["planning_reason"] == "planner_replan_runtime_recovery_action"
+    assert direct_request["continue_to_model"] is True
+    assert direct_request["replan_request_id"] == "replan-1"
 
 
 def test_agent_studio_service_paginates_group_run_events_after_child_sequence_renumbering() -> None:

@@ -28,6 +28,7 @@ def test_legacy_studio_agent_run_appends_runtime_planner_events() -> None:
         "source": "yachiyo_studio",
         "client_run_id": "client-agent-run-1",
         "run_group_id": None,
+        "daily_desktop_policy_overlay": True,
         "runtime_planner_entrypoint": True,
     }
     events = runtime.events["agent-run-1"]
@@ -68,6 +69,38 @@ def test_legacy_studio_agent_run_does_not_duplicate_runtime_planner_events() -> 
     assert [event["event_type"] for event in runtime.events["agent-run-1"]] == [
         "agent.intent.selected"
     ]
+
+
+def test_legacy_studio_agent_run_forwards_direct_tool_requests() -> None:
+    runtime = _FakeStudioRunRuntime()
+
+    run = LegacyStudioPort(runtime).start_agent_run(
+        {
+            "agent_id": "agent-1",
+            "objective": "执行恢复动作：Find Apple Music",
+            "direct_tool_requests": [
+                {
+                    "tool": "desktop.list_apps",
+                    "input": {"query": "Apple Music"},
+                    "source": "agent_studio_replan_recovery",
+                }
+            ],
+            "daily_desktop_planning_context": "执行恢复动作：Find Apple Music",
+        }
+    )
+
+    assert run["run_id"] == "agent-run-1"
+    assert runtime.agent_run_payload is not None
+    assert runtime.agent_run_payload["direct_tool_requests"] == [
+        {
+            "tool": "desktop.list_apps",
+            "input": {"query": "Apple Music"},
+            "source": "agent_studio_replan_recovery",
+        }
+    ]
+    assert runtime.agent_run_payload["daily_desktop_planning_context"] == (
+        "执行恢复动作：Find Apple Music"
+    )
 
 
 def test_legacy_studio_workflow_run_appends_runtime_planner_events() -> None:

@@ -117,6 +117,9 @@ class RuntimeAgentRunExecutor:
         upstream: str = "",
         run_group_id: str = "",
         workflow_run_id: str = "",
+        direct_tool_request: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
+        daily_desktop_planning_context: str | None = None,
     ) -> dict[str, Any]:
         preparation = self._preparer.prepare(
             run_id,
@@ -137,13 +140,19 @@ class RuntimeAgentRunExecutor:
                 timeline,
                 artifacts,
                 daily_desktop_planning_context=(
-                    _runtime_planner_entrypoint_context(agent, user_goal)
-                    if (
-                        agent.get("_daily_desktop_policy_overlay") is True
-                        or agent.get("_runtime_planner_entrypoint") is True
+                    daily_desktop_planning_context
+                    if daily_desktop_planning_context is not None
+                    else (
+                        _runtime_planner_entrypoint_context(agent, user_goal)
+                        if (
+                            agent.get("_daily_desktop_policy_overlay") is True
+                            or agent.get("_runtime_planner_entrypoint") is True
+                        )
+                        else ""
                     )
-                    else ""
                 ),
+                direct_tool_request=direct_tool_request,
+                direct_tool_requests=direct_tool_requests,
                 run_id=run_id,
             )
             return self._agent_run_outcomes.completed(
@@ -206,6 +215,7 @@ class RuntimeAgentRunCoordinator:
         execute_kwargs = {
             "upstream": str(payload.get("upstream") or ""),
             "run_group_id": str(run.get("run_group_id") or ""),
+            **_agent_run_execution_options(payload),
         }
         workflow_run_id = str(payload.get("workflow_run_id") or "").strip()
         if workflow_run_id:
@@ -293,6 +303,7 @@ class RuntimeAgentRunAsyncCoordinator:
                 execute_kwargs = {
                     "upstream": str(payload.get("upstream") or ""),
                     "run_group_id": str(run.get("run_group_id") or ""),
+                    **_agent_run_execution_options(payload),
                 }
                 workflow_run_id = str(payload.get("workflow_run_id") or "").strip()
                 if workflow_run_id:
@@ -399,13 +410,15 @@ def _with_daily_desktop_policy_overlay(agent: dict[str, Any], payload: dict[str,
     user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
     if _looks_like_daily_desktop_howto_question(user_goal):
         return agent
-    _decision, direct_requests = planner_first_direct_decision_and_tool_requests(
-        user_goal,
-        list(DAILY_DESKTOP_TOOL_NAMES),
-        legacy_tool_requests=daily_desktop_entrypoint_tool_requests,
-    )
+    direct_requests = _payload_direct_tool_requests(payload)
     if not direct_requests:
-        return agent
+        _decision, direct_requests = planner_first_direct_decision_and_tool_requests(
+            user_goal,
+            list(DAILY_DESKTOP_TOOL_NAMES),
+            legacy_tool_requests=daily_desktop_entrypoint_tool_requests,
+        )
+        if not direct_requests:
+            return agent
     policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
     allowed = _string_list(policy.get("allowed_tools"))
     approval_required = dict(policy.get("approval_required")) if isinstance(policy.get("approval_required"), dict) else {}
@@ -418,6 +431,39 @@ def _with_daily_desktop_policy_overlay(agent: dict[str, Any], payload: dict[str,
             "approval_required": approval_required,
         },
     }
+
+
+def _agent_run_execution_options(payload: dict[str, Any]) -> dict[str, Any]:
+    options: dict[str, Any] = {}
+    direct_tool_request = payload.get("direct_tool_request")
+    if isinstance(direct_tool_request, dict):
+        options["direct_tool_request"] = dict(direct_tool_request)
+    direct_tool_requests = _payload_direct_tool_requests(payload)
+    if direct_tool_requests:
+        options["direct_tool_requests"] = direct_tool_requests
+    if "daily_desktop_planning_context" in payload:
+        options["daily_desktop_planning_context"] = str(
+            payload.get("daily_desktop_planning_context") or ""
+        )
+    return options
+
+
+def _payload_direct_tool_requests(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    value = payload.get("direct_tool_requests")
+    raw_items: list[Any] = list(value) if isinstance(value, list) else []
+    single = payload.get("direct_tool_request")
+    if isinstance(single, dict):
+        raw_items.insert(0, single)
+    requests: list[dict[str, Any]] = []
+    for item in raw_items:
+        if not isinstance(item, dict):
+            continue
+        tool_name = str(item.get("tool") or "").strip()
+        if not tool_name:
+            continue
+        request_input = item.get("input") if isinstance(item.get("input"), dict) else {}
+        requests.append({**item, "tool": tool_name, "input": dict(request_input)})
+    return requests
 
 
 def _looks_like_daily_desktop_howto_question(text: str) -> bool:

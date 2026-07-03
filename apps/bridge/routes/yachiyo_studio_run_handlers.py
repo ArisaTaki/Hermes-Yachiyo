@@ -7,7 +7,11 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
-from apps.bridge.routes.yachiyo_models import RerunRunBody, TaskApprovalRequest
+from apps.bridge.routes.yachiyo_models import (
+    RerunRunBody,
+    RunReplanRecoveryActionBody,
+    TaskApprovalRequest,
+)
 from apps.bridge.routes.yachiyo_services import (
     bad_request,
     snapshot,
@@ -47,6 +51,24 @@ async def rerun_run(
     try:
         run_snapshot = await asyncio.to_thread(
             studio_service(http_request).rerun_run,
+            run_id,
+            request,
+        )
+        return snapshot(run_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Run 不存在") from exc
+    except AgentRuntimeError as exc:
+        raise bad_request(exc) from exc
+
+
+async def start_replan_recovery_action(
+    run_id: str,
+    request: RunReplanRecoveryActionBody,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        run_snapshot = await asyncio.to_thread(
+            studio_service(http_request).start_replan_recovery_action,
             run_id,
             request,
         )

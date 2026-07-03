@@ -64,6 +64,7 @@ export function RunDetailPanel({
   onRejectRunById,
   onRejectSelectedRun,
   onRequestCancelSelectedRun,
+  onRunReplanRecoveryAction,
   onRunToolRecoveryAction,
   onRerunSelectedRun,
   onRerunWorkflowScope,
@@ -124,6 +125,11 @@ export function RunDetailPanel({
   onRejectRunById: (runId: string, nextSelectedRunId?: string) => Promise<unknown>;
   onRejectSelectedRun: () => Promise<unknown>;
   onRequestCancelSelectedRun: () => void;
+  onRunReplanRecoveryAction?: (
+    runId: string,
+    requestId: string,
+    action: RuntimeToolRecoveryAction,
+  ) => Promise<unknown> | unknown;
   onRunToolRecoveryAction?: (
     toolCall: ToolCallSnapshot,
     action: RuntimeToolRecoveryAction,
@@ -393,7 +399,17 @@ export function RunDetailPanel({
           />
           <PlannerTraceInspector
             events={selectedRunPlannerEvents}
+            onRunReplanRecoveryAction={(
+              selectedPublicRunTimeline?.run_id || selectedRun.run_id
+            ) ? (requestId, action) => {
+              void onRunReplanRecoveryAction?.(
+                selectedPublicRunTimeline?.run_id || selectedRun.run_id,
+                requestId,
+                action,
+              );
+            } : undefined}
             plannerSummary={selectedPublicRunTimeline?.planner_summary}
+            recoveryActionDisabled={busy || !onRunReplanRecoveryAction}
             replanRecoveries={selectedPublicRunTimeline?.replan_recoveries || []}
             sourceLabel={plannerTraceSource}
             taskCore={selectedPublicRunTimeline?.task_core}

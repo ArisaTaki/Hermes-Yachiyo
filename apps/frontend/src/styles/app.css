@@ -15444,6 +15444,17 @@ button.activity-item {
   overflow-wrap: anywhere;
 }
 
+button.studio-tool-permission {
+  cursor: pointer;
+  font-family: inherit;
+  text-align: left;
+}
+
+button.studio-tool-permission:disabled {
+  cursor: default;
+  opacity: 0.62;
+}
+
 .studio-tool-permission.missing {
   border-color: oklch(76% 0.12 86 / 0.36);
   background: oklch(76% 0.12 86 / 0.12);
