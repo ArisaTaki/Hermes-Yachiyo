@@ -1148,6 +1148,7 @@ class LegacyStudioPort:
                 "source": "yachiyo_studio",
                 "client_run_id": request.get("client_run_id"),
                 "run_group_id": request.get("run_group_id"),
+                "daily_desktop_policy_overlay": True,
                 "runtime_planner_entrypoint": True,
             }
         )

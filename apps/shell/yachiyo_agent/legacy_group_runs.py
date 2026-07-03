@@ -99,6 +99,7 @@ def start_legacy_group_run(
             client_run_id=child_client_run_id,
             on_complete=on_member_complete,
             agent_override=group_member_agent_override(runtime, member, group),
+            daily_desktop_policy_overlay=True,
             runtime_planner_entrypoint=True,
         )
         if not run_group_id:

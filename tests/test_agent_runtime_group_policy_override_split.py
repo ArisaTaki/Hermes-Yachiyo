@@ -12,6 +12,7 @@ from apps.shell.agent.runtime.agent_runs import (
     RuntimeAgentRunAsyncCoordinator,
 )
 from apps.shell.agent.runtime.runnables import RuntimeRunnableRunCoordinator
+from apps.shell.yachiyo_agent.legacy_groups import create_runnable_run
 
 
 def test_runnable_run_coordinator_passes_agent_override_to_async_agent_run() -> None:
@@ -46,6 +47,27 @@ def test_runnable_run_coordinator_passes_agent_override_to_async_agent_run() -> 
     assert captured["payload"]["agent_override"] is override
     assert captured["payload"]["runtime_planner_entrypoint"] is True
     assert run["runnable"] == {"kind": "agent", "id": "agent-desktop"}
+
+
+def test_create_runnable_run_passes_daily_desktop_overlay_to_async_runtime() -> None:
+    captured: dict[str, Any] = {}
+
+    class Runtime:
+        def create_run_for_runnable_async(self, **payload: Any) -> dict[str, Any]:
+            captured["payload"] = payload
+            return {"run_id": "run-agent", "status": "processing"}
+
+    run = create_runnable_run(
+        Runtime(),
+        runnable_id="agent-desktop",
+        user_goal="打开 PixelForge",
+        daily_desktop_policy_overlay=True,
+        runtime_planner_entrypoint=True,
+    )
+
+    assert run["run_id"] == "run-agent"
+    assert captured["payload"]["daily_desktop_policy_overlay"] is True
+    assert captured["payload"]["runtime_planner_entrypoint"] is True
 
 
 def test_agent_run_async_uses_agent_override_without_persisted_lookup() -> None:

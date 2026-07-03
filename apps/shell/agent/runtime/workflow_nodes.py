@@ -6,8 +6,13 @@ from dataclasses import dataclass
 from typing import Any
 
 from apps.shell.agent.runtime.callbacks import supports_keyword
+from apps.shell.agent.runtime.desktop_intents import daily_desktop_entrypoint_tool_requests
 from apps.shell.agent.runtime.events import tool_input_preview as _tool_input_preview
 from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broker
+from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
+from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
+    planner_first_direct_tool_selection,
+)
 
 
 @dataclass(frozen=True)
@@ -57,11 +62,103 @@ def _agent_with_runtime_planner_entrypoint(
     *,
     planning_context: str,
 ) -> dict[str, Any]:
-    return {
+    enriched = {
         **agent,
         "_runtime_planner_entrypoint": True,
         "_runtime_planner_entrypoint_context": str(planning_context or "").strip(),
     }
+    return _agent_with_daily_desktop_policy_overlay(
+        enriched,
+        planning_context=planning_context,
+    )
+
+
+def _agent_with_daily_desktop_policy_overlay(
+    agent: dict[str, Any],
+    *,
+    planning_context: str,
+) -> dict[str, Any]:
+    clean_context = str(planning_context or "").strip()
+    if not clean_context or _looks_like_daily_desktop_howto_question(clean_context):
+        return agent
+    try:
+        selection = planner_first_direct_tool_selection(
+            clean_context,
+            list(DAILY_DESKTOP_TOOL_NAMES),
+            legacy_tool_requests=daily_desktop_entrypoint_tool_requests,
+        )
+    except Exception:
+        direct_requests = []
+        decision = None
+    else:
+        direct_requests = selection.requests
+        decision = selection.decision
+    if not direct_requests:
+        return agent
+    if not _decision_supports_daily_desktop_policy_overlay(decision):
+        return agent
+    policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
+    allowed = _string_list(policy.get("allowed_tools"))
+    approval_required = (
+        dict(policy.get("approval_required"))
+        if isinstance(policy.get("approval_required"), dict)
+        else {}
+    )
+    return {
+        **agent,
+        "_daily_desktop_policy_overlay": True,
+        "tool_policy": {
+            **policy,
+            "allowed_tools": _unique_tools([*allowed, *DAILY_DESKTOP_TOOL_NAMES]),
+            "approval_required": approval_required,
+        },
+    }
+
+
+def _decision_supports_daily_desktop_policy_overlay(decision: Any) -> bool:
+    intent = getattr(decision, "selected_intent", None)
+    kind = str(getattr(intent, "kind", "") or "").strip()
+    return kind in {
+        "desktop_operation",
+        "media_playback",
+        "system_control",
+        "clipboard_operation",
+        "web_research",
+        "information_capture",
+        "communication",
+        "schedule",
+    }
+
+
+def _looks_like_daily_desktop_howto_question(text: str) -> bool:
+    lowered = str(text or "").strip().lower()
+    return bool(
+        lowered
+        and (
+            lowered.startswith(("怎么", "如何", "怎样"))
+            or "怎么用" in lowered
+            or "如何用" in lowered
+            or lowered.startswith(("how do i ", "how to ", "how can i "))
+        )
+    )
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item or "").strip() for item in value if str(item or "").strip()]
+
+
+def _unique_tools(tools: list[str]) -> list[str]:
+    result: list[str] = []
+    seen: set[str] = set()
+    for tool in tools:
+        clean = str(tool or "").strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        result.append(clean)
+    return result
 
 
 @dataclass(frozen=True)

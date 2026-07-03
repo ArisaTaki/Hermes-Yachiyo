@@ -13,6 +13,7 @@ from apps.shell.yachiyo_agent.daily_desktop import daily_desktop_allowed_tools
 from apps.shell.yachiyo_agent.legacy_ports import (
     LegacyChatTaskStarter,
     LegacyRuntimePort as CompatLegacyRuntimePort,
+    LegacyStudioPort,
 )
 from apps.shell.yachiyo_agent.legacy_tasks import LegacyRuntimePort
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
@@ -2598,6 +2599,51 @@ def test_legacy_runtime_port_resolves_task_link_for_artifact_read() -> None:
     assert artifact["path"] == "reports/out.md"
     assert artifact["content"] == "# Report"
     assert ("read_run_artifact", {"run_id": "run-1", "artifact_path": "reports/out.md"}) in runtime.calls
+
+
+def test_legacy_studio_port_starts_agent_run_with_daily_desktop_overlay() -> None:
+    runtime = _StudioStartRuntime()
+    run = LegacyStudioPort(runtime).start_agent_run(
+        {
+            "agent_id": "agent-1",
+            "objective": "打开 PixelForge",
+            "client_run_id": "studio-run-1",
+        }
+    )
+
+    assert run["run_id"] == "studio-agent-run-1"
+    assert runtime.calls[0] == (
+        "create_agent_run",
+        {
+            "agent_id": "agent-1",
+            "user_goal": "打开 PixelForge",
+            "source": "yachiyo_studio",
+            "client_run_id": "studio-run-1",
+            "run_group_id": None,
+            "daily_desktop_policy_overlay": True,
+            "runtime_planner_entrypoint": True,
+        },
+    )
+
+
+class _StudioStartRuntime:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Any]] = []
+
+    def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("create_agent_run", payload))
+        return {
+            "run_id": "studio-agent-run-1",
+            "kind": "agent_run",
+            "status": "running",
+            "timeline": [],
+        }
+
+    def get_agent(self, agent_id: str) -> dict[str, Any]:
+        return {
+            "agent_id": agent_id,
+            "tool_policy": {"allowed_tools": ["workspace.read"], "approval_required": {}},
+        }
 
 
 class _FakeRuntime:

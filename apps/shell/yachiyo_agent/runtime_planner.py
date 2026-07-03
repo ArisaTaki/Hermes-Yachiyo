@@ -397,6 +397,8 @@ class TaskIntentRouter:
             return _empty_intent("desktop_operation", text)
         if _known_web_destination_search_hint(text):
             return _empty_intent("desktop_operation", text)
+        if _looks_like_non_desktop_content_task(text):
+            return _empty_intent("desktop_operation", text)
         if named_data_source_hint(text) and _data_analysis_action_requested(text):
             return _empty_intent("desktop_operation", text)
         if _looks_like_generic_data_source_analysis_request(text):
@@ -1645,6 +1647,8 @@ class TaskIntentRouter:
             text,
             [
                 "report",
+                "summarize",
+                "summarise",
                 "write up",
                 "summary",
                 "brief",
@@ -1704,6 +1708,8 @@ class TaskIntentRouter:
             score = 0.24
         if score <= 0 and document_artifact_transform:
             score = 0.22
+        if _looks_like_non_desktop_content_task(text):
+            score = max(score, 0.24)
         if score <= 0 and context_source == "visible_text" and _contains_any(
             text,
             [
@@ -17321,6 +17327,8 @@ def _app_name_hint(text: str) -> str:
     explicit_generic_named_app = _explicit_generic_named_app_hint(text)
     if explicit_generic_named_app:
         return explicit_generic_named_app
+    if _looks_like_non_desktop_content_task(text):
+        return ""
     if _app_capability_discovery_hint(text):
         return ""
     if (
@@ -17412,6 +17420,29 @@ def _app_name_hint(text: str) -> str:
         ):
             return app
     return ""
+
+
+def _looks_like_non_desktop_content_task(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    if not re.match(
+        r"^(?:summari[sz]e|write|draft|create|produce|generate|"
+        r"analy[sz]e|review|compare|explain)\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    return bool(
+        re.search(
+            r"\b(?:launch|release|market|business|project|product|risk|plan|"
+            r"strategy|report|analysis|summary|notes?|proposal|brief|"
+            r"current\s+(?:web\s+)?page|web\s*page|visible\s+text|"
+            r"selected\s+text|selection)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _app_first_click_scope_hint(text: str) -> dict[str, Any]:

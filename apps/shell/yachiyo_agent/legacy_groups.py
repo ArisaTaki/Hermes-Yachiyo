@@ -123,6 +123,7 @@ def create_runnable_run(
     client_run_id: str = "",
     on_complete: Any | None = None,
     agent_override: dict[str, Any] | None = None,
+    daily_desktop_policy_overlay: bool = False,
     runtime_planner_entrypoint: bool = False,
 ) -> dict[str, Any]:
     create_async = getattr(runtime, "create_run_for_runnable_async", None)
@@ -133,6 +134,8 @@ def create_runnable_run(
     }
     if agent_override is not None:
         payload["agent_override"] = agent_override
+    if daily_desktop_policy_overlay:
+        payload["daily_desktop_policy_overlay"] = True
     if runtime_planner_entrypoint:
         payload["runtime_planner_entrypoint"] = True
     if callable(create_async):
