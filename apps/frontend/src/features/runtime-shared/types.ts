@@ -368,6 +368,14 @@ export type RuntimeExecutionRequestSnapshot = {
   intent_kind?: string | null;
   core_id?: string | null;
   workspace_id?: string | null;
+  group_run_id?: string | null;
+  run_group_id?: string | null;
+  group_id?: string | null;
+  workflow_run_id?: string | null;
+  workflow_id?: string | null;
+  workflow_node_id?: string | null;
+  workflow_node_label?: string | null;
+  workflow_node_kind?: string | null;
   step_id?: string | null;
   capability_id?: string | null;
   tool_name: string;

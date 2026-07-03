@@ -1125,6 +1125,8 @@ function ExecutionRequestRow({
     .filter(Boolean)
     .join(', ');
   const taskVerificationPreview = replanRecoveryVerificationTargetsPreview(taskVerificationTargets);
+  const workflowScope = request.workflow_node_label || request.workflow_node_id || request.workflow_run_id || request.workflow_id || '';
+  const groupScope = request.group_run_id || request.run_group_id || request.group_id || '';
   return (
     <div
       className="studio-planner-step"
@@ -1135,6 +1137,8 @@ function ExecutionRequestRow({
       data-depends-on={dependsOn.join(',')}
       data-execution-request-id={request.request_id}
       data-fallback-tools={fallbackTools.join(',')}
+      data-group-id={request.group_id || ''}
+      data-group-run-id={request.group_run_id || request.run_group_id || ''}
       data-input-preview={inputPreview}
       data-intent-kind={request.intent_kind || ''}
       data-observation-retry={observationRetryPreview}
@@ -1146,6 +1150,7 @@ function ExecutionRequestRow({
       data-request-followup-target={followupTargetPreview}
       data-request-observation-evidence={observationEvidencePreview}
       data-replan-triggers={replanTriggers.join(',')}
+      data-run-group-id={request.run_group_id || request.group_run_id || ''}
       data-runtime-role={request.runtime_role || ''}
       data-runtime-stage={request.runtime_stage || ''}
       data-task-checkpoint-count={taskCheckpoints.length}
@@ -1160,11 +1165,18 @@ function ExecutionRequestRow({
       data-testid="agent-run-detail-planner-execution-request"
       data-tool-plan-id={request.tool_plan_id || ''}
       data-tool-name={request.tool_name || ''}
+      data-workflow-id={request.workflow_id || ''}
+      data-workflow-node-id={request.workflow_node_id || ''}
+      data-workflow-node-kind={request.workflow_node_kind || ''}
+      data-workflow-node-label={request.workflow_node_label || ''}
+      data-workflow-run-id={request.workflow_run_id || ''}
     >
       <div>
         <strong>{index + 1}. {request.tool_name || 'tool request'}</strong>
         {request.step_id ? <span>step: {request.step_id}</span> : null}
         {request.capability_id ? <span>capability: {request.capability_id}</span> : null}
+        {workflowScope ? <span>workflow: {workflowScope}</span> : null}
+        {groupScope ? <span>group: {groupScope}</span> : null}
         {request.core_id || request.workspace_id ? (
           <span>task: {[request.core_id, request.workspace_id].filter(Boolean).join(' / ')}</span>
         ) : null}
@@ -1512,6 +1524,14 @@ function runtimeExecutionRequestSnapshot(value: unknown): RuntimeExecutionReques
     intent_kind: stringValue(record.intent_kind) || null,
     core_id: stringValue(record.core_id) || null,
     workspace_id: stringValue(record.workspace_id) || null,
+    group_run_id: stringValue(record.group_run_id) || null,
+    run_group_id: stringValue(record.run_group_id) || null,
+    group_id: stringValue(record.group_id) || null,
+    workflow_run_id: stringValue(record.workflow_run_id) || null,
+    workflow_id: stringValue(record.workflow_id) || null,
+    workflow_node_id: stringValue(record.workflow_node_id) || null,
+    workflow_node_label: stringValue(record.workflow_node_label) || null,
+    workflow_node_kind: stringValue(record.workflow_node_kind) || null,
     step_id: stepId || null,
     capability_id: stringValue(record.capability_id) || null,
     tool_name: toolName || 'tool',

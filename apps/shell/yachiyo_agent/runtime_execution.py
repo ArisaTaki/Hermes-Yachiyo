@@ -253,6 +253,14 @@ def _execution_request_snapshot(
         intent_kind=str(decision.selected_intent.kind or "") or None,
         core_id=task_context["core_id"] or None,
         workspace_id=task_context["workspace_id"] or None,
+        group_run_id=_optional_text(request.get("group_run_id")),
+        run_group_id=_optional_text(request.get("run_group_id")),
+        group_id=_optional_text(request.get("group_id")),
+        workflow_run_id=_optional_text(request.get("workflow_run_id")),
+        workflow_id=_optional_text(request.get("workflow_id")),
+        workflow_node_id=_optional_text(request.get("workflow_node_id")),
+        workflow_node_label=_optional_text(request.get("workflow_node_label")),
+        workflow_node_kind=_optional_text(request.get("workflow_node_kind")),
         tool_name=tool_name or "tool",
         protocol=str(request.get("protocol") or "json_fallback"),
         input=dict(request_input),
@@ -309,6 +317,14 @@ def _tool_request_from_execution_request(
         "intent_kind",
         "core_id",
         "workspace_id",
+        "group_run_id",
+        "run_group_id",
+        "group_id",
+        "workflow_run_id",
+        "workflow_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "workflow_node_kind",
         "approval_required",
         "continue_to_model",
         "depends_on",
@@ -667,6 +683,11 @@ def _allowed_tools(
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _optional_text(value: Any) -> str | None:
+    text = _text(value)
+    return text or None
 
 
 def _steps_by_id(

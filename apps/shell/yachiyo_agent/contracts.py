@@ -454,6 +454,14 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     intent_kind: str | None = None
     core_id: str | None = None
     workspace_id: str | None = None
+    group_run_id: str | None = None
+    run_group_id: str | None = None
+    group_id: str | None = None
+    workflow_run_id: str | None = None
+    workflow_id: str | None = None
+    workflow_node_id: str | None = None
+    workflow_node_label: str | None = None
+    workflow_node_kind: str | None = None
     tool_name: str
     protocol: str = "json_fallback"
     input: dict[str, Any] = Field(default_factory=dict)

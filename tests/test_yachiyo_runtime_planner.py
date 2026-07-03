@@ -9,6 +9,7 @@ from typing import Any
 from apps.shell.yachiyo_agent import (
     AgentStudioService,
     PlannerDecisionSnapshot,
+    RuntimeExecutionEnvelopeSnapshot,
     RuntimePlanner,
     YachiyoAgentService,
     capability_snapshots,
@@ -32857,6 +32858,38 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     assert projected_requests[2]["task_verification_targets"][0]["checkpoints"][0][
         "after_step_id"
     ] == "operate-foreground-ui"
+
+    scoped_payload = envelope.model_dump(mode="json")
+    scoped_payload["requests"][1].update(
+        {
+            "group_run_id": "group-run-1",
+            "run_group_id": "group-run-1",
+            "group_id": "group-1",
+            "workflow_run_id": "workflow-run-1",
+            "workflow_id": "workflow-1",
+            "workflow_node_id": "node-export",
+            "workflow_node_label": "Export",
+            "workflow_node_kind": "agent",
+        }
+    )
+    scoped_envelope = RuntimeExecutionEnvelopeSnapshot.model_validate(scoped_payload)
+    assert scoped_envelope.requests[1].group_run_id == "group-run-1"
+    assert scoped_envelope.requests[1].run_group_id == "group-run-1"
+    assert scoped_envelope.requests[1].workflow_run_id == "workflow-run-1"
+    assert scoped_envelope.requests[1].workflow_node_label == "Export"
+
+    scoped_projected_requests = runtime_execution_requests_from_envelope_payload(
+        scoped_envelope,
+        allowed_tools=allowed_tools,
+    )
+    assert scoped_projected_requests[1]["group_run_id"] == "group-run-1"
+    assert scoped_projected_requests[1]["run_group_id"] == "group-run-1"
+    assert scoped_projected_requests[1]["group_id"] == "group-1"
+    assert scoped_projected_requests[1]["workflow_run_id"] == "workflow-run-1"
+    assert scoped_projected_requests[1]["workflow_id"] == "workflow-1"
+    assert scoped_projected_requests[1]["workflow_node_id"] == "node-export"
+    assert scoped_projected_requests[1]["workflow_node_label"] == "Export"
+    assert scoped_projected_requests[1]["workflow_node_kind"] == "agent"
 
 
 def test_runtime_execution_envelope_preserves_app_search_prepare_chain() -> None:
