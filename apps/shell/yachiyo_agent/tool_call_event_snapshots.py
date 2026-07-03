@@ -190,6 +190,10 @@ def daily_desktop_intent_step_payloads(event: PublicRunEvent) -> list[dict[str, 
                 "core_id",
                 "workspace_id",
                 "task_id",
+                "task_workspace_items",
+                "task_verification_targets",
+                "workspace_items",
+                "verification_targets",
                 "member_agent_id",
                 "member_agent_name",
                 "agent_id",
@@ -234,6 +238,10 @@ def merge_tool_trace_context(source: dict[str, Any], payload: dict[str, Any]) ->
         "core_id",
         "workspace_id",
         "task_id",
+        "task_workspace_items",
+        "task_verification_targets",
+        "workspace_items",
+        "verification_targets",
         *_PLANNER_TRACE_KEYS,
     ):
         if payload.get(key):
@@ -306,6 +314,14 @@ def merge_tool_call_snapshots(
         capability_id=current.capability_id or next_call.capability_id,
         replan_request_id=current.replan_request_id or next_call.replan_request_id,
         replan_trigger=current.replan_trigger or next_call.replan_trigger,
+        task_workspace_items=_merge_record_lists(
+            current.task_workspace_items,
+            next_call.task_workspace_items,
+        ),
+        task_verification_targets=_merge_record_lists(
+            current.task_verification_targets,
+            next_call.task_verification_targets,
+        ),
         tool_name=current.tool_name or next_call.tool_name,
         status=next_call.status or current.status,
         risk_level=current.risk_level or next_call.risk_level,
@@ -631,6 +647,24 @@ def _merge_input_previews(
     merged = dict(current)
     for key, value in next_preview.items():
         merged.setdefault(key, value)
+    return merged
+
+
+def _merge_record_lists(
+    current: list[dict[str, Any]],
+    next_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in [*current, *next_items]:
+        if not isinstance(item, Mapping):
+            continue
+        record = dict(item)
+        key = _stable_json(record)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(record)
     return merged
 
 

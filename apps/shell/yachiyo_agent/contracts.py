@@ -717,6 +717,8 @@ class ToolCallSnapshot(_PublicSnapshot):
     capability_id: str | None = None
     replan_request_id: str | None = None
     replan_trigger: str | None = None
+    task_workspace_items: list[dict[str, Any]] = Field(default_factory=list)
+    task_verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     tool_name: str
     status: str
     risk_level: str | None = None

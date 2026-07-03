@@ -611,6 +611,8 @@ export type ArtifactSnapshot = {
   capability_id?: string | null;
   replan_request_id?: string | null;
   replan_trigger?: string | null;
+  task_workspace_items?: TaskWorkspaceItemSnapshot[];
+  task_verification_targets?: Array<Record<string, unknown>>;
   replan_triggers?: string[];
   replan_signal_ids?: string[];
   runtime_doctrine?: string | null;

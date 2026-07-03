@@ -29,6 +29,18 @@ def test_tool_call_snapshots_from_events_merge_lifecycle_and_trace_context() -> 
                 "workflow_node_label": "Write README",
                 "group_id": "group-1",
                 "group_run_id": "group-run-1",
+                "task_workspace_items": [
+                    {"item_id": "workspace-report", "title": "Analysis report", "path": "analysis.md"}
+                ],
+                "task_verification_targets": [
+                    {
+                        "todo_id": "todo-report",
+                        "todo_title": "Write report",
+                        "workspace_items": [
+                            {"item_id": "workspace-report", "path": "analysis.md"}
+                        ],
+                    }
+                ],
             },
             created_at="2026-06-17T00:00:00Z",
         ),
@@ -101,6 +113,18 @@ def test_tool_call_snapshots_from_events_merge_lifecycle_and_trace_context() -> 
     assert call.workflow_node_label == "Write README"
     assert call.group_id == "group-1"
     assert call.group_run_id == "group-run-1"
+    assert call.task_workspace_items == [
+        {"item_id": "workspace-report", "title": "Analysis report", "path": "analysis.md"}
+    ]
+    assert call.task_verification_targets == [
+        {
+            "todo_id": "todo-report",
+            "todo_title": "Write report",
+            "workspace_items": [
+                {"item_id": "workspace-report", "path": "analysis.md"}
+            ],
+        }
+    ]
     assert call.input_preview == {
         "path": "README.md",
         "approval_id": "approval-write",

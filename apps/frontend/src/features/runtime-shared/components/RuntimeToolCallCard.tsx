@@ -38,6 +38,8 @@ export type RuntimeToolCallCardSnapshot = {
   capability_id?: string | null;
   replan_request_id?: string | null;
   replan_trigger?: string | null;
+  task_workspace_items?: Array<Record<string, unknown>>;
+  task_verification_targets?: Array<Record<string, unknown>>;
   replan_triggers?: string[];
   replan_signal_ids?: string[];
   runtime_doctrine?: string | null;
@@ -98,6 +100,8 @@ export function RuntimeToolCallCard({
   const observedActionEvidence = observedActionEvidenceSummary(observedMetadata.observationEvidence);
   const observedActionRetry = observedActionRetrySummary(observedMetadata.observationRetry);
   const observedCenter = observedActionCenterSummary(observedMetadata.observationEvidence);
+  const taskWorkspaceItems = runtimeToolTaskWorkspaceItems(toolCall);
+  const taskVerificationTargets = runtimeToolTaskVerificationTargets(toolCall);
   const metadata = toolCallMetadataItems(toolCall);
   return (
     <div
@@ -122,6 +126,8 @@ export function RuntimeToolCallCard({
       data-runtime-step-id={runtimeToolTraceString(toolCall, 'step_id', 'planner_step_id')}
       data-source-runnable-id={toolCall.source_runnable_id || ''}
       data-source-run-id={toolCall.source_run_id || ''}
+      data-task-verification-target-count={taskVerificationTargets.length}
+      data-task-workspace-item-count={taskWorkspaceItems.length}
       data-testid={testId}
       data-tool-call-id={toolCall.tool_call_id}
       data-tool-family={runtimeToolFamily(toolCall.tool_name)}
@@ -271,6 +277,8 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
   const observedMetadata = runtimeToolObservedMetadata(toolCall);
   const replanTrigger = runtimeToolTraceString(toolCall, 'replan_trigger');
   const replanTriggers = runtimeToolTraceStringList(toolCall, 'replan_triggers');
+  const taskWorkspaceItems = runtimeToolTaskWorkspaceItems(toolCall);
+  const taskVerificationTargets = runtimeToolTaskVerificationTargets(toolCall);
   return [
     { label: 'run', value: toolCall.run_id || '' },
     { label: 'source', value: toolCall.source_run_id || '' },
@@ -285,6 +293,8 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
     { label: 'doctrine', value: runtimeToolTraceString(toolCall, 'runtime_doctrine') },
     { label: 'observe', value: runtimeToolTraceBoolLabel(toolCall, 'requires_observation') },
     { label: 'verify', value: runtimeToolTraceBoolLabel(toolCall, 'requires_post_action_verification') },
+    { label: 'workspace', value: runtimeToolTaskWorkspaceSummary(taskWorkspaceItems) },
+    { label: 'targets', value: runtimeToolRecoveryVerificationTargetsSummary(taskVerificationTargets) },
     { label: 'replan', value: runtimeToolTraceString(toolCall, 'replan_request_id') || replanTrigger || replanTriggers.join(', ') },
     { label: 'signals', value: runtimeToolTraceStringList(toolCall, 'replan_signal_ids').join(', ') },
     { label: 'action', value: observedActionTargetSummary(observedMetadata.actionTarget) },
@@ -357,6 +367,8 @@ function runtimeToolTraceRecords(toolCall: RuntimeToolCallCardSnapshot): Record<
     approvalPreviewRecord(metadata.request),
     approvalPreviewRecord(metadata.result),
     approvalPreviewRecord(metadata.metadata),
+    approvalPreviewRecord(toolCall.input_preview),
+    approvalPreviewRecord(toolCall.output_preview),
   ].filter((record) => Object.keys(record).length);
 }
 
@@ -437,6 +449,43 @@ function runtimeToolRecoveryVerificationTargetsSummary(
   if (!parts.length) return '';
   const suffix = targets.length > parts.length ? ` +${targets.length - parts.length}` : '';
   return `${parts.join(' | ')}${suffix}`;
+}
+
+function runtimeToolTaskWorkspaceItems(toolCall: RuntimeToolCallCardSnapshot): Array<Record<string, unknown>> {
+  return uniqueRecords(runtimeToolTraceRecords(toolCall).flatMap((record) => [
+    ...recordList(record.task_workspace_items),
+    ...recordList(record.workspace_items),
+  ]));
+}
+
+function runtimeToolTaskVerificationTargets(toolCall: RuntimeToolCallCardSnapshot): Array<Record<string, unknown>> {
+  return uniqueRecords(runtimeToolTraceRecords(toolCall).flatMap((record) => [
+    ...recordList(record.task_verification_targets),
+    ...recordList(record.verification_targets),
+  ]));
+}
+
+function runtimeToolTaskWorkspaceSummary(items: Array<Record<string, unknown>>): string {
+  return items
+    .slice(0, 3)
+    .map((item) => (
+      stringValue(item.title)
+      || stringValue(item.path)
+      || stringValue(item.item_id)
+      || stringValue(item.source_step_id)
+    ))
+    .filter(Boolean)
+    .join(', ');
+}
+
+function uniqueRecords(items: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const key = JSON.stringify(item);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function recordList(value: unknown): Array<Record<string, unknown>> {

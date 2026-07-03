@@ -109,6 +109,18 @@ def tool_call_snapshot_from_payload(
             key: _optional_text(payload.get(key) or input_preview.get(key))
             for key in _PLANNER_TRACE_KEYS
         },
+        task_workspace_items=_record_list(
+            payload.get("task_workspace_items")
+            or input_preview.get("task_workspace_items")
+            or payload.get("workspace_items")
+            or input_preview.get("workspace_items")
+        ),
+        task_verification_targets=_record_list(
+            payload.get("task_verification_targets")
+            or input_preview.get("task_verification_targets")
+            or payload.get("verification_targets")
+            or input_preview.get("verification_targets")
+        ),
         tool_name=tool_name,
         status=status,
         risk_level=_optional_text(payload.get("risk_level") or payload.get("risk")),
@@ -239,6 +251,8 @@ def _redacted_tool_call_snapshot(snapshot: ToolCallSnapshot) -> ToolCallSnapshot
                 key: _optional_text(getattr(snapshot, key))
                 for key in _PLANNER_TRACE_KEYS
             },
+            "task_workspace_items": _record_list(snapshot.task_workspace_items),
+            "task_verification_targets": _record_list(snapshot.task_verification_targets),
             "tool_name": _text(snapshot.tool_name),
             "status": _text(snapshot.status),
             "risk_level": _optional_text(snapshot.risk_level),
@@ -269,6 +283,12 @@ def _mapping(value: Any) -> dict[str, Any]:
     redacted = redact_run_event_payload(dict(value))
     result = dict(redacted) if isinstance(redacted, Mapping) else {}
     return _restore_known_preview_types(_restore_stable_scalar_types(value, result))
+
+
+def _record_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [_mapping(item) for item in value if isinstance(item, Mapping)]
 
 
 def _restore_stable_scalar_types(source: Any, target: Any) -> dict[str, Any]:
@@ -310,6 +330,10 @@ def _restore_known_preview_types(value: dict[str, Any]) -> dict[str, Any]:
         "affected_tools",
         "recovery_actions",
         "recovery_hints",
+        "task_workspace_items",
+        "task_verification_targets",
+        "workspace_items",
+        "verification_targets",
     ):
         item = result.get(key)
         if isinstance(item, str):
