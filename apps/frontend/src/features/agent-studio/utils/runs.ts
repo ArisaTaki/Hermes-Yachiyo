@@ -466,6 +466,8 @@ export function publicApprovalToRunPendingApproval(approval: ApprovalCardSnapsho
     runtime_role: approval.runtime_role || '',
     requires_observation: approval.requires_observation || false,
     requires_post_action_verification: approval.requires_post_action_verification || false,
+    task_workspace_items: approval.task_workspace_items || [],
+    task_verification_targets: approval.task_verification_targets || [],
     requested_at: approval.requested_at || '',
     resolved_at: approval.resolved_at || '',
     risk_level: approval.risk_level || '',

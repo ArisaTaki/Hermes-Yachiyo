@@ -217,6 +217,8 @@ export type RunSpec = {
     runtime_role?: string;
     requires_observation?: boolean;
     requires_post_action_verification?: boolean;
+    task_workspace_items?: Array<Record<string, unknown>>;
+    task_verification_targets?: Array<Record<string, unknown>>;
   };
   created_at?: string;
   updated_at?: string;

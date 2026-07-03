@@ -4117,6 +4117,8 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
             "policy_reason: selectedRunApproval.policy_reason",
             "risk_level: selectedRunApproval.risk_level",
             "run_id: selectedRunApproval.run_id || selectedRun.run_id",
+            "task_workspace_items: selectedRunApproval.task_workspace_items",
+            "task_verification_targets: selectedRunApproval.task_verification_targets",
         ],
     )
     _assert_contains(
@@ -6562,6 +6564,8 @@ def test_agent_studio_preserves_workflow_run_detail_and_approval_paths() -> None
             "risk_level: approval.risk_level || ''",
             "run_id: approval.run_id || ''",
             "status: approval.status || ''",
+            "task_workspace_items: approval.task_workspace_items || []",
+            "task_verification_targets: approval.task_verification_targets || []",
         ],
     )
     _assert_contains(
