@@ -935,6 +935,17 @@ def test_agent_studio_service_starts_workflow_from_planner_orchestration() -> No
     ]
     assert planner_events[0].event_type == "workflow.run.intent.selected"
     assert planner_events[0].payload["intent"]["kind"] == "workflow_orchestration"
+    plan_event = next(
+        event
+        for event in started.workflow_run.events
+        if event.payload.get("planner_event_type") == "agent.plan.created"
+    )
+    assert isinstance(plan_event.payload["plan"]["tool_plan"]["steps"][0], dict)
+    assert isinstance(plan_event.payload["plan"]["capabilities"][0]["tools"], list)
+    assert isinstance(
+        plan_event.payload["runtime_execution_envelope"]["requests"][0]["input"],
+        dict,
+    )
 
 
 def test_agent_studio_service_starts_group_run_from_planner_orchestration() -> None:
@@ -987,6 +998,17 @@ def test_agent_studio_service_starts_group_run_from_planner_orchestration() -> N
     ]
     assert planner_events[0].event_type == "group.run.intent.selected"
     assert planner_events[0].payload["intent"]["kind"] == "multi_agent"
+    plan_event = next(
+        event
+        for event in started.group_run.events
+        if event.payload.get("planner_event_type") == "agent.plan.created"
+    )
+    assert isinstance(plan_event.payload["plan"]["tool_plan"]["steps"][0], dict)
+    assert isinstance(plan_event.payload["plan"]["capabilities"][0]["tools"], list)
+    assert isinstance(
+        plan_event.payload["runtime_execution_envelope"]["requests"][0]["input"],
+        dict,
+    )
 
 
 def test_agent_studio_service_returns_structured_handoff_when_planner_target_missing() -> None:

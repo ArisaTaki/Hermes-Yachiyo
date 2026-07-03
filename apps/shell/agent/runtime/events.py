@@ -45,11 +45,34 @@ def redact_run_event_payload(value: Any) -> Any:
     sanitized = sanitize_sensitive_value(
         value,
         text_limit=0,
+        max_depth=_run_event_payload_redaction_depth(value),
         max_items=RUNTIME_JSON_REDACTION_MAX_ITEMS,
         collapse_whitespace=False,
         trim=False,
     )
     return _restore_recovery_action_inputs(value, sanitized)
+
+
+def _run_event_payload_redaction_depth(value: Any) -> int:
+    if not isinstance(value, dict):
+        return 3
+    keys = {str(key) for key in value.keys()}
+    if keys.intersection(
+        {
+            "candidate_intents",
+            "intent",
+            "plan",
+            "planner_event_type",
+            "runtime_execution_envelope",
+            "runtime_plan",
+            "step",
+            "task_core",
+        }
+    ):
+        return 8
+    if str(value.get("source") or "").strip() == "runtime_planner":
+        return 8
+    return 3
 
 
 def _restore_recovery_action_inputs(source: Any, target: Any) -> Any:
