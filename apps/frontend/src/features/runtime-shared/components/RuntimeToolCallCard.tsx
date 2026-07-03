@@ -179,19 +179,32 @@ export function RuntimeToolCallCard({
               ? '截图定位'
               : '';
             const retryInput = retryAction?.input || {};
+            const verificationTargetsPreview = runtimeToolRecoveryVerificationTargetsSummary(action.verification_targets);
+            const retryVerificationTargetsPreview = retryAction
+              ? runtimeToolRecoveryVerificationTargetsSummary(retryAction.verification_targets)
+              : '';
             return [
               <button
                 type="button"
                 data-permission-target={action.permission_target}
                 data-recovery-kind="permission_recovery"
                 data-recovery-tool={action.tool}
+                data-recovery-verification-targets={verificationTargetsPreview}
                 data-testid={`${testId}-run-recovery-action`}
                 disabled={recoveryActionDisabled || !onRunRecoveryAction}
                 key={`${action.tool}:${action.prompt}:${action.permission_target}:recovery`}
                 onClick={() => void onRunRecoveryAction?.(toolCall, action)}
-                title={action.prompt}
+                title={[
+                  action.prompt,
+                  verificationTargetsPreview ? `verification: ${verificationTargetsPreview}` : '',
+                ].filter(Boolean).join(' · ')}
               >
                 {action.label}
+                {verificationTargetsPreview ? (
+                  <small className="runtime-tool-call-recovery-verification">
+                    verifies: {verificationTargetsPreview}
+                  </small>
+                ) : null}
               </button>,
               retryAction ? (
                 <button
@@ -205,14 +218,23 @@ export function RuntimeToolCallCard({
                   data-selected-retry-y={retryInput.y ?? ''}
                   data-recovery-kind="retry_original"
                   data-recovery-tool={retryAction.tool}
+                  data-recovery-verification-targets={retryVerificationTargetsPreview}
                   data-retry-input-schema={JSON.stringify(retryAction.retry_input_schema || {})}
                   data-testid={`${testId}-run-retry-action`}
                   disabled={recoveryActionDisabled || !onRunRecoveryAction || missingRetryFields.length > 0}
                   key={`${retryAction.tool}:${retryAction.prompt}:${retryAction.permission_target}:retry`}
                   onClick={() => void onRunRecoveryAction?.(toolCall, retryAction)}
-                  title={retryAction.prompt}
+                  title={[
+                    retryAction.prompt,
+                    retryVerificationTargetsPreview ? `verification: ${retryVerificationTargetsPreview}` : '',
+                  ].filter(Boolean).join(' · ')}
                 >
                   {retryAction.label}
+                  {retryVerificationTargetsPreview ? (
+                    <small className="runtime-tool-call-recovery-verification">
+                      verifies: {retryVerificationTargetsPreview}
+                    </small>
+                  ) : null}
                   {missingRetryFields.length ? (
                     <small className="runtime-tool-call-retry-contract">
                       待补参数：{missingRetryFields.join('、')}
@@ -382,6 +404,46 @@ function observedActionCenterSummary(value: Record<string, unknown>): string {
   const x = coordinateValue(center.x ?? legacyCenter.x ?? point.x);
   const y = coordinateValue(center.y ?? legacyCenter.y ?? point.y);
   return x && y ? `${x},${y}` : '';
+}
+
+function runtimeToolRecoveryVerificationTargetsSummary(
+  targets: Array<Record<string, unknown>> | undefined,
+): string {
+  if (!targets?.length) return '';
+  const parts = targets.slice(0, 3).map((target) => {
+    const label = (
+      stringValue(target.todo_title)
+      || stringValue(target.title)
+      || stringValue(target.step_id)
+      || stringValue(target.todo_id)
+      || stringValue(target.tool_name)
+    );
+    const workspaceItems = [
+      ...recordList(target.workspace_items),
+      ...recordList(target.task_workspace_items),
+    ];
+    const workspace = workspaceItems
+      .slice(0, 2)
+      .map((item) => (
+        stringValue(item.title)
+        || stringValue(item.path)
+        || stringValue(item.item_id)
+        || stringValue(item.source_step_id)
+      ))
+      .filter(Boolean)
+      .join(', ');
+    return [label, workspace ? `workspace: ${workspace}` : ''].filter(Boolean).join(' -> ');
+  }).filter(Boolean);
+  if (!parts.length) return '';
+  const suffix = targets.length > parts.length ? ` +${targets.length - parts.length}` : '';
+  return `${parts.join(' | ')}${suffix}`;
+}
+
+function recordList(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => (
+    Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+  ));
 }
 
 function coordinateValue(value: unknown): string {
