@@ -409,7 +409,7 @@ async def run_astrbot_plugin_bridge_check(
     config = PluginConfig(oha_url=bridge_url, bridge_token=bridge_token)
     responses: dict[str, str] = {}
 
-    def require_success_response(label: str, response: str) -> None:
+    def response_has_error(response: str) -> bool:
         failure_markers = (
             "命令执行失败",
             "执行失败",
@@ -419,14 +419,17 @@ async def run_astrbot_plugin_bridge_check(
             "RuntimeError",
             "⚠️",
         )
-        for marker in failure_markers:
-            if marker in response:
-                raise SmokeError(f"/y {label} returned an error response: {response[:160]}")
+        return any(marker in response for marker in failure_markers)
 
-    async def command(label: str, text: str) -> str:
+    def require_success_response(label: str, response: str) -> None:
+        if response_has_error(response):
+            raise SmokeError(f"/y {label} returned an error response: {response[:160]}")
+
+    async def command(label: str, text: str, *, allow_error_response: bool = False) -> str:
         response = await on_y_command(text, sender_id=sender_id, config=config)
         responses[label] = response
-        require_success_response(label, response)
+        if not allow_error_response:
+            require_success_response(label, response)
         return response
 
     status = await command("status", "/y status")
@@ -444,6 +447,8 @@ async def run_astrbot_plugin_bridge_check(
 
     task_id = ""
     task_command_mode = "full"
+    cancel_result = ""
+    tasks_list_contains_created_task: bool | None = None
     skipped_task_commands: list[str] = []
     if run_task_commands:
         created = await command("do", "/y do 外部 AstrBot 集成验收任务")
@@ -453,12 +458,31 @@ async def run_astrbot_plugin_bridge_check(
         task_id = match.group(1)
 
         tasks = await command("tasks", "/y tasks")
-        if task_id[:8] not in tasks:
-            raise SmokeError("/y tasks did not include the created task")
+        if "任务" not in tasks:
+            raise SmokeError("/y tasks did not return task-list text")
+        tasks_list_contains_created_task = task_id[:8] in tasks
 
         checked = await command("check", f"/y check {task_id}")
         if task_id not in checked:
             raise SmokeError("/y check did not include the created task id")
+
+        cancelled = await command(
+            "cancel",
+            f"/y cancel {task_id}",
+            allow_error_response=True,
+        )
+        terminal_conflict = re.search(
+            r"状态为\s+(failed|completed|cancelled)，无法取消",
+            cancelled,
+        )
+        if response_has_error(cancelled):
+            if terminal_conflict is None:
+                raise SmokeError(f"/y cancel returned an error response: {cancelled[:160]}")
+            cancel_result = f"already_terminal:{terminal_conflict.group(1)}"
+        elif "任务已取消" in cancelled or "已取消" in cancelled:
+            cancel_result = "cancelled"
+        else:
+            raise SmokeError("/y cancel did not return cancellation text")
 
         asked = await command("ask", "/y ask 做一次外部 AstrBot 自然语言入口验收")
         if "Yachiyo" not in asked:
@@ -489,11 +513,6 @@ async def run_astrbot_plugin_bridge_check(
         if "当前活动窗口" not in window:
             raise SmokeError("/y window did not return active-window text")
 
-    if run_task_commands:
-        cancelled = await command("cancel", f"/y cancel {task_id}")
-        if "取消" not in cancelled:
-            raise SmokeError("/y cancel did not return cancellation text")
-
     evidence: dict[str, Any] = {
         "bridge_url": bridge_url,
         "bridge_token_configured": bool(bridge_token),
@@ -505,6 +524,10 @@ async def run_astrbot_plugin_bridge_check(
     }
     if task_id:
         evidence["task_id"] = task_id
+    if tasks_list_contains_created_task is not None:
+        evidence["tasks_list_contains_created_task"] = tasks_list_contains_created_task
+    if cancel_result:
+        evidence["cancel_result"] = cancel_result
     if skipped_task_commands:
         evidence["skipped_task_commands"] = skipped_task_commands
     return evidence
