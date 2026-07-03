@@ -86,6 +86,17 @@ def test_tool_broker_call_uses_split_registry_for_workspace_read(tmp_path) -> No
     }
 
 
+def test_tool_broker_call_uses_fs_read_file_alias(tmp_path) -> None:
+    (tmp_path / "note.txt").write_text("hello", encoding="utf-8")
+    broker = _broker(tmp_path)
+
+    assert broker.call("fs.read_file", {"path": "note.txt"}) == {
+        "ok": True,
+        "path": "note.txt",
+        "content": "hello",
+    }
+
+
 def test_tool_broker_call_passes_workspace_list_filters(tmp_path) -> None:
     (tmp_path / "Screen Shot 1.png").write_text("png", encoding="utf-8")
     (tmp_path / "notes.txt").write_text("text", encoding="utf-8")
@@ -106,6 +117,29 @@ def test_tool_broker_call_passes_workspace_list_filters(tmp_path) -> None:
         "pattern": "*.{png,jpg,jpeg}",
         "file_type": "screenshot",
         "expanded_patterns": ["*.png", "*.jpg", "*.jpeg"],
+    }
+
+
+def test_tool_broker_call_passes_fs_find_files_filters(tmp_path) -> None:
+    (tmp_path / "sales.csv").write_text("csv", encoding="utf-8")
+    (tmp_path / "notes.txt").write_text("text", encoding="utf-8")
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "fs.find_files",
+        {
+            "path": ".",
+            "pattern": "*.csv",
+            "file_type": "csv",
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["entries"] == [{"name": "sales.csv", "type": "file"}]
+    assert result["filter"] == {
+        "pattern": "*.csv",
+        "file_type": "csv",
+        "expanded_patterns": ["*.csv"],
     }
 
 
@@ -863,6 +897,18 @@ def test_browser_portable_alias_schemas_validate_payloads() -> None:
         ToolDescriptorRegistry.validate_payload("browser.search", {})
     with pytest.raises(AgentRuntimeError, match="browser.open 参数 url 必须是非空字符串"):
         ToolDescriptorRegistry.validate_payload("browser.open", {})
+
+
+def test_fs_portable_alias_schemas_validate_payloads() -> None:
+    ToolDescriptorRegistry.validate_payload("fs.find_files", {})
+    ToolDescriptorRegistry.validate_payload(
+        "fs.find_files",
+        {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+    )
+    ToolDescriptorRegistry.validate_payload("fs.read_file", {"path": "sales.csv"})
+
+    with pytest.raises(AgentRuntimeError, match="fs.read_file 参数 path 必须是非空字符串"):
+        ToolDescriptorRegistry.validate_payload("fs.read_file", {})
 
 
 def test_desktop_permissions_schema_accepts_empty_payload() -> None:

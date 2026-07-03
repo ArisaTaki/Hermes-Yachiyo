@@ -24,6 +24,8 @@ TOOL_FUNCTION_NAMES = {
     "workspace.list": "workspace_list",
     "workspace.read": "workspace_read",
     "workspace.write_patch": "workspace_write_patch",
+    "fs.find_files": "fs_find_files",
+    "fs.read_file": "fs_read_file",
     "file.search": "file_search",
     "file.read": "file_read",
     "file.organize": "file_organize",
@@ -1082,6 +1084,43 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         description=(
             "Read a UTF-8 text file from the allowed workspace. This only accepts file paths; "
             "use workspace.list for directories."
+        ),
+        properties={"path": {"type": "string", "description": "Relative file path."}},
+        required=("path",),
+    ),
+    "fs.find_files": ToolDescriptor(
+        name="fs.find_files",
+        description=(
+            "Search/list entries in an allowed workspace directory. This is the portable fs "
+            "namespace alias for workspace.list and uses the same workspace scope checks."
+        ),
+        properties={
+            "path": {"type": "string", "description": "Relative directory path."},
+            "pattern": {
+                "type": "string",
+                "description": "Optional glob filter such as *.pdf or *.{png,jpg}.",
+            },
+            "file_type": {
+                "type": "string",
+                "description": (
+                    "Optional semantic file type hint such as spreadsheet, csv, tsv, xlsx, "
+                    "json, jsonl, text, document, image, pdf, archive, audio, or video."
+                ),
+            },
+            "include_metadata": {
+                "type": "boolean",
+                "description": (
+                    "Optional. Include per-entry mtime/size metadata when the task needs "
+                    "to choose a latest or recently modified file. Defaults false."
+                ),
+            },
+        },
+    ),
+    "fs.read_file": ToolDescriptor(
+        name="fs.read_file",
+        description=(
+            "Read a UTF-8 text file from the allowed workspace. This is the portable fs "
+            "namespace alias for workspace.read and uses the same workspace scope checks."
         ),
         properties={"path": {"type": "string", "description": "Relative file path."}},
         required=("path",),

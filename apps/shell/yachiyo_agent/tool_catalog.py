@@ -398,6 +398,12 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "browser.open_url_and_screenshot": [
             "Opens the URL first, then captures the page through the browser screenshot path.",
         ],
+        "fs.find_files": [
+            "Portable fs alias for workspace.list; uses the same allowed workspace scope checks.",
+        ],
+        "fs.read_file": [
+            "Portable fs alias for workspace.read; uses the same allowed workspace scope checks.",
+        ],
         "browser.extract": [
             "Portable alias for browser.extract_text; text extraction requires a reachable Chrome CDP endpoint.",
         ],
