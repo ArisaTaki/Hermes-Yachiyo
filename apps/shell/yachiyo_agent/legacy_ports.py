@@ -57,7 +57,6 @@ from .planner_projection import (
     runtime_planner_metadata,
 )
 from .planner_execution import (
-    planner_direct_tool_requests,
     planner_execution_tool_requests,
     planner_tool_requests,
 )
@@ -1514,22 +1513,6 @@ def _safe_runtime_planner_tool_requests(
     requests = _drop_legacy_open_then_plain_find_submit(prompt, requests)
     execution_requests = planner_execution_tool_requests(requests, allowed_tools) or requests
     return _drop_data_analysis_prepare_app_requests(execution_requests)
-    requests = planner_direct_tool_requests(
-        prompt,
-        allowed_tools,
-        metadata=metadata,
-    )
-    requests = _apply_legacy_file_transfer_app_alias(prompt, requests, allowed_tools)
-    requests = _apply_legacy_plain_search_open_mode(prompt, requests, allowed_tools)
-    requests = _apply_legacy_search_field_target_label(prompt, requests)
-    requests = _apply_legacy_return_hotkey_projection(prompt, requests, allowed_tools)
-    requests = _prepend_legacy_focus_app_search_discovery_request(prompt, requests)
-    if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
-        return []
-    requests = _coalesce_legacy_direct_app_shortcut_requests(prompt, requests, allowed_tools)
-    requests = _split_redundant_app_safe_shortcut_requests(requests)
-    requests = _drop_legacy_open_then_plain_find_submit(prompt, requests)
-    return planner_execution_tool_requests(requests, allowed_tools) or requests
 
 
 def _safe_runtime_execution_envelope_requests(
