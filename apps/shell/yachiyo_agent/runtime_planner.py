@@ -25998,8 +25998,28 @@ def _media_playback_target_app_capability_hint(text: str) -> dict[str, str]:
         value,
         flags=re.IGNORECASE,
     ):
+        playback = media_playback_hint(value)
+        if (
+            str(playback.get("action") or "").strip() == "play"
+            and str(playback.get("query") or "").strip()
+            and not _explicit_media_playback_app_scope_requested(value)
+        ):
+            return {"query": "music", "description": "music"}
         return {}
     return {"query": "music", "description": "音乐"}
+
+
+def _explicit_media_playback_app_scope_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"(?:apple\s*music|苹果音乐|spotify|网易云(?:音乐)?|qq\s*音乐|qq\s*music|youtube\s*music)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _app_file_open_discovery_hint(

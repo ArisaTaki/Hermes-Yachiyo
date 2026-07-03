@@ -1819,14 +1819,19 @@ def test_planner_first_daily_desktop_entrypoint_verifies_simple_media_playback()
         {
             "protocol": "json_fallback",
             "tool": "desktop.list_apps",
-            "input": {"query": "Music", "limit": 20},
+            "input": {"query": "music", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },
         {
             "protocol": "json_fallback",
             "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "Music", "action": "find"},
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "music",
+                "action": "find",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },
@@ -1847,7 +1852,11 @@ def test_planner_first_daily_desktop_entrypoint_verifies_simple_media_playback()
         {
             "protocol": "json_fallback",
             "tool": "media.music_app_open_and_play",
-            "input": {"app_name": "Music"},
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "music",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },
@@ -1859,6 +1868,23 @@ def test_planner_first_daily_desktop_entrypoint_verifies_simple_media_playback()
             "planning_reason": "planner_fallback_media_playback",
         },
     ]
+    explicit_app_query_requests = planner_first_daily_desktop_entrypoint_requests(
+        "播放超时空辉夜姬 Apple Music",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ],
+    )
+    assert explicit_app_query_requests[0]["input"] == {"query": "Music", "limit": 20}
+    assert explicit_app_query_requests[1]["input"] == {
+        "app_name": "Music",
+        "action": "find",
+    }
+    assert explicit_app_query_requests[4]["input"] == {"app_name": "Music"}
 
     search_requests = planner_first_daily_desktop_entrypoint_requests(
         "打开任意音乐 app，搜索 lo-fi beats，然后播放第一个结果",
