@@ -343,6 +343,12 @@ export type PlannerDecisionSnapshot = {
 
 export type RuntimeExecutionRequestSnapshot = {
   request_id: string;
+  decision_id?: string | null;
+  plan_id?: string | null;
+  tool_plan_id?: string | null;
+  intent_kind?: string | null;
+  core_id?: string | null;
+  workspace_id?: string | null;
   step_id?: string | null;
   capability_id?: string | null;
   tool_name: string;
@@ -365,6 +371,10 @@ export type RuntimeExecutionRequestSnapshot = {
   action_target?: Record<string, unknown>;
   observation_evidence?: Record<string, unknown>;
   observation_retry?: Record<string, unknown>;
+  task_todo?: TaskTodoItemSnapshot | null;
+  task_checkpoints?: TaskCheckpointSnapshot[];
+  task_workspace_items?: TaskWorkspaceItemSnapshot[];
+  task_verification_targets?: Array<Record<string, unknown>>;
   source?: string;
 };
 

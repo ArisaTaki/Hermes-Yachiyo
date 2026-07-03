@@ -1040,17 +1040,38 @@ function ExecutionRequestRow({
   const actionTargetPreview = replanRecoveryActionTargetPreview(objectRecord(request.action_target));
   const observationEvidencePreview = replanRecoveryObservationEvidencePreview(objectRecord(request.observation_evidence));
   const observationRetryPreview = replanRecoveryObservationRetryPreview(objectRecord(request.observation_retry));
+  const taskTodo = request.task_todo || null;
+  const taskCheckpoints = request.task_checkpoints || [];
+  const taskWorkspaceItems = request.task_workspace_items || [];
+  const taskVerificationTargets = request.task_verification_targets || [];
+  const taskTodoLabel = taskTodo
+    ? taskTodo.title || taskTodo.step_id || taskTodo.todo_id || ''
+    : '';
+  const taskCheckpointPreview = taskCheckpoints
+    .slice(0, 3)
+    .map((checkpoint) => checkpoint.title || checkpoint.after_step_id || checkpoint.checkpoint_id)
+    .filter(Boolean)
+    .join(', ');
+  const taskWorkspacePreview = taskWorkspaceItems
+    .slice(0, 3)
+    .map((item) => item.title || item.path || item.item_id)
+    .filter(Boolean)
+    .join(', ');
+  const taskVerificationPreview = replanRecoveryVerificationTargetsPreview(taskVerificationTargets);
   return (
     <div
       className="studio-planner-step"
       data-approval-required={String(Boolean(request.approval_required))}
       data-capability-id={request.capability_id || ''}
       data-continue-to-model={String(Boolean(request.continue_to_model))}
+      data-decision-id={request.decision_id || ''}
       data-depends-on={dependsOn.join(',')}
       data-execution-request-id={request.request_id}
       data-fallback-tools={fallbackTools.join(',')}
       data-input-preview={inputPreview}
+      data-intent-kind={request.intent_kind || ''}
       data-observation-retry={observationRetryPreview}
+      data-plan-id={request.plan_id || ''}
       data-planner-step-id={request.step_id || ''}
       data-planning-reason={request.planning_reason || ''}
       data-planning-reason-label={planningReasonLabel}
@@ -1060,14 +1081,41 @@ function ExecutionRequestRow({
       data-replan-triggers={replanTriggers.join(',')}
       data-runtime-role={request.runtime_role || ''}
       data-runtime-stage={request.runtime_stage || ''}
+      data-task-checkpoint-count={taskCheckpoints.length}
+      data-task-core-id={request.core_id || ''}
+      data-task-todo-id={taskTodo?.todo_id || ''}
+      data-task-todo-status={taskTodo?.status || ''}
+      data-task-verification-target-count={taskVerificationTargets.length}
+      data-task-verification-targets={taskVerificationPreview}
+      data-task-workspace-id={request.workspace_id || ''}
+      data-task-workspace-item-count={taskWorkspaceItems.length}
       data-step-status={request.status || 'planned'}
       data-testid="agent-run-detail-planner-execution-request"
+      data-tool-plan-id={request.tool_plan_id || ''}
       data-tool-name={request.tool_name || ''}
     >
       <div>
         <strong>{index + 1}. {request.tool_name || 'tool request'}</strong>
         {request.step_id ? <span>step: {request.step_id}</span> : null}
         {request.capability_id ? <span>capability: {request.capability_id}</span> : null}
+        {request.core_id || request.workspace_id ? (
+          <span>task: {[request.core_id, request.workspace_id].filter(Boolean).join(' / ')}</span>
+        ) : null}
+        {taskTodo ? (
+          <span title={taskTodo.reason || taskTodo.tool_name || taskTodo.capability_id}>
+            todo: {taskTodoLabel}
+            {taskTodo.status ? ` · ${taskTodo.status}` : ''}
+          </span>
+        ) : null}
+        {taskWorkspaceItems.length ? (
+          <span title={taskWorkspacePreview}>workspace: {taskWorkspacePreview || `${taskWorkspaceItems.length} items`}</span>
+        ) : null}
+        {taskCheckpoints.length ? (
+          <span title={taskCheckpointPreview}>checkpoints: {taskCheckpointPreview || taskCheckpoints.length}</span>
+        ) : null}
+        {taskVerificationTargets.length ? (
+          <span title={taskVerificationPreview}>verifies: {taskVerificationPreview || taskVerificationTargets.length}</span>
+        ) : null}
         {planningReasonLabel ? <span title={request.planning_reason}>reason: {planningReasonLabel}</span> : null}
         {request.runtime_stage || request.runtime_role ? (
           <span>runtime: {[request.runtime_stage, request.runtime_role].filter(Boolean).join(' / ')}</span>
@@ -1381,9 +1429,22 @@ function runtimeExecutionRequestSnapshot(value: unknown): RuntimeExecutionReques
   const toolName = stringValue(record.tool_name) || stringValue(record.tool);
   const stepId = stringValue(record.step_id) || stringValue(record.planner_step_id);
   if (!toolName && !stepId) return null;
+  const taskTodo = taskTodoItemSnapshot(record.task_todo);
+  const taskCheckpoints = arrayRecords(record.task_checkpoints)
+    .map(taskCheckpointSnapshot)
+    .filter((checkpoint): checkpoint is TaskCheckpointSnapshot => Boolean(checkpoint));
+  const taskWorkspaceItems = arrayRecords(record.task_workspace_items)
+    .map(taskWorkspaceItemSnapshot)
+    .filter((item): item is TaskWorkspaceItemSnapshot => Boolean(item));
   return {
     ...record,
     request_id: stringValue(record.request_id) || `${stepId || 'step'}:${toolName || 'tool'}`,
+    decision_id: stringValue(record.decision_id) || null,
+    plan_id: stringValue(record.plan_id) || null,
+    tool_plan_id: stringValue(record.tool_plan_id) || null,
+    intent_kind: stringValue(record.intent_kind) || null,
+    core_id: stringValue(record.core_id) || null,
+    workspace_id: stringValue(record.workspace_id) || null,
     step_id: stepId || null,
     capability_id: stringValue(record.capability_id) || null,
     tool_name: toolName || 'tool',
@@ -1406,6 +1467,10 @@ function runtimeExecutionRequestSnapshot(value: unknown): RuntimeExecutionReques
     action_target: objectRecord(record.action_target),
     observation_evidence: objectRecord(record.observation_evidence),
     observation_retry: objectRecord(record.observation_retry),
+    task_todo: taskTodo,
+    task_checkpoints: taskCheckpoints,
+    task_workspace_items: taskWorkspaceItems,
+    task_verification_targets: arrayRecords(record.task_verification_targets),
     source: stringValue(record.source) || 'runtime_planner',
   };
 }
