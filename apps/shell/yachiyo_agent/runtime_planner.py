@@ -1659,6 +1659,12 @@ class TaskIntentRouter:
                 text,
                 require_data_analysis=False,
             )
+        if _plain_dynamic_context_discovered_app_transfer(
+            text,
+            app_write_target,
+            transform_target,
+        ):
+            return _empty_intent("report_generation", text)
         artifact_context_source = _context_artifact_source_hint(text)
         app_write_current_page_context = (
             artifact_context_source
@@ -18401,6 +18407,52 @@ def _capability_dynamic_context_ui_transfer_hint(
         "app_name": app_name,
         "mode": "open" if _explicit_app_open_request(value) else "focus",
     }
+
+
+def _plain_dynamic_context_discovered_app_transfer(
+    text: str,
+    app_write_target: Mapping[str, Any],
+    transform_target: Mapping[str, Any],
+) -> bool:
+    if transform_target:
+        return False
+    target_app_capability = app_write_target.get("target_app_capability_hint")
+    if not isinstance(target_app_capability, Mapping):
+        return False
+    value = _clean_prompt(text)
+    source = _dynamic_context_source_hint(value)
+    if source not in {"selection", "clipboard", "current_page_link", "current_page_content"}:
+        return False
+    if not _looks_like_dynamic_context_transfer(value):
+        return False
+    if _dynamic_context_transform_requested(value) or _looks_like_document_artifact_transform_request(value):
+        return False
+    if _contains_any(
+        value,
+        (
+            "报告",
+            "总结",
+            "摘要",
+            "汇报",
+            "周报",
+            "日报",
+            "月报",
+            "年报",
+            "纪要",
+            "简报",
+            "复盘",
+            "发布说明",
+            "release notes",
+            "changelog",
+            "report",
+            "summary",
+            "brief",
+            "write up",
+            "deck",
+        ),
+    ):
+        return False
+    return True
 
 
 def _dynamic_context_transform_target_hint(text: str) -> dict[str, str]:

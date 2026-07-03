@@ -11378,6 +11378,53 @@ def test_runtime_planner_pastes_dynamic_context_into_discovered_apps() -> None:
     assert all("continue_to_model" not in request for request in selected_text_requests)
 
 
+def test_runtime_planner_keeps_plain_document_transfer_off_report_generation() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+        "clipboard.read",
+    ]
+
+    plain_transfer = RuntimePlanner().decision(
+        "找一个文档应用，把选中的文字写进去",
+        allowed_tools=allowed_tools,
+    )
+    generated_report = RuntimePlanner().decision(
+        "把选中的文字整理成报告写进一个文档应用",
+        allowed_tools=allowed_tools,
+    )
+
+    assert plain_transfer.selected_intent.kind == "desktop_operation"
+    assert plain_transfer.selected_intent.inputs["dynamic_context_ui_transfer_hint"] == {
+        "source": "selection",
+        "action": "transfer_context",
+        "target_kind": "app_paste",
+        "target": "",
+        "app_name": "文档",
+        "mode": "focus",
+    }
+    assert [step.step_id for step in plain_transfer.plan.tool_plan.steps] == [
+        "copy-selected-dynamic-context",
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "paste-context-into-selected-discovered-app",
+        "verify-selected-discovered-app-action",
+    ]
+    assert generated_report.selected_intent.kind == "report_generation"
+    assert [request["tool"] for request in planner_tool_requests(
+        "找一个文档应用，把选中的文字写进去",
+        allowed_tools,
+    )] == [
+        "desktop.safe_shortcut",
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+
+
 def test_runtime_planner_discovers_chinese_generic_editor_apps_before_acting() -> None:
     allowed_tools = [
         "desktop.list_apps",
