@@ -1821,6 +1821,19 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
                                     "input": {"cmd": "python analyze.py"},
                                     "permission_target": "terminal_execution",
                                     "risk_level": "medium",
+                                    "task_verification_targets": [
+                                        {
+                                            "step_id": "terminal-fallback",
+                                            "workspace_items": [
+                                                {
+                                                    "item_id": "workspace-terminal-input",
+                                                    "title": "terminal-fallback.input.json",
+                                                    "kind": "scratch",
+                                                    "source_step_id": "terminal-fallback",
+                                                }
+                                            ],
+                                        }
+                                    ],
                                 }
                             ]
                         },
@@ -1944,7 +1957,21 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
         "app_name": "Music",
     }
     assert recovery.recovery_actions[0].action_target == recovery.action_target
-    assert recovery.recovery_actions[0].verification_targets == recovery.verification_targets
+    assert {
+        "step_id": "terminal-fallback",
+        "workspace_items": [
+            {
+                "item_id": "workspace-terminal-input",
+                "title": "terminal-fallback.input.json",
+                "kind": "scratch",
+                "source_step_id": "terminal-fallback",
+            }
+        ],
+    } in recovery.recovery_actions[0].verification_targets
+    assert all(
+        target in recovery.recovery_actions[0].verification_targets
+        for target in recovery.verification_targets
+    )
     assert recovery.observation_evidence == {
         "strategy": "observed_center_fallback",
         "observed_center": {"x": 512, "y": 220},

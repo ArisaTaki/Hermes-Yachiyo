@@ -720,7 +720,7 @@ def _recovery_action_snapshots(
         action_target = _mapping(action.get("action_target"))
         observation_evidence = _mapping(action.get("observation_evidence"))
         observation_retry = _mapping(action.get("observation_retry"))
-        verification_targets = _mapping_list(action.get("verification_targets"))
+        verification_targets = _verification_target_records(action)
         if selected:
             if not action_target:
                 action_target = dict(record.action_target)
@@ -728,8 +728,7 @@ def _recovery_action_snapshots(
                 observation_evidence = dict(record.observation_evidence)
             if not observation_retry:
                 observation_retry = dict(record.observation_retry)
-            if not verification_targets:
-                verification_targets = [dict(target) for target in record.verification_targets]
+            _extend_unique_mappings(verification_targets, record.verification_targets)
         action_id = _first_text(
             action.get("action_id"),
             action.get("id"),
