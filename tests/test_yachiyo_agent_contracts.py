@@ -2351,6 +2351,37 @@ def test_group_and_workflow_snapshots_scope_desktop_recovery_events() -> None:
 
 
 def test_group_and_workflow_snapshots_scope_replan_recovery_updates() -> None:
+    task_core_created = {
+        "event_type": "agent.task_core.created",
+        "payload": {
+            "core_id": "task-core-1",
+            "task_core": {
+                "core_id": "task-core-1",
+                "workspace": {
+                    "workspace_id": "task-workspace-1",
+                    "title": "Desktop Recovery Workspace",
+                },
+                "todos": [
+                    {
+                        "todo_id": "todo-open-selected-discovered-app",
+                        "title": "Open selected app",
+                        "step_id": "open-selected-discovered-app",
+                        "tool_name": "app.open",
+                        "status": "pending",
+                    }
+                ],
+                "checkpoints": [
+                    {
+                        "checkpoint_id": "checkpoint-open-selected-discovered-app",
+                        "title": "Verify selected app opened",
+                        "after_step_id": "open-selected-discovered-app",
+                        "status": "planned",
+                    }
+                ],
+                "replan_signals": [],
+            },
+        },
+    }
     replan_request = {
         "request_id": "replan-app-1",
         "trigger": "tool_failure",
@@ -2362,6 +2393,35 @@ def test_group_and_workflow_snapshots_scope_replan_recovery_updates() -> None:
         "target_capability_id": "desktop.app_control",
         "fallback_tools": ["desktop.list_apps"],
         "failure_detail": "app_resolution_failed",
+    }
+    todo_completed = {
+        "event_type": "agent.task.todo.updated",
+        "payload": {
+            "replan_request_id": "replan-app-1",
+            "todo_id": "todo-open-selected-discovered-app",
+            "status": "completed",
+            "todo": {
+                "todo_id": "todo-open-selected-discovered-app",
+                "title": "Open selected app",
+                "step_id": "open-selected-discovered-app",
+                "tool_name": "app.open",
+                "status": "completed",
+            },
+        },
+    }
+    checkpoint_completed = {
+        "event_type": "agent.task.checkpoint.updated",
+        "payload": {
+            "replan_request_id": "replan-app-1",
+            "checkpoint_id": "checkpoint-open-selected-discovered-app",
+            "status": "completed",
+            "checkpoint": {
+                "checkpoint_id": "checkpoint-open-selected-discovered-app",
+                "title": "Verify selected app opened",
+                "after_step_id": "open-selected-discovered-app",
+                "status": "completed",
+            },
+        },
     }
     recovery_update = {
         "request_id": "replan-app-1",
@@ -2391,6 +2451,7 @@ def test_group_and_workflow_snapshots_scope_replan_recovery_updates() -> None:
             "status": "completed",
             "objective": "Recover app as a group",
             "events": [
+                task_core_created,
                 {
                     "event_type": "agent.replan.requested",
                     "payload": replan_request,
@@ -2399,6 +2460,8 @@ def test_group_and_workflow_snapshots_scope_replan_recovery_updates() -> None:
                     "event_type": "agent.replan.recovery.updated",
                     "payload": recovery_update,
                 },
+                todo_completed,
+                checkpoint_completed,
             ],
         }
     )
@@ -2410,6 +2473,7 @@ def test_group_and_workflow_snapshots_scope_replan_recovery_updates() -> None:
             "status": "completed",
             "objective": "Recover app in workflow",
             "events": [
+                task_core_created,
                 {
                     "event_type": "agent.replan.requested",
                     "payload": replan_request,
@@ -2418,6 +2482,8 @@ def test_group_and_workflow_snapshots_scope_replan_recovery_updates() -> None:
                     "event_type": "agent.replan.recovery.updated",
                     "payload": recovery_update,
                 },
+                todo_completed,
+                checkpoint_completed,
             ],
         }
     )
@@ -2438,6 +2504,12 @@ def test_group_and_workflow_snapshots_scope_replan_recovery_updates() -> None:
         "ok": True,
         "summary": "Found Preview",
     }
+    assert group_snapshot.task_progress is not None
+    assert group_snapshot.task_progress.status == "completed"
+    assert group_snapshot.task_progress.needs_replan is False
+    assert group_snapshot.task_progress.replan_request_count == 1
+    assert group_snapshot.task_progress.completed_todos == 1
+    assert group_snapshot.task_progress.completed_checkpoints == 1
 
     workflow_recovery_event = next(
         event
@@ -2454,6 +2526,12 @@ def test_group_and_workflow_snapshots_scope_replan_recovery_updates() -> None:
     )
     assert workflow_snapshot.replan_recoveries[0].selected_tool_name == "desktop.list_apps"
     assert workflow_snapshot.replan_recoveries[0].permission_target == "app_discovery"
+    assert workflow_snapshot.task_progress is not None
+    assert workflow_snapshot.task_progress.status == "completed"
+    assert workflow_snapshot.task_progress.needs_replan is False
+    assert workflow_snapshot.task_progress.replan_request_count == 1
+    assert workflow_snapshot.task_progress.completed_todos == 1
+    assert workflow_snapshot.task_progress.completed_checkpoints == 1
 
 
 def _desktop_approval_task_core_payload() -> dict:
