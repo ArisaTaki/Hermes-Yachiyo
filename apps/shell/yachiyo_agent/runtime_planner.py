@@ -14018,8 +14018,11 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     web_navigation_action_kind = str(
         web_navigation_action.get("browser_action") or ""
     ).strip()
+    note_capture_hint = capture_note_hint(text)
     if intent.kind == "desktop_operation" and intent.inputs.get("screen_capture_hint"):
         score += 0.44
+        if note_capture_hint:
+            score -= 0.32
         if current_page_action_kind == "screenshot":
             score -= 0.58
         if web_navigation_action_kind == "open_url_screenshot":

@@ -23564,10 +23564,23 @@ def test_runtime_planner_tracks_context_note_source_without_body() -> None:
 
 
 def test_runtime_planner_routes_foreground_note_context_to_visible_text() -> None:
-    allowed_tools = ["notes.create", "desktop.ui_elements", "browser.extract_text"]
+    allowed_tools = [
+        "notes.create",
+        "desktop.ui_elements",
+        "browser.extract_text",
+        "screen.capture",
+    ]
     decision = RuntimePlanner().decision(
         "把当前窗口内容整理成笔记",
         allowed_tools=allowed_tools,
+    )
+    screen_decision = RuntimePlanner().decision(
+        "把当前屏幕内容记录成笔记",
+        allowed_tools=allowed_tools,
+    )
+    screen_capture_fallback = RuntimePlanner().decision(
+        "把当前屏幕内容记录成笔记",
+        allowed_tools=["notes.create", "screen.capture"],
     )
     page_decision = RuntimePlanner().decision(
         "把当前网页内容整理成笔记",
@@ -23587,7 +23600,35 @@ def test_runtime_planner_routes_foreground_note_context_to_visible_text() -> Non
     assert _step_by_id(decision, "create-note-from-context").input_preview == {
         "body_source": "visible_text"
     }
+    assert screen_decision.selected_intent.kind == "information_capture"
+    assert screen_decision.selected_intent.inputs == {
+        "action": "create_note_from_context",
+        "source": "visible_text",
+    }
+    assert _step_by_id(screen_decision, "read-note-context").tool_name == (
+        "desktop.ui_elements"
+    )
+    assert _step_by_id(screen_decision, "create-note-from-context").input_preview == {
+        "body_source": "visible_text"
+    }
+    assert screen_capture_fallback.selected_intent.kind == "information_capture"
+    assert _step_by_id(screen_capture_fallback, "read-note-context").tool_name == (
+        "screen.capture"
+    )
+    assert _step_by_id(screen_capture_fallback, "read-note-context").input_preview == {
+        "reason": "capture note context"
+    }
     assert planner_tool_requests("把当前窗口内容整理成笔记", allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_information_capture_context",
+            "continue_to_model": True,
+        }
+    ]
+    assert planner_tool_requests("把当前屏幕内容记录成笔记", allowed_tools) == [
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
