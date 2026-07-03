@@ -22488,6 +22488,28 @@ def test_runtime_planner_generic_desktop_click_execution_observes_target_before_
     assert observation_request["input"] == {"role_filter": "button", "limit": 80}
 
 
+def test_runtime_planner_foreground_desktop_click_strips_scope_from_target() -> None:
+    allowed_tools = ["desktop.click_ui_element", "desktop.ui_elements"]
+
+    requests = planner_tool_requests(
+        "点击当前窗口的导出按钮",
+        allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    execution_requests = planner_execution_tool_requests(requests, allowed_tools)
+
+    assert [request["tool"] for request in execution_requests] == ["desktop.ui_elements"]
+    observation_request = execution_requests[0]
+    assert observation_request["deferred_tool"] == "desktop.click_ui_element"
+    assert observation_request["deferred_input"] == {
+        "target": "导出",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert observation_request["input"] == {"role_filter": "button", "limit": 80}
+
+
 def test_custom_api_agent_loop_observes_generic_desktop_click_target_before_default_click(
     monkeypatch,
 ) -> None:
@@ -22872,6 +22894,28 @@ def test_runtime_planner_generic_desktop_type_execution_observes_target_before_t
     }
     assert observation_request["deferred_context"]["step_id"] == "operate-foreground-ui"
     assert observation_request["deferred_context"]["capability_id"] == "desktop.ui_operation"
+    assert observation_request["input"] == {"role_filter": "text", "limit": 80}
+
+
+def test_runtime_planner_foreground_desktop_type_strips_scope_from_target() -> None:
+    allowed_tools = ["desktop.type_into_ui_element", "desktop.ui_elements"]
+
+    requests = planner_tool_requests(
+        "在当前窗口的搜索框输入 logo",
+        allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    execution_requests = planner_execution_tool_requests(requests, allowed_tools)
+
+    assert [request["tool"] for request in execution_requests] == ["desktop.ui_elements"]
+    observation_request = execution_requests[0]
+    assert observation_request["deferred_tool"] == "desktop.type_into_ui_element"
+    assert observation_request["deferred_input"] == {
+        "target": "搜索",
+        "text": "logo",
+        "role_filter": "text",
+        "limit": 80,
+    }
     assert observation_request["input"] == {"role_filter": "text", "limit": 80}
 
 

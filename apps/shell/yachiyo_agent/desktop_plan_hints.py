@@ -1563,8 +1563,26 @@ def _clean_media_query(value: str) -> str:
     return "" if query.lower() in _GENERIC_MUSIC_QUERIES else query
 
 
-def clean_target(value: str) -> str:
+def _strip_foreground_scope_prefix(value: str) -> str:
     target = clean(value)
+    stripped = re.sub(
+        r"^(?:(?:在|向|到|往|至)\s*)?"
+        r"(?:(?:当前|这个|该|本|前台|活动|活跃)\s*"
+        r"(?:窗口|界面|屏幕|应用|页面|网页|页|视图|ui|app)"
+        r"(?:的|里|中|上|内|里面|之中|里的|中的|上的|内的)?|"
+        r"(?:当前|这个|该|本|前台)\s*(?:的|里|中|上|内)|"
+        r"(?:current|foreground|frontmost)\s+"
+        r"(?:window|app|application|page|view|screen|ui)(?:'s)?)\s*",
+        "",
+        target,
+        count=1,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    return stripped
+
+
+def clean_target(value: str) -> str:
+    target = _strip_foreground_scope_prefix(value)
     target = re.split(
         r"(?:然后|并且|并|再|接着|之后|后|输入|键入|填写|填入|写入|写|and\s+then|then|and|type|enter|fill)",
         target,
@@ -1616,6 +1634,7 @@ def clean_type_target(value: str, *, app_name: str = "") -> str:
     if named_field_suffix:
         name = named_field_suffix.group("name").strip(" .，,。")
         clean_app_name = clean(app_name)
+        name = _strip_foreground_scope_prefix(name)
         name = re.sub(
             r"^(?:(?:在|通过)\s*|用\s+|(?:in|inside|within|using|with)\s+)",
             "",
