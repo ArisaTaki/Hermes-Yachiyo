@@ -944,7 +944,10 @@ def _desktop_discovered_app_followup_target(
             "input": {"limit": 80},
             "continue_to_model": True,
         }
-        payload["pending_user_action"] = discovered_app_pending_user_action(user_goal)
+    if needs_open_followup:
+        pending_user_action = discovered_app_pending_user_action(user_goal)
+        if pending_user_action:
+            payload["pending_user_action"] = pending_user_action
     return payload
 
 

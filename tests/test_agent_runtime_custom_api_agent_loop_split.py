@@ -21594,6 +21594,154 @@ def test_auto_discovered_app_observed_result_inherits_equivalent_tool_plan_trace
     assert requests[0]["input_resolution"]["resolved_app_name"] == "Figma"
 
 
+def test_auto_discovered_app_observed_pending_click_uses_safe_click() -> None:
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.list_apps",
+            input_preview={"query": "mail", "limit": 20},
+            result={
+                "ok": True,
+                "data": {
+                    "query": "mail",
+                    "apps": [
+                        {
+                            "name": "MailMate",
+                            "path": "/Applications/MailMate.app",
+                            "match_score": 93,
+                        }
+                    ],
+                },
+            },
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            input_preview={"limit": 80},
+            result={
+                "ok": True,
+                "data": {
+                    "elements": [
+                        {
+                            "role": "AXButton",
+                            "label": "写信",
+                            "center": {"x": 180, "y": 72},
+                        }
+                    ],
+                    "count": 1,
+                },
+            },
+        ),
+    ]
+
+    requests = custom_api_agent_module._auto_discovered_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "mail",
+                "target_action": "open_app",
+                "pending_user_action": "点击写信按钮",
+            }
+        },
+        ["desktop.safe_click", "desktop.ui_elements"],
+        timeline,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.safe_click",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["input"] == {"x": 180, "y": 72}
+    assert requests[0]["planning_reason"] == (
+        "planner_followup_discovered_app_observed_action"
+    )
+    assert requests[0]["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "click",
+        "target": "写信",
+        "role_filter": "button",
+        "app_name": "MailMate",
+    }
+    assert requests[0]["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "observed_center",
+        "center": {"x": 180, "y": 72},
+    }
+
+
+def test_auto_discovered_app_observed_pending_type_uses_safe_text() -> None:
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.list_apps",
+            input_preview={"query": "image", "limit": 20},
+            result={
+                "ok": True,
+                "data": {
+                    "query": "image",
+                    "apps": [
+                        {
+                            "name": "Figma",
+                            "path": "/Applications/Figma.app",
+                            "match_score": 94,
+                        }
+                    ],
+                },
+            },
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            input_preview={"limit": 80},
+            result={
+                "ok": True,
+                "data": {
+                    "elements": [
+                        {
+                            "role": "AXTextField",
+                            "label": "搜索",
+                            "center": {"x": 260, "y": 90},
+                        }
+                    ],
+                    "count": 1,
+                },
+            },
+        ),
+    ]
+
+    requests = custom_api_agent_module._auto_discovered_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "image",
+                "target_action": "open_app",
+                "pending_user_action": "在搜索框输入 revenue",
+            }
+        },
+        ["desktop.safe_click", "desktop.safe_type_text", "desktop.ui_elements"],
+        timeline,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.safe_click",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["input"] == {"x": 260, "y": 90}
+    assert requests[1]["input"] == {"text": "revenue"}
+    assert requests[1]["action_target"] == {
+        "kind": "desktop_observed_action",
+        "action": "type_text",
+        "target": "搜索",
+        "role_filter": "text",
+        "app_name": "Figma",
+    }
+    assert requests[1]["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "focused_after_observed_target",
+    }
+
+
 def test_auto_discovered_app_search_followup_types_submits_and_verifies() -> None:
     timeline = [
         _timeline(

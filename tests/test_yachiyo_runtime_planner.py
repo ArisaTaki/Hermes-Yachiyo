@@ -3154,6 +3154,31 @@ def test_planner_creates_selected_discovered_app_document_before_typing() -> Non
     ]
 
 
+def test_planner_keeps_selected_discovered_app_button_action_for_observation() -> None:
+    prompt = "打开任意邮件应用，点击写信按钮"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "desktop.safe_click",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert "safe_type_text_hint" not in decision.selected_intent.inputs
+    assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "mail",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "observe-selected-discovered-app",
+    ]
+    observation = _step_by_id(decision, "observe-selected-discovered-app")
+    assert observation.tool_name == "desktop.ui_elements"
+    assert observation.input_preview == {"limit": 80}
+
+
 def test_planner_adds_generic_discovered_app_followup_action_steps() -> None:
     prompt = "打开一个能编辑图片的应用，然后点击导出"
     allowed_tools = [

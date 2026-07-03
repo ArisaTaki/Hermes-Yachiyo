@@ -35,7 +35,11 @@ from apps.shell.agent.tools.policy import (
     DAILY_DESKTOP_TOOL_NAMES,
 )
 from apps.shell.yachiyo_agent.app_name_hints import compact_app_name_hint
-from apps.shell.yachiyo_agent.desktop_plan_hints import hotkey_hint
+from apps.shell.yachiyo_agent.desktop_plan_hints import (
+    click_target_hint,
+    hotkey_hint,
+    type_into_ui_hint,
+)
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     DirectToolSelection,
     planner_first_direct_tool_selection,
@@ -8950,6 +8954,7 @@ def _auto_discovered_followup_requests(
     for factory in (
         _auto_desktop_observed_action_followup_requests,
         _auto_discovered_app_search_observed_result_requests,
+        _auto_discovered_app_observed_pending_action_requests,
         _auto_discovered_app_followup_requests,
         _auto_discovered_media_playback_followup_requests,
     ):
@@ -8957,6 +8962,80 @@ def _auto_discovered_followup_requests(
         if requests:
             return requests
     return []
+
+
+def _auto_discovered_app_observed_pending_action_requests(
+    selection_payload: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    planning_reason: str = "planner_followup_discovered_app_observed_action",
+) -> list[dict[str, Any]]:
+    target = (
+        selection_payload.get("followup_target")
+        if isinstance(selection_payload.get("followup_target"), Mapping)
+        else {}
+    )
+    if str(target.get("kind") or "").strip() != "desktop_discovered_app_action":
+        return []
+    pending_action = str(target.get("pending_user_action") or "").strip()
+    if not pending_action or not _latest_desktop_observation_succeeded(timeline):
+        return []
+    observed_target = _observed_action_target_from_discovered_pending_action(
+        pending_action,
+    )
+    if not observed_target:
+        return []
+    _attach_discovered_app_context_to_observed_target(
+        observed_target,
+        target,
+        timeline,
+    )
+    observation_source = _latest_desktop_observation_tool(timeline)
+    if observation_source:
+        observed_target["observation_source"] = observation_source
+    requests = _auto_desktop_observed_action_followup_requests(
+        {"followup_target": observed_target},
+        allowed_tools,
+        timeline,
+        planning_reason=planning_reason,
+    )
+    return _annotate_auto_followup_requests_from_tool_plan(requests, selection_payload)
+
+
+def _observed_action_target_from_discovered_pending_action(
+    pending_action: str,
+) -> dict[str, Any]:
+    type_target = type_into_ui_hint(pending_action)
+    if isinstance(type_target, Mapping) and type_target:
+        target_label = str(type_target.get("target") or "").strip()
+        text = str(type_target.get("text") or "").strip()
+        if target_label and text:
+            return {
+                "kind": "desktop_observed_action",
+                "target_action": "type_text",
+                "target": target_label,
+                "text": text,
+                "role_filter": str(type_target.get("role_filter") or "text").strip(),
+                "limit": _clean_model_followup_int(type_target.get("limit"), default=80),
+                "body_source": "explicit_user_text",
+            }
+    click_target = click_target_hint(pending_action)
+    if isinstance(click_target, Mapping) and click_target:
+        target_label = str(click_target.get("target") or "").strip()
+        if target_label:
+            return {
+                "kind": "desktop_observed_action",
+                "target_action": "click",
+                "target": target_label,
+                "role_filter": str(click_target.get("role_filter") or "").strip(),
+                "click_count": _clean_model_followup_int(
+                    click_target.get("click_count"),
+                    default=1,
+                ),
+                "limit": _clean_model_followup_int(click_target.get("limit"), default=80),
+            }
+    return {}
 
 
 def _auto_discovered_app_search_observed_result_requests(

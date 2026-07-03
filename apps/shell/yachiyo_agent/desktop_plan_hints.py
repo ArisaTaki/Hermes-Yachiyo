@@ -196,6 +196,17 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
             or ""
         )
         target = clean_target(raw_target)
+        if not target and re.search(
+            r"(?:按钮|button)\s*$",
+            raw_target,
+            flags=re.IGNORECASE,
+        ):
+            target = re.sub(
+                r"\s*(?:按钮|button)\s*$",
+                "",
+                raw_target,
+                flags=re.IGNORECASE,
+            ).strip(" .，,。")
         if not target:
             continue
         return {
