@@ -30625,6 +30625,36 @@ def test_runtime_execution_envelope_can_project_full_data_analysis_plan() -> Non
         projected_requests[1]["workspace_id"]
         == decision.plan.task_core.workspace.workspace_id
     )
+    assert projected_requests[0]["fallback_tools"] == [
+        "desktop.open_path",
+        "browser.current_page",
+    ]
+    assert projected_requests[1]["depends_on"] == ["inspect-data-source"]
+    assert projected_requests[2]["depends_on"] == ["run-analysis"]
+
+
+def test_runtime_execution_requests_preserve_replan_fallback_tools() -> None:
+    allowed_tools = ["workspace.read", "data.analyze", "terminal.run", "artifact.write"]
+    decision = RuntimePlanner().decision(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools=allowed_tools,
+    )
+
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+
+    assert envelope is not None
+    assert envelope.requests[0].tool_name == "data.analyze"
+    assert envelope.requests[0].fallback_tools == ["terminal.run"]
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    assert projected_requests[0]["tool"] == "data.analyze"
+    assert projected_requests[0]["fallback_tools"] == ["terminal.run"]
+    assert projected_requests[0]["replan_signal_ids"] == envelope.requests[0].replan_signal_ids
 
 
 def test_runtime_execution_envelope_can_project_full_report_app_write_plan() -> None:

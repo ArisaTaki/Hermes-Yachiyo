@@ -251,6 +251,8 @@ def _tool_request_from_execution_request(
         "intent_kind",
         "approval_required",
         "continue_to_model",
+        "depends_on",
+        "fallback_tools",
         "status",
         "runtime_doctrine",
         "runtime_stage",
