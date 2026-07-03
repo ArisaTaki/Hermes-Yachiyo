@@ -1396,6 +1396,18 @@ def test_runtime_planner_routes_readme_edit_to_code_task_patch() -> None:
     assert decision.plan.tool_plan.steps[-1].depends_on == ["read-code-target-file"]
     assert decision.plan.tool_plan.steps[-1].approval_required is True
 
+    requests = planner_tool_requests(
+        "给 README 增加安装说明",
+        allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    assert [request["tool"] for request in requests] == [
+        "workspace.list",
+        "workspace.read",
+    ]
+    assert requests[-1]["input"] == {"path": "README.md"}
+    assert requests[-1]["continue_to_model"] is True
+
 
 def test_runtime_planner_routes_repository_entry_summary_to_code_task_report() -> None:
     allowed_tools = [

@@ -3330,18 +3330,13 @@ def _code_task_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str,
             needs_model_followup = _code_diagnostic_requires_model_followup(decision)
             prefetch_requests = []
             if needs_model_followup:
-                prefetch_requests = _context_prefetch_tool_requests(
+                prefetch_requests = _code_context_prefetch_tool_requests(
                     decision,
                     allowed,
-                    step_ids=("inspect-workspace",),
                     planning_reason="planner_prefetch_code_context",
                 )
                 for prefetch_request in prefetch_requests:
                     prefetch_request.pop("continue_to_model", None)
-                    _attach_basic_step_metadata(
-                        prefetch_request,
-                        _planned_step_by_id(decision, "inspect-workspace"),
-                    )
             request = _request(
                 "terminal.run",
                 {"command": command},
@@ -3354,12 +3349,34 @@ def _code_task_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str,
             if needs_model_followup:
                 request["continue_to_model"] = True
             return [*prefetch_requests, request]
-    return _context_prefetch_tool_requests(
+    return _code_context_prefetch_tool_requests(
         decision,
         allowed,
-        step_ids=("inspect-workspace",),
         planning_reason="planner_prefetch_code_context",
     )
+
+
+def _code_context_prefetch_tool_requests(
+    decision: Any,
+    allowed: set[str],
+    *,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    for step_id in ("inspect-workspace", "read-code-target-file"):
+        request = _context_prefetch_request_for_step(
+            _planned_step_by_id(decision, step_id),
+            allowed,
+            planning_reason=planning_reason,
+        )
+        if not request:
+            continue
+        request.pop("continue_to_model", None)
+        _attach_basic_step_metadata(request, _planned_step_by_id(decision, step_id))
+        requests.append(request)
+    if requests:
+        requests[-1]["continue_to_model"] = True
+    return requests
 
 
 def _code_diagnostic_requires_model_followup(decision: Any) -> bool:
