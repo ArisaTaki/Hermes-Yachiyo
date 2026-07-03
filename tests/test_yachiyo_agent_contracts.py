@@ -1477,6 +1477,121 @@ def test_run_timeline_snapshot_projects_task_core_from_plan_event() -> None:
     assert snapshot.task_core.todos[0].tool_name == "artifact.write"
 
 
+def test_run_timeline_snapshot_adds_runtime_artifacts_to_task_workspace() -> None:
+    core_payload = {
+        "core_id": "task-core-1",
+        "workspace": {
+            "workspace_id": "task-workspace-1",
+            "title": "Report Workspace",
+            "items": [],
+        },
+        "todos": [
+            {
+                "todo_id": "todo-1",
+                "title": "Write report",
+                "step_id": "write-report",
+                "tool_name": "artifact.write",
+            }
+        ],
+        "checkpoints": [
+            {
+                "checkpoint_id": "checkpoint-1",
+                "title": "Verify report",
+                "after_step_id": "write-report",
+            }
+        ],
+        "replan_signals": [],
+    }
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "status": "running",
+            "metadata": {"yachiyo_task_core": core_payload},
+            "events": [
+                {
+                    "event_id": "artifact-event-1",
+                    "sequence": 3,
+                    "event_type": "agent.artifact.write",
+                    "detail": "report.md",
+                    "payload": {
+                        "step_id": "write-report",
+                        "tool": "artifact.write",
+                        "artifact": {
+                            "title": "Analysis report",
+                            "kind": "markdown",
+                            "path": "report.md",
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert snapshot.task_core is not None
+    assert [item.path for item in snapshot.task_core.workspace.items] == ["report.md"]
+    item = snapshot.task_core.workspace.items[0]
+    assert item.item_id == "artifact:report.md"
+    assert item.title == "Analysis report"
+    assert item.kind == "artifact"
+    assert item.status == "completed"
+    assert item.source_step_id == "write-report"
+    assert item.metadata["source"] == "runtime_artifact_event"
+    assert item.metadata["artifact_kind"] == "markdown"
+    assert item.metadata["runtime_event_type"] == "agent.artifact.write"
+    assert snapshot.task_core.todos[0].status == "completed"
+    assert snapshot.task_core.checkpoints[0].status == "completed"
+    assert snapshot.task_progress is not None
+    assert snapshot.task_progress.total_workspace_items == 1
+    assert snapshot.task_progress.completed_workspace_items == 1
+
+
+def test_agent_task_snapshot_adds_runtime_artifacts_to_task_workspace() -> None:
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-1",
+            "run_id": "run-1",
+            "title": "Write report",
+            "status": "running",
+            "metadata": {
+                "yachiyo_task_core": {
+                    "core_id": "task-core-1",
+                    "workspace": {
+                        "workspace_id": "task-workspace-1",
+                        "title": "Report Workspace",
+                        "items": [],
+                    },
+                    "todos": [],
+                    "checkpoints": [],
+                    "replan_signals": [],
+                }
+            },
+            "events": [
+                {
+                    "event_type": "tool.completed",
+                    "payload": {
+                        "tool": "artifact.write",
+                        "result": {
+                            "ok": True,
+                            "artifact": {
+                                "title": "Report",
+                                "kind": "markdown",
+                                "path": "report.md",
+                            },
+                        },
+                    },
+                }
+            ],
+        }
+    )
+
+    assert snapshot.task_core is not None
+    assert len(snapshot.task_core.workspace.items) == 1
+    assert snapshot.task_core.workspace.items[0].path == "report.md"
+    assert snapshot.task_core.workspace.items[0].status == "completed"
+    assert snapshot.task_progress is not None
+    assert snapshot.task_progress.completed_workspace_items == 1
+
+
 def test_planner_plan_created_event_includes_execution_envelope_for_studio_debugging() -> None:
     decision = RuntimePlanner().decision(
         "分析当前窗口里的表格并输出报告",

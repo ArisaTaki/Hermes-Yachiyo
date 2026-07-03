@@ -554,6 +554,7 @@ def _task_core_with_event_progress(
         progress_by_tool,
         progress_by_artifact_path,
         task_updates,
+        event_list,
     )
     updated_todos = [
         _todo_with_progress(todo, progress_by_step, progress_by_tool, task_updates)
@@ -821,6 +822,7 @@ def _runtime_progress_from_event(
         or status in {"completed", "complete", "success", "succeeded", "ok"}
         or event_name.endswith(".completed")
         or _is_desktop_intent_event(event_name, "completed")
+        or _event_is_artifact_created(event_name)
     ):
         return {
             "todo_status": "completed",
@@ -853,6 +855,16 @@ def _runtime_progress_from_event(
     return {}
 
 
+def _event_is_artifact_created(event_type: str) -> bool:
+    return event_type in {
+        "artifact.created",
+        "agent.artifact.write",
+        "group.artifact.created",
+        "group.shared_artifact.created",
+        "workflow.node.artifact",
+    } or event_type.endswith(".artifact.created")
+
+
 def _is_desktop_intent_event(event_type: str, suffix: str) -> bool:
     return event_type in {
         f"agent.desktop.intent_{suffix}",
@@ -868,6 +880,7 @@ def _workspace_with_progress(
     progress_by_tool: Mapping[str, Mapping[str, Any]],
     progress_by_artifact_path: Mapping[str, Mapping[str, Any]],
     task_updates: Mapping[str, Mapping[str, Mapping[str, Any]]],
+    events: Iterable[PublicRunEvent],
 ) -> TaskWorkspaceSnapshot:
     updated_items = [
         _workspace_item_with_progress(
@@ -879,7 +892,122 @@ def _workspace_with_progress(
         )
         for item in workspace.items
     ]
+    updated_items.extend(
+        _runtime_artifact_workspace_items(
+            events,
+            updated_items,
+            progress_by_artifact_path,
+        )
+    )
     return workspace.model_copy(update={"items": updated_items})
+
+
+def _runtime_artifact_workspace_items(
+    events: Iterable[PublicRunEvent],
+    existing_items: list[TaskWorkspaceItemSnapshot],
+    progress_by_artifact_path: Mapping[str, Mapping[str, Any]],
+) -> list[TaskWorkspaceItemSnapshot]:
+    existing_paths = {
+        path
+        for item in existing_items
+        for path in _workspace_item_path_candidates(item)
+    }
+    existing_ids = {str(item.item_id or "").strip() for item in existing_items}
+    items: list[TaskWorkspaceItemSnapshot] = []
+    for event in events:
+        if event.visibility != "user" or event.sensitivity != "public":
+            continue
+        payload = event.payload if isinstance(event.payload, Mapping) else {}
+        if not _event_can_update_artifact_path(event.event_type, payload):
+            continue
+        progress = _runtime_progress_from_event(event.event_type, payload)
+        step_ids = _event_step_ids(payload)
+        for path in _event_artifact_paths(payload):
+            item_id = f"artifact:{path}"
+            if path in existing_paths or item_id in existing_ids:
+                continue
+            existing_paths.add(path)
+            existing_ids.add(item_id)
+            item_progress = progress_by_artifact_path.get(path) or progress
+            metadata = _runtime_artifact_workspace_item_metadata(event, payload, item_progress)
+            items.append(
+                TaskWorkspaceItemSnapshot(
+                    item_id=item_id,
+                    title=_runtime_artifact_workspace_item_title(path, payload),
+                    kind="artifact",
+                    path=path,
+                    description=_text(payload.get("detail") or event.detail),
+                    source_step_id=step_ids[0] if step_ids else None,
+                    status=_workspace_item_status_from_progress(item_progress, "completed"),
+                    metadata=metadata,
+                )
+            )
+    return items
+
+
+def _runtime_artifact_workspace_item_metadata(
+    event: PublicRunEvent,
+    payload: Mapping[str, Any],
+    progress: Mapping[str, Any],
+) -> dict[str, Any]:
+    metadata = {
+        "source": "runtime_artifact_event",
+        "runtime_status": str(progress.get("runtime_status") or "completed"),
+        "runtime_event_type": str(progress.get("event_type") or event.event_type or ""),
+    }
+    for key, value in {
+        "event_id": event.event_id,
+        "sequence": event.sequence,
+        "tool_name": _event_tool_name(payload),
+        "artifact_kind": _runtime_artifact_kind(payload),
+        "source_run_id": payload.get("source_run_id") or event.run_id,
+    }.items():
+        clean = str(value or "").strip()
+        if clean:
+            metadata[key] = clean
+    return metadata
+
+
+def _runtime_artifact_workspace_item_title(path: str, payload: Mapping[str, Any]) -> str:
+    for artifact_payload in _artifact_payload_candidates(payload):
+        title = _text(
+            artifact_payload.get("title")
+            or artifact_payload.get("label")
+            or artifact_payload.get("path")
+            or artifact_payload.get("artifact_path")
+        )
+        if title:
+            return title
+    return path
+
+
+def _runtime_artifact_kind(payload: Mapping[str, Any]) -> str:
+    for artifact_payload in _artifact_payload_candidates(payload):
+        kind = _text(artifact_payload.get("kind"))
+        if kind:
+            return kind
+    return ""
+
+
+def _artifact_payload_candidates(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    candidates: list[Mapping[str, Any]] = []
+    artifact = payload.get("artifact")
+    if isinstance(artifact, Mapping):
+        candidates.append(artifact)
+    result = payload.get("result")
+    if isinstance(result, Mapping):
+        result_artifact = result.get("artifact")
+        if isinstance(result_artifact, Mapping):
+            candidates.append(result_artifact)
+        result_artifacts = result.get("artifacts")
+        if isinstance(result_artifacts, list):
+            candidates.extend(item for item in result_artifacts if isinstance(item, Mapping))
+        data = result.get("data")
+        if isinstance(data, Mapping):
+            data_artifact = data.get("artifact")
+            if isinstance(data_artifact, Mapping):
+                candidates.append(data_artifact)
+    return candidates
 
 
 def _workspace_item_with_progress(
@@ -1159,6 +1287,8 @@ def _workspace_item_path_candidates(item: TaskWorkspaceItemSnapshot) -> list[str
 def _event_artifact_paths(payload: Mapping[str, Any]) -> list[str]:
     values: list[str] = []
     _extend_artifact_paths(values, payload)
+    for artifact_payload in _artifact_payload_candidates(payload):
+        _extend_artifact_paths(values, artifact_payload)
     result = payload.get("result")
     if isinstance(result, Mapping):
         _extend_artifact_paths(values, result)
