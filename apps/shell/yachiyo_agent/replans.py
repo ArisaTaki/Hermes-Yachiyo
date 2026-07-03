@@ -303,7 +303,7 @@ def _task_core_replan_context(
     workspace_items = _context_rows(
         getattr(workspace, "items", []) or [],
         focus=lambda item: _text(getattr(item, "source_step_id", "")) in {source_step, plan_step},
-        include=lambda item: _text(getattr(item, "kind", "")) in {"input", "artifact"},
+        include=lambda item: _text(getattr(item, "kind", "")) in {"input", "artifact", "scratch"},
         serialize=lambda item: {
             "item_id": _text(getattr(item, "item_id", "")),
             "title": _text(getattr(item, "title", "")),

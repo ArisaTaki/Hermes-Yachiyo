@@ -2006,12 +2006,17 @@ def test_runtime_planner_builds_replan_request_from_failed_step() -> None:
         item["kind"] == "input" and item["path"] == "sales.csv"
         for item in task_context["workspace_items"]
     )
+    assert any(
+        item["kind"] == "scratch" and item["title"] == "analyze-data-file.input.json"
+        for item in task_context["workspace_items"]
+    )
     assert task_context["todos"][0]["step_id"] == "analyze-data-file"
     assert task_context["checkpoints"][0]["after_step_id"] == "analyze-data-file"
     assert task_context["replan_signals"][0]["fallback_tools"] == ["terminal.run"]
     assert "Task workspace context:" in payload["replan_prompt"]
     assert "- planner_step: analyze-data-file" in payload["replan_prompt"]
     assert "input · planned · sales.csv" in payload["replan_prompt"]
+    assert "scratch · planned · analyze-data-file.input.json" in payload["replan_prompt"]
     assert "analyze-data-file · pending · data.analyze" in payload["replan_prompt"]
     assert run_event is not None
     assert run_event[0] == "agent.replan.requested"
