@@ -6687,6 +6687,26 @@ def test_runtime_planner_prefers_research_deliverable_over_browser_app_hint() ->
         ["browser.open_url", "artifact.write", "workspace.list", "data.analyze"],
     )[0]["tool"] == "browser.open_url"
 
+    current_page_presentation_outline = RuntimePlanner().decision(
+        "根据当前网页生成演示文稿大纲",
+        allowed_tools=["browser.extract_text", "artifact.write"],
+    )
+    assert current_page_presentation_outline.selected_intent.kind == "web_research"
+    assert current_page_presentation_outline.selected_intent.expected_outputs == [
+        "presentation"
+    ]
+    assert [step.step_id for step in current_page_presentation_outline.plan.tool_plan.steps] == [
+        "extract-current-page-text",
+        "write-research-artifact",
+    ]
+    assert _step_by_id(
+        current_page_presentation_outline,
+        "write-research-artifact",
+    ).tool_name == "artifact.write"
+    assert current_page_presentation_outline.plan.tool_plan.artifacts_expected == [
+        "research-summary.md"
+    ]
+
     english_pricing_table = RuntimePlanner().decision(
         "look up current Anthropic API pricing and make a table",
         allowed_tools=["browser.open_url", "artifact.write", "workspace.list", "data.analyze"],
@@ -32975,6 +32995,7 @@ def test_runtime_execution_envelope_can_project_full_web_research_plan() -> None
         "inspect_web_context",
         "artifact",
     ]
+    assert full_envelope.requests[1].continue_to_model is True
     assert full_envelope.runtime_stage_counts == {
         "discover": 1,
         "produce": 1,

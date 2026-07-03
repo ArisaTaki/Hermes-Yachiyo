@@ -139,9 +139,13 @@ def _request_needs_model_materialization(
             request_input.get("body") or ""
         ).strip()
     if tool_name == "artifact.write":
-        return bool(request_input.get("body_source")) and not str(
-            request_input.get("content") or ""
-        ).strip()
+        if str(request_input.get("content") or "").strip():
+            return False
+        return bool(
+            request_input.get("body_source")
+            or request_input.get("path")
+            or request_input.get("paths")
+        )
     return False
 
 

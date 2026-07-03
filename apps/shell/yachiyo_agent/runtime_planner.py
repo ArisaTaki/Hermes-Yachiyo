@@ -14440,7 +14440,7 @@ def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
         for item in intent.expected_outputs
         if str(item or "").strip()
     }
-    if outputs.intersection({"report", "table", "links"}):
+    if outputs.intersection({"report", "table", "links", "presentation"}):
         return True
     return _contains_any(
         intent.user_goal,
