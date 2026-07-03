@@ -389,7 +389,10 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
     )
     if desktop_discovered_app_target:
         return desktop_discovered_app_target
-    desktop_observed_action_target = _desktop_observed_action_followup_target(inputs)
+    desktop_observed_action_target = _desktop_observed_action_followup_target(
+        inputs,
+        decision,
+    )
     if desktop_observed_action_target:
         return desktop_observed_action_target
     note_write_target = _note_write_followup_target(inputs)
@@ -526,7 +529,13 @@ def _note_write_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:
     return payload
 
 
-def _desktop_observed_action_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:
+def _desktop_observed_action_followup_target(
+    inputs: Mapping[str, Any],
+    decision: Any | None = None,
+) -> dict[str, Any]:
+    plan_target = _desktop_observed_action_followup_target_from_plan(inputs, decision)
+    if plan_target:
+        return plan_target
     browser_action = str(inputs.get("browser_action") or "").strip()
     if browser_action not in {"click", "type_text"}:
         return {}
@@ -561,6 +570,78 @@ def _desktop_observed_action_followup_target(inputs: Mapping[str, Any]) -> dict[
         "body_source": "explicit_user_text",
         "observation_source": "desktop.read_ui",
     }
+
+
+def _desktop_observed_action_followup_target_from_plan(
+    inputs: Mapping[str, Any],
+    decision: Any | None,
+) -> dict[str, Any]:
+    operation_step = _planner_step_by_id(decision, "operate-foreground-ui")
+    if str(getattr(operation_step, "action", "") or "").strip() != "observe_ui_target":
+        return {}
+    input_preview = getattr(operation_step, "input_preview", None)
+    payload = input_preview if isinstance(input_preview, Mapping) else {}
+    target = str(payload.get("target") or "").strip()
+    if not target:
+        return {}
+    operation_hint = str(inputs.get("operation_hint") or "").strip()
+    target_action = "type_text" if operation_hint in {"type", "type_text"} else "click"
+    result: dict[str, Any] = {
+        "kind": "desktop_observed_action",
+        "target_action": target_action,
+        "target": target,
+        "role_filter": str(payload.get("role_filter") or "").strip(),
+        "limit": _safe_int(payload.get("limit"), default=80),
+        "observation_source": str(
+            getattr(operation_step, "tool_name", "") or "desktop.ui_elements"
+        ).strip(),
+    }
+    app_name = str(inputs.get("app_name_hint") or "").strip()
+    if app_name:
+        result["app_name"] = app_name
+    app_capability = (
+        inputs.get("app_capability_hint")
+        if isinstance(inputs.get("app_capability_hint"), Mapping)
+        else {}
+    )
+    app_query = str(app_capability.get("query") or "").strip()
+    if app_query:
+        result["app_query"] = app_query
+    if target_action == "click":
+        result["click_count"] = _safe_int(payload.get("click_count"), default=1)
+        return {
+            key: value
+            for key, value in result.items()
+            if value not in ("", None, [], {})
+        }
+    text = str(payload.get("text") or inputs.get("safe_type_text_hint") or "")
+    if not text:
+        return {}
+    result["text"] = text
+    result["body_source"] = "explicit_user_text"
+    return {
+        key: value
+        for key, value in result.items()
+        if value not in ("", None, [], {})
+    }
+
+
+def _planner_step_by_id(decision: Any | None, step_id: str) -> Any | None:
+    clean_step_id = str(step_id or "").strip()
+    if not clean_step_id:
+        return None
+    steps = list(
+        getattr(
+            getattr(getattr(decision, "plan", None), "tool_plan", None),
+            "steps",
+            [],
+        )
+        or []
+    )
+    for step in steps:
+        if str(getattr(step, "step_id", "") or "").strip() == clean_step_id:
+            return step
+    return None
 
 
 def _model_generated_content_hint_payload(inputs: Mapping[str, Any]) -> Mapping[str, Any]:

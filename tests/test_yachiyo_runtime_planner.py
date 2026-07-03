@@ -9711,6 +9711,28 @@ def test_runtime_planner_observes_semantic_ui_target_when_click_tool_unavailable
     assert requests[-1]["step_id"] == "operate-foreground-ui"
     assert requests[-1]["continue_to_model"] is True
 
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+    assert payload["followup_target"] == {
+        "kind": "desktop_observed_action",
+        "target_action": "click",
+        "target": "导出",
+        "role_filter": "button",
+        "limit": 80,
+        "observation_source": "desktop.ui_elements",
+        "app_name": "PixelForge",
+        "click_count": 1,
+    }
+    assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == (
+        payload["followup_target"]
+    )
+
 
 def test_runtime_planner_exposes_desktop_discover_operate_action_layer() -> None:
     allowed_tools = [
