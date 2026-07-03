@@ -2607,6 +2607,7 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
     ]
 
     pdf_prompt = "找一个能编辑 PDF 的本机应用并打开最近的 PDF"
+    pdf_downloads_prompt = "找一个 PDF 阅读器打开 Downloads 最新 pdf"
     pdf_allowed_tools = [
         "workspace.list",
         "desktop.list_apps",
@@ -2614,6 +2615,10 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
     ]
     pdf_decision = RuntimePlanner().decision(
         pdf_prompt,
+        allowed_tools=pdf_allowed_tools,
+    )
+    pdf_downloads_decision = RuntimePlanner().decision(
+        pdf_downloads_prompt,
         allowed_tools=pdf_allowed_tools,
     )
     pdf_requests = planner_tool_requests(
@@ -2632,7 +2637,19 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         "selection": "latest",
         "pattern": "*.pdf",
     }
+    assert pdf_downloads_decision.selected_intent.kind == "desktop_operation"
+    assert pdf_downloads_decision.selected_intent.inputs["file_open_discovery_hint"] == {
+        "path": "Downloads",
+        "file_type": "pdf",
+        "selection": "latest",
+        "pattern": "*.pdf",
+    }
     assert [step.step_id for step in pdf_decision.plan.tool_plan.steps] == [
+        "discover-file-open-target",
+        "discover_apps-desktop-state",
+        "open-discovered-file-with-app",
+    ]
+    assert [step.step_id for step in pdf_downloads_decision.plan.tool_plan.steps] == [
         "discover-file-open-target",
         "discover_apps-desktop-state",
         "open-discovered-file-with-app",

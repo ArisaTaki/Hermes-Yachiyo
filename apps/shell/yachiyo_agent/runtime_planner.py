@@ -418,20 +418,25 @@ class TaskIntentRouter:
             return _empty_intent("desktop_operation", text)
         if generic_browser_search and not app_capability:
             app_capability = {"query": "browser", "description": "browser"}
+        file_open_discovery_candidate = _app_file_open_discovery_hint(
+            text,
+            metadata,
+        ) or _generic_app_file_open_discovery_hint(
+            text,
+            metadata,
+            app_capability=app_capability,
+        )
         selected_app_target_path = (
-            _selected_discovered_app_target_path_hint(text) if app_capability else ""
+            ""
+            if file_open_discovery_candidate
+            else (
+                _selected_discovered_app_target_path_hint(text)
+                if app_capability
+                else ""
+            )
         )
         file_open_discovery = (
-            {}
-            if selected_app_target_path
-            else _app_file_open_discovery_hint(
-                text,
-                metadata,
-            ) or _generic_app_file_open_discovery_hint(
-                text,
-                metadata,
-                app_capability=app_capability,
-            )
+            {} if selected_app_target_path else file_open_discovery_candidate
         )
         app_search_app_hint = "" if app_capability else _app_name_hint(text)
         if (
