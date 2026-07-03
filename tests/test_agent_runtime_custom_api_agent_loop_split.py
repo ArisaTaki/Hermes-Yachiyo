@@ -1366,6 +1366,59 @@ def test_custom_api_agent_loop_guides_code_tasks_without_bypassing_approval() ->
     assert "approval gates still apply" in system_prompt
 
 
+def test_runtime_planner_routes_readme_edit_to_code_task_patch() -> None:
+    allowed_tools = ["workspace.list", "workspace.write_patch", "artifact.write"]
+
+    decision = RuntimePlanner().decision(
+        "给 README 增加安装说明",
+        allowed_tools=allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+
+    assert decision.selected_intent.kind == "code_task"
+    assert decision.selected_intent.inputs["code_change_hint"] == {"mode": "create"}
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-workspace",
+        "apply-code-changes",
+    ]
+    assert decision.plan.tool_plan.steps[-1].tool_name == "workspace.write_patch"
+    assert decision.plan.tool_plan.steps[-1].approval_required is True
+
+
+def test_runtime_planner_routes_repository_entry_summary_to_code_task_report() -> None:
+    allowed_tools = [
+        "workspace.list",
+        "artifact.write",
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+    ]
+
+    requests = planner_tool_requests(
+        "阅读这个仓库，找出 code task 的入口并写一份摘要",
+        allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    execution_requests = planner_execution_tool_requests(requests, allowed_tools)
+
+    assert [request["tool"] for request in execution_requests] == ["workspace.list"]
+    assert execution_requests[0]["continue_to_model"] is True
+
+    decision = RuntimePlanner().decision(
+        "阅读这个仓库，找出 code task 的入口并写一份摘要",
+        allowed_tools=allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    assert decision.selected_intent.kind == "code_task"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-workspace",
+        "write-code-report",
+    ]
+    assert decision.plan.tool_plan.steps[-1].input_preview == {
+        "path": "code-task-summary.md"
+    }
+
+
 def test_custom_api_agent_loop_guides_workflow_and_group_runs_as_studio_handoffs() -> None:
     workflow_prompt = RuntimeCustomApiAgentLoop._runtime_planner_guidance(
         "运行 Daily Summary workflow",

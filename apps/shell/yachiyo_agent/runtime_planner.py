@@ -1809,6 +1809,10 @@ class TaskIntentRouter:
                 "开发",
             ],
         )
+        workspace_context_request = _looks_like_workspace_code_context_request(text)
+        workspace_file_edit_request = _looks_like_workspace_file_edit_request(text)
+        if score <= 0 and (workspace_context_request or workspace_file_edit_request):
+            score = 0.22
         if score <= 0:
             return _empty_intent("code_task", text)
         diagnostic_command = _code_task_diagnostic_command_hint(text)
@@ -12353,6 +12357,11 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     )
     if intent.kind == "desktop_operation" and _looks_like_file_organization_request(text):
         score -= 0.3
+    if intent.kind == "desktop_operation" and (
+        _looks_like_workspace_code_context_request(text)
+        or _looks_like_workspace_file_edit_request(text)
+    ):
+        score -= 0.46
     if (
         intent.kind == "desktop_operation"
         and _looks_like_recipient_message_request(text)
@@ -12767,6 +12776,13 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         ["code", "test", "bug", "build", "repo", "代码", "测试", "修复", "仓库"],
     ):
         score += 0.08
+    if intent.kind == "code_task" and (
+        _looks_like_workspace_code_context_request(text)
+        or _looks_like_workspace_file_edit_request(text)
+    ):
+        score += 0.28
+    if intent.kind == "report_generation" and _looks_like_workspace_file_edit_request(text):
+        score -= 0.28
     return max(score, 0.0)
 
 
@@ -12861,6 +12877,106 @@ def _code_task_diagnostic_command_hint(text: str) -> dict[str, str]:
     return {}
 
 
+def _looks_like_workspace_code_context_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if _looks_like_external_docs_lookup(value):
+        return False
+    workspace_subject = _contains_any(
+        value,
+        (
+            "repo",
+            "repository",
+            "codebase",
+            "workspace",
+            "this project",
+            "current project",
+            "this repo",
+            "current repo",
+            "仓库",
+            "代码库",
+            "这个项目",
+            "当前项目",
+            "本项目",
+            "工作区",
+        ),
+    )
+    code_target = _contains_any(
+        value,
+        (
+            "code task",
+            "entrypoint",
+            "entry point",
+            "入口",
+            "代码",
+            "模块",
+            "函数",
+            "类",
+            "文件",
+            "readme",
+            "docs",
+            "documentation",
+        ),
+    )
+    context_action = bool(
+        re.search(
+            r"(?:read|inspect|review|find|locate|trace|summari[sz]e|explain|"
+            r"阅读|查看|检查|审阅|找出|查找|定位|梳理|总结|摘要|解释|说明)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+    return workspace_subject and (code_target or context_action)
+
+
+def _looks_like_workspace_file_edit_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value or not _code_task_write_requested(value):
+        return False
+    file_subject = bool(
+        re.search(
+            r"\b(?:readme|changelog|license|contributing|agents\.md|"
+            r"package\.json|pyproject\.toml|tsconfig\.json|vite\.config|"
+            r"docs?/|documentation)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"[\w./-]+\.(?:md|mdx|txt|py|ts|tsx|js|jsx|json|toml|yaml|yml|css|html)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or _contains_any(
+            value,
+            (
+                "安装说明",
+                "使用说明",
+                "开发说明",
+                "配置文件",
+                "文档文件",
+                "项目文档",
+                "仓库文档",
+            ),
+        )
+    )
+    workspace_context = _contains_any(
+        value,
+        (
+            "repo",
+            "repository",
+            "codebase",
+            "workspace",
+            "project",
+            "仓库",
+            "代码库",
+            "项目",
+            "工作区",
+        ),
+    )
+    return file_subject or (workspace_context and _contains_any(value, ("文档", "docs", "documentation")))
+
+
 def _code_task_write_requested(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
@@ -12874,7 +12990,7 @@ def _code_task_write_requested(text: str) -> bool:
         return True
     return bool(
         re.search(
-            r"(?:修复|修正|修改|改一下|改成|实现|新增|添加|创建|新建|生成|编写|"
+            r"(?:修复|修正|修改|改一下|改成|实现|新增|添加|增加|创建|新建|生成|编写|"
             r"写一个|写个|写出|重构|补上|接入|调整|更新|改造)",
             value,
         )
@@ -12885,7 +13001,7 @@ def _code_task_change_mode(text: str) -> str:
     value = _clean_prompt(text)
     lowered = value.lower()
     if re.search(r"\b(?:create|write|generate|scaffold|add)\b", lowered) or re.search(
-        r"(?:新增|添加|创建|新建|生成|编写|写一个|写个|写出)",
+        r"(?:新增|添加|增加|创建|新建|生成|编写|写一个|写个|写出)",
         value,
     ):
         return "create"
@@ -15253,6 +15369,11 @@ def _url_hint(text: str) -> str:
 
 def _app_name_hint(text: str) -> str:
     if _app_capability_discovery_hint(text):
+        return ""
+    if (
+        _looks_like_workspace_code_context_request(text)
+        or _looks_like_workspace_file_edit_request(text)
+    ):
         return ""
     if _looks_like_ui_click_advice_request(text):
         return ""
