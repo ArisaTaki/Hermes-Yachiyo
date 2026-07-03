@@ -2005,7 +2005,7 @@ class TaskIntentRouter:
             score = 0.24
         if score <= 0 and explicit_multi_agent:
             score = 0.24
-        target_hint = _group_target_hint(text) or known_target_hint
+        target_hint = known_target_hint or _group_target_hint(text)
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "multi_agent", text),
             kind="multi_agent",
@@ -2024,12 +2024,19 @@ class TaskIntentRouter:
             return _empty_intent("communication", text)
         app_capability_discovery = _app_capability_discovery_hint(text)
         app_capability_query = str(app_capability_discovery.get("query") or "").strip()
+        communication_compose_requested = (
+            _looks_like_communication_task_request(text)
+            or _generic_communication_compose_requested(text)
+        )
         if (
             _explicit_app_open_request(text)
             and app_capability_discovery
             and not (
                 app_capability_query in {"mail", "messaging"}
-                and _contains_any(text, _COMMUNICATION_ACTION_TERMS)
+                and (
+                    _contains_any(text, _COMMUNICATION_ACTION_TERMS)
+                    or communication_compose_requested
+                )
             )
         ):
             return _empty_intent("communication", text)
@@ -14752,7 +14759,7 @@ def _looks_like_multi_agent_request(text: str) -> bool:
         flags=re.IGNORECASE,
     ) and re.search(
         r"(?:让|安排|派发|派活|委派|分配|指派|运行|启动|开启|开|创建|新建|"
-        r"组建|组成|执行|协作|做|产出|"
+        r"组建|组成|执行|协作|做|产出|用|通过|调用|选择|一起|"
         r"coordinate|delegate|dispatch|assign|run|start|open|create|execute)",
         value,
         flags=re.IGNORECASE,
@@ -14790,7 +14797,14 @@ def _looks_like_multi_agent_request(text: str) -> bool:
         value,
         flags=re.IGNORECASE,
     )
-    if role_terms and (role_task_terms or role_together_task):
+    role_collaboration_marker = re.search(
+        r"(?:让|安排|派发|派活|委派|分配|指派|协作|合作|分别|各自|并行|分工|一起|"
+        r"两个|两个以上|多个|多位|几位|一组|"
+        r"coordinate|delegate|dispatch|assign|collaborate|together|parallel|separately)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if role_terms and (role_together_task or (role_task_terms and role_collaboration_marker)):
         return True
     if re.search(
         r"(?:two|three|multiple|several)\s+(?:agents?|ai\s+agents?)",
@@ -15001,6 +15015,7 @@ def _orchestration_target_hint(
     patterns = (
         rf"(?:名为|叫做|叫|named)\s*[\"'“”‘’「」『』]?(?P<target>[^\"'“”‘’「」『』,，。；;]+?)[\"'“”‘’「」『』]?\s*(?:的)?\s*(?:{noun_pattern})",
         rf"(?:{noun_pattern})\s*[\"'“”‘’「」『』](?P<target>[^\"'“”‘’「」『』,，。；;]+)[\"'“”‘’「」『』]",
+        rf"(?:用|通过|调用|选择|让|请)\s*(?P<target>[\w\u4e00-\u9fff ._-]{{2,48}}?)\s*(?:{noun_pattern})",
         rf"(?:运行|启动|执行|打开|run|start)\s*(?P<target>[\w\u4e00-\u9fff ._-]{{2,48}}?)\s*(?:{noun_pattern})",
         rf"(?:运行|启动|执行|打开|run|start)\s*(?:{noun_pattern})\s*(?P<target>[\w\u4e00-\u9fff ._-]{{2,48}})$",
     )

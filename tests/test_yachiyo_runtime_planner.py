@@ -247,6 +247,7 @@ def test_task_intent_router_covers_agent_work_domains() -> None:
         ("整理 Downloads 里的发票文件", "file_organization", ["file.organization"]),
         ("给 Alice 发消息说会议改到三点", "communication", ["communication.compose"]),
         ("给 Alice 写一封邮件说明会议延期", "communication", ["communication.compose"]),
+        ("打开一个邮件客户端给 Alice 写邮件说明项目延期", "communication", ["communication.compose"]),
         ("明天上午九点提醒我提交报告", "schedule", ["schedule.reminder"]),
         (
             "修复这个仓库里的 failing tests",
@@ -260,6 +261,7 @@ def test_task_intent_router_covers_agent_work_domains() -> None:
         ),
         ("运行日报 Workflow", "workflow_orchestration", ["workflow.orchestration"]),
         ("让研究群组协作比较三个方案", "multi_agent", ["group.multi_agent"]),
+        ("用月夜群组一起分析这个需求", "multi_agent", ["group.multi_agent"]),
         ("打开 PixelForge", "desktop_operation", ["desktop.app_discovery"]),
         ("把剪贴板内容读出来", "clipboard_operation", ["clipboard.read_write"]),
     )
@@ -4997,6 +4999,31 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     assert current_page_group_step.tool_name == "group.run"
     assert current_page_group_step.input_preview == {"target_name": "研究"}
 
+    natural_named_group = RuntimePlanner().decision(
+        "用月夜群组一起分析这个需求",
+        allowed_tools=["group.run", "artifact.write"],
+    )
+    assert natural_named_group.selected_intent.kind == "multi_agent"
+    assert natural_named_group.selected_intent.inputs == {
+        "target_name_hint": "月夜",
+    }
+    assert planner_tool_requests(
+        "用月夜群组一起分析这个需求",
+        ["group.run", "artifact.write"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "group.run",
+            "input": {
+                "objective": "用月夜群组一起分析这个需求",
+                "title": "Multi-Agent Coordination",
+                "target_name": "月夜",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_group_run",
+        }
+    ]
+
     generic_group = RuntimePlanner().decision(
         "运行一个 Agent 群组：研究 Hermes 和 Hanako 的差异并产出报告",
         allowed_tools=["group.run", "artifact.write"],
@@ -5009,6 +5036,12 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
         allowed_tools=["browser.open_url", "artifact.write"],
     )
     assert single_agent_research.selected_intent.kind == "web_research"
+
+    team_structure_analysis = RuntimePlanner().decision(
+        "分析团队架构",
+        allowed_tools=["group.run", "artifact.write"],
+    )
+    assert team_structure_analysis.selected_intent.kind != "multi_agent"
 
     desktop_agent_product_research = RuntimePlanner().decision(
         "调研 Hanako 和 Hermes 的桌面 agent 能力并汇总",
@@ -5096,6 +5129,7 @@ def test_planner_orchestration_requests_project_workflow_and_group_handoffs() ->
     assert planner_orchestration_requests("什么是 Workflow？") == []
     assert planner_orchestration_requests("介绍一下 multi-agent 架构") == []
     assert planner_orchestration_requests("安排明天研究员和写作者一起开会") == []
+    assert planner_orchestration_requests("分析团队架构") == []
 
 
 def test_planner_orchestration_requests_use_discovered_targets_without_keywords() -> None:
@@ -19678,6 +19712,27 @@ def test_runtime_planner_discovers_generic_communication_app_before_sending() ->
         email_decision,
         "draft-selected-communication-message",
     ).input_preview["target"] == "message body"
+
+    open_email_client_decision = RuntimePlanner().decision(
+        "打开一个邮件客户端给 Alice 写邮件说明项目延期",
+        allowed_tools=allowed_tools,
+    )
+
+    assert open_email_client_decision.selected_intent.kind == "communication"
+    assert open_email_client_decision.selected_intent.inputs["direct_message_hint"] == {
+        "recipient": "Alice",
+        "body": "说明项目延期",
+        "mode": "open",
+        "send_action": "draft",
+        "channel": "email",
+    }
+    assert _step_by_id(
+        open_email_client_decision,
+        "discover_apps-desktop-state",
+    ).input_preview == {"query": "mail", "limit": 20}
+    assert "draft-selected-communication-message" in [
+        step.step_id for step in open_email_client_decision.plan.tool_plan.steps
+    ]
 
     email_draft_decision = RuntimePlanner().decision(
         "用任意可用的邮件应用给 Alice 写封邮件说明项目延期",
