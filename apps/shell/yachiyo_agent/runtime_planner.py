@@ -5426,7 +5426,7 @@ class RuntimePlanner:
                     )
                 )
             return steps
-        return [
+        steps = [
             _step(
                 intent,
                 "control-system-state",
@@ -5437,6 +5437,10 @@ class RuntimePlanner:
                 reason="Use dedicated system tools for explicit low-risk controls instead of app-specific rules.",
             )
         ]
+        verify_step = _system_control_verify_step(intent, allowed, tool_name)
+        if verify_step is not None:
+            steps.append(verify_step)
+        return steps
 
     def _web_research_steps(
         self,
@@ -10762,6 +10766,34 @@ def _media_playback_verify_input_preview(tool_name: str | None) -> dict[str, Any
     if tool_name == "screen.capture":
         return {"reason": "verify media playback"}
     return {}
+
+
+def _system_control_verify_step(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    tool_name: str | None,
+) -> ToolPlanStepSnapshot | None:
+    if tool_name != "system.volume":
+        return None
+    payload = intent.inputs.get("payload") if isinstance(intent.inputs, Mapping) else {}
+    payload = payload if isinstance(payload, Mapping) else {}
+    action = str(payload.get("action") or "").strip()
+    if action == "status":
+        return None
+    verify_tool = _first_allowed(("system.volume",), allowed)
+    if verify_tool != "system.volume":
+        return None
+    return _step(
+        intent,
+        "verify-system-state",
+        "Verify system state",
+        "system.control",
+        verify_tool,
+        input_preview={"action": "status"},
+        depends_on=["control-system-state"],
+        action="verify",
+        reason="Read the system volume after changing it so the agent can confirm the requested state.",
+    )
 
 
 def _service_action(capability_id: str, intent: TaskIntentSnapshot | None = None) -> str:

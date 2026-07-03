@@ -3934,6 +3934,9 @@ def _system_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dic
             planning_reason="planner_fallback_system_control",
         )
     ]
+    verify_request = _system_control_verify_request(tool_name, payload, allowed)
+    if verify_request:
+        requests.append(verify_request)
     if (
         tool_name == "system.settings_open"
         and bool(inputs.get("inspect_ui"))
@@ -3947,6 +3950,25 @@ def _system_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dic
             )
         )
     return requests
+
+
+def _system_control_verify_request(
+    tool_name: str,
+    payload: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    if tool_name != "system.volume" or "system.volume" not in allowed:
+        return {}
+    action = str(payload.get("action") or "").strip()
+    if action == "status":
+        return {}
+    request = _request(
+        "system.volume",
+        {"action": "status"},
+        planning_reason="planner_fallback_system_control",
+    )
+    request["continue_to_model"] = True
+    return request
 
 
 def _system_settings_open_fallback_requests(

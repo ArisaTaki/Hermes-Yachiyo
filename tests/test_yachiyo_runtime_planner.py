@@ -20102,6 +20102,10 @@ def test_runtime_planner_routes_system_volume_to_system_control() -> None:
         "声音小一点",
         allowed_tools=["system.volume"],
     )
+    status = RuntimePlanner().decision(
+        "当前音量多少",
+        allowed_tools=["system.volume"],
+    )
 
     assert decision.selected_intent.kind == "system_control"
     assert decision.selected_intent.inputs == {
@@ -20112,6 +20116,12 @@ def test_runtime_planner_routes_system_volume_to_system_control() -> None:
     assert step.capability_id == "system.control"
     assert step.tool_name == "system.volume"
     assert step.input_preview == {"action": "set", "level": 50}
+    verify = _step_by_id(decision, "verify-system-state")
+    assert verify.capability_id == "system.control"
+    assert verify.tool_name == "system.volume"
+    assert verify.input_preview == {"action": "status"}
+    assert verify.depends_on == ["control-system-state"]
+    assert verify.action == "verify"
     assert max_volume.selected_intent.kind == "system_control"
     assert max_volume.selected_intent.inputs == {
         "kind": "volume",
@@ -20123,10 +20133,19 @@ def test_runtime_planner_routes_system_volume_to_system_control() -> None:
         "payload": {"action": "up"},
     }
     assert _step_by_id(louder, "control-system-state").tool_name == "system.volume"
+    assert _step_by_id(louder, "verify-system-state").tool_name == "system.volume"
     assert quieter.selected_intent.kind == "system_control"
     assert quieter.selected_intent.inputs == {
         "kind": "volume",
         "payload": {"action": "down"},
+    }
+    assert status.selected_intent.kind == "system_control"
+    assert status.selected_intent.inputs == {
+        "kind": "volume",
+        "payload": {"action": "status"},
+    }
+    assert "verify-system-state" not in {
+        step.step_id for step in status.plan.tool_plan.steps
     }
 
 
@@ -20162,11 +20181,23 @@ def test_runtime_planner_routes_brightness_and_display_controls() -> None:
     assert _step_by_id(brightness_up, "control-system-state").tool_name == (
         "system.brightness"
     )
+    assert "verify-system-state" not in {
+        step.step_id for step in brightness.plan.tool_plan.steps
+    }
+    assert "verify-system-state" not in {
+        step.step_id for step in brightness_up.plan.tool_plan.steps
+    }
     assert display_sleep.selected_intent.kind == "system_control"
     assert _step_by_id(display_sleep, "control-system-state").tool_name == "system.display_sleep"
+    assert "verify-system-state" not in {
+        step.step_id for step in display_sleep.plan.tool_plan.steps
+    }
     assert screen_saver.selected_intent.kind == "system_control"
     assert screen_saver.selected_intent.inputs == {"kind": "screen_saver", "payload": {}}
     assert _step_by_id(screen_saver, "control-system-state").tool_name == "system.screen_saver_start"
+    assert "verify-system-state" not in {
+        step.step_id for step in screen_saver.plan.tool_plan.steps
+    }
 
 
 def test_runtime_planner_routes_system_settings_open_to_system_control() -> None:
@@ -27723,6 +27754,38 @@ def test_planner_tool_requests_maps_system_control_plan() -> None:
             "planning_reason": "planner_fallback_system_control",
             "continue_to_model": True,
         },
+    ]
+    assert planner_tool_requests(
+        "把系统音量调到 50%",
+        allowed_tools=["system.volume"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "system.volume",
+            "input": {"action": "set", "level": 50},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "system.volume",
+            "input": {"action": "status"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
+            "continue_to_model": True,
+        },
+    ]
+    assert planner_tool_requests(
+        "当前音量多少",
+        allowed_tools=["system.volume"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "system.volume",
+            "input": {"action": "status"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_system_control",
+        }
     ]
     assert planner_tool_requests(
         "open sound settings",
