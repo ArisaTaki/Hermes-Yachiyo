@@ -90,6 +90,9 @@ def run_event_page_from_legacy_stream(
     ]
     page = events[:clean_limit]
     next_after_sequence = max([event_sequence(event) for event in page] or [clean_after_sequence])
+    if clean_after_sequence == 0 and len(events) > clean_limit:
+        page = events_with_first_page_key_event_window(page, events, next_after_sequence)
+        next_after_sequence = max([event_sequence(event) for event in page] or [next_after_sequence])
     return {
         "run_id": payload.get("run_id") or run_id,
         "after_sequence": clean_after_sequence,
@@ -100,8 +103,68 @@ def run_event_page_from_legacy_stream(
     }
 
 
+def events_with_first_page_key_event_window(
+    page: list[dict[str, Any]],
+    events: list[dict[str, Any]],
+    next_after_sequence: int,
+) -> list[dict[str, Any]]:
+    key_event_sequence = 0
+    for event in sorted(events, key=event_sequence):
+        sequence = event_sequence(event)
+        if sequence <= next_after_sequence:
+            continue
+        event_type = str(event.get("event_type") or event.get("event") or "").strip()
+        if event_type in _FIRST_PAGE_KEY_EVENT_TYPES:
+            key_event_sequence = sequence
+            break
+    if key_event_sequence <= next_after_sequence:
+        return page
+    existing_sequences = {event_sequence(event) for event in page}
+    enriched = list(page)
+    for event in sorted(events, key=event_sequence):
+        sequence = event_sequence(event)
+        if sequence <= next_after_sequence:
+            continue
+        if sequence > key_event_sequence:
+            break
+        if sequence not in existing_sequences:
+            enriched.append(event)
+            existing_sequences.add(sequence)
+    return enriched
+
+
 def event_sequence(event: dict[str, Any]) -> int:
     try:
         return int(event.get("sequence") or 0)
     except (TypeError, ValueError):
         return 0
+
+
+_FIRST_PAGE_KEY_EVENT_TYPES = {
+    "task.completed",
+    "task.failed",
+    "task.cancelled",
+    "run.completed",
+    "run.failed",
+    "run.cancelled",
+    "agent.completed",
+    "agent.failed",
+    "agent.cancelled",
+    "agent.run.completed",
+    "agent.run.failed",
+    "agent.run.cancelled",
+    "agent.tool.approval_required",
+    "agent.desktop.intent_approval_required",
+    "tool.approval_required",
+    "group.run.approval_required",
+    "group.run.completed",
+    "group.run.failed",
+    "group.run.cancelled",
+    "workflow.run.approval_required",
+    "workflow.run.completed",
+    "workflow.run.failed",
+    "workflow.run.cancelled",
+    "workflow.run.tool.approval_required",
+    "workflow.run.desktop.intent_approval_required",
+    "workflow.node.approval_required",
+}

@@ -36,6 +36,35 @@ def test_legacy_run_event_page_filters_by_sequence_and_clamps_limit() -> None:
     }
 
 
+def test_legacy_run_event_page_first_page_includes_key_status_window() -> None:
+    page = run_event_page_from_legacy_stream(
+        {
+            "run_id": "legacy-run",
+            "events": [
+                {"event_type": "run.started", "sequence": 1},
+                {"event_type": "agent.tool.call", "sequence": 3},
+                {"event_type": "agent.run.completed", "sequence": 7},
+            ],
+        },
+        run_id="fallback-run",
+        after_sequence=0,
+        limit=1,
+    )
+
+    assert page == {
+        "run_id": "legacy-run",
+        "after_sequence": 0,
+        "limit": 1,
+        "next_after_sequence": 7,
+        "has_more": True,
+        "events": [
+            {"event_type": "run.started", "sequence": 1},
+            {"event_type": "agent.tool.call", "sequence": 3},
+            {"event_type": "agent.run.completed", "sequence": 7},
+        ],
+    }
+
+
 def test_legacy_run_event_page_normalizes_empty_legacy_stream() -> None:
     page = run_event_page_from_legacy_stream(
         {"events": [{"event_type": "run.started", "sequence": 0}]},
