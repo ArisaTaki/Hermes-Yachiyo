@@ -31720,6 +31720,32 @@ def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> 
     assert legacy_calls == []
 
 
+def test_planner_first_owns_app_open_path_with_app_alias_for_file_access() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    selection = planner_first_direct_tool_selection(
+        "用 Numbers 打开 Downloads/sales.csv",
+        ["app.open_path_with_app"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert selection.requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_path_with_app",
+            "input": {
+                "path": "Downloads/sales.csv",
+                "app_name": "Numbers",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_file_access",
+        }
+    ]
+    assert legacy_calls == []
+
+
 def test_planner_first_owns_generic_discovered_app_launch_without_creative_action() -> None:
     legacy_calls: list[dict[str, Any]] = []
 

@@ -10,6 +10,9 @@ from .app_name_hints import legacy_app_name_hint
 from .path_alias_hints import legacy_common_desktop_path_hint
 
 
+_OPEN_PATH_WITH_APP_TOOLS = ("desktop.open_path_with_app", "app.open_path_with_app")
+
+
 def file_access_hint(prompt: str) -> dict[str, str]:
     text = _clean(prompt)
     if not text:
@@ -45,14 +48,21 @@ def file_access_tool_preview(
         app_name = str(inputs.get("app_name") or "").strip()
         if not app_name:
             return None, {}
-        tool_name = "desktop.open_path_with_app"
-        if allowed is not None and tool_name not in allowed:
+        tool_name = _first_allowed(_OPEN_PATH_WITH_APP_TOOLS, allowed)
+        if not tool_name:
             return None, {}
         return tool_name, {"path": path, "app_name": app_name}
     tool_name = "desktop.reveal_path" if action == "reveal_path" else "desktop.open_path"
     if allowed is not None and tool_name not in allowed:
         return None, {}
     return tool_name, {"path": path}
+
+
+def _first_allowed(tools: Iterable[str], allowed: set[str] | None) -> str | None:
+    for tool in tools:
+        if allowed is None or tool in allowed:
+            return tool
+    return None
 
 
 def _open_path_with_app(text: str) -> dict[str, str]:

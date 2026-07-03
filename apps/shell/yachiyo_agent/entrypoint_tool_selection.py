@@ -547,6 +547,7 @@ _RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS = frozenset(
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
         "desktop.open_path_with_app",
+        "app.open_path_with_app",
         "desktop.click",
         "desktop.type_text",
         "desktop.search_submit",
@@ -639,6 +640,11 @@ def _runtime_planner_desktop_followup_is_discovered_app_resolution_only(
 def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> bool:
     tool_name = str(request.get("tool") or "").strip()
     request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    if tool_name in {"desktop.open_path_with_app", "app.open_path_with_app"}:
+        path = str(request_input.get("path") or request_input.get("target_path") or "").strip()
+        if not path or (path.startswith("<") and path.endswith(">")):
+            return False
+        return _runtime_app_input_is_complete(request_input)
     app_scoped_tool = tool_name.startswith("app.") or tool_name in {
         "desktop.open_app",
         "desktop.focus_app",
@@ -654,11 +660,6 @@ def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> boo
         return True
     if tool_name == "desktop.inspect_app":
         return _runtime_app_name_is_specific(str(request_input.get("app_name") or ""))
-    if tool_name == "desktop.open_path_with_app":
-        path = str(request_input.get("path") or request_input.get("target_path") or "").strip()
-        if not path or (path.startswith("<") and path.endswith(">")):
-            return False
-        return _runtime_app_input_is_complete(request_input)
     if tool_name in {
         "desktop.hide_app",
         "desktop.show_all_apps",
@@ -788,7 +789,12 @@ def _runtime_planner_file_access_owns_selection(requests: list[dict[str, Any]]) 
     if reasons != {"planner_fallback_file_access"}:
         return False
     tools = _request_tool_set(requests)
-    return bool(tools) and tools <= {"desktop.open_path", "desktop.reveal_path"}
+    return bool(tools) and tools <= {
+        "desktop.open_path",
+        "desktop.reveal_path",
+        "desktop.open_path_with_app",
+        "app.open_path_with_app",
+    }
 
 
 def _request_tools(requests: list[dict[str, Any]]) -> list[str]:
