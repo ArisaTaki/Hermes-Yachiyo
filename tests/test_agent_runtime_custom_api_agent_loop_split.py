@@ -1409,6 +1409,74 @@ def test_runtime_planner_routes_readme_edit_to_code_task_patch() -> None:
     assert requests[-1]["continue_to_model"] is True
 
 
+@pytest.mark.parametrize(
+    ("prompt", "expected_area"),
+    [
+        (
+            "帮我实现一个小功能：给 Agent Studio 的 run timeline 增加 filter",
+            "apps/frontend/src/features/agent-studio",
+        ),
+        (
+            "给 Chat 里的 AgentTaskCard 增加打开 Studio 的按钮",
+            "apps/frontend/src/features/yachiyo-chat",
+        ),
+        (
+            "修复 Workflow 管理页面保存失败的问题",
+            "apps/frontend/src/features/agent-studio",
+        ),
+        (
+            "改一下 Groups 页面，让群组运行显示 timeline",
+            "apps/frontend/src/features/agent-studio",
+        ),
+    ],
+)
+def test_runtime_planner_routes_ui_development_to_code_task_area_context(
+    prompt: str,
+    expected_area: str,
+) -> None:
+    allowed_tools = [
+        "workspace.list",
+        "file.search",
+        "workspace.write_patch",
+        "workflow.run",
+        "agent.group_run",
+        "desktop.list_apps",
+        "app.open",
+    ]
+
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+
+    assert decision.selected_intent.kind == "code_task"
+    area_hints = decision.selected_intent.inputs["code_area_context_hints"]
+    assert any(hint["path"] == expected_area for hint in area_hints)
+    step_ids = [step.step_id for step in decision.plan.tool_plan.steps]
+    assert step_ids[0] == "inspect-workspace"
+    assert any(step_id.startswith("inspect-code-area-") for step_id in step_ids)
+    assert step_ids[-1] == "apply-code-changes"
+    assert decision.plan.tool_plan.steps[-1].approval_required is True
+    assert all(
+        depends_on.startswith("inspect-code-area-")
+        for depends_on in decision.plan.tool_plan.steps[-1].depends_on
+    )
+
+    requests = planner_tool_requests(
+        prompt,
+        allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    assert requests[0]["tool"] == "workspace.list"
+    assert any(
+        request["tool"] == "file.search"
+        and request["input"].get("path") == expected_area
+        for request in requests
+    )
+    assert requests[-1]["continue_to_model"] is True
+
+
 def test_runtime_planner_routes_repository_entry_summary_to_code_task_report() -> None:
     allowed_tools = [
         "workspace.list",

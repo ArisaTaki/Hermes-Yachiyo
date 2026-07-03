@@ -3363,20 +3363,36 @@ def _code_context_prefetch_tool_requests(
     planning_reason: str,
 ) -> list[dict[str, Any]]:
     requests: list[dict[str, Any]] = []
-    for step_id in ("inspect-workspace", "read-code-target-file"):
+    for step in _code_context_prefetch_steps(decision):
         request = _context_prefetch_request_for_step(
-            _planned_step_by_id(decision, step_id),
+            step,
             allowed,
             planning_reason=planning_reason,
         )
         if not request:
             continue
         request.pop("continue_to_model", None)
-        _attach_basic_step_metadata(request, _planned_step_by_id(decision, step_id))
+        _attach_basic_step_metadata(request, step)
         requests.append(request)
     if requests:
         requests[-1]["continue_to_model"] = True
     return requests
+
+
+def _code_context_prefetch_steps(decision: Any) -> list[Any]:
+    steps = list(getattr(getattr(decision.plan, "tool_plan", None), "steps", []) or [])
+    ordered_ids = ["inspect-workspace"]
+    ordered_ids.extend(
+        str(getattr(step, "step_id", "") or "").strip()
+        for step in steps
+        if str(getattr(step, "step_id", "") or "").strip().startswith("inspect-code-area-")
+    )
+    ordered_ids.append("read-code-target-file")
+    return [
+        step
+        for step_id in ordered_ids
+        if (step := _planned_step_by_id(decision, step_id)) is not None
+    ]
 
 
 def _code_diagnostic_requires_model_followup(decision: Any) -> bool:

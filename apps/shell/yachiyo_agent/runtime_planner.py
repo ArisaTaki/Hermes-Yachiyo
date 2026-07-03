@@ -1811,7 +1811,12 @@ class TaskIntentRouter:
         )
         workspace_context_request = _looks_like_workspace_code_context_request(text)
         workspace_file_edit_request = _looks_like_workspace_file_edit_request(text)
-        if score <= 0 and (workspace_context_request or workspace_file_edit_request):
+        workspace_ui_development_request = _looks_like_workspace_ui_development_request(text)
+        if score <= 0 and (
+            workspace_context_request
+            or workspace_file_edit_request
+            or workspace_ui_development_request
+        ):
             score = 0.22
         if score <= 0:
             return _empty_intent("code_task", text)
@@ -1823,6 +1828,9 @@ class TaskIntentRouter:
         target_file = _code_task_target_file_hint(text)
         if target_file:
             inputs["code_file_context_hint"] = {"path": target_file}
+        code_area_hints = _code_task_area_context_hints(text)
+        if code_area_hints:
+            inputs["code_area_context_hints"] = code_area_hints
         if write_requested:
             inputs["code_change_hint"] = {
                 "mode": _code_task_change_mode(text),
@@ -1973,6 +1981,8 @@ class TaskIntentRouter:
     def _workflow_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         if scheduled_runnable_payload(text):
             return _empty_intent("workflow_orchestration", text)
+        if _looks_like_workspace_ui_development_request(text):
+            return _empty_intent("workflow_orchestration", text)
         score = _score_terms(text, ["workflow", "flow", "工作流", "流程"])
         action_hint = _workflow_action_hint(text)
         known_target_hint = _known_orchestration_target_hint(
@@ -2007,6 +2017,8 @@ class TaskIntentRouter:
 
     def _multi_agent_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         if scheduled_runnable_payload(text):
+            return _empty_intent("multi_agent", text)
+        if _looks_like_workspace_ui_development_request(text):
             return _empty_intent("multi_agent", text)
         known_target_hint = _known_orchestration_target_hint(
             text,
@@ -5918,6 +5930,43 @@ class RuntimePlanner:
                     )
                 )
                 context_depends_on = ["read-code-target-file"]
+        area_context = intent.inputs.get("code_area_context_hints")
+        if isinstance(area_context, list):
+            area_step_ids: list[str] = []
+            search_tool = _first_allowed(
+                ("file.search", "fs.find_files", "workspace.list"),
+                allowed,
+            )
+            for index, hint in enumerate(area_context, start=1):
+                if not isinstance(hint, Mapping):
+                    continue
+                path = str(hint.get("path") or "").strip()
+                if not path:
+                    continue
+                input_preview: dict[str, Any] = {"path": path}
+                pattern = str(hint.get("pattern") or "").strip()
+                if pattern:
+                    input_preview["pattern"] = pattern
+                step_id = f"inspect-code-area-{index}"
+                context_steps.append(
+                    _step(
+                        intent,
+                        step_id,
+                        "Inspect code area",
+                        "file.workspace_read",
+                        search_tool,
+                        input_preview=input_preview,
+                        depends_on=["inspect-workspace"],
+                        reason=str(hint.get("reason") or "").strip()
+                        or "Inspect the likely product surface before patching.",
+                    )
+                )
+                area_step_ids.append(step_id)
+            if area_step_ids:
+                context_depends_on = [
+                    *[step_id for step_id in context_depends_on if step_id != "inspect-workspace"],
+                    *area_step_ids,
+                ]
         diagnostic_hint = intent.inputs.get("code_diagnostic_command_hint")
         if isinstance(diagnostic_hint, Mapping) and str(diagnostic_hint.get("command") or "").strip():
             run_step = _step(
@@ -12383,6 +12432,7 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     if intent.kind == "desktop_operation" and (
         _looks_like_workspace_code_context_request(text)
         or _looks_like_workspace_file_edit_request(text)
+        or _looks_like_workspace_ui_development_request(text)
     ):
         score -= 0.46
     if (
@@ -12802,6 +12852,7 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     if intent.kind == "code_task" and (
         _looks_like_workspace_code_context_request(text)
         or _looks_like_workspace_file_edit_request(text)
+        or _looks_like_workspace_ui_development_request(text)
     ):
         score += 0.28
     if intent.kind == "report_generation" and _looks_like_workspace_file_edit_request(text):
@@ -12998,6 +13049,132 @@ def _looks_like_workspace_file_edit_request(text: str) -> bool:
         ),
     )
     return file_subject or (workspace_context and _contains_any(value, ("文档", "docs", "documentation")))
+
+
+def _looks_like_workspace_ui_development_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value or not _code_task_write_requested(value):
+        return False
+    product_surface = _contains_any(
+        value,
+        (
+            "agent studio",
+            "studio",
+            "chat",
+            "bubble",
+            "live2d",
+            "workflow",
+            "workflows",
+            "groups",
+            "group run",
+            "run timeline",
+            "timeline",
+            "approval",
+            "artifact",
+            "AgentTaskCard",
+            "Chat",
+            "Agent Studio",
+            "Workflow",
+            "Groups",
+            "Run Timeline",
+            "页面",
+            "界面",
+            "组件",
+            "按钮",
+            "筛选",
+            "过滤",
+        ),
+    )
+    development_surface = bool(
+        re.search(
+            r"(?:page|view|screen|panel|tab|component|card|button|filter|timeline|route|ui|"
+            r"页面|界面|视图|面板|标签页|组件|卡片|按钮|筛选|过滤|入口|路由|保存失败)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+    product_action = bool(
+        re.search(
+            r"(?:增加|新增|添加|实现|修复|修改|改一下|调整|接入|显示|支持|"
+            r"add|implement|fix|modify|change|update|support|show)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+    return product_surface and development_surface and product_action
+
+
+def _code_task_area_context_hints(text: str) -> list[dict[str, str]]:
+    value = _clean_prompt(text)
+    if not value or not _looks_like_workspace_ui_development_request(value):
+        return []
+    hints: list[dict[str, str]] = []
+
+    def add_hint(path: str, *, pattern: str = "", reason: str = "") -> None:
+        if not path:
+            return
+        hint = {"path": path}
+        if pattern:
+            hint["pattern"] = pattern
+        if reason:
+            hint["reason"] = reason
+        if hint not in hints:
+            hints.append(hint)
+
+    if _contains_any(value, ("agenttaskcard", "agent task card", "chat", "bubble", "live2d")):
+        add_hint(
+            "apps/frontend/src/features/yachiyo-chat",
+            pattern="*AgentTask*",
+            reason="Chat, Bubble, Live2D, and AgentTaskCard UI live under yachiyo-chat.",
+        )
+    if _contains_any(value, ("agent studio", "studio", "agentstudio")):
+        add_hint(
+            "apps/frontend/src/features/agent-studio",
+            pattern="*Studio*",
+            reason="Agent Studio views, tabs, and panels live under agent-studio.",
+        )
+    if _contains_any(value, ("run timeline", "timeline", "时间线")):
+        add_hint(
+            "apps/frontend/src/features/agent-studio",
+            pattern="*Timeline*",
+            reason="Run Timeline implementation is part of Agent Studio.",
+        )
+        add_hint(
+            "apps/frontend/src/features/runtime-shared",
+            pattern="*Timeline*",
+            reason="Shared runtime timeline components live under runtime-shared.",
+        )
+    if _contains_any(value, ("workflow", "workflows", "工作流")):
+        add_hint(
+            "apps/frontend/src/features/agent-studio",
+            pattern="*Workflow*",
+            reason="Workflow management UI is part of Agent Studio.",
+        )
+    if _contains_any(value, ("groups", "group run", "群组", "多 agent", "multi agent")):
+        add_hint(
+            "apps/frontend/src/features/agent-studio",
+            pattern="*Group*",
+            reason="Groups and GroupRun UI are part of Agent Studio.",
+        )
+    if _contains_any(value, ("approval", "审批")):
+        add_hint(
+            "apps/frontend/src/features/agent-studio",
+            pattern="*Approval*",
+            reason="Approval inspectors and request views live under Agent Studio.",
+        )
+    if _contains_any(value, ("artifact", "产物")):
+        add_hint(
+            "apps/frontend/src/features/agent-studio",
+            pattern="*Artifact*",
+            reason="Artifact inspectors live under Agent Studio.",
+        )
+
+    if not hints:
+        add_hint(
+            "apps/frontend/src",
+            reason="Inspect frontend source for the requested UI development task.",
+        )
+    return hints[:4]
 
 
 def _code_task_target_file_hint(text: str) -> str:
@@ -15424,6 +15601,7 @@ def _app_name_hint(text: str) -> str:
     if (
         _looks_like_workspace_code_context_request(text)
         or _looks_like_workspace_file_edit_request(text)
+        or _looks_like_workspace_ui_development_request(text)
     ):
         return ""
     if _looks_like_ui_click_advice_request(text):
