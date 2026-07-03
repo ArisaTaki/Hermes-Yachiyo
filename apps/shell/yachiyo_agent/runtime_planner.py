@@ -13537,10 +13537,20 @@ def _runtime_dov_role(step: ToolPlanStepSnapshot, stage: str) -> str:
         return "open_settings" if action == "open_settings" else "control_system"
     if step_id == "apply-code-changes" or action == "apply_patch":
         return "apply_patch"
-    if action in {"open_app", "focus_app"} or step_id.startswith(("open-", "focus-", "prepare-")):
+    if step_id.startswith("prepare-"):
         return "prepare_target_app"
     if action in {"click", "type", "shortcut", "key", "scroll", "submit"}:
         return f"{action}_ui"
+    if action in {"safe_shortcut", "hotkey"}:
+        return "shortcut_ui"
+    if action in {"safe_key"}:
+        return "key_ui"
+    if action in {"safe_scroll"}:
+        return "scroll_ui"
+    if action in {"safe_click"}:
+        return "click_ui"
+    if action in {"open_app", "focus_app"} or step_id.startswith(("open-", "focus-", "prepare-")):
+        return "prepare_target_app"
     if action in {"send_message", "draft_message", "submit_search"}:
         return action
     return "operate_ui"

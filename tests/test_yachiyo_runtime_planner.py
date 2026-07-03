@@ -32191,6 +32191,8 @@ def test_runtime_execution_envelope_preserves_app_search_prepare_chain() -> None
         "desktop.search_submit",
         "desktop.ui_elements",
     ]
+    assert envelope.requests[3].runtime_role == "shortcut_ui"
+    assert envelope.requests[3].task_todo["metadata"]["runtime_role"] == "shortcut_ui"
     assert [request.step_id for request in envelope.requests[:4]] == [
         "discover-desktop-state",
         "open-or-focus-app",
@@ -32988,3 +32990,11 @@ def test_runtime_planner_projects_current_app_paste_as_focus_safe_shortcut() -> 
     assert [request.tool_name for request in envelope.requests].count(
         "app.focus_and_safe_shortcut"
     ) == 1
+    paste_request = next(
+        request
+        for request in envelope.requests
+        if request.tool_name == "app.focus_and_safe_shortcut"
+    )
+    assert paste_request.runtime_stage == "operate"
+    assert paste_request.runtime_role == "shortcut_ui"
+    assert paste_request.task_todo["metadata"]["runtime_role"] == "shortcut_ui"
