@@ -22,8 +22,7 @@ import {
 } from '../features/yachiyo-chat/launcherTasks';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../features/yachiyo-chat/types';
 import {
-  runtimeToolRecoveryActionPrompt,
-  runtimeToolRecoveryActionTaskMetadata,
+  runtimeToolRecoveryActionTaskStart,
   type RuntimeToolRecoveryAction,
 } from '../features/runtime-shared/toolRecoveryActions';
 import { studioRunClearParams, studioRunRouteParams } from '../features/runtime-shared/studioLinks';
@@ -1414,15 +1413,15 @@ function runLauncherModeRecoveryAction(
   action: RuntimeToolRecoveryAction,
   surface: string,
 ) {
-  const prompt = runtimeToolRecoveryActionPrompt(action);
-  return startAgentTask(prompt, {
-    title: action.label || prompt,
-    metadata: runtimeToolRecoveryActionTaskMetadata(action, {
-      launcher_recovery: true,
-      launcher_recovery_surface: surface,
-      source_task_id: task.task_id || '',
-      source_task_title: task.title || '',
-    }),
+  const recoveryStart = runtimeToolRecoveryActionTaskStart(action, {
+    launcher_recovery: true,
+    launcher_recovery_surface: surface,
+    source_task_id: task.task_id || '',
+    source_task_title: task.title || '',
+  });
+  return startAgentTask(recoveryStart.prompt, {
+    title: recoveryStart.title,
+    metadata: recoveryStart.metadata,
   });
 }
 

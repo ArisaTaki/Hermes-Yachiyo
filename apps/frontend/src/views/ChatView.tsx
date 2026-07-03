@@ -119,8 +119,7 @@ import {
 } from '../features/yachiyo-chat/layoutState';
 import { publicTaskSnapshotForMessage } from '../features/yachiyo-chat/taskSnapshots';
 import {
-  runtimeToolRecoveryActionPrompt,
-  runtimeToolRecoveryActionTaskMetadata,
+  runtimeToolRecoveryActionTaskStart,
 } from '../features/runtime-shared/toolRecoveryActions';
 import type {
   AgentTaskSnapshot,
@@ -440,7 +439,11 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     task: AgentTaskSnapshot,
     action: TaskPermissionRecoveryAction,
   ) => {
-    const prompt = runtimeToolRecoveryActionPrompt(action);
+    const recoveryStart = runtimeToolRecoveryActionTaskStart(action, {
+      source_task_id: task.task_id,
+      source_task_title: task.title || '',
+    });
+    const prompt = recoveryStart.prompt;
     if (!prompt || approvalActionMessageId) return;
     const busyId = `task:${task.task_id || 'unknown'}:recovery:${action.permission_target || action.tool}`;
     setApprovalActionMessageId(busyId);
@@ -452,10 +455,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
         prompt,
         runnableId: null,
         runnableKind: 'main',
-        metadata: runtimeToolRecoveryActionTaskMetadata(action, {
-          source_task_id: task.task_id,
-          source_task_title: task.title || '',
-        }),
+        metadata: recoveryStart.metadata,
       });
       if (!handled) setStatus('权限恢复动作提交失败');
     } finally {

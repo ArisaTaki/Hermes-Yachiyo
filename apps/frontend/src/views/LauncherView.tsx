@@ -26,8 +26,7 @@ import {
 import { chatDesktopPermissionNotice } from '../features/yachiyo-chat/readiness';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot, ChatNotice } from '../features/yachiyo-chat/types';
 import {
-  runtimeToolRecoveryActionPrompt,
-  runtimeToolRecoveryActionTaskMetadata,
+  runtimeToolRecoveryActionTaskStart,
   type RuntimeToolRecoveryAction,
 } from '../features/runtime-shared/toolRecoveryActions';
 import type { AppView } from '../lib/view';
@@ -363,15 +362,15 @@ function runLauncherRecoveryAction(
   action: RuntimeToolRecoveryAction,
   surface: string,
 ) {
-  const prompt = runtimeToolRecoveryActionPrompt(action);
-  return startAgentTask(prompt, {
-    title: action.label || prompt,
-    metadata: runtimeToolRecoveryActionTaskMetadata(action, {
-      launcher_recovery: true,
-      launcher_recovery_surface: surface,
-      source_task_id: task.task_id || '',
-      source_task_title: task.title || '',
-    }),
+  const recoveryStart = runtimeToolRecoveryActionTaskStart(action, {
+    launcher_recovery: true,
+    launcher_recovery_surface: surface,
+    source_task_id: task.task_id || '',
+    source_task_title: task.title || '',
+  });
+  return startAgentTask(recoveryStart.prompt, {
+    title: recoveryStart.title,
+    metadata: recoveryStart.metadata,
   });
 }
 

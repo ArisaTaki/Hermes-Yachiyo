@@ -57,8 +57,8 @@ import { useWorkflowRunReadiness } from '../features/agent-studio/hooks/useWorkf
 import { useWorkflowSaveActions } from '../features/agent-studio/hooks/useWorkflowSaveActions';
 import { useWorkflowCanvasActions } from '../features/agent-studio/hooks/useWorkflowCanvasActions';
 import {
-  runtimeToolRecoveryActionPrompt,
-  runtimeToolRecoveryActionTaskMetadata,
+  runtimeToolRecoveryActionRunStartRequest,
+  runtimeToolRecoveryActionTaskStart,
   type RuntimeToolRecoveryAction,
 } from '../features/runtime-shared/toolRecoveryActions';
 import { startYachiyoTask } from '../features/yachiyo-chat/api';
@@ -232,18 +232,19 @@ export function AgentStudioView() {
     toolCall: ToolCallSnapshot,
     action: RuntimeToolRecoveryAction,
   ) => {
-    const prompt = runtimeToolRecoveryActionPrompt(action);
+    const recoveryStart = runtimeToolRecoveryActionTaskStart(action, {
+      permission_target: action.permission_target,
+      source: 'agent_studio_tool_recovery',
+      source_run_id: toolCall.run_id || '',
+      source_tool_call_id: toolCall.tool_call_id || '',
+      source_tool_name: toolCall.tool_name || '',
+    });
+    const prompt = recoveryStart.prompt;
     if (!prompt) throw new Error('恢复动作缺少提示词');
     const task = await startYachiyoTask({
       prompt,
-      title: action.label || prompt,
-      metadata: runtimeToolRecoveryActionTaskMetadata(action, {
-        permission_target: action.permission_target,
-        source: 'agent_studio_tool_recovery',
-        source_run_id: toolCall.run_id || '',
-        source_tool_call_id: toolCall.tool_call_id || '',
-        source_tool_name: toolCall.tool_name || '',
-      }),
+      title: recoveryStart.title,
+      metadata: recoveryStart.metadata,
     });
     return {
       statusMessage: `已创建恢复任务：${task.title || prompt}`,
@@ -254,18 +255,12 @@ export function AgentStudioView() {
     requestId: string,
     action: RuntimeToolRecoveryAction,
   ) => {
-    if (!action.action_id) throw new Error('恢复动作缺少 action_id');
-    const run = await startYachiyoRunReplanRecoveryAction(runId, {
-      request_id: requestId,
-      action_id: action.action_id,
-      title: action.label || action.prompt || action.tool,
-      continue_to_model: true,
-      metadata: {
-        permission_target: action.permission_target,
-        source: 'agent_studio_replan_recovery',
-        source_run_id: runId,
-      },
+    const request = runtimeToolRecoveryActionRunStartRequest(action, requestId, {
+      source: 'agent_studio_replan_recovery',
+      source_run_id: runId,
     });
+    if (!request) throw new Error('恢复动作缺少 action_id');
+    const run = await startYachiyoRunReplanRecoveryAction(runId, request);
     return {
       selectedRunId: run.run_id,
       statusMessage: `已启动恢复 Run：${run.title || action.label || action.tool}`,
@@ -276,18 +271,12 @@ export function AgentStudioView() {
     requestId: string,
     action: RuntimeToolRecoveryAction,
   ) => {
-    if (!action.action_id) throw new Error('恢复动作缺少 action_id');
-    const run = await startYachiyoGroupRunReplanRecoveryAction(groupRunId, {
-      request_id: requestId,
-      action_id: action.action_id,
-      title: action.label || action.prompt || action.tool,
-      continue_to_model: true,
-      metadata: {
-        permission_target: action.permission_target,
-        source: 'agent_studio_group_replan_recovery',
-        source_group_run_id: groupRunId,
-      },
+    const request = runtimeToolRecoveryActionRunStartRequest(action, requestId, {
+      source: 'agent_studio_group_replan_recovery',
+      source_group_run_id: groupRunId,
     });
+    if (!request) throw new Error('恢复动作缺少 action_id');
+    const run = await startYachiyoGroupRunReplanRecoveryAction(groupRunId, request);
     return {
       selectedRunId: run.run_id,
       statusMessage: `已启动 GroupRun 恢复 Run：${run.title || action.label || action.tool}`,

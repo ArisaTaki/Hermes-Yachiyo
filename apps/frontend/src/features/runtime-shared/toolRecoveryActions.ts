@@ -66,6 +66,20 @@ export type RuntimeToolRecoveryActionTaskMetadata = {
   recovery_tool: string;
 } & Record<string, unknown>;
 
+export type RuntimeToolRecoveryActionTaskStart = {
+  metadata: RuntimeToolRecoveryActionTaskMetadata;
+  prompt: string;
+  title: string;
+};
+
+export type RuntimeToolRecoveryActionRunStartRequest = {
+  request_id: string;
+  action_id: string;
+  title: string;
+  continue_to_model: true;
+  metadata: Record<string, unknown>;
+};
+
 export const RUNTIME_TOOL_RECOVERY_TASK_METADATA_KEYS = [
   'daily_desktop_intent',
   'desktop_permission_recovery',
@@ -133,6 +147,38 @@ export function runtimeToolRecoveryActionTaskMetadata(
     ...(action.retry_source_event_type ? { recovery_retry_source_event_type: action.retry_source_event_type } : {}),
     ...(action.retry_source_tool_call_id ? { recovery_retry_source_tool_call_id: action.retry_source_tool_call_id } : {}),
     ...extra,
+  };
+}
+
+export function runtimeToolRecoveryActionTaskStart(
+  action: RuntimeToolRecoveryAction,
+  extra: Record<string, unknown> = {},
+): RuntimeToolRecoveryActionTaskStart {
+  const prompt = runtimeToolRecoveryActionPrompt(action);
+  return {
+    prompt,
+    title: action.label || prompt,
+    metadata: runtimeToolRecoveryActionTaskMetadata(action, extra),
+  };
+}
+
+export function runtimeToolRecoveryActionRunStartRequest(
+  action: RuntimeToolRecoveryAction,
+  requestId: string,
+  extra: Record<string, unknown> = {},
+): RuntimeToolRecoveryActionRunStartRequest | null {
+  const actionId = String(action.action_id || '').trim();
+  const cleanRequestId = String(requestId || action.replan_request_id || '').trim();
+  if (!actionId || !cleanRequestId) return null;
+  return {
+    request_id: cleanRequestId,
+    action_id: actionId,
+    title: action.label || action.prompt || action.tool,
+    continue_to_model: true,
+    metadata: {
+      permission_target: action.permission_target,
+      ...extra,
+    },
   };
 }
 
