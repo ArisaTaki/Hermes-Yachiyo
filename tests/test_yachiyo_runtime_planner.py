@@ -5272,6 +5272,7 @@ def test_runtime_planner_routes_file_organization_to_reviewable_plan() -> None:
         screenshot_rename_decision,
         "apply-file-organization",
     )
+    assert rename_apply_step.tool_name == "terminal.run"
     assert rename_apply_step.input_preview == {
         "path": "Downloads",
         "operation": "rename",

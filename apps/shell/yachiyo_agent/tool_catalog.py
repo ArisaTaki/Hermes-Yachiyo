@@ -265,8 +265,6 @@ def _risk_level_for_tool(tool_name: str) -> str | None:
         return "low"
     if tool_name in MEDIUM_RISK_BROWSER_TOOL_NAMES:
         return "medium"
-    if tool_name in {"fs.move_file", "fs.rename_file", "fs.delete_file", "fs.write_file"}:
-        return "high"
     if tool_name == "python.run":
         return "high"
     if tool_name in {
@@ -293,7 +291,6 @@ def _approval_required_for_tool(tool_name: str) -> bool:
     return (
         tool_name in HIGH_RISK_AGENT_TOOLS
         or tool_name == "python.run"
-        or tool_name in {"fs.move_file", "fs.rename_file", "fs.delete_file", "fs.write_file"}
         or desktop_tool_risk_level(tool_name) == "high"
     )
 

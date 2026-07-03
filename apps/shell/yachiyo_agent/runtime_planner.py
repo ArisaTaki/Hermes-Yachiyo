@@ -8156,7 +8156,7 @@ def _file_apply_tool_candidates(operation_hint: str) -> tuple[str, ...]:
     if operation in {"organize", "archive", "move"}:
         return ("file.organize", "fs.move_file", "terminal.run", "python.run")
     if operation == "rename":
-        return ("fs.rename_file", "terminal.run", "python.run")
+        return ("terminal.run", "python.run")
     return ("terminal.run", "python.run")
 
 
