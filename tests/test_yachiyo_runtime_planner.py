@@ -32686,6 +32686,100 @@ def test_runtime_execution_envelope_marks_media_and_system_tools() -> None:
     assert system_envelope.requests[0].runtime_role == "open_settings"
 
 
+def test_runtime_execution_envelope_covers_core_goal_capability_families() -> None:
+    cases = [
+        (
+            "desktop",
+            "打开 PixelForge 并点击导出",
+            ["desktop.inspect_app", "app.open_and_click_ui_element", "desktop.ui_elements"],
+            {"click_ui", "verify_result"},
+        ),
+        (
+            "data",
+            "分析 sales.csv 并输出一份报告",
+            ["workspace.read", "terminal.run", "artifact.write"],
+            {"inspect_workspace", "execute", "artifact"},
+        ),
+        (
+            "web",
+            "研究 https://example.com 并输出报告",
+            ["browser.open_url_and_extract_text", "artifact.write"],
+            {"inspect_web_context", "artifact"},
+        ),
+        (
+            "code",
+            "修复这个仓库里的 failing tests",
+            ["workspace.list", "workspace.read", "workspace.write_patch", "terminal.run"],
+            {"inspect_workspace", "diagnose", "apply_patch", "verify_result"},
+        ),
+        (
+            "workflow",
+            "运行 Daily Summary workflow",
+            ["workflow.run"],
+            {"start_workflow"},
+        ),
+        (
+            "group",
+            "启动 Research squad group 调研 Hanako",
+            ["group.run", "agent.group_run"],
+            {"start_group_run"},
+        ),
+        (
+            "schedule",
+            "明天上午九点提醒我提交周报",
+            ["future_task.schedule"],
+            {"schedule_task"},
+        ),
+        (
+            "media",
+            "播放 Apple Music 的 超时空浮夜姬",
+            [
+                "desktop.list_apps",
+                "app.open",
+                "desktop.safe_shortcut",
+                "desktop.safe_type_text",
+                "media.music_app_open_and_play",
+                "desktop.ui_elements",
+            ],
+            {"play_media", "verify_result"},
+        ),
+        (
+            "system",
+            "打开系统设置里的蓝牙",
+            ["system.settings_open"],
+            {"open_settings"},
+        ),
+        (
+            "clipboard",
+            "把 hello 写入剪贴板",
+            ["clipboard.write"],
+            {"write_clipboard"},
+        ),
+        (
+            "file_organization",
+            "整理 Downloads 里的 pdf 文件",
+            ["workspace.list", "fs.move_file", "artifact.write"],
+            {"inspect_workspace", "artifact", "organize_files"},
+        ),
+    ]
+
+    for name, prompt, allowed_tools, expected_roles in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+        envelope = runtime_execution_envelope_from_decision(
+            decision,
+            allowed_tools=allowed_tools,
+            full_plan=True,
+        )
+
+        assert envelope is not None, name
+        assert envelope.requests, name
+        assert envelope.runtime_stage_counts, name
+        roles = {request.runtime_role for request in envelope.requests}
+        assert expected_roles <= roles, name
+        assert all(request.runtime_stage for request in envelope.requests), name
+        assert all(request.runtime_role for request in envelope.requests), name
+
+
 def test_runtime_execution_envelope_can_project_full_analysis_app_write_plan() -> None:
     allowed_tools = [
         "desktop.ui_elements",
