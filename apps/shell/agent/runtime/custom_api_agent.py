@@ -12374,6 +12374,31 @@ def _attach_replan_payload_trace_metadata(
     if capability_id:
         request["capability_id"] = capability_id
     request.update(_runtime_trace_metadata_from_replan_payload(payload))
+    _attach_replan_payload_recovery_metadata(request, payload)
+
+
+def _attach_replan_payload_recovery_metadata(
+    request: dict[str, Any],
+    payload: Mapping[str, Any],
+) -> None:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    for key in ("action_target", "observation_evidence", "observation_retry"):
+        if isinstance(request.get(key), Mapping) and request.get(key):
+            continue
+        value = payload.get(key)
+        if not isinstance(value, Mapping):
+            value = metadata.get(key)
+        if isinstance(value, Mapping) and value:
+            request[key] = dict(value)
+    if _mapping_list(request.get("verification_targets")):
+        return
+    verification_targets = _mapping_list(payload.get("verification_targets"))
+    if not verification_targets:
+        verification_targets = _mapping_list(metadata.get("verification_targets"))
+    if verification_targets:
+        request["verification_targets"] = [
+            dict(target) for target in verification_targets
+        ]
 
 
 _RUNTIME_TRACE_TEXT_KEYS = (

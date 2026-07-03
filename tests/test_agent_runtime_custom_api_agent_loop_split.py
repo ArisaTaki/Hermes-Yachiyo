@@ -3606,6 +3606,17 @@ def test_auto_replan_focus_recovery_refocuses_expected_app_without_model_followu
                 "source_tool_name": "desktop.active_window",
                 "target_capability_id": "desktop.app_discovery",
                 "failure_detail": "foreground_focus_unverified",
+                "verification_targets": [
+                    {
+                        "step_id": "open-pixelforge",
+                        "todo_id": "todo-open-pixelforge",
+                    }
+                ],
+                "action_target": {
+                    "action": "verify_after_action",
+                    "step_id": "open-pixelforge",
+                    "app_name": "PixelForge",
+                },
                 "metadata": {
                     "runtime_stage": "verify",
                     "runtime_role": "verify_result",
@@ -3644,6 +3655,12 @@ def test_auto_replan_focus_recovery_refocuses_expected_app_without_model_followu
     assert {request["plan_id"] for request in requests} == {"plan-focus"}
     assert {request["runtime_stage"] for request in requests} == {"verify"}
     assert {request["runtime_role"] for request in requests} == {"verify_result"}
+    assert {request["action_target"]["step_id"] for request in requests} == {
+        "open-pixelforge"
+    }
+    assert {request["verification_targets"][0]["todo_id"] for request in requests} == {
+        "todo-open-pixelforge"
+    }
 
 
 def test_auto_replan_verification_recovery_inspects_target_app_when_available() -> None:
@@ -3658,6 +3675,25 @@ def test_auto_replan_verification_recovery_inspects_target_app_when_available() 
                 "source_tool_name": "desktop.ui_elements",
                 "target_capability_id": "desktop.app_discovery",
                 "failure_detail": "verification observation returned no UI elements or readable text",
+                "verification_targets": [
+                    {
+                        "step_id": "search-logo-template",
+                        "todo_id": "todo-search-logo-template",
+                    }
+                ],
+                "action_target": {
+                    "action": "verify_after_action",
+                    "step_id": "search-logo-template",
+                    "app_name": "Figma",
+                },
+                "observation_evidence": {
+                    "source_tool": "desktop.ui_elements",
+                    "verification_failed": True,
+                },
+                "observation_retry": {
+                    "tool": "desktop.ui_elements",
+                    "input": {"app_name": "Figma", "limit": 80},
+                },
                 "metadata": {
                     "runtime_stage": "verify",
                     "runtime_role": "verify_result",
@@ -3697,6 +3733,18 @@ def test_auto_replan_verification_recovery_inspects_target_app_when_available() 
         "decision-inspect"
     }
     assert {request["plan_id"] for request in recovery_requests} == {"plan-inspect"}
+    assert {request["action_target"]["step_id"] for request in recovery_requests} == {
+        "search-logo-template"
+    }
+    assert {
+        request["observation_evidence"]["source_tool"] for request in recovery_requests
+    } == {"desktop.ui_elements"}
+    assert {request["observation_retry"]["tool"] for request in recovery_requests} == {
+        "desktop.ui_elements"
+    }
+    assert {
+        request["verification_targets"][0]["todo_id"] for request in recovery_requests
+    } == {"todo-search-logo-template"}
 
 
 def test_auto_replan_ui_observation_recovery_inspects_failed_semantic_type_target() -> None:
@@ -4312,6 +4360,17 @@ def test_auto_replan_verification_continuation_runs_remaining_plan_after_focus_r
         "source_tool_name": "desktop.active_window",
         "target_capability_id": "desktop.visual_verification",
         "failure_detail": "foreground_focus_unverified",
+        "verification_targets": [
+            {
+                "step_id": "open-report-file",
+                "todo_id": "todo-open-report-file",
+            }
+        ],
+        "action_target": {
+            "action": "verify_after_action",
+            "step_id": "open-report-file",
+            "app_name": "Preview",
+        },
         "metadata": {
             "expected_app_name": "Preview",
             "blocking_conditions": ["foreground_focus_unverified"],
@@ -4440,6 +4499,12 @@ def test_auto_replan_verification_continuation_runs_remaining_plan_after_focus_r
     assert requests[0]["task_todo"]["step_id"] == "find-in-opened-file"
     assert requests[0]["task_checkpoints"][0]["after_step_id"] == "find-in-opened-file"
     assert requests[0]["task_workspace_items"][0]["source_step_id"] == "find-in-opened-file"
+    assert {request["action_target"]["step_id"] for request in requests} == {
+        "open-report-file"
+    }
+    assert {request["verification_targets"][0]["todo_id"] for request in requests} == {
+        "todo-open-report-file"
+    }
 
 
 def test_auto_replan_ui_search_observed_result_clicks_after_result_observation() -> None:
