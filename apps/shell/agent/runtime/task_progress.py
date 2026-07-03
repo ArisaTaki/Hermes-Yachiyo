@@ -371,12 +371,13 @@ def _append_replan_recovery_update_event(
         if isinstance(tool_request.get("task_todo"), Mapping)
         else {}
     )
+    trigger = _replan_recovery_trigger(tool_request)
     payload: dict[str, Any] = {
         **dict(base_payload),
         "request_id": request_id,
         "replan_request_id": request_id,
-        "trigger": str(tool_request.get("replan_trigger") or "tool_failure").strip(),
-        "replan_trigger": str(tool_request.get("replan_trigger") or "tool_failure").strip(),
+        "trigger": trigger,
+        "replan_trigger": trigger,
         "status": status,
         "source_step_id": str(
             tool_request.get("source_step_id")
@@ -434,6 +435,14 @@ def _append_replan_recovery_update_event(
         append_run_event=append_run_event,
         run_id=run_id,
     )
+
+
+def _replan_recovery_trigger(tool_request: Mapping[str, Any]) -> str:
+    trigger = str(tool_request.get("replan_trigger") or "").strip()
+    if trigger:
+        return trigger
+    triggers = _string_list(tool_request.get("replan_triggers"))
+    return triggers[0] if triggers else "tool_failure"
 
 
 def _append_replan_progress_event(

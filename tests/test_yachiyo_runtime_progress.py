@@ -125,6 +125,34 @@ def test_task_progress_payloads_can_infer_group_and_workflow_scope() -> None:
     assert workflow_events[0]["planner_scope"] == "workflow.run"
 
 
+def test_task_progress_payloads_scope_replan_recovery_from_trigger_list() -> None:
+    workflow_request = {
+        **_tool_request(),
+        "group_run_id": "",
+        "workflow_run_id": "workflow-run-1",
+        "replan_request_id": "replan-1",
+        "replan_triggers": ["verification_failed"],
+    }
+
+    events = task_progress_event_payloads_for_tool_result(
+        tool_request=workflow_request,
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "artifact.write",
+            "result": {"ok": True, "action": "artifact.write"},
+        },
+        event_scope="auto",
+    )
+
+    recovery_event = [
+        event for event in events if event["event"] == "workflow.run.replan.recovery.updated"
+    ][0]
+    assert recovery_event["planner_event_type"] == "agent.replan.recovery.updated"
+    assert recovery_event["planner_scope"] == "workflow.run"
+    assert recovery_event["trigger"] == "verification_failed"
+    assert recovery_event["replan_trigger"] == "verification_failed"
+
+
 def test_public_task_replan_events_project_failed_tool_result() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",
