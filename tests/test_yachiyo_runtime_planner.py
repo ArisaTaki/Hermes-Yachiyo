@@ -12719,6 +12719,89 @@ def test_runtime_planner_discovers_unscoped_communication_app_before_direct_send
         }
 
 
+def test_runtime_planner_uses_foreground_submit_for_communication_recipient_when_safe_submit_missing() -> None:
+    direct_allowed_tools = [
+        "desktop.running_apps",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "desktop.active_window",
+    ]
+    direct_decision = RuntimePlanner().decision(
+        "帮我用飞书给小王发消息说我十分钟后到",
+        allowed_tools=direct_allowed_tools,
+    )
+
+    assert direct_decision.selected_intent.kind == "communication"
+    direct_submit = _step_by_id(direct_decision, "submit-communication-recipient-search")
+    assert direct_submit.tool_name == "desktop.submit_foreground"
+    assert direct_submit.input_preview == {"action": "confirm"}
+    assert direct_submit.risk_level == "medium"
+    assert direct_submit.approval_required is True
+    direct_send = _step_by_id(direct_decision, "send-communication-message")
+    assert direct_send.tool_name == "desktop.submit_foreground"
+    assert direct_send.input_preview == {"action": "send"}
+    assert direct_send.risk_level == "high"
+    assert direct_send.approval_required is True
+    assert [request["tool"] for request in planner_tool_requests(
+        "帮我用飞书给小王发消息说我十分钟后到",
+        direct_allowed_tools,
+    )] == [
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+    ]
+
+    discovered_allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.submit_foreground",
+    ]
+    discovered_decision = RuntimePlanner().decision(
+        "给 Alice 发消息说会议改到三点",
+        allowed_tools=discovered_allowed_tools,
+    )
+
+    assert discovered_decision.selected_intent.kind == "communication"
+    discovered_submit = _step_by_id(
+        discovered_decision,
+        "submit-selected-communication-recipient",
+    )
+    assert discovered_submit.tool_name == "desktop.submit_foreground"
+    assert discovered_submit.input_preview == {"action": "confirm"}
+    assert discovered_submit.risk_level == "medium"
+    assert discovered_submit.approval_required is True
+    discovered_send = _step_by_id(
+        discovered_decision,
+        "send-selected-communication-message",
+    )
+    assert discovered_send.tool_name == "desktop.submit_foreground"
+    assert discovered_send.input_preview == {"action": "send"}
+    assert discovered_send.risk_level == "high"
+    assert discovered_send.approval_required is True
+    requests = planner_tool_requests(
+        "给 Alice 发消息说会议改到三点",
+        discovered_allowed_tools,
+    )
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.submit_foreground",
+        "app.focus_and_type_into_ui_element",
+        "desktop.submit_foreground",
+    ]
+    assert requests[4]["input"] == {"action": "confirm"}
+    assert requests[6]["input"] == {"action": "send"}
+
+
 def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation() -> None:
     allowed_tools = [
         "desktop.list_apps",

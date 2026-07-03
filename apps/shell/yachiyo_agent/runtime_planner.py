@@ -8153,7 +8153,7 @@ def _direct_communication_steps(
         allowed=allowed,
         payload={"text": recipient},
     )
-    search_submit_tool = _first_allowed(("desktop.search_submit",), allowed)
+    recipient_submit_tool = _app_search_submit_operation_tool(allowed)
     send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
     steps: list[ToolPlanStepSnapshot] = []
     source_step_id = ""
@@ -8291,11 +8291,16 @@ def _direct_communication_steps(
                     "submit-communication-recipient-search",
                     "Submit communication recipient search",
                     "communication.compose",
-                    send_tool,
-                    input_preview={"action": "confirm"},
+                    recipient_submit_tool,
+                    input_preview=_app_search_submit_input_preview(recipient_submit_tool),
+                    risk_level=_app_search_submit_risk_level(recipient_submit_tool),
+                    approval_required=_app_search_submit_approval_required(recipient_submit_tool),
                     depends_on=["type-communication-recipient"],
                     action="submit_search",
-                    reason="Confirm the recipient using the foreground submit tool before drafting.",
+                    reason=(
+                        "Confirm the recipient with the dedicated safe submit tool when available; "
+                        "otherwise use the foreground submit fallback through the approval gate."
+                    ),
                 ),
                 _step(
                     intent,
@@ -8404,11 +8409,16 @@ def _direct_communication_steps(
                 "submit-communication-recipient-search",
                 "Submit communication recipient search",
                 "communication.compose",
-                search_submit_tool,
-                input_preview={},
+                recipient_submit_tool,
+                input_preview=_app_search_submit_input_preview(recipient_submit_tool),
+                risk_level=_app_search_submit_risk_level(recipient_submit_tool),
+                approval_required=_app_search_submit_approval_required(recipient_submit_tool),
                 depends_on=["type-communication-recipient"],
                 action="submit_search",
-                reason="Select or search the recipient with the dedicated safe search submit tool.",
+                reason=(
+                    "Select or search the recipient with the dedicated safe submit tool when available; "
+                    "otherwise use the foreground submit fallback through the approval gate."
+                ),
             ),
         ]
     )
@@ -10032,20 +10042,23 @@ def _append_selected_discovered_communication_compose_steps(
         )
         if recipient_tool:
             previous_step = "fill-selected-communication-recipient"
-        search_submit_tool = _first_allowed(("desktop.search_submit",), allowed)
-        if search_submit_tool:
+        recipient_submit_tool = _app_search_submit_operation_tool(allowed)
+        if recipient_submit_tool:
             steps.append(
                 _step(
                     intent,
                     "submit-selected-communication-recipient",
                     "Submit selected communication recipient",
                     "communication.compose",
-                    search_submit_tool,
-                    input_preview={},
+                    recipient_submit_tool,
+                    input_preview=_app_search_submit_input_preview(recipient_submit_tool),
+                    risk_level=_app_search_submit_risk_level(recipient_submit_tool),
+                    approval_required=_app_search_submit_approval_required(recipient_submit_tool),
                     depends_on=[previous_step],
                     action="submit_search",
                     reason=(
-                        "Confirm the selected recipient with the safe search-submit tool before drafting."
+                        "Confirm the selected recipient with the dedicated safe submit tool when available; "
+                        "otherwise use the foreground submit fallback through the approval gate."
                     ),
                 )
             )
@@ -11513,7 +11526,7 @@ def _append_analysis_communication_steps(
         recipient_type_input,
         selected_app_payload,
     )
-    search_submit_tool = _first_allowed(("desktop.search_submit",), allowed)
+    search_submit_tool = _app_search_submit_operation_tool(allowed)
     send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
     focus_depends_on = ["discover-analysis-communication-app"] if selected_app_payload else [depends_on]
     if app_tool and shortcut_tool:
@@ -11587,10 +11600,15 @@ def _append_analysis_communication_steps(
                 "Submit communication recipient search",
                 "communication.compose",
                 search_submit_tool,
-                input_preview={},
+                input_preview=_app_search_submit_input_preview(search_submit_tool),
+                risk_level=_app_search_submit_risk_level(search_submit_tool),
+                approval_required=_app_search_submit_approval_required(search_submit_tool),
                 depends_on=["type-communication-recipient"],
                 action="submit_search",
-                reason="Select or search the recipient with the dedicated safe search submit tool.",
+                reason=(
+                    "Select or search the recipient with the dedicated safe submit tool when available; "
+                    "otherwise use the foreground submit fallback through the approval gate."
+                ),
             ),
             _step(
                 intent,
@@ -12232,7 +12250,7 @@ def _append_web_research_communication_steps(
         recipient_type_input,
         selected_app_payload,
     )
-    search_submit_tool = _first_allowed(("desktop.search_submit",), allowed)
+    search_submit_tool = _app_search_submit_operation_tool(allowed)
     send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
     focus_depends_on = ["discover-research-communication-app"] if selected_app_payload else [depends_on]
     if app_tool and shortcut_tool:
@@ -12302,10 +12320,15 @@ def _append_web_research_communication_steps(
                 "Submit communication recipient search",
                 "communication.compose",
                 search_submit_tool,
-                input_preview={},
+                input_preview=_app_search_submit_input_preview(search_submit_tool),
+                risk_level=_app_search_submit_risk_level(search_submit_tool),
+                approval_required=_app_search_submit_approval_required(search_submit_tool),
                 depends_on=["type-research-communication-recipient"],
                 action="submit_search",
-                reason="Select or search the recipient with the dedicated safe search submit tool.",
+                reason=(
+                    "Select or search the recipient with the dedicated safe submit tool when available; "
+                    "otherwise use the foreground submit fallback through the approval gate."
+                ),
             ),
             _step(
                 intent,
