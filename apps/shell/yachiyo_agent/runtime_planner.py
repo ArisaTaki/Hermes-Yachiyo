@@ -8549,6 +8549,16 @@ def _append_selected_discovered_foreground_compose_steps(
         return
     if isinstance(intent.inputs.get("model_generated_content_hint"), Mapping):
         return
+    safe_shortcut = (
+        intent.inputs.get("safe_shortcut_hint")
+        if isinstance(intent.inputs.get("safe_shortcut_hint"), Mapping)
+        else {}
+    )
+    if str((safe_shortcut or {}).get("action") or "").strip() in {
+        "new_document",
+        "new_note",
+    }:
+        return
     compose_text = str(intent.inputs.get("foreground_compose_text_hint") or "").strip()
     if not compose_text:
         return
@@ -8796,6 +8806,8 @@ def _append_selected_discovered_generic_action_steps(
     *,
     depends_on: str,
 ) -> None:
+    if isinstance(intent.inputs.get("model_generated_content_hint"), Mapping):
+        return
     if any(
         step.step_id.startswith("operate-foreground-ui-followup")
         or step.step_id
@@ -8831,7 +8843,19 @@ def _append_selected_discovered_generic_action_steps(
         if isinstance(raw_type_target, Mapping) and raw_type_target
         else type_into_ui_hint(pending_action)
     )
+    raw_safe_shortcut_payload = (
+        raw_safe_shortcut if isinstance(raw_safe_shortcut, Mapping) else {}
+    )
+    safe_shortcut_action = str(
+        raw_safe_shortcut_payload.get("action") or ""
+    ).strip()
     safe_type_text = "" if type_target else str(inputs.get("safe_type_text_hint") or "").strip()
+    if (
+        not safe_type_text
+        and not type_target
+        and safe_shortcut_action in {"new_document", "new_note"}
+    ):
+        safe_type_text = str(inputs.get("foreground_compose_text_hint") or "").strip()
     if not safe_type_text and not type_target:
         safe_type_text = safe_type_text_hint(pending_action)
     safe_shortcut = (
@@ -8868,7 +8892,7 @@ def _append_selected_discovered_generic_action_steps(
         steps,
         safe_shortcut,
     ):
-        return
+        safe_shortcut = {}
     previous_step = depends_on
     planned_action = False
 
@@ -9239,6 +9263,80 @@ def _append_selected_discovered_creative_action_steps(
     if not _looks_like_discovered_creative_action(intent, pending_action):
         return
     previous_step = depends_on
+    safe_shortcut = (
+        intent.inputs.get("safe_shortcut_hint")
+        if isinstance(intent.inputs.get("safe_shortcut_hint"), Mapping)
+        else {}
+    )
+    safe_shortcut_action = str((safe_shortcut or {}).get("action") or "").strip()
+    compose_text = str(intent.inputs.get("foreground_compose_text_hint") or "").strip()
+    if safe_shortcut_action in {"new_document", "new_note"}:
+        shortcut_tool = _first_allowed(
+            (
+                "app.focus_and_safe_shortcut",
+                "app.open_and_safe_shortcut",
+                "desktop.safe_shortcut",
+            ),
+            allowed,
+        )
+        if shortcut_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "shortcut-selected-discovered-app",
+                    "Run selected app shortcut",
+                    "desktop.ui_operation",
+                    shortcut_tool,
+                    input_preview=_selected_discovered_app_operation_input(
+                        intent,
+                        shortcut_tool,
+                        dict(safe_shortcut),
+                    ),
+                    depends_on=[previous_step],
+                    action="shortcut",
+                    risk_level="medium",
+                    approval_required=True,
+                    reason=(
+                        "Create the requested document or canvas in the model-selected app "
+                        "before typing foreground content."
+                    ),
+                )
+            )
+            previous_step = "shortcut-selected-discovered-app"
+    if compose_text:
+        type_text_tool = _first_allowed(
+            (
+                "app.focus_and_safe_type_text",
+                "app.open_and_safe_type_text",
+                "desktop.safe_type_text",
+                "desktop.type_text",
+            ),
+            allowed,
+        )
+        if type_text_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "type-selected-discovered-app-text",
+                    "Type text in selected app",
+                    "desktop.ui_operation",
+                    type_text_tool,
+                    input_preview=_selected_discovered_app_operation_input(
+                        intent,
+                        type_text_tool,
+                        {"text": compose_text},
+                    ),
+                    depends_on=[previous_step],
+                    action="type",
+                    risk_level="medium",
+                    approval_required=True,
+                    reason=(
+                        "Type explicit user-provided content only after the selected app "
+                        "has created the requested document or canvas."
+                    ),
+                )
+            )
+            previous_step = "type-selected-discovered-app-text"
     if _creative_action_requests_circle(pending_action):
         select_shape_tool = _first_allowed(
             ("app.focus_and_click_ui_element", "desktop.click_ui_element"),

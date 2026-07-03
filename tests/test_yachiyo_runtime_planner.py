@@ -3112,6 +3112,48 @@ def test_planner_binds_discovered_creative_actions_to_selected_app_when_availabl
     ).depends_on == ["save-discovered-app-creative-result"]
 
 
+def test_planner_creates_selected_discovered_app_document_before_typing() -> None:
+    prompt = "用任意绘图软件新建画布并输入猫耳少女"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    requests = planner_tool_requests(prompt, allowed_tools)
+
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "shortcut-selected-discovered-app",
+        "type-selected-discovered-app-text",
+        "verify-discovered-app-creative-result",
+    ]
+    shortcut = _step_by_id(decision, "shortcut-selected-discovered-app")
+    assert shortcut.tool_name == "desktop.safe_shortcut"
+    assert shortcut.input_preview == {"action": "new_document"}
+    assert shortcut.depends_on == ["open-selected-discovered-app"]
+    assert shortcut.approval_required is True
+
+    type_step = _step_by_id(decision, "type-selected-discovered-app-text")
+    assert type_step.tool_name == "desktop.safe_type_text"
+    assert type_step.input_preview == {"text": "猫耳少女"}
+    assert type_step.depends_on == ["shortcut-selected-discovered-app"]
+    assert _step_by_id(
+        decision,
+        "verify-discovered-app-creative-result",
+    ).depends_on == ["type-selected-discovered-app-text"]
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+
+
 def test_planner_adds_generic_discovered_app_followup_action_steps() -> None:
     prompt = "打开一个能编辑图片的应用，然后点击导出"
     allowed_tools = [
