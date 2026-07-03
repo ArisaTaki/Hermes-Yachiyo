@@ -69,6 +69,7 @@ from apps.shell.yachiyo_agent import (
     SkillTraceSnapshot,
     StartChatTaskRequest,
     StartPlannerOrchestrationRequest,
+    ReplanRecoveryActionSnapshot,
     ReplanRecoverySnapshot,
     ReplanSignalSnapshot,
     TaskCheckpointSnapshot,
@@ -585,6 +586,25 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         selected_step_id="run-analysis",
         planning_reason="planner_replan_fallback_recovery",
         recovery_action_label="Run terminal fallback",
+        recovery_actions=[
+            ReplanRecoveryActionSnapshot(
+                action_id="replan-request-1:action:1:terminal.run",
+                label="Run terminal fallback",
+                tool="terminal.run",
+                input={"command": "python analyze.py sales.csv"},
+                planning_reason="planner_replan_fallback_recovery",
+                permission_target="terminal_execution",
+                risk_level="medium",
+                approval_required=True,
+                selected=True,
+                verification_targets=[
+                    {
+                        "step_id": "run-analysis",
+                        "todo_id": "todo-run-analysis",
+                    }
+                ],
+            )
+        ],
         permission_target="terminal_execution",
         risk_level="medium",
         action_target={
@@ -633,6 +653,7 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         "selected_step_id",
         "planning_reason",
         "recovery_action_label",
+        "recovery_actions",
         "permission_target",
         "risk_level",
         "action_target",
@@ -651,6 +672,12 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
     ]
     assert payload["selected_tool_name"] == "terminal.run"
     assert payload["recovery_action_label"] == "Run terminal fallback"
+    assert payload["recovery_actions"][0]["tool"] == "terminal.run"
+    assert payload["recovery_actions"][0]["selected"] is True
+    assert payload["recovery_actions"][0]["approval_required"] is True
+    assert payload["recovery_actions"][0]["input"] == {
+        "command": "python analyze.py sales.csv",
+    }
     assert payload["permission_target"] == "terminal_execution"
     assert payload["risk_level"] == "medium"
     assert payload["verification_targets"] == [
@@ -1728,6 +1755,16 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
     assert recovery.selected_tool_name == "terminal.run"
     assert recovery.planning_reason == "planner_replan_runtime_recovery_action"
     assert recovery.recovery_action_label == "Run terminal fallback"
+    assert len(recovery.recovery_actions) == 1
+    assert recovery.recovery_actions[0].label == "Run terminal fallback"
+    assert recovery.recovery_actions[0].tool == "terminal.run"
+    assert recovery.recovery_actions[0].input == {"cmd": "python analyze.py"}
+    assert recovery.recovery_actions[0].selected is True
+    assert recovery.recovery_actions[0].planning_reason == (
+        "planner_replan_runtime_recovery_action"
+    )
+    assert recovery.recovery_actions[0].permission_target == "terminal_execution"
+    assert recovery.recovery_actions[0].risk_level == "medium"
     assert recovery.permission_target == "terminal_execution"
     assert recovery.risk_level == "medium"
     assert recovery.verification_targets == [
@@ -1743,6 +1780,8 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
         "label": "Apple Music result",
         "app_name": "Music",
     }
+    assert recovery.recovery_actions[0].action_target == recovery.action_target
+    assert recovery.recovery_actions[0].verification_targets == recovery.verification_targets
     assert recovery.observation_evidence == {
         "strategy": "observed_center_fallback",
         "observed_center": {"x": 512, "y": 220},

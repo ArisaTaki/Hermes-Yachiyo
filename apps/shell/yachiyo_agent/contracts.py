@@ -367,6 +367,24 @@ class TaskReplanRequestSnapshot(_PublicSnapshot):
     source: str = "runtime_planner"
 
 
+class ReplanRecoveryActionSnapshot(_PublicSnapshot):
+    action_id: str
+    label: str
+    tool: str
+    input: dict[str, Any] = Field(default_factory=dict)
+    planning_reason: str = ""
+    permission_target: str = ""
+    risk_level: str = ""
+    approval_required: bool = False
+    selected: bool = False
+    action_target: dict[str, Any] = Field(default_factory=dict)
+    observation_evidence: dict[str, Any] = Field(default_factory=dict)
+    observation_retry: dict[str, Any] = Field(default_factory=dict)
+    verification_targets: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    source: str = "replan_recovery_projection"
+
+
 class ReplanRecoverySnapshot(_PublicSnapshot):
     request_id: str
     trigger: str
@@ -387,6 +405,7 @@ class ReplanRecoverySnapshot(_PublicSnapshot):
     selected_step_id: str | None = None
     planning_reason: str = ""
     recovery_action_label: str = ""
+    recovery_actions: list[ReplanRecoveryActionSnapshot] = Field(default_factory=list)
     permission_target: str = ""
     risk_level: str = ""
     action_target: dict[str, Any] = Field(default_factory=dict)

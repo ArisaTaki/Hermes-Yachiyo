@@ -283,6 +283,24 @@ export type TaskReplanRequestSnapshot = {
   source?: string;
 };
 
+export type ReplanRecoveryActionSnapshot = {
+  action_id: string;
+  label: string;
+  tool: string;
+  input?: Record<string, unknown>;
+  planning_reason?: string;
+  permission_target?: string;
+  risk_level?: string;
+  approval_required?: boolean;
+  selected?: boolean;
+  action_target?: Record<string, unknown>;
+  observation_evidence?: Record<string, unknown>;
+  observation_retry?: Record<string, unknown>;
+  verification_targets?: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
+  source?: string;
+};
+
 export type ReplanRecoverySnapshot = {
   request_id: string;
   trigger: string;
@@ -303,6 +321,7 @@ export type ReplanRecoverySnapshot = {
   selected_step_id?: string | null;
   planning_reason?: string;
   recovery_action_label?: string;
+  recovery_actions?: ReplanRecoveryActionSnapshot[];
   permission_target?: string;
   risk_level?: string;
   action_target?: Record<string, unknown>;

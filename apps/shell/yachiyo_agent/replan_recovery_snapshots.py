@@ -8,7 +8,12 @@ from typing import Any
 
 from apps.shell.agent.runtime.events import redact_json_value
 
-from .contracts import PublicRunEvent, ReplanRecoverySnapshot, ToolCallSnapshot
+from .contracts import (
+    PublicRunEvent,
+    ReplanRecoveryActionSnapshot,
+    ReplanRecoverySnapshot,
+    ToolCallSnapshot,
+)
 from .tool_call_event_snapshots import is_tool_event, tool_call_payloads_from_event
 from .tool_call_payload_snapshots import tool_call_snapshot_from_payload
 
@@ -135,6 +140,7 @@ def replan_recovery_snapshots_from_events(
             selected_step_id=record.selected_step_id or None,
             planning_reason=record.planning_reason,
             recovery_action_label=record.recovery_action_label,
+            recovery_actions=_recovery_action_snapshots(record),
             permission_target=record.permission_target,
             risk_level=record.risk_level,
             action_target=dict(record.action_target),
@@ -513,6 +519,10 @@ def _merge_recovery_snapshots(
         observation_retry.update(incoming.observation_retry)
     verification_targets = list(current.verification_targets or [])
     _extend_unique_mappings(verification_targets, incoming.verification_targets)
+    recovery_actions = _merged_recovery_action_snapshots(
+        current.recovery_actions,
+        incoming.recovery_actions,
+    )
     event_ids = list(current.recovery_event_ids)
     _extend_unique(event_ids, incoming.recovery_event_ids)
     return current.model_copy(
@@ -535,6 +545,7 @@ def _merge_recovery_snapshots(
             "planning_reason": current.planning_reason or incoming.planning_reason,
             "recovery_action_label": current.recovery_action_label
             or incoming.recovery_action_label,
+            "recovery_actions": recovery_actions,
             "permission_target": current.permission_target or incoming.permission_target,
             "risk_level": current.risk_level or incoming.risk_level,
             "action_target": action_target,
@@ -690,6 +701,117 @@ def _apply_recovery_action_metadata(
     )
 
 
+def _recovery_action_snapshots(
+    record: _RecoveryRecord,
+) -> list[ReplanRecoveryActionSnapshot]:
+    actions: list[ReplanRecoveryActionSnapshot] = []
+    seen: set[str] = set()
+    selected_tool = _text(record.selected_tool_name)
+    for index, action in enumerate(record.recovery_actions):
+        tool = _first_text(action.get("tool"), action.get("tool_name"), action.get("recovery_tool"))
+        if not tool:
+            continue
+        action_input = _mapping(action.get("input") or action.get("recovery_input"))
+        signature = _recovery_action_signature(tool, action_input)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        selected = bool(action.get("selected")) or bool(selected_tool and tool == selected_tool)
+        action_target = _mapping(action.get("action_target"))
+        observation_evidence = _mapping(action.get("observation_evidence"))
+        observation_retry = _mapping(action.get("observation_retry"))
+        verification_targets = _mapping_list(action.get("verification_targets"))
+        if selected:
+            if not action_target:
+                action_target = dict(record.action_target)
+            if not observation_evidence:
+                observation_evidence = dict(record.observation_evidence)
+            if not observation_retry:
+                observation_retry = dict(record.observation_retry)
+            if not verification_targets:
+                verification_targets = [dict(target) for target in record.verification_targets]
+        action_id = _first_text(
+            action.get("action_id"),
+            action.get("id"),
+            f"{record.request_id}:action:{index + 1}:{tool}",
+        )
+        actions.append(
+            ReplanRecoveryActionSnapshot(
+                action_id=action_id,
+                label=_first_text(
+                    action.get("label"),
+                    action.get("title"),
+                    action.get("prompt"),
+                    tool,
+                ),
+                tool=tool,
+                input=action_input,
+                planning_reason=_first_text(
+                    action.get("planning_reason"),
+                    action.get("reason"),
+                    record.planning_reason,
+                ),
+                permission_target=_first_text(
+                    action.get("permission_target"),
+                    action.get("permission"),
+                    record.permission_target,
+                ),
+                risk_level=_first_text(action.get("risk_level"), record.risk_level),
+                approval_required=bool(
+                    action.get("approval_required")
+                    or action.get("requires_approval")
+                    or action.get("requiresApproval")
+                ),
+                selected=selected,
+                action_target=action_target,
+                observation_evidence=observation_evidence,
+                observation_retry=observation_retry,
+                verification_targets=verification_targets,
+                metadata=_recovery_action_metadata(action, index=index),
+            )
+        )
+    return actions
+
+
+def _merged_recovery_action_snapshots(
+    current: list[ReplanRecoveryActionSnapshot],
+    incoming: list[ReplanRecoveryActionSnapshot],
+) -> list[ReplanRecoveryActionSnapshot]:
+    merged = list(current or [])
+    seen = {
+        _recovery_action_signature(action.tool, action.input)
+        for action in merged
+        if _text(action.tool)
+    }
+    for action in incoming or []:
+        signature = _recovery_action_signature(action.tool, action.input)
+        if not signature or signature in seen:
+            continue
+        seen.add(signature)
+        merged.append(action)
+    return merged
+
+
+def _recovery_action_metadata(action: Mapping[str, Any], *, index: int) -> dict[str, Any]:
+    metadata = _mapping(action.get("metadata"))
+    recommended_tools = _string_list(action.get("recommended_tools"))
+    if recommended_tools:
+        metadata["recommended_tools"] = recommended_tools
+    metadata.setdefault("source_action_index", index)
+    return metadata
+
+
+def _recovery_action_signature(tool: str, action_input: Mapping[str, Any]) -> str:
+    clean_tool = _text(tool)
+    if not clean_tool:
+        return ""
+    try:
+        input_signature = repr(sorted(dict(action_input or {}).items()))
+    except Exception:
+        input_signature = repr(action_input)
+    return f"{clean_tool}:{input_signature}"
+
+
 def _apply_observed_action_metadata(
     record: _RecoveryRecord,
     payload: Mapping[str, Any],
@@ -798,6 +920,12 @@ def _mapping(value: Any) -> dict[str, Any]:
         return {}
     redacted = redact_json_value(dict(value))
     return dict(redacted) if isinstance(redacted, Mapping) else {}
+
+
+def _mapping_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [_mapping(item) for item in value if isinstance(item, Mapping)]
 
 
 def _merged_string_lists(*values: Iterable[str]) -> list[str]:
