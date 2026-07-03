@@ -1367,7 +1367,12 @@ def test_custom_api_agent_loop_guides_code_tasks_without_bypassing_approval() ->
 
 
 def test_runtime_planner_routes_readme_edit_to_code_task_patch() -> None:
-    allowed_tools = ["workspace.list", "workspace.write_patch", "artifact.write"]
+    allowed_tools = [
+        "workspace.list",
+        "workspace.read",
+        "workspace.write_patch",
+        "artifact.write",
+    ]
 
     decision = RuntimePlanner().decision(
         "给 README 增加安装说明",
@@ -1376,12 +1381,19 @@ def test_runtime_planner_routes_readme_edit_to_code_task_patch() -> None:
     )
 
     assert decision.selected_intent.kind == "code_task"
+    assert decision.selected_intent.inputs["code_file_context_hint"] == {
+        "path": "README.md"
+    }
     assert decision.selected_intent.inputs["code_change_hint"] == {"mode": "create"}
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "inspect-workspace",
+        "read-code-target-file",
         "apply-code-changes",
     ]
+    assert decision.plan.tool_plan.steps[1].tool_name == "workspace.read"
+    assert decision.plan.tool_plan.steps[1].input_preview == {"path": "README.md"}
     assert decision.plan.tool_plan.steps[-1].tool_name == "workspace.write_patch"
+    assert decision.plan.tool_plan.steps[-1].depends_on == ["read-code-target-file"]
     assert decision.plan.tool_plan.steps[-1].approval_required is True
 
 

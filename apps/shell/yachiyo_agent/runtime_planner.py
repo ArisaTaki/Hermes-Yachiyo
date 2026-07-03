@@ -1820,6 +1820,9 @@ class TaskIntentRouter:
         inputs: dict[str, Any] = {}
         if diagnostic_command:
             inputs["code_diagnostic_command_hint"] = diagnostic_command
+        target_file = _code_task_target_file_hint(text)
+        if target_file:
+            inputs["code_file_context_hint"] = {"path": target_file}
         if write_requested:
             inputs["code_change_hint"] = {
                 "mode": _code_task_change_mode(text),
@@ -5895,6 +5898,26 @@ class RuntimePlanner:
             ),
             reason="Understand the repo before editing or testing.",
         )
+        context_steps = [inspect_step]
+        context_depends_on = ["inspect-workspace"]
+        file_context = intent.inputs.get("code_file_context_hint")
+        if isinstance(file_context, Mapping):
+            target_path = str(file_context.get("path") or "").strip()
+            read_tool = _first_allowed(("workspace.read", "fs.read_file", "file.read"), allowed)
+            if target_path and read_tool:
+                context_steps.append(
+                    _step(
+                        intent,
+                        "read-code-target-file",
+                        "Read code target file",
+                        "file.workspace_read",
+                        read_tool,
+                        input_preview={"path": target_path},
+                        depends_on=["inspect-workspace"],
+                        reason="Read the explicit target file before generating a patch.",
+                    )
+                )
+                context_depends_on = ["read-code-target-file"]
         diagnostic_hint = intent.inputs.get("code_diagnostic_command_hint")
         if isinstance(diagnostic_hint, Mapping) and str(diagnostic_hint.get("command") or "").strip():
             run_step = _step(
@@ -5906,7 +5929,7 @@ class RuntimePlanner:
                 input_preview={"command": str(diagnostic_hint.get("command") or "").strip()},
                 risk_level="high",
                 approval_required=True,
-                depends_on=["inspect-workspace"],
+                depends_on=context_depends_on,
                 reason=(
                     "Run the inferred test or diagnostic command after inspecting the workspace; "
                     "terminal execution remains approval-gated."
@@ -5914,7 +5937,7 @@ class RuntimePlanner:
             )
             depends_on = ["run-code-diagnostic"]
             steps = [
-                inspect_step,
+                *context_steps,
                 run_step,
             ]
             if _code_task_intent_writes_code(intent):
@@ -5949,15 +5972,15 @@ class RuntimePlanner:
             return steps
         if _code_task_intent_writes_code(intent):
             return [
-                inspect_step,
+                *context_steps,
                 _code_change_step(
                     intent,
                     allowed,
-                    depends_on=["inspect-workspace"],
+                    depends_on=context_depends_on,
                 ),
             ]
         return [
-            inspect_step,
+            *context_steps,
             _step(
                 intent,
                 "write-code-report",
@@ -5965,7 +5988,7 @@ class RuntimePlanner:
                 "artifact.write",
                 _first_allowed(("artifact.write",), allowed),
                 input_preview={"path": "code-task-summary.md"},
-                depends_on=["inspect-workspace"],
+                depends_on=context_depends_on,
                 reason="Summarize changes or findings for replay.",
             ),
         ]
@@ -12975,6 +12998,34 @@ def _looks_like_workspace_file_edit_request(text: str) -> bool:
         ),
     )
     return file_subject or (workspace_context and _contains_any(value, ("文档", "docs", "documentation")))
+
+
+def _code_task_target_file_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if not value:
+        return ""
+    explicit_path = re.search(
+        r"(?P<path>(?:[\w.-]+/)*[\w.-]+"
+        r"\.(?:md|mdx|txt|py|ts|tsx|js|jsx|json|toml|yaml|yml|css|html))\b",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if explicit_path:
+        return explicit_path.group("path")
+    lowered = value.lower()
+    named_files = (
+        ("readme", "README.md"),
+        ("agents.md", "AGENTS.md"),
+        ("changelog", "CHANGELOG.md"),
+        ("license", "LICENSE"),
+        ("package.json", "package.json"),
+        ("pyproject.toml", "pyproject.toml"),
+        ("tsconfig.json", "tsconfig.json"),
+    )
+    for marker, path in named_files:
+        if marker in lowered:
+            return path
+    return ""
 
 
 def _code_task_write_requested(text: str) -> bool:
