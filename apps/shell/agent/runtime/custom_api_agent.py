@@ -13810,6 +13810,10 @@ def _attach_model_followup_pending_plan_trace_metadata(
         "plan_id",
         "tool_plan_id",
         "intent_kind",
+        "core_id",
+        "workspace_id",
+        "task_id",
+        "run_id",
         "replan_request_id",
         "replan_trigger",
     ):
@@ -13903,7 +13907,105 @@ def _model_followup_pending_trace_items(
     pending_plan_steps = followup_context.get("pending_plan_steps")
     if isinstance(pending_plan_steps, list):
         return [step for step in pending_plan_steps if isinstance(step, Mapping)]
-    return []
+    return _model_followup_task_core_pending_trace_items(followup_context)
+
+
+def _model_followup_task_core_pending_trace_items(
+    followup_context: Mapping[str, Any],
+) -> list[Mapping[str, Any]]:
+    task_core = (
+        followup_context.get("task_core")
+        if isinstance(followup_context.get("task_core"), Mapping)
+        else {}
+    )
+    if not task_core:
+        return []
+    workspace = task_core.get("workspace") if isinstance(task_core.get("workspace"), Mapping) else {}
+    workspace_id = str(workspace.get("workspace_id") or "").strip()
+    workspace_items = workspace.get("items") if isinstance(workspace.get("items"), list) else []
+    items_by_step: dict[str, list[Mapping[str, Any]]] = {}
+    for item in workspace_items:
+        if not isinstance(item, Mapping):
+            continue
+        step_id = str(item.get("source_step_id") or "").strip()
+        if step_id:
+            items_by_step.setdefault(step_id, []).append(item)
+    checkpoints_by_step: dict[str, list[Mapping[str, Any]]] = {}
+    for checkpoint in task_core.get("checkpoints", []):
+        if not isinstance(checkpoint, Mapping):
+            continue
+        step_id = str(checkpoint.get("after_step_id") or checkpoint.get("step_id") or "").strip()
+        if step_id:
+            checkpoints_by_step.setdefault(step_id, []).append(checkpoint)
+    items: list[Mapping[str, Any]] = []
+    for todo in task_core.get("todos", []):
+        if not isinstance(todo, Mapping):
+            continue
+        status = str(todo.get("status") or "").strip()
+        if status not in {"", "pending", "planned", "waiting_approval"}:
+            continue
+        step_id = str(todo.get("step_id") or "").strip()
+        if not step_id:
+            continue
+        workspace_step_items = items_by_step.get(step_id, [])
+        metadata = _model_followup_task_core_step_metadata(todo, workspace_step_items)
+        tool_name = str(todo.get("tool_name") or metadata.get("tool_name") or "").strip()
+        if not tool_name:
+            continue
+        input_preview = (
+            metadata.get("input_preview")
+            if isinstance(metadata.get("input_preview"), Mapping)
+            else {}
+        )
+        payload: dict[str, Any] = {
+            "step_id": step_id,
+            "tool_name": tool_name,
+            "capability_id": str(
+                todo.get("capability_id") or metadata.get("capability_id") or ""
+            ).strip(),
+            "input_preview": dict(input_preview),
+            "status": status or "pending",
+        }
+        for key in (
+            "runtime_doctrine",
+            "runtime_stage",
+            "runtime_role",
+            "requires_observation",
+            "requires_post_action_verification",
+        ):
+            value = metadata.get(key)
+            if value not in (None, "", [], {}):
+                payload[key] = value
+        if bool(todo.get("approval_required")) or bool(metadata.get("approval_required")):
+            payload["approval_required"] = True
+        if workspace_step_items:
+            payload["task_workspace_items"] = [dict(item) for item in workspace_step_items]
+        checkpoints = checkpoints_by_step.get(step_id, [])
+        if checkpoints:
+            payload["task_checkpoints"] = [dict(item) for item in checkpoints]
+        if workspace_id:
+            payload["workspace_id"] = workspace_id
+        core_id = str(task_core.get("core_id") or "").strip()
+        if core_id:
+            payload["core_id"] = core_id
+        items.append(payload)
+        if len(items) >= _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS:
+            break
+    return items
+
+
+def _model_followup_task_core_step_metadata(
+    todo: Mapping[str, Any],
+    workspace_items: Iterable[Mapping[str, Any]],
+) -> Mapping[str, Any]:
+    todo_metadata = todo.get("metadata") if isinstance(todo.get("metadata"), Mapping) else {}
+    for item in workspace_items:
+        if not isinstance(item, Mapping):
+            continue
+        metadata = item.get("metadata") if isinstance(item.get("metadata"), Mapping) else {}
+        if metadata:
+            return {**dict(todo_metadata), **dict(metadata)}
+    return dict(todo_metadata)
 
 
 def _next_matching_model_followup_pending_step(

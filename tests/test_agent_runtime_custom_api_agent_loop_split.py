@@ -7223,6 +7223,137 @@ def test_model_followup_pending_plan_types_analysis_snapshot_content() -> None:
     ]
 
 
+def test_model_followup_pending_plan_recovers_task_core_pending_steps() -> None:
+    analysis_text = "Data analysis result for data/sales.csv (csv).\nEast revenue 10."
+    requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            "planning_reason": "planner_replan_after_tool_unavailable",
+            "decision_id": "decision-data",
+            "plan_id": "runtime-plan-data",
+            "content_snapshot": {
+                "source_tool": "data.analyze",
+                "ok": True,
+                "path": "data/sales.csv",
+                "source_kind": "csv",
+                "text": analysis_text,
+            },
+            "task_core": {
+                "core_id": "task-core-data",
+                "workspace": {
+                    "workspace_id": "task-workspace-data",
+                    "items": [
+                        {
+                            "item_id": "workspace-prepare",
+                            "source_step_id": "prepare-report-target-app",
+                            "metadata": {
+                                "tool_name": "app.focus_and_safe_shortcut",
+                                "capability_id": "desktop.app_control",
+                                "input_preview": {
+                                    "app_name": "Obsidian",
+                                    "action": "new_note",
+                                },
+                                "runtime_stage": "operate",
+                                "runtime_role": "prepare_target_app",
+                                "requires_post_action_verification": True,
+                            },
+                        },
+                        {
+                            "item_id": "workspace-type",
+                            "source_step_id": "insert-report-into-target-app",
+                            "metadata": {
+                                "tool_name": "app.focus_and_safe_type_text",
+                                "capability_id": "desktop.ui_operation",
+                                "input_preview": {
+                                    "app_name": "Obsidian",
+                                    "body_source": "report_artifact",
+                                    "artifact_path": "analysis-report.md",
+                                },
+                                "runtime_stage": "operate",
+                                "runtime_role": "type_ui",
+                                "requires_post_action_verification": True,
+                            },
+                        },
+                        {
+                            "item_id": "workspace-verify",
+                            "source_step_id": "verify-report-target-app",
+                            "metadata": {
+                                "tool_name": "desktop.ui_elements",
+                                "capability_id": "desktop.ui_operation",
+                                "input_preview": {
+                                    "app_name": "Obsidian",
+                                    "limit": 80,
+                                },
+                                "runtime_stage": "verify",
+                                "runtime_role": "verify_result",
+                                "requires_observation": True,
+                            },
+                        },
+                    ],
+                },
+                "todos": [
+                    {
+                        "step_id": "read-report-context",
+                        "status": "completed",
+                        "tool_name": "data.analyze",
+                    },
+                    {
+                        "step_id": "write-report-artifact",
+                        "status": "blocked",
+                    },
+                    {
+                        "step_id": "prepare-report-target-app",
+                        "status": "pending",
+                        "tool_name": "app.focus_and_safe_shortcut",
+                        "capability_id": "desktop.app_control",
+                    },
+                    {
+                        "step_id": "insert-report-into-target-app",
+                        "status": "pending",
+                        "tool_name": "app.focus_and_safe_type_text",
+                        "capability_id": "desktop.ui_operation",
+                        "approval_required": True,
+                    },
+                    {
+                        "step_id": "verify-report-target-app",
+                        "status": "pending",
+                        "tool_name": "desktop.ui_elements",
+                        "capability_id": "desktop.ui_operation",
+                    },
+                ],
+            },
+        },
+        [
+            "app.focus_and_safe_shortcut",
+            "app.focus_and_safe_type_text",
+            "desktop.ui_elements",
+        ],
+        generated_content="继续把报告写入 Obsidian。",
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "app.focus_and_safe_shortcut",
+        "app.focus_and_safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["input"] == {
+        "app_name": "Obsidian",
+        "action": "new_note",
+    }
+    assert requests[1]["input"] == {
+        "app_name": "Obsidian",
+        "text": analysis_text,
+    }
+    assert requests[2]["input"] == {
+        "app_name": "Obsidian",
+        "limit": 80,
+    }
+    assert requests[1]["core_id"] == "task-core-data"
+    assert requests[1]["workspace_id"] == "task-workspace-data"
+    assert requests[1]["planner_step_id"] == "insert-report-into-target-app"
+    assert requests[1]["runtime_stage"] == "operate"
+    assert requests[2]["requires_observation"] is True
+
+
 def test_model_followup_pending_plan_promotes_model_clipboard_content() -> None:
     requests = custom_api_agent_module._model_followup_pending_plan_requests(
         {
