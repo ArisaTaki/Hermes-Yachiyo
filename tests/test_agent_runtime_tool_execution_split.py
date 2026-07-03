@@ -182,6 +182,79 @@ def _runner(
     )
 
 
+def test_runtime_tool_request_runner_resolves_analysis_artifact_body(tmp_path) -> None:
+    artifact_text = "Data analysis result for sales.csv.\nEast revenue: 10."
+    artifact_path = tmp_path / "analysis-report.md"
+    artifact_path.write_text(artifact_text, encoding="utf-8")
+    captured_requests: list[dict[str, Any]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    class Broker:
+        artifact_root = tmp_path
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        _timeline: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        captured_requests.append(tool_request)
+        return {"ok": True, "summary": "typed"}
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.safe_type_text",
+                "input": {
+                    "body_source": "analysis_artifact",
+                    "artifact_path": "analysis-report.md",
+                    "target_action": "app_paste",
+                },
+                "source": "runtime_planner",
+            }
+        ],
+        ["desktop.safe_type_text"],
+        Broker(),
+        [{"role": "user", "content": "分析 sales.csv 并写入前台应用"}],
+        timeline,
+        [
+            {
+                "path": "analysis-report.md",
+                "kind": "markdown",
+                "source_tool": "data.analyze",
+            }
+        ],
+        next_iteration=1,
+        run_id="run-artifact-body",
+    )
+
+    assert captured_requests[0]["input"]["text"] == artifact_text
+    assert captured_requests[0]["input"]["body_source"] == "analysis_artifact"
+    assert captured_requests[0]["input_resolution"] == {
+        "field": "text",
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
+        "source_tool": "data.analyze",
+        "resolved_text_bytes": len(artifact_text.encode("utf-8")),
+    }
+    assert (
+        "run-artifact-body",
+        "agent.tool.input_resolved",
+        {
+            "field": "text",
+            "body_source": "analysis_artifact",
+            "artifact_path": "analysis-report.md",
+            "source_tool": "data.analyze",
+            "resolved_text_bytes": len(artifact_text.encode("utf-8")),
+            "tool": "desktop.safe_type_text",
+        },
+    ) in run_events
+
+
 def test_runtime_tool_request_runner_preserves_scope_on_task_progress_events() -> None:
     run_events: list[tuple[str, str, dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []

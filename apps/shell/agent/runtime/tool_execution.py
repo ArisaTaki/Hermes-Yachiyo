@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
@@ -56,6 +57,28 @@ _TOOL_REQUEST_TRACE_MAPPING_KEYS = (
     "observation_evidence",
     "observation_retry",
 )
+
+_ARTIFACT_BODY_TEXT_TOOLS = {
+    "app.focus_and_safe_type_text",
+    "app.open_and_safe_type_text",
+    "app.focus_and_type_into_ui_element",
+    "app.open_and_type_into_ui_element",
+    "desktop.safe_type_text",
+    "desktop.type",
+    "desktop.type_text",
+    "desktop.type_into_ui_element",
+}
+
+_ARTIFACT_BODY_SOURCES = {
+    "analysis_artifact",
+    "analysis_result",
+    "artifact",
+    "artifact_content",
+    "data_analysis",
+    "report_artifact",
+}
+
+_ARTIFACT_BODY_TEXT_LIMIT = 20000
 
 _INPUT_PREVIEW_TRACE_KEYS = (
     "decision_id",
@@ -530,6 +553,148 @@ def _selected_workspace_file_field(raw_input: dict[str, Any]) -> str:
         if str(raw_input.get(field) or "").strip() == _SELECTED_WORKSPACE_FILE_PATH:
             return field
     return ""
+
+
+def _tool_request_artifact_body_resolution(
+    tool_request: dict[str, Any],
+    broker: Any,
+    artifacts: list[dict[str, Any]] | None,
+) -> dict[str, Any]:
+    tool_name = str(tool_request.get("tool") or "").strip()
+    if tool_name not in _ARTIFACT_BODY_TEXT_TOOLS:
+        return {}
+    raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+    if str(raw_input.get("text") or "").strip():
+        return {}
+    body_source = str(raw_input.get("body_source") or "").strip()
+    if body_source not in _ARTIFACT_BODY_SOURCES:
+        return {}
+    artifact_path = _artifact_body_path(raw_input, artifacts)
+    if not artifact_path:
+        return {}
+    content, metadata = _read_broker_text_artifact(broker, artifact_path)
+    if not content:
+        return {}
+    return {
+        "_resolved_text": content,
+        "field": "text",
+        "body_source": body_source,
+        "artifact_path": artifact_path,
+        "source_tool": _artifact_source_tool(artifact_path, artifacts) or "data.analyze",
+        **metadata,
+    }
+
+
+def _tool_request_with_artifact_body_resolution(
+    tool_request: dict[str, Any],
+    resolution: dict[str, Any],
+) -> dict[str, Any]:
+    content = str(resolution.get("_resolved_text") or "")
+    if not content:
+        return tool_request
+    raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+    resolved_input = {**raw_input, "text": content}
+    existing_resolution = (
+        tool_request.get("input_resolution")
+        if isinstance(tool_request.get("input_resolution"), dict)
+        else {}
+    )
+    public_resolution = _public_artifact_body_resolution(resolution)
+    if str(existing_resolution.get("resolved_app_name") or "").strip():
+        merged_resolution = {
+            **existing_resolution,
+            "text_field": "text",
+            "text_body_source": str(public_resolution.get("body_source") or "").strip(),
+            "text_artifact_path": str(public_resolution.get("artifact_path") or "").strip(),
+            "text_source_tool": str(public_resolution.get("source_tool") or "").strip(),
+        }
+        for key in ("resolved_text_bytes", "resolved_text_truncated"):
+            value = public_resolution.get(key)
+            if value not in (None, "", [], {}):
+                merged_resolution[key] = value
+    else:
+        merged_resolution = {**existing_resolution, **public_resolution}
+    return {
+        **tool_request,
+        "input_resolution": merged_resolution,
+        "input": resolved_input,
+    }
+
+
+def _public_artifact_body_resolution(resolution: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        str(key): value
+        for key, value in resolution.items()
+        if not str(key).startswith("_") and value not in (None, "", [], {})
+    }
+
+
+def _artifact_body_path(
+    raw_input: Mapping[str, Any],
+    artifacts: list[dict[str, Any]] | None,
+) -> str:
+    direct_path = str(raw_input.get("artifact_path") or raw_input.get("path") or "").strip()
+    if direct_path:
+        return direct_path
+    for artifact in reversed(artifacts or []):
+        if not isinstance(artifact, Mapping):
+            continue
+        path = str(artifact.get("path") or artifact.get("artifact_path") or "").strip()
+        if not path:
+            continue
+        kind = str(artifact.get("kind") or "").strip().lower()
+        mime_type = str(artifact.get("mime_type") or "").strip().lower()
+        if kind in {"markdown", "text", "report", "csv"} or mime_type.startswith("text/"):
+            return path
+    return ""
+
+
+def _artifact_source_tool(
+    artifact_path: str,
+    artifacts: list[dict[str, Any]] | None,
+) -> str:
+    clean_path = str(artifact_path or "").strip()
+    if not clean_path:
+        return ""
+    for artifact in reversed(artifacts or []):
+        if not isinstance(artifact, Mapping):
+            continue
+        path = str(artifact.get("path") or artifact.get("artifact_path") or "").strip()
+        if path != clean_path:
+            continue
+        return str(artifact.get("source_tool") or "").strip()
+    return ""
+
+
+def _read_broker_text_artifact(
+    broker: Any,
+    artifact_path: str,
+) -> tuple[str, dict[str, Any]]:
+    root_value = getattr(broker, "artifact_root", None)
+    if root_value is None:
+        return "", {}
+    rel_path = Path(str(artifact_path or "").strip())
+    if rel_path.is_absolute() or any(part == ".." for part in rel_path.parts):
+        return "", {}
+    root = Path(root_value).resolve()
+    target = (root / rel_path).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError:
+        return "", {}
+    if not target.is_file():
+        return "", {}
+    content = target.read_text(encoding="utf-8", errors="replace")
+    truncated = False
+    if len(content) > _ARTIFACT_BODY_TEXT_LIMIT:
+        content = content[:_ARTIFACT_BODY_TEXT_LIMIT].rstrip()
+        truncated = True
+    metadata: dict[str, Any] = {
+        "resolved_text_bytes": len(content.encode("utf-8")),
+    }
+    if truncated:
+        metadata["resolved_text_truncated"] = True
+    return content.strip(), metadata
 
 
 def _selected_workspace_file_from_timeline(
@@ -1224,6 +1389,18 @@ class RuntimeToolRequestRunner:
                 tool_request,
                 file_resolution,
             )
+            artifact_body_resolution = _tool_request_artifact_body_resolution(
+                tool_request,
+                broker,
+                artifacts,
+            )
+            tool_request = _tool_request_with_artifact_body_resolution(
+                tool_request,
+                artifact_body_resolution,
+            )
+            artifact_body_resolution = _public_artifact_body_resolution(
+                artifact_body_resolution,
+            )
             tool_name = self._normalize_tool_name(tool_request.get("tool"))
             tool_request = _tool_request_with_verification_target(
                 tool_request,
@@ -1239,7 +1416,7 @@ class RuntimeToolRequestRunner:
                 if isinstance(tool_request.get("input"), dict)
                 else {}
             )
-            for resolution in (app_name_resolution, file_resolution):
+            for resolution in (app_name_resolution, file_resolution, artifact_body_resolution):
                 if not resolution:
                     continue
                 resolution_payload = {**resolution, "tool": tool_name}

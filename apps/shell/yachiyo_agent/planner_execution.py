@@ -3214,6 +3214,18 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
                 )
                 for request in workspace_file_selection_requests:
                     request.pop("continue_to_model", None)
+            runtime_followup_requests = _data_analysis_app_write_followup_requests(
+                decision,
+                allowed,
+            )
+            if runtime_followup_requests:
+                return [
+                    *app_requests,
+                    *file_open_requests,
+                    *workspace_file_selection_requests,
+                    analyze_request,
+                    *runtime_followup_requests,
+                ]
             if _data_analysis_requires_model_followup(decision):
                 analyze_request["continue_to_model"] = True
                 return [
@@ -3285,6 +3297,78 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
         planning_reason="planner_prefetch_data_source",
     )
     return _append_model_followup_requests(context_requests, [*app_requests, *file_open_requests])
+
+
+_DATA_ANALYSIS_APP_WRITE_FOLLOWUP_STEP_IDS = {
+    "discover-analysis-target-app",
+    "prepare-analysis-target-app",
+    "prepare-analysis-discovered-target-app",
+    "insert-analysis-into-target-app",
+    "verify-analysis-target-app",
+}
+
+
+def _data_analysis_app_write_followup_requests(
+    decision: Any,
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    inputs = getattr(getattr(decision, "selected_intent", None), "inputs", None)
+    if not isinstance(inputs, Mapping):
+        return []
+    if str(inputs.get("target_action_hint") or "").strip() != "app_paste":
+        return []
+    if not (
+        str(inputs.get("target_app_hint") or "").strip()
+        or isinstance(inputs.get("target_app_capability_hint"), Mapping)
+    ):
+        return []
+
+    requests: list[dict[str, Any]] = []
+    saw_analyze_step = False
+    saw_insert_step = False
+    for step in list(getattr(decision.plan.tool_plan, "steps", []) or []):
+        step_id = str(getattr(step, "step_id", "") or "").strip()
+        if step_id == "analyze-data-file":
+            saw_analyze_step = True
+            continue
+        if not saw_analyze_step or step_id not in _DATA_ANALYSIS_APP_WRITE_FOLLOWUP_STEP_IDS:
+            continue
+        if not _step_available(step):
+            if step_id == "verify-analysis-target-app":
+                continue
+            return []
+        tool_name = str(getattr(step, "tool_name", "") or "").strip()
+        if not tool_name or tool_name not in allowed:
+            if step_id == "verify-analysis-target-app":
+                continue
+            return []
+        input_preview = getattr(step, "input_preview", None)
+        payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+        requests.append(
+            _request(
+                tool_name,
+                _desktop_request_payload(tool_name, payload),
+                planning_reason=_data_analysis_followup_planning_reason(step_id),
+            )
+        )
+        if step_id == "insert-analysis-into-target-app":
+            saw_insert_step = True
+    return requests if saw_insert_step else []
+
+
+def _data_analysis_followup_planning_reason(step_id: str) -> str:
+    if step_id == "discover-analysis-target-app":
+        return "planner_data_analysis_target_app_discovery"
+    if step_id in {
+        "prepare-analysis-target-app",
+        "prepare-analysis-discovered-target-app",
+    }:
+        return "planner_data_analysis_target_app_prepare"
+    if step_id == "insert-analysis-into-target-app":
+        return "planner_data_analysis_artifact_insert"
+    if step_id == "verify-analysis-target-app":
+        return "planner_data_analysis_target_app_verify"
+    return "planner_builtin_data_analysis"
 
 
 def _data_analysis_request_input_from_payload(

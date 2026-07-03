@@ -3791,7 +3791,33 @@ def test_runtime_planner_routes_data_analysis_report_to_app_write_target() -> No
             "input": _data_analysis_preview("sales.csv", "csv"),
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
-            "continue_to_model": True,
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_shortcut",
+            "input": {"app_name": "Obsidian", "action": "new_note"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_data_analysis_target_app_prepare",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_type_text",
+            "input": {
+                "app_name": "Obsidian",
+                "body_source": "analysis_artifact",
+                "artifact_path": "analysis-report.md",
+                "target_action": "app_paste",
+                "container_action": "new_note",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_data_analysis_artifact_insert",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"app_name": "Obsidian", "role_filter": "text", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_data_analysis_target_app_verify",
         }
     ]
 
@@ -3920,7 +3946,53 @@ def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -
             },
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
-            "continue_to_model": True,
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "markdown", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_data_analysis_target_app_discovery",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "markdown",
+                "target_action": "app_paste",
+                "body_source": "analysis_artifact",
+                "artifact_path": "analysis-report.md",
+                "action": "new_document",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_data_analysis_target_app_prepare",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {
+                "body_source": "analysis_artifact",
+                "artifact_path": "analysis-report.md",
+                "target_action": "app_paste",
+                "container_action": "new_document",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_data_analysis_artifact_insert",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "role_filter": "text",
+                "limit": 80,
+                "selection_source": "desktop.list_apps",
+                "query": "markdown",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_data_analysis_target_app_verify",
         }
     ]
 
@@ -4002,7 +4074,53 @@ def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -
             },
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
-            "continue_to_model": True,
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "document", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_data_analysis_target_app_discovery",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "document",
+                "target_action": "app_paste",
+                "body_source": "analysis_artifact",
+                "artifact_path": "analysis-report.md",
+                "action": "new_document",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_data_analysis_target_app_prepare",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {
+                "body_source": "analysis_artifact",
+                "artifact_path": "analysis-report.md",
+                "target_action": "app_paste",
+                "container_action": "new_document",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_data_analysis_artifact_insert",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "role_filter": "text",
+                "limit": 80,
+                "selection_source": "desktop.list_apps",
+                "query": "document",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_data_analysis_target_app_verify",
         }
     ]
 
