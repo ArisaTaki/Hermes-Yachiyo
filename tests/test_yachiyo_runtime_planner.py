@@ -2298,9 +2298,9 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
     assert [step.step_id for step in spreadsheet_decision.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
-        "operate-foreground-ui-followup-type",
-        "submit-foreground-ui",
-        "verify-desktop-result",
+        "type-selected-discovered-app-text",
+        "submit-selected-discovered-app-action",
+        "verify-selected-discovered-app-action",
     ]
     assert _step_by_id(spreadsheet_decision, "open-selected-discovered-app").input_preview == {
         "app_name": "<selected app from desktop.list_apps>",
@@ -2308,14 +2308,14 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         "query": "spreadsheet",
         "action": "new_document",
     }
-    assert _step_by_id(spreadsheet_decision, "operate-foreground-ui-followup-type").input_preview == {
+    assert _step_by_id(spreadsheet_decision, "type-selected-discovered-app-text").input_preview == {
         "text": "Q1 budget",
     }
-    submit = _step_by_id(spreadsheet_decision, "submit-foreground-ui")
+    submit = _step_by_id(spreadsheet_decision, "submit-selected-discovered-app-action")
     assert submit.input_preview == {"action": "confirm"}
     assert submit.approval_required is True
-    assert _step_by_id(spreadsheet_decision, "verify-desktop-result").depends_on == [
-        "submit-foreground-ui"
+    assert _step_by_id(spreadsheet_decision, "verify-selected-discovered-app-action").depends_on == [
+        "submit-selected-discovered-app-action"
     ]
     assert spreadsheet_requests == [
         {
@@ -2354,7 +2354,7 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -2493,7 +2493,7 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -2555,7 +2555,7 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -2775,8 +2775,8 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         },
         {
             "protocol": "json_fallback",
-            "tool": "screen.capture",
-            "input": {"reason": "verify discovered app creative result"},
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -2817,7 +2817,7 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
     assert _step_by_id(
         draw_circle_decision,
         "verify-discovered-app-creative-result",
-    ).tool_name == "screen.capture"
+    ).tool_name == "desktop.ui_elements"
     assert [
         todo.step_id
         for todo in draw_circle_decision.plan.task_core.todos
@@ -3196,7 +3196,7 @@ def test_planner_adds_generic_discovered_app_followup_action_steps() -> None:
         "app.open",
         "desktop.ui_elements",
         "desktop.click_ui_element",
-        "screen.capture",
+        "desktop.ui_elements",
     ]
     assert requests[0]["input"] == {"query": "image", "limit": 20}
     assert requests[1]["input"] == {
@@ -3204,7 +3204,7 @@ def test_planner_adds_generic_discovered_app_followup_action_steps() -> None:
         "selection_source": "desktop.list_apps",
         "query": "image",
     }
-    assert requests[-1]["input"] == {"reason": "verify selected discovered app action"}
+    assert requests[-1]["input"] == {"limit": 80}
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
@@ -3224,7 +3224,7 @@ def test_planner_adds_generic_discovered_app_followup_action_steps() -> None:
     assert _step_by_id(
         decision,
         "verify-selected-discovered-app-action",
-    ).tool_name == "screen.capture"
+    ).tool_name == "desktop.ui_elements"
     assert decision.plan.task_core is not None
     todo_stage_by_step = {
         todo.step_id: todo.metadata.get("runtime_stage")
@@ -10108,13 +10108,14 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     assert [step.step_id for step in markdown.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
-        "operate-foreground-ui-followup-type",
-        "verify-desktop-result",
+        "type-selected-discovered-app-text",
+        "verify-selected-discovered-app-action",
     ]
     assert markdown.plan.route_to_studio is True
     assert markdown.plan.tool_plan.required_capabilities == [
         "desktop.app_discovery",
         "desktop.ui_operation",
+        "desktop.visual_verification",
     ]
     assert markdown.plan.tool_plan.missing_capabilities == []
     assert _step_by_id(markdown, "discover_apps-desktop-state").input_preview == {
@@ -10130,14 +10131,14 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     assert _step_by_id(markdown, "open-selected-discovered-app").depends_on == [
         "discover_apps-desktop-state"
     ]
-    assert _step_by_id(markdown, "operate-foreground-ui-followup-type").input_preview == {
+    assert _step_by_id(markdown, "type-selected-discovered-app-text").input_preview == {
         "text": "周报"
     }
-    assert _step_by_id(markdown, "operate-foreground-ui-followup-type").depends_on == [
+    assert _step_by_id(markdown, "type-selected-discovered-app-text").depends_on == [
         "open-selected-discovered-app"
     ]
-    assert _step_by_id(markdown, "verify-desktop-result").depends_on == [
-        "operate-foreground-ui-followup-type"
+    assert _step_by_id(markdown, "verify-selected-discovered-app-action").depends_on == [
+        "type-selected-discovered-app-text"
     ]
     markdown_requests = planner_tool_requests(
         "打开一个能写 markdown 的应用，新建文档标题为周报",
@@ -10172,8 +10173,8 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     assert [step.step_id for step in local_markdown.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
-        "operate-foreground-ui-followup-type",
-        "verify-desktop-result",
+        "type-selected-discovered-app-text",
+        "verify-selected-discovered-app-action",
     ]
 
     document = RuntimePlanner().decision(
@@ -10411,8 +10412,8 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     assert [step.step_id for step in project_task.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
-        "operate-foreground-ui-followup-type",
-        "verify-desktop-result",
+        "type-selected-discovered-app-text",
+        "verify-selected-discovered-app-action",
     ]
     assert _step_by_id(project_task, "discover_apps-desktop-state").input_preview == {
         "query": "project management",
@@ -10424,7 +10425,7 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "query": "project management",
         "action": "new_document",
     }
-    assert _step_by_id(project_task, "operate-foreground-ui-followup-type").input_preview == {
+    assert _step_by_id(project_task, "type-selected-discovered-app-text").input_preview == {
         "text": "整理发布清单"
     }
     project_task_requests = planner_tool_requests(
@@ -16794,7 +16795,7 @@ def test_runtime_planner_routes_safe_key_scroll_and_click_without_approval() -> 
     assert click_step.approval_required is False
 
 
-def test_runtime_planner_uses_approved_low_level_foreground_click_and_type_when_safe_tools_are_unavailable() -> None:
+def test_runtime_planner_uses_low_level_click_type_and_observes_semantic_targets_when_safe_tools_are_unavailable() -> None:
     click_decision = RuntimePlanner().decision(
         "点击坐标 120, 240",
         allowed_tools=["desktop.active_window", "desktop.click"],
@@ -16821,12 +16822,14 @@ def test_runtime_planner_uses_approved_low_level_foreground_click_and_type_when_
     assert type_step.approval_required is True
 
     target_click_step = _step_by_id(target_click_decision, "operate-foreground-ui")
-    assert target_click_step.status == "unavailable"
-    assert target_click_step.tool_name is None
+    assert target_click_step.status == "planned"
+    assert target_click_step.tool_name == "desktop.ui_elements"
+    assert target_click_step.action == "observe_ui_target"
+    assert target_click_step.approval_required is False
+    assert target_click_step.risk_level == "low"
     assert target_click_step.input_preview == {
         "target": "保存",
         "role_filter": "button",
-        "click_count": 1,
         "limit": 80,
     }
 

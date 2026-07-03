@@ -156,7 +156,49 @@ def app_foreground_tool_candidates(mode: str, action: str) -> tuple[str, ...]:
 
 
 def click_target_hint(text: str) -> dict[str, Any] | None:
-    if _looks_like_ui_click_advice_request(str(text or "")):
+    value = str(text or "")
+    if safe_click_hint(value) is not None:
+        return None
+    conditional_click_request = bool(
+        re.search(
+            r"(?:判断.{0,12}(?:点击|点按|点|按|操作)|"
+            r"能否.{0,8}(?:点击|点按|点|按|操作)|"
+            r"是否(?:可以)?.{0,8}(?:点击|点按|点|按|操作)|"
+            r"可不可以.{0,8}(?:点击|点按|点|按|操作)|"
+            r"能不能.{0,8}(?:点击|点按|点|按|操作)|"
+            r"如果.{0,12}(?:点击|点按|点|按|操作))",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+    direct_click_request = bool(
+        not conditional_click_request
+        and (
+            re.search(
+                r"(?:双击|点击|点一下|点按|单击|按一下|点)\s*"
+                r"(?:可见(?:的)?|当前(?:的)?|这个|该)?[^。！？!?，,]{1,60}?"
+                r"(?:按钮|控件|元素|菜单项|菜单|复选框)",
+                value,
+                flags=re.IGNORECASE,
+            )
+            or re.search(
+                r"(?:^|[，,]|并|然后|再|接着|之后|后)\s*"
+                r"(?:双击|点击|点一下|点按|单击|按一下|点)\s*"
+                r"[^。！？!?，,]{1,60}$",
+                value,
+                flags=re.IGNORECASE,
+            )
+            or re.search(
+                r"(?:找到|找|定位|选择|选中)\s*[^。！？!?，,]{1,60}?"
+                r"(?:按钮|控件|元素|菜单项|菜单|复选框|项目|条目)?\s*"
+                r"(?:并|然后|再|之后|后)?\s*"
+                r"(?:双击|点击|点一下|点按|单击|打开|进入)",
+                value,
+                flags=re.IGNORECASE,
+            )
+        )
+    )
+    if _looks_like_ui_click_advice_request(value) and not direct_click_request:
         return None
     if re.search(
         r"\b(?:press|hit|tap)\s+(?:command|cmd|control|ctrl|option|alt|shift)\b",
@@ -186,6 +228,8 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
     for pattern in patterns:
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
+            continue
+        if conditional_click_request:
             continue
         raw_target = (
             match.groupdict().get("target")

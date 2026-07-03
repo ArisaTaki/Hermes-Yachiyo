@@ -388,6 +388,11 @@ class TaskIntentRouter:
             return _empty_intent("desktop_operation", text)
         app_capability = _app_capability_discovery_hint(text)
         generic_browser_search = _generic_browser_app_search_hint(text)
+        if _web_search_query(text) and (
+            _generic_browser_app_target_requested(text)
+            or _is_generic_browser_app_label(_app_name_hint(text))
+        ):
+            return _empty_intent("desktop_operation", text)
         if generic_browser_search and not app_capability:
             app_capability = {"query": "browser", "description": "browser"}
         selected_app_target_path = (
@@ -945,6 +950,18 @@ class TaskIntentRouter:
             )
         ):
             app_name_hint = app_search_app_name
+        if (
+            app_search
+            and app_name_hint
+            and not str(app_search.get("app_name") or "").strip()
+            and _desktop_content_artifact_hint(text)
+            and re.search(
+                rf"(?:在|用|通过)\s*{_app_search_scope_pattern(app_name_hint)}",
+                text,
+                flags=re.IGNORECASE,
+            )
+        ):
+            app_search = {"app_name": app_name_hint, **app_search}
         operation_hint = (
             str((desktop_discovery or {}).get("action") or "")
             or ("submit_search" if foreground_search_submit else "")
@@ -1149,7 +1166,7 @@ class TaskIntentRouter:
         if foreground_paste:
             inputs["foreground_paste_hint"] = {"action": "paste"}
         explicit_submit_action = foreground_submit_action
-        if not explicit_submit_action and (
+        if not explicit_submit_action and not (hotkey and operation_hint == "hotkey") and (
             _explicit_return_key_followup_hint(text)
             or _return_hotkey_followup_hint(text)
             or _foreground_search_submit_hint(text)
@@ -1781,6 +1798,15 @@ class TaskIntentRouter:
             and _app_capability_discovery_hint(text)
         ):
             return _empty_intent("code_task", text)
+        if (
+            not terminal_hint
+            and _app_capability_discovery_hint(text)
+            and (
+                _looks_like_app_scoped_create_followup(text)
+                or _generic_create_container_action_hint(text)
+            )
+        ):
+            return _empty_intent("code_task", text)
         if _looks_like_document_report_analysis_request(text, metadata):
             return _empty_intent("code_task", text)
         if _looks_like_generic_data_source_analysis_request(text):
@@ -1795,6 +1821,15 @@ class TaskIntentRouter:
         ):
             return _empty_intent("code_task", text)
         app_hint = _app_name_hint(text)
+        if (
+            not terminal_hint
+            and app_hint
+            and (
+                _looks_like_app_scoped_create_followup(text)
+                or _generic_create_container_action_hint(text)
+            )
+        ):
+            return _empty_intent("code_task", text)
         if app_hint and (
             _app_search_hint(text, app_hint)
             or screen_capture_hint(text)
@@ -2994,6 +3029,13 @@ class RuntimePlanner:
                     "limit": 80,
                 }
             click_target = None
+        if (
+            screen_capture is not None
+            and ui_inspection is not None
+            and click_target is None
+            and _contains_any(intent.user_goal, ("当前屏幕", "屏幕", "screen"))
+        ):
+            ui_inspection = None
         app_click_scope = _app_first_click_scope_hint(intent.user_goal)
         scoped_click_app = str(app_click_scope.get("app_name") or "").strip()
         scoped_click_target = app_click_scope.get("click_target")
@@ -3779,7 +3821,7 @@ class RuntimePlanner:
             return steps
         if ui_inspection is not None and not any(
             item
-            for item in (safe_shortcut, hotkey, type_target, safe_type_text, submit_action)
+            for item in (click_target, safe_shortcut, hotkey, type_target, safe_type_text, submit_action)
             if item
         ):
             ui_payload = {
@@ -4677,7 +4719,7 @@ class RuntimePlanner:
             operation_approval_required = _desktop_operation_approval_required(
                 resolved_operation_tool
             )
-            if resolved_operation_tool is None and (
+            if resolved_operation_tool is None and not hotkey and (
                 click_target or type_target or _looks_like_ui_operation(intent.user_goal)
             ):
                 observation_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed)
@@ -9068,7 +9110,11 @@ def _append_selected_discovered_generic_action_steps(
         and safe_shortcut_action in {"new_document", "new_note"}
     ):
         safe_type_text = str(inputs.get("foreground_compose_text_hint") or "").strip()
-    if not safe_type_text and not type_target:
+    if (
+        not safe_type_text
+        and not type_target
+        and safe_shortcut_action not in {"new_document", "new_note"}
+    ):
         safe_type_text = safe_type_text_hint(pending_action)
     safe_shortcut = (
         dict(raw_safe_shortcut)
@@ -9421,7 +9467,10 @@ def _append_selected_discovered_generic_action_steps(
 
     if not planned_action:
         return
-    verify_tool = _first_allowed(("screen.capture", "desktop.ui_elements"), allowed)
+    verify_tool = _first_allowed(
+        ("desktop.ui_elements", "desktop.read_ui", "screen.capture"),
+        allowed,
+    )
     if not verify_tool:
         return
     steps.append(
@@ -9613,7 +9662,10 @@ def _append_selected_discovered_creative_action_steps(
         )
         previous_step = "save-discovered-app-creative-result"
 
-    verify_tool = _first_allowed(("screen.capture", "desktop.ui_elements"), allowed)
+    verify_tool = _first_allowed(
+        ("desktop.ui_elements", "desktop.read_ui", "screen.capture"),
+        allowed,
+    )
     if not verify_tool:
         return
     steps.append(
@@ -16084,7 +16136,66 @@ def _url_hint(text: str) -> str:
     return _explicit_browser_url_hint(text)
 
 
+def _explicit_generic_named_app_hint(text: str) -> str:
+    value = str(text or "").strip()
+    if not value:
+        return ""
+    patterns = (
+        r"(?:打开|启动|开启|运行|拉起|切到|聚焦)\s*"
+        r"(?P<opened_app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)"
+        r"(?=\s*(?:，|,|。|！|!|？|\?|并|然后|再|接着|之后|后|先|"
+        r"搜索|查找|检索|读取|读|查看|看看|点击|点按|输入|写|按|操作|$))",
+        r"(?:在|用|通过)\s*"
+        r"(?P<scoped_app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)"
+        r"(?:里|中|上|内)?\s*"
+        r"(?=(?:新建|创建|打开|点击|点按|输入|写|搜索|查找|检索|按|操作|"
+        r"create|new|open|click|press|type|search))",
+        r"(?:打开|启动|开启|运行|拉起|切到|聚焦)?\s*"
+        r"(?:一个|一款|这个|那个)?"
+        r"(?:(?:我没提过的|我没有提过的|没提过的|没有提过的|从未提过的|"
+        r"没见过的|未知的?|陌生的|新的?|刚装的?|新装的?|"
+        r"刚安装的?|新安装的?|安装的?)\s*)*"
+        r"(?:新\s*)?(?:应用(?:程序)?|app|软件)\s+"
+        r"(?P<app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)"
+        r"(?=\s*(?:，|,|。|！|!|？|\?|并|然后|再|接着|之后|后|$))",
+        r"(?:叫|名叫|名称是|名字是|called|named)\s*"
+        r"(?P<called_app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)\s*"
+        r"(?:的)?(?:应用(?:程序)?|app|软件)"
+        r"(?=\s*(?:，|,|。|！|!|？|\?|并|然后|再|接着|之后|后|"
+        r"\band\b|\bthen\b|\bto\b|\bclick\b|\bpress\b|\btap\b|"
+        r"\btype\b|\bsearch\b|\bopen\b|\bcreate\b|\bnew\b|\bwrite\b|$))",
+        r"(?:应用(?:程序)?|app|软件)\s*(?:叫|名叫|名称是|名字是|called|named)\s*"
+        r"(?P<named_app>[A-Za-z][A-Za-z0-9 ._-]{1,40}?)"
+        r"(?=\s*(?:，|,|。|！|!|？|\?|并|然后|再|接着|之后|后|"
+        r"\band\b|\bthen\b|\bto\b|\bclick\b|\bpress\b|\btap\b|"
+        r"\btype\b|\bsearch\b|\bopen\b|\bcreate\b|\bnew\b|\bwrite\b|$))",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw_app = next(
+            (
+                item
+                for item in match.groupdict().values()
+                if item is not None and str(item).strip()
+            ),
+            "",
+        )
+        app = _clean_app_name_hint(raw_app)
+        if (
+            app
+            and not _invalid_app_scoped_followup_app(app)
+            and not _is_generic_foreground_app_label(app)
+        ):
+            return app
+    return ""
+
+
 def _app_name_hint(text: str) -> str:
+    explicit_generic_named_app = _explicit_generic_named_app_hint(text)
+    if explicit_generic_named_app:
+        return explicit_generic_named_app
     if _app_capability_discovery_hint(text):
         return ""
     if (
@@ -18933,6 +19044,8 @@ def _desktop_operation_hint(text: str) -> str:
         return "focus_window"
     if window_list_hint(text) is not None:
         return "list_windows"
+    if click_target_hint(text):
+        return "click"
     if ui_inspection_hint(text) is not None:
         return "read_ui"
     if screen_capture_hint(text) is not None:
@@ -18946,8 +19059,6 @@ def _desktop_operation_hint(text: str) -> str:
         return "safe_scroll"
     if safe_click_hint(text):
         return "safe_click"
-    if click_target_hint(text):
-        return "click"
     app_management = app_management_hint(text)
     if app_management:
         return f"{app_management.get('action')}_app"

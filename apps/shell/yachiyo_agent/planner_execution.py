@@ -1869,7 +1869,10 @@ def _has_unavailable_required_desktop_step(decision: Any) -> bool:
                 has_actionable_discovery=has_actionable_discovery,
             ):
                 continue
-            if has_actionable_discovery:
+            if (
+                has_actionable_discovery
+                and _unavailable_desktop_ui_payload_is_model_resolvable(payload)
+            ):
                 continue
             return True
         if (
