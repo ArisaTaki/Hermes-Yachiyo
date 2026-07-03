@@ -1076,6 +1076,31 @@ def media_app_query_search_plan(
         _append_media_app_verify_step(plan, allowed)
         return plan
 
+    if app_tool and type_tool and _media_observed_type_fallback_available(allowed):
+        type_into_payload = {
+            "app_name": app_name,
+            **selected_app_payload,
+            "target": "search 搜索",
+            "text": query,
+            "role_filter": "text",
+            "limit": 80,
+        }
+        plan = [
+            *discovery_step,
+            (app_tool, {"app_name": app_name, **selected_app_payload}),
+            ("desktop.type_into_ui_element", type_into_payload),
+            (submit_tool, submit_payload),
+        ]
+        _append_media_search_result_play_step(
+            plan,
+            app_name=app_name,
+            selected_app_payload=selected_app_payload,
+            allowed=allowed,
+            allow_observed_fallback=True,
+        )
+        _append_media_app_verify_step(plan, allowed)
+        return plan
+
     shortcut_tool = _first_allowed(("desktop.safe_shortcut", "desktop.hotkey"), allowed)
     if not app_tool or not shortcut_tool:
         return []
@@ -1108,6 +1133,7 @@ def _append_media_search_result_play_step(
     app_name: str,
     selected_app_payload: Mapping[str, Any],
     allowed: set[str] | None,
+    allow_observed_fallback: bool = False,
 ) -> None:
     play_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
     if play_tool:
@@ -1118,6 +1144,21 @@ def _append_media_search_result_play_step(
         allowed,
     )
     if not click_tool:
+        if not allow_observed_fallback or not _media_observed_click_fallback_available(allowed):
+            return
+        plan.append(
+            (
+                "desktop.click_ui_element",
+                {
+                    "app_name": app_name,
+                    **dict(selected_app_payload),
+                    "target": "first result",
+                    "role_filter": "",
+                    "limit": 80,
+                    "click_count": 1,
+                },
+            )
+        )
         return
     click_payload = {
         "target": "first result",
@@ -1132,6 +1173,34 @@ def _append_media_search_result_play_step(
             **click_payload,
         }
     plan.append((click_tool, click_payload))
+
+
+def _media_observed_type_fallback_available(allowed: set[str] | None) -> bool:
+    if not _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed):
+        return False
+    if not _first_allowed(
+        ("desktop.safe_type_text", "desktop.type_text", "desktop.type"),
+        allowed,
+    ):
+        return False
+    return bool(
+        _first_allowed(
+            (
+                "app.focus_and_click_ui_element",
+                "app.open_and_click_ui_element",
+                "desktop.click_ui_element",
+                "desktop.safe_click",
+                "desktop.click",
+            ),
+            allowed,
+        )
+    )
+
+
+def _media_observed_click_fallback_available(allowed: set[str] | None) -> bool:
+    if not _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed):
+        return False
+    return bool(_first_allowed(("desktop.safe_click", "desktop.click"), allowed))
 
 
 def media_app_prepare_plan(

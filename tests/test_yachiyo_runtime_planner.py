@@ -25463,6 +25463,96 @@ def test_runtime_planner_uses_app_scoped_typing_for_media_search_when_global_typ
     assert all(step.tool_name != "media.apple_music_play" for step in decision.plan.tool_plan.steps)
 
 
+def test_runtime_planner_uses_observed_safe_media_search_when_shortcut_is_missing() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.safe_click",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+    ]
+    decision = RuntimePlanner().decision(
+        "打开 Apple Music 播放超时空辉夜姬",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert decision.plan.tool_plan.missing_capabilities == []
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-media-app",
+        "open-media-app",
+        "type-media-search-query",
+        "submit-media-search",
+        "play-media-search-result",
+        "verify-media-search",
+    ]
+    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.type_into_ui_element",
+        "desktop.submit_foreground",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == {
+        "kind": "desktop_discovered_media_playback",
+        "app_query": "Music",
+        "app_name_source": "desktop.list_apps",
+        "target_action": "safe_shortcut",
+        "safe_shortcut_action": "find",
+        "media_playback_query": "超时空辉夜姬",
+        "result_selection": {
+            "target": "first result",
+            "role_filter": "",
+            "limit": 80,
+            "click_count": 1,
+        },
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
+        "app_name": "Music",
+    }
+
+    requests = planner_tool_requests(
+        "打开 Apple Music 播放超时空辉夜姬",
+        allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+    execution_requests = planner_execution_tool_requests(requests, allowed_tools)
+
+    assert [request["tool"] for request in execution_requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+    ]
+    observation = execution_requests[-1]
+    assert observation["continue_to_model"] is True
+    assert observation["deferred_tool"] == "desktop.type_into_ui_element"
+    assert observation["deferred_input"] == {
+        "app_name": "Music",
+        "target": "search 搜索",
+        "text": "超时空辉夜姬",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert [request["tool"] for request in observation["deferred_continuation"]] == [
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    result_observation = observation["deferred_continuation"][1]
+    assert result_observation["deferred_tool"] == "desktop.click_ui_element"
+    assert result_observation["deferred_input"] == {
+        "app_name": "Music",
+        "target": "first result",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+
+
 def test_planner_desktop_tool_requests_verifies_media_app_search_when_available() -> None:
     requests = planner_desktop_tool_requests(
         "打开 Apple Music 搜索超时空辉夜姬并播放",

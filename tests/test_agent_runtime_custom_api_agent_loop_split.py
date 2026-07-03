@@ -7416,6 +7416,99 @@ def test_auto_deferred_observed_ui_followup_promotes_matching_click_request() ->
     assert requests[0]["requires_post_action_verification"] is True
 
 
+def test_auto_deferred_observed_ui_followup_uses_safe_tools_for_virtual_type_request() -> None:
+    requests = custom_api_agent_module._auto_deferred_observed_ui_followup_requests(
+        [
+            {
+                "tool": "desktop.ui_elements",
+                "planning_reason": "planner_fallback_media_playback",
+                "continue_to_model": True,
+                "deferred_tool": "desktop.type_into_ui_element",
+                "deferred_input": {
+                    "app_name": "Music",
+                    "target": "search 搜索",
+                    "text": "超时空辉夜姬",
+                    "role_filter": "text",
+                    "limit": 80,
+                },
+                "deferred_continuation": [
+                    {
+                        "protocol": "json_fallback",
+                        "tool": "desktop.submit_foreground",
+                        "input": {"action": "confirm"},
+                        "source": "runtime_planner",
+                        "planning_reason": "planner_fallback_media_playback",
+                    },
+                    {
+                        "protocol": "json_fallback",
+                        "tool": "desktop.ui_elements",
+                        "input": {"app_name": "Music", "limit": 80},
+                        "source": "runtime_planner",
+                        "planning_reason": "planner_fallback_media_playback",
+                        "continue_to_model": True,
+                        "deferred_tool": "desktop.click_ui_element",
+                        "deferred_input": {
+                            "app_name": "Music",
+                            "target": "first result",
+                            "role_filter": "",
+                            "limit": 80,
+                            "click_count": 1,
+                        },
+                    },
+                ],
+                "request_id": "runtime-plan-media:request:3:desktop.ui_elements",
+                "decision_id": "decision-media",
+                "plan_id": "runtime-plan-media",
+                "intent_kind": "media_playback",
+            }
+        ],
+        [
+            "desktop.ui_elements",
+            "desktop.read_ui",
+            "desktop.safe_click",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+        ],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.ui_elements",
+                input_preview={"app_name": "Music", "role_filter": "text", "limit": 80},
+                result={
+                    "ok": True,
+                    "data": {
+                        "elements": [
+                            {
+                                "role": "text field",
+                                "label": "search 搜索",
+                                "center": {"x": 120, "y": 88},
+                            }
+                        ],
+                    },
+                },
+            )
+        ],
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.safe_click",
+        "desktop.safe_type_text",
+        "desktop.read_ui",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["input"] == {"x": 120, "y": 88}
+    assert requests[1]["input"] == {"text": "超时空辉夜姬"}
+    assert requests[0]["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "observed_center",
+        "center": {"x": 120, "y": 88},
+    }
+    assert requests[-1]["continue_to_model"] is True
+    assert requests[-1]["deferred_tool"] == "desktop.click_ui_element"
+    assert requests[-1]["deferred_input"]["target"] == "first result"
+
+
 def test_auto_deferred_observed_ui_followup_ignores_unmatched_target() -> None:
     requests = custom_api_agent_module._auto_deferred_observed_ui_followup_requests(
         [
@@ -25512,6 +25605,68 @@ def test_auto_discovered_media_playback_followup_searches_clicks_and_verifies() 
         "resolved_app_path": "/Applications/VLC.app",
     }
     assert requests[3]["input_resolution"]["resolved_app_name"] == "VLC"
+
+
+def test_auto_discovered_media_playback_followup_observes_search_when_shortcut_missing() -> None:
+    requests = custom_api_agent_module._auto_discovered_media_playback_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_media_playback",
+                "app_query": "Music",
+                "app_name": "Music",
+                "app_name_source": "desktop.list_apps",
+                "target_action": "safe_shortcut",
+                "safe_shortcut_action": "find",
+                "media_playback_query": "超时空辉夜姬",
+                "result_selection": {
+                    "target": "first result",
+                    "role_filter": "",
+                    "limit": 80,
+                    "click_count": 1,
+                },
+                "post_action_observation": {
+                    "tool": "desktop.ui_elements",
+                    "input": {},
+                },
+            }
+        },
+        [
+            "app.open",
+            "desktop.ui_elements",
+            "desktop.safe_click",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+        ],
+        [],
+    )
+
+    assert [request["tool"] for request in requests] == ["app.open", "desktop.ui_elements"]
+    assert requests[0]["input"] == {"app_name": "Music"}
+    observation = requests[1]
+    assert observation["continue_to_model"] is True
+    assert observation["deferred_tool"] == "desktop.type_into_ui_element"
+    assert observation["deferred_input"] == {
+        "app_name": "Music",
+        "app_query": "Music",
+        "target": "search 搜索",
+        "text": "超时空辉夜姬",
+        "role_filter": "text",
+        "limit": 80,
+        "submit_action": "confirm",
+    }
+    assert [request["tool"] for request in observation["deferred_continuation"]] == [
+        "desktop.ui_elements"
+    ]
+    assert observation["deferred_continuation"][0]["deferred_tool"] == (
+        "desktop.click_ui_element"
+    )
+    assert observation["deferred_continuation"][0]["deferred_input"] == {
+        "app_name": "Music",
+        "target": "first result",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
 
 
 def test_auto_discovered_media_playback_followup_inherits_tool_plan_trace() -> None:

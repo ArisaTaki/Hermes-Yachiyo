@@ -5739,7 +5739,12 @@ def _auto_deferred_observed_ui_followup_requests(
         if not target:
             continue
         tool_name = str(request.get("deferred_tool") or "").strip()
-        if tool_name not in allowed:
+        scoped_allowed = _deferred_observed_ui_scoped_allowed_tools(
+            tool_name,
+            target,
+            allowed,
+        )
+        if not scoped_allowed:
             continue
         target_label = str(target.get("target") or "").strip()
         role_filter = str(target.get("role_filter") or "").strip()
@@ -5760,18 +5765,6 @@ def _auto_deferred_observed_ui_followup_requests(
         observation_source = _latest_desktop_observation_tool(timeline)
         if observation_source:
             target["observation_source"] = observation_source
-        scoped_allowed = [
-            tool
-            for tool in (
-                tool_name,
-                "desktop.read_ui",
-                "desktop.ui_elements",
-                "desktop.active_window",
-            )
-            if tool in allowed
-        ]
-        if not scoped_allowed:
-            continue
         requests = _auto_desktop_observed_action_followup_requests(
             {"followup_target": target},
             scoped_allowed,
@@ -5791,6 +5784,88 @@ def _auto_deferred_observed_ui_followup_requests(
             continuation = _deferred_observed_ui_continuation_requests(request, allowed)
             return [*annotated, *continuation]
     return []
+
+
+def _deferred_observed_ui_scoped_allowed_tools(
+    tool_name: str,
+    target: Mapping[str, Any],
+    allowed: set[str],
+) -> list[str]:
+    clean_tool = str(tool_name or "").strip()
+    if not clean_tool:
+        return []
+    observation_tools = (
+        "desktop.read_ui",
+        "desktop.ui_elements",
+        "desktop.active_window",
+    )
+    app_name = _observed_action_app_name(target)
+    tools: list[str] = []
+    if clean_tool in {
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "desktop.click_ui_element",
+        "desktop.safe_click",
+        "desktop.click",
+    }:
+        if clean_tool in allowed:
+            tools.append(clean_tool)
+        if app_name:
+            tools.extend(
+                tool
+                for tool in (
+                    "app.focus_and_click_ui_element",
+                    "app.open_and_click_ui_element",
+                )
+                if tool in allowed
+            )
+        tools.extend(
+            tool
+            for tool in (
+                "desktop.click_ui_element",
+                "desktop.safe_click",
+                "desktop.click",
+            )
+            if tool in allowed
+        )
+    elif clean_tool in {
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "desktop.type_into_ui_element",
+        "desktop.safe_type_text",
+        "desktop.type_text",
+        "desktop.type",
+    }:
+        if clean_tool in allowed:
+            tools.append(clean_tool)
+        if app_name:
+            tools.extend(
+                tool
+                for tool in (
+                    "app.focus_and_type_into_ui_element",
+                    "app.open_and_type_into_ui_element",
+                    "app.focus_and_click_ui_element",
+                    "app.open_and_click_ui_element",
+                )
+                if tool in allowed
+            )
+        tools.extend(
+            tool
+            for tool in (
+                "desktop.type_into_ui_element",
+                "desktop.click_ui_element",
+                "desktop.safe_click",
+                "desktop.click",
+                "desktop.safe_type_text",
+                "desktop.type_text",
+                "desktop.type",
+            )
+            if tool in allowed
+        )
+    else:
+        return []
+    tools.extend(tool for tool in observation_tools if tool in allowed)
+    return _ordered_text_list(tools)
 
 
 def _deferred_observed_ui_continuation_requests(
@@ -5886,11 +5961,16 @@ def _deferred_observed_ui_target_from_request(
         "app.open_and_click_ui_element",
         "app.focus_and_click_ui_element",
         "desktop.click_ui_element",
+        "desktop.safe_click",
+        "desktop.click",
     }
     type_tools = {
         "app.open_and_type_into_ui_element",
         "app.focus_and_type_into_ui_element",
         "desktop.type_into_ui_element",
+        "desktop.safe_type_text",
+        "desktop.type_text",
+        "desktop.type",
     }
     if tool_name in click_tools:
         target_action = "click"
@@ -5929,6 +6009,9 @@ def _deferred_observed_ui_target_from_request(
         if not text:
             return {}
         target["text"] = text
+        submit_action = str(raw_input.get("submit_action") or "").strip()
+        if submit_action:
+            target["submit_action"] = submit_action
     return {key: value for key, value in target.items() if value not in ("", None, [], {})}
 
 
@@ -6011,9 +6094,18 @@ def _deferred_execution_request_id(
 
 def _deferred_ui_runtime_role(tool_name: str) -> str:
     clean_tool = str(tool_name or "").strip()
-    if clean_tool.endswith("_type_into_ui_element") or clean_tool == "desktop.type_into_ui_element":
+    if clean_tool.endswith("_type_into_ui_element") or clean_tool in {
+        "desktop.type_into_ui_element",
+        "desktop.safe_type_text",
+        "desktop.type_text",
+        "desktop.type",
+    }:
         return "type_ui"
-    if clean_tool.endswith("_click_ui_element") or clean_tool == "desktop.click_ui_element":
+    if clean_tool.endswith("_click_ui_element") or clean_tool in {
+        "desktop.click_ui_element",
+        "desktop.safe_click",
+        "desktop.click",
+    }:
         return "click_ui"
     return "operate_ui"
 
@@ -6027,6 +6119,11 @@ def _deferred_ui_tool_requires_approval(tool_name: str) -> bool:
         "app.focus_and_type_into_ui_element",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
+        "desktop.safe_click",
+        "desktop.click",
+        "desktop.safe_type_text",
+        "desktop.type_text",
+        "desktop.type",
     }
 
 
@@ -8805,6 +8902,7 @@ def _model_followup_discovered_media_playback_target_payload(
             "app.open",
             "app.focus",
             "desktop.safe_shortcut",
+            "desktop.safe_click",
             "desktop.safe_type_text",
             "desktop.search_submit",
             "desktop.submit_foreground",
@@ -8820,7 +8918,7 @@ def _model_followup_discovered_media_playback_target_payload(
         for tool in ("desktop.ui_elements", "desktop.active_window", "screen.capture")
         if tool in allowed
     ]
-    return {
+    payload = {
         "kind": "desktop_discovered_media_playback",
         "app_query": app_query,
         "app_name_source": str(target.get("app_name_source") or "desktop.list_apps").strip(),
@@ -8830,6 +8928,10 @@ def _model_followup_discovered_media_playback_target_payload(
         "recommended_tools": recommended_tools,
         "verify_tools": verify_tools,
     }
+    app_name = str(target.get("app_name") or target.get("target_app_name") or "").strip()
+    if app_name:
+        payload["app_name"] = app_name
+    return payload
 
 
 def _model_followup_communication_target_payload(
@@ -12412,6 +12514,9 @@ _FOLLOWUP_PLAN_TOOL_EQUIVALENCE_GROUPS = (
     },
     {
         "desktop.type_into_ui_element",
+        "desktop.safe_type_text",
+        "desktop.type_text",
+        "desktop.type",
         "app.focus_and_type_into_ui_element",
         "app.open_and_type_into_ui_element",
     },
@@ -12461,7 +12566,9 @@ def _auto_discovered_media_playback_followup_requests(
     media_query = str(target.get("media_playback_query") or "").strip()
     if not app_query:
         return []
-    app_name = _discovered_app_name_for_query(timeline, app_query)
+    app_name = str(target.get("app_name") or target.get("target_app_name") or "").strip()
+    if not app_name:
+        app_name = _discovered_app_name_for_query(timeline, app_query)
     if not app_name:
         return []
     resolution_evidence = _discovered_app_resolution_evidence(timeline, app_query, app_name)
@@ -12523,6 +12630,27 @@ def _auto_discovered_media_playback_followup_requests(
                 planning_reason=planning_reason,
             )
         )
+        if not requests:
+            requests = _discovered_media_observed_search_requests(
+                app_query,
+                app_name,
+                media_query,
+                target,
+                allowed,
+                source=source,
+                planning_reason=planning_reason,
+            )
+            if not requests:
+                return []
+            if resolution_evidence:
+                requests = [
+                    _with_discovered_app_resolution_evidence(request, resolution_evidence)
+                    for request in requests
+                ]
+            return _annotate_auto_followup_requests_from_tool_plan(
+                requests,
+                selection_payload,
+            )
     else:
         open_request = _discovered_app_open_request(
             app_query,
@@ -12578,6 +12706,162 @@ def _auto_discovered_media_playback_followup_requests(
             for request in requests
         ]
     return _annotate_auto_followup_requests_from_tool_plan(requests, selection_payload)
+
+
+def _discovered_media_observed_search_requests(
+    app_query: str,
+    app_name: str,
+    media_query: str,
+    target: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    type_tool = _discovered_media_search_deferred_type_tool(allowed)
+    if not type_tool:
+        return []
+    observation_tool = _first_allowed_tool(("desktop.ui_elements", "desktop.read_ui"), allowed)
+    if not observation_tool:
+        return []
+    open_request = _discovered_app_open_request(
+        app_query,
+        app_name,
+        allowed,
+        source=source,
+        planning_reason=planning_reason,
+    )
+    result_observation = _discovered_media_result_observation_request(
+        app_name,
+        target,
+        allowed,
+        source=source,
+        planning_reason=planning_reason,
+    )
+    if not result_observation:
+        return []
+    deferred_input: dict[str, Any] = {
+        "app_name": app_name,
+        "app_query": app_query,
+        "target": "search 搜索",
+        "text": media_query,
+        "role_filter": "text",
+        "limit": 80,
+    }
+    continuation: list[dict[str, Any]] = []
+    if "desktop.submit_foreground" in allowed:
+        deferred_input["submit_action"] = "confirm"
+    else:
+        submit_request = _media_search_submit_request(
+            allowed,
+            source=source,
+            planning_reason=planning_reason,
+        )
+        if not submit_request:
+            return []
+        continuation.append(submit_request)
+    continuation.append(result_observation)
+    observation_input = {"app_name": app_name, "role_filter": "text", "limit": 80}
+    observation_request = _with_discovered_app_resolution(
+        _request_like(
+            observation_tool,
+            observation_input,
+            source=source,
+            planning_reason=planning_reason,
+        ),
+        app_query,
+        app_name,
+    )
+    observation_request["continue_to_model"] = True
+    observation_request["deferred_tool"] = type_tool
+    observation_request["deferred_input"] = deferred_input
+    observation_request["deferred_continuation"] = continuation
+    return [*([open_request] if open_request else []), observation_request]
+
+
+def _discovered_media_search_deferred_type_tool(allowed: set[str]) -> str:
+    return _first_allowed_tool(
+        (
+            "app.focus_and_type_into_ui_element",
+            "app.open_and_type_into_ui_element",
+            "desktop.type_into_ui_element",
+        ),
+        allowed,
+    ) or (
+        "desktop.type_into_ui_element"
+        if _first_allowed_tool(
+            ("desktop.safe_type_text", "desktop.type_text", "desktop.type"),
+            allowed,
+        )
+        and _first_allowed_tool(
+            (
+                "app.focus_and_click_ui_element",
+                "app.open_and_click_ui_element",
+                "desktop.click_ui_element",
+                "desktop.safe_click",
+                "desktop.click",
+            ),
+            allowed,
+        )
+        else ""
+    )
+
+
+def _discovered_media_result_observation_request(
+    app_name: str,
+    target: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    source: str,
+    planning_reason: str,
+) -> dict[str, Any]:
+    click_tool = _discovered_media_result_deferred_click_tool(allowed)
+    if not click_tool:
+        return {}
+    observation_tool = _first_allowed_tool(("desktop.ui_elements", "desktop.read_ui"), allowed)
+    if not observation_tool:
+        return {}
+    result_selection = (
+        target.get("result_selection")
+        if isinstance(target.get("result_selection"), Mapping)
+        else {}
+    )
+    result_input = {
+        "app_name": app_name,
+        "target": str(result_selection.get("target") or "first result").strip(),
+        "role_filter": str(result_selection.get("role_filter") or "").strip(),
+        "limit": _positive_int(result_selection.get("limit"), default=80),
+        "click_count": _positive_int(result_selection.get("click_count"), default=1),
+    }
+    request = _request_like(
+        observation_tool,
+        {
+            "app_name": app_name,
+            "role_filter": result_input["role_filter"],
+            "limit": result_input["limit"],
+        },
+        source=source,
+        planning_reason=planning_reason,
+    )
+    request["continue_to_model"] = True
+    request["deferred_tool"] = click_tool
+    request["deferred_input"] = result_input
+    return request
+
+
+def _discovered_media_result_deferred_click_tool(allowed: set[str]) -> str:
+    return _first_allowed_tool(
+        (
+            "app.focus_and_click_ui_element",
+            "app.open_and_click_ui_element",
+            "desktop.click_ui_element",
+        ),
+        allowed,
+    ) or (
+        "desktop.click_ui_element"
+        if _first_allowed_tool(("desktop.safe_click", "desktop.click"), allowed)
+        else ""
+    )
 
 
 def _media_search_submit_request(

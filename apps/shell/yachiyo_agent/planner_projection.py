@@ -781,17 +781,21 @@ def _desktop_file_open_followup_target(inputs: Mapping[str, Any]) -> dict[str, A
 
 def _media_app_playback_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:
     app_capability = inputs.get("target_app_capability_hint")
-    if not isinstance(app_capability, Mapping):
-        return {}
-    if str(app_capability.get("query") or "").strip() != "music":
+    app_query = ""
+    app_name = str(inputs.get("app_name") or "").strip()
+    if isinstance(app_capability, Mapping):
+        app_query = str(app_capability.get("query") or "").strip()
+    if not app_query and app_name:
+        app_query = app_name
+    if not app_query:
         return {}
     if str(inputs.get("action") or "").strip() != "play":
         return {}
     media_query = str(inputs.get("query") or "").strip()
     if not media_query:
-        return {
+        payload = {
             "kind": "desktop_discovered_media_playback",
-            "app_query": "music",
+            "app_query": app_query,
             "app_name_source": "desktop.list_apps",
             "target_action": "play_control",
             "result_selection": {
@@ -805,9 +809,12 @@ def _media_app_playback_followup_target(inputs: Mapping[str, Any]) -> dict[str, 
                 "input": {},
             },
         }
-    return {
+        if app_name:
+            payload["app_name"] = app_name
+        return payload
+    payload = {
         "kind": "desktop_discovered_media_playback",
-        "app_query": "music",
+        "app_query": app_query,
         "app_name_source": "desktop.list_apps",
         "target_action": "safe_shortcut",
         "safe_shortcut_action": "find",
@@ -823,6 +830,9 @@ def _media_app_playback_followup_target(inputs: Mapping[str, Any]) -> dict[str, 
             "input": {},
         },
     }
+    if app_name:
+        payload["app_name"] = app_name
+    return payload
 
 
 def _discovered_app_write_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:
