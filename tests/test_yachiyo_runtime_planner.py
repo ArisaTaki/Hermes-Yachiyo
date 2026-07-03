@@ -9734,6 +9734,72 @@ def test_runtime_planner_observes_semantic_ui_target_when_click_tool_unavailable
     )
 
 
+def test_runtime_planner_observes_semantic_ui_target_when_type_tool_unavailable() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.ui_elements",
+        "desktop.safe_click",
+        "desktop.safe_type_text",
+    ]
+    prompt = "打开 PixelForge，在搜索框输入 apple music"
+    metadata = {"runtime_planner_execution_context": True}
+    decision = RuntimePlanner().decision(
+        prompt,
+        allowed_tools=allowed_tools,
+        metadata=metadata,
+    )
+
+    assert decision.selected_intent.inputs["safe_type_text_hint"] == "apple music"
+    operation = _step_by_id(decision, "operate-foreground-ui")
+    assert operation.tool_name == "desktop.ui_elements"
+    assert operation.title == "Observe foreground UI target"
+    assert operation.action == "observe_ui_target"
+    assert operation.input_preview == {
+        "target": "搜索",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert operation.depends_on == ["focus-opened-app"]
+
+    requests = planner_execution_tool_requests(
+        planner_tool_requests(prompt, allowed_tools, metadata=metadata),
+        allowed_tools,
+    )
+    assert [request["tool"] for request in requests[:4]] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.ui_elements",
+    ]
+    assert requests[3]["step_id"] == "operate-foreground-ui"
+    assert requests[3]["continue_to_model"] is True
+
+    payload = planner_selection_payload(
+        decision=decision,
+        planner_requests=requests,
+        legacy_requests=[],
+        selected_requests=requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_direct",
+    )
+    assert payload["followup_target"] == {
+        "kind": "desktop_observed_action",
+        "target_action": "type_text",
+        "target": "搜索",
+        "role_filter": "text",
+        "limit": 80,
+        "observation_source": "desktop.ui_elements",
+        "app_name": "PixelForge",
+        "text": "apple music",
+        "body_source": "explicit_user_text",
+    }
+    assert runtime_planner_metadata(decision)["yachiyo_followup_target"] == (
+        payload["followup_target"]
+    )
+
+
 def test_runtime_planner_exposes_desktop_discover_operate_action_layer() -> None:
     allowed_tools = [
         "desktop.list_apps",

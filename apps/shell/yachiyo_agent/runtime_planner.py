@@ -1124,6 +1124,25 @@ class TaskIntentRouter:
             inputs["operation_mode_hint"] = finder_operation_mode
         if foreground_compose_text:
             inputs["foreground_compose_text_hint"] = foreground_compose_text
+        app_type_target = (
+            app_type_scope.get("type_target")
+            if isinstance(app_type_scope.get("type_target"), Mapping)
+            else {}
+        )
+        safe_type_text_for_followup = (
+            str(app_type_target.get("text") or "").strip()
+            if isinstance(app_type_target, Mapping)
+            else ""
+        )
+        if not safe_type_text_for_followup and (
+            _looks_like_app_search_field_input(text)
+            or _ambiguous_type_target_requested(text)
+        ):
+            safe_type_text_for_followup = (
+                safe_type_text_hint(text) or _app_search_field_input_query(text)
+            )
+        if safe_type_text_for_followup:
+            inputs["safe_type_text_hint"] = safe_type_text_for_followup
         if model_generated_content:
             inputs["model_generated_content_hint"] = model_generated_content
         if foreground_paste:
