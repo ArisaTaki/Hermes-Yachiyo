@@ -74,7 +74,7 @@ def open_locked_runtime_connection(
     db_path: Path | str,
     lock: threading.RLock,
 ) -> LockedConnection:
-    raw_conn = sqlite3.connect(db_path, check_same_thread=False)
+    raw_conn = sqlite3.connect(db_path, check_same_thread=False, isolation_level=None)
     raw_conn.execute("PRAGMA foreign_keys=ON")
     raw_conn.execute("PRAGMA journal_mode=WAL")
     raw_conn.execute("PRAGMA busy_timeout=5000")
