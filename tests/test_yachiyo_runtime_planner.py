@@ -32893,6 +32893,53 @@ def test_runtime_execution_envelope_can_project_full_report_app_write_plan() -> 
     )
 
 
+def test_runtime_execution_envelope_can_project_full_information_capture_plan() -> None:
+    allowed_tools = ["clipboard.read", "notes.create", "artifact.write"]
+    decision = RuntimePlanner().decision(
+        "把当前剪贴板内容保存成笔记",
+        allowed_tools=allowed_tools,
+    )
+
+    default_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+    full_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert default_envelope is not None
+    assert full_envelope is not None
+    assert [request.tool_name for request in default_envelope.requests] == [
+        "clipboard.read"
+    ]
+    assert [request.tool_name for request in full_envelope.requests] == [
+        "clipboard.read",
+        "notes.create",
+    ]
+    assert full_envelope.runtime_stage_counts == {"discover": 1, "produce": 1}
+    assert [request.runtime_role for request in full_envelope.requests] == [
+        "inspect_desktop_state",
+        "create_note",
+    ]
+    assert full_envelope.requests[1].depends_on == ["read-note-context"]
+    assert full_envelope.requests[1].input == {"body_source": "clipboard"}
+
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        full_envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    assert [request["tool"] for request in projected_requests] == [
+        "clipboard.read",
+        "notes.create",
+    ]
+    assert projected_requests[1]["runtime_stage"] == "produce"
+    assert projected_requests[1]["runtime_role"] == "create_note"
+    assert projected_requests[1]["task_todo"]["step_id"] == "create-note-from-context"
+
+
 def test_runtime_execution_envelope_marks_browser_open_url_as_web_operation() -> None:
     allowed_tools = ["browser.open_url"]
     decision = RuntimePlanner().decision(
@@ -33237,6 +33284,26 @@ def test_agent_studio_service_projects_full_data_analysis_execution_plan() -> No
     assert envelope.requests[1].approval_required is True
     assert envelope.requests[1].task_todo["step_id"] == "run-analysis"
     assert envelope.requests[1].task_checkpoints[0]["after_step_id"] == "run-analysis"
+
+
+def test_agent_studio_service_projects_full_information_capture_execution_plan() -> None:
+    class StudioPort:
+        pass
+
+    service = AgentStudioService(StudioPort())
+    envelope = service.plan_execution(
+        "把当前剪贴板内容保存成笔记",
+        allowed_tools=["clipboard.read", "notes.create", "artifact.write"],
+        metadata={"surface": "studio"},
+    )
+
+    assert [request.tool_name for request in envelope.requests] == [
+        "clipboard.read",
+        "notes.create",
+    ]
+    assert envelope.runtime_stage_counts == {"discover": 1, "produce": 1}
+    assert envelope.requests[1].runtime_role == "create_note"
+    assert envelope.requests[1].task_todo["step_id"] == "create-note-from-context"
 
 
 def test_agent_studio_service_projects_full_code_and_file_execution_plans() -> None:

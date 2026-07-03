@@ -13427,6 +13427,7 @@ def _runtime_dov_step_applies(step: ToolPlanStepSnapshot) -> bool:
                 "clipboard.",
                 "media.",
                 "system.",
+                "notes.",
             )
         )
         or tool_name == "agent.group_run"
@@ -13445,6 +13446,7 @@ def _runtime_dov_step_applies(step: ToolPlanStepSnapshot) -> bool:
                 "clipboard.",
                 "media.",
                 "system.",
+                "information.",
             )
         )
         or _runtime_dov_code_step_applies(step_id)
@@ -13484,7 +13486,9 @@ def _runtime_dov_stage(step: ToolPlanStepSnapshot) -> str:
     if (
         step_id == "write-code-report"
         or action == "write_artifact"
+        or action == "create_note"
         or tool_name == "artifact.write"
+        or tool_name == "notes.create"
     ):
         return "produce"
     if step_id == "run-terminal-command":
@@ -13520,6 +13524,8 @@ def _runtime_dov_role(step: ToolPlanStepSnapshot, stage: str) -> str:
     if stage == "produce":
         if step_id == "write-code-report" or tool_name == "artifact.write":
             return "artifact"
+        if action == "create_note" or tool_name == "notes.create":
+            return "create_note"
         return "produce_output"
     if stage == "discover":
         if step_id == "run-code-diagnostic":
