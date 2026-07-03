@@ -7664,9 +7664,11 @@ def _selection_payload_with_timeline_fallback(
 def _tool_result_requests_replan(result: Mapping[str, Any]) -> bool:
     if not isinstance(result, Mapping):
         return False
-    if result.get("ok") is True:
-        return False
     if result.get("approval_required") or result.get("blocked_by_user_goal"):
+        return False
+    if result.get("verification_failed") is True:
+        return True
+    if result.get("ok") is True:
         return False
     if result.get("ok") is False:
         return True

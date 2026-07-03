@@ -232,6 +232,8 @@ def _tool_event_requests_replan(tool_event: Mapping[str, Any]) -> bool:
     result = tool_event.get("result") if isinstance(tool_event.get("result"), Mapping) else {}
     if result.get("approval_required") or tool_event.get("approval_required"):
         return False
+    if result.get("verification_failed") is True or tool_event.get("verification_failed") is True:
+        return True
     if result.get("ok") is False:
         return True
     status = _text(tool_event.get("status") or result.get("status")).lower()
@@ -258,6 +260,8 @@ def _failure_payload_from_tool_result(
 def _failure_trigger(failure: Mapping[str, Any]) -> str:
     status = _text(failure.get("status") or failure.get("event_type")).lower()
     result = failure.get("result") if isinstance(failure.get("result"), Mapping) else {}
+    if result.get("verification_failed") is True or failure.get("verification_failed") is True:
+        return "verification_failed"
     detail = " ".join(
         item
         for item in (

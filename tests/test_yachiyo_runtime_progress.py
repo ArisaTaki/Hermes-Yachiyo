@@ -111,6 +111,43 @@ def test_public_task_replan_events_project_failed_tool_result() -> None:
     assert "task_core_context" in event.payload["metadata"]
 
 
+def test_public_task_replan_events_project_explicit_verification_failure() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+
+    events = public_task_replan_events_for_tool_result(
+        decision,
+        tool_request={
+            "tool": "data.analyze",
+            "step_id": "analyze-data-file",
+            "task_id": "task-1",
+            "run_id": "run-1",
+        },
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "data.analyze",
+            "result": {
+                "ok": True,
+                "verification_failed": True,
+                "summary": "The generated report did not include the requested chart.",
+            },
+        },
+        run_id="run-1",
+        after_sequence=40,
+    )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.event_type == "agent.replan.requested"
+    assert event.sequence == 41
+    assert event.payload["trigger"] == "verification_failed"
+    assert event.payload["source_step_id"] == "analyze-data-file"
+    assert event.payload["source_tool_name"] == "data.analyze"
+    assert event.payload["target_capability_id"] == "data.analysis"
+
+
 def test_task_replan_payloads_scope_group_run_and_skip_success() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",
