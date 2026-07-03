@@ -19115,6 +19115,57 @@ def test_runtime_planner_uses_desktop_ui_fallback_for_media_playback() -> None:
     assert decision.plan.tool_plan.missing_capabilities == []
 
 
+def test_runtime_planner_searches_media_app_before_model_followup_when_submit_is_missing() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Apple Music 播放超时空浮夜姬",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+    generic = RuntimePlanner().decision(
+        "找一个音乐应用播放超时空浮夜姬",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-media-app",
+        "focus-media-app-search",
+        "type-media-search-query",
+        "verify-media-search",
+    ]
+    assert _step_by_id(decision, "focus-media-app-search").input_preview == {
+        "app_name": "Music",
+        "action": "find",
+    }
+    assert _step_by_id(decision, "type-media-search-query").input_preview == {
+        "text": "超时空浮夜姬"
+    }
+    assert _step_by_id(decision, "verify-media-search").depends_on == [
+        "type-media-search-query"
+    ]
+    assert [step.step_id for step in generic.plan.tool_plan.steps] == [
+        "discover-media-app",
+        "focus-media-app-search",
+        "type-media-search-query",
+        "verify-media-search",
+    ]
+    assert _step_by_id(generic, "focus-media-app-search").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "music",
+        "action": "find",
+    }
+
+
 def test_runtime_planner_treats_desktop_media_app_aliases_as_app_control() -> None:
     prepare = RuntimePlanner().decision(
         "帮我播放 Apple Music",
@@ -26846,6 +26897,50 @@ def test_planner_desktop_tool_requests_prepares_media_app_when_playback_tool_is_
     ]
 
 
+def test_planner_desktop_tool_requests_searches_media_app_before_followup_when_submit_is_missing() -> None:
+    requests = planner_desktop_tool_requests(
+        "打开 Apple Music 播放超时空浮夜姬",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "Music", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Music", "action": "find"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "超时空浮夜姬"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+            "continue_to_model": True,
+        },
+    ]
+
+
 def test_planner_desktop_tool_requests_uses_ui_fallback_for_media_playback() -> None:
     requests = planner_desktop_tool_requests(
         "帮我打开 Apple Music 并播放一首歌",
@@ -27073,6 +27168,7 @@ def test_planner_desktop_tool_requests_uses_generic_desktop_media_search() -> No
             "input": {"role_filter": "", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
+            "continue_to_model": True,
         },
     ]
 
@@ -27108,6 +27204,7 @@ def test_planner_desktop_tool_requests_falls_back_to_app_search_for_apple_music_
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
+            "continue_to_model": True,
         },
     ]
 
@@ -27281,6 +27378,7 @@ def test_planner_desktop_tool_requests_verifies_media_app_search_when_available(
         "input": {"role_filter": "", "limit": 80},
         "source": "runtime_planner",
         "planning_reason": "planner_fallback_media_playback",
+        "continue_to_model": True,
     }
 
 
@@ -27336,6 +27434,7 @@ def test_planner_desktop_tool_requests_discovers_generic_music_app_before_playba
             "input": {"role_filter": "", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
+            "continue_to_model": True,
         },
     ]
 

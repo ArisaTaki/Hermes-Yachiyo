@@ -1055,9 +1055,11 @@ def media_app_query_search_plan(
         allowed,
     )
     submit_tool = _first_allowed(("desktop.search_submit", "desktop.submit_foreground"), allowed)
-    if (not type_tool and not type_into_tool) or not submit_tool:
+    verify_tool = _first_allowed(("desktop.ui_elements", "desktop.active_window", "screen.capture"), allowed)
+    if (not type_tool and not type_into_tool) or (not submit_tool and not verify_tool):
         return []
     submit_payload = {"action": "confirm"} if submit_tool == "desktop.submit_foreground" else {}
+    submit_step = [(submit_tool, submit_payload)] if submit_tool else []
     type_payload = {"text": query}
     if type_tool and type_tool.startswith("app."):
         type_payload = {"app_name": app_name, **selected_app_payload, "text": query}
@@ -1083,7 +1085,7 @@ def media_app_query_search_plan(
             *discovery_step,
             (app_search_tool, app_search_payload),
             (type_tool, type_payload),
-            (submit_tool, submit_payload),
+            *submit_step,
         ]
         _append_media_search_result_play_step(
             plan,
@@ -1115,7 +1117,7 @@ def media_app_query_search_plan(
             *discovery_step,
             (app_tool, {"app_name": app_name, **selected_app_payload}),
             (type_into_tool, type_into_payload),
-            (submit_tool, submit_payload),
+            *submit_step,
         ]
         _append_media_search_result_play_step(
             plan,
@@ -1139,7 +1141,7 @@ def media_app_query_search_plan(
             *discovery_step,
             (app_tool, {"app_name": app_name, **selected_app_payload}),
             ("desktop.type_into_ui_element", type_into_payload),
-            (submit_tool, submit_payload),
+            *submit_step,
         ]
         _append_media_search_result_play_step(
             plan,
@@ -1159,7 +1161,7 @@ def media_app_query_search_plan(
         (app_tool, {"app_name": app_name, **selected_app_payload}),
         (shortcut_tool, _media_search_shortcut_payload(shortcut_tool)),
         (type_tool, type_payload),
-        (submit_tool, submit_payload),
+        *submit_step,
     ]
     _append_media_search_result_play_step(
         plan,

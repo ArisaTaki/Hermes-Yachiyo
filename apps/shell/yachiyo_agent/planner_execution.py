@@ -3839,6 +3839,9 @@ def _media_tool_requests(inputs: dict[str, Any], allowed: set[str]) -> list[dict
             if requests:
                 requests[0]["continue_to_model"] = True
             return requests[:1]
+        if _media_query_plan_needs_search_result_followup(app_query_plan):
+            if requests:
+                requests[-1]["continue_to_model"] = True
         return requests
     tool_name, payload = media_tool_preview(inputs, allowed)
     if not tool_name:
@@ -3879,6 +3882,20 @@ def _media_query_plan_needs_selected_app_followup(
         for _tool_name, payload in app_query_plan
         if isinstance(payload, Mapping)
     )
+
+
+def _media_query_plan_needs_search_result_followup(
+    app_query_plan: list[tuple[str, dict[str, Any]]],
+) -> bool:
+    playback_tools = {
+        "media.music_app_open_and_play",
+        "app.focus_and_click_ui_element",
+        "app.open_and_click_ui_element",
+        "desktop.click_ui_element",
+        "desktop.safe_click",
+        "desktop.click",
+    }
+    return not any(str(tool_name or "").strip() in playback_tools for tool_name, _ in app_query_plan)
 
 
 def _media_playback_verify_request(inputs: Mapping[str, Any], allowed: set[str]) -> dict[str, Any]:
