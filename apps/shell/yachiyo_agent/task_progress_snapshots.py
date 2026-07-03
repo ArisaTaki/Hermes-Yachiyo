@@ -26,7 +26,7 @@ def task_progress_summary_from_task_core(
     todos = list(task_core.todos or [])
     checkpoints = list(task_core.checkpoints or [])
     workspace_items = list(task_core.workspace.items or [])
-    latest_replan = _latest_replan_event(event_list)
+    latest_replan = _latest_unresolved_replan_event(event_list)
     blocked_step_ids = _blocked_step_ids(todos)
     approval_step_ids = _approval_step_ids(todos, checkpoints, event_list)
     status = _summary_status(
@@ -150,10 +150,18 @@ def _approval_step_ids(
     return _dedupe(step_ids)
 
 
-def _latest_replan_event(events: list[PublicRunEvent]) -> PublicRunEvent | None:
+def _latest_unresolved_replan_event(events: list[PublicRunEvent]) -> PublicRunEvent | None:
+    resolved_request_ids: set[str] = set()
     for event in reversed(events):
-        if _event_is_replan(event):
-            return event
+        request_id = _replan_request_id(event)
+        if request_id and not _event_is_replan(event) and _event_resolves_replan(event):
+            resolved_request_ids.add(request_id)
+            continue
+        if not _event_is_replan(event):
+            continue
+        if request_id and request_id in resolved_request_ids:
+            continue
+        return event
     return None
 
 
@@ -164,6 +172,19 @@ def _replan_request_count(events: list[PublicRunEvent]) -> int:
 def _event_is_replan(event: PublicRunEvent) -> bool:
     event_type = _base_event_type(event)
     return event_type == "agent.replan.requested" or event_type.endswith(".replan.requested")
+
+
+def _event_resolves_replan(event: PublicRunEvent) -> bool:
+    payload = event.payload if isinstance(event.payload, Mapping) else {}
+    return _text(payload.get("status") or payload.get("tool_status")).lower() in {
+        "completed",
+        "resolved",
+    }
+
+
+def _replan_request_id(event: PublicRunEvent) -> str:
+    payload = event.payload if isinstance(event.payload, Mapping) else {}
+    return _text(payload.get("request_id") or payload.get("replan_request_id"))
 
 
 def _event_is_approval(event: PublicRunEvent) -> bool:

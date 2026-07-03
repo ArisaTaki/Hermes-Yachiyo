@@ -1575,6 +1575,39 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
             "status": "completed",
             "events": [
                 {
+                    "event_id": "event-0",
+                    "sequence": 0,
+                    "event_type": "agent.task_core.created",
+                    "payload": {
+                        "core_id": "task-core-1",
+                        "task_core": {
+                            "core_id": "task-core-1",
+                            "workspace": {
+                                "workspace_id": "task-workspace-1",
+                                "title": "Analysis Workspace",
+                            },
+                            "todos": [
+                                {
+                                    "todo_id": "todo-analyze-data-file",
+                                    "title": "Analyze data file",
+                                    "step_id": "analyze-data-file",
+                                    "tool_name": "data.analyze",
+                                    "status": "pending",
+                                }
+                            ],
+                            "checkpoints": [
+                                {
+                                    "checkpoint_id": "checkpoint:analyze-data-file",
+                                    "title": "Verify analysis",
+                                    "after_step_id": "analyze-data-file",
+                                    "status": "planned",
+                                }
+                            ],
+                            "replan_signals": [],
+                        },
+                    },
+                },
+                {
                     "event_id": "event-1",
                     "sequence": 1,
                     "event_type": "agent.replan.requested",
@@ -1655,6 +1688,23 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
                 {
                     "event_id": "event-4",
                     "sequence": 4,
+                    "event_type": "agent.task.todo.updated",
+                    "payload": {
+                        "replan_request_id": "replan-1",
+                        "todo_id": "todo-analyze-data-file",
+                        "status": "completed",
+                        "todo": {
+                            "todo_id": "todo-analyze-data-file",
+                            "title": "Analyze data file",
+                            "step_id": "analyze-data-file",
+                            "tool_name": "data.analyze",
+                            "status": "completed",
+                        },
+                    },
+                },
+                {
+                    "event_id": "event-5",
+                    "sequence": 5,
                     "event_type": "agent.task.checkpoint.updated",
                     "payload": {
                         "replan_request_id": "replan-1",
@@ -1700,7 +1750,16 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
     assert recovery.tool_status == "completed"
     assert recovery.checkpoint_status == "completed"
     assert recovery.result_preview == {"ok": True, "stdout": "report.md"}
-    assert recovery.recovery_event_ids == ["event-1", "event-2", "event-3", "event-4"]
+    assert recovery.recovery_event_ids == ["event-1", "event-2", "event-3", "event-4", "event-5"]
+    assert snapshot.task_progress is not None
+    assert snapshot.task_progress.status == "completed"
+    assert snapshot.task_progress.needs_replan is False
+    assert snapshot.task_progress.replan_request_count == 1
+    assert snapshot.task_progress.latest_replan_request_id is None
+    assert snapshot.task_progress.latest_replan_step_id is None
+    assert snapshot.task_progress.completed_todos == 1
+    assert snapshot.task_progress.completed_checkpoints == 1
+    assert snapshot.task_progress.progress_text == "1/1 todos completed"
 
 
 def test_run_timeline_snapshot_projects_explicit_replan_recovery_update() -> None:
