@@ -1366,6 +1366,22 @@ def test_custom_api_agent_loop_guides_code_tasks_without_bypassing_approval() ->
     assert "approval gates still apply" in system_prompt
 
 
+def test_custom_api_agent_loop_guides_ui_code_tasks_with_workspace_items() -> None:
+    system_prompt = _runtime_planner_guidance_prompt(
+        "帮我实现一个小功能：给 Agent Studio 的 run timeline 增加 filter",
+        ["workspace.list", "file.search", "workspace.write_patch"],
+    )
+
+    assert "selected intent=code_task" in system_prompt
+    assert "Task workspace:" in system_prompt
+    assert "workspace_items:" in system_prompt
+    assert "apps/frontend/src/features/agent-studio" in system_prompt
+    assert "inspect-code-area-" in system_prompt
+    assert "*Timeline*" in system_prompt
+    assert "workspace.write_patch" in system_prompt
+    assert "approval gates still apply" in system_prompt
+
+
 def test_runtime_planner_routes_readme_edit_to_code_task_patch() -> None:
     allowed_tools = [
         "workspace.list",

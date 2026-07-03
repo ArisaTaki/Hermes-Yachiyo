@@ -4209,6 +4209,7 @@ class RuntimeCustomApiAgentLoop:
                 f"risk={step.risk_level}; {approval}{reason_text})"
             )
         steps_text = " ".join(step_guidance)
+        task_workspace_guidance = _runtime_planner_task_workspace_guidance(decision)
         return (
             "Runtime planner guidance: "
             f"selected intent={decision.selected_intent.kind}; "
@@ -4218,6 +4219,7 @@ class RuntimeCustomApiAgentLoop:
             f"artifact expected={artifacts}; "
             f"route to Studio={route_to_studio}. "
             f"Plan steps: {steps_text}. "
+            f"{task_workspace_guidance}"
             f"{studio_handoff_guidance}"
             "Follow the planned tool path in order when the named tools are allowed; do not replace app-scoped "
             "app.*_and_* foreground tools with a looser app.open/app.focus plus desktop.* sequence unless the "
@@ -4227,6 +4229,24 @@ class RuntimeCustomApiAgentLoop:
             "or policy blocks execution. If a required step is unavailable, explain the missing capability "
             "instead of fabricating execution. Existing tool policy and approval gates still apply. "
         )
+
+
+def _runtime_planner_task_workspace_guidance(decision: Any) -> str:
+    task_core = getattr(getattr(decision, "plan", None), "task_core", None)
+    if task_core is None:
+        return ""
+    if not hasattr(task_core, "model_dump"):
+        return ""
+    try:
+        task_core_payload = task_core.model_dump(mode="json")
+    except Exception:
+        return ""
+    if not isinstance(task_core_payload, Mapping):
+        return ""
+    lines = _runtime_replan_task_core_message_lines(task_core_payload)
+    if not lines:
+        return ""
+    return " ".join(lines[:4]) + " "
 
 
 def _payload_text(result: dict[str, Any], planned_input: dict[str, Any], key: str) -> str:
