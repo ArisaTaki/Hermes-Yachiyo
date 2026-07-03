@@ -1248,6 +1248,8 @@ class TaskIntentRouter:
             return _empty_intent("media_playback", text)
         if _generic_music_app_target_requested(text):
             return _empty_intent("media_playback", text)
+        if _looks_like_report_app_delivery_request(text):
+            return _empty_intent("media_playback", text)
         score = _score_terms(
             text,
             [
@@ -1497,6 +1499,11 @@ class TaskIntentRouter:
         if communication_target:
             inputs["communication_target_hint"] = communication_target
         app_write_target = {} if communication_target else _app_write_followup_target_hint(text)
+        if not app_write_target and not communication_target:
+            app_write_target = _discovered_app_write_followup_target_hint(
+                text,
+                require_data_analysis=False,
+            )
         if app_write_target:
             inputs.update(app_write_target)
         inputs.update(browser_action)
@@ -1548,6 +1555,11 @@ class TaskIntentRouter:
                     ["desktop.app_control"]
                     if communication_target.get("app_name")
                     or str(app_write_target.get("target_app_hint") or "").strip()
+                    else []
+                ),
+                *(
+                    ["desktop.app_discovery", "desktop.ui_operation"]
+                    if isinstance(app_write_target.get("target_app_capability_hint"), Mapping)
                     else []
                 ),
                 *(["communication.compose"] if communication_target else []),
@@ -5347,6 +5359,7 @@ class RuntimePlanner:
     ) -> list[ToolPlanStepSnapshot]:
         browser_action = str(intent.inputs.get("browser_action") or "").strip()
         target_app = str(intent.inputs.get("target_app_hint") or "").strip()
+        target_app_capability = intent.inputs.get("target_app_capability_hint")
         if browser_action == "find_current_page":
             return _current_page_find_steps(intent, allowed)
         context_source = str(intent.inputs.get("context_source") or "").strip()
@@ -5568,6 +5581,7 @@ class RuntimePlanner:
                     artifact_depends_on = post_step.step_id
                 if (
                     not target_app
+                    and not isinstance(target_app_capability, Mapping)
                     and _web_research_artifact_requested(intent)
                     and (allowed is None or "artifact.write" in allowed)
                 ):
@@ -5589,6 +5603,13 @@ class RuntimePlanner:
                     )
                 if target_app:
                     return _append_web_research_app_write_target_steps(
+                        intent,
+                        allowed,
+                        steps,
+                        depends_on=artifact_depends_on,
+                    )
+                if isinstance(target_app_capability, Mapping):
+                    return _append_web_research_discovered_app_write_target_steps(
                         intent,
                         allowed,
                         steps,
@@ -5679,6 +5700,7 @@ class RuntimePlanner:
             artifact_path = ""
             if (
                 not target_app
+                and not isinstance(target_app_capability, Mapping)
                 and (
                     _web_research_artifact_requested(intent)
                     or isinstance(intent.inputs.get("communication_target_hint"), Mapping)
@@ -5706,6 +5728,13 @@ class RuntimePlanner:
                 )
             if target_app:
                 return _append_web_research_app_write_target_steps(
+                    intent,
+                    allowed,
+                    steps,
+                    depends_on=content_depends_on,
+                )
+            if isinstance(target_app_capability, Mapping):
+                return _append_web_research_discovered_app_write_target_steps(
                     intent,
                     allowed,
                     steps,
@@ -5792,6 +5821,13 @@ class RuntimePlanner:
         ]
         if target_app:
             return _append_web_research_app_write_target_steps(
+                intent,
+                allowed,
+                steps,
+                depends_on="open-or-read-web",
+            )
+        if isinstance(target_app_capability, Mapping):
+            return _append_web_research_discovered_app_write_target_steps(
                 intent,
                 allowed,
                 steps,
@@ -6087,6 +6123,27 @@ class RuntimePlanner:
                 intent.user_goal,
                 _report_artifact_filename(intent.user_goal),
             )
+            target_app = str(intent.inputs.get("target_app_hint") or "").strip()
+            if target_app:
+                return _append_report_app_write_target_steps(
+                    intent,
+                    allowed,
+                    steps,
+                    depends_on=["gather-context"],
+                    target_app=target_app,
+                    artifact_path=artifact_path,
+                    body_source="model_generated_content",
+                )
+            target_app_capability = intent.inputs.get("target_app_capability_hint")
+            if isinstance(target_app_capability, Mapping):
+                return _append_report_discovered_app_write_target_steps(
+                    intent,
+                    allowed,
+                    steps,
+                    depends_on=["gather-context"],
+                    artifact_path=artifact_path,
+                    body_source="model_generated_content",
+                )
             steps.append(
                 _step(
                     intent,
@@ -11613,6 +11670,141 @@ def _append_web_research_app_write_target_steps(
     ]
 
 
+def _append_web_research_discovered_app_write_target_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    depends_on: str,
+) -> list[ToolPlanStepSnapshot]:
+    target_capability = intent.inputs.get("target_app_capability_hint")
+    target_action = str(intent.inputs.get("target_action_hint") or "").strip()
+    if not isinstance(target_capability, Mapping) or target_action != "app_paste":
+        return steps
+    query = str(target_capability.get("query") or "").strip()
+    if not query:
+        return steps
+    container_action = str(
+        intent.inputs.get("target_container_action_hint") or ""
+    ).strip()
+    safe_shortcut = {"action": container_action} if container_action else None
+    selected_app_tool = _selected_discovered_app_tool(
+        allowed,
+        safe_shortcut=safe_shortcut,
+    )
+    if not selected_app_tool:
+        return steps
+    selected_app_capability = (
+        "desktop.app_control"
+        if selected_app_tool in {"app.open", "desktop.open_app"}
+        else "desktop.ui_operation"
+    )
+    selected_app_action = (
+        "safe_shortcut"
+        if selected_app_tool == "app.open_and_safe_shortcut"
+        else "open_app"
+    )
+    artifact_path = _artifact_output_path(intent.user_goal, "research-summary.md")
+    next_steps = [
+        *steps,
+        _step(
+            intent,
+            "write-research-artifact",
+            "Write research artifact",
+            "artifact.write",
+            _first_allowed(("artifact.write",), allowed),
+            input_preview={"path": artifact_path},
+            depends_on=[depends_on],
+            reason=(
+                "Persist the browser-derived research output before selecting a target app."
+            ),
+        ),
+        _step(
+            intent,
+            "discover-research-target-app",
+            "Discover research target app",
+            "desktop.app_discovery",
+            _first_allowed(("desktop.list_apps",), allowed),
+            input_preview={"query": query, "limit": 20},
+            depends_on=["write-research-artifact"],
+            reason=(
+                "Discover an installed app by capability before writing the generated "
+                "research artifact into it."
+            ),
+        ),
+        _step(
+            intent,
+            "prepare-research-discovered-target-app",
+            "Prepare discovered research target app",
+            selected_app_capability,
+            selected_app_tool,
+            input_preview={
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": query,
+                "target_action": target_action,
+                "body_source": "research_artifact",
+                "artifact_path": artifact_path,
+                **_selected_discovered_app_operation_preview(
+                    selected_app_tool,
+                    safe_shortcut=safe_shortcut,
+                ),
+            },
+            depends_on=["discover-research-target-app"],
+            action=selected_app_action,
+            reason=(
+                "After desktop.list_apps returns candidates, runtime resolves the best "
+                "matching app and prepares it for the generated research output."
+            ),
+        ),
+    ]
+    insert_tool, insert_input = _safe_type_text_operation_preview(
+        app_name="<selected app from desktop.list_apps>",
+        mode="focus",
+        allowed=allowed,
+        payload={
+            "body_source": "research_artifact",
+            "artifact_path": artifact_path,
+            "target_action": target_action,
+            **(
+                {"container_action": container_action}
+                if container_action
+                else {}
+            ),
+        },
+    )
+    insert_input = _with_selected_app_payload(
+        insert_tool,
+        insert_input,
+        {"selection_source": "desktop.list_apps", "query": query},
+    )
+    next_steps.append(
+        _step(
+            intent,
+            "insert-research-into-target-app",
+            "Insert research into target app",
+            "desktop.ui_operation",
+            insert_tool,
+            input_preview=insert_input,
+            risk_level=_desktop_operation_risk_level(insert_tool),
+            approval_required=_desktop_operation_approval_required(insert_tool),
+            depends_on=["prepare-research-discovered-target-app"],
+            action="type",
+            reason=(
+                "Insert the generated research artifact into the selected foreground target app."
+            ),
+        )
+    )
+    return _append_research_target_app_verification_step(
+        intent,
+        allowed,
+        next_steps,
+        app_name="<selected app from desktop.list_apps>",
+        depends_on="insert-research-into-target-app",
+        selected_app_payload={"selection_source": "desktop.list_apps", "query": query},
+    )
+
+
 def _append_report_app_write_target_steps(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
@@ -11905,6 +12097,45 @@ def _append_report_target_app_verification_step(
             action="read_ui" if verify_tool != "screen.capture" else "capture_screen",
             reason=(
                 "Inspect the target app after insertion so the runtime can replan if the report is not visible."
+            ),
+        ),
+    ]
+
+
+def _append_research_target_app_verification_step(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    app_name: str,
+    depends_on: str,
+    selected_app_payload: Mapping[str, Any] | None = None,
+) -> list[ToolPlanStepSnapshot]:
+    verify_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui", "screen.capture"), allowed)
+    if not verify_tool:
+        return steps
+    if verify_tool == "screen.capture":
+        input_preview = {"reason": "Verify the research output was inserted into the target app."}
+    else:
+        input_preview = {
+            "app_name": app_name,
+            **dict(selected_app_payload or {}),
+            "role_filter": "text",
+            "limit": 80,
+        }
+    return [
+        *steps,
+        _step(
+            intent,
+            "verify-research-target-app",
+            "Verify research target app",
+            "desktop.ui_operation",
+            verify_tool,
+            input_preview=input_preview,
+            depends_on=[depends_on],
+            action="read_ui" if verify_tool != "screen.capture" else "capture_screen",
+            reason=(
+                "Inspect the target app after insertion so the runtime can replan if the research output is not visible."
             ),
         ),
     ]
@@ -13278,6 +13509,8 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         and isinstance(intent.inputs.get("target_app_capability_hint"), Mapping)
     ):
         score += 0.24
+    if intent.kind == "media_playback" and _looks_like_report_app_delivery_request(text):
+        score -= 0.9
     if intent.kind == "information_capture" and _contains_any(
         text,
         ["note", "notes", "备忘录", "笔记", "记一下", "记录一下", "记下"],
@@ -13498,6 +13731,36 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     if intent.kind == "report_generation":
         if _contains_any(text, ["report", "summary", "报告", "总结", "文档", "输出", "生成"]):
             score += 0.04
+        if _url_hint(text) and _contains_any(
+            text,
+            ["research", "search", "调研", "研究", "搜索", "查询", "检索"],
+        ):
+            score -= 0.42
+        if (
+            str(intent.inputs.get("target_app_hint") or "").strip()
+            or isinstance(intent.inputs.get("target_app_capability_hint"), Mapping)
+        ) and _contains_any(
+            text,
+            [
+                "report",
+                "summary",
+                "document",
+                "write",
+                "output",
+                "报告",
+                "总结",
+                "文档",
+                "周报",
+                "日报",
+                "写",
+                "输出",
+                "生成",
+                "放到",
+                "写进",
+                "写入",
+            ],
+        ):
+            score += 0.36
         if (
             screen_capture_hint(text) is not None
             and str(intent.inputs.get("context_source") or "").strip() == "visible_text"
@@ -13562,6 +13825,43 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     if intent.kind == "report_generation" and _looks_like_workspace_file_edit_request(text):
         score -= 0.28
     return max(score, 0.0)
+
+
+def _looks_like_report_app_delivery_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if not _contains_any(
+        value,
+        [
+            "report",
+            "summary",
+            "brief",
+            "document",
+            "write",
+            "output",
+            "报告",
+            "总结",
+            "摘要",
+            "文档",
+            "周报",
+            "日报",
+            "月报",
+            "纪要",
+            "写",
+            "输出",
+            "生成",
+            "整理",
+        ],
+    ):
+        return False
+    return bool(
+        _app_write_followup_target_hint(value)
+        or _discovered_app_write_followup_target_hint(
+            value,
+            require_data_analysis=False,
+        )
+    )
 
 
 def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:

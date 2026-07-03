@@ -76,6 +76,7 @@ _ARTIFACT_BODY_SOURCES = {
     "artifact_content",
     "data_analysis",
     "report_artifact",
+    "research_artifact",
 }
 
 _ARTIFACT_BODY_TEXT_LIMIT = 20000

@@ -4288,6 +4288,103 @@ def test_runtime_planner_routes_web_research_report_to_app_write_target() -> Non
         "container_action": "new_document",
     }
 
+    discovered_prompt = "调研 https://example.com 的信息并把报告写进任意文档应用"
+    discovered_allowed_tools = [
+        "browser.open_url_and_extract_text",
+        "artifact.write",
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    discovered = RuntimePlanner().decision(
+        discovered_prompt,
+        allowed_tools=discovered_allowed_tools,
+    )
+
+    assert discovered.selected_intent.kind == "web_research"
+    assert discovered.selected_intent.inputs == {
+        "url_hint": "https://example.com",
+        "target_app_capability_hint": {"query": "document", "description": "文档"},
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert [step.step_id for step in discovered.plan.tool_plan.steps] == [
+        "open-or-read-web",
+        "write-research-artifact",
+        "discover-research-target-app",
+        "prepare-research-discovered-target-app",
+        "insert-research-into-target-app",
+        "verify-research-target-app",
+    ]
+    assert _step_by_id(discovered, "discover-research-target-app").input_preview == {
+        "query": "document",
+        "limit": 20,
+    }
+    assert _step_by_id(
+        discovered,
+        "prepare-research-discovered-target-app",
+    ).input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "document",
+        "target_action": "app_paste",
+        "body_source": "research_artifact",
+        "artifact_path": "research-summary.md",
+        "action": "new_document",
+    }
+    assert _step_by_id(
+        discovered,
+        "insert-research-into-target-app",
+    ).input_preview == {
+        "body_source": "research_artifact",
+        "artifact_path": "research-summary.md",
+        "target_action": "app_paste",
+        "container_action": "new_document",
+    }
+    assert planner_tool_requests(discovered_prompt, discovered_allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url_and_extract_text",
+            "input": {"url": "https://example.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+    discovered_requests = planner_tool_requests(discovered_prompt, discovered_allowed_tools)
+    discovered_payload = planner_selection_payload(
+        decision=discovered,
+        planner_requests=discovered_requests,
+        legacy_requests=[],
+        selected_requests=discovered_requests,
+        selected_source="runtime_planner",
+        selected_reason="runtime_planner_full_plan_execution",
+    )
+    assert discovered_payload["followup_target"] == {
+        "kind": "desktop_discovered_app_action",
+        "app_query": "document",
+        "app_name_source": "desktop.list_apps",
+        "target_action": "safe_shortcut",
+        "body_source": "research_artifact",
+        "post_action_observation": {
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
+        "capability_description": "文档",
+        "safe_shortcut_action": "new_document",
+        "artifact_write": {
+            "target_action": "write_artifact",
+            "path": "research-summary.md",
+            "body_source": "model_generated_content",
+            "tool": "artifact.write",
+            "intent_kind": "web_research",
+        },
+    }
+    assert runtime_planner_metadata(discovered)["yachiyo_followup_target"] == (
+        discovered_payload["followup_target"]
+    )
+
 
 def test_runtime_planner_routes_browser_docs_lookup_to_web_research() -> None:
     prompt = "打开浏览器查一下 OpenAI 最新 API 文档，然后总结成 markdown artifact"
@@ -9283,6 +9380,61 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "source": "runtime_planner",
         "planning_reason": "planner_prefetch_report_context",
         "continue_to_model": True,
+    }
+    no_context_discovered_steps = [
+        "gather-context",
+        "write-report-artifact",
+        "discover-report-target-app",
+        "prepare-report-discovered-target-app",
+        "insert-report-into-target-app",
+        "verify-report-target-app",
+    ]
+
+    report_delivery = RuntimePlanner().decision(
+        "写一份本周进展报告并放到任意文档应用里",
+        allowed_tools=[*allowed, "workspace.list"],
+    )
+    weekly_delivery = RuntimePlanner().decision(
+        "用一个文档应用新建一份周报，标题是本周进展",
+        allowed_tools=[*allowed, "workspace.list"],
+    )
+
+    assert report_delivery.selected_intent.kind == "report_generation"
+    assert report_delivery.selected_intent.inputs == {
+        "target_app_capability_hint": {"query": "document", "description": "文档"},
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert [step.step_id for step in report_delivery.plan.tool_plan.steps] == (
+        no_context_discovered_steps
+    )
+    assert _step_by_id(report_delivery, "gather-context").tool_name == "workspace.list"
+    assert _step_by_id(report_delivery, "write-report-artifact").input_preview == {
+        "path": "report.md",
+        "body_source": "model_generated_content",
+    }
+    assert _step_by_id(
+        report_delivery,
+        "insert-report-into-target-app",
+    ).input_preview == {
+        "body_source": "report_artifact",
+        "artifact_path": "report.md",
+        "target_action": "app_paste",
+        "container_action": "new_document",
+    }
+
+    assert weekly_delivery.selected_intent.kind == "report_generation"
+    assert weekly_delivery.selected_intent.inputs == {
+        "target_app_capability_hint": {"query": "document", "description": "文档"},
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert [step.step_id for step in weekly_delivery.plan.tool_plan.steps] == (
+        no_context_discovered_steps
+    )
+    assert _step_by_id(weekly_delivery, "write-report-artifact").input_preview == {
+        "path": "weekly-report.md",
+        "body_source": "model_generated_content",
     }
 
     for prompt in (

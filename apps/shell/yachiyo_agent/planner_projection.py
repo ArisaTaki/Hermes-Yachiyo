@@ -374,7 +374,7 @@ def _selection_followup_target_payload(decision: Any | None) -> dict[str, Any]:
     desktop_file_open_target = _desktop_file_open_followup_target(inputs)
     if desktop_file_open_target:
         return desktop_file_open_target
-    discovered_app_write_target = _discovered_app_write_followup_target(inputs)
+    discovered_app_write_target = _discovered_app_write_followup_target(inputs, decision)
     if discovered_app_write_target:
         return discovered_app_write_target
     media_app_target = _media_app_playback_followup_target(inputs)
@@ -838,7 +838,10 @@ def _media_app_playback_followup_target(inputs: Mapping[str, Any]) -> dict[str, 
     return payload
 
 
-def _discovered_app_write_followup_target(inputs: Mapping[str, Any]) -> dict[str, Any]:
+def _discovered_app_write_followup_target(
+    inputs: Mapping[str, Any],
+    decision: Any | None = None,
+) -> dict[str, Any]:
     app_capability = inputs.get("target_app_capability_hint")
     if not isinstance(app_capability, Mapping):
         return {}
@@ -864,6 +867,10 @@ def _discovered_app_write_followup_target(inputs: Mapping[str, Any]) -> dict[str
     container_action = str(inputs.get("target_container_action_hint") or "").strip()
     if container_action:
         payload["safe_shortcut_action"] = container_action
+    intent = getattr(decision, "selected_intent", None)
+    if str(getattr(intent, "kind", "") or "").strip() == "web_research":
+        payload["body_source"] = "research_artifact"
+        return _with_generated_artifact_write(payload, decision)
     return payload
 
 
