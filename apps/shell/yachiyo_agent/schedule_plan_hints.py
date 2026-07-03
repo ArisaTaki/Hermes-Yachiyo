@@ -265,6 +265,9 @@ def _reminder_body(text: str) -> str:
     value = re.sub(rf"\b{_LOCAL_ISO_RE}\b", "", value).strip()
     patterns = (
         r"^(?:帮我|给我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+        r"(?:创建|新建|添加|新增)\s*(?:个|一个|一条|一项|新的?)?\s*"
+        r"(?:提醒事项|提醒)\s*[，,、:：]?\s*(?P<body_create_prefixed>[^。！？!?]+)$",
+        r"^(?:帮我|给我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?P<body_time_first>[^。！？!?]+?)\s*提醒我\s*(?P<body_time_after>[^。！？!?]+)$",
         r"^(?:帮我|给我|请|麻烦|能否|能不能|可以)?(?:直接)?"
         r"(?P<body_time_first_plain>[^。！？!?]+?)\s*提醒(?!事项)\s*(?P<body_time_after_plain>[^。！？!?]+)$",
@@ -315,6 +318,7 @@ def _reminder_body(text: str) -> str:
         body = _strip_schedule_prefix(
             groups.get("body")
             or groups.get("title")
+            or groups.get("body_create_prefixed")
             or groups.get("body_create")
             or groups.get("body_set")
             or groups.get("title_en")
@@ -454,8 +458,9 @@ def _local_iso_hint(text: str) -> str:
 
 def _strip_schedule_prefix(value: str) -> str:
     title = _clean(value)
+    title = title.strip(" .，,。:：、")
     title = re.sub(r"^(?:的|这个|该)\s*", "", title)
-    title = re.sub(r"^(?:在|于|到时候|的时候|时|要|去|做|进行|参加|记得|提醒我)\s*", "", title)
+    title = re.sub(r"^(?:在|于|到时候|的时候|时|要|去|做|进行|参加|记得|提醒我|叫我|让我|通知我)\s*", "", title)
     title = re.sub(r"^(?:to|for|about|that|please)\s+", "", title, flags=re.IGNORECASE)
     title = re.sub(r"\s*(?:的时候|时|在|于)$", "", title).strip()
     title = title.strip(" .，,。")

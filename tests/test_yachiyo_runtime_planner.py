@@ -23515,6 +23515,10 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
         "明天上午十点提醒",
         allowed_tools=["reminders.create"],
     )
+    create_prefixed_comma = RuntimePlanner().decision(
+        "新建一个提醒，明天下午三点叫我提交周报",
+        allowed_tools=["reminders.create"],
+    )
     time_first_plain = RuntimePlanner().decision(
         "帮我下周一上午十点提醒团队复盘",
         allowed_tools=["reminders.create", "group.run"],
@@ -23565,6 +23569,11 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
     assert _step_by_id(default_title_time_only, "create-schedule-item").input_preview == {
         "title": "提醒",
         "due_at": tomorrow_1000,
+    }
+    assert create_prefixed_comma.selected_intent.kind == "schedule"
+    assert _step_by_id(create_prefixed_comma, "create-schedule-item").input_preview == {
+        "title": "提交周报",
+        "due_at": f"{(date.today() + timedelta(days=1)).isoformat()}T15:00",
     }
     assert time_first_plain.selected_intent.kind == "schedule"
     time_first_plain_step = _step_by_id(time_first_plain, "create-schedule-item")
