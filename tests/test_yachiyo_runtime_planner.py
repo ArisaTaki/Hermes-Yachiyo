@@ -18354,6 +18354,118 @@ def test_runtime_planner_routes_generic_music_app_query_to_search_play_plan() ->
         ]
 
 
+def test_runtime_planner_discovers_music_app_for_plain_song_playback_query() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+        "media.apple_music_play",
+    ]
+    decision = RuntimePlanner().decision(
+        "帮我播放超时空辉夜姬",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert decision.selected_intent.inputs == {
+        "action": "play",
+        "app_name": "",
+        "query": "超时空辉夜姬",
+        "control_only": "",
+        "target_app_capability_hint": {
+            "query": "music",
+            "description": "音乐",
+        },
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-media-app",
+        "focus-media-app-search",
+        "type-media-search-query",
+        "submit-media-search",
+        "play-media-search-result",
+        "verify-media-search",
+    ]
+    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert _step_by_id(decision, "discover-media-app").input_preview == {
+        "query": "music",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "focus-media-app-search").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "music",
+        "action": "find",
+    }
+    assert _step_by_id(decision, "type-media-search-query").input_preview == {
+        "text": "超时空辉夜姬",
+    }
+    assert _step_by_id(decision, "play-media-search-result").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "music",
+        "target": "first result",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+    requests = planner_tool_requests(
+        "帮我播放超时空辉夜姬",
+        allowed_tools,
+    )
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert all(request["tool"] != "media.apple_music_play" for request in requests)
+    assert requests[0]["input"] == {"query": "music", "limit": 20}
+    assert requests[1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "music",
+        "action": "find",
+    }
+    assert requests[2]["input"] == {"text": "超时空辉夜姬"}
+    execution_requests = planner_tool_requests_for_decision(
+        decision,
+        allowed_tools,
+        direct=True,
+        execution_normalized=True,
+    )
+    assert [request["tool"] for request in execution_requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    observation = execution_requests[-1]
+    assert observation["continue_to_model"] is True
+    assert observation["deferred_tool"] == "app.focus_and_click_ui_element"
+    assert observation["deferred_input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "music",
+        "target": "first result",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+
+
 def test_runtime_planner_does_not_treat_generic_music_player_words_as_query() -> None:
     for prompt in (
         "打开任意音乐播放器播放点音乐",
@@ -23902,6 +24014,36 @@ def test_entrypoint_selection_keeps_runtime_planner_for_media_app_search_fallbac
         "desktop.ui_elements",
     ]
     assert alias_legacy_calls == []
+
+    plain_legacy_calls: list[dict[str, Any]] = []
+    plain_selection = planner_first_direct_tool_selection(
+        "帮我播放超时空辉夜姬",
+        [
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+            "media.apple_music_play",
+        ],
+        legacy_tool_requests=_recording_legacy_requests(plain_legacy_calls),
+    )
+
+    assert plain_selection.selected_source == "runtime_planner"
+    assert plain_selection.event_payload["legacy_request_count"] == 0
+    assert [request["tool"] for request in plain_selection.requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    assert plain_selection.requests[-1]["continue_to_model"] is True
+    assert plain_selection.requests[-1]["deferred_tool"] == (
+        "app.focus_and_click_ui_element"
+    )
+    assert plain_legacy_calls == []
 
 
 def test_entrypoint_selection_keeps_runtime_planner_for_discovered_app_open_path() -> None:

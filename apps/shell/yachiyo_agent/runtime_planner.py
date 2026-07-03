@@ -24636,6 +24636,13 @@ def _media_playback_target_app_capability_hint(text: str) -> dict[str, str]:
     hint = _app_capability_discovery_hint(text)
     if str(hint.get("query") or "").strip() == "music":
         return hint
+    media_hint = media_playback_hint(text)
+    if (
+        str(media_hint.get("action") or "").strip() == "play"
+        and str(media_hint.get("query") or "").strip()
+        and not str(media_hint.get("app_name") or "").strip()
+    ):
+        return {"query": "music", "description": "音乐"}
     value = _clean_prompt(text)
     if not value:
         return {}
