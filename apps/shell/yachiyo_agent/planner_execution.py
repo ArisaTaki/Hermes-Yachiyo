@@ -4026,6 +4026,15 @@ _MODEL_APP_FOREGROUND_MUTATION_TOOLS = frozenset(
 _MODEL_APP_OPERATION_MUTATION_PREFIXES = ("app.open_and_", "app.focus_and_")
 
 
+_MODEL_DESKTOP_OPERATION_MUTATION_TOOLS = frozenset(
+    {
+        *_APP_FOREGROUND_DIRECT_OPERATION_SUFFIX.keys(),
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    }
+)
+
+
 def _append_model_app_foreground_verification_requests(
     requests: list[dict[str, Any]],
     allowed: set[str],
@@ -4107,6 +4116,8 @@ def _model_app_verification_tool_for_request(
     foreground_verification_tool: str,
     operation_verification_tool: str,
 ) -> str:
+    if _model_desktop_operation_request_needs_verification(request):
+        return operation_verification_tool
     if _model_app_operation_request_needs_verification(request):
         return operation_verification_tool
     if _model_app_foreground_request_needs_verification(request):
@@ -4120,6 +4131,11 @@ def _model_app_operation_request_needs_verification(request: Mapping[str, Any]) 
         return False
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     return bool(str(payload.get("app_name") or "").strip())
+
+
+def _model_desktop_operation_request_needs_verification(request: Mapping[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    return tool_name in _MODEL_DESKTOP_OPERATION_MUTATION_TOOLS
 
 
 def _model_app_foreground_request_needs_verification(request: Mapping[str, Any]) -> bool:
@@ -4140,7 +4156,9 @@ def _model_app_foreground_verification_request(
         else {}
     )
     app_name = str(payload.get("app_name") or "").strip()
-    is_operation = _model_app_operation_request_needs_verification(source_request)
+    is_operation = _model_app_operation_request_needs_verification(
+        source_request
+    ) or _model_desktop_operation_request_needs_verification(source_request)
     if verification_tool in {"desktop.ui_elements", "desktop.read_ui"}:
         input_preview: dict[str, Any] = {"limit": 80}
         if app_name and verification_tool == "desktop.ui_elements":
