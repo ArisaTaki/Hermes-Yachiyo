@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import json
+from collections.abc import Mapping
+from typing import Any
+
 from .contracts import ApprovalCardSnapshot
 
 
@@ -35,6 +39,14 @@ def merge_approval_snapshots(
         intent_kind=current.intent_kind or next_approval.intent_kind,
         replan_request_id=current.replan_request_id or next_approval.replan_request_id,
         replan_trigger=current.replan_trigger or next_approval.replan_trigger,
+        task_workspace_items=_merge_record_lists(
+            current.task_workspace_items,
+            next_approval.task_workspace_items,
+        ),
+        task_verification_targets=_merge_record_lists(
+            current.task_verification_targets,
+            next_approval.task_verification_targets,
+        ),
         title=current.title or next_approval.title,
         description=next_approval.description or current.description,
         status=next_approval.status or current.status,
@@ -64,3 +76,24 @@ def merge_approval_snapshot_lists(
             else:
                 by_key[key] = merge_approval_snapshots(by_key[key], approval)
     return [by_key[key] for key in ordered_keys]
+
+
+def _merge_record_lists(
+    current: list[dict[str, Any]],
+    next_items: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for item in [*current, *next_items]:
+        if not isinstance(item, Mapping):
+            continue
+        record = dict(item)
+        try:
+            key = json.dumps(record, ensure_ascii=True, sort_keys=True, default=str)
+        except (TypeError, ValueError):
+            key = str(record)
+        if key in seen:
+            continue
+        seen.add(key)
+        merged.append(record)
+    return merged

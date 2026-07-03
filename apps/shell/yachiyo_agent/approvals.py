@@ -98,6 +98,18 @@ def approval_card_from_payload(
         intent_kind=_trace_text(payload, input_preview, "intent_kind", "task_intent_kind"),
         replan_request_id=_trace_text(payload, input_preview, "replan_request_id"),
         replan_trigger=_trace_text(payload, input_preview, "replan_trigger"),
+        task_workspace_items=_record_list(
+            payload.get("task_workspace_items")
+            or input_preview.get("task_workspace_items")
+            or payload.get("workspace_items")
+            or input_preview.get("workspace_items")
+        ),
+        task_verification_targets=_record_list(
+            payload.get("task_verification_targets")
+            or input_preview.get("task_verification_targets")
+            or payload.get("verification_targets")
+            or input_preview.get("verification_targets")
+        ),
         title=title,
         description=_optional_text(payload.get("description") or payload.get("reason")),
         status=_approval_status(payload.get("status")),
@@ -141,6 +153,12 @@ def _approval_status(value: Any) -> str:
 def _mapping(value: Any) -> dict[str, Any]:
     redacted = redact_run_event_payload(dict(value)) if isinstance(value, Mapping) else {}
     return dict(redacted) if isinstance(redacted, Mapping) else {}
+
+
+def _record_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [_mapping(item) for item in value if isinstance(item, Mapping)]
 
 
 def _studio_url(run_id: str | None, group_run_id: str | None = None) -> str | None:

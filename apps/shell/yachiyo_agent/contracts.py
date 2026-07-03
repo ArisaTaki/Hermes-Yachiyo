@@ -639,6 +639,8 @@ class ApprovalCardSnapshot(_PublicSnapshot):
     intent_kind: str | None = None
     replan_request_id: str | None = None
     replan_trigger: str | None = None
+    task_workspace_items: list[dict[str, Any]] = Field(default_factory=list)
+    task_verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     title: str
     description: str | None = None
     status: ApprovalStatus = "pending"

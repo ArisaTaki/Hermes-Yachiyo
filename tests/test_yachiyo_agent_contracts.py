@@ -3513,6 +3513,18 @@ def test_public_pending_approval_projects_runtime_planner_trace_fields() -> None
                 "replan_triggers": ["ui_not_found"],
                 "replan_request_id": "replan-1",
                 "replan_trigger": "ui_not_found",
+                "task_workspace_items": [
+                    {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
+                ],
+                "task_verification_targets": [
+                    {
+                        "todo_id": "todo-save",
+                        "todo_title": "Verify save",
+                        "workspace_items": [
+                            {"item_id": "workspace-save", "path": "draft.md"}
+                        ],
+                    }
+                ],
             },
         }
     )
@@ -3538,6 +3550,18 @@ def test_public_pending_approval_projects_runtime_planner_trace_fields() -> None
     assert snapshot["replan_triggers"] == ["ui_not_found"]
     assert snapshot["replan_request_id"] == "replan-1"
     assert snapshot["replan_trigger"] == "ui_not_found"
+    assert snapshot["task_workspace_items"] == [
+        {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
+    ]
+    assert snapshot["task_verification_targets"] == [
+        {
+            "todo_id": "todo-save",
+            "todo_title": "Verify save",
+            "workspace_items": [
+                {"item_id": "workspace-save", "path": "draft.md"}
+            ],
+        }
+    ]
 
 
 def test_approval_card_from_payload_maps_runtime_planner_trace_fields() -> None:
@@ -3551,6 +3575,18 @@ def test_approval_card_from_payload_maps_runtime_planner_trace_fields() -> None:
                 "planner_step_id": "save-discovered-app-creative-result",
                 "target_capability_id": "desktop.ui_operation",
                 "runtime_plan_id": "runtime-plan-1",
+                "task_workspace_items": [
+                    {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
+                ],
+                "task_verification_targets": [
+                    {
+                        "todo_id": "todo-save",
+                        "todo_title": "Verify save",
+                        "workspace_items": [
+                            {"item_id": "workspace-save", "path": "draft.md"}
+                        ],
+                    }
+                ],
             },
             "decision_id": "decision-1",
             "tool_plan_id": "tool-plan-1",
@@ -3564,6 +3600,18 @@ def test_approval_card_from_payload_maps_runtime_planner_trace_fields() -> None:
     assert snapshot.plan_id == "runtime-plan-1"
     assert snapshot.tool_plan_id == "tool-plan-1"
     assert snapshot.intent_kind == "desktop_operation"
+    assert snapshot.task_workspace_items == [
+        {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
+    ]
+    assert snapshot.task_verification_targets == [
+        {
+            "todo_id": "todo-save",
+            "todo_title": "Verify save",
+            "workspace_items": [
+                {"item_id": "workspace-save", "path": "draft.md"}
+            ],
+        }
+    ]
 
 
 def test_product_policy_helpers_use_public_snapshots() -> None:

@@ -106,6 +106,13 @@ def public_pending_approval(value: Any) -> dict[str, Any]:
             items = [str(item).strip() for item in value if str(item).strip()]
             if items:
                 snapshot[key] = items
+    for key, aliases in (
+        ("task_workspace_items", ("task_workspace_items", "workspace_items")),
+        ("task_verification_targets", ("task_verification_targets", "verification_targets")),
+    ):
+        items = _first_mapping_items(raw, tool_request, preview_record, aliases)
+        if items:
+            snapshot[key] = items
     if risk_level:
         snapshot["risk_level"] = risk_level
     if policy_reason:
@@ -167,6 +174,29 @@ def _workflow_approval_criteria(raw: dict[str, Any], public_input_preview: Any) 
     if isinstance(public_input_preview, dict):
         return str(public_input_preview.get("criteria") or "").strip()
     return ""
+
+
+def _first_mapping_items(
+    raw: dict[str, Any],
+    tool_request: dict[str, Any],
+    preview_record: dict[str, Any],
+    aliases: tuple[str, ...],
+) -> list[dict[str, Any]]:
+    for source in (raw, tool_request, preview_record):
+        for key in aliases:
+            items = _mapping_items(source.get(key))
+            if items:
+                return items
+    return []
+
+
+def _mapping_items(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    public_value = approval_input_preview(value)
+    if not isinstance(public_value, list):
+        return []
+    return [dict(item) for item in public_value if isinstance(item, dict)]
 
 
 def _medium_risk_foreground_reason(tool_name: str, public_input_preview: Any) -> str:

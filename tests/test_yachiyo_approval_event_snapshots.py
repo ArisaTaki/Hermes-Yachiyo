@@ -24,6 +24,18 @@ def test_approval_event_mapper_merges_pending_and_resolution_events() -> None:
                         "tool": "terminal.run",
                         "input_preview": {"command": "npm test"},
                         "policy_reason": "terminal command requires approval",
+                        "task_workspace_items": [
+                            {"item_id": "workspace-report", "title": "Report", "path": "report.md"}
+                        ],
+                        "task_verification_targets": [
+                            {
+                                "todo_id": "todo-report",
+                                "todo_title": "Review report",
+                                "workspace_items": [
+                                    {"item_id": "workspace-report", "path": "report.md"}
+                                ],
+                            }
+                        ],
                     },
                 },
             ),
@@ -57,6 +69,18 @@ def test_approval_event_mapper_merges_pending_and_resolution_events() -> None:
     assert approvals[0].status == "approved"
     assert approvals[0].input_preview == {"command": "npm test"}
     assert approvals[0].policy_reason == "terminal command requires approval"
+    assert approvals[0].task_workspace_items == [
+        {"item_id": "workspace-report", "title": "Report", "path": "report.md"}
+    ]
+    assert approvals[0].task_verification_targets == [
+        {
+            "todo_id": "todo-report",
+            "todo_title": "Review report",
+            "workspace_items": [
+                {"item_id": "workspace-report", "path": "report.md"}
+            ],
+        }
+    ]
     assert approvals[0].requested_at == "2026-06-15T00:00:00Z"
     assert approvals[0].resolved_at == "2026-06-15T00:00:01Z"
 

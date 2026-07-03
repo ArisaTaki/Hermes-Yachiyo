@@ -293,6 +293,8 @@ function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | nul
     runtime_role: eventTraceString(source, payload, inputPreview, 'runtime_role'),
     requires_observation: eventTraceBool(source, payload, inputPreview, 'requires_observation'),
     requires_post_action_verification: eventTraceBool(source, payload, inputPreview, 'requires_post_action_verification'),
+    task_workspace_items: approvalTaskWorkspaceItems(source, payload, inputPreview),
+    task_verification_targets: approvalTaskVerificationTargets(source, payload, inputPreview),
     status,
     title: publicRunEventPayloadString(source, 'title') || `Approval · ${toolName}`,
     tool_name: toolName,
@@ -522,6 +524,11 @@ function mergeApprovalTrace(current: ApprovalCardSnapshot, incoming: ApprovalCar
     runtime_role: current.runtime_role || incoming.runtime_role || null,
     requires_observation: current.requires_observation ?? incoming.requires_observation ?? null,
     requires_post_action_verification: current.requires_post_action_verification ?? incoming.requires_post_action_verification ?? null,
+    task_workspace_items: mergeRecordLists(current.task_workspace_items, incoming.task_workspace_items),
+    task_verification_targets: mergeRecordLists(
+      current.task_verification_targets,
+      incoming.task_verification_targets,
+    ),
   };
 }
 
@@ -561,6 +568,11 @@ function mergeApprovalReplayTrace(
     runtime_role: current.runtime_role || incoming.runtime_role || null,
     requires_observation: current.requires_observation ?? incoming.requires_observation ?? null,
     requires_post_action_verification: current.requires_post_action_verification ?? incoming.requires_post_action_verification ?? null,
+    task_workspace_items: mergeRecordLists(current.task_workspace_items, incoming.task_workspace_items),
+    task_verification_targets: mergeRecordLists(
+      current.task_verification_targets,
+      incoming.task_verification_targets,
+    ),
     description: incoming.description || current.description || null,
     input_preview: {
       ...(current.input_preview || {}),
@@ -1071,6 +1083,36 @@ function toolCallMetadata(payload: Record<string, unknown>): Record<string, unkn
     if (value) metadata[key] = value;
   });
   return metadata;
+}
+
+function approvalTaskWorkspaceItems(
+  source: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  inputPreview: Record<string, unknown>,
+): Array<Record<string, unknown>> {
+  return mergeRecordLists(
+    recordList(source.task_workspace_items),
+    recordList(payload.task_workspace_items),
+    recordList(inputPreview.task_workspace_items),
+    recordList(source.workspace_items),
+    recordList(payload.workspace_items),
+    recordList(inputPreview.workspace_items),
+  );
+}
+
+function approvalTaskVerificationTargets(
+  source: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  inputPreview: Record<string, unknown>,
+): Array<Record<string, unknown>> {
+  return mergeRecordLists(
+    recordList(source.task_verification_targets),
+    recordList(payload.task_verification_targets),
+    recordList(inputPreview.task_verification_targets),
+    recordList(source.verification_targets),
+    recordList(payload.verification_targets),
+    recordList(inputPreview.verification_targets),
+  );
 }
 
 function toolCallTaskWorkspaceItems(

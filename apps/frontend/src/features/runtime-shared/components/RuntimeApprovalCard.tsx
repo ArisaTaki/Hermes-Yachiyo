@@ -41,6 +41,8 @@ export type RuntimeApprovalCardSnapshot = Pick<
   | 'source_runnable_name'
   | 'status'
   | 'step_id'
+  | 'task_workspace_items'
+  | 'task_verification_targets'
   | 'title'
   | 'tool_name'
   | 'tool_plan_id'
@@ -74,6 +76,8 @@ export function RuntimeApprovalCard({
   const preview = approvalPreviewRecord(approval.input_preview);
   const target = approvalPreviewTarget(preview, toolName);
   const displayTool = variant === 'compact' ? runtimeToolDisplayLabel(toolName) : toolName;
+  const taskWorkspaceItems = recordList(approval.task_workspace_items);
+  const taskVerificationTargets = recordList(approval.task_verification_targets);
   const title = variant === 'compact'
     ? compactApprovalTitle(approval.title, toolName, displayTool)
     : approval.title || toolName;
@@ -98,6 +102,8 @@ export function RuntimeApprovalCard({
       data-approval-source-run-id={approval.source_run_id || ''}
       data-approval-status={status}
       data-approval-step-id={approval.step_id || approval.planner_step_id || ''}
+      data-approval-task-verification-target-count={taskVerificationTargets.length}
+      data-approval-task-workspace-item-count={taskWorkspaceItems.length}
       data-approval-replan-request-id={approval.replan_request_id || ''}
       data-approval-replan-signal-ids={(approval.replan_signal_ids || []).join(',')}
       data-approval-replan-trigger={approval.replan_trigger || approval.replan_triggers?.[0] || ''}
@@ -145,6 +151,8 @@ function compactApprovalTitle(title: string | null | undefined, toolName: string
 }
 
 function approvalMetadataItems(approval: RuntimeApprovalCardSnapshot, toolName: string) {
+  const taskWorkspaceItems = recordList(approval.task_workspace_items);
+  const taskVerificationTargets = recordList(approval.task_verification_targets);
   const items = [
     { label: 'approval', value: approval.approval_id },
     { label: 'run', value: approval.run_id || '' },
@@ -159,6 +167,8 @@ function approvalMetadataItems(approval: RuntimeApprovalCardSnapshot, toolName: 
     { label: 'doctrine', value: approval.runtime_doctrine || '' },
     { label: 'observe', value: approval.requires_observation ? 'required' : '' },
     { label: 'verify', value: approval.requires_post_action_verification ? 'required' : '' },
+    { label: 'workspace', value: approvalWorkspaceSummary(taskWorkspaceItems) },
+    { label: 'targets', value: approvalVerificationTargetsSummary(taskVerificationTargets) },
     { label: 'tool', value: toolName },
     { label: 'plan', value: approval.tool_plan_id || approval.plan_id || '' },
     { label: 'decision', value: approval.decision_id || '' },
@@ -171,6 +181,61 @@ function approvalMetadataItems(approval: RuntimeApprovalCardSnapshot, toolName: 
     { label: 'policy', value: approval.policy_reason || '' },
   ];
   return items.filter((item) => String(item.value || '').trim());
+}
+
+function approvalWorkspaceSummary(items: Array<Record<string, unknown>>): string {
+  return items
+    .slice(0, 3)
+    .map((item) => (
+      stringValue(item.title)
+      || stringValue(item.path)
+      || stringValue(item.item_id)
+      || stringValue(item.source_step_id)
+    ))
+    .filter(Boolean)
+    .join(', ');
+}
+
+function approvalVerificationTargetsSummary(targets: Array<Record<string, unknown>>): string {
+  const parts = targets.slice(0, 3).map((target) => {
+    const label = (
+      stringValue(target.todo_title)
+      || stringValue(target.title)
+      || stringValue(target.step_id)
+      || stringValue(target.todo_id)
+      || stringValue(target.tool_name)
+    );
+    const workspace = [
+      ...recordList(target.workspace_items),
+      ...recordList(target.task_workspace_items),
+    ]
+      .slice(0, 2)
+      .map((item) => (
+        stringValue(item.title)
+        || stringValue(item.path)
+        || stringValue(item.item_id)
+        || stringValue(item.source_step_id)
+      ))
+      .filter(Boolean)
+      .join(', ');
+    return [label, workspace ? `workspace: ${workspace}` : ''].filter(Boolean).join(' -> ');
+  }).filter(Boolean);
+  if (!parts.length) return '';
+  const suffix = targets.length > parts.length ? ` +${targets.length - parts.length}` : '';
+  return `${parts.join(' | ')}${suffix}`;
+}
+
+function recordList(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => (
+    Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+  ));
+}
+
+function stringValue(value: unknown): string {
+  if (typeof value === 'string') return value.trim();
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value);
+  return '';
 }
 
 function approvalReasonText(
