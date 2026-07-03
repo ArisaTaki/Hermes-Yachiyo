@@ -1943,6 +1943,8 @@ class TaskIntentRouter:
         scoped_operation = _app_scoped_safe_operation_hint(text)
         if scoped_operation and not _file_duplicate_hint(text):
             return _empty_intent("file_organization", text)
+        if _explicit_app_open_request(text) and _app_capability_discovery_hint(text):
+            return _empty_intent("file_organization", text)
         if _looks_like_external_docs_lookup(text):
             return _empty_intent("file_organization", text)
         if _looks_like_context_artifact_request(text):
@@ -16325,6 +16327,7 @@ def _looks_like_file_organization_request(text: str) -> bool:
             "move",
             "rename",
             "archive",
+            "compress",
             "deduplicate",
             "整理",
             "分类",
@@ -16333,7 +16336,9 @@ def _looks_like_file_organization_request(text: str) -> bool:
             "移除",
             "移动",
             "重命名",
+            "改名",
             "归档",
+            "压缩",
             "废纸篓",
         ],
     )

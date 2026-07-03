@@ -5229,6 +5229,61 @@ def test_runtime_planner_routes_archive_extraction_through_file_organization() -
     assert how_to.selected_intent.kind == "web_research"
 
 
+def test_runtime_planner_routes_archive_compression_and_rename_aliases() -> None:
+    allowed_tools = ["workspace.list", "artifact.write", "terminal.run", "desktop.active_window"]
+    pdf_archive = RuntimePlanner().decision(
+        "把桌面上的 report.pdf 压缩成 zip",
+        allowed_tools=allowed_tools,
+    )
+    image_archive = RuntimePlanner().decision(
+        "把 Downloads 里的图片压缩成一个 zip",
+        allowed_tools=allowed_tools,
+    )
+    largest_image_rename = RuntimePlanner().decision(
+        "帮我把桌面上最大的图片改名成 cover.png",
+        allowed_tools=allowed_tools,
+    )
+
+    assert pdf_archive.selected_intent.kind == "file_organization"
+    assert pdf_archive.selected_intent.inputs == {
+        "location_hint": "Desktop",
+        "operation_hint": "archive",
+        "file_type_hint": "pdf",
+        "file_pattern_hint": "*.pdf",
+    }
+    assert _step_by_id(pdf_archive, "apply-file-organization").input_preview == {
+        "path": "Desktop",
+        "operation": "archive",
+        "file_type": "pdf",
+        "pattern": "*.pdf",
+    }
+    assert image_archive.selected_intent.kind == "file_organization"
+    assert image_archive.selected_intent.inputs == {
+        "location_hint": "Downloads",
+        "operation_hint": "archive",
+        "file_type_hint": "image",
+        "file_pattern_hint": "*.{png,jpg,jpeg,heic,gif,webp}",
+    }
+    assert _step_by_id(image_archive, "apply-file-organization").approval_required is True
+    assert largest_image_rename.selected_intent.kind == "file_organization"
+    assert largest_image_rename.selected_intent.inputs == {
+        "location_hint": "Desktop",
+        "operation_hint": "rename",
+        "file_type_hint": "image",
+        "file_pattern_hint": "*.{png,jpg,jpeg,heic,gif,webp}",
+        "destination_hint": "cover.png",
+        "selection_hint": "largest",
+    }
+    assert _step_by_id(largest_image_rename, "apply-file-organization").input_preview == {
+        "path": "Desktop",
+        "operation": "rename",
+        "file_type": "image",
+        "pattern": "*.{png,jpg,jpeg,heic,gif,webp}",
+        "destination": "cover.png",
+        "selection": "largest",
+    }
+
+
 def test_runtime_planner_routes_duplicate_file_cleanup_through_approval() -> None:
     allowed_tools = ["workspace.list", "artifact.write", "terminal.run"]
     decision = RuntimePlanner().decision(
