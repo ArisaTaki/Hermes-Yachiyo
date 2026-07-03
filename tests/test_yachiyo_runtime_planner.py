@@ -2829,7 +2829,6 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
             "input": {"query": "image", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
         },
         {
             "protocol": "json_fallback",
@@ -11141,6 +11140,53 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "description": "issue",
     }
     assert issue_tracker.selected_intent.inputs["foreground_compose_text_hint"] == "login bug"
+
+    whiteboard_lookup = RuntimePlanner().decision(
+        "找一个白板应用",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.ui_elements"],
+    )
+    whiteboard_draw = RuntimePlanner().decision(
+        "找一个白板应用，画一个产品路线图",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.ui_elements"],
+    )
+    diagram_draw = RuntimePlanner().decision(
+        "找一个能画流程图的应用，画一个登录流程",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.ui_elements"],
+    )
+
+    assert [step.step_id for step in whiteboard_lookup.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state"
+    ]
+    assert whiteboard_draw.selected_intent.inputs["app_capability_hint"] == {
+        "query": "whiteboard",
+        "description": "白板",
+    }
+    assert [step.step_id for step in whiteboard_draw.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "observe-selected-discovered-app",
+        "verify-discovered-app-creative-result",
+    ]
+    assert _step_by_id(whiteboard_draw, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "whiteboard",
+    }
+    assert diagram_draw.selected_intent.inputs["app_capability_hint"] == {
+        "query": "diagram",
+        "description": "画流程图",
+    }
+    diagram_draw_requests = planner_tool_requests(
+        "找一个能画流程图的应用，画一个登录流程",
+        ["desktop.list_apps", "app.open", "desktop.ui_elements"],
+    )
+    assert [request["tool"] for request in diagram_draw_requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "desktop.ui_elements",
+    ]
+    assert diagram_draw_requests[2]["continue_to_model"] is True
 
     pdf = RuntimePlanner().decision(
         "找一个能编辑 PDF 的本机应用并打开它",
@@ -30875,7 +30921,7 @@ def test_planner_first_owns_generic_discovered_app_creative_action_over_legacy()
         "desktop.shortcut",
         "desktop.ui_elements",
     ]
-    assert selection.requests[0]["continue_to_model"] is True
+    assert "continue_to_model" not in selection.requests[0]
     assert selection.requests[1]["input"] == {
         "app_name": "<selected app from desktop.list_apps>",
         "selection_source": "desktop.list_apps",

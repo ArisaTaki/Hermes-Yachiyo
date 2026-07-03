@@ -9729,6 +9729,11 @@ def _append_selected_discovered_creative_action_steps(
     )
     safe_shortcut_action = str((safe_shortcut or {}).get("action") or "").strip()
     compose_text = str(intent.inputs.get("foreground_compose_text_hint") or "").strip()
+    creative_canvas = (
+        intent.inputs.get("creative_canvas_hint")
+        if isinstance(intent.inputs.get("creative_canvas_hint"), Mapping)
+        else {}
+    )
     if safe_shortcut_action in {"new_document", "new_note"}:
         shortcut_tool = _first_allowed(
             (
@@ -9935,7 +9940,8 @@ def _looks_like_discovered_creative_action(
     action_text = clean_pending_action or compose_text or safe_shortcut_action
     creative_app = bool(
         re.search(
-            r"(?:画图|绘图|图片|图像|image|drawing|paint|design)",
+            r"(?:画图|绘图|图片|图像|白板|流程图|思维导图|脑图|"
+            r"image|drawing|paint|design|whiteboard|diagram|flowchart|mind\s*map)",
             f"{capability_description} {capability_query}",
             flags=re.IGNORECASE,
         )
@@ -25624,6 +25630,8 @@ def _discovered_app_open_requested(intent: TaskIntentSnapshot) -> bool:
         if operation_hint in {"safe_key", "safe_scroll", "safe_click", "hotkey"}:
             return True
         pending_action = discovered_app_pending_user_action(text)
+        if _looks_like_discovered_creative_action(intent, pending_action):
+            return True
         if (
             safe_key_hint(pending_action)
             or safe_scroll_hint(pending_action)

@@ -1998,8 +1998,6 @@ def _discovered_app_plan_needs_model_reasoning(
             if _runtime_resolvable_dynamic_file_open_step(step):
                 continue
             return True
-        if "creative" in step_id:
-            return True
     return False
 
 
