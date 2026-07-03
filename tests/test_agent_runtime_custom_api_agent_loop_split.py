@@ -6150,7 +6150,7 @@ def test_model_followup_context_payload_preserves_multiple_content_snapshots() -
     assert "Data analysis result for data/sales.csv (csv)." in message
 
 
-def test_model_followup_context_snapshots_file_and_app_discovery_candidates() -> None:
+def test_dynamic_file_open_with_discovered_app_no_longer_requires_model_followup_context() -> None:
     prompt = "找一个能编辑 PDF 的本机应用并打开最近的 PDF"
     allowed_tools = [
         "workspace.list",
@@ -6217,19 +6217,14 @@ def test_model_followup_context_snapshots_file_and_app_discovery_candidates() ->
             ),
         ],
     )
-    message = custom_api_agent_module._model_followup_context_message(payload)
 
-    assert [snapshot["source_tool"] for snapshot in payload["content_snapshots"]] == [
+    assert [request["tool"] for request in planner_requests] == [
         "workspace.list",
         "desktop.list_apps",
+        "desktop.open_path_with_app",
     ]
-    assert "brief-latest.pdf" in payload["content_snapshots"][0]["text"]
-    assert "PDF Expert" in payload["content_snapshots"][1]["text"]
-    assert payload["pending_plan_steps"][0]["step_id"] == "open-discovered-file-with-app"
-    assert payload["pending_plan_steps"][0]["tool_name"] == "desktop.open_path_with_app"
-    assert "Candidate files in Downloads" in message
-    assert "Candidate apps for pdf" in message
-    assert "open-discovered-file-with-app via desktop.open_path_with_app" in message
+    assert not any(request.get("continue_to_model") for request in planner_requests)
+    assert payload == {}
 
 
 def test_model_followup_pending_plan_resolves_dynamic_file_and_app_candidates() -> None:

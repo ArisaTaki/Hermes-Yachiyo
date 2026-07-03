@@ -2481,7 +2481,6 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
             },
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_file_open_target",
-            "continue_to_model": True,
         },
         {
             "protocol": "json_fallback",
@@ -2489,7 +2488,21 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
             "input": {"query": "pdf", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path_with_app",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "app_selection_source": "desktop.list_apps",
+                "query": "pdf",
+                "target_path": "<selected file from workspace.list>",
+                "selection_source": "workspace.list",
+                "action": "open_path_with_app",
+                "selection": "latest",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
         },
     ]
 
@@ -3594,7 +3607,7 @@ def test_planner_selection_payload_surfaces_dynamic_file_open_target() -> None:
     )
 
     assert payload["intent_kind"] == "desktop_operation"
-    assert payload["selected_tools"] == ["workspace.list"]
+    assert payload["selected_tools"] == ["workspace.list", "desktop.open_path_with_app"]
     assert payload["followup_target"] == {
         "kind": "desktop_file_open_with_app",
         "app_name": "Excel",
@@ -3645,7 +3658,6 @@ def test_runtime_planner_verifies_dynamic_file_open_when_available() -> None:
             },
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_file_open_target",
-            "continue_to_model": True,
             "step_id": "discover-file-open-target",
             "capability_id": "file.workspace_read",
         },
@@ -3655,9 +3667,30 @@ def test_runtime_planner_verifies_dynamic_file_open_when_available() -> None:
             "input": {"query": "pdf", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
-            "continue_to_model": True,
             "step_id": "discover_apps-desktop-state",
             "capability_id": "desktop.app_discovery",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path_with_app",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "app_selection_source": "desktop.list_apps",
+                "query": "pdf",
+                "target_path": "<selected file from workspace.list>",
+                "selection_source": "workspace.list",
+                "action": "open_path_with_app",
+                "selection": "latest",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
         },
     ]
 
@@ -11477,7 +11510,19 @@ def test_runtime_planner_discovers_dynamic_file_before_opening_with_app() -> Non
             },
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_file_open_target",
-            "continue_to_model": True,
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path_with_app",
+            "input": {
+                "app_name": "Microsoft Excel",
+                "target_path": "<selected file from workspace.list>",
+                "selection_source": "workspace.list",
+                "action": "open_path_with_app",
+                "selection": "latest",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
 

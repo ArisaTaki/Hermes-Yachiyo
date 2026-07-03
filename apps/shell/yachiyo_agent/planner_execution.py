@@ -1726,10 +1726,16 @@ def _model_selected_desktop_step_ids(steps: list[Any]) -> set[str]:
                 )
                 or
                 _selected_discovered_app_step_requires_model(step_id, payload, tool_name)
-                or step_id == "open-discovered-file-with-app"
+                or (
+                    step_id == "open-discovered-file-with-app"
+                    and not _runtime_resolvable_dynamic_file_open_step(step)
+                )
                 or _selected_discovered_app_payload_requires_model(payload, tool_name)
-                or str(payload.get("target_path") or "").strip()
-                == "<selected file from workspace.list>"
+                or (
+                    str(payload.get("target_path") or "").strip()
+                    == "<selected file from workspace.list>"
+                    and not _runtime_resolvable_workspace_file_payload(payload, tool_name)
+                )
                 or any(item in selected_step_ids for item in depends_on)
             ):
                 selected_step_ids.add(step_id)
@@ -1778,14 +1784,50 @@ def _runtime_resolvable_selected_app_payload(
     payload: Mapping[str, Any],
     tool_name: str = "",
 ) -> bool:
+    app_selection_source = str(
+        payload.get("app_selection_source") or payload.get("selection_source") or ""
+    ).strip()
     if not (
-        str(payload.get("selection_source") or "").strip() == "desktop.list_apps"
+        app_selection_source == "desktop.list_apps"
         and bool(str(payload.get("query") or "").strip())
     ):
         return False
     if _selected_discovered_app_payload_needs_open_path_tool(payload):
         return str(tool_name or "").strip() == "desktop.open_path_with_app"
     return True
+
+
+def _runtime_resolvable_workspace_file_payload(
+    payload: Mapping[str, Any],
+    tool_name: str = "",
+) -> bool:
+    selected_path = str(payload.get("target_path") or payload.get("path") or "").strip()
+    return bool(
+        str(tool_name or "").strip() == "desktop.open_path_with_app"
+        and selected_path == "<selected file from workspace.list>"
+        and str(payload.get("selection_source") or "").strip() == "workspace.list"
+    )
+
+
+def _runtime_resolvable_dynamic_file_open_step(step: Any) -> bool:
+    if str(getattr(step, "step_id", "") or "").strip() != "open-discovered-file-with-app":
+        return False
+    input_preview = getattr(step, "input_preview", None)
+    payload = input_preview if isinstance(input_preview, Mapping) else {}
+    return _runtime_resolvable_workspace_file_payload(
+        payload,
+        str(getattr(step, "tool_name", "") or "").strip(),
+    )
+
+
+def _runtime_resolvable_dynamic_file_open_plan(decision: Any) -> bool:
+    return any(
+        _runtime_resolvable_dynamic_file_open_step(step)
+        for step in list(
+            getattr(getattr(getattr(decision, "plan", None), "tool_plan", None), "steps", [])
+            or []
+        )
+    )
 
 
 def _selected_discovered_app_payload_needs_open_path_tool(payload: Mapping[str, Any]) -> bool:
@@ -1811,6 +1853,8 @@ def _runtime_resolvable_discovered_app_plan(decision: Any) -> bool:
                 payload,
                 tool_name,
             )
+        if step_id == "open-discovered-file-with-app":
+            has_resolvable_open_step = _runtime_resolvable_dynamic_file_open_step(step)
         if _selected_discovered_app_payload_requires_model(payload, tool_name):
             return False
     return has_resolvable_open_step
@@ -1832,8 +1876,11 @@ def _discovered_app_plan_needs_model_reasoning(
         if step_id in {
             "read-desktop-content",
             "write-desktop-content-artifact",
-            "open-discovered-file-with-app",
         }:
+            return True
+        if step_id == "open-discovered-file-with-app":
+            if _runtime_resolvable_dynamic_file_open_step(step):
+                continue
             return True
         if "creative" in step_id:
             return True
@@ -2913,7 +2960,7 @@ def _desktop_discovery_step_needs_model_followup(
     tool_name: str,
 ) -> bool:
     if tool_name == "workspace.list" and step_id == "discover-file-open-target":
-        return True
+        return not _runtime_resolvable_dynamic_file_open_plan(decision)
     if tool_name != "desktop.list_apps":
         return False
     if step_id not in {"discover-desktop-state", "discover_apps-desktop-state"}:
