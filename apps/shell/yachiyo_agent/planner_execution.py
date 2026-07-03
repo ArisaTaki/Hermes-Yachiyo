@@ -1916,12 +1916,9 @@ def _unavailable_desktop_ui_step_can_continue_with_model(
 
 
 def _unavailable_desktop_ui_payload_is_model_resolvable(payload: Mapping[str, Any]) -> bool:
-    for key in ("target", "role_filter", "key", "action"):
+    for key in ("target", "role_filter", "action"):
         if str(payload.get(key) or "").strip():
             return True
-    modifiers = payload.get("modifiers")
-    if isinstance(modifiers, list) and modifiers:
-        return True
     if payload.get("click_count") is not None:
         return True
     return False

@@ -1660,12 +1660,18 @@ class TaskIntentRouter:
         )
         if target_app and context_source:
             file_context_capabilities = _unique_capabilities(
-                [_context_source_required_capability(context_source), output_capability]
+                [
+                    _context_source_required_capability(context_source),
+                    "artifact.write",
+                    output_capability,
+                    "desktop.ui_operation",
+                ]
             )
         elif isinstance(target_app_capability, Mapping) and context_source:
             file_context_capabilities = _unique_capabilities(
                 [
                     _context_source_required_capability(context_source),
+                    "artifact.write",
                     "desktop.app_discovery",
                     "desktop.ui_operation",
                 ]
@@ -5700,46 +5706,21 @@ class RuntimePlanner:
                 capability_id="artifact.write",
             )
             depends_on = [step.step_id for step in context_steps]
+            artifact_path = _artifact_output_path(
+                intent.user_goal,
+                _report_artifact_filename(intent.user_goal),
+            )
             target_app = str(intent.inputs.get("target_app_hint") or "").strip()
             if target_app:
-                container_action = str(
-                    intent.inputs.get("target_container_action_hint") or ""
-                ).strip()
-                return [
-                    *context_steps,
-                    _step(
-                        intent,
-                        "prepare-report-target-app",
-                        "Prepare target app",
-                        "desktop.app_control",
-                        _first_allowed(
-                            (
-                                "app.focus",
-                                "app.open",
-                                "app.focus_and_safe_shortcut",
-                                "app.open_and_safe_shortcut",
-                            ),
-                            allowed,
-                        ),
-                        input_preview={
-                            "app_name": target_app,
-                            "target_action": str(
-                                intent.inputs.get("target_action_hint") or "app_paste"
-                            ).strip(),
-                            **(
-                                {"container_action": container_action}
-                                if container_action
-                                else {}
-                            ),
-                            "body_source": "model_generated_content",
-                        },
-                        depends_on=depends_on,
-                        reason=(
-                            "After context is inspected and transformed by the model, "
-                            "focus the requested app before inserting the generated content."
-                        ),
-                    ),
-                ]
+                return _append_report_app_write_target_steps(
+                    intent,
+                    allowed,
+                    context_steps,
+                    depends_on=depends_on,
+                    target_app=target_app,
+                    artifact_path=artifact_path,
+                    body_source=context_source,
+                )
             target_app_capability = intent.inputs.get("target_app_capability_hint")
             if isinstance(target_app_capability, Mapping):
                 return _append_report_discovered_app_write_target_steps(
@@ -5747,11 +5728,9 @@ class RuntimePlanner:
                     allowed,
                     context_steps,
                     depends_on=depends_on,
+                    artifact_path=artifact_path,
+                    body_source=context_source,
                 )
-            artifact_path = _artifact_output_path(
-                intent.user_goal,
-                _report_artifact_filename(intent.user_goal),
-            )
             steps = [
                 *context_steps,
                 (
@@ -10783,12 +10762,129 @@ def _append_web_research_app_write_target_steps(
     ]
 
 
+def _append_report_app_write_target_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    depends_on: list[str],
+    target_app: str,
+    artifact_path: str,
+    body_source: str,
+) -> list[ToolPlanStepSnapshot]:
+    target_action = str(intent.inputs.get("target_action_hint") or "app_paste").strip()
+    if not target_app or target_action != "app_paste":
+        return steps
+    container_action = str(
+        intent.inputs.get("target_container_action_hint") or ""
+    ).strip()
+    next_steps = [
+        *steps,
+        _step(
+            intent,
+            "write-report-artifact",
+            "Write report artifact",
+            "artifact.write",
+            _first_allowed(("artifact.write",), allowed),
+            input_preview={
+                "path": artifact_path,
+                "body_source": body_source,
+            },
+            depends_on=depends_on,
+            reason=(
+                "Produce a replayable report draft from the inspected source before "
+                "writing it into the requested app."
+            ),
+        ),
+    ]
+    previous_step = "write-report-artifact"
+    if container_action:
+        previous_step = _append_app_scoped_safe_shortcut_steps(
+            next_steps,
+            intent,
+            step_id="prepare-report-target-app",
+            title="Prepare target app",
+            app_name=target_app,
+            mode="open",
+            shortcut_action=container_action,
+            allowed=allowed,
+            depends_on=[previous_step],
+            prepare_reason="Open or focus the requested app after the report draft is available.",
+            shortcut_reason="Create the requested target container before inserting the report.",
+            fallback_reason="Open or focus the requested app and create the target container with one safe app-scoped action.",
+        )
+    else:
+        prepare_tool = _first_allowed(("app.open", "app.focus"), allowed)
+        next_steps.append(
+            _step(
+                intent,
+                "prepare-report-target-app",
+                "Prepare target app",
+                "desktop.app_control",
+                prepare_tool,
+                input_preview={
+                    "app_name": target_app,
+                    "target_action": target_action,
+                    "body_source": "report_artifact",
+                    "artifact_path": artifact_path,
+                },
+                depends_on=[previous_step],
+                reason=(
+                    "Open or focus the requested app after the report draft is ready."
+                ),
+            )
+        )
+        previous_step = "prepare-report-target-app"
+
+    insert_tool, insert_input = _safe_type_text_operation_preview(
+        app_name=target_app,
+        mode="focus",
+        allowed=allowed,
+        payload={
+            "body_source": "report_artifact",
+            "artifact_path": artifact_path,
+            "target_action": target_action,
+            **(
+                {"container_action": container_action}
+                if container_action
+                else {}
+            ),
+        },
+    )
+    next_steps.append(
+        _step(
+            intent,
+            "insert-report-into-target-app",
+            "Insert report into target app",
+            "desktop.ui_operation",
+            insert_tool,
+            input_preview=insert_input,
+            risk_level=_desktop_operation_risk_level(insert_tool),
+            approval_required=_desktop_operation_approval_required(insert_tool),
+            depends_on=[previous_step],
+            action="type",
+            reason=(
+                "Insert the generated report draft into the prepared foreground target app."
+            ),
+        )
+    )
+    return _append_report_target_app_verification_step(
+        intent,
+        allowed,
+        next_steps,
+        app_name=target_app,
+        depends_on="insert-report-into-target-app",
+    )
+
+
 def _append_report_discovered_app_write_target_steps(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
     steps: list[ToolPlanStepSnapshot],
     *,
     depends_on: list[str],
+    artifact_path: str,
+    body_source: str,
 ) -> list[ToolPlanStepSnapshot]:
     target_capability = intent.inputs.get("target_app_capability_hint")
     target_action = str(intent.inputs.get("target_action_hint") or "").strip()
@@ -10817,8 +10913,24 @@ def _append_report_discovered_app_write_target_steps(
         if selected_app_tool == "app.open_and_safe_shortcut"
         else "open_app"
     )
-    return [
+    next_steps = [
         *steps,
+        _step(
+            intent,
+            "write-report-artifact",
+            "Write report artifact",
+            "artifact.write",
+            _first_allowed(("artifact.write",), allowed),
+            input_preview={
+                "path": artifact_path,
+                "body_source": body_source,
+            },
+            depends_on=depends_on,
+            reason=(
+                "Produce a replayable report draft from the inspected source before "
+                "selecting a target app."
+            ),
+        ),
         _step(
             intent,
             "discover-report-target-app",
@@ -10826,7 +10938,7 @@ def _append_report_discovered_app_write_target_steps(
             "desktop.app_discovery",
             _first_allowed(("desktop.list_apps",), allowed),
             input_preview={"query": query, "limit": 20},
-            depends_on=depends_on,
+            depends_on=["write-report-artifact"],
             reason=(
                 "Discover an installed app by capability before writing the generated "
                 "report into it."
@@ -10843,7 +10955,8 @@ def _append_report_discovered_app_write_target_steps(
                 "selection_source": "desktop.list_apps",
                 "query": query,
                 "target_action": target_action,
-                "body_source": "model_generated_content",
+                "body_source": "report_artifact",
+                "artifact_path": artifact_path,
                 **_selected_discovered_app_operation_preview(
                     selected_app_tool,
                     safe_shortcut=safe_shortcut,
@@ -10854,6 +10967,90 @@ def _append_report_discovered_app_write_target_steps(
             reason=(
                 "After desktop.list_apps returns candidates, the model selects the best "
                 "matching app and prepares it for the generated report."
+            ),
+        ),
+    ]
+    insert_tool, insert_input = _safe_type_text_operation_preview(
+        app_name="<selected app from desktop.list_apps>",
+        mode="focus",
+        allowed=allowed,
+        payload={
+            "body_source": "report_artifact",
+            "artifact_path": artifact_path,
+            "target_action": target_action,
+            **(
+                {"container_action": container_action}
+                if container_action
+                else {}
+            ),
+        },
+    )
+    insert_input = _with_selected_app_payload(
+        insert_tool,
+        insert_input,
+        {"selection_source": "desktop.list_apps", "query": query},
+    )
+    next_steps.append(
+        _step(
+            intent,
+            "insert-report-into-target-app",
+            "Insert report into target app",
+            "desktop.ui_operation",
+            insert_tool,
+            input_preview=insert_input,
+            risk_level=_desktop_operation_risk_level(insert_tool),
+            approval_required=_desktop_operation_approval_required(insert_tool),
+            depends_on=["prepare-report-discovered-target-app"],
+            action="type",
+            reason=(
+                "Insert the generated report draft into the selected foreground target app."
+            ),
+        )
+    )
+    return _append_report_target_app_verification_step(
+        intent,
+        allowed,
+        next_steps,
+        app_name="<selected app from desktop.list_apps>",
+        depends_on="insert-report-into-target-app",
+        selected_app_payload={"selection_source": "desktop.list_apps", "query": query},
+    )
+
+
+def _append_report_target_app_verification_step(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    app_name: str,
+    depends_on: str,
+    selected_app_payload: Mapping[str, Any] | None = None,
+) -> list[ToolPlanStepSnapshot]:
+    verify_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui", "screen.capture"), allowed)
+    if not verify_tool:
+        return steps
+    if verify_tool == "screen.capture":
+        input_preview = {"reason": "Verify the report was inserted into the target app."}
+    else:
+        input_preview = {
+            "app_name": app_name,
+            **dict(selected_app_payload or {}),
+            "role_filter": "text",
+            "limit": 80,
+        }
+    return [
+        *steps,
+        _step(
+            intent,
+            "verify-report-target-app",
+            "Verify report target app",
+            "desktop.ui_operation",
+            verify_tool,
+            input_preview=input_preview,
+            depends_on=[depends_on],
+            action="read_ui" if verify_tool != "screen.capture" else "capture_screen",
+            reason=(
+                "Inspect the target app after insertion so the runtime can replan if the report is not visible."
             ),
         ),
     ]

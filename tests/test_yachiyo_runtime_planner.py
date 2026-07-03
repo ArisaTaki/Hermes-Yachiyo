@@ -7977,12 +7977,11 @@ def test_planner_execution_tool_requests_discovers_unknown_app_scoped_operations
         },
         {
             "protocol": "json_fallback",
-            "tool": "app.open_and_click_ui_element",
+            "tool": "app.open",
             "input": {
                 "app_name": "PixelForge",
-                "target": "Export",
-                "role_filter": "button",
-                "limit": 80,
+                "selection_source": "desktop.list_apps",
+                "query": "PixelForge",
             },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
@@ -7990,9 +7989,20 @@ def test_planner_execution_tool_requests_discovers_unknown_app_scoped_operations
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"limit": 80},
+            "input": {"role_filter": "button", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
+            "continue_to_model": True,
+            "deferred_tool": "app.open_and_click_ui_element",
+            "deferred_input": {
+                "app_name": "PixelForge",
+                "target": "Export",
+                "role_filter": "button",
+                "limit": 80,
+                "selection_source": "desktop.list_apps",
+                "query": "PixelForge",
+            },
+            "deferred_context": {},
         },
     ]
 
@@ -8029,7 +8039,11 @@ def test_planner_execution_tool_requests_verifies_after_unknown_app_foreground_c
         {
             "protocol": "json_fallback",
             "tool": "app.open",
-            "input": {"app_name": "PixelForge"},
+            "input": {
+                "app_name": "PixelForge",
+                "selection_source": "desktop.list_apps",
+                "query": "PixelForge",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -8573,7 +8587,24 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "app.open",
         "app.open_and_safe_shortcut",
         "desktop.safe_shortcut",
+        "desktop.safe_type_text",
         "desktop.ui_elements",
+        "artifact.write",
+    ]
+    direct_app_steps = [
+        "read-report-context",
+        "write-report-artifact",
+        "prepare-report-target-app",
+        "insert-report-into-target-app",
+        "verify-report-target-app",
+    ]
+    discovered_app_steps = [
+        "read-report-context",
+        "write-report-artifact",
+        "discover-report-target-app",
+        "prepare-report-discovered-target-app",
+        "insert-report-into-target-app",
+        "verify-report-target-app",
     ]
     page_prefetch = {
         "protocol": "json_fallback",
@@ -8614,21 +8645,30 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         }
         assert decision.selected_intent.required_capabilities == [
             "browser.research",
+            "artifact.write",
             "desktop.app_control",
+            "desktop.ui_operation",
         ]
-        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
-            "read-report-context",
-            "prepare-report-target-app",
-        ]
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == direct_app_steps
         assert _step_by_id(decision, "read-report-context").tool_name == (
             "browser.extract_text"
         )
+        assert _step_by_id(decision, "write-report-artifact").input_preview == {
+            "path": "report.md",
+            "body_source": "current_page_content",
+        }
         assert _step_by_id(decision, "prepare-report-target-app").input_preview == {
             "app_name": "Obsidian",
             "target_action": "app_paste",
-            "body_source": "model_generated_content",
+            "body_source": "report_artifact",
+            "artifact_path": "report.md",
         }
-        assert decision.plan.tool_plan.artifacts_expected == []
+        assert _step_by_id(decision, "insert-report-into-target-app").input_preview == {
+            "body_source": "report_artifact",
+            "artifact_path": "report.md",
+            "target_action": "app_paste",
+        }
+        assert decision.plan.tool_plan.artifacts_expected == ["report.md"]
         assert planner_tool_requests(prompt, allowed) == [page_prefetch]
         assert planner_direct_tool_requests(prompt, allowed) == [page_prefetch]
 
@@ -8646,9 +8686,13 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
     }
     assert _step_by_id(new_note, "prepare-report-target-app").input_preview == {
         "app_name": "Obsidian",
+        "action": "new_note",
+    }
+    assert _step_by_id(new_note, "insert-report-into-target-app").input_preview == {
+        "body_source": "report_artifact",
+        "artifact_path": "report.md",
         "target_action": "app_paste",
         "container_action": "new_note",
-        "body_source": "model_generated_content",
     }
     assert planner_tool_requests(
         "把当前网页总结一下并保存到 Obsidian 新笔记",
@@ -8681,10 +8725,7 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
     }
     assert natural_new_page.selected_intent.kind == "report_generation"
     assert natural_new_page.selected_intent.inputs == new_page.selected_intent.inputs
-    assert [step.step_id for step in natural_new_page.plan.tool_plan.steps] == [
-        "read-report-context",
-        "prepare-report-target-app",
-    ]
+    assert [step.step_id for step in natural_new_page.plan.tool_plan.steps] == direct_app_steps
     assert planner_tool_requests(
         "把当前网页总结到 Notion 新页面",
         allowed,
@@ -8696,10 +8737,7 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "target_action_hint": "app_paste",
         "target_container_action_hint": "new_document",
     }
-    assert [step.step_id for step in current_app_new_page.plan.tool_plan.steps] == [
-        "read-report-context",
-        "prepare-report-target-app",
-    ]
+    assert [step.step_id for step in current_app_new_page.plan.tool_plan.steps] == direct_app_steps
     assert _step_by_id(current_app_new_page, "read-report-context").tool_name == (
         "desktop.ui_elements"
     )
@@ -8746,17 +8784,21 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
     }
     assert clipboard.selected_intent.required_capabilities == [
         "clipboard.read_write",
+        "artifact.write",
         "desktop.app_control",
+        "desktop.ui_operation",
     ]
-    assert [step.step_id for step in clipboard.plan.tool_plan.steps] == [
-        "read-report-context",
-        "prepare-report-target-app",
-    ]
+    assert [step.step_id for step in clipboard.plan.tool_plan.steps] == direct_app_steps
     assert _step_by_id(clipboard, "read-report-context").tool_name == "clipboard.read"
+    assert _step_by_id(clipboard, "write-report-artifact").input_preview == {
+        "path": "report.md",
+        "body_source": "clipboard",
+    }
     assert _step_by_id(clipboard, "prepare-report-target-app").input_preview == {
         "app_name": "Obsidian",
         "target_action": "app_paste",
-        "body_source": "model_generated_content",
+        "body_source": "report_artifact",
+        "artifact_path": "report.md",
     }
     assert planner_tool_requests(
         "把剪贴板内容整理成待办并写进 Obsidian",
@@ -8777,17 +8819,15 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "target_app_hint": "Obsidian",
         "target_action_hint": "app_paste",
     }
-    assert [step.step_id for step in opened_named_clipboard.plan.tool_plan.steps] == [
-        "read-report-context",
-        "prepare-report-target-app",
-    ]
+    assert [step.step_id for step in opened_named_clipboard.plan.tool_plan.steps] == direct_app_steps
     assert _step_by_id(opened_named_clipboard, "read-report-context").tool_name == (
         "clipboard.read"
     )
     assert _step_by_id(opened_named_clipboard, "prepare-report-target-app").input_preview == {
         "app_name": "Obsidian",
         "target_action": "app_paste",
-        "body_source": "model_generated_content",
+        "body_source": "report_artifact",
+        "artifact_path": "meeting-minutes.md",
     }
     assert planner_tool_requests(
         "打开 Obsidian 或其他 markdown 应用，把剪贴板内容整理成会议纪要",
@@ -8820,14 +8860,11 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
     }
     assert current_page_discovered.selected_intent.required_capabilities == [
         "browser.research",
+        "artifact.write",
         "desktop.app_discovery",
         "desktop.ui_operation",
     ]
-    assert [step.step_id for step in current_page_discovered.plan.tool_plan.steps] == [
-        "read-report-context",
-        "discover-report-target-app",
-        "prepare-report-discovered-target-app",
-    ]
+    assert [step.step_id for step in current_page_discovered.plan.tool_plan.steps] == discovered_app_steps
     assert _step_by_id(current_page_discovered, "read-report-context").tool_name == (
         "browser.extract_text"
     )
@@ -8843,8 +8880,18 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "selection_source": "desktop.list_apps",
         "query": "document",
         "target_action": "app_paste",
-        "body_source": "model_generated_content",
+        "body_source": "report_artifact",
+        "artifact_path": "report.md",
         "action": "new_document",
+    }
+    assert _step_by_id(
+        current_page_discovered,
+        "insert-report-into-target-app",
+    ).input_preview == {
+        "body_source": "report_artifact",
+        "artifact_path": "report.md",
+        "target_action": "app_paste",
+        "container_action": "new_document",
     }
     assert planner_tool_requests(
         "把当前网页总结到任意文档应用",
@@ -8873,11 +8920,7 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "target_action_hint": "app_paste",
         "target_container_action_hint": "new_document",
     }
-    assert [step.step_id for step in current_window_discovered.plan.tool_plan.steps] == [
-        "read-report-context",
-        "discover-report-target-app",
-        "prepare-report-discovered-target-app",
-    ]
+    assert [step.step_id for step in current_window_discovered.plan.tool_plan.steps] == discovered_app_steps
     assert _step_by_id(current_window_discovered, "read-report-context").tool_name == (
         "desktop.ui_elements"
     )
@@ -8893,11 +8936,7 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "target_action_hint": "app_paste",
         "target_container_action_hint": "new_document",
     }
-    assert [step.step_id for step in clipboard_discovered.plan.tool_plan.steps] == [
-        "read-report-context",
-        "discover-report-target-app",
-        "prepare-report-discovered-target-app",
-    ]
+    assert [step.step_id for step in clipboard_discovered.plan.tool_plan.steps] == discovered_app_steps
     assert _step_by_id(clipboard_discovered, "read-report-context").tool_name == (
         "clipboard.read"
     )
@@ -8913,11 +8952,7 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "target_action_hint": "app_paste",
         "target_container_action_hint": "new_document",
     }
-    assert [step.step_id for step in opened_markdown_clipboard.plan.tool_plan.steps] == [
-        "read-report-context",
-        "discover-report-target-app",
-        "prepare-report-discovered-target-app",
-    ]
+    assert [step.step_id for step in opened_markdown_clipboard.plan.tool_plan.steps] == discovered_app_steps
     assert _step_by_id(opened_markdown_clipboard, "discover-report-target-app").input_preview == {
         "query": "markdown",
         "limit": 20,
@@ -8930,7 +8965,8 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "selection_source": "desktop.list_apps",
         "query": "markdown",
         "target_action": "app_paste",
-        "body_source": "model_generated_content",
+        "body_source": "report_artifact",
+        "artifact_path": "meeting-minutes.md",
         "action": "new_document",
     }
     assert planner_tool_requests(
@@ -11369,18 +11405,6 @@ def test_runtime_planner_discovers_generic_communication_app_before_composing() 
             assert send.input_preview == {"action": "send"}
         assert planner_tool_requests(prompt, allowed_tools) == [
             {**_app_discovery_request(query), "continue_to_model": True},
-            {
-                "protocol": "json_fallback",
-                "tool": "app.open_and_safe_shortcut",
-                "input": {
-                    "app_name": "<selected app from desktop.list_apps>",
-                    "selection_source": "desktop.list_apps",
-                    "query": query,
-                    "action": "new_message",
-                },
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
         ]
 
     assert RuntimePlanner().decision(
@@ -11562,6 +11586,11 @@ def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation(
         assert _step_by_id(decision, step_id).tool_name == operation_tool
         assert _step_by_id(decision, step_id).input_preview == operation_input
         assert _step_by_id(decision, "verify-desktop-result").input_preview == verify_input
+        execution_operation_input = {
+            **operation_input,
+            "selection_source": "desktop.list_apps",
+            "query": expected_app,
+        }
         assert planner_execution_tool_requests(
             planner_tool_requests(prompt, allowed_tools),
             allowed_tools,
@@ -11570,7 +11599,7 @@ def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation(
             {
                 "protocol": "json_fallback",
                 "tool": operation_tool,
-                "input": operation_input,
+                "input": execution_operation_input,
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
@@ -13709,11 +13738,11 @@ def test_runtime_planner_routes_app_scoped_search_to_desktop_sequence() -> None:
     assert _step_by_id(
         app_scoped_when_generic_is_available,
         "type-app-search-query",
-    ).tool_name == "app.focus_and_safe_type_text"
+    ).tool_name == "desktop.safe_type_text"
     assert _step_by_id(
         app_scoped_when_generic_is_available,
         "type-app-search-query",
-    ).input_preview == {"app_name": "Obsidian", "text": "yachiyo"}
+    ).input_preview == {"text": "yachiyo"}
 
     desktop_content_report = RuntimePlanner().decision(
         "打开 Obsidian，搜索 yachiyo runtime，然后把当前内容总结成报告",
@@ -20861,6 +20890,8 @@ def test_runtime_planner_prefetches_app_search_result_for_communication() -> Non
     assert selection.event_payload["legacy_request_count"] == 0
     assert [request["tool"] for request in selection.requests] == [
         "desktop.list_apps",
+        "app.open",
+        "app.focus",
         "app.open_and_safe_shortcut",
         "app.open_and_safe_type_text",
         "desktop.search_submit",
@@ -22935,9 +22966,9 @@ def test_entrypoint_selection_keeps_runtime_planner_for_strong_multi_step_plan()
     assert [request["tool"] for request in requests] == [
         "desktop.list_apps",
         "app.open",
-        "desktop.click_ui_element",
         "desktop.ui_elements",
     ]
+    assert requests[-1]["deferred_tool"] == "desktop.click_ui_element"
     assert legacy_calls == []
 
 
@@ -28820,7 +28851,6 @@ def test_planner_first_owns_app_scoped_ui_operations_over_legacy() -> None:
             ],
             [
                 "desktop.list_apps",
-                "app.focus",
                 "app.focus_and_safe_shortcut",
                 "app.focus_and_safe_type_text",
             ],
@@ -29466,6 +29496,85 @@ def test_runtime_execution_envelope_can_project_full_data_analysis_plan() -> Non
     assert projected_requests[1]["task_checkpoints"][0]["after_step_id"] == "run-analysis"
     assert (
         projected_requests[1]["workspace_id"]
+        == decision.plan.task_core.workspace.workspace_id
+    )
+
+
+def test_runtime_execution_envelope_can_project_full_report_app_write_plan() -> None:
+    allowed_tools = [
+        "browser.extract_text",
+        "artifact.write",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "把当前网页总结一下并保存到 Obsidian 新笔记",
+        allowed_tools=allowed_tools,
+    )
+
+    default_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+    full_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert default_envelope is not None
+    assert full_envelope is not None
+    assert [request.tool_name for request in default_envelope.requests] == [
+        "browser.extract_text"
+    ]
+    assert [request.tool_name for request in full_envelope.requests] == [
+        "browser.extract_text",
+        "artifact.write",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert [request.step_id for request in full_envelope.requests] == [
+        "read-report-context",
+        "write-report-artifact",
+        "prepare-report-target-app",
+        "insert-report-into-target-app",
+        "verify-report-target-app",
+    ]
+    assert full_envelope.requests[1].input == {
+        "path": "report.md",
+        "body_source": "current_page_content",
+    }
+    assert full_envelope.requests[2].input == {
+        "app_name": "Obsidian",
+        "action": "new_note",
+    }
+    assert full_envelope.requests[3].input == {
+        "body_source": "report_artifact",
+        "artifact_path": "report.md",
+        "target_action": "app_paste",
+        "container_action": "new_note",
+    }
+    assert full_envelope.requests[3].approval_required is True
+    assert full_envelope.requests[4].depends_on == ["insert-report-into-target-app"]
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        full_envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    assert [request["tool"] for request in projected_requests] == [
+        "browser.extract_text",
+        "artifact.write",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert projected_requests[3]["approval_required"] is True
+    assert projected_requests[3]["task_todo"]["step_id"] == (
+        "insert-report-into-target-app"
+    )
+    assert (
+        projected_requests[3]["workspace_id"]
         == decision.plan.task_core.workspace.workspace_id
     )
 
