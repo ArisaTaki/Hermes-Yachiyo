@@ -27787,6 +27787,32 @@ def test_planner_tool_requests_maps_system_control_plan() -> None:
             "planning_reason": "planner_fallback_system_control",
         }
     ]
+    assert planner_execution_tool_requests(
+        [
+            {
+                "protocol": "tool_calls",
+                "tool": "system.volume",
+                "input": {"action": "mute"},
+                "tool_call_id": "call_volume",
+            }
+        ],
+        allowed_tools=["system.volume"],
+    ) == [
+        {
+            "protocol": "tool_calls",
+            "tool": "system.volume",
+            "input": {"action": "mute"},
+            "tool_call_id": "call_volume",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "system.volume",
+            "input": {"action": "status"},
+            "source": "runtime_verification",
+            "planning_reason": "runtime_system_control_verification",
+            "continue_to_model": True,
+        },
+    ]
     assert planner_tool_requests(
         "open sound settings",
         allowed_tools=["app.open"],

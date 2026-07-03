@@ -56,8 +56,14 @@ def planner_execution_tool_requests(
 ) -> list[dict[str, Any]]:
     """Normalize direct requests into the execution shape used by Chat entrypoints."""
 
-    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
-    normalized_requests = [dict(request) for request in requests if isinstance(request, Mapping)]
+    allowed = {
+        str(tool or "").strip()
+        for tool in allowed_tools
+        if str(tool or "").strip()
+    }
+    normalized_requests = [
+        dict(request) for request in requests if isinstance(request, Mapping)
+    ]
     if not normalized_requests:
         return []
     normalized_requests = _expand_inspect_app_execution_requests(normalized_requests, allowed)
@@ -89,7 +95,32 @@ def planner_execution_tool_requests(
         normalized_requests,
         allowed,
     )
-    return _drop_redundant_execution_verification_requests(normalized_requests)
+    normalized_requests = _drop_redundant_execution_verification_requests(
+        normalized_requests
+    )
+    return runtime_execution_verified_tool_requests(normalized_requests, allowed)
+
+
+def runtime_execution_verified_tool_requests(
+    requests: Iterable[Mapping[str, Any]],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    """Append low-risk verification reads for execution requests from any source."""
+
+    allowed = {
+        str(tool or "").strip()
+        for tool in allowed_tools
+        if str(tool or "").strip()
+    }
+    normalized_requests = [
+        dict(request) for request in requests if isinstance(request, Mapping)
+    ]
+    if not normalized_requests:
+        return []
+    return _append_system_volume_status_verification_requests(
+        normalized_requests,
+        allowed,
+    )
 
 
 def _prepend_unknown_app_discovery_requests(
@@ -3968,6 +3999,71 @@ def _system_control_verify_request(
         planning_reason="planner_fallback_system_control",
     )
     request["continue_to_model"] = True
+    return request
+
+
+_SYSTEM_VOLUME_MUTATION_ACTIONS = frozenset({"set", "up", "down", "mute", "unmute"})
+
+
+def _append_system_volume_status_verification_requests(
+    requests: list[dict[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    if "system.volume" not in allowed:
+        return requests
+    normalized: list[dict[str, Any]] = []
+    for index, request in enumerate(requests):
+        normalized.append(request)
+        if not _system_volume_request_needs_status_verification(request):
+            continue
+        if _next_request_is_system_volume_status(requests, index):
+            continue
+        normalized.append(_system_volume_status_verification_request(request))
+    return normalized
+
+
+def _system_volume_request_needs_status_verification(request: Mapping[str, Any]) -> bool:
+    if str(request.get("tool") or "").strip() != "system.volume":
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    action = str(payload.get("action") or "").strip()
+    return action in _SYSTEM_VOLUME_MUTATION_ACTIONS
+
+
+def _next_request_is_system_volume_status(
+    requests: list[dict[str, Any]],
+    index: int,
+) -> bool:
+    if index + 1 >= len(requests):
+        return False
+    next_request = requests[index + 1]
+    if str(next_request.get("tool") or "").strip() != "system.volume":
+        return False
+    payload = (
+        next_request.get("input")
+        if isinstance(next_request.get("input"), Mapping)
+        else {}
+    )
+    return str(payload.get("action") or "").strip() == "status"
+
+
+def _system_volume_status_verification_request(
+    source_request: Mapping[str, Any],
+) -> dict[str, Any]:
+    source = str(source_request.get("source") or "").strip() or "runtime_model"
+    if source != "runtime_planner":
+        source = "runtime_verification"
+    planning_reason = str(source_request.get("planning_reason") or "").strip()
+    if planning_reason != "planner_fallback_system_control":
+        planning_reason = "runtime_system_control_verification"
+    request = {
+        "protocol": "json_fallback",
+        "tool": "system.volume",
+        "input": {"action": "status"},
+        "source": source,
+        "planning_reason": planning_reason,
+        "continue_to_model": True,
+    }
     return request
 
 

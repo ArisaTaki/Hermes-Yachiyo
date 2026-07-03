@@ -48,6 +48,7 @@ from apps.shell.yachiyo_agent.capability_registry import capability_snapshots
 from apps.shell.yachiyo_agent.planner_execution import (
     planner_execution_tool_requests,
     planner_tool_requests,
+    runtime_execution_verified_tool_requests,
 )
 from apps.shell.yachiyo_agent.planner_projection import (
     planner_selection_payload,
@@ -1580,6 +1581,10 @@ class RuntimeCustomApiAgentLoop:
             tool_requests = _tool_requests_with_pending_plan_metadata(
                 tool_requests,
                 timeline,
+            )
+            tool_requests = runtime_execution_verified_tool_requests(
+                tool_requests,
+                allowed_tools,
             )
             detail = content[:500] if content else ", ".join(
                 request["tool"] for request in tool_requests
