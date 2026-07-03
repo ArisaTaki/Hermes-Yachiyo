@@ -11425,6 +11425,79 @@ def test_runtime_planner_keeps_plain_document_transfer_off_report_generation() -
     ]
 
 
+def test_runtime_planner_pastes_dynamic_context_into_named_apps() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+        "clipboard.read",
+    ]
+
+    clipboard = RuntimePlanner().decision(
+        "把剪贴板内容写进 Obsidian",
+        allowed_tools=allowed_tools,
+    )
+    explicit_open = RuntimePlanner().decision(
+        "打开 Obsidian，把剪贴板内容写进去",
+        allowed_tools=allowed_tools,
+    )
+
+    assert clipboard.selected_intent.kind == "desktop_operation"
+    assert clipboard.selected_intent.inputs["dynamic_context_ui_transfer_hint"] == {
+        "source": "clipboard",
+        "action": "transfer_context",
+        "target_kind": "app_paste",
+        "target": "",
+        "app_name": "Obsidian",
+        "mode": "focus",
+    }
+    assert [step.step_id for step in clipboard.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "paste-context-into-app",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(clipboard, "open-or-focus-app").tool_name == "app.focus"
+    assert _step_by_id(clipboard, "paste-context-into-app").input_preview == {
+        "action": "paste"
+    }
+    clipboard_requests = planner_tool_requests(
+        "把剪贴板内容写进 Obsidian",
+        allowed_tools,
+    )
+    assert [request["tool"] for request in clipboard_requests] == [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    assert clipboard_requests[2]["input"] == {"action": "paste"}
+    assert all(request["tool"] != "clipboard.read" for request in clipboard_requests)
+
+    assert explicit_open.selected_intent.inputs["dynamic_context_ui_transfer_hint"] == {
+        "source": "clipboard",
+        "action": "transfer_context",
+        "target_kind": "app_paste",
+        "target": "",
+        "app_name": "Obsidian",
+        "mode": "open",
+    }
+    assert _step_by_id(explicit_open, "open-or-focus-app").tool_name == "app.open"
+    explicit_open_requests = planner_tool_requests(
+        "打开 Obsidian，把剪贴板内容写进去",
+        allowed_tools,
+    )
+    assert [request["tool"] for request in explicit_open_requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    assert explicit_open_requests[2]["input"] == {"action": "paste"}
+
+
 def test_runtime_planner_discovers_chinese_generic_editor_apps_before_acting() -> None:
     allowed_tools = [
         "desktop.list_apps",

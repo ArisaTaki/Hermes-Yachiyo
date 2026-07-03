@@ -815,6 +815,13 @@ class TaskIntentRouter:
             and _is_generic_foreground_app_label(app_name_hint)
         ):
             app_name_hint = direct_app_name_hint
+        if not dynamic_context_transfer and app_name_hint:
+            dynamic_context_transfer = _app_scoped_dynamic_context_ui_transfer_hint(
+                text,
+                app_name_hint,
+            )
+            if dynamic_context_transfer:
+                foreground_compose_text = ""
         if (
             direct_app_name_hint
             and screen_capture is not None
@@ -2347,6 +2354,11 @@ class TaskIntentRouter:
             return _empty_intent("clipboard_operation", text)
         hint = clipboard_operation_hint(text)
         if not hint:
+            return _empty_intent("clipboard_operation", text)
+        if (
+            _dynamic_context_ui_transfer_hint(text)
+            and str(hint.get("action") or "").strip() != "write"
+        ):
             return _empty_intent("clipboard_operation", text)
         if (
             str(hint.get("action") or "").strip() == "read"
@@ -18405,6 +18417,39 @@ def _capability_dynamic_context_ui_transfer_hint(
         "target_kind": "app_paste",
         "target": "",
         "app_name": app_name,
+        "mode": "open" if _explicit_app_open_request(value) else "focus",
+    }
+
+
+def _app_scoped_dynamic_context_ui_transfer_hint(
+    text: str,
+    app_name: str,
+) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    clean_app_name = str(app_name or "").strip()
+    if not clean_app_name:
+        return {}
+    if _dynamic_context_transform_target_hint(value):
+        return {}
+    source = _dynamic_context_source_hint(value)
+    if source not in {"selection", "clipboard", "current_page_link", "current_page_content"}:
+        return {}
+    if _looks_like_dynamic_context_copy_only(value):
+        return {}
+    if not _looks_like_dynamic_context_transfer(value):
+        return {}
+    target_kind, target = _dynamic_context_ui_target_hint(value)
+    if target_kind == "current_input" and source == "current_page_content":
+        return {}
+    if target_kind not in {"ui_field", "current_input"}:
+        target_kind = "app_paste"
+        target = ""
+    return {
+        "source": source,
+        "action": "transfer_context",
+        "target_kind": target_kind,
+        "target": target,
+        "app_name": clean_app_name,
         "mode": "open" if _explicit_app_open_request(value) else "focus",
     }
 
