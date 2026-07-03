@@ -28,8 +28,16 @@ def append_task_progress_events_for_tool_result(
         return
 
     result = tool_event.get("result") if isinstance(tool_event.get("result"), Mapping) else {}
-    todo_status = _task_todo_status_for_tool_result(str(tool_event.get("event") or ""), result)
-    checkpoint_status = _task_checkpoint_status_for_todo_status(todo_status, result)
+    todo_status = _task_todo_status_for_tool_result(
+        str(tool_event.get("event") or ""),
+        result,
+        tool_request=tool_request,
+    )
+    checkpoint_status = _task_checkpoint_status_for_todo_status(
+        todo_status,
+        result,
+        tool_request=tool_request,
+    )
     skip_statuses = {todo_status}
     if todo_status != "completed":
         skip_statuses.add("completed")
@@ -311,22 +319,41 @@ def _append_task_progress_event(
         append_run_event(run_id, event_type, payload)
 
 
-def _task_todo_status_for_tool_result(event_type: str, result: Mapping[str, Any]) -> str:
+def _task_todo_status_for_tool_result(
+    event_type: str,
+    result: Mapping[str, Any],
+    *,
+    tool_request: Mapping[str, Any] | None = None,
+) -> str:
     if not isinstance(result, Mapping):
         return "blocked"
     if result.get("approval_required"):
         return "blocked"
     if str(event_type or "").strip() == "agent.tool.skipped":
         return "skipped" if result.get("blocked_by_user_goal") else "blocked"
+    if (
+        result.get("ok") is True
+        and isinstance(tool_request, Mapping)
+        and bool(tool_request.get("requires_post_action_verification"))
+    ):
+        return "in_progress"
     return "blocked" if _tool_result_requests_replan(result) else "completed"
 
 
 def _task_checkpoint_status_for_todo_status(
     todo_status: str,
     result: Mapping[str, Any],
+    *,
+    tool_request: Mapping[str, Any] | None = None,
 ) -> str:
     if isinstance(result, Mapping) and result.get("approval_required"):
         return "waiting_approval"
+    if (
+        todo_status == "in_progress"
+        and isinstance(tool_request, Mapping)
+        and bool(tool_request.get("requires_post_action_verification"))
+    ):
+        return "ready"
     if todo_status == "completed":
         return "completed"
     return "blocked"

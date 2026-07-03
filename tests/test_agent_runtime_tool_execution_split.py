@@ -408,6 +408,84 @@ def test_runtime_tool_request_runner_preserves_scope_on_task_progress_events() -
     assert run_todo_event["workflow_run_id"] == "workflow-run-1"
 
 
+def test_runtime_tool_request_runner_marks_operate_steps_ready_for_verification() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        _timeline: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        return {
+            "ok": True,
+            "action": str(tool_request.get("tool") or ""),
+            "summary": "clicked",
+        }
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+
+    runner.run(
+        [
+            {
+                "tool": "app.open_and_click_ui_element",
+                "input": {"app_name": "PixelForge", "selector": "text=Export"},
+                "source": "runtime_planner",
+                "step_id": "operate-foreground-ui",
+                "core_id": "task-core-1",
+                "workspace_id": "task-workspace-1",
+                "decision_id": "decision-1",
+                "plan_id": "plan-1",
+                "runtime_stage": "operate",
+                "runtime_role": "click_ui",
+                "requires_post_action_verification": True,
+                "task_todo": {
+                    "todo_id": "todo-operate",
+                    "title": "Click Export",
+                    "status": "pending",
+                    "step_id": "operate-foreground-ui",
+                    "tool_name": "app.open_and_click_ui_element",
+                },
+                "task_checkpoints": [
+                    {
+                        "checkpoint_id": "checkpoint-operate",
+                        "title": "Verify Export",
+                        "status": "planned",
+                        "after_step_id": "operate-foreground-ui",
+                    }
+                ],
+            }
+        ],
+        ["app.open_and_click_ui_element"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "click export"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-verify",
+        budget=FakeBudget(),
+    )
+
+    todo_event = next(event for event in timeline if event["event"] == "agent.task.todo.updated")
+    checkpoint_event = next(
+        event for event in timeline if event["event"] == "agent.task.checkpoint.updated"
+    )
+    assert todo_event["status"] == "in_progress"
+    assert todo_event["todo"]["status"] == "in_progress"
+    assert checkpoint_event["status"] == "ready"
+    assert checkpoint_event["checkpoint"]["status"] == "ready"
+    assert not any(event["event"] == "agent.replan.requested" for event in timeline)
+
+    run_checkpoint_event = next(
+        payload
+        for _run_id, event_type, payload in run_events
+        if event_type == "agent.task.checkpoint.updated"
+    )
+    assert run_checkpoint_event["status"] == "ready"
+
+
 def test_runtime_tool_request_runner_records_replan_request_for_failed_planned_step() -> None:
     run_events: list[tuple[str, str, dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
