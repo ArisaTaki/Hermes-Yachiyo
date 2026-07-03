@@ -6544,6 +6544,8 @@ def _timeline_replan_request_payloads(
             continue
         payload = event.get("payload")
         if isinstance(payload, Mapping):
+            if str(payload.get("source") or "").strip() != "runtime_tool_request_runner":
+                continue
             payloads.append(dict(payload))
     return payloads
 
@@ -12146,7 +12148,21 @@ def _attach_replan_payload_trace_metadata(
     request: dict[str, Any],
     payload: Mapping[str, Any],
 ) -> None:
-    for key in ("decision_id", "plan_id", "core_id", "task_id", "run_id"):
+    for key in (
+        "decision_id",
+        "plan_id",
+        "core_id",
+        "workspace_id",
+        "task_id",
+        "run_id",
+        "run_group_id",
+        "group_run_id",
+        "group_id",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+    ):
         value = str(request.get(key) or payload.get(key) or "").strip()
         if value:
             request[key] = value

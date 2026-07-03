@@ -21653,6 +21653,7 @@ def test_runtime_planner_replan_reuses_existing_runner_replan_event() -> None:
             payload={
                 "request_id": "runtime-replan:decision-1:plan-1:analyze-data-file:data.analyze:tool_failure",
                 "trigger": "tool_failure",
+                "source": "runtime_tool_request_runner",
                 "source_step_id": "analyze-data-file",
                 "source_tool_name": "data.analyze",
                 "target_capability_id": "data.analysis",
@@ -21678,6 +21679,134 @@ def test_runtime_planner_replan_reuses_existing_runner_replan_event() -> None:
     assert payloads[0]["fallback_tools"] == ["terminal.run"]
     assert "replan_prompt" in payloads[0]
     assert payloads[0]["metadata"]["input_preview"] == {"path": "sales.csv"}
+
+
+def test_runtime_replan_event_drives_fallback_without_decision_and_preserves_scope() -> None:
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = []
+    tool_runs: list[list[dict[str, Any]]] = []
+    model_calls: list[Any] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append([dict(request) for request in tool_requests])
+        for tool_request in tool_requests:
+            tool = str(tool_request.get("tool") or "")
+            payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+            if tool == "data.analyze":
+                timeline_arg.append(
+                    _timeline(
+                        "agent.tool.call",
+                        tool,
+                        input_preview=payload,
+                        result={"ok": False, "error": "unsupported chart type"},
+                    )
+                )
+                timeline_arg.append(
+                    _timeline(
+                        "agent.replan.requested",
+                        "Runtime requested a replan after a failed or unverified step.",
+                        payload={
+                            "request_id": "runtime-replan:group-analysis",
+                            "trigger": "tool_failure",
+                            "source": "runtime_tool_request_runner",
+                            "run_id": "run-1",
+                            "task_id": "task-1",
+                            "core_id": "task-core-1",
+                            "workspace_id": "task-workspace-1",
+                            "group_run_id": "group-run-1",
+                            "workflow_run_id": "workflow-run-1",
+                            "source_step_id": "analyze-data-file",
+                            "source_tool_name": "data.analyze",
+                            "target_capability_id": "data.analysis",
+                            "fallback_tools": ["terminal.run"],
+                            "input_preview": payload,
+                            "metadata": {"input_preview": payload},
+                        },
+                    )
+                )
+                continue
+            if tool == "terminal.run":
+                timeline_arg.append(
+                    _timeline(
+                        "agent.tool.call",
+                        tool,
+                        input_preview=payload,
+                        result={"ok": True, "summary": "fallback complete"},
+                    )
+                )
+                continue
+            raise AssertionError(f"unexpected tool: {tool}")
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["data.analyze", "terminal.run"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner recovery.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: model_calls.append(True)
+        or {"role": "assistant", "content": "unexpected model fallback"},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    loop.run(
+        {"name": "Analyst"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=[{"role": "user", "content": "Analyze sales.csv"}],
+        direct_tool_requests=[
+            {
+                "tool": "data.analyze",
+                "input": {"path": "sales.csv"},
+                "fallback_tools": ["terminal.run"],
+                "replan_triggers": ["tool_failure"],
+            }
+        ],
+        run_id="run-1",
+    )
+
+    assert model_calls == []
+    assert [run[0]["tool"] for run in tool_runs] == ["data.analyze", "terminal.run"]
+    fallback_request = tool_runs[1][0]
+    assert fallback_request["planning_reason"] == "planner_replan_fallback_recovery"
+    assert fallback_request["replan_request_id"] == "runtime-replan:group-analysis"
+    assert fallback_request["task_id"] == "task-1"
+    assert fallback_request["core_id"] == "task-core-1"
+    assert fallback_request["workspace_id"] == "task-workspace-1"
+    assert fallback_request["group_run_id"] == "group-run-1"
+    assert fallback_request["workflow_run_id"] == "workflow-run-1"
+    assert fallback_request["step_id"] == "analyze-data-file"
+    assert fallback_request["capability_id"] == "data.analysis"
+    assert "sales.csv" in fallback_request["input"]["command"]
 
 
 def test_runtime_planner_replan_accepts_tool_failed_timeline_events() -> None:
