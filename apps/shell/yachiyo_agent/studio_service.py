@@ -57,6 +57,7 @@ from .memories import memory_snapshot_from_payload
 from .ports import StudioPort
 from .runtime_execution import runtime_execution_envelope_from_decision
 from .runtime_planner import RuntimePlanner
+from .runtime_progress import ProgressEventScope, public_runtime_tool_result_events
 from .start_event_enrichment import start_payload_with_planner_events
 from .skills import (
     skill_folder_snapshot_from_payload,
@@ -181,6 +182,29 @@ class AgentStudioService:
         if envelope is None:
             raise ValueError("Unable to build Agent Studio execution plan")
         return envelope
+
+    def project_tool_result_events(
+        self,
+        decision: PlannerDecisionSnapshot,
+        *,
+        tool_request: Mapping[str, Any],
+        tool_event: Mapping[str, Any],
+        event_scope: ProgressEventScope = "agent",
+        run_id: str = "",
+        task_id: str = "",
+        after_sequence: int = 0,
+        existing_timeline: list[Mapping[str, Any]] | None = None,
+    ) -> list[PublicRunEvent]:
+        return public_runtime_tool_result_events(
+            decision,
+            tool_request=tool_request,
+            tool_event=tool_event,
+            event_scope=event_scope,
+            run_id=run_id,
+            task_id=task_id,
+            after_sequence=after_sequence,
+            existing_timeline=existing_timeline,
+        )
 
     def start_planner_orchestration(
         self,

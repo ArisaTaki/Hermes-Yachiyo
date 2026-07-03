@@ -29,6 +29,7 @@ from .planner_projection import planner_enriched_chat_request
 from .ports import ChatTaskStarter, RuntimePort
 from .runtime_execution import runtime_execution_envelope_from_decision
 from .runtime_planner import RuntimePlanner
+from .runtime_progress import ProgressEventScope, public_runtime_tool_result_events
 from .run_snapshots import run_timeline_snapshot_from_payload
 from .start_event_enrichment import start_payload_with_planner_events
 from .task_cards import agent_task_snapshot_from_payload, agent_task_snapshots_from_payloads
@@ -124,6 +125,29 @@ class YachiyoAgentService:
         if envelope is None:
             raise ValueError("Unable to build Yachiyo chat execution plan")
         return envelope
+
+    def project_tool_result_events(
+        self,
+        decision: PlannerDecisionSnapshot,
+        *,
+        tool_request: Mapping[str, Any],
+        tool_event: Mapping[str, Any],
+        event_scope: ProgressEventScope = "agent",
+        run_id: str = "",
+        task_id: str = "",
+        after_sequence: int = 0,
+        existing_timeline: list[Mapping[str, Any]] | None = None,
+    ) -> list[PublicRunEvent]:
+        return public_runtime_tool_result_events(
+            decision,
+            tool_request=tool_request,
+            tool_event=tool_event,
+            event_scope=event_scope,
+            run_id=run_id,
+            task_id=task_id,
+            after_sequence=after_sequence,
+            existing_timeline=existing_timeline,
+        )
 
     def start_chat_task(
         self,

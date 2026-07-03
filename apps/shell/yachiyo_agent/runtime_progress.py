@@ -85,6 +85,38 @@ def public_task_progress_events_for_tool_result(
     ]
 
 
+def public_runtime_tool_result_events(
+    decision: PlannerDecisionSnapshot,
+    *,
+    tool_request: Mapping[str, Any],
+    tool_event: Mapping[str, Any],
+    event_scope: ProgressEventScope = "agent",
+    run_id: str = "",
+    task_id: str = "",
+    after_sequence: int = 0,
+    existing_timeline: list[Mapping[str, Any]] | None = None,
+) -> list[PublicRunEvent]:
+    """Return shared task progress and replan events for a completed tool step."""
+    progress_events = public_task_progress_events_for_tool_result(
+        tool_request=tool_request,
+        tool_event=tool_event,
+        event_scope=event_scope,
+        run_id=run_id,
+        after_sequence=after_sequence,
+        existing_timeline=existing_timeline,
+    )
+    replan_events = public_task_replan_events_for_tool_result(
+        decision,
+        tool_request=tool_request,
+        tool_event=tool_event,
+        event_scope=event_scope,
+        run_id=run_id,
+        task_id=task_id,
+        after_sequence=after_sequence + len(progress_events),
+    )
+    return [*progress_events, *replan_events]
+
+
 def task_replan_event_payloads_for_tool_result(
     decision: PlannerDecisionSnapshot,
     *,

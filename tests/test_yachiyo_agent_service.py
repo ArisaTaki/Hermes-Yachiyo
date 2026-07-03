@@ -717,6 +717,85 @@ def test_agent_studio_service_plans_discovered_desktop_app_execution() -> None:
     assert envelope.requests[2].requires_post_action_verification is True
 
 
+def test_yachiyo_agent_service_projects_runtime_tool_result_events() -> None:
+    service = YachiyoAgentService(_FakeRuntimePort())
+    decision = service.plan_chat_task(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+
+    events = service.project_tool_result_events(
+        decision,
+        tool_request=_runtime_progress_tool_request(
+            decision,
+            tool="data.analyze",
+            step_id="analyze-data-file",
+            task_id="task-1",
+            run_id="run-1",
+        ),
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "data.analyze",
+            "result": {"ok": False, "error": "unsupported chart type"},
+        },
+        run_id="run-1",
+        task_id="task-1",
+        after_sequence=40,
+    )
+
+    assert [event.event_type for event in events] == [
+        "agent.task.workspace_item.updated",
+        "agent.task.todo.updated",
+        "agent.task.checkpoint.updated",
+        "agent.replan.requested",
+    ]
+    assert [event.sequence for event in events] == [41, 42, 43, 44]
+    assert all(event.run_id == "run-1" for event in events)
+    assert events[0].core_id == decision.plan.task_core.core_id
+    assert events[-1].payload["source_step_id"] == "analyze-data-file"
+    assert events[-1].payload["fallback_tools"] == ["terminal.run"]
+
+
+def test_agent_studio_service_projects_scoped_group_runtime_tool_result_events() -> None:
+    service = AgentStudioService(_FakeStudioExecutionPort())
+    decision = service.plan_task(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+
+    events = service.project_tool_result_events(
+        decision,
+        tool_request=_runtime_progress_tool_request(
+            decision,
+            tool="data.analyze",
+            step_id="analyze-data-file",
+            task_id="task-1",
+            run_id="group-run-1",
+            group_run_id="group-run-1",
+        ),
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "data.analyze",
+            "result": {"ok": False, "error": "tool unavailable"},
+        },
+        event_scope="group.run",
+        run_id="group-run-1",
+        task_id="task-1",
+        after_sequence=10,
+    )
+
+    assert [event.event_type for event in events] == [
+        "group.run.task.workspace_item.updated",
+        "group.run.task.todo.updated",
+        "group.run.task.checkpoint.updated",
+        "group.run.replan.requested",
+    ]
+    assert [event.sequence for event in events] == [11, 12, 13, 14]
+    assert events[0].group_run_id == "group-run-1"
+    assert events[-1].payload["planner_event_type"] == "agent.replan.requested"
+    assert events[-1].payload["planner_scope"] == "group.run"
+
+
 def test_yachiyo_agent_service_enriches_bare_chat_start_payload_with_planner_events() -> None:
     port = _BareStartTaskRuntimePort()
     service = YachiyoAgentService(port)
@@ -1197,6 +1276,70 @@ def test_yachiyo_agent_service_keeps_string_reject_reason_compatible() -> None:
     assert port.calls == [
         ("reject", {"task_id": "task-2", "decision": {"approved": False, "reason": "No"}})
     ]
+
+
+def _runtime_progress_tool_request(
+    decision: Any,
+    *,
+    tool: str,
+    step_id: str,
+    task_id: str,
+    run_id: str,
+    group_run_id: str = "",
+    workflow_run_id: str = "",
+) -> dict[str, Any]:
+    task_core = decision.plan.task_core
+    assert task_core is not None
+    workspace_id = task_core.workspace.workspace_id
+    todo = next((item for item in task_core.todos if item.step_id == step_id), None)
+    checkpoint = next(
+        (item for item in task_core.checkpoints if item.after_step_id == step_id),
+        None,
+    )
+    return {
+        "tool": tool,
+        "input": {"path": "data/sales.csv"},
+        "source": "runtime_planner",
+        "step_id": step_id,
+        "core_id": task_core.core_id,
+        "workspace_id": workspace_id,
+        "decision_id": decision.decision_id,
+        "plan_id": decision.plan.plan_id,
+        "task_id": task_id,
+        "run_id": run_id,
+        "group_run_id": group_run_id,
+        "workflow_run_id": workflow_run_id,
+        "task_workspace_items": [
+            {
+                "item_id": f"workspace-{step_id}",
+                "title": "data/sales.csv",
+                "kind": "file",
+                "status": "planned",
+                "source_step_id": step_id,
+            }
+        ],
+        "task_todo": (
+            todo.model_dump(mode="python")
+            if todo is not None
+            else {
+                "todo_id": f"todo-{step_id}",
+                "title": step_id,
+                "status": "pending",
+                "step_id": step_id,
+                "tool_name": tool,
+            }
+        ),
+        "task_checkpoints": [
+            checkpoint.model_dump(mode="python")
+            if checkpoint is not None
+            else {
+                "checkpoint_id": f"checkpoint-{step_id}",
+                "title": f"Verify {step_id}",
+                "status": "planned",
+                "after_step_id": step_id,
+            }
+        ],
+    }
 
 
 def _task_payload(**overrides: Any) -> dict[str, Any]:
