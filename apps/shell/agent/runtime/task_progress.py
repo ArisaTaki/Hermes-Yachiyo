@@ -398,8 +398,29 @@ def _runtime_task_update_exists(
             or str(event.get("status") or "").strip() == status
             or str(_event_payload(event).get("status") or "").strip() == status
         )
+        and not _plan_seed_event_should_allow_runtime_update(event, payload)
         for event in timeline
     )
+
+
+def _plan_seed_event_should_allow_runtime_update(
+    event: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> bool:
+    existing_source = _task_update_source_event_name(event)
+    next_source = _task_update_source_event_name(payload)
+    return existing_source == "agent.plan.created" and bool(
+        next_source and next_source != "agent.plan.created"
+    )
+
+
+def _task_update_source_event_name(value: Mapping[str, Any]) -> str:
+    source = value.get("source_event")
+    if not isinstance(source, Mapping):
+        source = _event_payload(value).get("source_event")
+    if not isinstance(source, Mapping):
+        return ""
+    return str(source.get("event") or "").strip()
 
 
 def _runtime_planner_step_has_status(

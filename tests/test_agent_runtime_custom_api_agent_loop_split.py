@@ -25786,6 +25786,131 @@ def test_runtime_tool_runner_projects_task_progress_from_tool_result() -> None:
     assert run_events[1]["payload"]["decision_id"] == "decision-1"
 
 
+def test_auto_followup_annotation_scopes_task_context_to_matched_step() -> None:
+    selection_payload = {
+        "decision_id": "decision-auto-followup",
+        "plan_id": "runtime-plan-auto-followup",
+        "intent_kind": "desktop_operation",
+        "tool_plan": {
+            "plan_id": "tool-plan-auto-followup",
+            "steps": [
+                {
+                    "step_id": "open-selected-discovered-app",
+                    "tool_name": "app.open_and_safe_shortcut",
+                    "capability_id": "desktop.app_discovery",
+                },
+                {
+                    "step_id": "operate-foreground-ui-followup-type",
+                    "tool_name": "desktop.safe_type_text",
+                    "capability_id": "desktop.ui_operation",
+                },
+                {
+                    "step_id": "verify-desktop-result",
+                    "tool_name": "desktop.ui_elements",
+                    "capability_id": "desktop.observation",
+                },
+            ],
+        },
+        "task_core": {
+            "core_id": "task-core-auto-followup",
+            "workspace": {
+                "workspace_id": "task-workspace-auto-followup",
+                "items": [
+                    {
+                        "item_id": "workspace-open",
+                        "source_step_id": "open-selected-discovered-app",
+                    },
+                    {
+                        "item_id": "workspace-verify",
+                        "source_step_id": "verify-desktop-result",
+                    },
+                ],
+            },
+            "todos": [
+                {
+                    "todo_id": "todo-open",
+                    "step_id": "open-selected-discovered-app",
+                    "tool_name": "app.open_and_safe_shortcut",
+                },
+                {
+                    "todo_id": "todo-type",
+                    "step_id": "operate-foreground-ui-followup-type",
+                    "tool_name": "desktop.safe_type_text",
+                },
+            ],
+            "checkpoints": [
+                {
+                    "checkpoint_id": "checkpoint-open",
+                    "after_step_id": "open-selected-discovered-app",
+                },
+                {
+                    "checkpoint_id": "checkpoint-verify",
+                    "after_step_id": "verify-desktop-result",
+                },
+            ],
+            "replan_signals": [
+                {
+                    "signal_id": "signal-type",
+                    "trigger": "verification_failed",
+                    "source_step_id": "operate-foreground-ui-followup-type",
+                }
+            ],
+        },
+    }
+    requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Typora", "action": "new_document"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "generated content"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {},
+        },
+    ]
+
+    annotated = custom_api_agent_module._annotate_auto_followup_requests_from_tool_plan(
+        requests,
+        selection_payload,
+    )
+
+    assert [request["step_id"] for request in annotated] == [
+        "open-selected-discovered-app",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
+    assert all(request["core_id"] == "task-core-auto-followup" for request in annotated)
+    assert all(
+        request["workspace_id"] == "task-workspace-auto-followup"
+        for request in annotated
+    )
+    assert annotated[0]["task_todo"]["todo_id"] == "todo-open"
+    assert [item["item_id"] for item in annotated[0]["task_workspace_items"]] == [
+        "workspace-open"
+    ]
+    assert [checkpoint["checkpoint_id"] for checkpoint in annotated[0]["task_checkpoints"]] == [
+        "checkpoint-open"
+    ]
+    assert annotated[1]["task_todo"]["todo_id"] == "todo-type"
+    assert "task_workspace_items" not in annotated[1]
+    assert "task_checkpoints" not in annotated[1]
+    assert annotated[1]["replan_signal_ids"] == ["signal-type"]
+    assert annotated[1]["replan_triggers"] == ["verification_failed"]
+    assert "task_todo" not in annotated[2]
+    assert [item["item_id"] for item in annotated[2]["task_workspace_items"]] == [
+        "workspace-verify"
+    ]
+    assert [checkpoint["checkpoint_id"] for checkpoint in annotated[2]["task_checkpoints"]] == [
+        "checkpoint-verify"
+    ]
+
+
 def test_runtime_tool_runner_emits_replan_recovery_update_from_task_context() -> None:
     budget = FakeBudget()
     timeline: list[dict[str, Any]] = []

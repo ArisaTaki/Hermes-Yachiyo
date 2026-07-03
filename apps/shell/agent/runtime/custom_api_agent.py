@@ -11978,12 +11978,11 @@ def _annotate_auto_followup_requests_from_tool_plan(
             step_cursor = step_index + 1
             for key, value in _auto_followup_plan_step_trace(step).items():
                 item.setdefault(key, value)
-            task_todo = _auto_followup_task_todo_for_step(
+            for key, value in _auto_followup_task_context_for_step(
                 selection_payload,
                 str(item.get("step_id") or "").strip(),
-            )
-            if task_todo:
-                item.setdefault("task_todo", task_todo)
+            ).items():
+                item.setdefault(key, value)
         if str(item.get("step_id") or "").strip() and not str(
             item.get("planner_step_id") or ""
         ).strip():
@@ -12037,22 +12036,10 @@ def _auto_followup_task_core_trace(selection_payload: Mapping[str, Any]) -> dict
     workspace_id = str(workspace.get("workspace_id") or "").strip()
     if workspace_id:
         trace["workspace_id"] = workspace_id
-    workspace_items = workspace.get("items") if isinstance(workspace, Mapping) else []
-    if isinstance(workspace_items, list):
-        items = [dict(item) for item in workspace_items if isinstance(item, Mapping)]
-        if items:
-            trace["task_workspace_items"] = items
-    checkpoints = task_core.get("checkpoints")
-    if isinstance(checkpoints, list):
-        checkpoint_items = [
-            dict(checkpoint) for checkpoint in checkpoints if isinstance(checkpoint, Mapping)
-        ]
-        if checkpoint_items:
-            trace["task_checkpoints"] = checkpoint_items
     return trace
 
 
-def _auto_followup_task_todo_for_step(
+def _auto_followup_task_context_for_step(
     selection_payload: Mapping[str, Any],
     step_id: str,
 ) -> dict[str, Any]:
@@ -12060,16 +12047,58 @@ def _auto_followup_task_todo_for_step(
     if not clean_step_id:
         return {}
     task_core = _model_followup_task_core_payload(selection_payload)
-    todos = task_core.get("todos") if isinstance(task_core, Mapping) else []
-    if not isinstance(todos, list):
+    if not isinstance(task_core, Mapping):
         return {}
-    for todo in todos:
-        if not isinstance(todo, Mapping):
-            continue
-        if str(todo.get("step_id") or "").strip() == clean_step_id:
-            return dict(todo)
-    return {}
-
+    payload: dict[str, Any] = {}
+    todos = task_core.get("todos")
+    if isinstance(todos, list):
+        for todo in todos:
+            if not isinstance(todo, Mapping):
+                continue
+            if str(todo.get("step_id") or "").strip() == clean_step_id:
+                payload["task_todo"] = dict(todo)
+                break
+    checkpoints = task_core.get("checkpoints")
+    if isinstance(checkpoints, list):
+        checkpoint_items = [
+            dict(checkpoint)
+            for checkpoint in checkpoints
+            if isinstance(checkpoint, Mapping)
+            and str(checkpoint.get("after_step_id") or "").strip() == clean_step_id
+        ]
+        if checkpoint_items:
+            payload["task_checkpoints"] = checkpoint_items
+    workspace = task_core.get("workspace") if isinstance(task_core.get("workspace"), Mapping) else {}
+    workspace_items = workspace.get("items") if isinstance(workspace, Mapping) else []
+    if isinstance(workspace_items, list):
+        item_payloads = [
+            dict(item)
+            for item in workspace_items
+            if isinstance(item, Mapping)
+            and str(item.get("source_step_id") or "").strip() == clean_step_id
+        ]
+        if item_payloads:
+            payload["task_workspace_items"] = item_payloads
+    replan_signals = task_core.get("replan_signals")
+    if isinstance(replan_signals, list):
+        signal_ids: list[str] = []
+        triggers: list[str] = []
+        for signal in replan_signals:
+            if not isinstance(signal, Mapping):
+                continue
+            if str(signal.get("source_step_id") or "").strip() != clean_step_id:
+                continue
+            signal_id = str(signal.get("signal_id") or "").strip()
+            trigger = str(signal.get("trigger") or "").strip()
+            if signal_id and signal_id not in signal_ids:
+                signal_ids.append(signal_id)
+            if trigger and trigger not in triggers:
+                triggers.append(trigger)
+        if signal_ids:
+            payload["replan_signal_ids"] = signal_ids
+        if triggers:
+            payload["replan_triggers"] = triggers
+    return payload
 
 def _next_matching_followup_plan_step(
     request: Mapping[str, Any],
