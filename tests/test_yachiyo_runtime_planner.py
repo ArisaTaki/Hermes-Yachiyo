@@ -32949,6 +32949,76 @@ def test_runtime_execution_envelope_preserves_app_search_prepare_chain() -> None
     assert projected_requests[3]["task_todo"]["step_id"] == "focus-app-search-field"
 
 
+def test_runtime_execution_envelope_projects_full_desktop_plan_with_app_discovery() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "desktop.inspect_app",
+        "app.open",
+        "app.focus",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge 并点击导出",
+        allowed_tools=allowed_tools,
+    )
+
+    default_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+    full_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert default_envelope is not None
+    assert full_envelope is not None
+    assert [request.tool_name for request in default_envelope.requests] == [
+        "desktop.list_apps",
+        "desktop.inspect_app",
+        "desktop.ui_elements",
+    ]
+    assert [request.tool_name for request in full_envelope.requests] == [
+        "desktop.inspect_app",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert [request.step_id for request in full_envelope.requests] == [
+        "inspect-app",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert full_envelope.runtime_stage_counts == {
+        "discover": 1,
+        "operate": 1,
+        "verify": 1,
+    }
+    assert full_envelope.requests[1].approval_required is True
+    assert full_envelope.requests[1].runtime_role == "click_ui"
+    assert full_envelope.requests[1].task_todo["step_id"] == "operate-foreground-ui"
+    assert full_envelope.requests[2].runtime_stage == "verify"
+    assert full_envelope.requests[2].task_verification_targets[0]["step_id"] == (
+        "operate-foreground-ui"
+    )
+
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        full_envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    assert [request["tool"] for request in projected_requests] == [
+        "desktop.inspect_app",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert projected_requests[1]["approval_required"] is True
+    assert projected_requests[1]["requires_post_action_verification"] is True
+    assert projected_requests[2]["task_verification_targets"][0]["todo"]["step_id"] == (
+        "operate-foreground-ui"
+    )
+
+
 def test_runtime_execution_envelope_can_project_full_data_analysis_plan() -> None:
     allowed_tools = ["workspace.read", "terminal.run", "artifact.write"]
     decision = RuntimePlanner().decision(
