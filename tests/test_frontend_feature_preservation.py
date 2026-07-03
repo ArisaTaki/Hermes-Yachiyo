@@ -2246,6 +2246,12 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "预取报告素材",
             "planner_fallback_communication_send",
             "通信应用发送",
+            "planner_replan_after_tool_unavailable",
+            "工具不可用后重规划",
+            "planner_replan_ui_observed_action",
+            "基于观察结果重试 UI 动作",
+            "planner_followup_discovered_app_write",
+            "发现应用并写入后继续",
         ],
     )
     _assert_contains(

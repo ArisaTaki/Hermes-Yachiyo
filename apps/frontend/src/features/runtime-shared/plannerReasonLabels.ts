@@ -19,9 +19,16 @@ const PLANNER_REASON_LABELS: Record<string, string> = {
   planner_fallback_system_control: '系统控制',
   planner_fallback_web_research: '网页研究',
   planner_followup_artifact_write: '写入产物后继续',
+  planner_followup_app_search_observed_result: '观察应用搜索结果后继续',
+  planner_followup_app_write: '应用写入后继续',
   planner_followup_communication_observed_compose: '观察输入框后继续发信',
+  planner_followup_communication: '通信动作后继续',
+  planner_followup_deferred_ui_action: '延迟 UI 动作后继续',
+  planner_followup_discovered_app_observed_action: '发现应用并观察 UI 后继续',
+  planner_followup_discovered_app_write: '发现应用并写入后继续',
   planner_followup_desktop_observed_action: '观察 UI 后继续执行',
   planner_followup_note_write: '写入笔记后继续',
+  planner_followup_pending_plan: '待执行计划后继续',
   planner_followup_verify_code_changes: '验证代码修改',
   planner_policy_gate: '策略审批检查',
   planner_prefetch_communication_context: '预取通信上下文',
@@ -33,7 +40,18 @@ const PLANNER_REASON_LABELS: Record<string, string> = {
   planner_prefetch_schedule_context: '预取日程上下文',
   planner_prefetch_web_context: '预取网页上下文',
   planner_replan_fallback_recovery: '失败后恢复规划',
+  planner_replan_after_mixed_runtime_failure: '混合运行失败后重规划',
+  planner_replan_after_tool_failure: '工具失败后重规划',
+  planner_replan_after_tool_unavailable: '工具不可用后重规划',
+  planner_replan_after_verification_failed: '验证失败后重规划',
+  planner_replan_app_search_observed_result: '应用搜索结果观察后重试',
+  planner_replan_discovered_app_continuation: '发现应用后继续重规划',
+  planner_replan_focus_recovery: '恢复焦点后重试',
   planner_replan_runtime_recovery_action: 'Runtime 恢复动作',
+  planner_replan_ui_continuation: 'UI 重试后继续',
+  planner_replan_ui_observation_recovery: 'UI 观察恢复',
+  planner_replan_ui_observed_action: '基于观察结果重试 UI 动作',
+  planner_replan_ui_search_observed_result: 'UI 搜索结果观察后重试',
   planner_selected_foreground_operation: '前台操作',
 };
 
@@ -47,4 +65,3 @@ export function runtimePlannerReasonLabel(reason: string | null | undefined): st
     .replace(/_/g, ' ')
     .trim();
 }
-
