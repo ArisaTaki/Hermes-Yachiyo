@@ -385,6 +385,9 @@ class RuntimeCustomApiAgentLoop:
                     )
                     if not execution_tool_requests:
                         execution_tool_requests = planned_tool_requests
+                execution_tool_requests = _split_model_materialization_tool_requests(
+                    execution_tool_requests
+                )[0]
                 self._record_desktop_permission_preflight(
                     execution_tool_requests,
                     broker,
@@ -404,17 +407,18 @@ class RuntimeCustomApiAgentLoop:
                 )
                 tool_timeline_start = len(timeline)
                 try:
-                    self._run_tool_requests(
-                        execution_tool_requests,
-                        allowed_tools,
-                        broker,
-                        messages,
-                        timeline,
-                        artifacts,
-                        next_iteration=start_iteration,
-                        run_id=run_id,
-                        budget=budget,
-                    )
+                    if execution_tool_requests:
+                        self._run_tool_requests(
+                            execution_tool_requests,
+                            allowed_tools,
+                            broker,
+                            messages,
+                            timeline,
+                            artifacts,
+                            next_iteration=start_iteration,
+                            run_id=run_id,
+                            budget=budget,
+                        )
                 except AgentApprovalRequired as exc:
                     self._record_runtime_planner_task_progress_events(
                         runtime_planner_decision,
@@ -1587,7 +1591,11 @@ class RuntimeCustomApiAgentLoop:
             tool_requests = runtime_execution_verified_tool_requests(
                 tool_requests,
                 allowed_tools,
-                include_model_app_foreground=True,
+                include_model_app_foreground=not (
+                    _model_tool_requests_are_verification_recovery_actions(
+                        tool_requests
+                    )
+                ),
             )
             detail = content[:500] if content else ", ".join(
                 request["tool"] for request in tool_requests
@@ -1596,7 +1604,10 @@ class RuntimeCustomApiAgentLoop:
             if not tool_requests:
                 if not content.strip():
                     raise self._error_type("Native Agent 模型返回了空回复")
-                followup_context = _latest_model_followup_context(timeline)
+                followup_context = _latest_model_followup_context(
+                    timeline,
+                    include_pending_execution_only=True,
+                )
                 followup_target = _model_followup_context_target(followup_context)
                 auto_app_write_requests = _model_followup_app_write_requests(
                     content,
@@ -5752,6 +5763,16 @@ def _model_followup_context_payload(
     ]
     if not content_requests:
         return {}
+    observation_content_requests = [
+        request
+        for request in content_requests
+        if not _tool_request_requires_model_materialization(request)
+    ]
+    materialization_content_requests = [
+        request
+        for request in content_requests
+        if _tool_request_requires_model_materialization(request)
+    ]
     allowed = {
         str(tool or "").strip()
         for tool in allowed_tools
@@ -5773,7 +5794,7 @@ def _model_followup_context_payload(
     observation_tools = _ordered_text_list(
         [
             str(request.get("tool") or "").strip()
-            for request in content_requests
+            for request in observation_content_requests
             if str(request.get("tool") or "").strip()
         ]
     )
@@ -5791,15 +5812,27 @@ def _model_followup_context_payload(
         payload["artifacts_expected"] = artifacts_expected
     pending_plan_steps = _model_followup_pending_plan_steps(
         selection_payload,
-        content_requests,
+        observation_content_requests,
     )
     if pending_plan_steps:
         payload["pending_plan_steps"] = pending_plan_steps
     pending_execution_requests = _model_followup_pending_execution_requests(
         selection_payload,
-        content_requests,
+        observation_content_requests,
         allowed,
     )
+    materialization_execution_requests = (
+        _model_followup_materialization_execution_requests(
+            selection_payload,
+            materialization_content_requests,
+            allowed,
+        )
+    )
+    if materialization_execution_requests:
+        pending_execution_requests = _merged_pending_execution_requests(
+            pending_execution_requests,
+            materialization_execution_requests,
+        )
     deferred_execution_requests = _model_followup_deferred_execution_requests(
         content_requests,
         allowed,
@@ -5903,6 +5936,96 @@ def _model_followup_pending_execution_requests(
         if len(pending_requests) >= 5:
             break
     return pending_requests
+
+
+def _model_followup_materialization_execution_requests(
+    selection_payload: Mapping[str, Any],
+    content_requests: Iterable[Mapping[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    materialization_requests = [
+        request
+        for request in content_requests
+        if isinstance(request, Mapping)
+        and _tool_request_requires_model_materialization(request)
+    ]
+    if not materialization_requests:
+        return []
+    envelope_requests = _selection_execution_envelope_requests(selection_payload)
+    start_indexes = [
+        index
+        for request in materialization_requests
+        for index in [
+            _matching_execution_envelope_request_index(envelope_requests, request)
+        ]
+        if index >= 0
+    ]
+    raw_pending_requests: Iterable[Mapping[str, Any]]
+    if start_indexes:
+        raw_pending_requests = envelope_requests[min(start_indexes) :]
+    else:
+        raw_pending_requests = materialization_requests
+
+    pending: list[dict[str, Any]] = []
+    for request in raw_pending_requests:
+        if not isinstance(request, Mapping):
+            continue
+        request_payload = _model_followup_execution_request_payload(request, allowed)
+        if request_payload:
+            pending.append(request_payload)
+    return pending
+
+
+def _matching_execution_envelope_request_index(
+    envelope_requests: list[Mapping[str, Any]],
+    request: Mapping[str, Any],
+) -> int:
+    if not envelope_requests:
+        return -1
+    request_id = str(request.get("request_id") or "").strip()
+    step_id = str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+    for index, candidate in enumerate(envelope_requests):
+        candidate_request_id = str(candidate.get("request_id") or "").strip()
+        if request_id and candidate_request_id == request_id:
+            return index
+        candidate_step_id = str(candidate.get("step_id") or "").strip()
+        if step_id and candidate_step_id == step_id:
+            return index
+    request_tool = str(request.get("tool") or request.get("tool_name") or "").strip()
+    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    for index, candidate in enumerate(envelope_requests):
+        candidate_tool = str(
+            candidate.get("tool_name") or candidate.get("tool") or ""
+        ).strip()
+        if candidate_tool != request_tool:
+            continue
+        candidate_input = (
+            candidate.get("input") if isinstance(candidate.get("input"), Mapping) else {}
+        )
+        if _model_materialization_inputs_match(candidate_input, request_input):
+            return index
+    return -1
+
+
+def _model_materialization_inputs_match(
+    candidate_input: Mapping[str, Any],
+    request_input: Mapping[str, Any],
+) -> bool:
+    for key in (
+        "app_name",
+        "path",
+        "target_path",
+        "body_source",
+        "selection_source",
+        "app_selection_source",
+        "action",
+    ):
+        request_value = request_input.get(key)
+        if request_value in (None, "", [], {}):
+            continue
+        if candidate_input.get(key) != request_value:
+            return False
+    return True
 
 
 def _model_followup_deferred_execution_requests(
@@ -10979,6 +11102,49 @@ def _tool_requests_without_model_followup(
     return cleaned
 
 
+def _split_model_materialization_tool_requests(
+    requests: Iterable[Mapping[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    immediate: list[dict[str, Any]] = []
+    materialization: list[dict[str, Any]] = []
+    defer_remaining = False
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        item = dict(request)
+        if defer_remaining or _tool_request_requires_model_materialization(item):
+            defer_remaining = True
+            materialization.append(item)
+        else:
+            immediate.append(item)
+    return immediate, materialization
+
+
+def _tool_request_requires_model_materialization(request: Mapping[str, Any]) -> bool:
+    if not isinstance(request, Mapping) or not bool(request.get("continue_to_model")):
+        return False
+    tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+    request_input = (
+        request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    )
+    body_source = str(request_input.get("body_source") or "").strip()
+    if tool_name == "notes.create":
+        return bool(body_source) and not str(request_input.get("body") or "").strip()
+    if tool_name == "artifact.write":
+        if str(request_input.get("content") or "").strip():
+            return False
+        return bool(
+            body_source
+            or str(request_input.get("path") or "").strip()
+            or request_input.get("paths")
+        )
+    if tool_name == "clipboard.write":
+        return bool(body_source) and not str(request_input.get("text") or "").strip()
+    if tool_name in _MODEL_FOLLOWUP_TEXT_ENTRY_TOOLS:
+        return bool(body_source) and not str(request_input.get("text") or "").strip()
+    return False
+
+
 def _runtime_planner_should_trace_tool_requests(decision: Any | None) -> bool:
     steps = getattr(
         getattr(getattr(decision, "plan", None), "tool_plan", None),
@@ -15176,7 +15342,11 @@ def _latest_model_followup_target(timeline: list[dict[str, Any]]) -> dict[str, A
     return _model_followup_context_target(_latest_model_followup_context(timeline))
 
 
-def _latest_model_followup_context(timeline: list[dict[str, Any]]) -> dict[str, Any]:
+def _latest_model_followup_context(
+    timeline: list[dict[str, Any]],
+    *,
+    include_pending_execution_only: bool = False,
+) -> dict[str, Any]:
     for event in reversed(timeline):
         if not isinstance(event, dict):
             continue
@@ -15189,6 +15359,10 @@ def _latest_model_followup_context(timeline: list[dict[str, Any]]) -> dict[str, 
         }
         if (
             not _followup_event_has_readable_source(event)
+            and not (
+                include_pending_execution_only
+                and _followup_event_has_pending_execution(event)
+            )
             and not _model_followup_target_from_task_core_context(context)
         ):
             return {}
@@ -15293,6 +15467,17 @@ def _followup_event_has_readable_source(event: Mapping[str, Any]) -> bool:
         snapshot.get("ok") is not False
         and bool(str(snapshot.get("text") or "").strip())
         for snapshot in snapshots
+    )
+
+
+def _followup_event_has_pending_execution(event: Mapping[str, Any]) -> bool:
+    pending_requests = event.get("pending_execution_requests")
+    if not isinstance(pending_requests, list):
+        return False
+    return any(
+        isinstance(request, Mapping)
+        and str(request.get("tool_name") or request.get("tool") or "").strip()
+        for request in pending_requests
     )
 
 
@@ -16030,10 +16215,35 @@ def _tool_requests_with_pending_plan_metadata(
         tool_requests,
         followup_context,
     )
+    tool_requests = [
+        _explicit_model_tool_request_without_auto_verification(request)
+        for request in tool_requests
+    ]
     return _model_followup_requests_with_context_trace_metadata(
         tool_requests,
         followup_context,
     )
+
+
+def _explicit_model_tool_request_without_auto_verification(
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    item = dict(request)
+    item.pop("requires_post_action_verification", None)
+    return item
+
+
+def _model_tool_requests_are_verification_recovery_actions(
+    requests: Iterable[Mapping[str, Any]],
+) -> bool:
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        trigger = str(request.get("replan_trigger") or "").strip()
+        triggers = _string_list(request.get("replan_triggers"))
+        if trigger == "verification_failed" or "verification_failed" in triggers:
+            return True
+    return False
 
 
 def _model_followup_requests_with_context_trace_metadata(

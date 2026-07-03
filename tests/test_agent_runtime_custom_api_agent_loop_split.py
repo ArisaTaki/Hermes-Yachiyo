@@ -7955,6 +7955,306 @@ def test_model_followup_context_surfaces_deferred_ui_execution_request() -> None
     ]
 
 
+def test_model_followup_context_defers_materialization_execution_requests() -> None:
+    immediate, deferred = (
+        custom_api_agent_module._split_model_materialization_tool_requests(
+            [
+                {
+                    "tool": "app.open_and_safe_shortcut",
+                    "input": {"app_name": "Obsidian", "action": "new_document"},
+                },
+                {
+                    "tool": "desktop.safe_type_text",
+                    "input": {"body_source": "model_generated_content"},
+                    "continue_to_model": True,
+                    "request_id": "runtime-plan-note:request:2:desktop.safe_type_text",
+                    "step_id": "insert-generated-note",
+                },
+                {
+                    "tool": "desktop.ui_elements",
+                    "input": {"limit": 80},
+                    "request_id": "runtime-plan-note:request:3:desktop.ui_elements",
+                    "step_id": "verify-generated-note",
+                },
+            ]
+        )
+    )
+
+    assert [request["tool"] for request in immediate] == ["app.open_and_safe_shortcut"]
+    assert [request["tool"] for request in deferred] == [
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+
+    payload = custom_api_agent_module._model_followup_context_payload(
+        [
+            {
+                "tool": "desktop.safe_type_text",
+                "input": {"body_source": "model_generated_content"},
+                "planning_reason": "planner_full_plan_information_capture",
+                "continue_to_model": True,
+                "request_id": "runtime-plan-note:request:2:desktop.safe_type_text",
+                "step_id": "insert-generated-note",
+            }
+        ],
+        {
+            "intent_kind": "information_capture",
+            "decision_id": "decision-note",
+            "plan_id": "runtime-plan-note",
+            "yachiyo_execution_envelope": {
+                "requests": [
+                    {
+                        "request_id": (
+                            "runtime-plan-note:request:1:app.open_and_safe_shortcut"
+                        ),
+                        "step_id": "prepare-note-target",
+                        "tool_name": "app.open_and_safe_shortcut",
+                        "input": {
+                            "app_name": "Obsidian",
+                            "action": "new_document",
+                        },
+                        "status": "planned",
+                    },
+                    {
+                        "request_id": (
+                            "runtime-plan-note:request:2:desktop.safe_type_text"
+                        ),
+                        "step_id": "insert-generated-note",
+                        "tool_name": "desktop.safe_type_text",
+                        "capability_id": "desktop.ui_operation",
+                        "input": {"body_source": "model_generated_content"},
+                        "planning_reason": "planner_full_plan_information_capture",
+                        "approval_required": True,
+                        "status": "planned",
+                        "runtime_stage": "operate",
+                        "runtime_role": "type_ui",
+                    },
+                    {
+                        "request_id": "runtime-plan-note:request:3:desktop.ui_elements",
+                        "step_id": "verify-generated-note",
+                        "tool_name": "desktop.ui_elements",
+                        "capability_id": "desktop.ui_operation",
+                        "input": {"limit": 80},
+                        "planning_reason": "planner_full_plan_information_capture",
+                        "status": "planned",
+                        "runtime_stage": "verify",
+                        "runtime_role": "observe",
+                    },
+                ],
+            },
+        },
+        allowed_tools=[
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
+        timeline=[
+            _timeline(
+                "agent.tool.call",
+                "app.open_and_safe_shortcut",
+                input_preview={"app_name": "Obsidian", "action": "new_document"},
+                result={"ok": True},
+            )
+        ],
+    )
+
+    assert payload["observation_tools"] == []
+    assert [
+        request["request_id"] for request in payload["pending_execution_requests"]
+    ] == [
+        "runtime-plan-note:request:2:desktop.safe_type_text",
+        "runtime-plan-note:request:3:desktop.ui_elements",
+    ]
+    assert payload["pending_execution_requests"][0]["approval_required"] is True
+
+    pending_requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        payload,
+        ["desktop.safe_type_text", "desktop.ui_elements"],
+        generated_content="今天的会议纪要：先整理任务，再同步日程。",
+    )
+
+    assert [request["tool"] for request in pending_requests] == [
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert pending_requests[0]["input"] == {
+        "text": "今天的会议纪要：先整理任务，再同步日程。"
+    }
+    assert pending_requests[0]["request_id"] == (
+        "runtime-plan-note:request:2:desktop.safe_type_text"
+    )
+    assert pending_requests[1]["input"] == {"limit": 80}
+
+
+def test_custom_api_agent_loop_defers_materialization_until_model_content(
+    monkeypatch,
+) -> None:
+    budget = FakeBudget()
+    tool_runs: list[list[dict[str, Any]]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    allowed_tools = [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    planner_requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Obsidian", "action": "new_document"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_full_plan_information_capture",
+            "request_id": "runtime-plan-note:request:1:app.open_and_safe_shortcut",
+            "step_id": "prepare-note-target",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"body_source": "model_generated_content"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_full_plan_information_capture",
+            "continue_to_model": True,
+            "request_id": "runtime-plan-note:request:2:desktop.safe_type_text",
+            "step_id": "insert-generated-note",
+            "capability_id": "desktop.ui_operation",
+            "runtime_stage": "operate",
+            "runtime_role": "type_ui",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_full_plan_information_capture",
+            "request_id": "runtime-plan-note:request:3:desktop.ui_elements",
+            "step_id": "verify-generated-note",
+            "capability_id": "desktop.ui_operation",
+            "runtime_stage": "verify",
+            "runtime_role": "observe",
+        },
+    ]
+    selection_payload = {
+        "intent_kind": "information_capture",
+        "decision_id": "decision-note",
+        "plan_id": "runtime-plan-note",
+        "yachiyo_execution_envelope": {
+            "requests": [
+                {
+                    "request_id": request["request_id"],
+                    "step_id": request["step_id"],
+                    "tool_name": request["tool"],
+                    "capability_id": request.get("capability_id", ""),
+                    "input": request["input"],
+                    "planning_reason": request["planning_reason"],
+                    "status": "planned",
+                    "runtime_stage": request.get("runtime_stage", ""),
+                    "runtime_role": request.get("runtime_role", ""),
+                }
+                for request in planner_requests
+            ],
+        },
+    }
+
+    monkeypatch.setattr(
+        RuntimeCustomApiAgentLoop,
+        "_runtime_planner_tool_requests",
+        lambda _self, _planning_context, _allowed_tools: (
+            None,
+            planner_requests,
+            selection_payload,
+        ),
+    )
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ) -> None:
+        tool_runs.append([dict(request) for request in tool_requests])
+        for request in tool_requests:
+            tool = str(request.get("tool") or "")
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool,
+                    input_preview=payload,
+                    result={"ok": True, "action": tool},
+                )
+            )
+
+    def call_model(_base_url, _model, _api_key, messages_arg, **_kwargs):
+        model_calls.append([dict(message) for message in messages_arg])
+        return {"content": "今天的会议纪要：先整理任务，再同步日程。"}
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": allowed_tools},
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed: [{"name": tool} for tool in allowed],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=2,
+        operating_doctrine="Use runtime planner direct desktop execution.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=call_model,
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    loop.run(
+        {"name": "Yachiyo"},
+        "",
+        broker={},
+        timeline=timeline,
+        artifacts=[],
+        messages=[{"role": "user", "content": "在 Obsidian 写一段会议纪要"}],
+        direct_tool_requests=planner_requests,
+        run_id="run-materialization",
+    )
+
+    assert [[request["tool"] for request in run] for run in tool_runs] == [
+        ["app.open_and_safe_shortcut"],
+        ["desktop.safe_type_text", "desktop.ui_elements"],
+    ]
+    assert tool_runs[1][0]["input"] == {
+        "text": "今天的会议纪要：先整理任务，再同步日程。"
+    }
+    assert len(model_calls) == 1
+    followup_context = next(
+        event
+        for event in timeline
+        if event.get("event") == "agent.model.followup_context"
+    )
+    assert [
+        request["request_id"]
+        for request in followup_context["pending_execution_requests"]
+    ] == [
+        "runtime-plan-note:request:2:desktop.safe_type_text",
+        "runtime-plan-note:request:3:desktop.ui_elements",
+    ]
+
+
 def test_auto_deferred_observed_ui_followup_promotes_matching_click_request() -> None:
     requests = custom_api_agent_module._auto_deferred_observed_ui_followup_requests(
         [
