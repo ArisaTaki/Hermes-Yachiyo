@@ -468,6 +468,11 @@ def test_task_progress_summary_public_snapshot_exposes_replay_state() -> None:
         blocked_todos=1,
         total_checkpoints=3,
         waiting_approval_checkpoints=1,
+        pending_verification_count=1,
+        failed_verification_count=1,
+        verified_verification_count=2,
+        latest_verification_status="verification_failed",
+        latest_verification_step_id="run-analysis",
         replan_request_count=1,
         latest_replan_request_id="replan-1",
         latest_replan_trigger="tool_failure",
@@ -498,6 +503,11 @@ def test_task_progress_summary_public_snapshot_exposes_replay_state() -> None:
         "total_workspace_items",
         "completed_workspace_items",
         "blocked_workspace_items",
+        "pending_verification_count",
+        "failed_verification_count",
+        "verified_verification_count",
+        "latest_verification_status",
+        "latest_verification_step_id",
         "replan_request_count",
         "latest_replan_request_id",
         "latest_replan_trigger",
@@ -512,6 +522,9 @@ def test_task_progress_summary_public_snapshot_exposes_replay_state() -> None:
     assert payload["status"] == "replan_requested"
     assert payload["needs_replan"] is True
     assert payload["blocked_step_ids"] == ["run-analysis"]
+    assert payload["pending_verification_count"] == 1
+    assert payload["failed_verification_count"] == 1
+    assert payload["latest_verification_status"] == "verification_failed"
 
 
 def test_task_replan_request_contract_links_failure_to_planner_state() -> None:
@@ -1381,14 +1394,21 @@ def test_agent_task_snapshot_replays_explicit_task_core_update_events_by_id() ->
                     "event_type": "workflow.run.task.checkpoint.updated",
                     "payload": {
                         "checkpoint_id": "checkpoint-1",
+                        "step_id": "read-source",
                         "status": "completed",
+                        "verification_status": "verified",
+                        "verified_by_step_id": "verify-read-source",
                         "source_event": {"event": "agent.tool.call"},
                         "checkpoint": {
                             "checkpoint_id": "checkpoint-1",
                             "title": "Verify read",
                             "after_step_id": "read-source",
                             "status": "completed",
-                            "payload": {"verified": True},
+                            "payload": {
+                                "verified": True,
+                                "verification_status": "verified",
+                                "verified_by_step_id": "verify-read-source",
+                            },
                         },
                     },
                 },
@@ -1418,6 +1438,9 @@ def test_agent_task_snapshot_replays_explicit_task_core_update_events_by_id() ->
     assert snapshot.task_progress.completed_todos == 1
     assert snapshot.task_progress.completed_checkpoints == 1
     assert snapshot.task_progress.completed_workspace_items == 1
+    assert snapshot.task_progress.verified_verification_count == 1
+    assert snapshot.task_progress.latest_verification_status == "verified"
+    assert snapshot.task_progress.latest_verification_step_id == "read-source"
     assert snapshot.task_progress.progress_text == "1/1 todos completed"
 
 

@@ -331,6 +331,11 @@ class TaskProgressSummarySnapshot(_PublicSnapshot):
     total_workspace_items: int = 0
     completed_workspace_items: int = 0
     blocked_workspace_items: int = 0
+    pending_verification_count: int = 0
+    failed_verification_count: int = 0
+    verified_verification_count: int = 0
+    latest_verification_status: str | None = None
+    latest_verification_step_id: str | None = None
     replan_request_count: int = 0
     latest_replan_request_id: str | None = None
     latest_replan_trigger: str | None = None

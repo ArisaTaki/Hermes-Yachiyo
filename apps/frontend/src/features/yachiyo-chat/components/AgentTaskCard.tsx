@@ -353,6 +353,8 @@ function TaskCoreProgress({ task }: { task: AgentTaskSnapshot }) {
   const blockedCount = progress?.blocked_todos ?? todos.filter((todo) => todo.status === 'blocked').length;
   const activeCount = progress?.active_todos ?? todos.filter((todo) => todo.status === 'in_progress').length;
   const checkpointCount = progress?.total_checkpoints ?? (task.task_core?.checkpoints || []).length;
+  const pendingVerificationCount = progress?.pending_verification_count ?? 0;
+  const failedVerificationCount = progress?.failed_verification_count ?? 0;
   const progressDetail = progress?.progress_text
     || (totalCount ? `${completedCount}/${totalCount}` : progress?.status || '');
   const activeTodo = todos.find((todo) => todo.status === 'in_progress' || todo.status === 'blocked')
@@ -367,7 +369,10 @@ function TaskCoreProgress({ task }: { task: AgentTaskSnapshot }) {
       data-checkpoint-count={checkpointCount}
       data-completed-count={completedCount}
       data-latest-replan-request-id={progress?.latest_replan_request_id || ''}
+      data-latest-verification-status={progress?.latest_verification_status || ''}
       data-needs-replan={String(progress?.needs_replan === true)}
+      data-pending-verification-count={pendingVerificationCount}
+      data-failed-verification-count={failedVerificationCount}
       data-progress-status={progress?.status || ''}
       data-testid="yachiyo-agent-task-core"
       data-todo-count={totalCount}

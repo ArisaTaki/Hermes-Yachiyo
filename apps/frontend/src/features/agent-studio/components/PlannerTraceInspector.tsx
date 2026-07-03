@@ -688,7 +688,12 @@ export function TaskProgressInspector({
     <section
       data-latest-replan-request-id={taskProgress?.latest_replan_request_id || ''}
       data-latest-replan-step-id={taskProgress?.latest_replan_step_id || ''}
+      data-latest-verification-status={taskProgress?.latest_verification_status || ''}
+      data-latest-verification-step-id={taskProgress?.latest_verification_step_id || ''}
       data-needs-replan={String(taskProgress?.needs_replan === true)}
+      data-pending-verification-count={taskProgress?.pending_verification_count ?? 0}
+      data-failed-verification-count={taskProgress?.failed_verification_count ?? 0}
+      data-verified-verification-count={taskProgress?.verified_verification_count ?? 0}
       data-replan-recovery-count={recoveries.length}
       data-task-progress-status={taskProgress?.status || ''}
       data-testid="agent-run-detail-task-progress"
@@ -709,6 +714,21 @@ export function TaskProgressInspector({
             <span className="studio-tool-permission" data-task-progress-count-kind="workspace">
               workspace · {taskProgress.completed_workspace_items ?? 0}/{taskProgress.total_workspace_items ?? 0}
             </span>
+            {taskProgress.pending_verification_count ? (
+              <span className="studio-tool-permission" data-task-progress-count-kind="verification-pending">
+                verification pending · {taskProgress.pending_verification_count}
+              </span>
+            ) : null}
+            {taskProgress.failed_verification_count ? (
+              <span className="studio-tool-permission missing" data-task-progress-count-kind="verification-failed">
+                verification failed · {taskProgress.failed_verification_count}
+              </span>
+            ) : null}
+            {taskProgress.verified_verification_count ? (
+              <span className="studio-tool-permission" data-task-progress-count-kind="verification-verified">
+                verified · {taskProgress.verified_verification_count}
+              </span>
+            ) : null}
             {taskProgress.current_step_title || taskProgress.current_step_id ? (
               <span
                 className="studio-tool-permission"

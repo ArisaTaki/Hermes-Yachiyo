@@ -247,6 +247,11 @@ export type TaskProgressSummarySnapshot = {
   total_workspace_items?: number;
   completed_workspace_items?: number;
   blocked_workspace_items?: number;
+  pending_verification_count?: number;
+  failed_verification_count?: number;
+  verified_verification_count?: number;
+  latest_verification_status?: string | null;
+  latest_verification_step_id?: string | null;
   replan_request_count?: number;
   latest_replan_request_id?: string | null;
   latest_replan_trigger?: string | null;

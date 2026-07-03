@@ -46,6 +46,8 @@ def task_progress_summary_from_task_core(
     waiting_approval_checkpoints = _count_status(checkpoints, "waiting_approval")
     completed_workspace_items = _count_status(workspace_items, "completed")
     blocked_workspace_items = _count_status(workspace_items, "blocked")
+    verification_counts = _verification_counts(checkpoints, todos, workspace_items)
+    latest_verification = _latest_verification_status(event_list)
     latest_payload = latest_replan.payload if latest_replan is not None else {}
 
     return TaskProgressSummarySnapshot(
@@ -67,6 +69,11 @@ def task_progress_summary_from_task_core(
         total_workspace_items=len(workspace_items),
         completed_workspace_items=completed_workspace_items,
         blocked_workspace_items=blocked_workspace_items,
+        pending_verification_count=verification_counts["pending"],
+        failed_verification_count=verification_counts["failed"],
+        verified_verification_count=verification_counts["verified"],
+        latest_verification_status=latest_verification.get("status"),
+        latest_verification_step_id=latest_verification.get("step_id"),
         replan_request_count=_replan_request_count(event_list),
         latest_replan_request_id=_optional_text(latest_payload.get("request_id")),
         latest_replan_trigger=_optional_text(latest_payload.get("trigger")),
@@ -80,6 +87,8 @@ def task_progress_summary_from_task_core(
             completed=completed_todos,
             blocked=blocked_todos,
             waiting_approval=waiting_approval_checkpoints,
+            pending_verifications=verification_counts["pending"],
+            failed_verifications=verification_counts["failed"],
             replan_requested=latest_replan is not None,
         ),
     )
@@ -206,6 +215,60 @@ def _count_status(items: Iterable[Any], status: str) -> int:
     return sum(1 for item in items if _status(item) == status)
 
 
+def _verification_counts(
+    checkpoints: list[Any],
+    todos: list[TaskTodoItemSnapshot],
+    workspace_items: list[Any],
+) -> dict[str, int]:
+    statuses = _verification_statuses(checkpoints, source_kind="checkpoint")
+    if not statuses:
+        statuses = _verification_statuses(todos, source_kind="todo")
+    if not statuses:
+        statuses = _verification_statuses(workspace_items, source_kind="workspace_item")
+    return {
+        "pending": sum(1 for status in statuses if status == "pending_verification"),
+        "failed": sum(1 for status in statuses if status == "verification_failed"),
+        "verified": sum(1 for status in statuses if status == "verified"),
+    }
+
+
+def _verification_statuses(items: Iterable[Any], *, source_kind: str) -> list[str]:
+    statuses: list[str] = []
+    for item in items:
+        status = _verification_status(item, source_kind=source_kind)
+        if status:
+            statuses.append(status)
+    return statuses
+
+
+def _verification_status(item: Any, *, source_kind: str) -> str:
+    source = {}
+    if source_kind == "checkpoint":
+        source = getattr(item, "payload", {}) or {}
+    elif source_kind in {"todo", "workspace_item"}:
+        source = getattr(item, "metadata", {}) or {}
+    if not isinstance(source, Mapping):
+        return ""
+    return _text(source.get("verification_status"))
+
+
+def _latest_verification_status(events: list[PublicRunEvent]) -> dict[str, str | None]:
+    for event in reversed(events):
+        payload = event.payload if isinstance(event.payload, Mapping) else {}
+        status = _text(payload.get("verification_status"))
+        if not status:
+            continue
+        return {
+            "status": status,
+            "step_id": _optional_text(
+                payload.get("step_id")
+                or payload.get("verified_by_step_id")
+                or payload.get("planner_step_id")
+            ),
+        }
+    return {"status": None, "step_id": None}
+
+
 def _status(item: Any) -> str:
     return _text(getattr(item, "status", ""))
 
@@ -216,6 +279,8 @@ def _progress_text(
     completed: int,
     blocked: int,
     waiting_approval: int,
+    pending_verifications: int,
+    failed_verifications: int,
     replan_requested: bool,
 ) -> str:
     if not total:
@@ -225,6 +290,10 @@ def _progress_text(
         parts.append(f"{blocked} blocked")
     if waiting_approval:
         parts.append(f"{waiting_approval} waiting approval")
+    if pending_verifications:
+        parts.append(f"{pending_verifications} verification pending")
+    if failed_verifications:
+        parts.append(f"{failed_verifications} verification failed")
     if replan_requested:
         parts.append("replan requested")
     return " | ".join(parts)
