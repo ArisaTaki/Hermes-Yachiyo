@@ -26,6 +26,7 @@ TOOL_FUNCTION_NAMES = {
     "workspace.write_patch": "workspace_write_patch",
     "fs.find_files": "fs_find_files",
     "fs.read_file": "fs_read_file",
+    "fs.move_file": "fs_move_file",
     "file.search": "file_search",
     "file.read": "file_read",
     "file.organize": "file_organize",
@@ -124,7 +125,13 @@ TOOL_FUNCTION_NAMES = {
 }
 TOOL_NAME_ALIASES = {value: key for key, value in TOOL_FUNCTION_NAMES.items()}
 KNOWN_AGENT_TOOLS = set(TOOL_FUNCTION_NAMES)
-HIGH_RISK_AGENT_TOOLS = {"terminal.run", "python.run", "workspace.write_patch", "file.organize"}
+HIGH_RISK_AGENT_TOOLS = {
+    "terminal.run",
+    "python.run",
+    "workspace.write_patch",
+    "file.organize",
+    "fs.move_file",
+}
 MEMORY_TOOL_NAMES = ("memory.add", "memory.replace", "memory.remove")
 FUTURE_TASK_TOOL_NAMES = ("future_task.schedule", "future_task.list", "future_task.cancel")
 SAFE_SHORTCUT_ACTIONS = (
@@ -414,26 +421,26 @@ class ToolDescriptor:
                     raise AgentRuntimeError(
                         "workspace.write_patch 参数 expected_sha256 与 base_sha256 不一致"
                     )
-        if self.name == "file.organize":
+        if self.name in {"file.organize", "fs.move_file"}:
             for key in ("path", "operation", "file_type", "pattern", "destination", "conflict_strategy"):
                 if key in payload and not isinstance(payload.get(key), str):
-                    raise AgentRuntimeError(f"file.organize 参数 {key} 必须是字符串")
+                    raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是字符串")
             operation = str(payload.get("operation") or "organize").strip().lower()
             if operation not in {"organize", "archive", "move"}:
                 raise AgentRuntimeError(
-                    "file.organize 参数 operation 必须是 organize、archive 或 move"
+                    f"{self.name} 参数 operation 必须是 organize、archive 或 move"
                 )
             conflict_strategy = str(
                 payload.get("conflict_strategy") or "keep_both"
             ).strip().lower()
             if conflict_strategy not in {"keep_both", "skip"}:
                 raise AgentRuntimeError(
-                    "file.organize 参数 conflict_strategy 必须是 keep_both 或 skip"
+                    f"{self.name} 参数 conflict_strategy 必须是 keep_both 或 skip"
                 )
             if "limit" in payload:
                 value = payload.get("limit")
                 if isinstance(value, bool) or not isinstance(value, int) or not 1 <= value <= 500:
-                    raise AgentRuntimeError("file.organize 参数 limit 必须是 1-500 的整数")
+                    raise AgentRuntimeError(f"{self.name} 参数 limit 必须是 1-500 的整数")
         if self.name == "python.run":
             for key in ("command", "code"):
                 if key in payload and not isinstance(payload.get(key), str):
@@ -1206,6 +1213,48 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
                 "type": "string",
                 "enum": ["organize", "archive", "move"],
                 "description": "File organization operation. Delete/dedupe is intentionally unsupported.",
+            },
+            "file_type": {
+                "type": "string",
+                "description": "Optional semantic file type filter such as invoice, pdf, screenshot, image, document, spreadsheet, archive, audio, or video.",
+            },
+            "pattern": {
+                "type": "string",
+                "description": "Optional glob filter such as *.pdf or *.{png,jpg}.",
+            },
+            "destination": {
+                "type": "string",
+                "description": "Optional destination directory. Simple names are created under path; top-level Desktop/Documents/Downloads/Pictures/Movies/Music are workspace-relative.",
+            },
+            "conflict_strategy": {
+                "type": "string",
+                "enum": ["keep_both", "skip"],
+                "description": "How to handle existing destination filenames. Defaults to keep_both.",
+            },
+            "limit": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 500,
+                "description": "Maximum matching files to move. Defaults to 200.",
+            },
+        },
+        required=("path", "operation"),
+    ),
+    "fs.move_file": ToolDescriptor(
+        name="fs.move_file",
+        description=(
+            "Portable fs namespace alias for file.organize. Moves matching files inside "
+            "configured writable workspace scopes. Requires user approval and does not delete files."
+        ),
+        properties={
+            "path": {
+                "type": "string",
+                "description": "Relative source directory path inside writable scopes.",
+            },
+            "operation": {
+                "type": "string",
+                "enum": ["organize", "archive", "move"],
+                "description": "File move/organization operation. Delete/dedupe is intentionally unsupported.",
             },
             "file_type": {
                 "type": "string",

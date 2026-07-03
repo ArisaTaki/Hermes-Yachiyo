@@ -404,6 +404,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "fs.read_file": [
             "Portable fs alias for workspace.read; uses the same allowed workspace scope checks.",
         ],
+        "fs.move_file": [
+            "Portable fs alias for file.organize; always requires approval and does not delete files.",
+        ],
         "browser.extract": [
             "Portable alias for browser.extract_text; text extraction requires a reachable Chrome CDP endpoint.",
         ],

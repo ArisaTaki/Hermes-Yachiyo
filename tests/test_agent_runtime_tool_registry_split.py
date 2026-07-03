@@ -196,6 +196,72 @@ def test_tool_dispatch_registry_routes_python_run_through_terminal(tmp_path, mon
     ]
 
 
+def test_tool_dispatch_registry_routes_fs_move_file_through_file_organize(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    broker = _broker(tmp_path)
+    calls = []
+
+    monkeypatch.setattr(
+        broker,
+        "file_organize",
+        lambda path,
+        *,
+        operation="organize",
+        file_type="",
+        pattern="",
+        destination="",
+        conflict_strategy="keep_both",
+        limit=200,
+        approved=False: calls.append(
+            (path, operation, file_type, pattern, destination, conflict_strategy, limit, approved)
+        )
+        or {"ok": bool(approved), "approval_required": not approved},
+    )
+
+    approval = dispatch_tool_call(
+        broker,
+        "fs.move_file",
+        {
+            "path": "Downloads",
+            "operation": "organize",
+            "file_type": "pdf",
+            "pattern": "*.pdf",
+            "destination": "Documents",
+        },
+    )
+    result = dispatch_tool_call(
+        broker,
+        "fs.move_file",
+        {
+            "path": "Downloads",
+            "operation": "organize",
+            "file_type": "pdf",
+            "pattern": "*.pdf",
+            "destination": "Documents",
+        },
+        approved=True,
+    )
+
+    assert approval == {
+        "ok": False,
+        "approval_required": True,
+        "tool": "fs.move_file",
+        "alias_for": "file.organize",
+    }
+    assert result == {
+        "ok": True,
+        "approval_required": False,
+        "tool": "fs.move_file",
+        "alias_for": "file.organize",
+    }
+    assert calls == [
+        ("Downloads", "organize", "pdf", "*.pdf", "Documents", "keep_both", 200, False),
+        ("Downloads", "organize", "pdf", "*.pdf", "Documents", "keep_both", 200, True),
+    ]
+
+
 def test_tool_broker_call_workspace_list_metadata_is_opt_in(tmp_path) -> None:
     (tmp_path / "recent.pdf").write_text("pdf", encoding="utf-8")
     broker = _broker(tmp_path)
@@ -979,6 +1045,30 @@ def test_python_run_schema_requires_command_or_code() -> None:
         ToolDescriptorRegistry.validate_payload("python.run", {"code": "print('ok')", "timeout_seconds": 0})
 
 
+def test_fs_move_file_schema_matches_file_organize_alias() -> None:
+    ToolDescriptorRegistry.validate_payload(
+        "fs.move_file",
+        {
+            "path": "Downloads",
+            "operation": "organize",
+            "file_type": "pdf",
+            "pattern": "*.pdf",
+            "destination": "Documents",
+        },
+    )
+
+    with pytest.raises(AgentRuntimeError, match="fs.move_file 参数 operation 必须是 organize、archive 或 move"):
+        ToolDescriptorRegistry.validate_payload(
+            "fs.move_file",
+            {"path": "Downloads", "operation": "delete"},
+        )
+    with pytest.raises(AgentRuntimeError, match="fs.move_file 参数 limit 必须是 1-500 的整数"):
+        ToolDescriptorRegistry.validate_payload(
+            "fs.move_file",
+            {"path": "Downloads", "operation": "move", "limit": 0},
+        )
+
+
 def test_desktop_permissions_schema_accepts_empty_payload() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.permissions", {})
 
@@ -1754,6 +1844,19 @@ def test_compile_tool_policy_marks_python_run_as_approval_required() -> None:
         "approval_required": {"python.run": True},
     }
     assert "python.run" in HIGH_RISK_AGENT_TOOLS
+
+
+def test_compile_tool_policy_marks_fs_move_file_as_approval_required() -> None:
+    policy = RuntimePolicyCompiler().compile_tool_policy(
+        "custom",
+        {"allowed_tools": ["fs.move_file", "workspace.list"]},
+    )
+
+    assert policy == {
+        "allowed_tools": ["fs.move_file", "workspace.list"],
+        "approval_required": {"fs.move_file": True},
+    }
+    assert "fs.move_file" in HIGH_RISK_AGENT_TOOLS
 
 
 def test_desktop_click_schema_accepts_coordinates_and_rejects_bad_payload() -> None:

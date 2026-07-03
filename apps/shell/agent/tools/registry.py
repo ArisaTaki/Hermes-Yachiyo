@@ -121,6 +121,13 @@ def _file_organize(broker: Any, payload: dict[str, Any], approved: bool) -> dict
     )
 
 
+def _fs_move_file(broker: Any, payload: dict[str, Any], approved: bool) -> dict[str, Any]:
+    result = _file_organize(broker, payload, approved)
+    if isinstance(result, dict):
+        return {**result, "tool": "fs.move_file", "alias_for": "file.organize"}
+    return result
+
+
 def _terminal_run(broker: Any, payload: dict[str, Any], approved: bool) -> dict[str, Any]:
     return broker.terminal_run(
         str(payload.get("command") or ""),
@@ -963,6 +970,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "workspace.write_patch": _workspace_write_patch,
     "fs.find_files": _workspace_list,
     "fs.read_file": _workspace_read,
+    "fs.move_file": _fs_move_file,
     "file.search": _workspace_list,
     "file.read": _workspace_read,
     "file.organize": _file_organize,

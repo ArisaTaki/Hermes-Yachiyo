@@ -4214,6 +4214,7 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     browser_open_screenshot = tools["browser.open_url_and_screenshot"]
     fs_find_files = tools["fs.find_files"]
     fs_read_file = tools["fs.read_file"]
+    fs_move_file = tools["fs.move_file"]
     python_run = tools["python.run"]
     terminal = tools["terminal.run"]
 
@@ -4490,6 +4491,11 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert fs_read_file.risk_level == "low"
     assert fs_read_file.input_schema["required"] == ["path"]
     assert any("workspace.read" in note for note in fs_read_file.fallback_notes)
+    assert fs_move_file.capability_id == "file.organization"
+    assert fs_move_file.risk_level == "high"
+    assert fs_move_file.approval_required is True
+    assert fs_move_file.input_schema["required"] == ["path", "operation"]
+    assert any("file.organize" in note for note in fs_move_file.fallback_notes)
     assert python_run.capability_id == "terminal"
     assert python_run.risk_level == "high"
     assert python_run.approval_required is True
