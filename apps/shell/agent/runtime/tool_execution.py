@@ -1300,16 +1300,12 @@ class RuntimeToolRequestRunner:
                             **trace_payload,
                         },
                     )
-                append_task_progress_events_for_tool_result(
-                    tool_request={**tool_request, "tool": tool_name},
-                    tool_event={
-                        "event": "agent.tool.skipped",
-                        "detail": tool_name,
-                        "result": runtime_skip,
-                    },
+                self._append_tool_result_progress(
+                    tool_request,
+                    tool_name=tool_name,
+                    tool_event_type="agent.tool.skipped",
+                    tool_result=runtime_skip,
                     timeline=timeline,
-                    timeline_factory=self._timeline,
-                    append_run_event=self._append_run_event,
                     run_id=run_id,
                 )
                 self._tool_loop_projection.append_tool_result_message(
@@ -1353,16 +1349,12 @@ class RuntimeToolRequestRunner:
                             **trace_payload,
                         },
                     )
-                append_task_progress_events_for_tool_result(
-                    tool_request={**tool_request, "tool": tool_name},
-                    tool_event={
-                        "event": "agent.tool.skipped",
-                        "detail": tool_name,
-                        "result": tool_result,
-                    },
+                self._append_tool_result_progress(
+                    tool_request,
+                    tool_name=tool_name,
+                    tool_event_type="agent.tool.skipped",
+                    tool_result=tool_result,
                     timeline=timeline,
-                    timeline_factory=self._timeline,
-                    append_run_event=self._append_run_event,
                     run_id=run_id,
                 )
                 self._tool_loop_projection.append_tool_result_message(
@@ -1381,16 +1373,12 @@ class RuntimeToolRequestRunner:
                 budget=budget,
             )
             if tool_result.get("approval_required"):
-                append_task_progress_events_for_tool_result(
-                    tool_request={**tool_request, "tool": tool_name},
-                    tool_event={
-                        "event": "agent.tool.call",
-                        "detail": tool_name,
-                        "result": tool_result,
-                    },
+                self._append_tool_result_progress(
+                    tool_request,
+                    tool_name=tool_name,
+                    tool_event_type="agent.tool.call",
+                    tool_result=tool_result,
                     timeline=timeline,
-                    timeline_factory=self._timeline,
-                    append_run_event=self._append_run_event,
                     run_id=run_id,
                 )
                 pending_approval = self._pending_approval_builder.build(
@@ -1420,16 +1408,12 @@ class RuntimeToolRequestRunner:
                         **trace_payload,
                     )
                 )
-                append_task_progress_events_for_tool_result(
-                    tool_request={**tool_request, "tool": tool_name},
-                    tool_event={
-                        "event": "agent.tool.failed",
-                        "detail": tool_name,
-                        "result": tool_result,
-                    },
+                self._append_tool_result_progress(
+                    tool_request,
+                    tool_name=tool_name,
+                    tool_event_type="agent.tool.failed",
+                    tool_result=tool_result,
                     timeline=timeline,
-                    timeline_factory=self._timeline,
-                    append_run_event=self._append_run_event,
                     run_id=run_id,
                 )
                 raise AgentRuntimeError(fatal_failure)
@@ -1438,16 +1422,12 @@ class RuntimeToolRequestRunner:
                 tool_request,
                 tool_result,
             )
-            append_task_progress_events_for_tool_result(
-                tool_request={**tool_request, "tool": tool_name},
-                tool_event={
-                    "event": "agent.tool.call",
-                    "detail": tool_name,
-                    "result": tool_result,
-                },
+            self._append_tool_result_progress(
+                tool_request,
+                tool_name=tool_name,
+                tool_event_type="agent.tool.call",
+                tool_result=tool_result,
                 timeline=timeline,
-                timeline_factory=self._timeline,
-                append_run_event=self._append_run_event,
                 run_id=run_id,
             )
             previous_readiness_blocker = foreground_readiness_blocker
@@ -1495,6 +1475,295 @@ class RuntimeToolRequestRunner:
                 )
                 if next_active_window_target is not None:
                     active_window_verification_target = next_active_window_target
+
+    def _append_tool_result_progress(
+        self,
+        tool_request: dict[str, Any],
+        *,
+        tool_name: str,
+        tool_event_type: str,
+        tool_result: dict[str, Any],
+        timeline: list[dict[str, Any]],
+        run_id: str,
+    ) -> None:
+        traced_request = {**tool_request, "tool": tool_name}
+        tool_event = {
+            "event": tool_event_type,
+            "detail": tool_name,
+            "result": tool_result,
+        }
+        append_task_progress_events_for_tool_result(
+            tool_request=traced_request,
+            tool_event=tool_event,
+            timeline=timeline,
+            timeline_factory=self._timeline,
+            append_run_event=self._append_run_event,
+            run_id=run_id,
+        )
+        append_replan_request_event_for_tool_result(
+            tool_request=traced_request,
+            tool_event=tool_event,
+            timeline=timeline,
+            timeline_factory=self._timeline,
+            append_run_event=self._append_run_event,
+            run_id=run_id,
+        )
+
+
+def append_replan_request_event_for_tool_result(
+    *,
+    tool_request: Mapping[str, Any],
+    tool_event: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    timeline_factory: Callable[..., dict[str, Any]],
+    append_run_event: Callable[[str, str, dict[str, Any]], Any] | None = None,
+    run_id: str = "",
+) -> None:
+    payload = _runtime_replan_request_payload_for_tool_result(
+        tool_request,
+        tool_event,
+        run_id=run_id,
+    )
+    if not payload or _runtime_replan_request_exists(timeline, payload):
+        return
+    event_type = "agent.replan.requested"
+    detail = (
+        str(payload.get("reason") or "").strip()
+        or str(payload.get("failure_detail") or "").strip()
+        or str(payload.get("trigger") or "replan requested")
+    )
+    timeline.append(
+        timeline_factory(
+            event_type,
+            detail,
+            status="requested",
+            source="runtime_tool_request_runner",
+            decision_id=str(payload.get("decision_id") or ""),
+            plan_id=str(payload.get("plan_id") or ""),
+            **_runtime_replan_context_payload(payload),
+            payload=payload,
+        )
+    )
+    if run_id and append_run_event is not None:
+        append_run_event(run_id, event_type, payload)
+
+
+def _runtime_replan_request_payload_for_tool_result(
+    tool_request: Mapping[str, Any],
+    tool_event: Mapping[str, Any],
+    *,
+    run_id: str,
+) -> dict[str, Any]:
+    result = tool_event.get("result") if isinstance(tool_event.get("result"), Mapping) else {}
+    if not _tool_event_requests_runtime_replan(tool_event, result):
+        return {}
+    replan_signal_ids = _string_list(tool_request.get("replan_signal_ids"))
+    replan_triggers = _string_list(tool_request.get("replan_triggers"))
+    request_fallback_tools = _string_list(tool_request.get("fallback_tools"))
+    fallback_tools = _runtime_replan_fallback_tools(tool_request, result)
+    if not (
+        replan_signal_ids
+        or replan_triggers
+        or request_fallback_tools
+        or bool(tool_request.get("requires_observation"))
+        or bool(tool_request.get("requires_post_action_verification"))
+    ):
+        return {}
+
+    trigger = _runtime_replan_trigger(tool_event, result, replan_triggers)
+    source_step_id = str(
+        tool_request.get("step_id") or tool_request.get("planner_step_id") or ""
+    ).strip()
+    source_tool_name = str(
+        tool_request.get("tool") or tool_request.get("tool_name") or tool_event.get("detail") or ""
+    ).strip()
+    failure_event_type = str(tool_event.get("event") or tool_event.get("event_type") or "").strip()
+    failure_detail = _runtime_replan_failure_detail(tool_event, result)
+    request_id = _runtime_replan_request_id(
+        decision_id=str(tool_request.get("decision_id") or ""),
+        plan_id=str(tool_request.get("plan_id") or ""),
+        source_step_id=source_step_id,
+        source_tool_name=source_tool_name,
+        trigger=trigger,
+    )
+    payload: dict[str, Any] = {
+        "request_id": request_id,
+        "trigger": trigger,
+        "status": "requested",
+        "run_id": run_id or str(tool_request.get("run_id") or ""),
+        "task_id": str(tool_request.get("task_id") or ""),
+        "decision_id": str(tool_request.get("decision_id") or ""),
+        "plan_id": str(tool_request.get("plan_id") or ""),
+        "core_id": str(tool_request.get("core_id") or ""),
+        "workspace_id": str(tool_request.get("workspace_id") or ""),
+        "source_step_id": source_step_id,
+        "source_tool_name": source_tool_name,
+        "target_capability_id": str(
+            tool_request.get("target_capability_id") or tool_request.get("capability_id") or ""
+        ),
+        "failure_event_type": failure_event_type,
+        "failure_detail": failure_detail,
+        "fallback_tools": fallback_tools,
+        "replan_signal_ids": replan_signal_ids,
+        "replan_triggers": replan_triggers,
+        "reason": "Runtime requested a replan after a failed or unverified step.",
+        "source": "runtime_tool_request_runner",
+        "metadata": {
+            "result_preview": _runtime_replan_result_preview(result),
+            "runtime_stage": str(tool_request.get("runtime_stage") or ""),
+            "runtime_role": str(tool_request.get("runtime_role") or ""),
+        },
+    }
+    for key in (
+        "run_group_id",
+        "group_run_id",
+        "group_id",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+    ):
+        value = str(tool_request.get(key) or "").strip()
+        if value:
+            payload[key] = value
+    return payload
+
+
+def _tool_event_requests_runtime_replan(
+    tool_event: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> bool:
+    if result.get("approval_required") or tool_event.get("approval_required"):
+        return False
+    if result.get("ok") is False:
+        return True
+    status = str(tool_event.get("status") or result.get("status") or "").strip().lower()
+    if status in {"failed", "failure", "error", "unavailable", "rejected", "cancelled"}:
+        return True
+    event_type = str(tool_event.get("event") or tool_event.get("event_type") or "").strip().lower()
+    return event_type.endswith(".failed") or event_type.endswith("_failed")
+
+
+def _runtime_replan_trigger(
+    tool_event: Mapping[str, Any],
+    result: Mapping[str, Any],
+    replan_triggers: list[str],
+) -> str:
+    if result.get("verification_failed"):
+        return "verification_failed"
+    event_text = " ".join(
+        str(value or "").lower()
+        for value in (
+            tool_event.get("event"),
+            tool_event.get("status"),
+            result.get("status"),
+            result.get("error"),
+            result.get("blocking_condition"),
+        )
+    )
+    if "unavailable" in event_text or "not_found" in event_text:
+        return "tool_unavailable"
+    return replan_triggers[0] if replan_triggers else "tool_failure"
+
+
+def _runtime_replan_failure_detail(
+    tool_event: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> str:
+    for value in (
+        result.get("error"),
+        result.get("hint"),
+        result.get("summary"),
+        tool_event.get("detail"),
+        result.get("status"),
+        tool_event.get("status"),
+    ):
+        text = str(value or "").strip()
+        if text:
+            return text
+    return "tool result failed"
+
+
+def _runtime_replan_fallback_tools(
+    tool_request: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> list[str]:
+    tools = [
+        *_string_list(tool_request.get("fallback_tools")),
+        *_string_list(result.get("suggested_tool")),
+        *_string_list(result.get("recommended_tools")),
+    ]
+    recovery_actions = result.get("recovery_actions")
+    if isinstance(recovery_actions, list):
+        for action in recovery_actions:
+            if isinstance(action, Mapping):
+                tools.extend(_string_list(action.get("tool")))
+    return _string_list(tools)
+
+
+def _runtime_replan_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
+    preview: dict[str, Any] = {}
+    for key in ("ok", "error", "status", "summary", "hint", "blocking_condition"):
+        value = result.get(key)
+        if value not in (None, "", [], {}):
+            preview[key] = value
+    return preview
+
+
+def _runtime_replan_context_payload(payload: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in payload.items()
+        if key
+        in {
+            "run_group_id",
+            "group_run_id",
+            "group_id",
+            "workflow_id",
+            "workflow_run_id",
+            "workflow_node_id",
+            "workflow_node_label",
+            "core_id",
+            "workspace_id",
+            "task_id",
+        }
+        and value not in (None, "", [], {})
+    }
+
+
+def _runtime_replan_request_exists(
+    timeline: list[dict[str, Any]],
+    payload: Mapping[str, Any],
+) -> bool:
+    request_id = str(payload.get("request_id") or "").strip()
+    if not request_id:
+        return False
+    for event in timeline:
+        if not isinstance(event, Mapping):
+            continue
+        event_type = str(event.get("event") or event.get("event_type") or "").strip()
+        if event_type != "agent.replan.requested":
+            continue
+        event_payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else event
+        if str(event_payload.get("request_id") or "").strip() == request_id:
+            return True
+    return False
+
+
+def _runtime_replan_request_id(
+    *,
+    decision_id: str,
+    plan_id: str,
+    source_step_id: str,
+    source_tool_name: str,
+    trigger: str,
+) -> str:
+    parts = [
+        value.replace(":", "_")
+        for value in (decision_id, plan_id, source_step_id, source_tool_name, trigger)
+        if value
+    ]
+    return "runtime-replan:" + ":".join(parts or ["request"])
 
 
 _FOREGROUND_READINESS_GATED_TOOLS = {
