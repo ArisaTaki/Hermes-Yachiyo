@@ -4,6 +4,7 @@ import type {
   RunTimelineChildSnapshot,
   YachiyoRunTimelineSnapshot,
 } from '../../yachiyo-studio/types';
+import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
 import type { RunSpec } from '../types';
 
 type WorkflowRunDetailPanelProps = {
@@ -92,6 +93,12 @@ export function WorkflowRunDetailPanel({
         <span>artifacts {selectedPublicRunTimeline.artifacts?.length || 0}</span>
         <span>children {selectedPublicRunTimeline.children?.length || 0}</span>
       </div>
+      <RuntimeDebugSummary
+        className="run-public-runtime-debug"
+        sourceLabel={publicSnapshotName}
+        summary={selectedPublicRunTimeline.runtime_debug}
+        testId="agent-run-detail-public-runtime-debug"
+      />
       {childSnapshots.length ? (
         <div className="run-group-overview-children run-public-child-list" data-testid="agent-run-detail-public-children">
           {childSnapshots.map((child) => {

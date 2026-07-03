@@ -11,6 +11,7 @@ import type {
 } from '../../yachiyo-studio/types';
 import type { RuntimeImageArtifactPointSelection } from '../../runtime-shared/components/RuntimeReadableArtifactPreview';
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
+import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
 import {
   runtimeToolRecoveryActionsFromRecords,
   runtimeToolRecoveryRetryAction,
@@ -411,6 +412,12 @@ export function RunDetailPanel({
             selectedRouteGroupRunId={selectedRouteGroupRunId}
             selectedRun={selectedRun}
             selectedRunGroup={selectedRunGroup}
+          />
+          <RuntimeDebugSummary
+            className="run-detail-block run-runtime-debug-block"
+            sourceLabel="RunTimelineSnapshot"
+            summary={selectedPublicRunTimeline?.runtime_debug}
+            testId="agent-run-detail-runtime-debug"
           />
           {selectedWorkflowApprovalChildRunId ? (
             <WorkflowChildApprovalBridge

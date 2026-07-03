@@ -19132,6 +19132,140 @@ button.studio-tool-permission:disabled {
   min-width: 0;
 }
 
+.runtime-debug-summary {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 9px 10px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 8px;
+  background: oklch(255 0 0 / 0.025);
+}
+
+.runtime-debug-summary.compact {
+  gap: 6px;
+  padding: 7px 8px;
+}
+
+.runtime-debug-summary.needs-user-action,
+.runtime-debug-summary.needs-replan {
+  border-color: oklch(82% 0.135 76 / 0.32);
+  background: oklch(82% 0.135 76 / 0.07);
+}
+
+.runtime-debug-summary-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+}
+
+.runtime-debug-summary-head>div:first-child {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.runtime-debug-summary-head strong,
+.runtime-debug-summary-head span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-debug-summary-head strong {
+  color: var(--hy-fg);
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.runtime-debug-summary-head span {
+  color: var(--hy-faint);
+  font-size: 11px;
+  line-height: 1.25;
+}
+
+.runtime-debug-summary-state,
+.runtime-debug-context,
+.runtime-debug-metrics,
+.runtime-debug-facts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  min-width: 0;
+}
+
+.runtime-debug-summary-state {
+  justify-content: flex-end;
+}
+
+.runtime-debug-summary-state span,
+.runtime-debug-context code,
+.runtime-debug-metric,
+.runtime-debug-facts span,
+.runtime-debug-facts em {
+  display: inline-flex;
+  align-items: center;
+  max-width: min(260px, 100%);
+  min-height: 22px;
+  min-width: 0;
+  padding: 3px 7px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 7px;
+  background: oklch(255 0 0 / 0.025);
+  color: var(--hy-muted);
+  font-size: 11px;
+  line-height: 1.2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.runtime-debug-summary-state span.warning,
+.runtime-debug-metric.warning {
+  border-color: oklch(82% 0.135 76 / 0.32);
+  color: var(--hy-warning);
+}
+
+.runtime-debug-metric.ready {
+  border-color: oklch(73% 0.13 150 / 0.28);
+  color: var(--hy-success);
+}
+
+.runtime-debug-metric.danger {
+  border-color: oklch(62% 0.18 24 / 0.32);
+  color: var(--hy-danger);
+}
+
+.runtime-debug-context code {
+  font-family: var(--hy-font-mono);
+}
+
+.runtime-debug-metric {
+  gap: 5px;
+}
+
+.runtime-debug-metric strong {
+  color: inherit;
+  font-size: 12px;
+  line-height: 1;
+}
+
+.runtime-debug-metric small {
+  color: var(--hy-faint);
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.runtime-debug-facts em {
+  border-color: oklch(66% 0.12 188 / 0.22);
+  color: var(--hy-faint);
+  font-style: normal;
+}
+
 .workflow-approval-bridge {
   gap: 12px;
   border-color: oklch(78% 0.14 78 / 0.42);

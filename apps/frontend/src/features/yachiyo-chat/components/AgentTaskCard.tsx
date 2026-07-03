@@ -1,6 +1,7 @@
 import { useState } from 'react';
 
 import { UiIcon } from '../../../components/UiIcon';
+import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
 import type { RuntimeImageArtifactPointSelection } from '../../runtime-shared/components/RuntimeReadableArtifactPreview';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import { runtimeEventIsDesktopReadinessRecovered } from '../../runtime-shared/desktopEvents';
@@ -118,6 +119,13 @@ export function AgentTaskCard({
       {task.summary ? <p className="yachiyo-agent-task-summary">{task.summary}</p> : null}
       {plannerSummary ? <TaskPlannerSummary summary={plannerSummary} /> : null}
       <TaskCoreProgress task={task} />
+      <RuntimeDebugSummary
+        className="yachiyo-agent-task-runtime-debug"
+        compact
+        sourceLabel="Task runtime"
+        summary={task.runtime_debug}
+        testId="yachiyo-agent-task-runtime-debug"
+      />
       {timelineEvents.length || toolCallFacts.length ? (
         <ToolCallSummary events={timelineEvents} toolCalls={toolCallFacts} />
       ) : null}

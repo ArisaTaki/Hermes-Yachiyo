@@ -9,6 +9,7 @@ import type {
 import { MemorySkillTraceInspector } from './MemorySkillTraceInspector';
 import { RuntimeApprovalCard } from '../../runtime-shared/components/RuntimeApprovalCard';
 import { RuntimeArtifactList } from '../../runtime-shared/components/RuntimeArtifactList';
+import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import type { RuntimeToolRecoveryAction } from '../../runtime-shared/toolRecoveryActions';
 import { ToolCallInspector } from './ToolCallInspector';
@@ -186,6 +187,12 @@ export function GroupRunDetailPanel({
           ))}
         </div>
       ) : null}
+      <RuntimeDebugSummary
+        className="group-run-runtime-debug"
+        sourceLabel="GroupRunSnapshot"
+        summary={selectedGroupRunSnapshot?.runtime_debug}
+        testId="agent-run-detail-group-run-runtime-debug"
+      />
       {groupRunReplayEvents.length || replayLoading || replayError ? (
         <section className="group-run-runtime-section" data-testid="agent-run-detail-group-run-replay">
           <div className="group-run-runtime-section-head">
