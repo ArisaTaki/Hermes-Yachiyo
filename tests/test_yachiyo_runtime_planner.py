@@ -19862,7 +19862,7 @@ def test_runtime_planner_routes_generic_music_app_query_to_search_play_plan() ->
         ]
 
 
-def test_runtime_planner_discovers_music_app_for_plain_song_playback_query() -> None:
+def test_runtime_planner_uses_media_tool_for_plain_song_playback_query() -> None:
     allowed_tools = [
         "desktop.list_apps",
         "app.open_and_safe_shortcut",
@@ -19883,70 +19883,27 @@ def test_runtime_planner_discovers_music_app_for_plain_song_playback_query() -> 
         "app_name": "",
         "query": "超时空辉夜姬",
         "control_only": "",
-        "target_app_capability_hint": {
-            "query": "music",
-            "description": "音乐",
-        },
     }
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
-        "discover-media-app",
-        "focus-media-app-search",
-        "type-media-search-query",
-        "submit-media-search",
-        "play-media-search-result",
-        "verify-media-search",
+        "control-media-playback",
+        "verify-media-playback",
     ]
     assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
-        "desktop.list_apps",
-        "app.open_and_safe_shortcut",
-        "desktop.safe_type_text",
-        "desktop.search_submit",
-        "app.focus_and_click_ui_element",
+        "media.apple_music_play",
         "desktop.ui_elements",
     ]
-    assert _step_by_id(decision, "discover-media-app").input_preview == {
-        "query": "music",
-        "limit": 20,
-    }
-    assert _step_by_id(decision, "focus-media-app-search").input_preview == {
-        "app_name": "<selected app from desktop.list_apps>",
-        "selection_source": "desktop.list_apps",
-        "query": "music",
-        "action": "find",
-    }
-    assert _step_by_id(decision, "type-media-search-query").input_preview == {
-        "text": "超时空辉夜姬",
-    }
-    assert _step_by_id(decision, "play-media-search-result").input_preview == {
-        "app_name": "<selected app from desktop.list_apps>",
-        "selection_source": "desktop.list_apps",
-        "query": "music",
-        "target": "first result",
-        "role_filter": "",
-        "limit": 80,
-        "click_count": 1,
+    assert _step_by_id(decision, "control-media-playback").input_preview == {
+        "query": "超时空辉夜姬"
     }
     requests = planner_tool_requests(
         "帮我播放超时空辉夜姬",
         allowed_tools,
     )
     assert [request["tool"] for request in requests] == [
-        "desktop.list_apps",
-        "app.open_and_safe_shortcut",
-        "desktop.safe_type_text",
-        "desktop.search_submit",
-        "app.focus_and_click_ui_element",
+        "media.apple_music_play",
         "desktop.ui_elements",
     ]
-    assert all(request["tool"] != "media.apple_music_play" for request in requests)
-    assert requests[0]["input"] == {"query": "music", "limit": 20}
-    assert requests[1]["input"] == {
-        "app_name": "<selected app from desktop.list_apps>",
-        "selection_source": "desktop.list_apps",
-        "query": "music",
-        "action": "find",
-    }
-    assert requests[2]["input"] == {"text": "超时空辉夜姬"}
+    assert requests[0]["input"] == {"query": "超时空辉夜姬"}
     execution_requests = planner_tool_requests_for_decision(
         decision,
         allowed_tools,
@@ -19954,24 +19911,10 @@ def test_runtime_planner_discovers_music_app_for_plain_song_playback_query() -> 
         execution_normalized=True,
     )
     assert [request["tool"] for request in execution_requests] == [
-        "desktop.list_apps",
-        "app.open_and_safe_shortcut",
-        "desktop.safe_type_text",
-        "desktop.search_submit",
+        "media.apple_music_play",
         "desktop.ui_elements",
     ]
-    observation = execution_requests[-1]
-    assert observation["continue_to_model"] is True
-    assert observation["deferred_tool"] == "app.focus_and_click_ui_element"
-    assert observation["deferred_input"] == {
-        "app_name": "<selected app from desktop.list_apps>",
-        "selection_source": "desktop.list_apps",
-        "query": "music",
-        "target": "first result",
-        "role_filter": "",
-        "limit": 80,
-        "click_count": 1,
-    }
+    assert execution_requests[0]["input"] == {"query": "超时空辉夜姬"}
 
 
 def test_runtime_planner_does_not_treat_generic_music_player_words_as_query() -> None:

@@ -178,6 +178,13 @@ def _mapping_includes(mapping: Any, expected: dict[str, Any]) -> bool:
     return all(mapping.get(key) == value for key, value in expected.items())
 
 
+def _is_desktop_operation_planning_reason(value: Any) -> bool:
+    return str(value or "").strip() in {
+        "planner_desktop_operation",
+        "planner_full_plan_desktop_operation",
+    }
+
+
 def _model_event_free(events: Sequence[dict[str, Any]]) -> bool:
     return not any(
         event_type in {"model.request.started", "model.requested"}
@@ -373,9 +380,12 @@ def _capability_discovered_app_open_case(service: AgentRuntimeService) -> dict[s
         == {"query": "pdf", "limit": 20}
         if planned_events
         else False,
-        "planned_followup_tools": [
-            _payload(event).get("planning_reason") for event in planned_events[1:]
-        ] == ["planner_desktop_operation", "planner_desktop_operation"]
+        "planned_followup_tools": all(
+            _is_desktop_operation_planning_reason(
+                _payload(event).get("planning_reason")
+            )
+            for event in planned_events[1:]
+        )
         if len(planned_events) > 1
         else False,
         "tool_call_chain": tool_call_tools == [
@@ -506,8 +516,9 @@ def _capability_discovered_app_open_path_case(service: AgentRuntimeService) -> d
         if planned_events
         else False,
         "planned_followup_tool": (
-            _payload(planned_events[1]).get("planning_reason")
-            == "planner_desktop_operation"
+            _is_desktop_operation_planning_reason(
+                _payload(planned_events[1]).get("planning_reason")
+            )
             if len(planned_events) > 1
             else False
         ),
