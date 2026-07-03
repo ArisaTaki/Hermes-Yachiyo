@@ -146,6 +146,19 @@ def _request_needs_model_materialization(
             or request_input.get("path")
             or request_input.get("paths")
         )
+    if tool_name in {
+        "app.focus_and_safe_type_text",
+        "app.focus_and_type_into_ui_element",
+        "app.open_and_safe_type_text",
+        "app.open_and_type_into_ui_element",
+        "desktop.safe_type_text",
+        "desktop.type",
+        "desktop.type_into_ui_element",
+        "desktop.type_text",
+    }:
+        return bool(request_input.get("body_source")) and not str(
+            request_input.get("text") or ""
+        ).strip()
     return False
 
 

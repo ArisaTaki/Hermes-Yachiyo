@@ -23769,6 +23769,81 @@ def test_runtime_planner_routes_foreground_note_context_to_visible_text() -> Non
     )
 
 
+def test_runtime_planner_writes_context_note_to_discovered_notes_app() -> None:
+    allowed_tools = [
+        "browser.extract_text",
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "打开一个笔记应用，记录当前网页总结",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.kind == "information_capture"
+    assert decision.selected_intent.inputs == {
+        "action": "create_note_from_context",
+        "source": "current_page_content",
+        "target_app_capability_hint": {"query": "notes", "description": "笔记"},
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "read-note-context",
+        "discover-note-target-app",
+        "prepare-note-discovered-target-app",
+        "insert-note-into-target-app",
+        "verify-note-target-app",
+    ]
+    assert _step_by_id(decision, "read-note-context").tool_name == "browser.extract_text"
+    assert _step_by_id(decision, "discover-note-target-app").input_preview == {
+        "query": "notes",
+        "limit": 20,
+    }
+    assert _step_by_id(decision, "prepare-note-discovered-target-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "notes",
+        "target_action": "app_paste",
+        "body_source": "model_generated_content",
+        "action": "new_note",
+    }
+    assert _step_by_id(decision, "insert-note-into-target-app").input_preview == {
+        "body_source": "model_generated_content",
+        "target_action": "app_paste",
+        "container_action": "new_note",
+    }
+    assert planner_tool_requests(
+        "打开一个笔记应用，记录当前网页总结",
+        allowed_tools,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_information_capture_context",
+            "continue_to_model": True,
+        }
+    ]
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+    assert envelope is not None
+    assert [request.tool_name for request in envelope.requests] == [
+        "browser.extract_text",
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert envelope.requests[3].continue_to_model is True
+
+
 def test_planner_selection_payload_surfaces_context_note_write_target() -> None:
     prompt = "把当前网页总结一下，保存到备忘录"
     allowed_tools = ["notes.create", "browser.extract_text"]

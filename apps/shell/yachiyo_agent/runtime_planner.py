@@ -2337,6 +2337,18 @@ class TaskIntentRouter:
             and str((safe_shortcut_hint(text) or {}).get("action") or "").strip() == "new_note"
         ):
             return _empty_intent("information_capture", text)
+        app_write_target = _app_write_followup_target_hint(text) if source else {}
+        inputs = {**hint, **app_write_target}
+        preferred_capabilities = (
+            ["clipboard.read_write", "browser.research", "desktop.ui_operation"]
+            if source
+            else []
+        )
+        if app_write_target:
+            preferred_capabilities.extend(
+                ["desktop.app_discovery", "desktop.app_control"]
+            )
+        preferred_capabilities = list(dict.fromkeys(preferred_capabilities))
         return TaskIntentSnapshot(
             intent_id=_stable_id("intent", "information_capture", text),
             kind="information_capture",
@@ -2344,14 +2356,10 @@ class TaskIntentRouter:
             user_goal=text,
             confidence=0.84 if has_body else 0.72,
             description="Capture explicit text or inspected context into a local note.",
-            inputs=hint,
+            inputs=inputs,
             expected_outputs=["note"],
             required_capabilities=["information.capture"],
-            preferred_capabilities=[
-                capability
-                for capability in ("clipboard.read_write", "browser.research", "desktop.ui_operation")
-                if source
-            ],
+            preferred_capabilities=preferred_capabilities,
             missing_inputs=[] if has_body or source else ["note_body"],
             risk_level="low",
         )
@@ -6685,6 +6693,113 @@ class RuntimePlanner:
             capability_id="information.capture",
         )
         depends_on = [step.step_id for step in context_steps]
+        target_capability = intent.inputs.get("target_app_capability_hint")
+        target_action = str(intent.inputs.get("target_action_hint") or "").strip()
+        if isinstance(target_capability, Mapping) and target_action == "app_paste":
+            query = str(target_capability.get("query") or "").strip()
+            if query:
+                container_action = str(
+                    intent.inputs.get("target_container_action_hint") or ""
+                ).strip()
+                if query == "notes" and container_action in {"", "new_document"}:
+                    container_action = "new_note"
+                safe_shortcut = {"action": container_action} if container_action else None
+                selected_app_tool = _selected_discovered_app_tool(
+                    allowed,
+                    safe_shortcut=safe_shortcut,
+                )
+                if selected_app_tool:
+                    selected_app_capability = (
+                        "desktop.app_control"
+                        if selected_app_tool in {"app.open", "desktop.open_app"}
+                        else "desktop.ui_operation"
+                    )
+                    selected_app_action = (
+                        "safe_shortcut"
+                        if selected_app_tool
+                        in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}
+                        else "open_app"
+                    )
+                    insert_tool = _first_allowed(("desktop.safe_type_text",), allowed)
+                    return [
+                        *context_steps,
+                        _step(
+                            intent,
+                            "discover-note-target-app",
+                            "Discover note target app",
+                            "desktop.app_discovery",
+                            _first_allowed(("desktop.list_apps",), allowed),
+                            input_preview={"query": query, "limit": 20},
+                            depends_on=depends_on,
+                            reason=(
+                                "Discover an installed notes app before creating a note "
+                                "from inspected context."
+                            ),
+                        ),
+                        _step(
+                            intent,
+                            "prepare-note-discovered-target-app",
+                            "Prepare discovered note app",
+                            selected_app_capability,
+                            selected_app_tool,
+                            input_preview={
+                                "app_name": "<selected app from desktop.list_apps>",
+                                "selection_source": "desktop.list_apps",
+                                "query": query,
+                                "target_action": target_action,
+                                "body_source": "model_generated_content",
+                                **_selected_discovered_app_operation_preview(
+                                    selected_app_tool,
+                                    safe_shortcut=safe_shortcut,
+                                ),
+                            },
+                            depends_on=["discover-note-target-app"],
+                            action=selected_app_action,
+                            reason=(
+                                "Open or focus the selected notes app and prepare a note "
+                                "container before inserting model-generated content."
+                            ),
+                        ),
+                        _step(
+                            intent,
+                            "insert-note-into-target-app",
+                            "Insert note into target app",
+                            "desktop.ui_operation",
+                            insert_tool,
+                            input_preview={
+                                "body_source": "model_generated_content",
+                                "target_action": target_action,
+                                **(
+                                    {"container_action": container_action}
+                                    if container_action
+                                    else {}
+                                ),
+                            },
+                            depends_on=["prepare-note-discovered-target-app"],
+                            action="type",
+                            reason=(
+                                "Insert the generated note content into the prepared "
+                                "foreground notes app."
+                            ),
+                        ),
+                        _step(
+                            intent,
+                            "verify-note-target-app",
+                            "Verify note target app",
+                            "desktop.visual_verification",
+                            _first_allowed(("desktop.ui_elements", "screen.capture"), allowed),
+                            input_preview={
+                                "app_name": "<selected app from desktop.list_apps>",
+                                "selection_source": "desktop.list_apps",
+                                "query": query,
+                                "role_filter": "text",
+                                "limit": 80,
+                            },
+                            depends_on=["insert-note-into-target-app"],
+                            action="verify",
+                            reason="Verify the generated note appears in the target app.",
+                        ),
+                    ]
         return [
             *context_steps,
             _step(
