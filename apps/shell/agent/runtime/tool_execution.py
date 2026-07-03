@@ -1601,6 +1601,7 @@ def _runtime_replan_request_payload_for_tool_result(
         "target_capability_id": str(
             tool_request.get("target_capability_id") or tool_request.get("capability_id") or ""
         ),
+        "input_preview": _runtime_replan_input_preview(tool_request),
         "failure_event_type": failure_event_type,
         "failure_detail": failure_detail,
         "fallback_tools": fallback_tools,
@@ -1609,6 +1610,7 @@ def _runtime_replan_request_payload_for_tool_result(
         "reason": "Runtime requested a replan after a failed or unverified step.",
         "source": "runtime_tool_request_runner",
         "metadata": {
+            "input_preview": _runtime_replan_input_preview(tool_request),
             "result_preview": _runtime_replan_result_preview(result),
             "runtime_stage": str(tool_request.get("runtime_stage") or ""),
             "runtime_role": str(tool_request.get("runtime_role") or ""),
@@ -1708,6 +1710,11 @@ def _runtime_replan_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
         if value not in (None, "", [], {}):
             preview[key] = value
     return preview
+
+
+def _runtime_replan_input_preview(tool_request: Mapping[str, Any]) -> dict[str, Any]:
+    value = tool_request.get("input")
+    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _runtime_replan_context_payload(payload: Mapping[str, Any]) -> dict[str, Any]:

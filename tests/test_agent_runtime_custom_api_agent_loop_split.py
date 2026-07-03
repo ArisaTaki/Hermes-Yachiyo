@@ -21630,6 +21630,56 @@ def test_runtime_planner_replan_maps_tool_failure_to_plan_step_without_request_t
     assert "failed_step: analyze-data-file" in payload["replan_prompt"]
 
 
+def test_runtime_planner_replan_reuses_existing_runner_replan_event() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+    loop = _private_runtime_loop()
+    run_events: list[dict[str, Any]] = []
+    loop._append_run_event = lambda run_id, event_type, payload: run_events.append(
+        {"run_id": run_id, "event_type": event_type, "payload": payload}
+    )
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "data.analyze",
+            input_preview={"path": "sales.csv"},
+            result={"ok": False, "error": "unsupported chart type"},
+        ),
+        _timeline(
+            "agent.replan.requested",
+            "Runtime requested a replan after a failed or unverified step.",
+            payload={
+                "request_id": "runtime-replan:decision-1:plan-1:analyze-data-file:data.analyze:tool_failure",
+                "trigger": "tool_failure",
+                "source_step_id": "analyze-data-file",
+                "source_tool_name": "data.analyze",
+                "target_capability_id": "data.analysis",
+                "fallback_tools": ["terminal.run"],
+                "input_preview": {"path": "sales.csv"},
+            },
+        ),
+    ]
+
+    payloads = loop._record_runtime_planner_replan_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-analysis",
+    )
+
+    replan_events = [event for event in timeline if event["event"] == "agent.replan.requested"]
+    assert len(replan_events) == 1
+    assert run_events == []
+    assert len(payloads) == 1
+    assert payloads[0]["source_step_id"] == "analyze-data-file"
+    assert payloads[0]["source_tool_name"] == "data.analyze"
+    assert payloads[0]["fallback_tools"] == ["terminal.run"]
+    assert "replan_prompt" in payloads[0]
+    assert payloads[0]["metadata"]["input_preview"] == {"path": "sales.csv"}
+
+
 def test_runtime_planner_replan_accepts_tool_failed_timeline_events() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",

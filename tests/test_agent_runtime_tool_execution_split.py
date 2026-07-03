@@ -312,6 +312,10 @@ def test_runtime_tool_request_runner_records_replan_request_for_failed_planned_s
     assert replan_event["payload"]["source_step_id"] == "analyze-data-file"
     assert replan_event["payload"]["source_tool_name"] == "data.analyze"
     assert replan_event["payload"]["target_capability_id"] == "data.analysis"
+    assert replan_event["payload"]["input_preview"] == {"path": "data/sales.csv"}
+    assert replan_event["payload"]["metadata"]["input_preview"] == {
+        "path": "data/sales.csv"
+    }
     assert replan_event["payload"]["fallback_tools"] == ["terminal.run"]
     assert "unsupported chart type" in replan_event["payload"]["failure_detail"]
 

@@ -2654,14 +2654,18 @@ class RuntimeCustomApiAgentLoop:
         tool_timeline_start: int,
         run_id: str = "",
     ) -> list[dict[str, Any]]:
+        existing_payloads = _timeline_replan_request_payloads(
+            timeline,
+            start=tool_timeline_start,
+        )
         if decision is None:
-            return []
+            return existing_payloads
         try:
             from apps.shell.yachiyo_agent.planner_projection import (
                 planner_replan_timeline_event,
             )
         except Exception:
-            return []
+            return existing_payloads
         existing_request_ids = {
             str(
                 (
@@ -2674,6 +2678,12 @@ class RuntimeCustomApiAgentLoop:
             for event in timeline
             if isinstance(event, dict)
             and str(event.get("event") or "").strip() == "agent.replan.requested"
+        }
+        existing_payload_by_key = {
+            key: index
+            for index, payload in enumerate(existing_payloads)
+            for key in [_replan_payload_dedupe_key(payload)]
+            if key
         }
         tool_events = [
             event
@@ -2734,7 +2744,7 @@ class RuntimeCustomApiAgentLoop:
         )
         if not failure_payloads:
             failure_payloads.extend(_runtime_planner_unavailable_failure_payloads(decision))
-        payloads: list[dict[str, Any]] = []
+        payloads: list[dict[str, Any]] = list(existing_payloads)
         for failure_payload in failure_payloads:
             replan_metadata = (
                 failure_payload.get("metadata")
@@ -2754,13 +2764,17 @@ class RuntimeCustomApiAgentLoop:
                 if isinstance(replan_event.get("payload"), dict)
                 else {}
             )
+            payload_dict = dict(payload)
+            dedupe_key = _replan_payload_dedupe_key(payload_dict)
+            if dedupe_key and dedupe_key in existing_payload_by_key:
+                payloads[existing_payload_by_key[dedupe_key]] = payload_dict
+                continue
             request_id = str(payload.get("request_id") or "").strip()
             if request_id and request_id in existing_request_ids:
                 continue
             if request_id:
                 existing_request_ids.add(request_id)
             timeline.append(replan_event)
-            payload_dict = dict(payload)
             payloads.append(payload_dict)
             if run_id and self._append_run_event is not None:
                 self._append_run_event(run_id, "agent.replan.requested", payload_dict)
@@ -6515,6 +6529,36 @@ def _model_replan_followup_context_payload(
     if recovery_actions:
         payload["recovery_actions"] = recovery_actions
     return payload
+
+
+def _timeline_replan_request_payloads(
+    timeline: list[dict[str, Any]],
+    *,
+    start: int = 0,
+) -> list[dict[str, Any]]:
+    payloads: list[dict[str, Any]] = []
+    for event in list(timeline[max(0, int(start or 0)):]):
+        if not isinstance(event, Mapping):
+            continue
+        if str(event.get("event") or "").strip() != "agent.replan.requested":
+            continue
+        payload = event.get("payload")
+        if isinstance(payload, Mapping):
+            payloads.append(dict(payload))
+    return payloads
+
+
+def _replan_payload_dedupe_key(payload: Mapping[str, Any]) -> tuple[str, str, str] | None:
+    step_id = str(
+        payload.get("source_step_id") or payload.get("planner_step_id") or ""
+    ).strip()
+    tool_name = str(
+        payload.get("source_tool_name") or payload.get("tool_name") or ""
+    ).strip()
+    trigger = str(payload.get("trigger") or payload.get("replan_trigger") or "").strip()
+    if not step_id and not tool_name:
+        return None
+    return (step_id, tool_name, trigger)
 
 
 def _runtime_replan_planning_reason(triggers: list[str]) -> str:
