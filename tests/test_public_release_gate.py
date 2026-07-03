@@ -662,6 +662,48 @@ def test_public_release_gate_markdown_defaults_missing_blocker_counts():
     assert "None" not in markdown
 
 
+def test_public_release_gate_reports_stale_external_release_reports(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    monkeypatch.setattr(gate, "_current_git_commit", lambda: "b" * 40)
+    monkeypatch.setattr(gate, "_run_command", lambda command: _completed(list(command)))
+    report_path = tmp_path / "tmp" / "old-rc.json"
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(
+            {
+                "source_revision": {
+                    "commit": "a" * 40,
+                    "short_commit": "aaaaaaa",
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    summary = gate.run_public_release_gate(
+        tmp_dir="tmp/gate",
+        include_public_demo=False,
+        include_release_smoke=False,
+        include_diagnostics_bundle=False,
+        release_smoke_reports=["tmp/old-rc.json"],
+    )
+
+    assert summary["ok"] is True
+    assert summary["release_ready"] is False
+    assert summary["release_blocker_count"] == 1
+    freshness = next(
+        item for item in summary["checks"] if item["id"] == "external_report_freshness"
+    )
+    assert freshness["status"] == "passed"
+    assert freshness["release_blockers"][0]["status"] == "stale"
+    assert "old-rc.json was generated for aaaaaaaa" in freshness["release_blockers"][0]["reason"]
+    action = next(item for item in summary["next_actions"] if item["id"] == "external_report_freshness")
+    assert "verify_release_candidate.py" in action["command"]
+
+
 def test_public_release_gate_passes_granular_real_desktop_demo_flags(
     tmp_path,
     monkeypatch,

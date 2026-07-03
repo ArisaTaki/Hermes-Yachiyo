@@ -162,6 +162,16 @@ def run_public_release_gate(
         has_external_reports=extra_public_demo_report_count > 0,
         plan_only=plan_only,
     )
+    external_report_paths = [
+        *[_resolve_path(Path(path)) for path in release_smoke_reports],
+        *public_demo_report_paths,
+    ]
+    freshness_check = _external_report_freshness_check(
+        external_report_paths,
+        plan_only=plan_only,
+    )
+    if freshness_check:
+        check_results.append(freshness_check)
     generated_diagnostics_zips: list[Path] = []
     if include_diagnostics_bundle and include_public_demo:
         diagnostics_result = _diagnostics_bundle_check(
@@ -614,6 +624,108 @@ def _effective_release_smoke_blockers(
         for blocker in blockers
         if str(blocker.get("id") or "").strip() != "public_demo"
     ]
+
+
+def _external_report_freshness_check(
+    report_paths: Sequence[Path],
+    *,
+    plan_only: bool,
+) -> dict[str, Any]:
+    command = [
+        sys.executable,
+        "scripts/verify_release_candidate.py",
+        "--require-artifacts",
+        "--report-json",
+        "tmp/rc-verification-current.json",
+    ]
+    base: dict[str, Any] = {
+        "id": "external_report_freshness",
+        "label": "External release evidence freshness",
+        "command": command,
+    }
+    if plan_only:
+        return {**base, "status": "planned"} if report_paths else {}
+    current_commit = _current_git_commit()
+    if not current_commit:
+        return {}
+    blockers: list[dict[str, Any]] = []
+    seen_reports: set[Path] = set()
+    for report_path in report_paths:
+        resolved = _resolve_path(report_path)
+        stable = resolved.resolve(strict=False)
+        if stable in seen_reports:
+            continue
+        seen_reports.add(stable)
+        report = _load_json(resolved)
+        report_commit = _report_source_commit(report)
+        if not report_commit or report_commit == current_commit:
+            continue
+        blockers.append(
+            {
+                "id": "stale_external_report",
+                "status": "stale",
+                "reason": (
+                    f"{_display_path(resolved)} was generated for "
+                    f"{_short_commit(report_commit)}, current HEAD is "
+                    f"{_short_commit(current_commit)}"
+                ),
+                "report_json": _display_path(resolved),
+                "report_commit": report_commit,
+                "current_commit": current_commit,
+            }
+        )
+    if not blockers:
+        return {}
+    return {
+        **base,
+        "status": "passed",
+        "current_commit": current_commit,
+        "stale_report_count": len(blockers),
+        "release_blockers": blockers,
+    }
+
+
+def _current_git_commit() -> str:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=ROOT,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except OSError:
+        return ""
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()
+
+
+def _report_source_commit(report: Mapping[str, Any]) -> str:
+    source_revision = report.get("source_revision")
+    if isinstance(source_revision, Mapping):
+        commit = str(source_revision.get("commit") or "").strip()
+        if commit:
+            return commit
+    for section_name in (
+        "dmg_app_smoke",
+        "packaged_backend_bridge_smoke",
+        "packaged_backend_smoke",
+    ):
+        section = report.get(section_name)
+        if not isinstance(section, Mapping):
+            continue
+        for status in _dict_list(section.get("bridge_statuses")):
+            build_metadata = _dict(status.get("build_metadata"))
+            commit = str(build_metadata.get("commit") or "").strip()
+            if commit:
+                return commit
+    return ""
+
+
+def _short_commit(commit: str) -> str:
+    return commit[:8] if commit else "unknown"
 
 
 def _next_actions(

@@ -129,6 +129,8 @@ python scripts/run_public_release_gate.py \
 
 当剩余项依赖本机授权或 provider 凭证时，gate JSON 会额外写入 `external_requirement_count` 和 `external_requirements`，Markdown 会写入 `External Requirements` 小节。这里会把缺口归并成 `real_desktop_smoke_opt_in`、`provider_smoke_credentials` 等可执行类别，并列出缺失的 demo flow、缺失的 `OHA_YACHIYO_SMOKE_*` 环境变量、blocking condition 和补证命令。
 
+通过 `--release-smoke-report` 或 `--public-demo-report` 合入的外部 JSON 如果包含 `source_revision.commit` 或 packaged `build_metadata.commit`，gate 会和当前 Git HEAD 对比；不匹配时会新增 `external_report_freshness` release blocker，避免旧 packaged/RC evidence 被误当成当前提交的发布证明。
+
 本地增量收证时，`run_public_release_gate.py` 也可以直接透传 `--include-real-desktop-open`、`--include-real-desktop-ui-inspection`、`--include-real-desktop-interaction` 和 `--include-ui` 到 public-demo runner。这样可以先把已通过的真实 app open 或 Studio/Workflow UI evidence 归档到同一份 gate report，而不必一次运行所有真实桌面交互 smoke。当 public demo 仍是 partial 时，Next Actions 会按真实桌面、provider 和 UI 依赖拆分补证命令，并优先只包含缺失 flow flags；只有遇到未知未来 flow 时才回退到 full-demo 命令。已生成的分批 public-demo JSON 可以用重复的 `--public-demo-report` 合回 gate、`refresh_local_rc_signoff.py` 和 release-smoke summary；聚合时只承认 `status=passed` 的 flow，因此已通过的真实 app open 会被保留，仍被 Screen Recording、provider credentials 或 UI smoke 挡住的 flow 继续出现在 Next Actions。`--include-provider-workflow` 在缺少 `OHA_YACHIYO_SMOKE_*` 凭证时会写入 `skipped=true`、`provider_smoke_credentials_missing` 和缺失变量名作为 blocker evidence，发布仍未 ready，但本地补证命令不会因为环境未配置而伪装成产品失败。
 
 如果要一次刷新当前 HEAD 的本地 RC evidence、Gatekeeper readiness diagnostics、Screen Recording attempt、provider-not-applicable 草稿和 final signoff preview，运行：

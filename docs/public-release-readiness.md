@@ -174,6 +174,11 @@ an `External Requirements` section in Markdown. These fields group the remaining
 work into actionable classes such as `real_desktop_smoke_opt_in` and
 `provider_smoke_credentials`, including missing public-demo flow IDs, missing
 provider environment variables, blocking conditions, and rerun commands.
+External JSON reports passed through `--release-smoke-report` or
+`--public-demo-report` are also checked against the current Git HEAD when they
+include `source_revision.commit` or packaged `build_metadata.commit`; stale
+evidence is reported as `external_report_freshness` release evidence, not
+silently treated as current release proof.
 
 When collecting opt-in evidence incrementally, the same gate can pass through
 granular public-demo flags such as `--include-real-desktop-open`,
