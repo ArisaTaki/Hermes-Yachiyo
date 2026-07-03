@@ -396,6 +396,9 @@ def _tool_request_input_accepts_app_name_resolution(tool_name: str) -> bool:
         "desktop.show_app",
         "desktop.hide_app",
         "desktop.quit_app",
+        "desktop.inspect_app",
+        "desktop.read_ui",
+        "desktop.ui_elements",
         "desktop.open_path_with_app",
     }
 

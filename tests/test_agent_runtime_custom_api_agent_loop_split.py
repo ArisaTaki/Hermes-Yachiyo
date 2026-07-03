@@ -25752,6 +25752,119 @@ def test_runtime_tool_runner_skips_unresolved_selected_discovered_app() -> None:
     assert run_events[-1]["payload"]["result"]["error"] == "app_resolution_failed"
 
 
+def test_runtime_tool_runner_resolves_selected_app_for_ui_readback() -> None:
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = []
+    messages = [
+        {"role": "system", "content": "Use tools."},
+        {"role": "user", "content": "打开一个画图应用后看看界面"},
+    ]
+    run_events: list[dict[str, Any]] = []
+    tool_calls: list[tuple[str, dict[str, Any]]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_value: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        tool_calls.append((tool, dict(payload)))
+        if tool == "desktop.list_apps":
+            result = {
+                "ok": True,
+                "action": "desktop.list_apps",
+                "summary": "Found Figma",
+                "data": {
+                    "query": "image",
+                    "apps": [
+                        {
+                            "name": "Figma",
+                            "path": "/Applications/Figma.app",
+                            "match_score": 94,
+                        }
+                    ],
+                },
+            }
+        elif tool == "desktop.ui_elements":
+            result = {
+                "ok": True,
+                "action": "desktop.ui_elements",
+                "summary": "Read Figma UI",
+                "data": {"app_name": payload.get("app_name"), "elements": []},
+            }
+        else:
+            raise AssertionError(f"unexpected tool: {tool}")
+        timeline_value.append(
+            _timeline(
+                "agent.tool.call",
+                tool,
+                input_preview=dict(payload),
+                result=result,
+            )
+        )
+        return result
+
+    runner = RuntimeToolRequestRunner(
+        normalize_tool_name=normalize_tool_name,
+        input_preview=tool_input_preview,
+        run_budget=lambda _run_id, _timeline_value: budget,
+        user_goal_from_messages=lambda value: str(value[1].get("content") or ""),
+        goal_disallows_tool=lambda _goal, _tool: "",
+        timeline_factory=_timeline,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+        tool_loop_projection=RuntimeToolLoopProjectionBuilder(),
+        pending_approval_builder=NoopPendingApprovalBuilder(),
+        call_agent_tool=call_agent_tool,
+    )
+
+    runner.run(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.list_apps",
+                "input": {"query": "image", "limit": 20},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.ui_elements",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": "image",
+                    "limit": 80,
+                },
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            },
+        ],
+        ["desktop.list_apps", "desktop.ui_elements"],
+        broker={},
+        messages=messages,
+        timeline=timeline,
+        artifacts=[],
+        next_iteration=1,
+        run_id="run-selected-app-ui-readback",
+        budget=budget,
+    )
+
+    assert tool_calls == [
+        ("desktop.list_apps", {"query": "image", "limit": 20}),
+        ("desktop.ui_elements", {"app_name": "Figma", "limit": 80}),
+    ]
+    resolved = [
+        event for event in timeline if event["event"] == "agent.tool.input_resolved"
+    ]
+    assert resolved[0]["resolved_app_name"] == "Figma"
+    assert run_events[-1]["event_type"] == "agent.tool.input_resolved"
+
+
 def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> None:
     decision = RuntimePlanner().decision(
         "找一个 PDF 阅读器，向下滚动两页",
