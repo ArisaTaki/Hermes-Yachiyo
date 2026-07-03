@@ -399,7 +399,15 @@ def test_runtime_planner_defers_unknown_app_ui_operation_until_ui_observed() -> 
         "app.open",
         "desktop.ui_elements",
     ]
-    assert payload["yachiyo_execution_envelope"]["requests"][-1]["continue_to_model"] is True
+    assert payload["yachiyo_execution_plan_requests"] == [
+        "desktop.list_apps",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert payload["yachiyo_execution_normalized"] is True
+    assert payload["yachiyo_execution_envelope"]["requests"][1]["tool_name"] == (
+        "app.open_and_click_ui_element"
+    )
 
 
 def test_runtime_planner_file_access_opens_path_with_requested_app() -> None:
@@ -425,7 +433,7 @@ def test_runtime_planner_file_access_opens_path_with_requested_app() -> None:
         "path": "Downloads/sales.csv",
         "app_name": "Numbers",
     }
-    assert requests[0]["planning_reason"] == "planner_fallback_file_access"
+    assert requests[0]["planning_reason"] == "planner_full_plan_file_access"
     assert payload["selection_reason"] == "runtime_planner_full_plan_execution"
     assert decision.plan.tool_plan.steps[0].step_id == "open-local-path-with-app"
     assert decision.plan.tool_plan.steps[0].tool_name == "desktop.open_path_with_app"
@@ -468,8 +476,17 @@ def test_runtime_planner_keeps_generic_media_search_plan_over_legacy_open() -> N
         "limit": 80,
     }
     assert {request["planning_reason"] for request in requests} == {
-        "planner_fallback_media_playback"
+        "planner_full_plan_media_playback"
     }
+    assert payload["yachiyo_execution_plan_requests"] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert payload["yachiyo_execution_normalized"] is True
     assert payload["selection_reason"] == "runtime_planner_full_plan_execution"
 
 
@@ -24267,9 +24284,9 @@ def test_runtime_planner_keeps_generic_app_discovery_when_later_ui_tools_unavail
         "input": {"query": "image", "limit": 20},
         "source": "runtime_planner",
         "planning_reason": "planner_desktop_operation",
-        "continue_to_model": True,
     }
     assert "step_id" not in full_requests[0]
+    assert full_requests[2]["continue_to_model"] is True
     assert direct_requests == full_requests
 
 
@@ -26201,7 +26218,7 @@ def test_custom_api_agent_loop_executes_runtime_planner_desktop_click_with_ui_ve
         "desktop.ui_elements",
     ]
     assert tool_runs[0][-1]["source"] == "runtime_planner"
-    assert tool_runs[0][-1]["planning_reason"] == "planner_desktop_operation"
+    assert tool_runs[0][-1]["planning_reason"] == "planner_full_plan_desktop_operation"
     assert tool_runs[0][-1]["input"] == {"limit": 80}
 
     selection = _planner_selection_events(timeline)[0]
@@ -26312,12 +26329,12 @@ def test_custom_api_agent_loop_prefers_runtime_planner_media_before_legacy_rules
     assert "Apple Music" in str(result)
     assert [request["tool"] for request in tool_runs[0]] == ["media.apple_music_open_and_play"]
     assert tool_runs[0][0]["source"] == "runtime_planner"
-    assert tool_runs[0][0]["planning_reason"] == "planner_fallback_media_playback"
+    assert tool_runs[0][0]["planning_reason"] == "planner_full_plan_media_playback"
     planned_events = [
         event for event in timeline if event["event"] == "agent.desktop.intent_planned"
     ]
     assert [event["detail"] for event in planned_events] == ["media.apple_music_open_and_play"]
-    assert planned_events[0]["planning_reason"] == "planner_fallback_media_playback"
+    assert planned_events[0]["planning_reason"] == "planner_full_plan_media_playback"
 
 
 def test_custom_api_agent_loop_executes_runtime_planner_media_app_search_verify(
@@ -26430,7 +26447,7 @@ def test_custom_api_agent_loop_executes_runtime_planner_media_app_search_verify(
         "desktop.search_submit",
     ]
     assert [step["tool"] for step in completed_event["steps"]] == completed_event["tools"]
-    assert completed_event["planning_reason"] == "planner_fallback_media_playback"
+    assert completed_event["planning_reason"] == "planner_full_plan_media_playback"
 
 
 def test_runtime_planner_media_query_uses_type_into_ui_fallback() -> None:
@@ -32712,7 +32729,7 @@ def test_custom_api_agent_loop_preserves_runtime_planner_source_on_approval_requ
 
     assert timeline[-1]["event"] == "agent.desktop.intent_approval_required"
     assert timeline[-1]["source"] == "runtime_planner"
-    assert timeline[-1]["planning_reason"] == "planner_fallback_desktop_operation"
+    assert timeline[-1]["planning_reason"] == "planner_full_plan_desktop_operation"
     assert timeline[-1]["step_id"] == "operate-foreground-ui"
     assert timeline[-1]["capability_id"] == "desktop.ui_operation"
     assert timeline[-1]["runtime_stage"] == "operate"
@@ -32721,7 +32738,7 @@ def test_custom_api_agent_loop_preserves_runtime_planner_source_on_approval_requ
     assert appended_events[-1]["event_type"] == "agent.desktop.intent_approval_required"
     assert appended_events[-1]["payload"]["source"] == "runtime_planner"
     assert appended_events[-1]["payload"]["planning_reason"] == (
-        "planner_fallback_desktop_operation"
+        "planner_full_plan_desktop_operation"
     )
     assert appended_events[-1]["payload"]["step_id"] == "operate-foreground-ui"
     assert appended_events[-1]["payload"]["runtime_stage"] == "operate"

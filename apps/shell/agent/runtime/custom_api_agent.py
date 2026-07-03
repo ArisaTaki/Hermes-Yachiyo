@@ -54,7 +54,10 @@ from apps.shell.yachiyo_agent.planner_projection import (
     planner_selection_payload,
     runtime_planner_decision,
 )
-from apps.shell.yachiyo_agent.runtime_execution import runtime_execution_envelope_payload
+from apps.shell.yachiyo_agent.runtime_execution import (
+    runtime_execution_envelope_payload,
+    runtime_execution_requests_from_envelope_payload,
+)
 from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_OPERATING_MANUAL
 
 _DIRECT_DAILY_DESKTOP_TOOLS = {
@@ -2224,7 +2227,10 @@ class RuntimeCustomApiAgentLoop:
                 runtime_trace_metadata = _runtime_planner_request_trace_metadata(
                     selection.decision
                 )
-                full_plan_requests = planner_tool_requests(
+                full_plan_requests = _runtime_planner_full_plan_tool_requests(
+                    selection.decision,
+                    allowed_tools,
+                ) or planner_tool_requests(
                     planning_context,
                     allowed_tools,
                     metadata=runtime_trace_metadata,
@@ -2258,13 +2264,13 @@ class RuntimeCustomApiAgentLoop:
                         selected_reason="runtime_planner_full_plan_execution",
                         metadata=runtime_trace_metadata,
                     )
-                    if _tool_requests_include_model_followup(execution_requests):
-                        selection_payload = _selection_payload_with_runtime_execution_envelope(
-                            selection_payload,
-                            selection.decision,
-                            allowed_tools,
-                            full_plan=True,
-                        )
+                    selection_payload = _selection_payload_with_runtime_execution_envelope(
+                        selection_payload,
+                        selection.decision,
+                        allowed_tools,
+                        full_plan=True,
+                        execution_requests=execution_requests,
+                    )
                     return (
                         selection.decision,
                         execution_requests,
@@ -11005,12 +11011,49 @@ def _runtime_planner_request_trace_metadata(
     return {"runtime_planner_request_trace": True}
 
 
+def _runtime_planner_full_plan_tool_requests(
+    decision: Any | None,
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    intent_kind = str(
+        getattr(getattr(decision, "selected_intent", None), "kind", "") or ""
+    ).strip()
+    if intent_kind not in _CHAT_FULL_PLAN_EXECUTION_INTENTS:
+        return []
+    envelope = runtime_execution_envelope_payload(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+    if not envelope:
+        return []
+    return runtime_execution_requests_from_envelope_payload(
+        envelope,
+        allowed_tools=allowed_tools,
+    )
+
+
+_CHAT_FULL_PLAN_EXECUTION_INTENTS = frozenset(
+    {
+        "clipboard_operation",
+        "communication",
+        "desktop_operation",
+        "file_access",
+        "file_operation",
+        "media_playback",
+        "schedule",
+        "system_control",
+    }
+)
+
+
 def _selection_payload_with_runtime_execution_envelope(
     payload: Mapping[str, Any],
     decision: Any | None,
     allowed_tools: Iterable[str],
     *,
     full_plan: bool = False,
+    execution_requests: Iterable[Mapping[str, Any]] | None = None,
 ) -> dict[str, Any]:
     enriched = dict(payload)
     envelope = runtime_execution_envelope_payload(
@@ -11021,18 +11064,36 @@ def _selection_payload_with_runtime_execution_envelope(
     if not envelope:
         return enriched
     requests = envelope.get("requests") if isinstance(envelope.get("requests"), list) else []
-    tool_names = [
+    plan_tool_names = [
         str(request.get("tool_name") or "").strip()
         for request in requests
         if isinstance(request, Mapping) and str(request.get("tool_name") or "").strip()
     ]
+    execution_tool_names = _tool_names_from_requests(execution_requests)
+    tool_names = execution_tool_names or plan_tool_names
     enriched["yachiyo_execution_envelope"] = envelope
     enriched["yachiyo_execution_request_count"] = len(tool_names)
     if tool_names:
         enriched["yachiyo_execution_requests"] = tool_names
+    if execution_tool_names and plan_tool_names and execution_tool_names != plan_tool_names:
+        enriched["yachiyo_execution_plan_requests"] = plan_tool_names
+        enriched["yachiyo_execution_normalized"] = True
     if full_plan:
         enriched["yachiyo_execution_projection"] = "full_plan"
     return enriched
+
+
+def _tool_names_from_requests(
+    requests: Iterable[Mapping[str, Any]] | None,
+) -> list[str]:
+    if requests is None:
+        return []
+    return [
+        str(request.get("tool") or request.get("tool_name") or "").strip()
+        for request in requests
+        if isinstance(request, Mapping)
+        and str(request.get("tool") or request.get("tool_name") or "").strip()
+    ]
 
 
 def _tool_requests_include_model_followup(requests: Iterable[Mapping[str, Any]]) -> bool:
@@ -17511,7 +17572,10 @@ def _is_preserved_runtime_planner_verification(
     if tool_name not in _DAILY_DESKTOP_VERIFY_TOOLS:
         return False
     planning_reason = str(request.get("planning_reason") or "").strip()
-    if planning_reason != "planner_desktop_operation":
+    if planning_reason not in {
+        "planner_desktop_operation",
+        "planner_full_plan_desktop_operation",
+    }:
         return False
     previous_primary = str(requests[last_primary].get("tool") or "").strip()
     return previous_primary.startswith(("app.", "desktop."))

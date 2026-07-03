@@ -5103,11 +5103,18 @@ def test_main_chat_model_loop_executes_daily_desktop_intent_without_chat_model_p
         assert [event["payload"]["tool"] for event in planned_events] == [
             "desktop.list_apps",
             "app.open",
+            "desktop.active_window",
         ]
         assert planned_events[1]["payload"]["source"] == "runtime_planner"
-        assert planned_events[1]["payload"]["input_preview"] == {"app_name": "Music"}
+        assert planned_events[1]["payload"]["input_preview"] == {"app_name": "Apple Music"}
+        assert planned_events[2]["payload"]["runtime_stage"] == "verify"
+        assert planned_events[2]["payload"]["planning_reason"] == "planner_full_plan_desktop_operation"
         assert tool_event["payload"]["tool"] == "app.open"
-        assert tool_event["payload"]["input_preview"] == {"app_name": "Music"}
+        assert tool_event["payload"]["input_preview"]["app_name"] == "Music"
+        assert (
+            tool_event["payload"]["input_preview"]["app_resolution_source"]
+            == "desktop.list_apps"
+        )
     finally:
         service.close()
 
