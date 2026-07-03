@@ -1395,6 +1395,11 @@ def test_runtime_planner_routes_readme_edit_to_code_task_patch() -> None:
     assert decision.plan.tool_plan.steps[-1].tool_name == "workspace.write_patch"
     assert decision.plan.tool_plan.steps[-1].depends_on == ["read-code-target-file"]
     assert decision.plan.tool_plan.steps[-1].approval_required is True
+    assert decision.plan.task_core is not None
+    workspace_items = decision.plan.task_core.workspace.items
+    target_file_item = next(item for item in workspace_items if item.path == "README.md")
+    assert target_file_item.metadata["role"] == "code_target_file"
+    assert target_file_item.source_step_id == "read-code-target-file"
 
     requests = planner_tool_requests(
         "给 README 增加安装说明",
@@ -1462,6 +1467,17 @@ def test_runtime_planner_routes_ui_development_to_code_task_area_context(
         depends_on.startswith("inspect-code-area-")
         for depends_on in decision.plan.tool_plan.steps[-1].depends_on
     )
+    assert decision.plan.task_core is not None
+    workspace_items = decision.plan.task_core.workspace.items
+    code_area_items = [
+        item
+        for item in workspace_items
+        if item.metadata.get("role") == "code_area_context"
+    ]
+    assert any(item.path == expected_area for item in code_area_items)
+    matched_area_item = next(item for item in code_area_items if item.path == expected_area)
+    assert matched_area_item.source_step_id.startswith("inspect-code-area-")
+    assert matched_area_item.metadata["pattern"]
 
     requests = planner_tool_requests(
         prompt,

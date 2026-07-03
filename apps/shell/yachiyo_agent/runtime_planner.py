@@ -11834,6 +11834,10 @@ def _task_workspace_items(
             continue
         if not _task_workspace_input_key(key):
             continue
+        specialized_items = _task_workspace_special_input_items(intent, steps, key, value)
+        if specialized_items:
+            items.extend(specialized_items)
+            continue
         items.append(
             TaskWorkspaceItemSnapshot(
                 item_id=_stable_id("workspace-input", intent.intent_id, key),
@@ -11900,6 +11904,81 @@ def _task_workspace_items(
             )
         )
     return items
+
+
+def _task_workspace_special_input_items(
+    intent: TaskIntentSnapshot,
+    steps: list[ToolPlanStepSnapshot],
+    key: str,
+    value: Any,
+) -> list[TaskWorkspaceItemSnapshot]:
+    if key == "code_file_context_hint" and isinstance(value, Mapping):
+        target_path = str(value.get("path") or "").strip()
+        if not target_path:
+            return []
+        return [
+            TaskWorkspaceItemSnapshot(
+                item_id=_stable_id("workspace-code-file", intent.intent_id, target_path),
+                title=f"Target file: {target_path}",
+                kind="input",
+                path=target_path if _looks_like_workspace_path(target_path) else None,
+                source_step_id=_first_step_id_with_input_path(steps, target_path),
+                description="Explicit code file to read before patching.",
+                metadata={
+                    "input_key": key,
+                    "role": "code_target_file",
+                },
+            )
+        ]
+    if key == "code_area_context_hints" and isinstance(value, list):
+        items: list[TaskWorkspaceItemSnapshot] = []
+        for index, hint in enumerate(value, start=1):
+            if not isinstance(hint, Mapping):
+                continue
+            path = str(hint.get("path") or "").strip()
+            if not path:
+                continue
+            pattern = str(hint.get("pattern") or "").strip()
+            reason = str(hint.get("reason") or "").strip()
+            source_step_id = f"inspect-code-area-{index}"
+            if not any(step.step_id == source_step_id for step in steps):
+                source_step_id = _first_step_id_with_input_path(steps, path)
+            items.append(
+                TaskWorkspaceItemSnapshot(
+                    item_id=_stable_id(
+                        "workspace-code-area",
+                        intent.intent_id,
+                        f"{index}:{path}:{pattern}",
+                    ),
+                    title=f"Code area: {path}",
+                    kind="input",
+                    path=path if _looks_like_workspace_path(path) else None,
+                    source_step_id=source_step_id or None,
+                    description=reason or "Likely code area to inspect before patching.",
+                    metadata={
+                        "input_key": key,
+                        "role": "code_area_context",
+                        "pattern": pattern,
+                        "discovery_reason": reason,
+                    },
+                )
+            )
+        return items
+    return []
+
+
+def _first_step_id_with_input_path(
+    steps: list[ToolPlanStepSnapshot],
+    path: str,
+) -> str | None:
+    target_path = str(path or "").strip()
+    if not target_path:
+        return None
+    for step in steps:
+        input_preview = step.input_preview if isinstance(step.input_preview, Mapping) else {}
+        if str(input_preview.get("path") or "").strip() == target_path:
+            return step.step_id
+    return None
 
 
 def _task_workspace_input_key(key: str) -> bool:
