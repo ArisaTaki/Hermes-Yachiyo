@@ -1736,6 +1736,32 @@ class TaskIntentRouter:
             ],
         ):
             score = 0.18
+        if score <= 0 and context_source in {"selection", "clipboard"} and _contains_any(
+            text,
+            [
+                "整理",
+                "写",
+                "写入",
+                "记录",
+                "保存",
+                "保存成",
+                "输出",
+                "导出",
+                "生成",
+                "markdown",
+                "Markdown",
+                "md",
+                "文件",
+                "文档",
+                "save",
+                "export",
+                "output",
+                "format",
+                "write",
+                "markdown file",
+            ],
+        ):
+            score = 0.18
         if score <= 0 and file_context and _contains_any(
             text,
             ["生成", "输出", "写", "总结", "摘要", "summarize", "write", "report"],

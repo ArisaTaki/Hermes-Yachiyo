@@ -9525,6 +9525,10 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
         "把剪贴板内容做成报告",
         allowed_tools=["clipboard.read", "artifact.write"],
     )
+    clipboard_markdown = RuntimePlanner().decision(
+        "把当前剪贴板内容保存成 markdown 文件",
+        allowed_tools=["clipboard.read", "artifact.write"],
+    )
     selected_weekly = RuntimePlanner().decision(
         "把当前选中的内容整理成周报",
         allowed_tools=["desktop.safe_shortcut", "clipboard.read", "artifact.write"],
@@ -9609,6 +9613,19 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
     assert report_context.capability_id == "clipboard.read_write"
     assert report_context.tool_name == "clipboard.read"
     assert _step_by_id(clipboard, "write-report-artifact").input_preview == {
+        "path": "report.md",
+        "body_source": "clipboard",
+    }
+    assert clipboard_markdown.selected_intent.kind == "report_generation"
+    assert clipboard_markdown.selected_intent.inputs == {"context_source": "clipboard"}
+    assert [step.step_id for step in clipboard_markdown.plan.tool_plan.steps] == [
+        "read-report-context",
+        "write-report-artifact",
+    ]
+    assert _step_by_id(clipboard_markdown, "read-report-context").tool_name == (
+        "clipboard.read"
+    )
+    assert _step_by_id(clipboard_markdown, "write-report-artifact").input_preview == {
         "path": "report.md",
         "body_source": "clipboard",
     }
@@ -30031,6 +30048,10 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
         "把剪贴板内容做成报告",
         allowed_tools=["clipboard.read", "artifact.write"],
     )
+    clipboard_markdown_requests = planner_tool_requests(
+        "把当前剪贴板内容保存成 markdown 文件",
+        allowed_tools=["clipboard.read", "artifact.write"],
+    )
 
     assert clipboard_requests == [
         {
@@ -30042,6 +30063,7 @@ def test_planner_tool_requests_prefetches_report_context_for_model_loop() -> Non
             "continue_to_model": True,
         }
     ]
+    assert clipboard_markdown_requests == clipboard_requests
 
     clipboard_report_back_requests = planner_tool_requests(
         "把剪贴板内容整理成报告并复制回剪贴板",
