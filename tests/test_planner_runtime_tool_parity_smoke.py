@@ -33,20 +33,59 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
     assert case_by_id["visible_table_analysis"]["request_tools"] == [
         "desktop.ui_elements"
     ]
+    assert case_by_id["visible_table_analysis"]["deferred_plan_tools"] == [
+        "data.analyze"
+    ]
+    assert case_by_id["visible_table_analysis"]["request_continue_to_model"] == [True]
     assert case_by_id["visible_table_analysis_to_document_app"]["plan_tools"] == [
         "desktop.ui_elements",
         "data.analyze",
         "desktop.list_apps",
         "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert case_by_id["visible_table_analysis_to_document_app"]["deferred_plan_tools"] == [
+        "data.analyze",
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
     ]
     assert case_by_id["current_page_report"]["plan_tools"] == [
         "browser.extract_text",
         "artifact.write",
     ]
+    assert case_by_id["current_page_report"]["deferred_plan_tools"] == [
+        "artifact.write"
+    ]
+    assert case_by_id["current_page_summary_to_app"]["plan_tools"] == [
+        "browser.extract_text",
+        "artifact.write",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert case_by_id["current_page_summary_to_app"]["deferred_plan_tools"] == [
+        "artifact.write",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
     assert case_by_id["current_page_summary_to_document_app"]["plan_tools"] == [
         "browser.extract_text",
+        "artifact.write",
         "desktop.list_apps",
         "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert case_by_id["current_page_summary_to_document_app"]["deferred_plan_tools"] == [
+        "artifact.write",
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
     ]
     assert case_by_id["capability_media_app_playback"]["request_tools"] == [
         "desktop.list_apps",
@@ -76,6 +115,10 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
         "file.organize",
     ]
     assert case_by_id["file_organize_invoices"]["request_tools"] == ["workspace.list"]
+    assert case_by_id["file_organize_invoices"]["deferred_plan_tools"] == [
+        "artifact.write",
+        "file.organize",
+    ]
     assert case_by_id["file_organize_invoices"]["approval_required_tools"] == []
     assert case_by_id["explicit_terminal_command"]["approval_required_tools"] == [
         "terminal.run"
@@ -90,6 +133,10 @@ def test_planner_runtime_tool_parity_cli_outputs_json(capsys):
     assert output["mode"] == "planner_runtime_tool_parity_smoke"
     assert all(case["checks"]["request_tools_dispatched"] for case in output["cases"])
     assert all(case["checks"]["tools_have_model_descriptors"] for case in output["cases"])
+    assert all(
+        case["checks"]["deferred_followup_boundary_present"]
+        for case in output["cases"]
+    )
 
 
 def test_planner_runtime_tool_parity_cli_writes_report_json(tmp_path, capsys):

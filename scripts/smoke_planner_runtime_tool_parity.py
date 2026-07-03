@@ -104,6 +104,7 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "expected_intent": "data_analysis",
         "expected_plan_tools": ["desktop.ui_elements", "data.analyze"],
         "expected_request_tools": ["desktop.ui_elements"],
+        "expected_deferred_plan_tools": ["data.analyze"],
         "approval_required": [],
     },
     {
@@ -116,8 +117,17 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
             "data.analyze",
             "desktop.list_apps",
             "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
         ],
         "expected_request_tools": ["desktop.ui_elements"],
+        "expected_deferred_plan_tools": [
+            "data.analyze",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
         "approval_required": [],
     },
     {
@@ -127,6 +137,7 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "expected_intent": "web_research",
         "expected_plan_tools": ["browser.extract_text", "artifact.write"],
         "expected_request_tools": ["browser.extract_text"],
+        "expected_deferred_plan_tools": ["artifact.write"],
         "approval_required": [],
     },
     {
@@ -134,8 +145,20 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "category": "orchestrator",
         "prompt": "把当前网页总结到 Notion 新页面",
         "expected_intent": "report_generation",
-        "expected_plan_tools": ["browser.extract_text", "app.focus"],
+        "expected_plan_tools": [
+            "browser.extract_text",
+            "artifact.write",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
         "expected_request_tools": ["browser.extract_text"],
+        "expected_deferred_plan_tools": [
+            "artifact.write",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
         "approval_required": [],
     },
     {
@@ -145,10 +168,20 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "expected_intent": "report_generation",
         "expected_plan_tools": [
             "browser.extract_text",
+            "artifact.write",
             "desktop.list_apps",
             "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
         ],
         "expected_request_tools": ["browser.extract_text"],
+        "expected_deferred_plan_tools": [
+            "artifact.write",
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.ui_elements",
+        ],
         "approval_required": [],
     },
     {
@@ -158,6 +191,7 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "expected_intent": "report_generation",
         "expected_plan_tools": ["desktop.ui_elements", "artifact.write"],
         "expected_request_tools": ["desktop.ui_elements"],
+        "expected_deferred_plan_tools": ["artifact.write"],
         "approval_required": [],
     },
     {
@@ -167,6 +201,7 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
         "expected_intent": "report_generation",
         "expected_plan_tools": ["desktop.ui_elements", "artifact.write"],
         "expected_request_tools": ["desktop.ui_elements"],
+        "expected_deferred_plan_tools": ["artifact.write"],
         "approval_required": [],
     },
     {
@@ -258,6 +293,7 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
             "file.organize",
         ],
         "expected_request_tools": ["workspace.list"],
+        "expected_deferred_plan_tools": ["artifact.write", "file.organize"],
         "approval_required": ["file.organize"],
     },
     {
@@ -281,6 +317,7 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
             "terminal.run",
         ],
         "expected_request_tools": ["workspace.list", "terminal.run"],
+        "expected_deferred_plan_tools": ["workspace.write_patch", "terminal.run"],
         "approval_required": ["terminal.run"],
     },
     {
@@ -314,6 +351,17 @@ def _descriptor_tools(tools: list[str]) -> list[str]:
     ]
 
 
+def _deferred_plan_tools(
+    plan_tools: list[str],
+    request_tools: list[str],
+) -> list[str]:
+    if not request_tools:
+        return []
+    if plan_tools[: len(request_tools)] != request_tools:
+        return []
+    return plan_tools[len(request_tools) :]
+
+
 def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
     category = str(case["category"])
     policy = _compiled_policy(category)
@@ -333,8 +381,17 @@ def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
     ]
     expected_plan_tools = [str(tool) for tool in case["expected_plan_tools"]]
     expected_request_tools = [str(tool) for tool in case["expected_request_tools"]]
+    expected_deferred_plan_tools = [
+        str(tool) for tool in case.get("expected_deferred_plan_tools", [])
+    ]
     expected_approval_tools = [str(tool) for tool in case["approval_required"]]
     descriptor_tools = _descriptor_tools(sorted(set(plan_tools + request_tools)))
+    deferred_plan_tools = _deferred_plan_tools(plan_tools, request_tools)
+    request_continue_to_model = [
+        bool(request.get("continue_to_model"))
+        for request in requests
+        if isinstance(request, dict)
+    ]
     approval_required = policy.get("approval_required")
     if not isinstance(approval_required, dict):
         approval_required = {}
@@ -342,6 +399,11 @@ def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
         "intent_matches": decision.selected_intent.kind == str(case["expected_intent"]),
         "plan_tools_match": plan_tools == expected_plan_tools,
         "request_tools_match": request_tools == expected_request_tools,
+        "deferred_plan_tools_match": deferred_plan_tools == expected_deferred_plan_tools,
+        "deferred_followup_boundary_present": (
+            not deferred_plan_tools
+            or bool(request_continue_to_model and request_continue_to_model[-1])
+        ),
         "plan_tools_registered": all(tool in KNOWN_AGENT_TOOLS for tool in plan_tools),
         "request_tools_dispatched": all(tool in TOOL_DISPATCH_REGISTRY for tool in request_tools),
         "tools_have_model_descriptors": set(plan_tools + request_tools).issubset(
@@ -365,6 +427,8 @@ def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
         "intent_kind": decision.selected_intent.kind,
         "plan_tools": plan_tools,
         "request_tools": request_tools,
+        "deferred_plan_tools": deferred_plan_tools,
+        "request_continue_to_model": request_continue_to_model,
         "descriptor_tools": descriptor_tools,
         "approval_required_tools": [
             tool for tool in request_tools if bool(approval_required.get(tool))
