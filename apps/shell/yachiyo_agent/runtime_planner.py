@@ -25271,7 +25271,10 @@ def _selected_discovered_app_target_path_hint(text: str) -> str:
         return ""
     if _path_hint_is_app_search_query(value, str(match.group("path") or "")):
         return ""
-    path = str(match.group("path") or "").rstrip("。.,，；;")
+    path = _clean_file_open_explicit_path(
+        str(match.group("path") or ""),
+        value,
+    )
     location = _file_open_location_hint(value)
     if location and path and "/" not in path and not path.startswith(("~", ".")):
         return f"{location}/{path}"
@@ -25300,13 +25303,43 @@ def _file_open_explicit_path_hint(text: str) -> str:
     )
     if not match:
         return ""
-    path = str(match.group("path") or "").rstrip("。.,，；;")
+    path = _clean_file_open_explicit_path(
+        str(match.group("path") or ""),
+        value,
+    )
     if _path_hint_is_app_search_query(value, path):
         return ""
     location = _file_open_location_hint(value)
     if location and path and "/" not in path and not path.startswith(("~", ".")):
         return f"{location}/{path}"
     return path
+
+
+def _clean_file_open_explicit_path(path: str, prompt: str) -> str:
+    value = str(path or "").strip().rstrip("。.,，；;")
+    if not value:
+        return ""
+    if "/" in value or value.startswith(("~", ".")):
+        return value
+    if _file_open_location_hint(prompt):
+        for marker in (
+            "桌面上的",
+            "桌面的",
+            "下载文件夹里的",
+            "下载里的",
+            "文档里的",
+            "文件夹里的",
+            "目录里的",
+            "里面的",
+            "中的",
+            "里的",
+            "上的",
+            "的",
+        ):
+            if marker in value:
+                value = value.rsplit(marker, 1)[-1].strip()
+                break
+    return value
 
 
 def _path_hint_is_app_search_query(text: str, path: str) -> bool:

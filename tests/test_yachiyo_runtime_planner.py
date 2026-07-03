@@ -11836,6 +11836,27 @@ def test_runtime_planner_opens_file_with_discovered_app_before_in_app_search() -
     assert selection.selected_source == "runtime_planner"
     assert selection.requests == expected_requests
 
+    localized_prompt = "帮我用一个 PDF 应用打开桌面的合同.pdf，然后搜索违约条款"
+    localized_decision = RuntimePlanner().decision(
+        localized_prompt,
+        allowed_tools=allowed_tools,
+    )
+
+    assert localized_decision.selected_intent.inputs["selected_app_target_path_hint"] == (
+        "Desktop/合同.pdf"
+    )
+    assert _step_by_id(localized_decision, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "pdf",
+        "target_path": "Desktop/合同.pdf",
+        "action": "open_path_with_selected_app",
+    }
+    localized_requests = planner_tool_requests(localized_prompt, allowed_tools)
+    assert localized_requests[1]["tool"] == "desktop.open_path_with_app"
+    assert localized_requests[1]["input"]["target_path"] == "Desktop/合同.pdf"
+    assert localized_requests[3]["input"] == {"text": "违约条款"}
+
 
 def test_runtime_planner_discovers_dynamic_file_before_opening_with_app() -> None:
     allowed_tools = [
