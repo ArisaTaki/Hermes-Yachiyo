@@ -18381,6 +18381,10 @@ button.studio-tool-permission:disabled {
   font-size: 11px;
 }
 
+.run-group-overview-children .group-run-child-recovery-source {
+  color: oklch(86% 0.12 84);
+}
+
 .run-result-block.ready {
   border-color: oklch(68% 0.15 155 / 0.22);
 }
@@ -19646,6 +19650,22 @@ button.studio-tool-permission:disabled {
   color: var(--hy-muted);
   font-size: 12px;
   line-height: 1.45;
+  overflow-wrap: anywhere;
+}
+
+.workflow-step-recovery-source,
+.workflow-step-recovery-source-summary {
+  border-color: oklch(76% 0.14 84 / 0.26);
+  background: oklch(76% 0.14 84 / 0.075);
+  color: oklch(86% 0.12 84);
+}
+
+.workflow-step-recovery-source-summary {
+  margin: 0;
+  padding: 8px 9px;
+  border: 1px solid oklch(76% 0.14 84 / 0.22);
+  border-radius: 8px;
+  font-size: 11px;
   overflow-wrap: anywhere;
 }
 

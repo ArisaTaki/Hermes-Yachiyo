@@ -2,6 +2,7 @@ import type { RunGroupSpec, RunSpec } from '../types';
 import type {
   GroupRunSnapshot,
   PublicRunEvent,
+  RecoveryRunProvenanceSnapshot,
   RunTimelineSnapshot,
   ToolCallSnapshot,
 } from '../../yachiyo-studio/types';
@@ -307,14 +308,21 @@ export function GroupRunDetailPanel({
             const childStatus = publicRun?.status || childRun?.status || '';
             const childKind = groupRunChildKind(publicRun, childRun);
             const plannerTraceSummary = groupRunChildPlannerTraceSummary(publicRun);
+            const recoverySource = publicRun?.recovery_source || childRun?.recovery_source || null;
+            const recoverySourceSummary = groupRunRecoverySourceSummary(recoverySource);
             return (
               <button
                 key={childRunId}
                 type="button"
                 className={selected ? 'selected' : ''}
                 data-agent-id={publicRun?.agent_id || childRun?.runnable_id || ''}
+                data-has-recovery-source={String(Boolean(recoverySource))}
                 data-has-planner-trace={String(Boolean(plannerTraceSummary))}
                 data-planner-trace-summary={plannerTraceSummary}
+                data-recovery-action-id={recoverySource?.recovery_action_id || ''}
+                data-recovery-kind={recoverySource?.kind || ''}
+                data-recovery-source-run-id={recoverySource?.source_run_id || ''}
+                data-recovery-tool={recoverySource?.recovery_tool || ''}
                 data-run-id={childRunId}
                 data-run-status={childStatus}
                 data-testid="agent-run-detail-group-run-child"
@@ -332,6 +340,14 @@ export function GroupRunDetailPanel({
                     data-testid="agent-run-detail-group-run-child-planner-trace"
                   >
                     Planner trace · {plannerTraceSummary}
+                  </small>
+                ) : null}
+                {recoverySourceSummary ? (
+                  <small
+                    className="group-run-child-recovery-source"
+                    data-testid="agent-run-detail-group-run-child-recovery-source"
+                  >
+                    Recovery · {recoverySourceSummary}
                   </small>
                 ) : null}
               </button>
@@ -390,6 +406,25 @@ function groupRunChildPlannerTraceSummary(publicRun: RunTimelineSnapshot | null)
     summary.selection_role || summary.selection_source || summary.selected_tools?.length ? 'selection' : '',
     summary.planner_entrypoint ? `entrypoint ${summary.planner_entrypoint}` : '',
     summary.launcher_surface ? `surface ${summary.launcher_surface}` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function groupRunRecoverySourceSummary(
+  source: RecoveryRunProvenanceSnapshot | null | undefined,
+): string {
+  if (!source) return '';
+  const sourceLabel = source.source_task_title
+    || source.source_tool_name
+    || source.replan_request_id
+    || source.source_run_id
+    || source.source_group_run_id
+    || source.source_workflow_run_id
+    || '';
+  return [
+    source.kind,
+    sourceLabel ? `from ${sourceLabel}` : '',
+    source.recovery_tool ? `tool ${source.recovery_tool}` : '',
+    source.recovery_action_kind ? `action ${source.recovery_action_kind}` : '',
   ].filter(Boolean).join(' · ');
 }
 

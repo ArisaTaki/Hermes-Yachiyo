@@ -1,5 +1,5 @@
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
-import type { RerunRunRequest } from '../../yachiyo-studio/types';
+import type { RecoveryRunProvenanceSnapshot, RerunRunRequest } from '../../yachiyo-studio/types';
 import type { RunSpec } from '../types';
 import type { RunDetailWorkflowStepRef } from './runDetailTypes';
 
@@ -59,9 +59,15 @@ export function WorkflowStepResults({
           const rerunDisabled = Boolean(busy || selectedRunRerunDisabledReason || !step.nodeId);
           const stepLabel = step.label || step.nodeId || 'Workflow node';
           const canRerunBranch = Boolean(step.nodeId && step.selectedTargetNodeId);
+          const recoverySource = childRun?.recovery_source || null;
+          const recoverySourceSummary = workflowStepRecoverySourceSummary(recoverySource);
           return (
             <article
               className={`workflow-child-result workflow-step-result ${step.kind}`}
+              data-recovery-action-id={recoverySource?.recovery_action_id || ''}
+              data-recovery-kind={recoverySource?.kind || ''}
+              data-recovery-source-run-id={recoverySource?.source_run_id || ''}
+              data-recovery-tool={recoverySource?.recovery_tool || ''}
               data-testid="agent-run-detail-workflow-step"
               data-workflow-step-key={step.key}
               data-workflow-step-kind={step.kind}
@@ -87,6 +93,22 @@ export function WorkflowStepResults({
                       onClick={() => onOpenRunDetail(step.childRunId || '')}
                     >
                       Open Run
+                    </button>
+                  ) : null}
+                  {recoverySourceSummary ? (
+                    <button
+                      type="button"
+                      className="run-timeline-child workflow-step-recovery-source"
+                      data-recovery-action-id={recoverySource?.recovery_action_id || ''}
+                      data-recovery-kind={recoverySource?.kind || ''}
+                      data-recovery-source-run-id={recoverySource?.source_run_id || ''}
+                      data-testid="agent-run-detail-workflow-step-recovery-source"
+                      disabled={!recoverySource?.source_run_id}
+                      onClick={() => {
+                        if (recoverySource?.source_run_id) onOpenRunDetail(recoverySource.source_run_id);
+                      }}
+                    >
+                      Recovery
                     </button>
                   ) : null}
                   <button
@@ -141,6 +163,14 @@ export function WorkflowStepResults({
                   {step.task}
                 </p>
               ) : null}
+              {recoverySourceSummary ? (
+                <p
+                  className="workflow-step-recovery-source-summary"
+                  data-testid="agent-run-detail-workflow-step-recovery-source-summary"
+                >
+                  {recoverySourceSummary}
+                </p>
+              ) : null}
               <RunExpandableContent
                 content={step.childRunId && !childRun ? 'Loading child run...' : summary}
                 label="展开完整节点结果"
@@ -183,4 +213,23 @@ export function WorkflowStepResults({
       </div>
     </details>
   );
+}
+
+function workflowStepRecoverySourceSummary(
+  source: RecoveryRunProvenanceSnapshot | null | undefined,
+): string {
+  if (!source) return '';
+  const sourceLabel = source.source_task_title
+    || source.source_tool_name
+    || source.replan_request_id
+    || source.source_run_id
+    || source.source_group_run_id
+    || source.source_workflow_run_id
+    || 'source run';
+  return [
+    `Recovery from ${sourceLabel}`,
+    source.kind ? `kind ${source.kind}` : '',
+    source.recovery_tool ? `tool ${source.recovery_tool}` : '',
+    source.recovery_action_kind ? `action ${source.recovery_action_kind}` : '',
+  ].filter(Boolean).join(' · ');
 }
