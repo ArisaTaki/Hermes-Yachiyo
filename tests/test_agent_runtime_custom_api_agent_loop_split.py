@@ -1586,6 +1586,10 @@ def test_auto_code_context_read_requests_select_source_candidates() -> None:
     }
     assert requests[0]["planning_reason"] == "planner_auto_code_context_read"
     assert requests[0]["decision_id"] == "decision-code"
+    assert requests[0]["runtime_stage"] == "discover"
+    assert requests[0]["runtime_role"] == "inspect_workspace"
+    assert requests[0]["requires_observation"] is True
+    assert requests[0]["requires_post_action_verification"] is False
     assert requests[-1]["continue_to_model"] is True
     assert requests[-1]["input"] == {"path": "package.json"}
 
@@ -1728,6 +1732,9 @@ def test_custom_api_agent_loop_reads_code_candidates_after_area_search() -> None
     read_paths = [request["input"]["path"] for request in tool_runs[1]["tool_requests"]]
     assert "apps/frontend/src/features/agent-studio/RunTimelinePanel.tsx" in read_paths
     assert "apps/frontend/src/features/runtime-shared/RuntimeTimeline.tsx" in read_paths
+    assert {request["runtime_role"] for request in tool_runs[1]["tool_requests"]} == {
+        "inspect_workspace"
+    }
     followup_message = str(model_calls[0][-1]["content"])
     assert "workspace.read" in followup_message
     assert "workspace.write_patch with path and patch" in followup_message

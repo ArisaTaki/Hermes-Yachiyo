@@ -9515,6 +9515,11 @@ def _auto_code_context_read_requests(
         request["step_id"] = f"read-code-context-candidate-{index}"
         request["capability_id"] = "file.workspace_read"
         request["intent_kind"] = "code_task"
+        request["runtime_doctrine"] = "discover_operate_verify"
+        request["runtime_stage"] = "discover"
+        request["runtime_role"] = "inspect_workspace"
+        request["requires_observation"] = True
+        request["requires_post_action_verification"] = False
         _attach_selection_trace_fields(request, selection_payload)
         requests.append(request)
     if requests:
