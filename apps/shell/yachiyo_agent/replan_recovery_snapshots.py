@@ -851,8 +851,10 @@ def _apply_verification_target_metadata(
 def _verification_target_records(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
     records: list[dict[str, Any]] = []
     _extend_unique_mappings(records, payload.get("verification_targets"))
+    _extend_unique_mappings(records, payload.get("task_verification_targets"))
     metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
     _extend_unique_mappings(records, metadata.get("verification_targets"))
+    _extend_unique_mappings(records, metadata.get("task_verification_targets"))
     return records
 
 

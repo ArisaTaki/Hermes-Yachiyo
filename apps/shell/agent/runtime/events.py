@@ -66,6 +66,8 @@ def _run_event_payload_redaction_depth(value: Any) -> int:
             "runtime_execution_envelope",
             "runtime_plan",
             "step",
+            "task_verification_targets",
+            "verification_targets",
             "task_core",
         }
     ):

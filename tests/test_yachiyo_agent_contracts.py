@@ -1799,6 +1799,19 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
                                 "checkpoint_ids": ["checkpoint:analyze-data-file"],
                             }
                         ],
+                        "task_verification_targets": [
+                            {
+                                "step_id": "analyze-data-file",
+                                "workspace_items": [
+                                    {
+                                        "item_id": "workspace-analyze-input",
+                                        "title": "analyze-data-file.input.json",
+                                        "kind": "scratch",
+                                        "source_step_id": "analyze-data-file",
+                                    }
+                                ],
+                            }
+                        ],
                         "failure_detail": "data.analyze failed",
                         "metadata": {
                             "recovery_actions": [
@@ -1908,14 +1921,23 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
     assert recovery.recovery_actions[0].risk_level == "medium"
     assert recovery.permission_target == "terminal_execution"
     assert recovery.risk_level == "medium"
-    assert recovery.verification_targets == [
-        {
-            "step_id": "analyze-data-file",
-            "todo_id": "todo-analyze-data-file",
-            "todo_title": "Analyze data file",
-            "checkpoint_ids": ["checkpoint:analyze-data-file"],
-        }
-    ]
+    assert {
+        "step_id": "analyze-data-file",
+        "todo_id": "todo-analyze-data-file",
+        "todo_title": "Analyze data file",
+        "checkpoint_ids": ["checkpoint:analyze-data-file"],
+    } in recovery.verification_targets
+    assert {
+        "step_id": "analyze-data-file",
+        "workspace_items": [
+            {
+                "item_id": "workspace-analyze-input",
+                "title": "analyze-data-file.input.json",
+                "kind": "scratch",
+                "source_step_id": "analyze-data-file",
+            }
+        ],
+    } in recovery.verification_targets
     assert recovery.action_target == {
         "action": "click",
         "label": "Apple Music result",
