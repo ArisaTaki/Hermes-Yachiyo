@@ -12769,6 +12769,14 @@ def _auto_replan_runtime_recovery_action_requests(
             permission_target = str(action.get("permission_target") or "").strip()
             if permission_target:
                 request["permission_target"] = permission_target
+            for key in ("action_target", "observation_evidence", "observation_retry"):
+                value = action.get(key)
+                if not isinstance(value, Mapping):
+                    value = metadata.get(key)
+                if not isinstance(value, Mapping):
+                    value = payload.get(key)
+                if isinstance(value, Mapping) and value:
+                    request[key] = dict(value)
             request["continue_to_model"] = True
             _attach_replan_payload_trace_metadata(request, payload)
             requests.append(request)

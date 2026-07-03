@@ -1764,6 +1764,8 @@ def _runtime_replan_request_payload_for_tool_result(
         source_tool_name=source_tool_name,
         trigger=trigger,
     )
+    input_preview = _runtime_replan_input_preview(tool_request)
+    result_preview = _runtime_replan_result_preview(result)
     payload: dict[str, Any] = {
         "request_id": request_id,
         "trigger": trigger,
@@ -1779,7 +1781,7 @@ def _runtime_replan_request_payload_for_tool_result(
         "target_capability_id": str(
             tool_request.get("target_capability_id") or tool_request.get("capability_id") or ""
         ),
-        "input_preview": _runtime_replan_input_preview(tool_request),
+        "input_preview": input_preview,
         "failure_event_type": failure_event_type,
         "failure_detail": failure_detail,
         "fallback_tools": fallback_tools,
@@ -1788,12 +1790,23 @@ def _runtime_replan_request_payload_for_tool_result(
         "reason": "Runtime requested a replan after a failed or unverified step.",
         "source": "runtime_tool_request_runner",
         "metadata": {
-            "input_preview": _runtime_replan_input_preview(tool_request),
-            "result_preview": _runtime_replan_result_preview(result),
+            "input_preview": input_preview,
+            "result_preview": result_preview,
             "runtime_stage": str(tool_request.get("runtime_stage") or ""),
             "runtime_role": str(tool_request.get("runtime_role") or ""),
         },
     }
+    _runtime_replan_enrich_recovery_context(
+        payload,
+        tool_request,
+        result,
+        trigger=trigger,
+        source_step_id=source_step_id,
+        source_tool_name=source_tool_name,
+        input_preview=input_preview,
+        result_preview=result_preview,
+        failure_detail=failure_detail,
+    )
     for key in (
         "run_group_id",
         "group_run_id",
@@ -1893,6 +1906,236 @@ def _runtime_replan_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
 def _runtime_replan_input_preview(tool_request: Mapping[str, Any]) -> dict[str, Any]:
     value = tool_request.get("input")
     return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _runtime_replan_enrich_recovery_context(
+    payload: dict[str, Any],
+    tool_request: Mapping[str, Any],
+    result: Mapping[str, Any],
+    *,
+    trigger: str,
+    source_step_id: str,
+    source_tool_name: str,
+    input_preview: Mapping[str, Any],
+    result_preview: Mapping[str, Any],
+    failure_detail: str,
+) -> None:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    metadata = dict(metadata)
+    payload["metadata"] = metadata
+
+    for key in ("action_target", "observation_evidence", "observation_retry"):
+        value = _first_mapping(tool_request.get(key), result.get(key), metadata.get(key))
+        if value:
+            payload[key] = dict(value)
+            metadata[key] = dict(value)
+
+    recovery_actions = _runtime_replan_recovery_actions(tool_request, result)
+    if trigger == "verification_failed":
+        verification_context = _runtime_replan_verification_failure_context(
+            tool_request,
+            source_step_id=source_step_id,
+            source_tool_name=source_tool_name,
+            input_preview=input_preview,
+            result_preview=result_preview,
+            failure_detail=failure_detail,
+        )
+        verification_targets = verification_context.get("verification_targets")
+        if isinstance(verification_targets, list) and verification_targets:
+            payload.setdefault("verification_targets", verification_targets)
+            metadata.setdefault("verification_targets", verification_targets)
+        for key in ("action_target", "observation_evidence", "observation_retry"):
+            value = verification_context.get(key)
+            if isinstance(value, Mapping) and value:
+                payload.setdefault(key, dict(value))
+                metadata.setdefault(key, dict(value))
+        label = str(verification_context.get("recovery_action_label") or "").strip()
+        if label:
+            payload.setdefault("recovery_action_label", label)
+            metadata.setdefault("recovery_action_label", label)
+        recovery_actions.extend(_mapping_list(verification_context.get("recovery_actions")))
+
+    recovery_actions = _dedupe_runtime_replan_recovery_actions(recovery_actions)
+    if recovery_actions:
+        metadata["recovery_actions"] = recovery_actions
+
+
+def _runtime_replan_verification_failure_context(
+    tool_request: Mapping[str, Any],
+    *,
+    source_step_id: str,
+    source_tool_name: str,
+    input_preview: Mapping[str, Any],
+    result_preview: Mapping[str, Any],
+    failure_detail: str,
+) -> dict[str, Any]:
+    verification_targets = _runtime_replan_verification_targets(tool_request)
+    if not verification_targets:
+        return {}
+    action_target = _runtime_replan_verification_action_target(
+        verification_targets[0],
+        source_step_id=source_step_id,
+        source_tool_name=source_tool_name,
+        input_preview=input_preview,
+    )
+    observation_evidence = {
+        "source_tool": source_tool_name,
+        "source_step_id": source_step_id,
+        "verification_failed": True,
+        "input_preview": dict(input_preview),
+        "result_preview": dict(result_preview),
+    }
+    if failure_detail:
+        observation_evidence["failure_detail"] = failure_detail
+    observation_retry = {
+        "tool": source_tool_name,
+        "input": dict(input_preview),
+        "source_step_id": source_step_id,
+        "reason": "verification_failed",
+    }
+    recovery_actions: list[dict[str, Any]] = []
+    if source_tool_name:
+        recovery_action: dict[str, Any] = {
+            "label": "Re-observe failed verification target",
+            "tool": source_tool_name,
+            "input": dict(input_preview),
+            "permission_target": "runtime_verification",
+            "risk_level": "low",
+            "action_target": action_target,
+            "observation_evidence": observation_evidence,
+            "observation_retry": observation_retry,
+        }
+        recovery_actions.append(recovery_action)
+    return {
+        "verification_targets": verification_targets,
+        "action_target": action_target,
+        "observation_evidence": observation_evidence,
+        "observation_retry": observation_retry,
+        "recovery_action_label": "Re-observe failed verification target",
+        "recovery_actions": recovery_actions,
+    }
+
+
+def _runtime_replan_verification_targets(
+    tool_request: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    targets: list[dict[str, Any]] = []
+    for target in _mapping_list(tool_request.get("task_verification_targets")):
+        step_id = str(target.get("step_id") or "").strip()
+        todo = target.get("todo") if isinstance(target.get("todo"), Mapping) else {}
+        checkpoints = _mapping_list(target.get("checkpoints"))
+        snapshot: dict[str, Any] = {}
+        if step_id:
+            snapshot["step_id"] = step_id
+        todo_id = str(todo.get("todo_id") or "").strip()
+        if todo_id:
+            snapshot["todo_id"] = todo_id
+        todo_title = str(todo.get("title") or "").strip()
+        if todo_title:
+            snapshot["todo_title"] = todo_title
+        tool_name = str(todo.get("tool_name") or todo.get("tool") or "").strip()
+        if tool_name:
+            snapshot["tool_name"] = tool_name
+        checkpoint_ids = [
+            str(checkpoint.get("checkpoint_id") or "").strip()
+            for checkpoint in checkpoints
+            if str(checkpoint.get("checkpoint_id") or "").strip()
+        ]
+        if checkpoint_ids:
+            snapshot["checkpoint_ids"] = checkpoint_ids
+        checkpoint_titles = [
+            str(checkpoint.get("title") or "").strip()
+            for checkpoint in checkpoints
+            if str(checkpoint.get("title") or "").strip()
+        ]
+        if checkpoint_titles:
+            snapshot["checkpoint_titles"] = checkpoint_titles
+        if snapshot:
+            targets.append(snapshot)
+    return targets
+
+
+def _runtime_replan_verification_action_target(
+    target: Mapping[str, Any],
+    *,
+    source_step_id: str,
+    source_tool_name: str,
+    input_preview: Mapping[str, Any],
+) -> dict[str, Any]:
+    action_target: dict[str, Any] = {
+        "kind": "task_verification_target",
+        "action": "verify_after_action",
+        "verified_by_step_id": source_step_id,
+        "verification_tool": source_tool_name,
+    }
+    for key in ("step_id", "todo_id", "todo_title", "tool_name"):
+        value = str(target.get(key) or "").strip()
+        if value:
+            action_target[key] = value
+    for key in ("checkpoint_ids", "checkpoint_titles"):
+        values = _string_list(target.get(key))
+        if values:
+            action_target[key] = values
+    for source_key, target_key in (
+        ("app_name", "app_name"),
+        ("target_app_name", "app_name"),
+        ("query", "app_query"),
+        ("app_query", "app_query"),
+        ("target", "target"),
+        ("selector", "target"),
+        ("text", "text"),
+        ("value", "text"),
+    ):
+        value = str(input_preview.get(source_key) or "").strip()
+        if value and not str(action_target.get(target_key) or "").strip():
+            action_target[target_key] = value
+    return {key: value for key, value in action_target.items() if value not in ("", [], {})}
+
+
+def _runtime_replan_recovery_actions(
+    tool_request: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    actions: list[dict[str, Any]] = []
+    for source in (
+        tool_request.get("recovery_actions"),
+        result.get("recovery_actions"),
+        data.get("recovery_actions"),
+    ):
+        actions.extend(_mapping_list(source))
+    return [dict(action) for action in actions]
+
+
+def _dedupe_runtime_replan_recovery_actions(
+    actions: list[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for action in actions:
+        tool_name = str(action.get("tool") or "").strip()
+        if not tool_name:
+            continue
+        action_input = action.get("input") if isinstance(action.get("input"), Mapping) else {}
+        signature = (tool_name, repr(sorted(dict(action_input).items())))
+        if signature in seen:
+            continue
+        seen.add(signature)
+        deduped.append(dict(action))
+    return deduped
+
+
+def _first_mapping(*values: Any) -> dict[str, Any]:
+    for value in values:
+        if isinstance(value, Mapping) and value:
+            return dict(value)
+    return {}
+
+
+def _mapping_list(value: Any) -> list[Mapping[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [item for item in value if isinstance(item, Mapping)]
 
 
 def _runtime_replan_context_payload(payload: Mapping[str, Any]) -> dict[str, Any]:

@@ -597,6 +597,137 @@ def test_runtime_tool_request_runner_completes_operate_step_after_verify() -> No
     assert run_todo_statuses == ["in_progress", "completed"]
 
 
+def test_runtime_tool_request_runner_records_verification_failure_recovery_context() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    operate_todo = {
+        "todo_id": "todo-operate",
+        "title": "Click Export",
+        "status": "pending",
+        "step_id": "operate-foreground-ui",
+        "tool_name": "app.open_and_click_ui_element",
+    }
+    operate_checkpoint = {
+        "checkpoint_id": "checkpoint-operate",
+        "title": "Verify Export",
+        "status": "planned",
+        "after_step_id": "operate-foreground-ui",
+    }
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        _timeline: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        if str(tool_request.get("tool") or "") == "desktop.ui_elements":
+            return {
+                "ok": False,
+                "verification_failed": True,
+                "summary": "Export dialog is still not visible",
+                "blocking_condition": "ui_inspection_failed",
+            }
+        return {"ok": True, "summary": "clicked"}
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+
+    runner.run(
+        [
+            {
+                "tool": "app.open_and_click_ui_element",
+                "input": {"app_name": "PixelForge", "selector": "text=Export"},
+                "source": "runtime_planner",
+                "step_id": "operate-foreground-ui",
+                "core_id": "task-core-1",
+                "workspace_id": "task-workspace-1",
+                "decision_id": "decision-1",
+                "plan_id": "plan-1",
+                "runtime_stage": "operate",
+                "requires_post_action_verification": True,
+                "task_todo": operate_todo,
+                "task_checkpoints": [operate_checkpoint],
+            },
+            {
+                "tool": "desktop.ui_elements",
+                "input": {"app_name": "PixelForge", "role_filter": "text", "limit": 80},
+                "source": "runtime_planner",
+                "step_id": "verify-desktop-result",
+                "capability_id": "desktop.visual_verification",
+                "core_id": "task-core-1",
+                "workspace_id": "task-workspace-1",
+                "decision_id": "decision-1",
+                "plan_id": "plan-1",
+                "runtime_stage": "verify",
+                "depends_on": ["operate-foreground-ui"],
+                "replan_signal_ids": ["signal-verify-export-failed"],
+                "replan_triggers": ["verification_failed"],
+                "task_verification_targets": [
+                    {
+                        "step_id": "operate-foreground-ui",
+                        "todo": operate_todo,
+                        "checkpoints": [operate_checkpoint],
+                    }
+                ],
+            },
+        ],
+        ["app.open_and_click_ui_element", "desktop.ui_elements"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "click export"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-verify-failed",
+        budget=FakeBudget(),
+    )
+
+    todo_statuses = [
+        event["status"]
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["todo_id"] == "todo-operate"
+    ]
+    checkpoint_statuses = [
+        event["status"]
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event["checkpoint_id"] == "checkpoint-operate"
+    ]
+    assert todo_statuses == ["in_progress", "blocked"]
+    assert checkpoint_statuses == ["ready", "blocked"]
+
+    replan_event = next(event for event in timeline if event["event"] == "agent.replan.requested")
+    payload = replan_event["payload"]
+    assert payload["trigger"] == "verification_failed"
+    assert payload["source_step_id"] == "verify-desktop-result"
+    assert payload["source_tool_name"] == "desktop.ui_elements"
+    assert payload["verification_targets"][0]["step_id"] == "operate-foreground-ui"
+    assert payload["verification_targets"][0]["todo_id"] == "todo-operate"
+    assert payload["action_target"]["action"] == "verify_after_action"
+    assert payload["action_target"]["step_id"] == "operate-foreground-ui"
+    assert payload["action_target"]["todo_id"] == "todo-operate"
+    assert payload["action_target"]["app_name"] == "PixelForge"
+    assert payload["observation_evidence"]["source_tool"] == "desktop.ui_elements"
+    assert payload["observation_evidence"]["verification_failed"] is True
+    assert payload["observation_retry"]["tool"] == "desktop.ui_elements"
+    assert payload["observation_retry"]["input"]["app_name"] == "PixelForge"
+    assert payload["metadata"]["verification_targets"] == payload["verification_targets"]
+    assert payload["metadata"]["action_target"] == payload["action_target"]
+    assert payload["metadata"]["recovery_actions"][0]["tool"] == "desktop.ui_elements"
+    assert (
+        payload["metadata"]["recovery_actions"][0]["action_target"]["step_id"]
+        == "operate-foreground-ui"
+    )
+
+    run_replan_event = next(
+        payload
+        for _run_id, event_type, payload in run_events
+        if event_type == "agent.replan.requested"
+    )
+    assert run_replan_event["request_id"] == payload["request_id"]
+    assert run_replan_event["metadata"]["action_target"] == payload["action_target"]
+
+
 def test_runtime_tool_request_runner_records_replan_request_for_failed_planned_step() -> None:
     run_events: list[tuple[str, str, dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []
