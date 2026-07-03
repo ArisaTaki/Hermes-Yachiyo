@@ -25,6 +25,7 @@ from .replan_recovery_snapshots import (
     replan_recovery_snapshots_from_events,
 )
 from .run_snapshots import RunSnapshotProjector
+from .runtime_debug_snapshots import runtime_debug_summary_from_runtime_objects
 from .task_core_snapshots import task_core_snapshot_from_payload
 from .task_progress_snapshots import task_progress_summary_from_task_core
 
@@ -105,6 +106,8 @@ def group_run_snapshot_from_payload(
         events,
         group_run_id=group_run_id,
     )
+    memory_traces = _group_run_memory_traces(runs, events)
+    skill_traces = _group_run_skill_traces(runs, events)
     return GroupRunSnapshot(
         group_run_id=group_run_id,
         run_group_id=legacy_run_group_id or group_run_id or None,
@@ -122,13 +125,28 @@ def group_run_snapshot_from_payload(
         active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
         task_core=task_core,
         task_progress=task_progress,
+        runtime_debug=runtime_debug_summary_from_runtime_objects(
+            run_id=group_run_id,
+            group_id=group_id,
+            group_run_id=group_run_id,
+            events=events,
+            tool_calls=tool_calls,
+            approvals=pending_approvals,
+            artifacts=shared_artifacts,
+            memory_traces=memory_traces,
+            skill_traces=skill_traces,
+            children=runs,
+            replan_recoveries=replan_recoveries,
+            needs_user_action=bool(pending_approvals),
+            needs_replan=bool(task_progress and task_progress.needs_replan),
+        ),
         replan_recoveries=replan_recoveries,
         events=events,
         runs=runs,
         child_run_ids=child_run_ids,
         tool_calls=tool_calls,
-        memory_traces=_group_run_memory_traces(runs, events),
-        skill_traces=_group_run_skill_traces(runs, events),
+        memory_traces=memory_traces,
+        skill_traces=skill_traces,
         shared_artifacts=shared_artifacts,
         pending_approvals=pending_approvals,
         final_answer=_optional_text(payload.get("final_answer") or payload.get("summary")),

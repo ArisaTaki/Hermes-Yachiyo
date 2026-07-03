@@ -28,6 +28,7 @@ from .task_core_snapshots import task_core_snapshot_from_payload
 from .task_progress_snapshots import task_progress_summary_from_task_core
 from .replan_event_projection import run_events_with_replan_requests
 from .replan_recovery_snapshots import replan_recovery_snapshots_from_events
+from .runtime_debug_snapshots import runtime_debug_summary_from_runtime_objects
 from .timeline_metadata_snapshots import (
     merge_timeline_child_snapshots,
     planner_trace_summary_from_payload,
@@ -85,6 +86,25 @@ def run_timeline_snapshot_from_payload(
         group_run_id=group_run_id or "",
         workflow_run_id=workflow_run_id_from_payload(payload, run_id),
     )
+    workflow_run_id = workflow_run_id_from_payload(payload, run_id)
+    tool_calls = tool_call_snapshots_from_payloads(
+        payload.get("tool_calls"),
+        run_id=run_id,
+        events=events,
+    )
+    memory_traces = memory_trace_snapshots_from_events(events)
+    skill_traces = skill_trace_snapshots_from_events(events)
+    artifacts = artifact_snapshots_from_timeline_payload(
+        payload,
+        run_id=run_id,
+        events=events,
+    )
+    children = merge_timeline_child_snapshots(
+        timeline_child_snapshots_from_payloads(
+            payload.get("children") or payload.get("child_run_ids")
+        ),
+        timeline_child_snapshots_from_events(events),
+    )
 
     return RunTimelineSnapshot(
         run_id=run_id,
@@ -111,31 +131,35 @@ def run_timeline_snapshot_from_payload(
         rerun_original_created_at=rerun_provenance.get("rerun_original_created_at"),
         rerun_original_updated_at=rerun_provenance.get("rerun_original_updated_at"),
         planner_summary=planner_trace_summary_from_payload(payload),
+        runtime_debug=runtime_debug_summary_from_runtime_objects(
+            run_id=run_id,
+            task_id=_text(payload.get("task_id")),
+            group_run_id=group_run_id or "",
+            workflow_run_id=workflow_run_id,
+            events=events,
+            tool_calls=tool_calls,
+            approvals=approvals,
+            pending_approval=pending_approval,
+            artifacts=artifacts,
+            memory_traces=memory_traces,
+            skill_traces=skill_traces,
+            children=children,
+            replan_recoveries=replan_recoveries,
+            needs_user_action=pending_approval is not None,
+            needs_replan=bool(task_progress and task_progress.needs_replan),
+        ),
         task_core=task_core,
         task_progress=task_progress,
         replan_recoveries=replan_recoveries,
         recovery_source=recovery_source,
         events=events,
-        tool_calls=tool_call_snapshots_from_payloads(
-            payload.get("tool_calls"),
-            run_id=run_id,
-            events=events,
-        ),
-        memory_traces=memory_trace_snapshots_from_events(events),
-        skill_traces=skill_trace_snapshots_from_events(events),
+        tool_calls=tool_calls,
+        memory_traces=memory_traces,
+        skill_traces=skill_traces,
         approvals=approvals,
         pending_approval=pending_approval,
-        artifacts=artifact_snapshots_from_timeline_payload(
-            payload,
-            run_id=run_id,
-            events=events,
-        ),
-        children=merge_timeline_child_snapshots(
-            timeline_child_snapshots_from_payloads(
-                payload.get("children") or payload.get("child_run_ids")
-            ),
-            timeline_child_snapshots_from_events(events),
-        ),
+        artifacts=artifacts,
+        children=children,
         created_at=_text(payload.get("created_at")),
         updated_at=_text(payload.get("updated_at")),
     )

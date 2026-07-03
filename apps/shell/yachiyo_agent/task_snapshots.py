@@ -26,6 +26,7 @@ from .links import studio_run_url
 from .recovery_actions import RECOVERY_RETRY_CONTEXT_EVENT_TYPE
 from .replan_event_projection import run_events_with_replan_requests
 from .replan_recovery_snapshots import replan_recovery_snapshots_from_events
+from .runtime_debug_snapshots import runtime_debug_summary_from_runtime_objects
 from .timeline_metadata_snapshots import planner_trace_summary_from_payload
 from .tool_call_snapshots import tool_call_snapshots_from_payloads
 from .task_core_snapshots import task_core_snapshot_from_payload
@@ -144,6 +145,11 @@ def agent_task_snapshot_from_payload(
         task_id=task_id,
         group_run_id=group_run_id,
     )
+    artifacts = artifact_snapshots_from_task_payload(
+        payload,
+        run_id=run_id,
+        events=recent_events,
+    )
 
     return AgentTaskSnapshot(
         task_id=task_id,
@@ -157,17 +163,25 @@ def agent_task_snapshot_from_payload(
         pending_approvals=approvals,
         recent_events=recent_events,
         tool_calls=tool_calls,
-        artifacts=artifact_snapshots_from_task_payload(
-            payload,
-            run_id=run_id,
-            events=recent_events,
-        ),
+        artifacts=artifacts,
         metadata=_public_task_metadata(payload),
         planner_summary=planner_trace_summary_from_payload(
             {
                 "planner_summary": payload.get("planner_summary"),
                 "events": recent_events,
             }
+        ),
+        runtime_debug=runtime_debug_summary_from_runtime_objects(
+            run_id=run_id,
+            task_id=task_id,
+            group_run_id=group_run_id,
+            events=recent_events,
+            tool_calls=tool_calls,
+            approvals=approvals,
+            artifacts=artifacts,
+            replan_recoveries=replan_recoveries,
+            needs_user_action=needs_user_action,
+            needs_replan=bool(task_progress and task_progress.needs_replan),
         ),
         task_core=task_core,
         task_progress=task_progress,

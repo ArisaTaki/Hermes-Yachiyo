@@ -456,6 +456,37 @@ export type PlannerTraceSummarySnapshot = {
   event_count?: number;
 };
 
+export type RuntimeDebugSummarySnapshot = {
+  source?: string;
+  run_id?: string | null;
+  task_id?: string | null;
+  group_id?: string | null;
+  group_run_id?: string | null;
+  workflow_id?: string | null;
+  workflow_run_id?: string | null;
+  event_count?: number;
+  tool_call_count?: number;
+  completed_tool_call_count?: number;
+  failed_tool_call_count?: number;
+  blocked_tool_call_count?: number;
+  waiting_tool_call_count?: number;
+  approval_count?: number;
+  pending_approval_count?: number;
+  artifact_count?: number;
+  memory_trace_count?: number;
+  skill_trace_count?: number;
+  child_run_count?: number;
+  replan_recovery_count?: number;
+  needs_user_action?: boolean;
+  needs_replan?: boolean;
+  latest_event_type?: string | null;
+  latest_tool_name?: string | null;
+  latest_tool_status?: string | null;
+  latest_approval_id?: string | null;
+  latest_artifact_path?: string | null;
+  debug_surfaces?: string[];
+};
+
 export type PublicRunEvent = {
   event_id?: string | null;
   run_id: string;
@@ -730,6 +761,7 @@ export type AgentTaskSnapshot = {
   artifacts?: ArtifactSnapshot[];
   metadata?: Record<string, unknown>;
   planner_summary?: PlannerTraceSummarySnapshot | null;
+  runtime_debug?: RuntimeDebugSummarySnapshot | null;
   task_core?: TaskCoreSnapshot | null;
   task_progress?: TaskProgressSummarySnapshot | null;
   replan_recoveries?: ReplanRecoverySnapshot[];
@@ -812,6 +844,7 @@ export type RunTimelineSnapshot = {
   rerun_original_created_at?: string | null;
   rerun_original_updated_at?: string | null;
   planner_summary?: PlannerTraceSummarySnapshot | null;
+  runtime_debug?: RuntimeDebugSummarySnapshot | null;
   task_core?: TaskCoreSnapshot | null;
   task_progress?: TaskProgressSummarySnapshot | null;
   replan_recoveries?: ReplanRecoverySnapshot[];
@@ -992,6 +1025,7 @@ export type GroupRunSnapshot = {
   active_speaker_agent_id?: string | null;
   task_core?: TaskCoreSnapshot | null;
   task_progress?: TaskProgressSummarySnapshot | null;
+  runtime_debug?: RuntimeDebugSummarySnapshot | null;
   replan_recoveries?: ReplanRecoverySnapshot[];
   events?: PublicRunEvent[];
   runs?: RunTimelineSnapshot[];

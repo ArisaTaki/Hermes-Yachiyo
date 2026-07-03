@@ -540,6 +540,37 @@ class PlannerTraceSummarySnapshot(_PublicSnapshot):
     event_count: int = 0
 
 
+class RuntimeDebugSummarySnapshot(_PublicSnapshot):
+    source: str = "runtime_projection"
+    run_id: str | None = None
+    task_id: str | None = None
+    group_id: str | None = None
+    group_run_id: str | None = None
+    workflow_id: str | None = None
+    workflow_run_id: str | None = None
+    event_count: int = 0
+    tool_call_count: int = 0
+    completed_tool_call_count: int = 0
+    failed_tool_call_count: int = 0
+    blocked_tool_call_count: int = 0
+    waiting_tool_call_count: int = 0
+    approval_count: int = 0
+    pending_approval_count: int = 0
+    artifact_count: int = 0
+    memory_trace_count: int = 0
+    skill_trace_count: int = 0
+    child_run_count: int = 0
+    replan_recovery_count: int = 0
+    needs_user_action: bool = False
+    needs_replan: bool = False
+    latest_event_type: str | None = None
+    latest_tool_name: str | None = None
+    latest_tool_status: str | None = None
+    latest_approval_id: str | None = None
+    latest_artifact_path: str | None = None
+    debug_surfaces: list[str] = Field(default_factory=list)
+
+
 class PublicRunEvent(_PublicSnapshot):
     event_id: str | None = None
     run_id: str
@@ -774,6 +805,7 @@ class AgentTaskSnapshot(_PublicSnapshot):
     artifacts: list[ArtifactSnapshot] = Field(default_factory=list)
     metadata: dict[str, Any] = Field(default_factory=dict)
     planner_summary: PlannerTraceSummarySnapshot | None = None
+    runtime_debug: RuntimeDebugSummarySnapshot | None = None
     task_core: TaskCoreSnapshot | None = None
     task_progress: TaskProgressSummarySnapshot | None = None
     replan_recoveries: list[ReplanRecoverySnapshot] = Field(default_factory=list)
@@ -856,6 +888,7 @@ class RunTimelineSnapshot(_PublicSnapshot):
     rerun_original_created_at: str | None = None
     rerun_original_updated_at: str | None = None
     planner_summary: PlannerTraceSummarySnapshot | None = None
+    runtime_debug: RuntimeDebugSummarySnapshot | None = None
     task_core: TaskCoreSnapshot | None = None
     task_progress: TaskProgressSummarySnapshot | None = None
     replan_recoveries: list[ReplanRecoverySnapshot] = Field(default_factory=list)
@@ -1040,6 +1073,7 @@ class GroupRunSnapshot(_PublicSnapshot):
     active_speaker_agent_id: str | None = None
     task_core: TaskCoreSnapshot | None = None
     task_progress: TaskProgressSummarySnapshot | None = None
+    runtime_debug: RuntimeDebugSummarySnapshot | None = None
     replan_recoveries: list[ReplanRecoverySnapshot] = Field(default_factory=list)
     events: list[PublicRunEvent] = Field(default_factory=list)
     runs: list[RunTimelineSnapshot] = Field(default_factory=list)

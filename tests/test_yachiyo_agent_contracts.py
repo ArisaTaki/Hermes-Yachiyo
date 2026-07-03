@@ -53,6 +53,7 @@ from apps.shell.yachiyo_agent import (
     RunEventPageSnapshot,
     RunTimelineChildSnapshot,
     RunTimelineSnapshot,
+    RuntimeDebugSummarySnapshot,
     RuntimeExecutionEnvelopeSnapshot,
     RuntimeExecutionRequestSnapshot,
     RuntimePlanSnapshot,
@@ -2349,6 +2350,14 @@ def test_workflow_run_snapshot_rolls_child_debug_state_into_timeline() -> None:
     assert snapshot.pending_approval.run_id == "workflow-node-run-1"
     assert snapshot.pending_approval.workflow_node_label == "Analyze data"
     assert snapshot.approvals[0].workflow_run_id == "workflow-run-rollup-1"
+    assert snapshot.runtime_debug is not None
+    assert snapshot.runtime_debug.workflow_id == "workflow-1"
+    assert snapshot.runtime_debug.workflow_run_id == "workflow-run-rollup-1"
+    assert snapshot.runtime_debug.tool_call_count == 2
+    assert snapshot.runtime_debug.waiting_tool_call_count == 1
+    assert snapshot.runtime_debug.pending_approval_count == 1
+    assert snapshot.runtime_debug.artifact_count == 1
+    assert snapshot.runtime_debug.child_run_count == 1
 
 
 def test_run_timeline_snapshot_projects_desktop_approval_event() -> None:
@@ -2936,6 +2945,15 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
             step_count=1,
             event_count=2,
         ),
+        runtime_debug=RuntimeDebugSummarySnapshot(
+            run_id="run-1",
+            task_id="task-1",
+            event_count=1,
+            tool_call_count=1,
+            pending_approval_count=1,
+            artifact_count=1,
+            debug_surfaces=["timeline", "tools", "approvals", "artifacts"],
+        ),
         open_in_studio_url="#/agents?run_id=run-1",
         created_at="2026-06-14T00:00:00Z",
         updated_at="2026-06-14T00:00:01Z",
@@ -2958,6 +2976,7 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
         "artifacts",
         "metadata",
         "planner_summary",
+        "runtime_debug",
         "task_core",
         "task_progress",
         "replan_recoveries",
@@ -2971,6 +2990,13 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
     assert payload["metadata"]["yachiyo_plan_tools"] == ["workspace.write_patch"]
     assert payload["planner_summary"]["intent_kind"] == "code_task"
     assert payload["planner_summary"]["plan_capabilities"] == ["terminal.execute"]
+    assert payload["runtime_debug"]["tool_call_count"] == 1
+    assert payload["runtime_debug"]["debug_surfaces"] == [
+        "timeline",
+        "tools",
+        "approvals",
+        "artifacts",
+    ]
     assert "event" not in payload["recent_events"][0]
 
 
@@ -3039,6 +3065,11 @@ def test_agent_task_snapshot_keeps_verify_events_but_shows_primary_desktop_tool(
     assert [event.event_type for event in snapshot.recent_events].count("agent.tool.call") == 3
     assert [tool_call.tool_name for tool_call in snapshot.tool_calls] == ["app.open"]
     assert snapshot.tool_calls[0].input_preview == {"app_name": "Microsoft Word"}
+    assert snapshot.runtime_debug is not None
+    assert snapshot.runtime_debug.event_count == 4
+    assert snapshot.runtime_debug.tool_call_count == 1
+    assert snapshot.runtime_debug.latest_tool_name == "app.open"
+    assert snapshot.runtime_debug.debug_surfaces == ["timeline", "tools"]
 
 
 def test_agent_task_snapshot_uses_first_planned_desktop_step_for_progress() -> None:
@@ -4883,6 +4914,15 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
         rerun_of_runnable_name="Planner",
         rerun_original_created_at="2026-06-13T00:00:00Z",
         rerun_original_updated_at="2026-06-13T00:00:03Z",
+        runtime_debug=RuntimeDebugSummarySnapshot(
+            run_id="run-1",
+            task_id="task-1",
+            event_count=1,
+            tool_call_count=1,
+            approval_count=1,
+            artifact_count=1,
+            child_run_count=1,
+        ),
         recovery_source=RecoveryRunProvenanceSnapshot(
             source="agent_studio_replan_recovery",
             kind="replan",
@@ -4979,6 +5019,7 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
         "rerun_original_created_at",
         "rerun_original_updated_at",
         "planner_summary",
+        "runtime_debug",
         "task_core",
         "task_progress",
         "replan_recoveries",
@@ -4999,6 +5040,7 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
     assert payload["task_run_link_last_event_sequence"] == 7
     assert payload["rerun_of_run_id"] == "original-run-1"
     assert payload["planner_summary"] is None
+    assert payload["runtime_debug"]["child_run_count"] == 1
     assert payload["recovery_source"]["kind"] == "replan"
     assert payload["recovery_source"]["recovery_tool"] == "desktop.list_apps"
     assert payload["tool_calls"][0]["tool_name"] == "workspace.read"
@@ -5089,6 +5131,11 @@ def test_run_timeline_events_inherit_parent_task_core_context() -> None:
     assert tool_call.input_preview["core_id"] == "core-1"
     assert tool_call.input_preview["workspace_id"] == "workspace-1"
     assert tool_call.input_preview["task_id"] == "task-1"
+    assert snapshot.runtime_debug is not None
+    assert snapshot.runtime_debug.task_id == "task-1"
+    assert snapshot.runtime_debug.event_count == 1
+    assert snapshot.runtime_debug.tool_call_count == 1
+    assert snapshot.runtime_debug.latest_tool_name == "workspace.read"
 
 
 def test_group_run_events_inherit_parent_task_core_context() -> None:
@@ -5754,6 +5801,13 @@ def test_group_run_snapshot_rolls_child_debug_state_into_participants() -> None:
     assert reviewer.tool_calls == []
     assert [approval.approval_id for approval in group_run.pending_approvals] == ["approval-1"]
     assert [artifact.path for artifact in group_run.shared_artifacts] == ["music.png"]
+    assert group_run.runtime_debug is not None
+    assert group_run.runtime_debug.group_id == "group-1"
+    assert group_run.runtime_debug.group_run_id == "group-run-1"
+    assert group_run.runtime_debug.tool_call_count == 1
+    assert group_run.runtime_debug.pending_approval_count == 1
+    assert group_run.runtime_debug.artifact_count == 1
+    assert group_run.runtime_debug.child_run_count == 1
 
 
 def test_agent_definition_snapshot_serializes_model_config_alias() -> None:

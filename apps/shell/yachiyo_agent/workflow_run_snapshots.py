@@ -16,6 +16,7 @@ from .contracts import (
     WorkflowRunSnapshot,
 )
 from .run_snapshots import RunSnapshotProjector, run_timeline_snapshot_from_payload
+from .runtime_debug_snapshots import runtime_debug_summary_from_runtime_objects
 from .timeline_metadata_snapshots import merge_timeline_child_snapshots
 
 _RUN_PROJECTOR = RunSnapshotProjector()
@@ -138,6 +139,28 @@ def workflow_run_snapshot_from_payload(
                 ),
             }
         )
+    task_progress = timeline_payload.get("task_progress")
+    timeline_payload["runtime_debug"] = runtime_debug_summary_from_runtime_objects(
+        run_id=workflow_run_id,
+        task_id=_text(payload.get("task_id")),
+        workflow_id=workflow_id or "",
+        workflow_run_id=workflow_run_id,
+        events=timeline_payload.get("events"),
+        tool_calls=timeline_payload.get("tool_calls"),
+        approvals=timeline_payload.get("approvals"),
+        pending_approval=timeline_payload.get("pending_approval"),
+        artifacts=timeline_payload.get("artifacts"),
+        memory_traces=timeline_payload.get("memory_traces"),
+        skill_traces=timeline_payload.get("skill_traces"),
+        children=timeline_payload.get("children"),
+        replan_recoveries=timeline_payload.get("replan_recoveries"),
+        needs_user_action=timeline_payload.get("pending_approval") is not None,
+        needs_replan=bool(
+            task_progress.get("needs_replan")
+            if isinstance(task_progress, Mapping)
+            else getattr(task_progress, "needs_replan", False)
+        ),
+    )
     return WorkflowRunSnapshot(
         **timeline_payload,
         workflow_id=workflow_id,
