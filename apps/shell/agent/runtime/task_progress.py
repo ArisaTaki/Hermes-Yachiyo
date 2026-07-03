@@ -168,6 +168,16 @@ def append_task_progress_events_for_tool_result(
             append_run_event=append_run_event,
             run_id=run_id,
         )
+        _append_verification_target_progress_events(
+            tool_request,
+            _verification_targets_from_replan_recovery(tool_request, result),
+            base_payload,
+            result,
+            timeline=timeline,
+            timeline_factory=timeline_factory,
+            append_run_event=append_run_event,
+            run_id=run_id,
+        )
 
 
 def _append_verification_target_progress_events(
@@ -272,6 +282,61 @@ def _verification_target_checkpoint_status(result: Mapping[str, Any]) -> str:
     if isinstance(result, Mapping) and result.get("approval_required"):
         return "waiting_approval"
     return "completed" if isinstance(result, Mapping) and result.get("ok") is True else "blocked"
+
+
+def _verification_targets_from_replan_recovery(
+    tool_request: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    if result.get("ok") is not True:
+        return []
+    targets: list[dict[str, Any]] = []
+    for target in _mapping_items(tool_request.get("verification_targets")):
+        step_id = str(target.get("step_id") or "").strip()
+        if not step_id:
+            continue
+        todo = target.get("todo") if isinstance(target.get("todo"), Mapping) else {}
+        if not todo:
+            todo_id = str(target.get("todo_id") or "").strip()
+            todo_title = str(target.get("todo_title") or target.get("title") or "").strip()
+            tool_name = str(target.get("tool_name") or target.get("tool") or "").strip()
+            if todo_id:
+                todo = {
+                    key: value
+                    for key, value in {
+                        "todo_id": todo_id,
+                        "title": todo_title or step_id,
+                        "status": str(target.get("status") or "blocked").strip(),
+                        "step_id": step_id,
+                        "tool_name": tool_name,
+                    }.items()
+                    if value
+                }
+        checkpoints = _mapping_items(target.get("checkpoints"))
+        if not checkpoints:
+            checkpoint_ids = _string_list(target.get("checkpoint_ids"))
+            checkpoint_titles = _string_list(target.get("checkpoint_titles"))
+            checkpoints = [
+                {
+                    "checkpoint_id": checkpoint_id,
+                    "title": (
+                        checkpoint_titles[index]
+                        if index < len(checkpoint_titles)
+                        else checkpoint_id
+                    ),
+                    "status": "blocked",
+                    "after_step_id": step_id,
+                }
+                for index, checkpoint_id in enumerate(checkpoint_ids)
+            ]
+        targets.append(
+            {
+                "step_id": step_id,
+                "todo": dict(todo) if isinstance(todo, Mapping) else {},
+                "checkpoints": [dict(checkpoint) for checkpoint in checkpoints],
+            }
+        )
+    return targets
 
 
 def _append_replan_recovery_update_event(

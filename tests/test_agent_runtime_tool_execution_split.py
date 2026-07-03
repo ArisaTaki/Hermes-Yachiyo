@@ -760,12 +760,42 @@ def test_runtime_tool_request_runner_records_verification_failure_recovery_conte
     assert recovery_update["request_id"] == payload["request_id"]
     assert recovery_update["verification_targets"] == payload["verification_targets"]
     assert recovery_update["action_target"] == payload["action_target"]
+    recovered_todo_statuses = [
+        event["status"]
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["todo_id"] == "todo-operate"
+    ]
+    recovered_checkpoint_statuses = [
+        event["status"]
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event["checkpoint_id"] == "checkpoint-operate"
+    ]
+    assert recovered_todo_statuses == ["in_progress", "blocked", "completed"]
+    assert recovered_checkpoint_statuses == ["ready", "blocked", "completed"]
+    recovered_todo = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["todo_id"] == "todo-operate"
+        and event["status"] == "completed"
+    )
+    assert recovered_todo["previous_status"] == "blocked"
+    assert recovered_todo["verified_by_step_id"] == "verify-desktop-result"
     run_recovery_update = next(
         payload
         for _run_id, event_type, payload in run_events
         if event_type == "agent.replan.recovery.updated"
     )
     assert run_recovery_update["verification_targets"] == payload["verification_targets"]
+    run_recovered_todo_statuses = [
+        payload["status"]
+        for _run_id, event_type, payload in run_events
+        if event_type == "agent.task.todo.updated"
+        and payload["todo_id"] == "todo-operate"
+    ]
+    assert run_recovered_todo_statuses == ["in_progress", "blocked", "completed"]
 
 
 def test_runtime_tool_request_runner_records_replan_request_for_failed_planned_step() -> None:
