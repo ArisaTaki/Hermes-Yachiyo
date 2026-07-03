@@ -1188,6 +1188,10 @@ def planner_run_event_payloads(
 ) -> list[tuple[str, dict[str, Any]]]:
     if decision is None:
         return []
+    execution_envelope = runtime_execution_envelope_payload(
+        decision,
+        full_plan=True,
+    )
     payloads: list[tuple[str, dict[str, Any]]] = [
         (
             "agent.intent.selected",
@@ -1209,6 +1213,17 @@ def planner_run_event_payloads(
                 "source": decision.source,
                 "decision_id": decision.decision_id,
                 "plan": decision.plan.model_dump(mode="json"),
+                "runtime_execution_envelope": execution_envelope,
+                "execution_request_count": len(
+                    execution_envelope.get("requests")
+                    if isinstance(execution_envelope.get("requests"), list)
+                    else []
+                ),
+                "execution_stage_counts": (
+                    execution_envelope.get("runtime_stage_counts")
+                    if isinstance(execution_envelope.get("runtime_stage_counts"), Mapping)
+                    else {}
+                ),
             },
         ),
     ]

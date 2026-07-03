@@ -1437,6 +1437,48 @@ def test_run_timeline_snapshot_projects_task_core_from_plan_event() -> None:
     assert snapshot.task_core.todos[0].tool_name == "artifact.write"
 
 
+def test_planner_plan_created_event_includes_execution_envelope_for_studio_debugging() -> None:
+    decision = RuntimePlanner().decision(
+        "分析当前窗口里的表格并输出报告",
+        allowed_tools=["desktop.ui_elements", "data.analyze", "artifact.write"],
+    )
+    events = [
+        {"event_type": event_type, "payload": payload}
+        for event_type, payload in planner_run_event_payloads(decision)
+    ]
+    plan_event = next(
+        event for event in events if event["event_type"] == "agent.plan.created"
+    )
+
+    envelope = plan_event["payload"]["runtime_execution_envelope"]
+    assert envelope["decision_id"] == decision.decision_id
+    assert envelope["plan_id"] == decision.plan.plan_id
+    assert envelope["intent_kind"] == "data_analysis"
+    assert envelope["task_core"]["core_id"] == decision.plan.task_core.core_id
+    assert plan_event["payload"]["execution_request_count"] == len(envelope["requests"])
+    assert envelope["requests"][0]["tool_name"] == "desktop.ui_elements"
+    assert envelope["requests"][1]["tool_name"] == "data.analyze"
+    assert envelope["requests"][1]["step_id"] == "analyze-data-context"
+    assert envelope["requests"][1]["replan_signal_ids"]
+
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "status": "running",
+            "events": events,
+        }
+    )
+
+    assert snapshot.events[1].payload["runtime_execution_envelope"]["requests"][1][
+        "tool_name"
+    ] == "data.analyze"
+    assert snapshot.planner_summary is not None
+    assert snapshot.planner_summary.plan_tools == [
+        "desktop.ui_elements",
+        "data.analyze",
+    ]
+
+
 def test_run_timeline_snapshot_synthesizes_replan_event_from_failed_tool() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",
