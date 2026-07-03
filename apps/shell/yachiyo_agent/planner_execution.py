@@ -2240,13 +2240,14 @@ def _drop_redundant_app_foreground_prepare_requests(
     requests: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     filtered: list[dict[str, Any]] = []
-    for request in requests:
+    for index, request in enumerate(requests):
         tool_name = str(request.get("tool") or "").strip()
         payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
         app_name = str(payload.get("app_name") or "").strip()
         if (
             app_name
             and tool_name in _APP_OPEN_AND_FOREGROUND_TOOLS
+            and not _starts_multistep_app_search_chain(request, requests, index)
         ):
             while _last_prepare_request_matches(
                 filtered,
@@ -2257,6 +2258,7 @@ def _drop_redundant_app_foreground_prepare_requests(
         elif (
             app_name
             and tool_name in _APP_FOCUS_AND_FOREGROUND_TOOLS
+            and not _starts_multistep_app_search_chain(request, requests, index)
         ):
             while _last_prepare_request_matches(
                 filtered,
@@ -2266,6 +2268,24 @@ def _drop_redundant_app_foreground_prepare_requests(
                 filtered.pop()
         filtered.append(request)
     return filtered
+
+
+def _starts_multistep_app_search_chain(
+    request: Mapping[str, Any],
+    requests: list[dict[str, Any]],
+    index: int,
+) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in (_APP_OPEN_AND_FOREGROUND_TOOLS | _APP_FOCUS_AND_FOREGROUND_TOOLS):
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    if str(payload.get("action") or "").strip() != "find":
+        return False
+    return any(
+        str(later.get("tool") or "").strip()
+        in {"desktop.safe_type_text", "desktop.type_text", "desktop.search_submit"}
+        for later in requests[index + 1 :]
+    )
 
 
 def _last_prepare_request_matches(

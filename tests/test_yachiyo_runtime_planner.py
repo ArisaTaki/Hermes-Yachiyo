@@ -29373,6 +29373,57 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     )
 
 
+def test_runtime_execution_envelope_preserves_app_search_prepare_chain() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+        "artifact.write",
+    ]
+    decision = RuntimePlanner().decision(
+        "打开 Notion 搜索 release plan，把结果整理成摘要",
+        allowed_tools=allowed_tools,
+    )
+
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+
+    assert envelope is not None
+    assert [request.tool_name for request in envelope.requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    assert [request.step_id for request in envelope.requests[:4]] == [
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "focus-opened-app",
+        "focus-app-search-field",
+    ]
+    assert envelope.requests[3].depends_on == ["open-or-focus-app"]
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    assert [request["tool"] for request in projected_requests[:4]] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus",
+        "app.open_and_safe_shortcut",
+    ]
+    assert projected_requests[3]["task_todo"]["step_id"] == "focus-app-search-field"
+
+
 def test_runtime_execution_envelope_can_project_full_data_analysis_plan() -> None:
     allowed_tools = ["workspace.read", "terminal.run", "artifact.write"]
     decision = RuntimePlanner().decision(
