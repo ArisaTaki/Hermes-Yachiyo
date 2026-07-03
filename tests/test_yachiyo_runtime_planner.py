@@ -11254,6 +11254,130 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
     ]
 
 
+def test_runtime_planner_pastes_dynamic_context_into_discovered_apps() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+
+    clipboard = RuntimePlanner().decision(
+        "把剪贴板内容写进一个笔记应用",
+        allowed_tools=allowed_tools,
+    )
+    current_link = RuntimePlanner().decision(
+        "找一个笔记应用，把当前网页链接写进去",
+        allowed_tools=allowed_tools,
+    )
+    selected_text = RuntimePlanner().decision(
+        "找一个文本编辑器，把选中的文字写进去",
+        allowed_tools=allowed_tools,
+    )
+
+    assert clipboard.selected_intent.kind == "desktop_operation"
+    assert clipboard.selected_intent.inputs["dynamic_context_ui_transfer_hint"]["source"] == (
+        "clipboard"
+    )
+    assert [step.step_id for step in clipboard.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "paste-context-into-selected-discovered-app",
+        "verify-selected-discovered-app-action",
+    ]
+    assert _step_by_id(clipboard, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "notes",
+    }
+    assert _step_by_id(
+        clipboard,
+        "paste-context-into-selected-discovered-app",
+    ).input_preview == {"action": "paste"}
+    assert "type-selected-discovered-app-text" not in {
+        step.step_id for step in clipboard.plan.tool_plan.steps
+    }
+    clipboard_requests = planner_tool_requests(
+        "把剪贴板内容写进一个笔记应用",
+        allowed_tools,
+    )
+    assert [request["tool"] for request in clipboard_requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    assert clipboard_requests[2]["input"] == {"action": "paste"}
+    assert all("continue_to_model" not in request for request in clipboard_requests)
+
+    assert current_link.selected_intent.inputs["dynamic_context_ui_transfer_hint"] == {
+        "source": "current_page_link",
+        "action": "transfer_context",
+        "target_kind": "app_paste",
+        "target": "",
+        "app_name": "笔记",
+        "mode": "focus",
+    }
+    assert [step.step_id for step in current_link.plan.tool_plan.steps] == [
+        "copy-current-page-link-context",
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "paste-context-into-selected-discovered-app",
+        "verify-selected-discovered-app-action",
+    ]
+    assert _step_by_id(current_link, "discover_apps-desktop-state").depends_on == [
+        "copy-current-page-link-context"
+    ]
+    current_link_requests = planner_tool_requests(
+        "找一个笔记应用，把当前网页链接写进去",
+        allowed_tools,
+    )
+    assert [request["tool"] for request in current_link_requests] == [
+        "desktop.safe_shortcut",
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    assert current_link_requests[0]["input"] == {"action": "copy_current_page_link"}
+    assert current_link_requests[3]["input"] == {"action": "paste"}
+    assert all("continue_to_model" not in request for request in current_link_requests)
+
+    assert selected_text.selected_intent.inputs["dynamic_context_ui_transfer_hint"] == {
+        "source": "selection",
+        "action": "transfer_context",
+        "target_kind": "app_paste",
+        "target": "",
+        "app_name": "文本",
+        "mode": "focus",
+    }
+    assert [step.step_id for step in selected_text.plan.tool_plan.steps] == [
+        "copy-selected-dynamic-context",
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "paste-context-into-selected-discovered-app",
+        "verify-selected-discovered-app-action",
+    ]
+    assert _step_by_id(selected_text, "discover_apps-desktop-state").input_preview == {
+        "query": "document",
+        "limit": 20,
+    }
+    selected_text_requests = planner_tool_requests(
+        "找一个文本编辑器，把选中的文字写进去",
+        allowed_tools,
+    )
+    assert [request["tool"] for request in selected_text_requests] == [
+        "desktop.safe_shortcut",
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.ui_elements",
+    ]
+    assert selected_text_requests[0]["input"] == {"action": "copy"}
+    assert selected_text_requests[3]["input"] == {"action": "paste"}
+    assert all("continue_to_model" not in request for request in selected_text_requests)
+
+
 def test_runtime_planner_discovers_chinese_generic_editor_apps_before_acting() -> None:
     allowed_tools = [
         "desktop.list_apps",

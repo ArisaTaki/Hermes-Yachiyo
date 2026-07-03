@@ -573,6 +573,11 @@ class TaskIntentRouter:
             desktop_discovery = None
         context_source = context_source_hint(text)
         dynamic_context_transfer = _dynamic_context_ui_transfer_hint(text)
+        if not dynamic_context_transfer and app_capability:
+            dynamic_context_transfer = _capability_dynamic_context_ui_transfer_hint(
+                text,
+                app_capability,
+            )
         if dynamic_context_transfer:
             foreground_compose_text = ""
         app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
@@ -3445,7 +3450,11 @@ class RuntimePlanner:
                 target_path=selected_app_target_path,
                 mode=mode,
             )
-            if action == "discover_apps" and _discovered_app_open_requested(intent) and selected_app_tool:
+            if (
+                action == "discover_apps"
+                and (_discovered_app_open_requested(intent) or dynamic_context_transfer)
+                and selected_app_tool
+            ):
                 selected_app_capability = (
                     "file.desktop_access"
                     if selected_app_tool == "desktop.open_path_with_app"
@@ -3499,6 +3508,17 @@ class RuntimePlanner:
                     selected_app_tool=selected_app_tool,
                     depends_on="open-selected-discovered-app",
                 )
+                if _append_selected_discovered_dynamic_context_transfer_steps(
+                    steps,
+                    intent,
+                    allowed,
+                    dict(dynamic_context_transfer),
+                    discovery_step_id=f"{action}-desktop-state"
+                    if action
+                    else "discover-desktop-state",
+                    open_step_id="open-selected-discovered-app",
+                ):
+                    return steps
                 _append_selected_discovered_foreground_compose_steps(
                     steps,
                     intent,
@@ -3587,7 +3607,11 @@ class RuntimePlanner:
                 target_path=str(intent.inputs.get("selected_app_target_path_hint") or "").strip(),
                 mode=mode,
             )
-            if action == "discover_apps" and _discovered_app_open_requested(intent) and selected_app_tool:
+            if (
+                action == "discover_apps"
+                and (_discovered_app_open_requested(intent) or dynamic_context_transfer)
+                and selected_app_tool
+            ):
                 selected_app_capability = (
                     "file.desktop_access"
                     if selected_app_tool == "desktop.open_path_with_app"
@@ -9249,6 +9273,180 @@ def _selected_discovered_app_operation_input(
             **dict(payload),
         }
     return dict(payload)
+
+
+def _append_selected_discovered_dynamic_context_transfer_steps(
+    steps: list[ToolPlanStepSnapshot],
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    hint: Mapping[str, Any],
+    *,
+    discovery_step_id: str,
+    open_step_id: str,
+) -> bool:
+    source = str(hint.get("source") or "").strip()
+    action = str(hint.get("action") or "").strip()
+    target_kind = str(hint.get("target_kind") or "").strip()
+    if action != "transfer_context" or target_kind != "app_paste":
+        return False
+    if source not in {"selection", "clipboard", "current_page_link", "current_page_content"}:
+        return False
+    if not any(step.step_id == open_step_id for step in steps):
+        return False
+
+    paste_tool = _first_allowed(
+        (
+            "desktop.safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            "app.open_and_safe_shortcut",
+        ),
+        allowed,
+    )
+    if not paste_tool:
+        return False
+
+    source_steps = _selected_discovered_dynamic_context_source_steps(
+        intent,
+        allowed,
+        source,
+    )
+    if source_steps is None:
+        return False
+    if source_steps:
+        steps[:0] = source_steps
+        source_dependency = source_steps[-1].step_id
+        for index, step in enumerate(steps):
+            if step.step_id != discovery_step_id:
+                continue
+            depends_on = [
+                item
+                for item in [*step.depends_on, source_dependency]
+                if item
+            ]
+            steps[index] = step.model_copy(
+                update={"depends_on": _unique_capabilities(depends_on)}
+            )
+            break
+
+    paste_input = (
+        {"action": "paste"}
+        if paste_tool == "desktop.safe_shortcut"
+        else _selected_discovered_app_operation_input(
+            intent,
+            paste_tool,
+            {"action": "paste"},
+        )
+    )
+    steps.append(
+        _step(
+            intent,
+            "paste-context-into-selected-discovered-app",
+            "Paste context into selected app",
+            "desktop.ui_operation",
+            paste_tool,
+            input_preview=paste_input,
+            depends_on=[open_step_id],
+            action="shortcut",
+            reason=(
+                "Paste the captured dynamic context into the runtime-resolved selected app "
+                "after app discovery and focus."
+            ),
+        )
+    )
+    verify_tool = _first_allowed(
+        ("desktop.ui_elements", "desktop.read_ui", "desktop.active_window", "screen.capture"),
+        allowed,
+    )
+    if verify_tool:
+        steps.append(
+            _step(
+                intent,
+                "verify-selected-discovered-app-action",
+                "Verify selected app action",
+                "desktop.visual_verification",
+                verify_tool,
+                input_preview=(
+                    {"reason": "verify selected discovered app context transfer"}
+                    if verify_tool == "screen.capture"
+                    else _desktop_verify_input_preview(
+                        verify_tool,
+                        app_name="<selected app from desktop.list_apps>",
+                        operation_preview={"limit": 80},
+                    )
+                    or {"limit": 80}
+                ),
+                depends_on=["paste-context-into-selected-discovered-app"],
+                action=_desktop_discovery_action(verify_tool),
+                reason=(
+                    "Verify the selected discovered app after pasting dynamic context "
+                    "before reporting completion."
+                ),
+            )
+        )
+    return True
+
+
+def _selected_discovered_dynamic_context_source_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    source: str,
+) -> list[ToolPlanStepSnapshot] | None:
+    if source == "clipboard":
+        return []
+    shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+    if not shortcut_tool:
+        return None
+    if source == "selection":
+        return [
+            _step(
+                intent,
+                "copy-selected-dynamic-context",
+                "Copy selected context",
+                "desktop.ui_operation",
+                shortcut_tool,
+                input_preview={"action": "copy"},
+                action="copy_selection",
+                reason="Copy the selected content before opening the target discovered app.",
+            )
+        ]
+    if source == "current_page_link":
+        return [
+            _step(
+                intent,
+                "copy-current-page-link-context",
+                "Copy current page link",
+                "desktop.ui_operation",
+                shortcut_tool,
+                input_preview={"action": "copy_current_page_link"},
+                action="copy_current_page_link",
+                reason="Copy the current page link before opening the target discovered app.",
+            )
+        ]
+    if source == "current_page_content":
+        return [
+            _step(
+                intent,
+                "select-current-page-content",
+                "Select current page content",
+                "desktop.ui_operation",
+                shortcut_tool,
+                input_preview={"action": "select_all"},
+                action="shortcut",
+                reason="Select the current page content before copying it for transfer.",
+            ),
+            _step(
+                intent,
+                "copy-current-page-content",
+                "Copy current page content",
+                "desktop.ui_operation",
+                shortcut_tool,
+                input_preview={"action": "copy"},
+                depends_on=["select-current-page-content"],
+                action="copy_selection",
+                reason="Copy the current page content before opening the target discovered app.",
+            ),
+        ]
+    return None
 
 
 def _append_selected_discovered_generic_action_steps(
@@ -18168,6 +18366,38 @@ def _dynamic_context_ui_transfer_hint(text: str) -> dict[str, Any]:
         "action": "transfer_context",
         "target_kind": target_kind,
         "target": target,
+        "app_name": app_name,
+        "mode": "open" if _explicit_app_open_request(value) else "focus",
+    }
+
+
+def _capability_dynamic_context_ui_transfer_hint(
+    text: str,
+    app_capability: Mapping[str, Any],
+) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    if _dynamic_context_transform_target_hint(value):
+        return {}
+    source = _dynamic_context_source_hint(value)
+    if source not in {"selection", "clipboard", "current_page_link", "current_page_content"}:
+        return {}
+    target_kind, _target = _dynamic_context_ui_target_hint(value)
+    if target_kind:
+        return {}
+    if _looks_like_dynamic_context_copy_only(value):
+        return {}
+    if not _looks_like_dynamic_context_transfer(value):
+        return {}
+    app_name = str(
+        app_capability.get("description") or app_capability.get("query") or ""
+    ).strip()
+    if not app_name:
+        return {}
+    return {
+        "source": source,
+        "action": "transfer_context",
+        "target_kind": "app_paste",
+        "target": "",
         "app_name": app_name,
         "mode": "open" if _explicit_app_open_request(value) else "focus",
     }
