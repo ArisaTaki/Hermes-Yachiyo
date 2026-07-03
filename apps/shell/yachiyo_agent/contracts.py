@@ -806,6 +806,28 @@ class RunTimelineChildSnapshot(_PublicSnapshot):
     planner_summary: PlannerTraceSummarySnapshot | None = None
 
 
+class RecoveryRunProvenanceSnapshot(_PublicSnapshot):
+    source: str = ""
+    kind: str = ""
+    source_run_id: str | None = None
+    source_group_run_id: str | None = None
+    source_workflow_run_id: str | None = None
+    source_task_id: str | None = None
+    source_task_title: str | None = None
+    source_tool_call_id: str | None = None
+    source_tool_name: str | None = None
+    replan_request_id: str | None = None
+    replan_trigger: str | None = None
+    recovery_action_id: str | None = None
+    recovery_action_kind: str | None = None
+    recovery_tool: str | None = None
+    recovery_input_preview: dict[str, Any] = Field(default_factory=dict)
+    recovery_permission_target: str | None = None
+    recovery_risk_level: str | None = None
+    approval_required: bool = False
+    task_core_context: dict[str, Any] = Field(default_factory=dict)
+
+
 class RunTimelineSnapshot(_PublicSnapshot):
     run_id: str
     parent_run_id: str | None = None
@@ -832,6 +854,7 @@ class RunTimelineSnapshot(_PublicSnapshot):
     task_core: TaskCoreSnapshot | None = None
     task_progress: TaskProgressSummarySnapshot | None = None
     replan_recoveries: list[ReplanRecoverySnapshot] = Field(default_factory=list)
+    recovery_source: RecoveryRunProvenanceSnapshot | None = None
     events: list[PublicRunEvent] = Field(default_factory=list)
     tool_calls: list[ToolCallSnapshot] = Field(default_factory=list)
     memory_traces: list[MemoryTraceSnapshot] = Field(default_factory=list)

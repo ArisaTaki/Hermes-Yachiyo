@@ -29,6 +29,7 @@ export type {
   PlannerOrchestrationStartSnapshot,
   PlannerTraceSummarySnapshot,
   PublicRunEvent,
+  RecoveryRunProvenanceSnapshot,
   RerunRunRequest,
   ReplanRecoveryActionSnapshot,
   ReplanRecoverySnapshot,
@@ -89,6 +90,7 @@ export type YachiyoRunTimelineSnapshot = RuntimeRunTimelineSnapshot & {
   task_core?: RuntimeRunTimelineSnapshot['task_core'];
   task_progress?: RuntimeRunTimelineSnapshot['task_progress'];
   replan_recoveries?: RuntimeRunTimelineSnapshot['replan_recoveries'];
+  recovery_source?: RuntimeRunTimelineSnapshot['recovery_source'];
   workflow_id?: RuntimeWorkflowRunSnapshot['workflow_id'];
   objective?: RuntimeWorkflowRunSnapshot['objective'];
   current_node_id?: RuntimeWorkflowRunSnapshot['current_node_id'];

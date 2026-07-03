@@ -32,6 +32,7 @@ from .timeline_metadata_snapshots import (
     merge_timeline_child_snapshots,
     planner_trace_summary_from_payload,
     run_timeline_agent_id_from_payload,
+    run_timeline_recovery_source_from_payload,
     timeline_child_snapshots_from_events,
     run_timeline_rerun_provenance_from_payload,
     timeline_child_snapshots_from_payloads,
@@ -70,6 +71,7 @@ def run_timeline_snapshot_from_payload(
     )
     pending_approval = _pending_timeline_approval(payload, approvals)
     rerun_provenance = run_timeline_rerun_provenance_from_payload(payload, events)
+    recovery_source = run_timeline_recovery_source_from_payload(payload, events)
     task_core = task_core_snapshot_from_payload(payload, events=events)
     task_progress = task_progress_summary_from_task_core(
         task_core,
@@ -112,6 +114,7 @@ def run_timeline_snapshot_from_payload(
         task_core=task_core,
         task_progress=task_progress,
         replan_recoveries=replan_recoveries,
+        recovery_source=recovery_source,
         events=events,
         tool_calls=tool_call_snapshots_from_payloads(
             payload.get("tool_calls"),

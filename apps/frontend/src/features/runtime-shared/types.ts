@@ -762,6 +762,28 @@ export type RunTimelineChildSnapshot = {
   planner_summary?: PlannerTraceSummarySnapshot | null;
 };
 
+export type RecoveryRunProvenanceSnapshot = {
+  source?: string;
+  kind?: string;
+  source_run_id?: string | null;
+  source_group_run_id?: string | null;
+  source_workflow_run_id?: string | null;
+  source_task_id?: string | null;
+  source_task_title?: string | null;
+  source_tool_call_id?: string | null;
+  source_tool_name?: string | null;
+  replan_request_id?: string | null;
+  replan_trigger?: string | null;
+  recovery_action_id?: string | null;
+  recovery_action_kind?: string | null;
+  recovery_tool?: string | null;
+  recovery_input_preview?: Record<string, unknown>;
+  recovery_permission_target?: string | null;
+  recovery_risk_level?: string | null;
+  approval_required?: boolean;
+  task_core_context?: Record<string, unknown>;
+};
+
 export type RunTimelineSnapshot = {
   run_id: string;
   parent_run_id?: string | null;
@@ -788,6 +810,7 @@ export type RunTimelineSnapshot = {
   task_core?: TaskCoreSnapshot | null;
   task_progress?: TaskProgressSummarySnapshot | null;
   replan_recoveries?: ReplanRecoverySnapshot[];
+  recovery_source?: RecoveryRunProvenanceSnapshot | null;
   events?: PublicRunEvent[];
   tool_calls?: ToolCallSnapshot[];
   memory_traces?: MemoryTraceSnapshot[];

@@ -26,7 +26,7 @@ def start_payload_with_planner_events(
     plan_task: StartPayloadPlanner,
     metadata_source: str,
 ) -> dict[str, Any]:
-    payload = dict(raw_payload)
+    payload = _payload_with_request_metadata(raw_payload, request_payload)
     if _payload_has_planner_events(payload):
         return payload
 
@@ -106,6 +106,25 @@ def _start_metadata(request_payload: Mapping[str, Any], *, source: str) -> dict[
     metadata.setdefault("source", source)
     metadata["runtime_planner_entrypoint"] = True
     return metadata
+
+
+def _payload_with_request_metadata(
+    raw_payload: Mapping[str, Any],
+    request_payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = dict(raw_payload)
+    request_metadata = (
+        dict(request_payload.get("metadata"))
+        if isinstance(request_payload.get("metadata"), Mapping)
+        else {}
+    )
+    if not request_metadata:
+        return payload
+    response_metadata = (
+        dict(payload.get("metadata")) if isinstance(payload.get("metadata"), Mapping) else {}
+    )
+    payload["metadata"] = {**request_metadata, **response_metadata}
+    return payload
 
 
 def _planner_public_events_for_start_payload(

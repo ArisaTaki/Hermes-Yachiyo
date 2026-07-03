@@ -49,6 +49,7 @@ from apps.shell.yachiyo_agent import (
     PlannerOrchestrationStartSnapshot,
     PlannerTraceSummarySnapshot,
     PublicRunEvent,
+    RecoveryRunProvenanceSnapshot,
     RunEventPageSnapshot,
     RunTimelineChildSnapshot,
     RunTimelineSnapshot,
@@ -4859,6 +4860,16 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
         rerun_of_runnable_name="Planner",
         rerun_original_created_at="2026-06-13T00:00:00Z",
         rerun_original_updated_at="2026-06-13T00:00:03Z",
+        recovery_source=RecoveryRunProvenanceSnapshot(
+            source="agent_studio_replan_recovery",
+            kind="replan",
+            source_run_id="original-run-1",
+            source_task_id="task-1",
+            replan_request_id="replan-1",
+            recovery_action_id="replan-1:action:1:desktop.list_apps",
+            recovery_tool="desktop.list_apps",
+            recovery_input_preview={"query": "Music"},
+        ),
         events=[
             PublicRunEvent(
                 event_id="event-1",
@@ -4948,6 +4959,7 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
         "task_core",
         "task_progress",
         "replan_recoveries",
+        "recovery_source",
         "events",
         "tool_calls",
         "memory_traces",
@@ -4964,6 +4976,8 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
     assert payload["task_run_link_last_event_sequence"] == 7
     assert payload["rerun_of_run_id"] == "original-run-1"
     assert payload["planner_summary"] is None
+    assert payload["recovery_source"]["kind"] == "replan"
+    assert payload["recovery_source"]["recovery_tool"] == "desktop.list_apps"
     assert payload["tool_calls"][0]["tool_name"] == "workspace.read"
     assert payload["memory_traces"][0]["event_type"] == "memory.retrieved"
     assert payload["skill_traces"][0]["event_type"] == "skill.selected"
@@ -4972,6 +4986,41 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
     assert payload["children"][0]["group_run_id"] == "group-run-1"
     assert payload["children"][0]["workflow_node_id"] == "review"
     assert payload["children"][0]["planner_summary"] is None
+
+
+def test_run_timeline_snapshot_projects_recovery_source_metadata() -> None:
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "recovery-run-1",
+            "status": "running",
+            "metadata": {
+                "source": "agent_studio_tool_recovery",
+                "desktop_permission_recovery": True,
+                "source_run_id": "run-1",
+                "source_tool_call_id": "tool-call-1",
+                "source_tool_name": "desktop.open_app",
+                "tool_recovery_action_id": "tool-action-1",
+                "recovery_action_kind": "retry_original",
+                "recovery_tool": "desktop.open_app",
+                "recovery_input": {"app_name": "Music", "token": "secret"},
+                "recovery_permission_target": "app_launch",
+                "recovery_risk_level": "low",
+                "source_task_id": "task-1",
+                "source_task_title": "Open Apple Music",
+            },
+        }
+    )
+
+    assert snapshot.recovery_source is not None
+    assert snapshot.recovery_source.source == "agent_studio_tool_recovery"
+    assert snapshot.recovery_source.kind == "tool"
+    assert snapshot.recovery_source.source_run_id == "run-1"
+    assert snapshot.recovery_source.source_tool_call_id == "tool-call-1"
+    assert snapshot.recovery_source.recovery_action_id == "tool-action-1"
+    assert snapshot.recovery_source.recovery_action_kind == "retry_original"
+    assert snapshot.recovery_source.recovery_tool == "desktop.open_app"
+    assert snapshot.recovery_source.recovery_input_preview["app_name"] == "Music"
+    assert snapshot.recovery_source.source_task_id == "task-1"
 
 
 def test_run_timeline_events_inherit_parent_task_core_context() -> None:

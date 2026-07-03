@@ -1541,6 +1541,13 @@ def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None
     )
 
     assert run.run_id == "recovery-run-1"
+    assert run.recovery_source is not None
+    assert run.recovery_source.kind == "replan"
+    assert run.recovery_source.source_run_id == "run-1"
+    assert run.recovery_source.replan_request_id == "replan-1"
+    assert run.recovery_source.recovery_action_id == "replan-1:action:1:desktop.list_apps"
+    assert run.recovery_source.recovery_tool == "desktop.list_apps"
+    assert run.recovery_source.task_core_context["core_id"] == "task-core-1"
     request = _port_call_payload(port, "start_agent_run")
     assert request["agent_id"] == "agent-1"
     assert request["metadata"]["desktop_permission_recovery"] is True
@@ -1580,6 +1587,12 @@ def test_agent_studio_service_starts_tool_recovery_action_direct_run() -> None:
     )
 
     assert run.run_id == "recovery-run-1"
+    assert run.recovery_source is not None
+    assert run.recovery_source.kind == "tool"
+    assert run.recovery_source.source_run_id == "run-1"
+    assert run.recovery_source.source_tool_call_id == "tool-call-1"
+    assert run.recovery_source.recovery_action_id == "tool-action-1"
+    assert run.recovery_source.recovery_tool == "desktop.list_apps"
     request = _port_call_payload(port, "start_agent_run")
     assert request["agent_id"] == "agent-1"
     assert request["metadata"]["desktop_permission_recovery"] is True
@@ -1610,6 +1623,10 @@ def test_agent_studio_service_starts_tool_recovery_retry_direct_run() -> None:
     )
 
     assert run.run_id == "recovery-run-1"
+    assert run.recovery_source is not None
+    assert run.recovery_source.recovery_action_kind == "retry_original"
+    assert run.recovery_source.recovery_tool == "desktop.open_app"
+    assert run.recovery_source.recovery_input_preview == {"app_name": "Music"}
     request = _port_call_payload(port, "start_agent_run")
     assert request["metadata"]["desktop_permission_retry"] is True
     assert request["metadata"]["recovery_action_kind"] == "retry_original"
@@ -1633,6 +1650,10 @@ def test_agent_studio_service_starts_group_replan_recovery_action_from_child_age
     )
 
     assert run.run_id == "recovery-run-1"
+    assert run.recovery_source is not None
+    assert run.recovery_source.source_run_id == "group-run-1"
+    assert run.recovery_source.source_group_run_id == "group-run-1"
+    assert run.recovery_source.replan_request_id == "replan-1"
     request = _port_call_payload(port, "start_agent_run")
     assert request["agent_id"] == "agent-2"
     assert request["metadata"]["source_run_id"] == "group-run-1"
@@ -1656,6 +1677,10 @@ def test_agent_studio_service_starts_group_tool_recovery_action_from_child_agent
     )
 
     assert run.run_id == "recovery-run-1"
+    assert run.recovery_source is not None
+    assert run.recovery_source.source_run_id == "group-run-1"
+    assert run.recovery_source.source_group_run_id == "group-run-1"
+    assert run.recovery_source.source_tool_call_id == "tool-call-1"
     request = _port_call_payload(port, "start_agent_run")
     assert request["agent_id"] == "agent-2"
     assert request["metadata"]["source_run_id"] == "group-run-1"
@@ -1677,6 +1702,10 @@ def test_agent_studio_service_starts_workflow_replan_recovery_action_from_child_
     )
 
     assert run.run_id == "recovery-run-1"
+    assert run.recovery_source is not None
+    assert run.recovery_source.source_run_id == "workflow-run-1"
+    assert run.recovery_source.source_workflow_run_id == "workflow-run-1"
+    assert run.recovery_source.replan_request_id == "replan-1"
     request = _port_call_payload(port, "start_agent_run")
     assert request["agent_id"] == "agent-2"
     assert request["metadata"]["source_run_id"] == "workflow-run-1"

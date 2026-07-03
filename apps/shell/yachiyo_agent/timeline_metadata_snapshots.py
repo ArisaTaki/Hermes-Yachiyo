@@ -7,7 +7,12 @@ from typing import Any
 
 from apps.shell.agent.runtime.events import redact_run_event_payload, redact_secrets
 
-from .contracts import PlannerTraceSummarySnapshot, PublicRunEvent, RunTimelineChildSnapshot
+from .contracts import (
+    PlannerTraceSummarySnapshot,
+    PublicRunEvent,
+    RecoveryRunProvenanceSnapshot,
+    RunTimelineChildSnapshot,
+)
 
 _PLANNER_INTENT_EVENTS = {
     "agent.intent.selected",
@@ -405,6 +410,48 @@ def _optional_int(value: Any) -> int | None:
         return None
 
 
+def run_timeline_recovery_source_from_payload(
+    payload: Mapping[str, Any],
+    events: list[PublicRunEvent],
+) -> RecoveryRunProvenanceSnapshot | None:
+    source = _recovery_source_record(payload, events)
+    if not _is_recovery_source_record(source):
+        return None
+    source_marker = _optional_text(source.get("source"))
+    return RecoveryRunProvenanceSnapshot(
+        source=source_marker or "agent_studio_recovery",
+        kind=_recovery_source_kind(source, source_marker),
+        source_run_id=_optional_text(source.get("source_run_id")),
+        source_group_run_id=_optional_text(source.get("source_group_run_id")),
+        source_workflow_run_id=_optional_text(source.get("source_workflow_run_id")),
+        source_task_id=_optional_text(source.get("source_task_id")),
+        source_task_title=_optional_text(source.get("source_task_title")),
+        source_tool_call_id=_optional_text(source.get("source_tool_call_id")),
+        source_tool_name=_optional_text(source.get("source_tool_name")),
+        replan_request_id=_optional_text(source.get("replan_request_id")),
+        replan_trigger=_optional_text(source.get("replan_trigger")),
+        recovery_action_id=_optional_text(
+            source.get("recovery_action_id")
+            or source.get("replan_recovery_action_id")
+            or source.get("tool_recovery_action_id")
+            or source.get("action_id")
+        ),
+        recovery_action_kind=_optional_text(source.get("recovery_action_kind")),
+        recovery_tool=_optional_text(source.get("recovery_tool")),
+        recovery_input_preview=_mapping_preview(
+            source.get("recovery_input") or source.get("recovery_input_preview")
+        ),
+        recovery_permission_target=_optional_text(source.get("recovery_permission_target")),
+        recovery_risk_level=_optional_text(source.get("recovery_risk_level")),
+        approval_required=_truthy(
+            source.get("recovery_action_approval_required")
+            or source.get("approval_required")
+            or source.get("requires_approval")
+        ),
+        task_core_context=_mapping_preview(source.get("task_core_context")),
+    )
+
+
 def run_timeline_rerun_provenance_from_payload(
     payload: Mapping[str, Any],
     events: list[PublicRunEvent],
@@ -434,6 +481,116 @@ def run_timeline_rerun_provenance_from_payload(
         "rerun_original_created_at": _optional_text(source.get("original_created_at")),
         "rerun_original_updated_at": _optional_text(source.get("original_updated_at")),
     }
+
+
+_RECOVERY_SOURCE_KEYS = {
+    "source",
+    "daily_desktop_intent",
+    "desktop_permission_recovery",
+    "desktop_permission_retry",
+    "source_run_id",
+    "source_group_run_id",
+    "source_workflow_run_id",
+    "source_task_id",
+    "source_task_title",
+    "source_tool_call_id",
+    "source_tool_name",
+    "source_step_id",
+    "replan_request_id",
+    "replan_recovery_action_id",
+    "replan_trigger",
+    "tool_recovery_action_id",
+    "recovery_action_id",
+    "recovery_action_kind",
+    "recovery_tool",
+    "recovery_input",
+    "recovery_input_preview",
+    "recovery_permission_target",
+    "recovery_risk_level",
+    "recovery_action_approval_required",
+    "approval_required",
+    "requires_approval",
+    "task_core_context",
+}
+
+
+def _recovery_source_record(
+    payload: Mapping[str, Any],
+    events: list[PublicRunEvent],
+) -> dict[str, Any]:
+    records: list[Mapping[str, Any]] = []
+    event_record = _recovery_source_record_from_events(events)
+    if event_record:
+        records.append(event_record)
+    records.append({key: payload.get(key) for key in _RECOVERY_SOURCE_KEYS if key in payload})
+    metadata = payload.get("metadata")
+    if isinstance(metadata, Mapping):
+        records.append(metadata)
+    direct = payload.get("recovery_source")
+    if isinstance(direct, Mapping):
+        records.append(direct)
+    merged: dict[str, Any] = {}
+    for record in records:
+        for key, value in record.items():
+            if value is None or value == "":
+                continue
+            merged[key] = value
+    return merged
+
+
+def _recovery_source_record_from_events(
+    events: list[PublicRunEvent],
+) -> Mapping[str, Any] | None:
+    for event in events:
+        payload = event.payload if isinstance(event.payload, Mapping) else {}
+        metadata = payload.get("metadata")
+        if isinstance(metadata, Mapping) and _is_recovery_source_record(metadata):
+            return metadata
+        if _is_recovery_source_record(payload):
+            return payload
+    return None
+
+
+def _is_recovery_source_record(source: Mapping[str, Any]) -> bool:
+    marker = _optional_text(source.get("source"))
+    if marker in {"agent_studio_replan_recovery", "agent_studio_tool_recovery"}:
+        return True
+    if _optional_text(source.get("replan_recovery_action_id")):
+        return True
+    if _optional_text(source.get("tool_recovery_action_id")):
+        return True
+    if _truthy(source.get("desktop_permission_recovery")) and (
+        _optional_text(source.get("replan_request_id"))
+        or _optional_text(source.get("source_tool_call_id"))
+        or _optional_text(source.get("recovery_tool"))
+    ):
+        return True
+    return False
+
+
+def _recovery_source_kind(source: Mapping[str, Any], marker: str | None) -> str:
+    if marker == "agent_studio_replan_recovery" or _optional_text(
+        source.get("replan_request_id")
+    ):
+        return "replan"
+    if marker == "agent_studio_tool_recovery" or _optional_text(
+        source.get("source_tool_call_id")
+    ):
+        return "tool"
+    return "recovery"
+
+
+def _mapping_preview(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    redacted = redact_run_event_payload(dict(value))
+    return dict(redacted) if isinstance(redacted, Mapping) else {}
+
+
+def _truthy(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    return _text(value).lower() in {"1", "true", "yes", "on"}
 
 
 def run_timeline_agent_id_from_payload(payload: Mapping[str, Any]) -> str:

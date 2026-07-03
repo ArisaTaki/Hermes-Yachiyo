@@ -33,6 +33,7 @@ from .contracts import (
     PlannerTraceSummarySnapshot,
     PublicRunEvent,
     ReadinessSnapshot,
+    RecoveryRunProvenanceSnapshot,
     ReplanRecoveryActionSnapshot,
     ReplanRecoverySnapshot,
     ReplanSignalSnapshot,
