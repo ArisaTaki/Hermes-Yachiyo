@@ -67,6 +67,87 @@ def test_public_task_progress_events_block_explicit_verification_failure() -> No
     ]
 
 
+def test_task_progress_events_mark_operate_step_pending_verification() -> None:
+    events = public_task_progress_events_for_tool_result(
+        tool_request={
+            **_tool_request(),
+            "requires_post_action_verification": True,
+        },
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "artifact.write",
+            "result": {"ok": True, "summary": "Report artifact written."},
+        },
+        run_id="run-1",
+        after_sequence=40,
+    )
+
+    assert [event.payload["status"] for event in events] == [
+        "in_progress",
+        "in_progress",
+        "ready",
+    ]
+    assert all(
+        event.payload["verification_status"] == "pending_verification"
+        for event in events
+    )
+    assert events[1].payload["todo"]["metadata"]["verification_status"] == (
+        "pending_verification"
+    )
+    assert events[2].payload["checkpoint"]["payload"]["verification_status"] == (
+        "pending_verification"
+    )
+    assert events[2].payload["requires_post_action_verification"] is True
+
+
+def test_task_progress_events_complete_targets_from_verify_step_result() -> None:
+    source_request = _tool_request()
+    verify_request = {
+        "tool": "desktop.ui_elements",
+        "source": "runtime_planner",
+        "step_id": "verify-report",
+        "runtime_stage": "verify",
+        "core_id": source_request["core_id"],
+        "workspace_id": source_request["workspace_id"],
+        "decision_id": source_request["decision_id"],
+        "plan_id": source_request["plan_id"],
+        "task_id": source_request["task_id"],
+        "task_verification_targets": [
+            {
+                "step_id": "write-report",
+                "todo": source_request["task_todo"],
+                "checkpoints": source_request["task_checkpoints"],
+            }
+        ],
+    }
+
+    events = public_task_progress_events_for_tool_result(
+        tool_request=verify_request,
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "desktop.ui_elements",
+            "result": {"ok": True, "summary": "Report artifact is visible."},
+        },
+        run_id="run-1",
+        after_sequence=50,
+    )
+
+    assert [event.event_type for event in events] == [
+        "agent.task.todo.updated",
+        "agent.task.checkpoint.updated",
+    ]
+    assert [event.payload["status"] for event in events] == ["completed", "completed"]
+    assert all(event.payload["verification_status"] == "verified" for event in events)
+    assert events[0].payload["verified_by_step_id"] == "verify-report"
+    assert events[0].payload["verification_tool"] == "desktop.ui_elements"
+    assert events[0].payload["todo"]["metadata"]["verification_status"] == "verified"
+    assert events[0].payload["todo"]["metadata"]["verified_by_step_id"] == "verify-report"
+    assert events[1].payload["checkpoint"]["payload"]["verification_status"] == "verified"
+    assert events[1].payload["checkpoint"]["payload"]["verification_tool"] == (
+        "desktop.ui_elements"
+    )
+
+
 def test_task_progress_payloads_can_be_scoped_for_group_and_workflow_runs() -> None:
     tool_event = {
         "event": "agent.tool.call",

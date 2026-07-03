@@ -70,6 +70,13 @@ def append_task_progress_events_for_tool_result(
         "source_event": source_event,
         "result_preview": _task_progress_result_preview(result),
     }
+    base_payload.update(
+        _task_progress_verification_context(
+            tool_request,
+            result,
+            verification_targets=verification_targets,
+        )
+    )
     for key in (
         "task_id",
         "run_group_id",
@@ -87,6 +94,10 @@ def append_task_progress_events_for_tool_result(
         for workspace_item in workspace_items:
             item_payload = dict(workspace_item)
             item_payload["status"] = todo_status
+            _apply_workspace_item_verification_context(
+                item_payload,
+                base_payload,
+            )
             payload = {
                 **base_payload,
                 "workspace_item_id": str(workspace_item.get("item_id") or "").strip(),
@@ -107,6 +118,7 @@ def append_task_progress_events_for_tool_result(
     if todo and not task_update_already_recorded:
         todo_payload = dict(todo)
         todo_payload["status"] = todo_status
+        _apply_todo_verification_context(todo_payload, base_payload)
         payload = {
             **base_payload,
             "todo_id": str(todo.get("todo_id") or "").strip(),
@@ -128,6 +140,7 @@ def append_task_progress_events_for_tool_result(
         for checkpoint in checkpoints:
             checkpoint_payload = dict(checkpoint)
             checkpoint_payload["status"] = checkpoint_status
+            _apply_checkpoint_verification_context(checkpoint_payload, base_payload)
             payload = {
                 **base_payload,
                 "checkpoint_id": str(checkpoint.get("checkpoint_id") or "").strip(),
@@ -208,6 +221,8 @@ def _append_verification_target_progress_events(
             "step_id": target_step_id,
             "verified_by_step_id": verify_step_id,
             "verification_tool": verify_tool,
+            "verification_status": _verification_target_status(result),
+            "verification_result": _task_progress_result_preview(result),
         }
         todo = target.get("todo") if isinstance(target.get("todo"), Mapping) else {}
         if todo and not _runtime_planner_step_has_status(
@@ -218,6 +233,7 @@ def _append_verification_target_progress_events(
         ):
             todo_payload = dict(todo)
             todo_payload["status"] = target_todo_status
+            _apply_todo_verification_context(todo_payload, target_base_payload)
             payload = {
                 **target_base_payload,
                 "todo_id": str(todo.get("todo_id") or "").strip(),
@@ -245,6 +261,7 @@ def _append_verification_target_progress_events(
             checkpoint_id = str(checkpoint.get("checkpoint_id") or "").strip()
             checkpoint_payload = dict(checkpoint)
             checkpoint_payload["status"] = target_checkpoint_status
+            _apply_checkpoint_verification_context(checkpoint_payload, target_base_payload)
             payload = {
                 **target_base_payload,
                 "checkpoint_id": checkpoint_id,
@@ -286,6 +303,130 @@ def _verification_target_checkpoint_status(result: Mapping[str, Any]) -> str:
     if isinstance(result, Mapping) and result.get("verification_failed") is True:
         return "blocked"
     return "completed" if isinstance(result, Mapping) and result.get("ok") is True else "blocked"
+
+
+def _task_progress_verification_context(
+    tool_request: Mapping[str, Any],
+    result: Mapping[str, Any],
+    *,
+    verification_targets: list[Mapping[str, Any]],
+) -> dict[str, Any]:
+    requires_post_action_verification = bool(
+        tool_request.get("requires_post_action_verification")
+    )
+    runtime_stage = str(tool_request.get("runtime_stage") or "").strip()
+    if (
+        not requires_post_action_verification
+        and runtime_stage != "verify"
+        and not verification_targets
+    ):
+        return {}
+    context: dict[str, Any] = {
+        "verification_status": _tool_result_verification_status(
+            result,
+            requires_post_action_verification=requires_post_action_verification,
+            runtime_stage=runtime_stage,
+        ),
+        "verification_result": _task_progress_result_preview(result),
+        "verification_target_count": len(verification_targets),
+    }
+    if requires_post_action_verification:
+        context["requires_post_action_verification"] = True
+    return context
+
+
+def _tool_result_verification_status(
+    result: Mapping[str, Any],
+    *,
+    requires_post_action_verification: bool,
+    runtime_stage: str,
+) -> str:
+    if isinstance(result, Mapping) and result.get("approval_required"):
+        return "waiting_approval"
+    if isinstance(result, Mapping) and result.get("verification_failed") is True:
+        return "verification_failed"
+    if isinstance(result, Mapping) and result.get("ok") is True:
+        if requires_post_action_verification and runtime_stage != "verify":
+            return "pending_verification"
+        return "verified" if runtime_stage == "verify" else "completed"
+    return "verification_failed" if runtime_stage == "verify" else "blocked"
+
+
+def _verification_target_status(result: Mapping[str, Any]) -> str:
+    if isinstance(result, Mapping) and result.get("approval_required"):
+        return "waiting_approval"
+    if isinstance(result, Mapping) and result.get("verification_failed") is True:
+        return "verification_failed"
+    return (
+        "verified"
+        if isinstance(result, Mapping) and result.get("ok") is True
+        else "verification_failed"
+    )
+
+
+def _apply_workspace_item_verification_context(
+    item_payload: dict[str, Any],
+    source: Mapping[str, Any],
+) -> None:
+    context = _nested_verification_context(source)
+    if not context:
+        return
+    metadata = (
+        item_payload.get("metadata")
+        if isinstance(item_payload.get("metadata"), Mapping)
+        else {}
+    )
+    item_payload["metadata"] = {**dict(metadata), **context}
+
+
+def _apply_todo_verification_context(
+    todo_payload: dict[str, Any],
+    source: Mapping[str, Any],
+) -> None:
+    context = _nested_verification_context(source)
+    if not context:
+        return
+    metadata = (
+        todo_payload.get("metadata")
+        if isinstance(todo_payload.get("metadata"), Mapping)
+        else {}
+    )
+    todo_payload["metadata"] = {**dict(metadata), **context}
+
+
+def _apply_checkpoint_verification_context(
+    checkpoint_payload: dict[str, Any],
+    source: Mapping[str, Any],
+) -> None:
+    context = _nested_verification_context(source)
+    if not context:
+        return
+    payload = (
+        checkpoint_payload.get("payload")
+        if isinstance(checkpoint_payload.get("payload"), Mapping)
+        else {}
+    )
+    checkpoint_payload["payload"] = {**dict(payload), **context}
+
+
+def _nested_verification_context(source: Mapping[str, Any]) -> dict[str, Any]:
+    status = str(source.get("verification_status") or "").strip()
+    if not status:
+        return {}
+    context: dict[str, Any] = {"verification_status": status}
+    for key in (
+        "requires_post_action_verification",
+        "verification_target_count",
+        "verified_by_step_id",
+        "verification_tool",
+    ):
+        value = source.get(key)
+        if value not in (None, "", [], {}):
+            context[key] = value
+    result = source.get("verification_result")
+    if isinstance(result, Mapping) and result:
+        context["verification_result"] = dict(result)
+    return context
 
 
 def _verification_targets_from_replan_recovery(
@@ -594,6 +735,7 @@ def _task_progress_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
         "exit_code",
         "blocked_by_user_goal",
         "approval_required",
+        "verification_failed",
     ):
         if key in result:
             preview[key] = result.get(key)

@@ -438,6 +438,7 @@ function runtimeEventMetadata(
     { label: 'doctrine', value: runtimeContext.runtimeDoctrine },
     { label: 'observe', value: runtimeContext.requiresObservation },
     { label: 'verify', value: runtimeContext.requiresVerification },
+    { label: 'verification', value: runtimeContext.verificationStatus },
     { label: 'replan', value: runtimeContext.replanTrigger || runtimeContext.replanTriggers.join(', ') },
     { label: 'replan id', value: runtimeContext.replanRequestId },
     { label: 'signals', value: runtimeContext.replanSignalIds.join(', ') },
@@ -516,6 +517,7 @@ type RuntimeTimelineRuntimeContext = {
   replanTriggers: string[];
   requiresObservation: string;
   requiresVerification: string;
+  verificationStatus: string;
   runtimeDoctrine: string;
   runtimeRole: string;
   runtimeStage: string;
@@ -606,6 +608,11 @@ function runtimeEventRuntimeContext(
       event,
       payload,
       'requires_post_action_verification',
+    ),
+    verificationStatus: runtimeEventContextString(
+      event,
+      payload,
+      'verification_status',
     ),
     runtimeDoctrine: runtimeEventContextString(event, payload, 'runtime_doctrine'),
     runtimeRole: runtimeEventContextString(event, payload, 'runtime_role'),

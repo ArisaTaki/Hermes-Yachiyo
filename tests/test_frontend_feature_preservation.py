@@ -2280,6 +2280,8 @@ def test_chat_renders_yachiyo_agent_task_card_entrypoint() -> None:
             "{ label: 'recovery', value: runtimeEventString(event, payload, 'recovery_action_label') }",
             "{ label: 'selected', value: runtimeEventString(event, payload, 'selected_tool_name') }",
             "{ label: 'checkpoint', value: runtimeEventString(event, payload, 'checkpoint_status') }",
+            "{ label: 'verification', value: runtimeContext.verificationStatus }",
+            "'verification_status',",
             "{ label: 'action', value: observedContext.actionTarget }",
             "{ label: 'observed', value: observedContext.observationEvidence }",
             "function runtimeEventRecoveryTarget",
