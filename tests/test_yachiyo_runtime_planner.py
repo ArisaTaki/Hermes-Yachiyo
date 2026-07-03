@@ -443,6 +443,53 @@ def test_runtime_planner_accepts_portable_capability_tool_aliases() -> None:
     ]
 
 
+def test_runtime_planner_plans_builtin_analysis_after_scoped_data_discovery() -> None:
+    prompt = "把 Downloads 里的 CSV 做成图表报告"
+    allowed_tools = [
+        "workspace.list",
+        "fs.find_files",
+        "data.analyze",
+        "artifact.write",
+        "desktop.open_path",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.plan.tool_plan.missing_capabilities == []
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-data-source",
+        "analyze-discovered-data",
+    ]
+    inspect_step = _step_by_id(decision, "inspect-data-source")
+    analyze_step = _step_by_id(decision, "analyze-discovered-data")
+    assert inspect_step.tool_name == "workspace.list"
+    assert inspect_step.input_preview == {
+        "path": "Downloads",
+        "pattern": "*.csv",
+        "file_type": "csv",
+    }
+    assert analyze_step.tool_name == "data.analyze"
+    assert analyze_step.depends_on == ["inspect-data-source"]
+    assert analyze_step.input_preview["path"] == "<selected file from workspace.list>"
+    assert analyze_step.input_preview["selection_source"] == "workspace.list"
+    assert analyze_step.input_preview["source_scope"] == "Downloads"
+    assert analyze_step.input_preview["source_kind"] == "csv"
+    assert analyze_step.input_preview["artifact_paths"] == [
+        "analysis-report.md",
+        "analysis-chart.png",
+    ]
+    assert planner_tool_requests(prompt, allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_runtime_planner_prefers_builtin_data_analysis_for_simple_reports() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",
@@ -29986,6 +30033,45 @@ def test_planner_first_direct_selection_can_include_task_execution_context() -> 
     assert operation_request["task_workspace_items"][0]["source_step_id"] == "operate-foreground-ui"
     assert operation_request["replan_signal_ids"]
     assert operation_request["replan_triggers"] == ["verification_failed"]
+
+
+def test_runtime_planner_routes_app_scoped_meeting_minutes_to_desktop_create_flow() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    selection = planner_first_direct_tool_selection(
+        "在 Notion 里新建一页写今天的会议纪要",
+        allowed_tools,
+        metadata={"runtime_planner_execution_context": True},
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.decision is not None
+    assert selection.decision.selected_intent.kind == "desktop_operation"
+    assert selection.decision.selected_intent.inputs["safe_shortcut_hint"] == {
+        "action": "new_document"
+    }
+    assert [request["tool"] for request in selection.requests] == [
+        "desktop.list_apps",
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert [request["step_id"] for request in selection.requests] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
+    assert selection.requests[1]["input"] == {
+        "app_name": "Notion",
+        "action": "new_document",
+    }
+    assert selection.requests[2]["input"] == {"text": "今天的会议纪要"}
+    assert selection.requests[-1]["runtime_stage"] == "verify"
 
 
 def test_runtime_planner_execution_keeps_open_and_focus_verification_steps() -> None:

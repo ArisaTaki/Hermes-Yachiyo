@@ -3027,9 +3027,14 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
     ):
         input_preview = getattr(data_analyze_step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
-        if payload.get("path"):
+        path_value = str(payload.get("path") or "").strip()
+        if (
+            path_value
+            and str(payload.get("selection_source") or "").strip() != "workspace.list"
+            and not (path_value.startswith("<") and path_value.endswith(">"))
+        ):
             request_input = {
-                "path": str(payload.get("path") or ""),
+                "path": path_value,
                 "artifact_path": str(payload.get("artifact_path") or "analysis-report.md"),
             }
             source_kind = str(payload.get("source_kind") or "").strip()

@@ -505,7 +505,10 @@ class TaskIntentRouter:
             foreground_compose_text = ""
         if str((safe_shortcut or {}).get("action") or "").strip() == "new_message":
             foreground_compose_text = ""
-        container_action = _dynamic_context_target_container_action_hint(text)
+        container_action = (
+            _dynamic_context_target_container_action_hint(text)
+            or _generic_create_container_action_hint(text)
+        )
         if (
             container_action
             and safe_shortcut is None
@@ -2721,25 +2724,61 @@ class RuntimePlanner:
                 reason="Find and inspect the dataset before analysis.",
                 fallback_tools=["desktop.open_path", "browser.current_page"],
             ),
-            *spreadsheet_steps,
-            *file_open_steps,
-            _step(
-                intent,
-                "run-analysis",
-                "Run reproducible data analysis",
-                "data.analysis",
-                _first_allowed(("python.run", "terminal.run"), allowed),
-                input_preview={"command": "python - <<'PY'\n# inspect data, compute summary, generate charts\nPY"},
-                risk_level="high",
-                approval_required=True,
-                depends_on=[
-                    "inspect-data-source",
-                    *[step.step_id for step in spreadsheet_steps],
-                    *[step.step_id for step in file_open_steps],
-                ],
-                reason="Use local Python/pandas-style analysis instead of manually operating a spreadsheet app.",
-            ),
         ]
+        if _can_plan_builtin_data_analysis_after_source_discovery(intent, allowed):
+            steps.extend([*spreadsheet_steps, *file_open_steps])
+            steps.append(
+                _step(
+                    intent,
+                    "analyze-discovered-data",
+                    "Analyze discovered data file",
+                    "data.analysis",
+                    "data.analyze",
+                    input_preview=_discovered_data_analysis_input_preview(
+                        intent,
+                        artifact_paths=artifact_paths,
+                    ),
+                    depends_on=[
+                        "inspect-data-source",
+                        *[step.step_id for step in spreadsheet_steps],
+                        *[step.step_id for step in file_open_steps],
+                    ],
+                    reason=(
+                        "After workspace.list finds the matching data file, use the "
+                        "built-in local analyzer instead of handing the user a manual spreadsheet workflow."
+                    ),
+                    fallback_tools=_data_analyze_fallback_tools(allowed),
+                )
+            )
+            return _append_data_analysis_followup_steps(
+                intent,
+                allowed,
+                steps,
+                artifact_paths=artifact_paths,
+                depends_on="analyze-discovered-data",
+            )
+        steps.extend(
+            [
+                *spreadsheet_steps,
+                *file_open_steps,
+                _step(
+                    intent,
+                    "run-analysis",
+                    "Run reproducible data analysis",
+                    "data.analysis",
+                    _first_allowed(("python.run", "terminal.run"), allowed),
+                    input_preview={"command": "python - <<'PY'\n# inspect data, compute summary, generate charts\nPY"},
+                    risk_level="high",
+                    approval_required=True,
+                    depends_on=[
+                        "inspect-data-source",
+                        *[step.step_id for step in spreadsheet_steps],
+                        *[step.step_id for step in file_open_steps],
+                    ],
+                    reason="Use local Python/pandas-style analysis instead of manually operating a spreadsheet app.",
+                ),
+            ]
+        )
         depends_on_step = "run-analysis"
         if _task_output_target_hint(intent.user_goal) != "clipboard":
             steps.append(
@@ -12214,6 +12253,64 @@ def _can_use_builtin_data_analysis(
     return True
 
 
+def _can_plan_builtin_data_analysis_after_source_discovery(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+) -> bool:
+    if _first_allowed(("data.analyze",), allowed) != "data.analyze":
+        return False
+    source_kind = str(intent.inputs.get("data_source_kind") or "").strip()
+    if source_kind not in {"csv", "tsv", "json", "jsonl", "xlsx", "text", "text_table"}:
+        return False
+    source_scope = str(intent.inputs.get("data_source_scope_hint") or "").strip()
+    if source_scope and not _workspace_listable_discovered_data_scope(source_scope):
+        return False
+    return bool(
+        source_scope
+        or str(intent.inputs.get("data_source_name_hint") or "").strip()
+        or _data_source_pattern_hint(source_kind)
+    )
+
+
+def _workspace_listable_discovered_data_scope(scope_hint: str) -> bool:
+    if not scope_hint or scope_hint.startswith(("/", "~")):
+        return False
+    if re.search(r"^[a-zA-Z][a-zA-Z0-9+.-]*://", scope_hint):
+        return False
+    return not any(part == ".." for part in scope_hint.replace("\\", "/").split("/"))
+
+
+def _discovered_data_analysis_input_preview(
+    intent: TaskIntentSnapshot,
+    *,
+    artifact_paths: list[str],
+) -> dict[str, Any]:
+    source_kind = str(intent.inputs.get("data_source_kind") or "").strip()
+    source_scope = str(intent.inputs.get("data_source_scope_hint") or "").strip()
+    source_name = str(intent.inputs.get("data_source_name_hint") or "").strip()
+    pattern = _data_source_pattern_hint(source_kind)
+    clean_name = _clean_data_source_name_pattern(source_name)
+    if clean_name and pattern:
+        pattern = _named_data_source_pattern(clean_name, pattern)
+    elif clean_name:
+        pattern = f"*{clean_name}*"
+    preview: dict[str, Any] = {
+        "path": "<selected file from workspace.list>",
+        "selection_source": "workspace.list",
+        "artifact_path": artifact_paths[0] if artifact_paths else "analysis-report.md",
+        "source_kind": source_kind,
+        "requested_outputs": list(intent.expected_outputs),
+        "artifact_manifest": data_analysis_artifact_manifest(artifact_paths),
+    }
+    if source_scope:
+        preview["source_scope"] = source_scope
+    if pattern:
+        preview["pattern"] = pattern
+    if len(artifact_paths) > 1:
+        preview["artifact_paths"] = artifact_paths
+    return preview
+
+
 def _data_analyze_fallback_tools(allowed: set[str] | None) -> list[str]:
     fallback_tool = _first_allowed(("python.run", "terminal.run"), allowed)
     return [fallback_tool] if fallback_tool else []
@@ -17217,7 +17314,7 @@ def _generic_create_container_action_hint(text: str) -> str:
         r"(?:\d{2,5}\s*(?:x|×|X|\*)\s*\d{2,5}\s*)?"
         r"(?:新的|新)?\s*"
         r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
-        r"(?:页面|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|图片|图像|图(?!标)|"
+        r"(?:一页|一个页面|一张页面|页面|页|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|图片|图像|图(?!标)|"
         r"流程图|思维导图|脑图|图表|画布|表格|工作簿|[^。！？!?，,]{0,20}?表|演示|演示文稿|幻灯片|"
         r"项目|任务|卡片|工单|事项)",
         value,
@@ -17300,7 +17397,7 @@ def _looks_like_app_scoped_create_followup(text: str) -> bool:
             r"(?:今天的|今日的|新的|新|关于.+?的)?\s*"
             r"(?:新的|新)?\s*"
             r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
-            r"(?:页面|页|笔记|备忘录|日志|日记|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|"
+            r"(?:一页|一个页面|一张页面|页面|页|笔记|备忘录|日志|日记|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|"
             r"图片|图像|图(?!标)|流程图|思维导图|脑图|图表|画布|表格|工作簿|[^。！？!?，,]{0,20}?表|演示|演示文稿|"
             r"幻灯片|项目|任务|卡片|工单|事项|ticket|issue|bug)",
             value,
@@ -17622,7 +17719,7 @@ def _dynamic_context_target_container_action_hint(text: str) -> str:
     ):
         return "new_note"
     if re.search(
-        r"(?:新页面|新建页面|创建页面|新文档|新建文档|创建文档|新文件|新建文件|创建文件|"
+        r"(?:新页面|新建页面|创建页面|新页|新建页|创建页|新建一页|创建一页|新文档|新建文档|创建文档|新文件|新建文件|创建文件|"
         r"新表格|新建表格|创建表格|"
         r"\bnew\s+(?:page|document|file|table|spreadsheet)\b|"
         r"\bcreate\s+(?:a\s+)?new\s+(?:page|document|file|table|spreadsheet)\b|"
@@ -18147,6 +18244,11 @@ def _looks_like_meeting_content_task(value: str) -> bool:
                 "找到",
                 "查找",
                 "读取",
+                "写",
+                "撰写",
+                "创建",
+                "新建",
+                "生成",
                 "总结",
                 "摘要",
                 "整理",
@@ -18154,6 +18256,11 @@ def _looks_like_meeting_content_task(value: str) -> bool:
                 "open",
                 "find",
                 "read",
+                "write",
+                "draft",
+                "create",
+                "new",
+                "generate",
                 "summarize",
                 "summary",
                 "report",
