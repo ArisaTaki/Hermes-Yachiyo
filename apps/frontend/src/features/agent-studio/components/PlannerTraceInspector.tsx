@@ -901,11 +901,35 @@ function replanRecoveryVerificationTargetsPreview(targets: Array<Record<string, 
     const checkpoints = Array.isArray(target.checkpoint_titles)
       ? uniqueStrings(target.checkpoint_titles).slice(0, 2).join(', ')
       : '';
-    return [label, checkpoints].filter(Boolean).join(' -> ');
+    const workspace = replanRecoveryVerificationTargetWorkspacePreview(target);
+    return [
+      label,
+      checkpoints,
+      workspace ? `workspace: ${workspace}` : '',
+    ].filter(Boolean).join(' -> ');
   }).filter(Boolean);
   if (!parts.length) return '';
   const suffix = targets.length > parts.length ? ` +${targets.length - parts.length}` : '';
   return truncatePlannerPreview(`${parts.join(' | ')}${suffix}`);
+}
+
+function replanRecoveryVerificationTargetWorkspacePreview(target: Record<string, unknown>): string {
+  const items = [
+    ...arrayRecords(target.workspace_items),
+    ...arrayRecords(target.task_workspace_items),
+  ];
+  const labels = items
+    .slice(0, 2)
+    .map((item) => (
+      stringValue(item.title)
+      || stringValue(item.path)
+      || stringValue(item.item_id)
+      || stringValue(item.source_step_id)
+    ))
+    .filter(Boolean);
+  if (!labels.length) return '';
+  const suffix = items.length > labels.length ? ` +${items.length - labels.length}` : '';
+  return `${labels.join(', ')}${suffix}`;
 }
 
 function coordinateValue(value: unknown): string {
