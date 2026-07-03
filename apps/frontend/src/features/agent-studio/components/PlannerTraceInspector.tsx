@@ -738,6 +738,9 @@ function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnap
   const observationRetryPreview = replanRecoveryObservationRetryPreview(observationRetry);
   const observedCenterPreview = replanRecoveryObservedCenterPreview(observationEvidence);
   const verificationTargetsPreview = replanRecoveryVerificationTargetsPreview(verificationTargets);
+  const recoveryActions = runtimeToolRecoveryActionsFromRecords([
+    recovery as unknown as Record<string, unknown>,
+  ]);
   const title = [
     recovery.failure_detail,
     planningReasonLabel ? `reason: ${planningReasonLabel}` : '',
@@ -749,29 +752,40 @@ function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnap
     observationRetryPreview ? `retry: ${observationRetryPreview}` : '',
   ].filter(Boolean).join(' · ');
   return (
-    <span
-      className={recovery.status === 'completed' ? 'studio-tool-permission' : 'studio-tool-permission missing'}
-      data-replan-recovery-action={label}
-      data-replan-recovery-action-target={actionTargetPreview}
-      data-replan-recovery-id={recovery.request_id}
-      data-replan-recovery-observation-evidence={observationEvidencePreview}
-      data-replan-recovery-observation-retry={observationRetryPreview}
-      data-replan-recovery-observed-center={observedCenterPreview}
-      data-replan-recovery-permission-target={recovery.permission_target || ''}
-      data-replan-recovery-planning-reason={recovery.planning_reason || ''}
-      data-replan-recovery-planning-reason-label={planningReasonLabel}
-      data-replan-recovery-risk={recovery.risk_level || ''}
-      data-replan-recovery-status={recovery.status || 'requested'}
-      data-replan-recovery-verification-targets={verificationTargetsPreview}
-      key={`recovery:${recovery.request_id}`}
-      title={title}
-    >
-      recovery · {label || recovery.trigger} · {recovery.status || 'requested'}
-      {planningReasonLabel ? ` · ${planningReasonLabel}` : ''}
-      {verificationTargetsPreview ? ` · verifies: ${verificationTargetsPreview}` : ''}
-      {actionTargetPreview ? ` · target: ${actionTargetPreview}` : ''}
-      {observationRetryPreview ? ` · retry: ${observationRetryPreview}` : ''}
-    </span>
+    <Fragment>
+      <span
+        className={recovery.status === 'completed' ? 'studio-tool-permission' : 'studio-tool-permission missing'}
+        data-replan-recovery-action={label}
+        data-replan-recovery-action-count={recoveryActions.length}
+        data-replan-recovery-action-target={actionTargetPreview}
+        data-replan-recovery-id={recovery.request_id}
+        data-replan-recovery-observation-evidence={observationEvidencePreview}
+        data-replan-recovery-observation-retry={observationRetryPreview}
+        data-replan-recovery-observed-center={observedCenterPreview}
+        data-replan-recovery-permission-target={recovery.permission_target || ''}
+        data-replan-recovery-planning-reason={recovery.planning_reason || ''}
+        data-replan-recovery-planning-reason-label={planningReasonLabel}
+        data-replan-recovery-risk={recovery.risk_level || ''}
+        data-replan-recovery-status={recovery.status || 'requested'}
+        data-replan-recovery-verification-targets={verificationTargetsPreview}
+        key={`recovery:${recovery.request_id}`}
+        title={title}
+      >
+        recovery · {label || recovery.trigger} · {recovery.status || 'requested'}
+        {planningReasonLabel ? ` · ${planningReasonLabel}` : ''}
+        {verificationTargetsPreview ? ` · verifies: ${verificationTargetsPreview}` : ''}
+        {actionTargetPreview ? ` · target: ${actionTargetPreview}` : ''}
+        {observationRetryPreview ? ` · retry: ${observationRetryPreview}` : ''}
+      </span>
+      {recoveryActions.slice(0, 5).map((action, index) => (
+        <ReplanRecoveryActionPill
+          action={action}
+          index={index}
+          key={`${recovery.request_id}:recovery-action:${action.tool}:${index}`}
+          requestId={recovery.request_id}
+        />
+      ))}
+    </Fragment>
   );
 }
 
@@ -984,11 +998,14 @@ function ReplanRecoveryActionPill({
   return (
     <span
       className="studio-tool-permission"
+      data-replan-recovery-action-approval-required={String(action.approval_required === true)}
+      data-replan-recovery-action-id={action.action_id || ''}
       data-replan-recovery-input={inputPreview}
       data-replan-recovery-label={action.label || action.prompt || action.tool}
       data-replan-recovery-permission-target={action.permission_target || ''}
       data-replan-recovery-request-id={requestId}
       data-replan-recovery-risk={action.risk_level || ''}
+      data-replan-recovery-selected={String(action.selected === true)}
       data-replan-recovery-tool={action.tool}
       data-replan-recovery-tool-index={index}
       data-replan-recovery-tools={recommendedTools.join(',')}

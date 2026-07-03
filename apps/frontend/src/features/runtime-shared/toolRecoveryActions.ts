@@ -1,10 +1,13 @@
 export type RuntimeToolRecoveryAction = {
+  action_id?: string;
   action_kind?: 'permission_recovery' | 'retry_original';
+  approval_required?: boolean;
   input: Record<string, unknown>;
   label: string;
   permission_target: string;
   prompt: string;
   recommended_tools?: string[];
+  replan_request_id?: string;
   required_retry_fields?: string[];
   risk_level?: string;
   retry_input?: Record<string, unknown>;
@@ -18,6 +21,7 @@ export type RuntimeToolRecoveryAction = {
   retry_source_event_type?: string;
   retry_source_tool_call_id?: string;
   retry_tool?: string;
+  selected?: boolean;
   tool: string;
 };
 
@@ -225,13 +229,23 @@ export function runtimeToolRecoveryActionsFromRecord(
     const label = String(action.label || fallbackLabel || tool).trim();
     const actionRetryContext = runtimeToolRecoveryRetryContext(action, retryContext);
     return [{
+      action_id: String(action.action_id || action.id || '').trim() || undefined,
+      approval_required: Boolean(action.approval_required || action.requires_approval),
       input,
       label,
       permission_target: String(action.permission_target || '').trim(),
       prompt: String(action.prompt || label || fallbackLabel || tool).trim(),
       recommended_tools: recoveryStringList(action.recommended_tools),
+      replan_request_id: String(
+        action.replan_request_id
+        || action.request_id
+        || source.replan_request_id
+        || source.request_id
+        || '',
+      ).trim() || undefined,
       required_retry_fields: recoveryStringList(action.required_retry_fields),
       risk_level: String(action.risk_level || '').trim() || undefined,
+      selected: Boolean(action.selected),
       ...actionRetryContext,
       tool,
     }];
