@@ -13352,6 +13352,12 @@ def _runtime_dov_step_applies(step: ToolPlanStepSnapshot) -> bool:
                 "browser.",
                 "workflow.",
                 "group.",
+                "fs.",
+                "future_task.",
+                "reminders.",
+                "calendar.",
+                "notification.",
+                "clipboard.",
             )
         )
         or tool_name == "agent.group_run"
@@ -13366,6 +13372,8 @@ def _runtime_dov_step_applies(step: ToolPlanStepSnapshot) -> bool:
                 "browser.",
                 "workflow.",
                 "group.",
+                "schedule.",
+                "clipboard.",
             )
         )
         or _runtime_dov_code_step_applies(step_id)
@@ -13400,11 +13408,12 @@ def _runtime_dov_stage(step: ToolPlanStepSnapshot) -> str:
         "screenshot",
     }:
         return "discover"
+    if tool_name == "clipboard.read" or action == "read_clipboard":
+        return "discover"
     if (
         step_id == "write-code-report"
         or action == "write_artifact"
         or tool_name == "artifact.write"
-        or step_id.startswith("write-")
     ):
         return "produce"
     if step_id == "run-terminal-command":
@@ -13479,6 +13488,26 @@ def _runtime_dov_role(step: ToolPlanStepSnapshot, stage: str) -> str:
         or action == "start_group_run"
     ):
         return "start_group_run"
+    if (
+        tool_name.startswith(("future_task.", "reminders."))
+        or action == "schedule_task"
+    ):
+        return "schedule_task"
+    if tool_name.startswith(("calendar.", "notification.")):
+        return "schedule_event"
+    if tool_name.startswith("clipboard.") or action in {
+        "read_clipboard",
+        "write_clipboard",
+    }:
+        return action or (
+            "read_clipboard" if tool_name == "clipboard.read" else "write_clipboard"
+        )
+    if tool_name.startswith("fs.") or action in {
+        "apply_file_changes",
+        "move_file",
+        "rename_file",
+    }:
+        return "organize_files"
     if step_id == "apply-code-changes" or action == "apply_patch":
         return "apply_patch"
     if action in {"open_app", "focus_app"} or step_id.startswith(("open-", "focus-", "prepare-")):

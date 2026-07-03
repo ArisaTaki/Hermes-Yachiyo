@@ -32584,6 +32584,58 @@ def test_runtime_execution_envelope_marks_orchestration_runs_as_operate() -> Non
         assert envelope.requests[0].task_todo["metadata"]["runtime_role"] == runtime_role
 
 
+def test_runtime_execution_envelope_marks_local_utility_tools() -> None:
+    schedule = RuntimePlanner().decision(
+        "明天上午九点提醒我提交周报",
+        allowed_tools=["future_task.schedule"],
+    )
+    schedule_envelope = runtime_execution_envelope_from_decision(
+        schedule,
+        allowed_tools=["future_task.schedule"],
+    )
+
+    assert schedule_envelope is not None
+    assert schedule_envelope.runtime_stage_counts == {"operate": 1}
+    assert schedule_envelope.requests[0].runtime_stage == "operate"
+    assert schedule_envelope.requests[0].runtime_role == "schedule_task"
+
+    clipboard = RuntimePlanner().decision(
+        "把 hello 写入剪贴板",
+        allowed_tools=["clipboard.write"],
+    )
+    clipboard_envelope = runtime_execution_envelope_from_decision(
+        clipboard,
+        allowed_tools=["clipboard.write"],
+    )
+
+    assert clipboard_envelope is not None
+    assert clipboard_envelope.runtime_stage_counts == {"operate": 1}
+    assert clipboard_envelope.requests[0].runtime_stage == "operate"
+    assert clipboard_envelope.requests[0].runtime_role == "write_clipboard"
+
+    file_organization = RuntimePlanner().decision(
+        "整理 Downloads 里的 pdf 文件",
+        allowed_tools=["workspace.list", "fs.move_file", "artifact.write"],
+    )
+    file_envelope = runtime_execution_envelope_from_decision(
+        file_organization,
+        allowed_tools=["workspace.list", "fs.move_file", "artifact.write"],
+        full_plan=True,
+    )
+
+    assert file_envelope is not None
+    assert file_envelope.runtime_stage_counts == {
+        "discover": 1,
+        "produce": 1,
+        "operate": 1,
+    }
+    assert [request.runtime_role for request in file_envelope.requests] == [
+        "inspect_workspace",
+        "artifact",
+        "organize_files",
+    ]
+
+
 def test_runtime_execution_envelope_can_project_full_analysis_app_write_plan() -> None:
     allowed_tools = [
         "desktop.ui_elements",
