@@ -255,6 +255,12 @@ class TaskIntentRouter:
             return _empty_intent("data_analysis", text)
         result_open_app_hint = _analysis_result_open_app_hint(text)
         spreadsheet_app_hint = _spreadsheet_ui_app_hint(text)
+        if (
+            result_open_app_hint
+            and context_source
+            and _canonical_spreadsheet_app_hint(source_scope) == result_open_app_hint
+        ):
+            source_scope = ""
         source_scope_is_output = bool(
             source_scope and source_scope == _artifact_output_location_hint(text)
         )
@@ -16376,11 +16382,17 @@ def _analysis_result_open_app_hint(text: str) -> str:
     )
     patterns = (
         rf"(?:用|通过|在)\s*{app_pattern}\s*(?:里|中|上)?\s*(?:打开|查看)\s*{result_pattern}",
+        rf"(?:用|通过|在)\s*{app_pattern}\s*(?:里|中|上)?\s*"
+        rf"(?:生成|输出|导出|创建|新建|做成|整理成|整理为)\s*{result_pattern}",
         rf"(?:打开|查看)\s*{result_pattern}\s*(?:用|通过|在)\s*{app_pattern}",
+        rf"(?:生成|输出|导出|创建|新建|做成|整理成|整理为)\s*{result_pattern}"
+        rf"\s*(?:到|进|至|在|用|通过)\s*{app_pattern}",
         rf"\b(?:open|view)\s+(?:the\s+)?{result_pattern}\s+"
         rf"(?:with|in|using)\s+(?:the\s+)?{app_pattern}\b",
+        rf"\b(?:generate|create|make|output|export)\s+(?:the\s+)?{result_pattern}"
+        rf"\s+(?:to|into|in|with|using)\s+(?:the\s+)?{app_pattern}\b",
         rf"\b(?:with|in|using)\s+(?:the\s+)?{app_pattern}\b.{0,32}"
-        rf"\b(?:open|view)\s+(?:the\s+)?{result_pattern}\b",
+        rf"\b(?:open|view|generate|create|make|output|export)\s+(?:the\s+)?{result_pattern}\b",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)

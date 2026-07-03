@@ -656,16 +656,22 @@ def test_runtime_planner_opens_requested_data_file_when_desktop_path_tool_is_all
 
 def test_runtime_planner_opens_generated_analysis_result_with_requested_app() -> None:
     prompt = "分析 Downloads 里的 sales.csv，生成图表和报告，然后用 Numbers 打开结果"
+    visible_prompt = "分析当前窗口数据并在 Excel 里生成表格"
     allowed_tools = [
         "data.analyze",
         "desktop.open_path_with_app",
         "desktop.open_path",
         "app.open",
         "workspace.read",
+        "desktop.ui_elements",
         "terminal.run",
         "artifact.write",
     ]
     decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+    visible_decision = RuntimePlanner().decision(
+        visible_prompt,
+        allowed_tools=allowed_tools,
+    )
 
     assert decision.selected_intent.kind == "data_analysis"
     assert decision.selected_intent.inputs == {
@@ -704,6 +710,44 @@ def test_runtime_planner_opens_generated_analysis_result_with_requested_app() ->
     assert open_result.input_preview == {
         "path": "analysis-summary.csv",
         "app_name": "Numbers",
+    }
+    assert visible_decision.selected_intent.kind == "data_analysis"
+    assert visible_decision.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "text_table",
+        "context_source": "visible_text",
+        "analysis_result_open_app_hint": "Excel",
+    }
+    assert visible_decision.selected_intent.expected_outputs == ["table"]
+    assert [step.step_id for step in visible_decision.plan.tool_plan.steps] == [
+        "read-data-context",
+        "analyze-data-context",
+        "open-analysis-artifact-with-app",
+    ]
+    assert _step_by_id(visible_decision, "read-data-context").tool_name == (
+        "desktop.ui_elements"
+    )
+    assert _step_by_id(visible_decision, "analyze-data-context").input_preview == {
+        "content": "<captured visible_text>",
+        "display_path": "captured:visible_text",
+        "artifact_path": "analysis-report.md",
+        "source_kind": "text_table",
+        "requested_outputs": ["table"],
+        "artifact_manifest": [
+            {"path": "analysis-report.md", "kind": "markdown"},
+            {"path": "analysis-summary.csv", "kind": "csv"},
+        ],
+        "artifact_paths": ["analysis-report.md", "analysis-summary.csv"],
+    }
+    visible_open_result = _step_by_id(
+        visible_decision,
+        "open-analysis-artifact-with-app",
+    )
+    assert visible_open_result.tool_name == "desktop.open_path_with_app"
+    assert visible_open_result.depends_on == ["analyze-data-context"]
+    assert visible_open_result.input_preview == {
+        "path": "analysis-summary.csv",
+        "app_name": "Excel",
     }
 
     assert planner_tool_requests(prompt, allowed_tools=allowed_tools) == [
