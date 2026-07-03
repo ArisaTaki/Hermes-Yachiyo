@@ -11607,7 +11607,12 @@ def test_runtime_planner_extracts_postposed_chinese_app_names() -> None:
     for prompt, expected_app_name, expected_tool in cases:
         decision = RuntimePlanner().decision(
             prompt,
-            allowed_tools=["desktop.list_apps", "app.open", "app.focus", "desktop.active_window"],
+            allowed_tools=[
+                "desktop.list_apps",
+                "app.open",
+                "app.focus",
+                "desktop.active_window",
+            ],
         )
 
         assert decision.selected_intent.kind == "desktop_operation"
@@ -11620,6 +11625,41 @@ def test_runtime_planner_extracts_postposed_chinese_app_names() -> None:
         assert _step_by_id(decision, "open-or-focus-app").input_preview == {
             "app_name": expected_app_name,
         }
+
+
+def test_runtime_planner_treats_foreground_confirmation_as_open_then_verify() -> None:
+    cases = (
+        ("打开 Obsidian 并确认它在前台", "Obsidian"),
+        ("启动 Linear 然后检查它是否在前台", "Linear"),
+        ("open PixelForge and confirm it is foreground", "PixelForge"),
+    )
+
+    for prompt, expected_app_name in cases:
+        decision = RuntimePlanner().decision(
+            prompt,
+            allowed_tools=["desktop.list_apps", "app.open", "app.focus", "desktop.active_window"],
+        )
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == expected_app_name
+        assert decision.selected_intent.inputs["operation_hint"] == "open"
+        assert "app_management_hint" not in decision.selected_intent.inputs
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover-desktop-state",
+            "open-or-focus-app",
+            "verify-desktop-result",
+        ]
+        assert _step_by_id(decision, "discover-desktop-state").input_preview == {
+            "query": expected_app_name,
+            "limit": 20,
+        }
+        assert _step_by_id(decision, "open-or-focus-app").tool_name == "app.open"
+        assert _step_by_id(decision, "open-or-focus-app").input_preview == {
+            "app_name": expected_app_name,
+        }
+        assert _step_by_id(decision, "verify-desktop-result").tool_name == (
+            "desktop.active_window"
+        )
 
 
 def test_runtime_planner_strips_launch_suffix_from_prefix_app_open() -> None:

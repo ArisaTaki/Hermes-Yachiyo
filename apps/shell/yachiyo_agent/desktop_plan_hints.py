@@ -491,6 +491,8 @@ def app_management_hint(text: str) -> dict[str, str] | None:
     value = clean(text)
     if foreground_management_hint(value):
         return None
+    if _looks_like_open_then_foreground_confirmation(value):
+        return None
     patterns: tuple[tuple[str, str], ...] = (
         (
             "hide_other_apps",
@@ -610,6 +612,32 @@ def app_management_hint(text: str) -> dict[str, str] | None:
         if app_name:
             return {"action": action, "app_name": app_name}
     return None
+
+
+def _looks_like_open_then_foreground_confirmation(value: str) -> bool:
+    text = clean(value)
+    if not text:
+        return False
+    return bool(
+        re.search(
+            r"(?:打开|启动|开启|拉起)\s*[^。！？!?，,]+?"
+            r"(?:并|然后|再|接着|之后)?\s*"
+            r"(?:确认|检查|验证|看看|看一下|看下)\s*"
+            r"(?:它|其|这个(?:应用|app)?|该(?:应用|app)?|应用|app)?\s*"
+            r"(?:是否|是不是|有没有|已经)?\s*(?:在|处于)?\s*(?:前台|置前)$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:open|launch|start)\s+[A-Za-z][A-Za-z0-9 ._-]{1,40}?\s+"
+            r"(?:and|then)\s+"
+            r"(?:confirm|check|verify|make\s+sure)\s+"
+            r"(?:it|the\s+app|the\s+application)?\s*"
+            r"(?:is\s+)?(?:frontmost|foreground|the\s+active\s+app|active)\b",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def foreground_management_hint(text: str) -> dict[str, str] | None:
