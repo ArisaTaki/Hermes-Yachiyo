@@ -378,7 +378,13 @@ def test_runtime_planner_defers_unknown_app_ui_operation_until_ui_observed() -> 
             "selection_source": "desktop.list_apps",
         },
     )
-    assert requests[2]["input"] == {"role_filter": "button", "limit": 80}
+    assert requests[2]["input"] == {
+        "app_name": "PixelForge",
+        "role_filter": "button",
+        "limit": 80,
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
+    }
     assert requests[2]["continue_to_model"] is True
     assert requests[2]["deferred_tool"] == "app.open_and_click_ui_element"
     assert requests[2]["deferred_input"]["target"] == "登录"
@@ -2961,7 +2967,6 @@ def test_custom_api_agent_loop_surfaces_builtin_data_analysis_followup_context()
             },
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
-            "continue_to_model": True,
         },
     )
     _assert_planner_task_core_metadata(
@@ -5751,41 +5756,41 @@ def test_custom_api_agent_loop_writes_data_analysis_report_to_target_app() -> No
             },
             "source": "runtime_planner",
             "planning_reason": "planner_builtin_data_analysis",
-            "continue_to_model": True,
         },
     )
     _assert_planner_task_core_metadata(
         tool_runs[0]["tool_requests"][0],
         require_task_todo=True,
     )
-    assert [request["tool"] for request in tool_runs[1]["tool_requests"]] == [
+    assert len(tool_runs) == 1
+    assert [request["tool"] for request in tool_runs[0]["tool_requests"]] == [
+        "data.analyze",
         "app.focus_and_safe_shortcut",
         "app.focus_and_safe_type_text",
-        "desktop.ui_elements",
     ]
-    assert tool_runs[1]["tool_requests"][0]["input"] == {
+    assert tool_runs[0]["tool_requests"][1]["input"] == {
         "app_name": "Obsidian",
         "action": "new_note",
     }
-    assert tool_runs[1]["tool_requests"][1]["input"] == {
+    assert tool_runs[0]["tool_requests"][2]["input"] == {
         "app_name": "Obsidian",
-        "text": generated,
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
+        "target_action": "app_paste",
+        "container_action": "new_note",
     }
-    followup = next(
-        event for event in timeline if event["event"] == "agent.model.followup_context"
+    selection = next(
+        event for event in timeline if event["event"] == "agent.plan.selection"
     )
-    assert followup["followup_target"]["app_name"] == "Obsidian"
-    assert followup["followup_target"]["container_action"] == "new_note"
-    assert followup["content_snapshot"]["source_tool"] == "data.analyze"
+    assert selection["followup_target"]["app_name"] == "Obsidian"
+    assert selection["followup_target"]["container_action"] == "new_note"
     assert any(
         event["event"] == "agent.desktop.intent_planned"
         and event["detail"] == "app.focus_and_safe_type_text"
-        and event["planning_reason"] == "planner_followup_app_write"
+        and event["planning_reason"] == "planner_data_analysis_artifact_insert"
         for event in timeline
     )
-    assert len(model_calls) == 1
-    assert "Data analysis result for data/sales.csv (csv)." in model_calls[0][-1]["content"]
-    assert "written into Obsidian" in model_calls[0][-1]["content"]
+    assert model_calls == []
 
 
 def test_custom_api_agent_loop_writes_captured_data_analysis_to_target_app() -> None:

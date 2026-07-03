@@ -2220,6 +2220,10 @@ class RuntimeCustomApiAgentLoop:
                     allowed_tools,
                 )
                 execution_requests = _drop_trailing_daily_desktop_verify_requests(execution_requests)
+                execution_requests = _discovered_app_resolution_probe_requests(
+                    execution_requests,
+                    selection.event_payload,
+                )
                 has_approval_plan_tool = self._has_approval_plan_tool(execution_requests)
                 if execution_requests and (
                     not has_approval_plan_tool
@@ -2257,6 +2261,10 @@ class RuntimeCustomApiAgentLoop:
                 allowed_tools,
             )
             execution_requests = _drop_trailing_daily_desktop_verify_requests(execution_requests)
+            execution_requests = _discovered_app_resolution_probe_requests(
+                execution_requests,
+                selection.event_payload,
+            )
             if not execution_requests and not selection.requests:
                 unavailable_decision = runtime_planner_decision(
                     planning_context,
@@ -10868,6 +10876,68 @@ def _tool_requests_include_model_followup(requests: Iterable[Mapping[str, Any]])
         for request in requests
         if isinstance(request, Mapping)
     )
+
+
+def _discovered_app_resolution_probe_requests(
+    requests: list[dict[str, Any]],
+    selection_payload: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    if not requests:
+        return requests
+    target = (
+        selection_payload.get("followup_target")
+        if isinstance(selection_payload.get("followup_target"), Mapping)
+        else {}
+    )
+    if str(target.get("kind") or "").strip() != "desktop_discovered_app_action":
+        return requests
+    communication_compose = (
+        target.get("communication_compose")
+        if isinstance(target.get("communication_compose"), Mapping)
+        else {}
+    )
+    if not communication_compose:
+        return requests
+    app_query = str(target.get("app_query") or "").strip()
+    if not app_query:
+        return requests
+    discovery_index = -1
+    for index, request in enumerate(requests):
+        if str(request.get("tool") or "").strip() != "desktop.list_apps":
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        if str(payload.get("query") or "").strip() == app_query:
+            discovery_index = index
+            break
+    if discovery_index < 0:
+        return requests
+    if not any(
+        _request_uses_selected_desktop_app_result(request, app_query)
+        for request in requests[discovery_index + 1 :]
+    ):
+        return requests
+    probe_requests = [dict(request) for request in requests[: discovery_index + 1]]
+    probe_requests[-1]["continue_to_model"] = True
+    return probe_requests
+
+
+def _request_uses_selected_desktop_app_result(
+    request: Mapping[str, Any],
+    app_query: str,
+) -> bool:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    if (
+        str(
+            payload.get("selection_source")
+            or payload.get("app_selection_source")
+            or ""
+        ).strip()
+        != "desktop.list_apps"
+    ):
+        return False
+    if str(payload.get("query") or "").strip() != str(app_query or "").strip():
+        return False
+    return str(payload.get("app_name") or "").strip() == "<selected app from desktop.list_apps>"
 
 
 def _tool_requests_without_model_followup(
