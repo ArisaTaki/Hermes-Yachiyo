@@ -2443,6 +2443,50 @@ def test_runtime_tool_request_runner_adds_active_window_target_after_app_control
     }
 
 
+def test_runtime_tool_request_runner_adds_active_window_target_after_open_path_with_app() -> None:
+    seen_requests: list[dict[str, Any]] = []
+
+    def call_agent_tool(tool_request, *_args, **_kwargs):
+        seen_requests.append(tool_request)
+        if tool_request["tool"] == "desktop.open_path_with_app":
+            return {
+                "ok": True,
+                "data": {
+                    "app_name": str(tool_request["input"].get("app_name") or ""),
+                    "path": str(tool_request["input"].get("path") or ""),
+                },
+            }
+        if tool_request["tool"] == "desktop.active_window":
+            return {"ok": True, "data": {"app_name": "Preview"}}
+        raise AssertionError(f"unexpected tool: {tool_request['tool']}")
+
+    runner = _runner(call_agent_tool=call_agent_tool)
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.open_path_with_app",
+                "input": {"app_name": "Preview", "path": "Downloads/report.pdf"},
+            },
+            {"tool": "desktop.active_window", "input": {}},
+        ],
+        ["desktop.open_path_with_app", "desktop.active_window"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "open pdf"}],
+        [],
+        [],
+        next_iteration=1,
+        run_id="run-open-path-target",
+        budget=FakeBudget(),
+    )
+
+    assert seen_requests[1]["input"] == {}
+    assert seen_requests[1]["verification_target"] == {
+        "app_name": "Preview",
+        "source_tool": "desktop.open_path_with_app",
+    }
+
+
 def test_runtime_tool_request_runner_projects_fatal_failures_and_success_messages() -> None:
     first_runner = _runner(
         call_agent_tool=lambda *_args, **_kwargs: {

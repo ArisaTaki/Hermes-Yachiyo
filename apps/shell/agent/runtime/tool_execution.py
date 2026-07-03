@@ -1798,6 +1798,7 @@ def _tool_can_change_active_app(tool_name: str) -> bool:
             "app.focus_window",
             "desktop.open_app",
             "desktop.focus_app",
+            "desktop.open_path_with_app",
         }
         or clean_tool.startswith("app.open_and_")
         or clean_tool.startswith("app.focus_and_")
