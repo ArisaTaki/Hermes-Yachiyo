@@ -1059,9 +1059,19 @@ class AgentStudioService:
                 after_sequence=clean_after_sequence,
                 limit=clean_limit,
             )
+            raw_events = _payload_items(raw_page, "events")
+            events = _run_events_from_port_payload(raw_page, run_id=run_id)
+            port_event_stream = getattr(self._studio_port, "get_run_event_stream", None)
+            if clean_after_sequence == 0 and page.has_more and callable(port_event_stream):
+                events = _events_with_first_page_key_event_window(
+                    events,
+                    self.get_run_event_stream(run_id),
+                    page=page,
+                    event_types=_run_first_page_key_event_types(raw_page, raw_events),
+                )
             return _run_event_page_with_projected_events(
                 page,
-                _run_events_from_port_payload(raw_page, run_id=run_id),
+                events,
             )
 
         filtered_events = [
@@ -2027,6 +2037,29 @@ _WORKFLOW_RUN_LIFECYCLE_EVENT_TYPES = {
     "workflow.run.failed",
     "workflow.run.cancelled",
 }
+_RUN_FIRST_PAGE_KEY_EVENT_TYPES = {
+    "run.completed",
+    "run.failed",
+    "run.cancelled",
+    "agent.completed",
+    "agent.failed",
+    "agent.cancelled",
+    "agent.run.completed",
+    "agent.run.failed",
+    "agent.run.cancelled",
+    "agent.tool.approval_required",
+    "agent.desktop.intent_approval_required",
+    "tool.approval_required",
+}
+_WORKFLOW_RUN_FIRST_PAGE_KEY_EVENT_TYPES = {
+    "workflow.run.approval_required",
+    "workflow.run.completed",
+    "workflow.run.failed",
+    "workflow.run.cancelled",
+    "workflow.run.tool.approval_required",
+    "workflow.run.desktop.intent_approval_required",
+    "workflow.node.approval_required",
+}
 
 
 def _group_run_events_from_port_payload(
@@ -2085,6 +2118,16 @@ def _is_workflow_event_payload(
         if str(event_payload.get("planner_scope") or "").strip() == "workflow_run":
             return True
     return False
+
+
+def _run_first_page_key_event_types(
+    payload: Any,
+    raw_events: list[dict[str, Any]],
+) -> set[str]:
+    projected_payload = _event_projection_payload(payload, raw_events)
+    if _is_workflow_event_payload(projected_payload, raw_events):
+        return _WORKFLOW_RUN_FIRST_PAGE_KEY_EVENT_TYPES
+    return _RUN_FIRST_PAGE_KEY_EVENT_TYPES
 
 
 def _drop_unreported_lifecycle_events(

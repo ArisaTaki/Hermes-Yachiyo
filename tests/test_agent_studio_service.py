@@ -2000,6 +2000,181 @@ def test_agent_studio_service_prefers_runtime_run_event_page_port() -> None:
     assert ("get_run_event_stream", "run-1") not in port.calls
 
 
+def test_agent_studio_service_run_event_first_page_includes_key_status_window() -> None:
+    class FirstPageRunEventPort(_FakeStudioPort):
+        def get_run_event_page(
+            self,
+            run_id: str,
+            *,
+            after_sequence: int = 0,
+            limit: int = 200,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "get_run_event_page",
+                    {
+                        "run_id": run_id,
+                        "after_sequence": after_sequence,
+                        "limit": limit,
+                    },
+                )
+            )
+            return {
+                "run_id": run_id,
+                "after_sequence": after_sequence,
+                "limit": limit,
+                "next_after_sequence": 2,
+                "has_more": True,
+                "events": [
+                    {
+                        "event_id": "event-page-1",
+                        "run_id": run_id,
+                        "sequence": 1,
+                        "event_type": "agent.started",
+                        "payload": {"status": "running"},
+                    },
+                    {
+                        "event_id": "event-page-2",
+                        "run_id": run_id,
+                        "sequence": 2,
+                        "event_type": "agent.plan.created",
+                        "payload": {"plan_id": "plan-1"},
+                    },
+                ],
+            }
+
+        def get_run_event_stream(self, run_id: str) -> dict[str, Any]:
+            self.calls.append(("get_run_event_stream", run_id))
+            return {
+                "run_id": run_id,
+                "events": [
+                    {
+                        "event_id": "event-stream-1",
+                        "run_id": run_id,
+                        "sequence": 1,
+                        "event_type": "agent.started",
+                        "payload": {"status": "running"},
+                    },
+                    {
+                        "event_id": "event-stream-2",
+                        "run_id": run_id,
+                        "sequence": 2,
+                        "event_type": "agent.plan.created",
+                        "payload": {"plan_id": "plan-1"},
+                    },
+                    {
+                        "event_id": "event-stream-3",
+                        "run_id": run_id,
+                        "sequence": 3,
+                        "event_type": "agent.tool.started",
+                        "payload": {"tool": "terminal.run"},
+                    },
+                    {
+                        "event_id": "event-stream-4",
+                        "run_id": run_id,
+                        "sequence": 4,
+                        "event_type": "agent.tool.approval_required",
+                        "payload": {"tool": "terminal.run", "status": "approval_required"},
+                    },
+                ],
+            }
+
+    port = FirstPageRunEventPort()
+    service = AgentStudioService(port)
+
+    page = service.get_run_event_page("run-1", after_sequence=0, limit=2)
+    event_types = [event.event_type for event in page.events]
+
+    assert event_types == [
+        "agent.started",
+        "agent.plan.created",
+        "agent.tool.started",
+        "agent.tool.approval_required",
+    ]
+    assert page.next_after_sequence == 4
+    assert ("get_run_event_stream", "run-1") in port.calls
+
+
+def test_agent_studio_service_workflow_event_first_page_includes_key_status_window() -> None:
+    class FirstPageWorkflowRunEventPort(_FakeStudioPort):
+        def get_run_event_page(
+            self,
+            run_id: str,
+            *,
+            after_sequence: int = 0,
+            limit: int = 200,
+        ) -> dict[str, Any]:
+            self.calls.append(
+                (
+                    "get_run_event_page",
+                    {
+                        "run_id": run_id,
+                        "after_sequence": after_sequence,
+                        "limit": limit,
+                    },
+                )
+            )
+            return {
+                "workflow_run_id": run_id,
+                "after_sequence": after_sequence,
+                "limit": limit,
+                "next_after_sequence": 1,
+                "has_more": True,
+                "events": [
+                    {
+                        "event_id": "workflow-page-1",
+                        "run_id": run_id,
+                        "sequence": 1,
+                        "event_type": "workflow.run.started",
+                        "payload": {"status": "running"},
+                    }
+                ],
+            }
+
+        def get_run_event_stream(self, run_id: str) -> dict[str, Any]:
+            self.calls.append(("get_run_event_stream", run_id))
+            return {
+                "workflow_run_id": run_id,
+                "events": [
+                    {
+                        "event_id": "workflow-stream-1",
+                        "run_id": run_id,
+                        "sequence": 1,
+                        "event_type": "workflow.run.started",
+                        "payload": {"status": "running"},
+                    },
+                    {
+                        "event_id": "workflow-stream-2",
+                        "run_id": run_id,
+                        "sequence": 2,
+                        "event_type": "workflow.node.started",
+                        "payload": {"workflow_node_id": "node-1"},
+                    },
+                    {
+                        "event_id": "workflow-stream-3",
+                        "run_id": run_id,
+                        "sequence": 3,
+                        "event_type": "workflow.run.approval_required",
+                        "payload": {"status": "approval_required"},
+                    },
+                ],
+            }
+
+    port = FirstPageWorkflowRunEventPort()
+    service = AgentStudioService(port)
+
+    page = service.get_run_event_page("workflow-run-1", after_sequence=0, limit=1)
+    event_types = [event.event_type for event in page.events]
+
+    assert event_types == [
+        "workflow.run.started",
+        "workflow.node.started",
+        "workflow.run.approval_required",
+    ]
+    assert page.next_after_sequence == 3
+    assert ("get_run_event_stream", "workflow-run-1") in port.calls
+
+
 def test_agent_studio_service_projects_workflow_replan_events_from_port_page() -> None:
     class WorkflowRunEventPagePort(_FakeStudioPort):
         def get_run_event_page(
