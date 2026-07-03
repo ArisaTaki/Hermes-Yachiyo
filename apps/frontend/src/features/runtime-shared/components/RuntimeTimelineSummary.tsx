@@ -5,6 +5,7 @@ import {
   runtimeEventIsDesktopPermissionRecovery,
   runtimeEventIsDesktopReadinessRecovered,
 } from '../desktopEvents';
+import { runtimePlannerReasonLabel } from '../plannerReasonLabels';
 
 export type RuntimeTimelineEventSnapshot = {
   event_id?: string | null;
@@ -108,6 +109,10 @@ export function runtimeTimelineEventLabel(event: RuntimeTimelineEventSnapshot): 
     const selectionDetail = runtimeTimelinePlannerSelectionDetail(event);
     return selectionDetail ? `Planner 选择 · ${selectionDetail}` : 'Planner 选择';
   }
+  if (type === 'agent.model.followup_context') {
+    const reasonLabel = runtimeTimelinePlanningReasonLabel(event);
+    return reasonLabel ? `模型后续上下文 · ${reasonLabel}` : '模型后续上下文';
+  }
   const typeLabel = runtimeTimelineEventTypeLabel(type || title);
   if (typeLabel) return typeLabel;
   if (title && !runtimeTimelineLooksInternalLabel(title)) return title;
@@ -128,9 +133,14 @@ function runtimeTimelineEventDetail(event: RuntimeTimelineEventSnapshot): string
     return recoveryTargetDetail;
   }
   if (type === 'agent.model.followup_context') {
+    const reasonLabel = runtimeTimelinePlanningReasonLabel(event);
     const contentSnapshotDetail = runtimeTimelineContentSnapshotDetail(event);
-    if (contentSnapshotDetail) return contentSnapshotDetail;
-    if (recoveryTargetDetail) return recoveryTargetDetail;
+    const detail = [
+      reasonLabel ? `原因 · ${reasonLabel}` : '',
+      contentSnapshotDetail,
+      recoveryTargetDetail,
+    ].filter(Boolean).join(' · ');
+    if (detail) return detail;
   }
   if (runtimeEventIsDesktopIntent(type, 'completed')) {
     const toolChainDetail = runtimeTimelineDesktopToolChainDetail(event);
@@ -401,6 +411,7 @@ function runtimeTimelineReplanRecoveryUpdateDetail(event: RuntimeTimelineEventSn
     record,
     payload,
   );
+  const labelText = runtimePlannerReasonLabel(label) || label;
   const sourceTool = runtimeTimelineFirstRecordString(['source_tool_name'], record, payload);
   const todoStatus = runtimeTimelineFirstRecordString(['todo_status'], record, payload);
   const checkpointStatus = runtimeTimelineFirstRecordString(['checkpoint_status'], record, payload);
@@ -411,7 +422,7 @@ function runtimeTimelineReplanRecoveryUpdateDetail(event: RuntimeTimelineEventSn
     resultPreview,
   );
   return [
-    label,
+    labelText,
     sourceTool ? `source ${runtimeToolDisplayLabelOrName(sourceTool)}` : '',
     todoStatus ? `todo ${todoStatus}` : '',
     checkpointStatus ? `checkpoint ${checkpointStatus}` : '',
@@ -419,6 +430,21 @@ function runtimeTimelineReplanRecoveryUpdateDetail(event: RuntimeTimelineEventSn
     riskLevel ? `risk ${riskLevel}` : '',
     resultSummary,
   ].filter(Boolean).join(' · ');
+}
+
+function runtimeTimelinePlanningReasonLabel(event: RuntimeTimelineEventSnapshot): string {
+  const record = event as RuntimeTimelineEventSnapshot & Record<string, unknown>;
+  const payload = runtimeTimelineRecordObject(record, 'payload');
+  const metadata = runtimeTimelineRecordObject(payload, 'metadata');
+  const inputPreview = runtimeTimelineRecordObject(payload, 'input_preview');
+  const reason = runtimeTimelineFirstRecordString(
+    ['planning_reason', 'reason'],
+    record,
+    payload,
+    metadata,
+    inputPreview,
+  );
+  return runtimePlannerReasonLabel(reason);
 }
 
 function runtimeTimelineDesktopToolChainDetail(event: RuntimeTimelineEventSnapshot): string {

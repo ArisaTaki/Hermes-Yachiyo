@@ -1607,6 +1607,8 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "workflow.run.task.todo.updated",
             "workflow.run.task.checkpoint.updated",
             "runtimeTimelinePlannerSelectionDetail",
+            "runtimeTimelinePlanningReasonLabel",
+            "runtimePlannerReasonLabel",
             "workflow.started",
             "workflow.paused_for_approval",
             "workflow.resumed",

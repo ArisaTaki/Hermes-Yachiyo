@@ -1,6 +1,7 @@
 import { Fragment } from 'react';
 
 import { publicRunEventIsSecret } from '../../runtime-shared/runEvents';
+import { runtimePlannerReasonLabel } from '../../runtime-shared/plannerReasonLabels';
 import {
   runtimeToolRecoveryActionsFromRecords,
   type RuntimeToolRecoveryAction,
@@ -727,6 +728,7 @@ function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnap
     || recovery.source_tool_name
     || ''
   );
+  const planningReasonLabel = runtimePlannerReasonLabel(recovery.planning_reason);
   const actionTarget = objectRecord(recovery.action_target);
   const observationEvidence = objectRecord(recovery.observation_evidence);
   const observationRetry = objectRecord(recovery.observation_retry);
@@ -736,7 +738,7 @@ function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnap
   const observedCenterPreview = replanRecoveryObservedCenterPreview(observationEvidence);
   const title = [
     recovery.failure_detail,
-    recovery.planning_reason,
+    planningReasonLabel ? `reason: ${planningReasonLabel}` : '',
     recovery.permission_target ? `permission: ${recovery.permission_target}` : '',
     recovery.risk_level ? `risk: ${recovery.risk_level}` : '',
     actionTargetPreview ? `target: ${actionTargetPreview}` : '',
@@ -753,12 +755,15 @@ function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnap
       data-replan-recovery-observation-retry={observationRetryPreview}
       data-replan-recovery-observed-center={observedCenterPreview}
       data-replan-recovery-permission-target={recovery.permission_target || ''}
+      data-replan-recovery-planning-reason={recovery.planning_reason || ''}
+      data-replan-recovery-planning-reason-label={planningReasonLabel}
       data-replan-recovery-risk={recovery.risk_level || ''}
       data-replan-recovery-status={recovery.status || 'requested'}
       key={`recovery:${recovery.request_id}`}
       title={title}
     >
       recovery · {label || recovery.trigger} · {recovery.status || 'requested'}
+      {planningReasonLabel ? ` · ${planningReasonLabel}` : ''}
       {actionTargetPreview ? ` · target: ${actionTargetPreview}` : ''}
       {observationRetryPreview ? ` · retry: ${observationRetryPreview}` : ''}
     </span>
@@ -1006,6 +1011,7 @@ function ExecutionRequestRow({
   const fallbackTools = uniqueStrings(request.fallback_tools || []);
   const replanTriggers = uniqueStrings(request.replan_triggers || []);
   const inputPreview = plannerStepInputPreview(request.input);
+  const planningReasonLabel = runtimePlannerReasonLabel(request.planning_reason);
   const followupTargetPreview = plannerValuePreview(objectRecord(request.followup_target));
   const actionTargetPreview = replanRecoveryActionTargetPreview(objectRecord(request.action_target));
   const observationEvidencePreview = replanRecoveryObservationEvidencePreview(objectRecord(request.observation_evidence));
@@ -1022,6 +1028,8 @@ function ExecutionRequestRow({
       data-input-preview={inputPreview}
       data-observation-retry={observationRetryPreview}
       data-planner-step-id={request.step_id || ''}
+      data-planning-reason={request.planning_reason || ''}
+      data-planning-reason-label={planningReasonLabel}
       data-request-action-target={actionTargetPreview}
       data-request-followup-target={followupTargetPreview}
       data-request-observation-evidence={observationEvidencePreview}
@@ -1036,7 +1044,7 @@ function ExecutionRequestRow({
         <strong>{index + 1}. {request.tool_name || 'tool request'}</strong>
         {request.step_id ? <span>step: {request.step_id}</span> : null}
         {request.capability_id ? <span>capability: {request.capability_id}</span> : null}
-        {request.planning_reason ? <span>reason: {request.planning_reason}</span> : null}
+        {planningReasonLabel ? <span title={request.planning_reason}>reason: {planningReasonLabel}</span> : null}
         {request.runtime_stage || request.runtime_role ? (
           <span>runtime: {[request.runtime_stage, request.runtime_role].filter(Boolean).join(' / ')}</span>
         ) : null}
@@ -1169,6 +1177,7 @@ function PlannerTraceStepRow({
   const dependsOn = uniqueStrings(step.depends_on || []);
   const fallbackTools = uniqueStrings(step.fallback_tools || []);
   const inputPreview = plannerStepInputPreview(step.input_preview);
+  const planningReasonLabel = runtimePlannerReasonLabel(step.reason);
   return (
     <div
       className="studio-planner-step"
@@ -1179,6 +1188,8 @@ function PlannerTraceStepRow({
       data-fallback-tools={fallbackTools.join(',')}
       data-input-preview={inputPreview}
       data-planner-step-id={step.step_id}
+      data-planning-reason={step.reason || ''}
+      data-planning-reason-label={planningReasonLabel}
       data-risk-level={step.risk_level || ''}
       data-step-status={step.status || 'planned'}
       data-testid="agent-run-detail-planner-step"
@@ -1192,7 +1203,7 @@ function PlannerTraceStepRow({
         {inputPreview ? <span>input: {inputPreview}</span> : null}
         {dependsOn.length ? <span>depends on: {dependsOn.join(', ')}</span> : null}
         {fallbackTools.length ? <span>fallbacks: {fallbackTools.join(', ')}</span> : null}
-        {step.reason ? <span>{step.reason}</span> : null}
+        {planningReasonLabel ? <span title={step.reason}>reason: {planningReasonLabel}</span> : null}
       </div>
       <small>{step.status || 'planned'}{step.approval_required ? ' / approval' : ''}</small>
     </div>

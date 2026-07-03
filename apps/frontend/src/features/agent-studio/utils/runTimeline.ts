@@ -1,6 +1,7 @@
 import type { PublicRunEvent } from '../../yachiyo-studio/types';
 import { publicRunEventIsSecret } from '../../runtime-shared/runEvents';
 import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
+import { runtimePlannerReasonLabel } from '../../runtime-shared/plannerReasonLabels';
 import {
   runtimeEventIsDesktopIntent,
   runtimeEventIsDesktopPermissionRecovery,
@@ -39,7 +40,14 @@ export function timelineEventTitle(event: Record<string, unknown>): string {
   if (name === 'model.request.failed') return '模型请求失败';
   if (name === 'model.output.ready') return '模型输出已就绪';
   if (name === 'model.output.completed' || name === 'model.completed') return '模型输出完成';
-  if (name === 'agent.model.followup_context') return detail ? `模型后续上下文 · ${detail}` : '模型后续上下文';
+  if (name === 'agent.model.followup_context') {
+    const reasonLabel = timelinePlanningReasonLabel(event);
+    return reasonLabel
+      ? `模型后续上下文 · ${reasonLabel}`
+      : detail
+        ? `模型后续上下文 · ${detail}`
+        : '模型后续上下文';
+  }
   if (name === 'agent.run.started') return 'Agent 已启动';
   if (name === 'agent.runtime.compiled') return '运行环境已准备';
   if (name === 'agent.artifact.write') return '上下文/产物已写入';
@@ -331,11 +339,23 @@ function replanRecoveryUpdateTitle(event: Record<string, unknown>, detail: strin
       : status === 'waiting_approval'
         ? '恢复待审批'
         : '恢复状态';
+  const reasonLabel = runtimePlannerReasonLabel(timelineFirstString(['recovery_action_label', 'planning_reason'], event, payload));
   return toolLabel
     ? `${prefix} · ${toolLabel}`
+    : reasonLabel
+      ? `${prefix} · ${reasonLabel}`
     : detail
       ? `${prefix} · ${detail}`
       : prefix;
+}
+
+function timelinePlanningReasonLabel(event: Record<string, unknown>): string {
+  const payload = timelineRecord(event.payload);
+  const metadata = timelineRecord(payload.metadata);
+  const inputPreview = timelineRecord(payload.input_preview);
+  return runtimePlannerReasonLabel(
+    timelineFirstString(['planning_reason', 'reason'], event, payload, metadata, inputPreview),
+  );
 }
 
 function plannerSelectionTimelineDetail(event: Record<string, unknown>, fallback: string): string {
@@ -530,7 +550,10 @@ export function publicRunEventPayloadDetail(event: PublicRunEvent): string {
     if (recoverySummary) return recoverySummary;
   }
   if (event.event_type === 'agent.model.followup_context') {
+    const reasonLabel = runtimePlannerReasonLabel(publicRunEventPayloadString(payload, 'planning_reason'));
     const contentSnapshotSummary = publicRunEventContentSnapshotSummary(payload);
+    if (reasonLabel && contentSnapshotSummary) return `${reasonLabel} · ${contentSnapshotSummary}`;
+    if (reasonLabel) return reasonLabel;
     if (contentSnapshotSummary) return contentSnapshotSummary;
   }
   if (runtimeEventIsDesktopIntent(event.event_type, 'completed')) {
@@ -722,7 +745,7 @@ function publicRunEventReplanRecoveryUpdateSummary(payload: Record<string, unkno
     || publicRunEventPayloadString(resultPreview, 'hint');
   return [
     publicRunEventPayloadString(payload, 'recovery_action_label')
-      || publicRunEventPayloadString(payload, 'planning_reason'),
+      || runtimePlannerReasonLabel(publicRunEventPayloadString(payload, 'planning_reason')),
     selectedTool ? `selected ${runtimeToolDisplayLabelOrName(selectedTool)}` : '',
     sourceTool ? `source ${runtimeToolDisplayLabelOrName(sourceTool)}` : '',
     todoStatus ? `todo ${todoStatus}` : '',
