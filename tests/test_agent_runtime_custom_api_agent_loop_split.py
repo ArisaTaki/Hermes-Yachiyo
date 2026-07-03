@@ -7165,6 +7165,73 @@ def test_model_followup_pending_plan_promotes_model_clipboard_content() -> None:
     ]
 
 
+def test_model_followup_pending_plan_resolves_captured_data_analysis_content() -> None:
+    requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            "planning_reason": "planner_prefetch_data_source",
+            "content_snapshot": {
+                "source_tool": "desktop.ui_elements",
+                "ok": True,
+                "app_name": "Numbers",
+                "text": (
+                    "| region | revenue |\n"
+                    "| --- | ---: |\n"
+                    "| East | 10 |\n"
+                    "| West | 20 |"
+                ),
+            },
+            "pending_execution_requests": [
+                {
+                    "request_id": "runtime-plan-data:request:2:data.analyze",
+                    "step_id": "analyze-data-context",
+                    "tool_name": "data.analyze",
+                    "capability_id": "data.analysis",
+                    "input_preview": {
+                        "content": "<captured visible_text>",
+                        "display_path": "captured:visible_text",
+                        "artifact_path": "analysis-report.md",
+                        "source_kind": "text_table",
+                        "requested_outputs": ["report"],
+                        "artifact_manifest": [
+                            {"path": "analysis-report.md", "kind": "markdown"}
+                        ],
+                    },
+                }
+            ],
+        },
+        ["data.analyze"],
+        generated_content="继续分析这段表格。",
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "content": (
+                    "| region | revenue |\n"
+                    "| --- | ---: |\n"
+                    "| East | 10 |\n"
+                    "| West | 20 |"
+                ),
+                "display_path": "Numbers",
+                "source_kind": "text_table",
+                "artifact_path": "analysis-report.md",
+                "requested_outputs": ["report"],
+                "artifact_manifest": [
+                    {"path": "analysis-report.md", "kind": "markdown"}
+                ],
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+            "step_id": "analyze-data-context",
+            "capability_id": "data.analysis",
+            "request_id": "runtime-plan-data:request:2:data.analyze",
+            "planner_step_id": "analyze-data-context",
+        }
+    ]
+
+
 def test_model_followup_pending_plan_inherits_trace_metadata() -> None:
     requests = custom_api_agent_module._model_followup_pending_plan_requests(
         {
@@ -7195,6 +7262,144 @@ def test_model_followup_pending_plan_inherits_trace_metadata() -> None:
     assert requests[0]["intent_kind"] == "data_analysis"
     assert requests[0]["replan_request_id"] == "replan-1"
     assert requests[0]["planner_step_id"] == "write-clipboard-output"
+
+
+def test_custom_api_agent_loop_auto_dispatches_pending_captured_data_analysis() -> None:
+    budget = FakeBudget()
+    captured_requests: list[dict[str, Any]] = []
+    timeline: list[dict[str, Any]] = [
+        _timeline(
+            "agent.model.followup_context",
+            "planner_prefetch_data_source",
+            source="runtime_planner",
+            planning_reason="planner_prefetch_data_source",
+            content_snapshot={
+                "source_tool": "desktop.ui_elements",
+                "ok": True,
+                "app_name": "Numbers",
+                "text": "region,revenue\nEast,10\nWest,20",
+            },
+            pending_execution_requests=[
+                {
+                    "request_id": "runtime-plan-data:request:2:data.analyze",
+                    "step_id": "analyze-data-context",
+                    "tool_name": "data.analyze",
+                    "capability_id": "data.analysis",
+                    "input_preview": {
+                        "content": "<captured visible_text>",
+                        "display_path": "captured:visible_text",
+                        "artifact_path": "analysis-report.md",
+                        "source_kind": "text_table",
+                        "requested_outputs": ["report"],
+                        "artifact_manifest": [
+                            {"path": "analysis-report.md", "kind": "markdown"}
+                        ],
+                    },
+                    "runtime_stage": "operate",
+                    "runtime_role": "analyze",
+                }
+            ],
+        )
+    ]
+
+    def fake_run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ) -> None:
+        captured_requests.extend(dict(request) for request in tool_requests)
+        for request in tool_requests:
+            input_preview = (
+                request.get("input") if isinstance(request.get("input"), dict) else {}
+            )
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    str(request.get("tool") or ""),
+                    input_preview=input_preview,
+                    result={
+                        "ok": True,
+                        "path": str(input_preview.get("display_path") or ""),
+                        "source_kind": str(input_preview.get("source_kind") or ""),
+                        "rows": 2,
+                        "analyzed_rows": 2,
+                        "columns": ["region", "revenue"],
+                        "artifact_path": "analysis-report.md",
+                        "artifact_paths": ["analysis-report.md"],
+                        "artifact_manifest": [
+                            {"path": "analysis-report.md", "kind": "markdown"}
+                        ],
+                        "summary": "Analyzed captured table.",
+                    },
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["data.analyze"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use pending runtime plan for data analysis.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: {
+            "role": "assistant",
+            "content": "继续执行数据分析。",
+        },
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=fake_run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Analyst"},
+        "continue captured data analysis",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=[
+            {"role": "system", "content": "Use tools."},
+            {"role": "user", "content": "继续分析当前窗口里的表格"},
+        ],
+        start_iteration=1,
+        run_id="run-pending-captured-data-analysis",
+    )
+
+    assert "已分析" in str(result)
+    assert captured_requests[0]["tool"] == "data.analyze"
+    assert captured_requests[0]["input"] == {
+        "content": "region,revenue\nEast,10\nWest,20",
+        "display_path": "Numbers",
+        "source_kind": "text_table",
+        "artifact_path": "analysis-report.md",
+        "requested_outputs": ["report"],
+        "artifact_manifest": [{"path": "analysis-report.md", "kind": "markdown"}],
+    }
+    assert captured_requests[0]["request_id"] == (
+        "runtime-plan-data:request:2:data.analyze"
+    )
+    assert captured_requests[0]["runtime_stage"] == "operate"
+    assert captured_requests[0]["runtime_role"] == "analyze"
 
 
 def test_custom_api_agent_loop_auto_dispatches_pending_clipboard_write_after_model_output() -> None:

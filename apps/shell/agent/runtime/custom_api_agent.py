@@ -13620,6 +13620,7 @@ def _followup_event_has_readable_source(event: Mapping[str, Any]) -> bool:
 _MODEL_FOLLOWUP_AUTO_PENDING_TOOLS = {
     "app.open",
     "artifact.write",
+    "data.analyze",
     "app.focus",
     "app.focus_and_click_ui_element",
     "app.focus_and_hotkey",
@@ -13891,6 +13892,13 @@ def _model_followup_pending_plan_request(
         input_payload = _model_followup_clipboard_pending_input(
             raw_input,
             generated_content,
+        )
+        if not input_payload:
+            return {}
+    elif tool_name == "data.analyze":
+        input_payload = _model_followup_data_analyze_pending_input(
+            raw_input,
+            followup_context or {},
         )
         if not input_payload:
             return {}
@@ -14336,6 +14344,95 @@ def _model_followup_artifact_pending_input(
     if not content:
         return {}
     return {"path": path, "content": content}
+
+
+def _model_followup_data_analyze_pending_input(
+    raw_input: Mapping[str, Any],
+    followup_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(raw_input, Mapping):
+        raw_input = {}
+    path = str(raw_input.get("path") or "").strip()
+    if path and not _pending_plan_placeholder_value(path, "captured"):
+        return _data_analyze_pending_input_with_manifest(dict(raw_input), path=path)
+
+    content = str(raw_input.get("content") or "").strip()
+    snapshot: Mapping[str, Any] = {}
+    if not content or _pending_plan_placeholder_value(content, "captured"):
+        snapshot = _latest_data_analysis_followup_snapshot(followup_context)
+        content = str(snapshot.get("text") or "").strip()
+    if not content:
+        return {}
+
+    display_path = str(raw_input.get("display_path") or "").strip()
+    if not display_path or _pending_plan_placeholder_value(display_path, "captured"):
+        display_path = _captured_data_display_path(dict(snapshot))
+    source_kind = str(raw_input.get("source_kind") or "").strip()
+    if not source_kind or source_kind == "unknown":
+        source_kind = _captured_data_source_kind(content)
+
+    payload = _data_analyze_pending_input_with_manifest(
+        dict(raw_input),
+        content=content,
+        display_path=display_path,
+        source_kind=source_kind,
+    )
+    return payload
+
+
+def _latest_data_analysis_followup_snapshot(
+    followup_context: Mapping[str, Any],
+) -> Mapping[str, Any]:
+    snapshots: list[Mapping[str, Any]] = []
+    raw_snapshots = followup_context.get("content_snapshots")
+    if isinstance(raw_snapshots, list):
+        snapshots.extend(snapshot for snapshot in raw_snapshots if isinstance(snapshot, Mapping))
+    raw_snapshot = followup_context.get("content_snapshot")
+    if isinstance(raw_snapshot, Mapping):
+        snapshots.append(raw_snapshot)
+    for snapshot in reversed(snapshots):
+        if str(snapshot.get("source_tool") or "").strip() == "data.analyze":
+            continue
+        if str(snapshot.get("text") or "").strip():
+            return snapshot
+    return {}
+
+
+def _data_analyze_pending_input_with_manifest(
+    raw_input: dict[str, Any],
+    *,
+    path: str = "",
+    content: str = "",
+    display_path: str = "",
+    source_kind: str = "",
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    if path:
+        payload["path"] = path
+    if content:
+        payload["content"] = content
+    if display_path:
+        payload["display_path"] = display_path
+    if source_kind:
+        payload["source_kind"] = source_kind
+
+    for key in ("artifact_path",):
+        value = str(raw_input.get(key) or "").strip()
+        if value:
+            payload[key] = value
+    for key in ("requested_outputs", "artifact_paths"):
+        values = _string_list(raw_input.get(key))
+        if values:
+            payload[key] = values
+    artifact_manifest = raw_input.get("artifact_manifest")
+    if isinstance(artifact_manifest, list):
+        manifest = [dict(item) for item in artifact_manifest if isinstance(item, Mapping)]
+        if manifest:
+            payload["artifact_manifest"] = manifest
+    max_rows = raw_input.get("max_rows")
+    if isinstance(max_rows, int) and not isinstance(max_rows, bool) and max_rows > 0:
+        payload["max_rows"] = max_rows
+    return payload
 
 
 def _model_followup_terminal_pending_input(
