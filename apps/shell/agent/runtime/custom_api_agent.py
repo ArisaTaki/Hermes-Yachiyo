@@ -8994,6 +8994,26 @@ def _auto_discovered_app_observed_pending_action_requests(
     observation_source = _latest_desktop_observation_tool(timeline)
     if observation_source:
         observed_target["observation_source"] = observation_source
+    target_label = str(observed_target.get("target") or "").strip()
+    role_filter = str(observed_target.get("role_filter") or "").strip()
+    if not _latest_desktop_observation_has_target_match(
+        timeline,
+        target_label,
+        role_filter,
+    ):
+        retry_request = _discovered_app_observed_pending_observation_retry_request(
+            target,
+            observed_target,
+            {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()},
+            timeline,
+            planning_reason=planning_reason,
+        )
+        if retry_request:
+            return _annotate_auto_followup_requests_from_tool_plan(
+                [retry_request],
+                selection_payload,
+            )
+        return []
     requests = _auto_desktop_observed_action_followup_requests(
         {"followup_target": observed_target},
         allowed_tools,
@@ -9001,6 +9021,49 @@ def _auto_discovered_app_observed_pending_action_requests(
         planning_reason=planning_reason,
     )
     return _annotate_auto_followup_requests_from_tool_plan(requests, selection_payload)
+
+
+def _discovered_app_observed_pending_observation_retry_request(
+    discovered_target: Mapping[str, Any],
+    observed_target: Mapping[str, Any],
+    allowed: set[str],
+    timeline: list[dict[str, Any]],
+    *,
+    planning_reason: str,
+) -> dict[str, Any]:
+    latest_tool = _latest_desktop_observation_tool(timeline)
+    if latest_tool != "desktop.ui_elements" or "desktop.read_ui" not in allowed:
+        return {}
+    target_label = str(observed_target.get("target") or "").strip()
+    if not target_label:
+        return {}
+    input_payload = {
+        "role_filter": str(observed_target.get("role_filter") or "").strip(),
+        "limit": _clean_model_followup_int(observed_target.get("limit"), default=80),
+    }
+    request = _request_like(
+        "desktop.read_ui",
+        input_payload,
+        source="runtime_planner",
+        planning_reason=planning_reason,
+    )
+    request["continue_to_model"] = True
+    request["observation_retry"] = {
+        "from_tool": latest_tool,
+        "reason": "target_not_found",
+        "target": target_label,
+    }
+    request["followup_target"] = _compact_observed_action_target(observed_target)
+    app_name = _observed_action_app_name(observed_target)
+    if app_name:
+        request["target_app_name"] = app_name
+    app_query = (
+        _observed_action_app_query(observed_target)
+        or str(discovered_target.get("app_query") or "").strip()
+    )
+    if app_query:
+        request["target_app_query"] = app_query
+    return request
 
 
 def _observed_action_target_from_discovered_pending_action(

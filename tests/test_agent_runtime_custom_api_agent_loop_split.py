@@ -21669,6 +21669,88 @@ def test_auto_discovered_app_observed_pending_click_uses_safe_click() -> None:
     }
 
 
+def test_auto_discovered_app_observed_pending_click_retries_unmatched_ui_elements() -> None:
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.list_apps",
+            input_preview={"query": "image", "limit": 20},
+            result={
+                "ok": True,
+                "data": {
+                    "query": "image",
+                    "apps": [
+                        {
+                            "name": "Figma",
+                            "path": "/Applications/Figma.app",
+                            "match_score": 94,
+                        }
+                    ],
+                },
+            },
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            input_preview={"limit": 80},
+            result={
+                "ok": True,
+                "data": {
+                    "elements": [
+                        {
+                            "role": "AXButton",
+                            "label": "设置",
+                            "center": {"x": 100, "y": 80},
+                        }
+                    ],
+                    "count": 1,
+                },
+            },
+        ),
+    ]
+
+    requests = custom_api_agent_module._auto_discovered_followup_requests(
+        {
+            "followup_target": {
+                "kind": "desktop_discovered_app_action",
+                "app_query": "image",
+                "target_action": "open_app",
+                "pending_user_action": "点击导出按钮",
+            }
+        },
+        ["desktop.safe_click", "desktop.ui_elements", "desktop.read_ui"],
+        timeline,
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.read_ui",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_followup_discovered_app_observed_action",
+            "continue_to_model": True,
+            "observation_retry": {
+                "from_tool": "desktop.ui_elements",
+                "reason": "target_not_found",
+                "target": "导出",
+            },
+            "followup_target": {
+                "kind": "desktop_observed_action",
+                "target_action": "click",
+                "target": "导出",
+                "role_filter": "button",
+                "observation_source": "desktop.ui_elements",
+                "app_name": "Figma",
+                "app_query": "image",
+                "click_count": 1,
+            },
+            "target_app_name": "Figma",
+            "target_app_query": "image",
+        }
+    ]
+
+
 def test_auto_discovered_app_observed_pending_type_uses_safe_text() -> None:
     timeline = [
         _timeline(
