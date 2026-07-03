@@ -126,7 +126,9 @@ from .replans import (
     task_replan_timeline_event,
 )
 from .runtime_progress import (
+    public_task_replan_events_for_tool_result,
     public_task_progress_events_for_tool_result,
+    task_replan_event_payloads_for_tool_result,
     task_progress_event_payloads_for_tool_result,
 )
 from .service import YachiyoAgentService
@@ -231,9 +233,11 @@ __all__ = [
     "RuntimePlanner",
     "RuntimePlanSnapshot",
     "TaskTodoItemSnapshot",
+    "public_task_replan_events_for_tool_result",
     "public_task_progress_events_for_tool_result",
     "TaskWorkspaceItemSnapshot",
     "TaskWorkspaceSnapshot",
+    "task_replan_event_payloads_for_tool_result",
     "task_progress_event_payloads_for_tool_result",
     "ToolCatalogItemSnapshot",
     "ToolCatalogSnapshot",

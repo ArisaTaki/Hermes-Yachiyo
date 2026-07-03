@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 from apps.shell.yachiyo_agent.runtime_progress import (
+    public_task_replan_events_for_tool_result,
     public_task_progress_events_for_tool_result,
+    task_replan_event_payloads_for_tool_result,
     task_progress_event_payloads_for_tool_result,
 )
 
@@ -66,6 +69,88 @@ def test_task_progress_payloads_can_be_scoped_for_group_and_workflow_runs() -> N
     ]
     assert group_events[1]["planner_event_type"] == "agent.task.todo.updated"
     assert workflow_events[2]["planner_event_type"] == "agent.task.checkpoint.updated"
+
+
+def test_public_task_replan_events_project_failed_tool_result() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+    tool_request = {
+        "tool": "data.analyze",
+        "step_id": "analyze-data-file",
+        "task_id": "task-1",
+        "run_id": "run-1",
+    }
+
+    events = public_task_replan_events_for_tool_result(
+        decision,
+        tool_request=tool_request,
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "data.analyze",
+            "result": {"ok": False, "error": "unsupported chart type"},
+        },
+        run_id="run-1",
+        after_sequence=30,
+    )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.event_type == "agent.replan.requested"
+    assert event.run_id == "run-1"
+    assert event.sequence == 31
+    assert event.core_id == decision.plan.task_core.core_id
+    assert event.task_id == "task-1"
+    assert event.payload["trigger"] == "tool_failure"
+    assert event.payload["source_step_id"] == "analyze-data-file"
+    assert event.payload["source_tool_name"] == "data.analyze"
+    assert event.payload["target_capability_id"] == "data.analysis"
+    assert event.payload["fallback_tools"] == ["terminal.run"]
+    assert "unsupported chart type" in event.payload["failure_detail"]
+    assert "task_core_context" in event.payload["metadata"]
+
+
+def test_task_replan_payloads_scope_group_run_and_skip_success() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+    tool_request = {
+        "tool": "data.analyze",
+        "step_id": "analyze-data-file",
+        "task_id": "task-1",
+        "group_run_id": "group-run-1",
+    }
+
+    group_events = task_replan_event_payloads_for_tool_result(
+        decision,
+        tool_request=tool_request,
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "data.analyze",
+            "result": {"ok": False, "error": "tool unavailable"},
+        },
+        event_scope="group.run",
+    )
+    success_events = task_replan_event_payloads_for_tool_result(
+        decision,
+        tool_request=tool_request,
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "data.analyze",
+            "result": {"ok": True, "summary": "done"},
+        },
+        event_scope="group.run",
+    )
+
+    assert len(group_events) == 1
+    assert group_events[0]["event"] == "group.run.replan.requested"
+    assert group_events[0]["planner_event_type"] == "agent.replan.requested"
+    assert group_events[0]["payload"]["planner_event_type"] == "agent.replan.requested"
+    assert group_events[0]["payload"]["planner_scope"] == "group.run"
+    assert group_events[0]["payload"]["trigger"] == "tool_unavailable"
+    assert success_events == []
 
 
 def _tool_request() -> dict:
