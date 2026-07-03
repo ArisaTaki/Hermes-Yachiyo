@@ -16,7 +16,7 @@ from .replans import (
     task_replan_run_event_payload,
 )
 
-ProgressEventScope = Literal["agent", "group.run", "workflow.run"]
+ProgressEventScope = Literal["agent", "group.run", "workflow.run", "auto"]
 
 _SCOPED_PROGRESS_EVENT_TYPES: dict[ProgressEventScope, dict[str, str]] = {
     "agent": {},
@@ -45,6 +45,7 @@ def task_progress_event_payloads_for_tool_result(
     existing_timeline: list[Mapping[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     """Return task workspace/todo/checkpoint progress events for a tool result."""
+    effective_scope = _effective_progress_event_scope(event_scope, tool_request)
     timeline = [dict(item) for item in existing_timeline or []]
     start_index = len(timeline)
     _append_task_progress_events(
@@ -54,7 +55,7 @@ def task_progress_event_payloads_for_tool_result(
         timeline_factory=_timeline_event,
     )
     return [
-        _scoped_progress_event(event, event_scope)
+        _scoped_progress_event(event, effective_scope)
         for event in timeline[start_index:]
     ]
 
@@ -129,6 +130,7 @@ def task_replan_event_payloads_for_tool_result(
     """Return a replayable replan request event for a failed tool result."""
     if not _tool_event_requests_replan(tool_event):
         return []
+    effective_scope = _effective_progress_event_scope(event_scope, tool_request)
     failure = _failure_payload_from_tool_result(tool_request, tool_event)
     request = task_replan_request_from_failure(
         decision,
@@ -165,7 +167,7 @@ def task_replan_event_payloads_for_tool_result(
                 "plan_id": payload.get("plan_id") or "",
                 "payload": payload,
             },
-            event_scope,
+            effective_scope,
         )
     ]
 
@@ -226,6 +228,19 @@ def _scoped_progress_event(
             "planner_scope": str(payload.get("planner_scope") or event_scope),
         }
     return scoped
+
+
+def _effective_progress_event_scope(
+    event_scope: ProgressEventScope,
+    tool_request: Mapping[str, Any],
+) -> Literal["agent", "group.run", "workflow.run"]:
+    if event_scope != "auto":
+        return event_scope
+    if _text(tool_request.get("workflow_run_id")):
+        return "workflow.run"
+    if _text(tool_request.get("group_run_id") or tool_request.get("run_group_id")):
+        return "group.run"
+    return "agent"
 
 
 def _tool_event_requests_replan(tool_event: Mapping[str, Any]) -> bool:

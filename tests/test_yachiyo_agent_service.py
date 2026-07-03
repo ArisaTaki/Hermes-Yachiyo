@@ -817,6 +817,45 @@ def test_agent_studio_service_projects_scoped_group_runtime_tool_result_events()
     assert events[-1].payload["planner_scope"] == "group.run"
 
 
+def test_agent_studio_service_infers_workflow_runtime_tool_result_scope() -> None:
+    service = AgentStudioService(_FakeStudioExecutionPort())
+    decision = service.plan_task(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+
+    events = service.project_tool_result_events(
+        decision,
+        tool_request=_runtime_progress_tool_request(
+            decision,
+            tool="data.analyze",
+            step_id="analyze-data-file",
+            task_id="task-1",
+            run_id="workflow-run-1",
+            workflow_run_id="workflow-run-1",
+        ),
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "data.analyze",
+            "result": {"ok": False, "error": "tool unavailable"},
+        },
+        run_id="workflow-run-1",
+        task_id="task-1",
+        after_sequence=20,
+    )
+
+    assert [event.event_type for event in events] == [
+        "workflow.run.task.workspace_item.updated",
+        "workflow.run.task.todo.updated",
+        "workflow.run.task.checkpoint.updated",
+        "workflow.run.replan.requested",
+    ]
+    assert [event.sequence for event in events] == [21, 22, 23, 24]
+    assert events[0].workflow_run_id == "workflow-run-1"
+    assert events[-1].payload["planner_event_type"] == "agent.replan.requested"
+    assert events[-1].payload["planner_scope"] == "workflow.run"
+
+
 def test_yachiyo_agent_service_enriches_bare_chat_start_payload_with_planner_events() -> None:
     port = _BareStartTaskRuntimePort()
     service = YachiyoAgentService(port)

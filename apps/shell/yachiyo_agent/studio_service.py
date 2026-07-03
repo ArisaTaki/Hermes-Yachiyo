@@ -196,7 +196,7 @@ class AgentStudioService:
         *,
         tool_request: Mapping[str, Any],
         tool_event: Mapping[str, Any],
-        event_scope: ProgressEventScope = "agent",
+        event_scope: ProgressEventScope = "auto",
         run_id: str = "",
         task_id: str = "",
         after_sequence: int = 0,

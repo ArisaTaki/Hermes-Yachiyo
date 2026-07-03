@@ -99,6 +99,32 @@ def test_task_progress_payloads_can_be_scoped_for_group_and_workflow_runs() -> N
     assert workflow_events[2]["planner_event_type"] == "agent.task.checkpoint.updated"
 
 
+def test_task_progress_payloads_can_infer_group_and_workflow_scope() -> None:
+    tool_event = {
+        "event": "agent.tool.call",
+        "detail": "artifact.write",
+        "result": {"ok": True, "action": "artifact.write"},
+    }
+    group_request = {**_tool_request(), "workflow_run_id": ""}
+    workflow_request = {**_tool_request(), "group_run_id": "", "run_group_id": ""}
+
+    group_events = task_progress_event_payloads_for_tool_result(
+        tool_request=group_request,
+        tool_event=tool_event,
+        event_scope="auto",
+    )
+    workflow_events = task_progress_event_payloads_for_tool_result(
+        tool_request=workflow_request,
+        tool_event=tool_event,
+        event_scope="auto",
+    )
+
+    assert group_events[0]["event"] == "group.run.task.workspace_item.updated"
+    assert group_events[0]["planner_scope"] == "group.run"
+    assert workflow_events[0]["event"] == "workflow.run.task.workspace_item.updated"
+    assert workflow_events[0]["planner_scope"] == "workflow.run"
+
+
 def test_public_task_replan_events_project_failed_tool_result() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",
