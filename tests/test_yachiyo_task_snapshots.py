@@ -328,6 +328,43 @@ def test_agent_task_snapshot_prefers_direct_tool_calls_over_event_fallback() -> 
     assert task.tool_calls[0].input_preview == {"url": "https://example.com"}
 
 
+def test_agent_task_snapshot_keeps_chat_tool_inputs_free_of_trace_context() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-open",
+            "run_id": "run-open",
+            "status": "completed",
+            "timeline": [
+                {
+                    "event_type": "agent.desktop.intent_completed",
+                    "detail": "app.open",
+                    "core_id": "core-open",
+                    "task_id": "task-open",
+                    "payload": {
+                        "decision_id": "decision-open",
+                        "planner_step_id": "open-or-focus-app",
+                        "steps": [
+                            {
+                                "tool": "app.open",
+                                "input_preview": {"app_name": "WeChat"},
+                                "result": {"ok": True},
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+    )
+
+    assert len(task.tool_calls) == 1
+    assert task.tool_calls[0].tool_name == "app.open"
+    assert task.tool_calls[0].core_id == "core-open"
+    assert task.tool_calls[0].task_id == "task-open"
+    assert task.tool_calls[0].decision_id == "decision-open"
+    assert task.tool_calls[0].planner_step_id == "open-or-focus-app"
+    assert task.tool_calls[0].input_preview == {"app_name": "WeChat"}
+
+
 def test_agent_task_snapshot_derives_progress_from_permission_blocked_desktop_intent() -> None:
     task = agent_task_snapshot_from_payload(
         {

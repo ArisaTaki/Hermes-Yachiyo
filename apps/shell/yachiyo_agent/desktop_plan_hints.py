@@ -981,12 +981,12 @@ def media_tool_preview(
     if action == "status":
         return _first_allowed(("media.apple_music_status",), allowed), {}
     if query and is_apple_music:
-        apple_tool = _first_allowed(("media.apple_music_play",), allowed)
-        if apple_tool:
-            return apple_tool, {"query": query}
         generic_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
         if generic_tool:
             return generic_tool, {"app_name": app_name or "Music"}
+        apple_tool = _first_allowed(("media.apple_music_play",), allowed)
+        if apple_tool:
+            return apple_tool, {"query": query}
         return None, {}
     if app_name and not is_apple_music:
         if action == "play":
@@ -997,10 +997,19 @@ def media_tool_preview(
     if action == "play":
         if control_only:
             tool_name = (
-                _first_allowed(("media.apple_music_control", "media.system_control"), allowed)
+                _first_allowed(
+                    (
+                        "media.music_app_control",
+                        "media.apple_music_control",
+                        "media.system_control",
+                    ),
+                    allowed,
+                )
                 if app_name
                 else _first_allowed(("media.system_control", "media.apple_music_control"), allowed)
             )
+            if tool_name == "media.music_app_control":
+                return tool_name, {"app_name": app_name or "Music", "action": "play"}
             return tool_name, {"action": "play"} if tool_name else {}
         generic_tool = _first_allowed(("media.music_app_open_and_play",), allowed)
         if generic_tool:
@@ -1013,7 +1022,12 @@ def media_tool_preview(
     if not app_name:
         tool_name = _first_allowed(("media.system_control", "media.apple_music_control"), allowed)
         return tool_name, {"action": action} if tool_name else {}
-    tool_name = _first_allowed(("media.apple_music_control", "media.system_control"), allowed)
+    tool_name = _first_allowed(
+        ("media.music_app_control", "media.apple_music_control", "media.system_control"),
+        allowed,
+    )
+    if tool_name == "media.music_app_control":
+        return tool_name, {"app_name": app_name, "action": action}
     return tool_name, {"action": action} if tool_name else {}
 
 

@@ -27374,6 +27374,34 @@ def test_planner_desktop_tool_requests_falls_back_to_generic_music_app_for_apple
     ]
 
 
+def test_planner_desktop_tool_requests_prefers_generic_music_app_when_legacy_is_allowed() -> None:
+    requests = planner_desktop_tool_requests(
+        "用 Apple Music 播放 超时空净夜",
+        allowed_tools=[
+            "media.apple_music_play",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Music"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+
+
 def test_planner_desktop_tool_requests_prepares_media_app_when_playback_tool_is_missing() -> None:
     requests = planner_desktop_tool_requests(
         "帮我播放 Apple Music",
@@ -28043,6 +28071,27 @@ def test_planner_desktop_tool_requests_keeps_generic_music_control_system_scoped
             "protocol": "json_fallback",
             "tool": "media.system_control",
             "input": {"action": "pause"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_media_playback",
+        },
+    ]
+
+
+def test_planner_desktop_tool_requests_prefers_app_scoped_music_control_when_available() -> None:
+    requests = planner_desktop_tool_requests(
+        "Apple Music 下一首",
+        allowed_tools=[
+            "media.apple_music_control",
+            "media.music_app_control",
+            "media.system_control",
+        ],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_control",
+            "input": {"app_name": "Music", "action": "next"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_media_playback",
         },

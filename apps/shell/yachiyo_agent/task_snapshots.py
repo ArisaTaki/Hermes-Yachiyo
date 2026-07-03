@@ -67,6 +67,46 @@ _DAILY_DESKTOP_VERIFY_TOOLS = {
     "desktop.ui_elements",
     "desktop.inspect_app",
 }
+_CHAT_TOOL_INPUT_TRACE_KEYS = {
+    "approval_id",
+    "risk_level",
+    "policy_reason",
+    "source",
+    "planning_reason",
+    "source_run_id",
+    "source_runnable_id",
+    "source_runnable_name",
+    "member_agent_id",
+    "member_agent_name",
+    "agent_id",
+    "agent_name",
+    "workflow_id",
+    "workflow_run_id",
+    "workflow_node_id",
+    "workflow_node_label",
+    "group_id",
+    "group_run_id",
+    "run_group_id",
+    "core_id",
+    "workspace_id",
+    "task_id",
+    "decision_id",
+    "plan_id",
+    "tool_plan_id",
+    "intent_kind",
+    "step_id",
+    "planner_step_id",
+    "capability_id",
+    "replan_request_id",
+    "replan_trigger",
+    "replan_signal_ids",
+    "replan_triggers",
+    "requires_observation",
+    "requires_post_action_verification",
+    "runtime_doctrine",
+    "runtime_role",
+    "runtime_stage",
+}
 
 
 def agent_task_snapshot_from_payload(
@@ -115,6 +155,7 @@ def agent_task_snapshot_from_payload(
         events=recent_events,
     )
     tool_calls = _chat_task_tool_calls(tool_calls, recent_events)
+    tool_calls = _chat_sanitized_tool_calls(tool_calls)
     active_task = status in _ACTIVE_TASK_STATUSES
     recovery_needs_user_action = (
         _has_desktop_recovery_user_action(
@@ -228,6 +269,23 @@ def _chat_task_tool_calls(
         visible_events.append(event.model_copy(update={"payload": payload}))
     visible_tool_calls = tool_call_snapshots_from_payloads(None, events=visible_events)
     return visible_tool_calls or tool_calls
+
+
+def _chat_sanitized_tool_calls(
+    tool_calls: list[ToolCallSnapshot],
+) -> list[ToolCallSnapshot]:
+    return [_chat_sanitized_tool_call(tool_call) for tool_call in tool_calls]
+
+
+def _chat_sanitized_tool_call(tool_call: ToolCallSnapshot) -> ToolCallSnapshot:
+    clean_input = {
+        key: value
+        for key, value in tool_call.input_preview.items()
+        if key not in _CHAT_TOOL_INPUT_TRACE_KEYS
+    }
+    if clean_input == tool_call.input_preview:
+        return tool_call
+    return tool_call.model_copy(update={"input_preview": clean_input})
 
 
 def _visible_daily_desktop_completed_steps(raw_steps: Any) -> list[dict[str, Any]]:
