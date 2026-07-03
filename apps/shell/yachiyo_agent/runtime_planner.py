@@ -18792,7 +18792,7 @@ def _plain_dynamic_context_discovered_app_transfer(
     return True
 
 
-def _dynamic_context_transform_target_hint(text: str) -> dict[str, str]:
+def _dynamic_context_transform_target_hint(text: str) -> dict[str, Any]:
     value = _clean_prompt(text)
     if not _dynamic_context_transform_requested(value):
         return {}
@@ -18819,6 +18819,14 @@ def _dynamic_context_transform_target_hint(text: str) -> dict[str, str]:
     if _normalize_artifact_output_location(app_name):
         return {}
     container_action = _dynamic_context_target_container_action_hint(value)
+    app_capability = _app_capability_discovery_hint(value)
+    if app_capability and _looks_like_generic_capability_app_phrase(value, app_name):
+        return {
+            "context_source": source,
+            "target_app_capability_hint": app_capability,
+            "target_action_hint": "app_paste",
+            "target_container_action_hint": container_action or "new_document",
+        }
     return {
         "context_source": source,
         "target_app_hint": app_name,

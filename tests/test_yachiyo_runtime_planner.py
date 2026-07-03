@@ -10122,6 +10122,10 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
         "把剪贴板内容整理成报告写进任意文档应用",
         allowed_tools=allowed,
     )
+    clipboard_text_editor = RuntimePlanner().decision(
+        "把剪贴板内容整理成 markdown，放到一个文本编辑器里",
+        allowed_tools=allowed,
+    )
     opened_markdown_clipboard = RuntimePlanner().decision(
         "打开一个 markdown 应用，把剪贴板内容整理成会议纪要",
         allowed_tools=allowed,
@@ -10218,6 +10222,37 @@ def test_runtime_planner_prefetches_transformed_context_before_app_write() -> No
     )
     assert planner_tool_requests(
         "把剪贴板内容整理成报告写进任意文档应用",
+        allowed,
+    ) == [clipboard_prefetch]
+
+    assert clipboard_text_editor.selected_intent.kind == "report_generation"
+    assert clipboard_text_editor.selected_intent.inputs == {
+        "context_source": "clipboard",
+        "target_app_capability_hint": {"query": "document", "description": "文本"},
+        "target_action_hint": "app_paste",
+        "target_container_action_hint": "new_document",
+    }
+    assert [step.step_id for step in clipboard_text_editor.plan.tool_plan.steps] == (
+        discovered_app_steps
+    )
+    assert _step_by_id(
+        clipboard_text_editor,
+        "discover-report-target-app",
+    ).input_preview == {"query": "document", "limit": 20}
+    assert _step_by_id(
+        clipboard_text_editor,
+        "prepare-report-discovered-target-app",
+    ).input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "document",
+        "target_action": "app_paste",
+        "body_source": "report_artifact",
+        "artifact_path": "report.md",
+        "action": "new_document",
+    }
+    assert planner_tool_requests(
+        "把剪贴板内容整理成 markdown，放到一个文本编辑器里",
         allowed,
     ) == [clipboard_prefetch]
 
