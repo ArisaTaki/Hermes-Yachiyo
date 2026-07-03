@@ -184,7 +184,12 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         title="Open Or Reveal Local Files",
         category="file",
         description="Open safe local paths or reveal them in Finder through desktop file tools.",
-        tools=("desktop.open_path", "desktop.open_path_with_app", "desktop.reveal_path"),
+        tools=(
+            "desktop.open_path",
+            "desktop.open_path_with_app",
+            "app.open_path_with_app",
+            "desktop.reveal_path",
+        ),
         execution_actions=("open_path", "open_path_with_app", "reveal_path"),
         output_kinds=("desktop_state",),
     ),
@@ -434,6 +439,45 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
 _DYNAMIC_CAPABILITY_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
     "artifact.write": ("artifact.",),
     "browser.research": ("browser.",),
+    "desktop.app_discovery": (
+        "screen.",
+        "desktop.list_",
+        "desktop.read_",
+        "desktop.inspect_",
+        "desktop.verify",
+        "desktop.active_",
+        "desktop.running_",
+        "desktop.permission",
+        "desktop.window_",
+        "desktop.ui_",
+    ),
+    "desktop.app_control": (
+        "app.open",
+        "app.focus",
+        "app.status",
+        "app.show",
+        "app.hide",
+        "app.minimize",
+        "app.quit",
+        "desktop.open_app",
+        "desktop.focus_",
+        "desktop.show_",
+        "desktop.hide_",
+        "desktop.minimize_",
+        "desktop.close_",
+        "desktop.quit_",
+    ),
+    "desktop.ui_operation": (
+        "app.open_and_",
+        "app.focus_and_",
+        "desktop.safe_",
+        "desktop.click",
+        "desktop.type",
+        "desktop.hotkey",
+        "desktop.shortcut",
+        "desktop.search_",
+        "desktop.submit_",
+    ),
     "media.playback": ("media.",),
     "system.control": ("system.",),
     "information.capture": ("notes.",),
@@ -443,10 +487,19 @@ _DYNAMIC_CAPABILITY_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
     "skill.runtime": ("skill.",),
     "terminal.execution": ("terminal.",),
     "file.workspace_write": ("workspace.write_",),
-    "file.desktop_access": ("file.",),
+    "file.desktop_access": ("file.", "desktop.open_path", "desktop.reveal_path", "app.open_path"),
     "file.organization": ("file.",),
     "workflow.orchestration": ("workflow.",),
     "group.multi_agent": ("group.",),
+}
+
+_DYNAMIC_CAPABILITY_TOOL_EXCLUDED_PREFIXES: dict[str, tuple[str, ...]] = {
+    "desktop.app_control": (
+        "app.open_and_",
+        "app.open_path",
+        "app.focus_and_",
+        "desktop.open_path",
+    ),
 }
 
 _DYNAMIC_CAPABILITY_TOOL_NAMES: dict[str, tuple[str, ...]] = {
@@ -463,6 +516,7 @@ _DYNAMIC_CAPABILITY_TOOL_NAMES: dict[str, tuple[str, ...]] = {
     "file.desktop_access": (
         "desktop.open_path",
         "desktop.open_path_with_app",
+        "app.open_path_with_app",
         "desktop.reveal_path",
     ),
     "file.organization": (
@@ -516,10 +570,15 @@ def _dynamic_tools_for_capability(capability_id: str, allowed_tools: Iterable[st
         return []
     exact = set(_DYNAMIC_CAPABILITY_TOOL_NAMES.get(capability_id, ()))
     prefixes = _DYNAMIC_CAPABILITY_TOOL_PREFIXES.get(capability_id, ())
+    excluded_prefixes = _DYNAMIC_CAPABILITY_TOOL_EXCLUDED_PREFIXES.get(capability_id, ())
     return [
         tool
         for tool in allowed
-        if tool in exact or any(tool.startswith(prefix) for prefix in prefixes)
+        if tool in exact
+        or (
+            any(tool.startswith(prefix) for prefix in prefixes)
+            and not any(tool.startswith(prefix) for prefix in excluded_prefixes)
+        )
     ]
 
 

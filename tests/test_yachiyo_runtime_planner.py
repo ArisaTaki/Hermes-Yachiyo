@@ -23779,6 +23779,55 @@ def test_capability_registry_discovers_browser_namespace_tools_from_policy() -> 
     assert "browser.print_page" in snapshots[0].available_tools
 
 
+def test_capability_registry_discovers_generic_desktop_namespace_tools() -> None:
+    snapshots = capability_snapshots(
+        allowed_tools=[
+            "desktop.read_frontmost_ui",
+            "desktop.verify_foreground_state",
+            "desktop.focus_window",
+            "app.open_then_appkit",
+            "app.open_and_select_menu",
+            "app.focus_and_drag_ui_element",
+            "desktop.safe_drag",
+            "desktop.click_at",
+        ],
+        capability_ids=[
+            "desktop.app_discovery",
+            "desktop.app_control",
+            "desktop.ui_operation",
+        ],
+    )
+    by_id = {snapshot.capability_id: snapshot for snapshot in snapshots}
+
+    assert by_id["desktop.app_discovery"].available_tools == [
+        "desktop.read_frontmost_ui",
+        "desktop.verify_foreground_state",
+    ]
+    assert by_id["desktop.app_control"].available_tools == [
+        "app.open_then_appkit",
+        "desktop.focus_window",
+    ]
+    assert by_id["desktop.ui_operation"].available_tools == [
+        "app.focus_and_drag_ui_element",
+        "app.open_and_select_menu",
+        "desktop.click_at",
+        "desktop.safe_drag",
+    ]
+    assert "app.open_and_select_menu" not in by_id["desktop.app_control"].available_tools
+    assert "app.focus_and_drag_ui_element" not in by_id["desktop.app_control"].available_tools
+
+
+def test_capability_registry_exposes_app_open_path_with_app_alias() -> None:
+    snapshots = capability_snapshots(
+        allowed_tools=["app.open_path_with_app"],
+        capability_ids=["file.desktop_access"],
+    )
+
+    assert len(snapshots) == 1
+    assert "app.open_path_with_app" in snapshots[0].tools
+    assert snapshots[0].available_tools == ["app.open_path_with_app"]
+
+
 def test_capability_registry_exposes_workflow_and_group_run_tools() -> None:
     snapshots = capability_snapshots(
         allowed_tools=["workflow.run", "group.run"],
