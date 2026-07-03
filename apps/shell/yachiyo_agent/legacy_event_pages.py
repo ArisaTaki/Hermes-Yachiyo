@@ -5,6 +5,8 @@ from __future__ import annotations
 import json
 from typing import Any
 
+from .event_page_windows import FIRST_PAGE_LEGACY_KEY_EVENT_TYPES
+
 
 def run_with_replay_events(run: dict[str, Any], runtime: Any) -> dict[str, Any]:
     run_id = str(run.get("run_id") or "").strip()
@@ -114,7 +116,7 @@ def events_with_first_page_key_event_window(
         if sequence <= next_after_sequence:
             continue
         event_type = str(event.get("event_type") or event.get("event") or "").strip()
-        if event_type in _FIRST_PAGE_KEY_EVENT_TYPES:
+        if event_type in FIRST_PAGE_LEGACY_KEY_EVENT_TYPES:
             key_event_sequence = sequence
             break
     if key_event_sequence <= next_after_sequence:
@@ -138,33 +140,3 @@ def event_sequence(event: dict[str, Any]) -> int:
         return int(event.get("sequence") or 0)
     except (TypeError, ValueError):
         return 0
-
-
-_FIRST_PAGE_KEY_EVENT_TYPES = {
-    "task.completed",
-    "task.failed",
-    "task.cancelled",
-    "run.completed",
-    "run.failed",
-    "run.cancelled",
-    "agent.completed",
-    "agent.failed",
-    "agent.cancelled",
-    "agent.run.completed",
-    "agent.run.failed",
-    "agent.run.cancelled",
-    "agent.tool.approval_required",
-    "agent.desktop.intent_approval_required",
-    "tool.approval_required",
-    "group.run.approval_required",
-    "group.run.completed",
-    "group.run.failed",
-    "group.run.cancelled",
-    "workflow.run.approval_required",
-    "workflow.run.completed",
-    "workflow.run.failed",
-    "workflow.run.cancelled",
-    "workflow.run.tool.approval_required",
-    "workflow.run.desktop.intent_approval_required",
-    "workflow.node.approval_required",
-}

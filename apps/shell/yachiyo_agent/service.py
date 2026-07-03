@@ -26,6 +26,7 @@ from .contracts import (
 )
 from .events import public_run_event_page_from_payload
 from .event_page_windows import (
+    FIRST_PAGE_TASK_KEY_EVENT_TYPES,
     events_with_first_page_key_event_window,
     run_event_page_with_projected_events,
 )
@@ -225,7 +226,7 @@ class YachiyoAgentService:
                     events,
                     _chat_visible_events(list(self.get_task_event_stream(task_id))),
                     page=page,
-                    event_types=_TASK_FIRST_PAGE_KEY_EVENT_TYPES,
+                    event_types=FIRST_PAGE_TASK_KEY_EVENT_TYPES,
                 )
             return run_event_page_with_projected_events(page, events)
 
@@ -253,7 +254,7 @@ class YachiyoAgentService:
                 page_events,
                 events,
                 page=page,
-                event_types=_TASK_FIRST_PAGE_KEY_EVENT_TYPES,
+                event_types=FIRST_PAGE_TASK_KEY_EVENT_TYPES,
             )
         return run_event_page_with_projected_events(page, page_events)
 
@@ -429,23 +430,3 @@ def _chat_visible_events(events: list[PublicRunEvent]) -> list[PublicRunEvent]:
         for event in events
         if event.visibility == "user" and event.sensitivity == "public"
     ]
-
-
-_TASK_FIRST_PAGE_KEY_EVENT_TYPES = {
-    "task.completed",
-    "task.failed",
-    "task.cancelled",
-    "run.completed",
-    "run.failed",
-    "run.cancelled",
-    "agent.completed",
-    "agent.failed",
-    "agent.cancelled",
-    "agent.run.completed",
-    "agent.run.failed",
-    "agent.run.cancelled",
-    "agent.tool.approval_required",
-    "agent.desktop.intent_approval_required",
-    "tool.approval_required",
-    "workflow.run.approval_required",
-}

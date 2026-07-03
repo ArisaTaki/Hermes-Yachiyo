@@ -52,6 +52,10 @@ from apps.shell.agent.runtime.errors import AgentRuntimeError
 from .desk import agent_desk_snapshot_from_payload
 from .events import public_run_event_page_from_payload
 from .event_page_windows import (
+    FIRST_PAGE_GROUP_RUN_KEY_EVENT_TYPES,
+    FIRST_PAGE_RUN_KEY_EVENT_TYPES,
+    FIRST_PAGE_RUN_OR_WORKFLOW_KEY_EVENT_TYPES,
+    FIRST_PAGE_WORKFLOW_RUN_KEY_EVENT_TYPES,
     events_with_first_page_key_event_window,
     run_event_page_with_projected_events,
 )
@@ -920,7 +924,7 @@ class AgentStudioService:
                     events,
                     list(self.get_group_run_event_stream(group_run_id)),
                     page=page,
-                    event_types=_GROUP_RUN_FIRST_PAGE_KEY_EVENT_TYPES,
+                    event_types=FIRST_PAGE_GROUP_RUN_KEY_EVENT_TYPES,
                 )
             return run_event_page_with_projected_events(
                 page,
@@ -949,7 +953,7 @@ class AgentStudioService:
                 page_events,
                 events,
                 page=page,
-                event_types=_GROUP_RUN_FIRST_PAGE_KEY_EVENT_TYPES,
+                event_types=FIRST_PAGE_GROUP_RUN_KEY_EVENT_TYPES,
             )
         return run_event_page_with_projected_events(page, page_events)
 
@@ -1108,7 +1112,7 @@ class AgentStudioService:
                 page_events,
                 filtered_events,
                 page=page,
-                event_types=_RUN_OR_WORKFLOW_FIRST_PAGE_KEY_EVENT_TYPES,
+                event_types=FIRST_PAGE_RUN_OR_WORKFLOW_KEY_EVENT_TYPES,
             )
         return run_event_page_with_projected_events(page, page_events)
 
@@ -2044,45 +2048,12 @@ _GROUP_RUN_LIFECYCLE_EVENT_TYPES = {
     "group.run.failed",
     "group.run.cancelled",
 }
-_GROUP_RUN_FIRST_PAGE_KEY_EVENT_TYPES = {
-    "group.run.approval_required",
-    "group.run.completed",
-    "group.run.failed",
-    "group.run.cancelled",
-}
-
 _WORKFLOW_RUN_LIFECYCLE_EVENT_TYPES = {
     "workflow.run.started",
     "workflow.run.completed",
     "workflow.run.failed",
     "workflow.run.cancelled",
 }
-_RUN_FIRST_PAGE_KEY_EVENT_TYPES = {
-    "run.completed",
-    "run.failed",
-    "run.cancelled",
-    "agent.completed",
-    "agent.failed",
-    "agent.cancelled",
-    "agent.run.completed",
-    "agent.run.failed",
-    "agent.run.cancelled",
-    "agent.tool.approval_required",
-    "agent.desktop.intent_approval_required",
-    "tool.approval_required",
-}
-_WORKFLOW_RUN_FIRST_PAGE_KEY_EVENT_TYPES = {
-    "workflow.run.approval_required",
-    "workflow.run.completed",
-    "workflow.run.failed",
-    "workflow.run.cancelled",
-    "workflow.run.tool.approval_required",
-    "workflow.run.desktop.intent_approval_required",
-    "workflow.node.approval_required",
-}
-_RUN_OR_WORKFLOW_FIRST_PAGE_KEY_EVENT_TYPES = (
-    _RUN_FIRST_PAGE_KEY_EVENT_TYPES | _WORKFLOW_RUN_FIRST_PAGE_KEY_EVENT_TYPES
-)
 
 
 def _group_run_events_from_port_payload(
@@ -2149,8 +2120,8 @@ def _run_first_page_key_event_types(
 ) -> set[str]:
     projected_payload = _event_projection_payload(payload, raw_events)
     if _is_workflow_event_payload(projected_payload, raw_events):
-        return _WORKFLOW_RUN_FIRST_PAGE_KEY_EVENT_TYPES
-    return _RUN_FIRST_PAGE_KEY_EVENT_TYPES
+        return FIRST_PAGE_WORKFLOW_RUN_KEY_EVENT_TYPES
+    return FIRST_PAGE_RUN_KEY_EVENT_TYPES
 
 
 def _drop_unreported_lifecycle_events(

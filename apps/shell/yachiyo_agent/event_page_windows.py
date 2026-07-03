@@ -5,6 +5,57 @@ from __future__ import annotations
 from .contracts import PublicRunEvent, RunEventPageSnapshot
 
 
+FIRST_PAGE_GROUP_RUN_KEY_EVENT_TYPES = {
+    "group.run.approval_required",
+    "group.run.completed",
+    "group.run.failed",
+    "group.run.cancelled",
+}
+
+FIRST_PAGE_RUN_KEY_EVENT_TYPES = {
+    "run.completed",
+    "run.failed",
+    "run.cancelled",
+    "agent.completed",
+    "agent.failed",
+    "agent.cancelled",
+    "agent.run.completed",
+    "agent.run.failed",
+    "agent.run.cancelled",
+    "agent.tool.approval_required",
+    "agent.desktop.intent_approval_required",
+    "tool.approval_required",
+}
+
+FIRST_PAGE_WORKFLOW_RUN_KEY_EVENT_TYPES = {
+    "workflow.run.approval_required",
+    "workflow.run.completed",
+    "workflow.run.failed",
+    "workflow.run.cancelled",
+    "workflow.run.tool.approval_required",
+    "workflow.run.desktop.intent_approval_required",
+    "workflow.node.approval_required",
+}
+
+FIRST_PAGE_TASK_KEY_EVENT_TYPES = {
+    "task.completed",
+    "task.failed",
+    "task.cancelled",
+    *FIRST_PAGE_RUN_KEY_EVENT_TYPES,
+    "workflow.run.approval_required",
+}
+
+FIRST_PAGE_RUN_OR_WORKFLOW_KEY_EVENT_TYPES = (
+    FIRST_PAGE_RUN_KEY_EVENT_TYPES | FIRST_PAGE_WORKFLOW_RUN_KEY_EVENT_TYPES
+)
+
+FIRST_PAGE_LEGACY_KEY_EVENT_TYPES = (
+    FIRST_PAGE_TASK_KEY_EVENT_TYPES
+    | FIRST_PAGE_GROUP_RUN_KEY_EVENT_TYPES
+    | FIRST_PAGE_WORKFLOW_RUN_KEY_EVENT_TYPES
+)
+
+
 def run_event_page_with_projected_events(
     page: RunEventPageSnapshot,
     events: list[PublicRunEvent],
