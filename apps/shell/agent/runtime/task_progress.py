@@ -211,7 +211,7 @@ def _append_replan_recovery_update_event(
         fallback_tools.append(selected_tool)
     if fallback_tools:
         payload["fallback_tools"] = fallback_tools
-    for key in ("action_target", "observation_evidence"):
+    for key in ("action_target", "observation_evidence", "observation_retry"):
         value = tool_request.get(key)
         if isinstance(value, Mapping) and value:
             payload[key] = dict(value)

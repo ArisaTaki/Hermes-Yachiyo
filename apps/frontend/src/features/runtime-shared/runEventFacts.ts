@@ -1050,7 +1050,7 @@ function toolInputResolutionPreview(
 
 function toolCallMetadata(payload: Record<string, unknown>): Record<string, unknown> {
   const metadata = { ...(objectPreview(payload.metadata) || {}) };
-  ['followup_target', 'action_target', 'observation_evidence'].forEach((key) => {
+  ['followup_target', 'action_target', 'observation_evidence', 'observation_retry'].forEach((key) => {
     const value = objectPreview(payload[key]);
     if (value) metadata[key] = value;
   });

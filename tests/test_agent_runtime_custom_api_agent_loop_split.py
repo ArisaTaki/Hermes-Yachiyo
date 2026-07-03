@@ -26449,6 +26449,11 @@ def test_runtime_tool_executor_preserves_dov_replan_trace_fields() -> None:
                 "observed_center": {"x": 180, "y": 90},
                 "source_tool": "desktop.ui_elements",
             },
+            "observation_retry": {
+                "from_tool": "desktop.ui_elements",
+                "reason": "target_not_found",
+                "target": "Open result",
+            },
         },
         ["desktop.ui_elements"],
         broker,
@@ -26467,6 +26472,11 @@ def test_runtime_tool_executor_preserves_dov_replan_trace_fields() -> None:
     assert tool_call["replan_signal_ids"] == ["replan-verify"]
     assert tool_call["action_target"]["label"] == "Open result"
     assert tool_call["observation_evidence"]["observed_center"] == {"x": 180, "y": 90}
+    assert tool_call["observation_retry"] == {
+        "from_tool": "desktop.ui_elements",
+        "reason": "target_not_found",
+        "target": "Open result",
+    }
 
     completed = next(
         event for event in run_events if event["event_type"] == "tool.completed"
@@ -26475,6 +26485,7 @@ def test_runtime_tool_executor_preserves_dov_replan_trace_fields() -> None:
     assert completed["payload"]["replan_triggers"] == ["verification_failed"]
     assert completed["payload"]["action_target"]["app_name"] == "Music"
     assert completed["payload"]["observation_evidence"]["strategy"] == "observed_center_fallback"
+    assert completed["payload"]["observation_retry"]["reason"] == "target_not_found"
     agent_tool_call = next(
         event for event in run_events if event["event_type"] == "agent.tool.call"
     )
@@ -26482,6 +26493,7 @@ def test_runtime_tool_executor_preserves_dov_replan_trace_fields() -> None:
     assert agent_tool_call["payload"]["replan_signal_ids"] == ["replan-verify"]
     assert agent_tool_call["payload"]["action_target"]["action"] == "click"
     assert agent_tool_call["payload"]["observation_evidence"]["source_tool"] == "desktop.ui_elements"
+    assert agent_tool_call["payload"]["observation_retry"]["from_tool"] == "desktop.ui_elements"
     snapshots = tool_call_snapshots_from_events(
         [
             PublicRunEvent(
@@ -26506,6 +26518,11 @@ def test_runtime_tool_executor_preserves_dov_replan_trace_fields() -> None:
         "strategy": "observed_center_fallback",
         "observed_center": {"x": 180, "y": 90},
         "source_tool": "desktop.ui_elements",
+    }
+    assert completed_snapshot.metadata["observation_retry"] == {
+        "from_tool": "desktop.ui_elements",
+        "reason": "target_not_found",
+        "target": "Open result",
     }
 
 

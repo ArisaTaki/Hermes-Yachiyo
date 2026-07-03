@@ -220,6 +220,10 @@ def _execution_request_snapshot(
         ],
         replan_triggers=replan_metadata["replan_triggers"],
         replan_signal_ids=replan_metadata["replan_signal_ids"],
+        followup_target=_mapping(request.get("followup_target")),
+        action_target=_mapping(request.get("action_target")),
+        observation_evidence=_mapping(request.get("observation_evidence")),
+        observation_retry=_mapping(request.get("observation_retry")),
         source=str(request.get("source") or "runtime_planner"),
     )
 
@@ -350,6 +354,10 @@ def _mapping_list(value: Any) -> list[Mapping[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, Mapping)]
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _execution_envelope_runtime_metadata(

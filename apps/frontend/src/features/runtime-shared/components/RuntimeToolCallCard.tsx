@@ -96,6 +96,7 @@ export function RuntimeToolCallCard({
   const observedMetadata = runtimeToolObservedMetadata(toolCall);
   const observedActionTarget = observedActionTargetSummary(observedMetadata.actionTarget);
   const observedActionEvidence = observedActionEvidenceSummary(observedMetadata.observationEvidence);
+  const observedActionRetry = observedActionRetrySummary(observedMetadata.observationRetry);
   const observedCenter = observedActionCenterSummary(observedMetadata.observationEvidence);
   const metadata = toolCallMetadataItems(toolCall);
   return (
@@ -106,6 +107,7 @@ export function RuntimeToolCallCard({
       data-group-id={toolCall.group_id || ''}
       data-group-run-id={toolCall.group_run_id || ''}
       data-observed-action-evidence={observedActionEvidence}
+      data-observed-action-retry={observedActionRetry}
       data-observed-action-target={observedActionTarget}
       data-observed-center={observedCenter}
       data-risk-level={toolCall.risk_level || ''}
@@ -265,17 +267,20 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
     { label: 'signals', value: runtimeToolTraceStringList(toolCall, 'replan_signal_ids').join(', ') },
     { label: 'action', value: observedActionTargetSummary(observedMetadata.actionTarget) },
     { label: 'observed', value: observedActionEvidenceSummary(observedMetadata.observationEvidence) },
+    { label: 'retry', value: observedActionRetrySummary(observedMetadata.observationRetry) },
   ].filter((item) => item.value);
 }
 
 function runtimeToolObservedMetadata(toolCall: RuntimeToolCallCardSnapshot): {
   actionTarget: Record<string, unknown>;
   observationEvidence: Record<string, unknown>;
+  observationRetry: Record<string, unknown>;
 } {
   const metadata = approvalPreviewRecord(toolCall.metadata);
   return {
     actionTarget: approvalPreviewRecord(metadata.action_target),
     observationEvidence: approvalPreviewRecord(metadata.observation_evidence),
+    observationRetry: approvalPreviewRecord(metadata.observation_retry),
   };
 }
 
@@ -360,6 +365,14 @@ function observedActionEvidenceSummary(value: Record<string, unknown>): string {
   const reason = stringValue(value.reason);
   const center = observedActionCenterSummary(value);
   return [sourceTool || source, strategy, reason, center ? `center ${center}` : ''].filter(Boolean).join(' · ');
+}
+
+function observedActionRetrySummary(value: Record<string, unknown>): string {
+  if (!Object.keys(value).length) return '';
+  const sourceTool = stringValue(value.from_tool) || stringValue(value.source_tool);
+  const reason = stringValue(value.reason);
+  const target = stringValue(value.target) || stringValue(value.label) || stringValue(value.target_label);
+  return [sourceTool, reason, target ? `target ${target}` : ''].filter(Boolean).join(' · ');
 }
 
 function observedActionCenterSummary(value: Record<string, unknown>): string {

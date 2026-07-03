@@ -729,8 +729,10 @@ function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnap
   );
   const actionTarget = objectRecord(recovery.action_target);
   const observationEvidence = objectRecord(recovery.observation_evidence);
+  const observationRetry = objectRecord(recovery.observation_retry);
   const actionTargetPreview = replanRecoveryActionTargetPreview(actionTarget);
   const observationEvidencePreview = replanRecoveryObservationEvidencePreview(observationEvidence);
+  const observationRetryPreview = replanRecoveryObservationRetryPreview(observationRetry);
   const observedCenterPreview = replanRecoveryObservedCenterPreview(observationEvidence);
   const title = [
     recovery.failure_detail,
@@ -739,6 +741,7 @@ function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnap
     recovery.risk_level ? `risk: ${recovery.risk_level}` : '',
     actionTargetPreview ? `target: ${actionTargetPreview}` : '',
     observationEvidencePreview ? `evidence: ${observationEvidencePreview}` : '',
+    observationRetryPreview ? `retry: ${observationRetryPreview}` : '',
   ].filter(Boolean).join(' · ');
   return (
     <span
@@ -747,6 +750,7 @@ function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnap
       data-replan-recovery-action-target={actionTargetPreview}
       data-replan-recovery-id={recovery.request_id}
       data-replan-recovery-observation-evidence={observationEvidencePreview}
+      data-replan-recovery-observation-retry={observationRetryPreview}
       data-replan-recovery-observed-center={observedCenterPreview}
       data-replan-recovery-permission-target={recovery.permission_target || ''}
       data-replan-recovery-risk={recovery.risk_level || ''}
@@ -756,6 +760,7 @@ function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnap
     >
       recovery · {label || recovery.trigger} · {recovery.status || 'requested'}
       {actionTargetPreview ? ` · target: ${actionTargetPreview}` : ''}
+      {observationRetryPreview ? ` · retry: ${observationRetryPreview}` : ''}
     </span>
   );
 }
@@ -787,6 +792,16 @@ function replanRecoveryObservationEvidencePreview(evidence: Record<string, unkno
     center ? `center ${center}` : '',
   ].filter(Boolean);
   return parts.length ? truncatePlannerPreview(parts.join(' · ')) : plannerValuePreview(evidence);
+}
+
+function replanRecoveryObservationRetryPreview(retry: Record<string, unknown>): string {
+  if (!Object.keys(retry).length) return '';
+  const parts = [
+    stringValue(retry.from_tool) || stringValue(retry.source_tool),
+    stringValue(retry.reason),
+    stringValue(retry.target) || stringValue(retry.label) || stringValue(retry.target_label),
+  ].filter(Boolean);
+  return parts.length ? truncatePlannerPreview(parts.join(' · ')) : plannerValuePreview(retry);
 }
 
 function replanRecoveryObservedCenterPreview(evidence: Record<string, unknown>): string {
@@ -991,6 +1006,10 @@ function ExecutionRequestRow({
   const fallbackTools = uniqueStrings(request.fallback_tools || []);
   const replanTriggers = uniqueStrings(request.replan_triggers || []);
   const inputPreview = plannerStepInputPreview(request.input);
+  const followupTargetPreview = plannerValuePreview(objectRecord(request.followup_target));
+  const actionTargetPreview = replanRecoveryActionTargetPreview(objectRecord(request.action_target));
+  const observationEvidencePreview = replanRecoveryObservationEvidencePreview(objectRecord(request.observation_evidence));
+  const observationRetryPreview = replanRecoveryObservationRetryPreview(objectRecord(request.observation_retry));
   return (
     <div
       className="studio-planner-step"
@@ -1001,7 +1020,11 @@ function ExecutionRequestRow({
       data-execution-request-id={request.request_id}
       data-fallback-tools={fallbackTools.join(',')}
       data-input-preview={inputPreview}
+      data-observation-retry={observationRetryPreview}
       data-planner-step-id={request.step_id || ''}
+      data-request-action-target={actionTargetPreview}
+      data-request-followup-target={followupTargetPreview}
+      data-request-observation-evidence={observationEvidencePreview}
       data-replan-triggers={replanTriggers.join(',')}
       data-runtime-role={request.runtime_role || ''}
       data-runtime-stage={request.runtime_stage || ''}
@@ -1021,6 +1044,10 @@ function ExecutionRequestRow({
         {dependsOn.length ? <span>depends on: {dependsOn.join(', ')}</span> : null}
         {fallbackTools.length ? <span>fallbacks: {fallbackTools.join(', ')}</span> : null}
         {replanTriggers.length ? <span>replan: {replanTriggers.join(', ')}</span> : null}
+        {followupTargetPreview ? <span>follow-up: {followupTargetPreview}</span> : null}
+        {actionTargetPreview ? <span>target: {actionTargetPreview}</span> : null}
+        {observationEvidencePreview ? <span>observed: {observationEvidencePreview}</span> : null}
+        {observationRetryPreview ? <span>retry observe: {observationRetryPreview}</span> : null}
       </div>
       <small>
         {request.status || 'planned'}
@@ -1340,6 +1367,10 @@ function runtimeExecutionRequestSnapshot(value: unknown): RuntimeExecutionReques
     requires_post_action_verification: booleanValue(record.requires_post_action_verification, false) || false,
     replan_triggers: uniqueStrings(Array.isArray(record.replan_triggers) ? record.replan_triggers : []),
     replan_signal_ids: uniqueStrings(Array.isArray(record.replan_signal_ids) ? record.replan_signal_ids : []),
+    followup_target: objectRecord(record.followup_target),
+    action_target: objectRecord(record.action_target),
+    observation_evidence: objectRecord(record.observation_evidence),
+    observation_retry: objectRecord(record.observation_retry),
     source: stringValue(record.source) || 'runtime_planner',
   };
 }

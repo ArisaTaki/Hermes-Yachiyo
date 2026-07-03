@@ -306,6 +306,7 @@ export type ReplanRecoverySnapshot = {
   risk_level?: string;
   action_target?: Record<string, unknown>;
   observation_evidence?: Record<string, unknown>;
+  observation_retry?: Record<string, unknown>;
   tool_call_id?: string | null;
   tool_status?: string | null;
   todo_status?: string | null;
@@ -359,6 +360,10 @@ export type RuntimeExecutionRequestSnapshot = {
   requires_post_action_verification?: boolean;
   replan_triggers?: string[];
   replan_signal_ids?: string[];
+  followup_target?: Record<string, unknown>;
+  action_target?: Record<string, unknown>;
+  observation_evidence?: Record<string, unknown>;
+  observation_retry?: Record<string, unknown>;
   source?: string;
 };
 

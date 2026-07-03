@@ -329,6 +329,13 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         requires_observation=True,
         replan_triggers=["verification_failed"],
         replan_signal_ids=["replan-1"],
+        followup_target={"kind": "desktop_observed_action", "target_action": "click"},
+        action_target={"action": "click", "label": "Open result"},
+        observation_evidence={"source_tool": "desktop.ui_elements"},
+        observation_retry={
+            "from_tool": "desktop.ui_elements",
+            "reason": "target_not_found",
+        },
     )
     envelope = RuntimeExecutionEnvelopeSnapshot(
         envelope_id="execution-envelope-runtime-plan-1",
@@ -365,6 +372,21 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     assert payload["requests"][0]["input"] == {"query": "PixelForge", "limit": 20}
     assert payload["requests"][0]["runtime_stage"] == "discover"
     assert payload["requests"][0]["replan_triggers"] == ["verification_failed"]
+    assert payload["requests"][0]["followup_target"] == {
+        "kind": "desktop_observed_action",
+        "target_action": "click",
+    }
+    assert payload["requests"][0]["action_target"] == {
+        "action": "click",
+        "label": "Open result",
+    }
+    assert payload["requests"][0]["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+    }
+    assert payload["requests"][0]["observation_retry"] == {
+        "from_tool": "desktop.ui_elements",
+        "reason": "target_not_found",
+    }
     assert payload["runtime_stage_counts"] == {"discover": 1}
     assert payload["replan_signal_count"] == 1
 
@@ -568,6 +590,10 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
             "strategy": "observed_center_fallback",
             "observed_center": {"x": 512, "y": 220},
         },
+        observation_retry={
+            "from_tool": "desktop.ui_elements",
+            "reason": "target_not_found",
+        },
         tool_call_id="tool-call-1",
         tool_status="completed",
         todo_status="completed",
@@ -604,6 +630,7 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         "risk_level",
         "action_target",
         "observation_evidence",
+        "observation_retry",
         "tool_call_id",
         "tool_status",
         "todo_status",
@@ -627,6 +654,10 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
     assert payload["observation_evidence"] == {
         "strategy": "observed_center_fallback",
         "observed_center": {"x": 512, "y": 220},
+    }
+    assert payload["observation_retry"] == {
+        "from_tool": "desktop.ui_elements",
+        "reason": "target_not_found",
     }
     assert payload["checkpoint_status"] == "completed"
 

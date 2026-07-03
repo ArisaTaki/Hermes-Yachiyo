@@ -390,6 +390,7 @@ class ReplanRecoverySnapshot(_PublicSnapshot):
     risk_level: str = ""
     action_target: dict[str, Any] = Field(default_factory=dict)
     observation_evidence: dict[str, Any] = Field(default_factory=dict)
+    observation_retry: dict[str, Any] = Field(default_factory=dict)
     tool_call_id: str | None = None
     tool_status: str | None = None
     todo_status: str | None = None
@@ -443,6 +444,10 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     requires_post_action_verification: bool = False
     replan_triggers: list[str] = Field(default_factory=list)
     replan_signal_ids: list[str] = Field(default_factory=list)
+    followup_target: dict[str, Any] = Field(default_factory=dict)
+    action_target: dict[str, Any] = Field(default_factory=dict)
+    observation_evidence: dict[str, Any] = Field(default_factory=dict)
+    observation_retry: dict[str, Any] = Field(default_factory=dict)
     source: str = "runtime_planner"
 
 

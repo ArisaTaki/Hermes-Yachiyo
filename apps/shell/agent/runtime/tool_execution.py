@@ -54,6 +54,7 @@ _TOOL_REQUEST_TRACE_MAPPING_KEYS = (
     "followup_target",
     "action_target",
     "observation_evidence",
+    "observation_retry",
 )
 
 _INPUT_PREVIEW_TRACE_KEYS = (

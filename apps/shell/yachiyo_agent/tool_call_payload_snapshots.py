@@ -32,6 +32,7 @@ _TOOL_METADATA_KEYS = (
     "followup_target",
     "action_target",
     "observation_evidence",
+    "observation_retry",
 )
 
 

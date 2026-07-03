@@ -39,6 +39,7 @@ class _RecoveryRecord:
     risk_level: str = ""
     action_target: dict[str, Any] = field(default_factory=dict)
     observation_evidence: dict[str, Any] = field(default_factory=dict)
+    observation_retry: dict[str, Any] = field(default_factory=dict)
     tool_call_id: str | None = None
     tool_status: str | None = None
     todo_status: str | None = None
@@ -136,6 +137,7 @@ def replan_recovery_snapshots_from_events(
             risk_level=record.risk_level,
             action_target=dict(record.action_target),
             observation_evidence=dict(record.observation_evidence),
+            observation_retry=dict(record.observation_retry),
             tool_call_id=record.tool_call_id or None,
             tool_status=record.tool_status or None,
             todo_status=record.todo_status or None,
@@ -500,6 +502,9 @@ def _merge_recovery_snapshots(
     observation_evidence = dict(current.observation_evidence or {})
     if incoming.observation_evidence:
         observation_evidence.update(incoming.observation_evidence)
+    observation_retry = dict(current.observation_retry or {})
+    if incoming.observation_retry:
+        observation_retry.update(incoming.observation_retry)
     event_ids = list(current.recovery_event_ids)
     _extend_unique(event_ids, incoming.recovery_event_ids)
     return current.model_copy(
@@ -525,6 +530,7 @@ def _merge_recovery_snapshots(
             "risk_level": current.risk_level or incoming.risk_level,
             "action_target": action_target,
             "observation_evidence": observation_evidence,
+            "observation_retry": observation_retry,
             "tool_call_id": current.tool_call_id or incoming.tool_call_id,
             "tool_status": current.tool_status or incoming.tool_status,
             "todo_status": current.todo_status or incoming.todo_status,
@@ -683,15 +689,20 @@ def _apply_observed_action_metadata(
 ) -> None:
     action_target = _observed_mapping(payload, "action_target")
     observation_evidence = _observed_mapping(payload, "observation_evidence")
+    observation_retry = _observed_mapping(payload, "observation_retry")
     if call is not None:
         if not action_target:
             action_target = _mapping(call.metadata.get("action_target"))
         if not observation_evidence:
             observation_evidence = _mapping(call.metadata.get("observation_evidence"))
+        if not observation_retry:
+            observation_retry = _mapping(call.metadata.get("observation_retry"))
     if action_target:
         record.action_target.update(action_target)
     if observation_evidence:
         record.observation_evidence.update(observation_evidence)
+    if observation_retry:
+        record.observation_retry.update(observation_retry)
 
 
 def _observed_mapping(payload: Mapping[str, Any], key: str) -> dict[str, Any]:
