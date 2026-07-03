@@ -499,7 +499,7 @@ class TaskIntentRouter:
             text,
             foreground_compose_text,
         )
-        if model_generated_content:
+        if model_generated_content and not str(model_generated_content.get("title") or "").strip():
             foreground_compose_text = ""
         if control_presence_inspection:
             foreground_compose_text = ""
@@ -3167,16 +3167,25 @@ class RuntimePlanner:
             )
         ):
             app_search = {}
+        generated_content_hint = (
+            intent.inputs.get("model_generated_content_hint")
+            if isinstance(intent.inputs.get("model_generated_content_hint"), Mapping)
+            else {}
+        )
+        generated_content_title = str(
+            (generated_content_hint or {}).get("title") or ""
+        ).strip()
         foreground_compose_text = (
             ""
             if (
                 type_target
                 or defer_ambiguous_type_target
                 or control_presence_inspection
-                or isinstance(intent.inputs.get("model_generated_content_hint"), Mapping)
+                or (generated_content_hint and not generated_content_title)
             )
             else str(
                 intent.inputs.get("foreground_compose_text_hint")
+                or generated_content_title
                 or _foreground_compose_text_hint(intent.user_goal)
                 or ""
             ).strip()
@@ -3191,7 +3200,7 @@ class RuntimePlanner:
                 or defer_ambiguous_type_target
                 or control_presence_inspection
                 or str((safe_shortcut or {}).get("action") or "").strip() == "new_message"
-                or isinstance(intent.inputs.get("model_generated_content_hint"), Mapping)
+                or (generated_content_hint and not generated_content_title)
             )
             else (
                 foreground_compose_text
@@ -17532,6 +17541,14 @@ def _model_generated_foreground_content_hint(
         return {}
     if re.search(r"(?:粘贴|paste)", value, flags=re.IGNORECASE):
         return {}
+    title = _generic_create_title_text_hint(value)
+    title_scoped_brief = _title_scoped_model_generated_content_brief(value)
+    if title and title_scoped_brief:
+        return {
+            "body_source": "model_generated_content",
+            "brief": title_scoped_brief,
+            "title": title,
+        }
     if re.search(
         r"(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)|\b(?:titled|called|named)\b",
         value,
@@ -17551,6 +17568,31 @@ def _model_generated_foreground_content_hint(
         "body_source": "model_generated_content",
         "brief": brief,
     }
+
+
+def _title_scoped_model_generated_content_brief(text: str) -> str:
+    value = _clean_prompt(text)
+    if not value:
+        return ""
+    patterns = (
+        r"(?:内容|正文)\s*(?:写成|写下|写入|写|撰写|生成|创建|制作|列出|总结|整理|摘要|输出|包含|包括)\s*"
+        r"(?P<brief>[^。！？!?，,]{1,100})",
+        r"\b(?:content|body)\s*(?:to|should)?\s*"
+        r"(?:write|generate|create|make|list|summari[sz]e|outline|include)\s+"
+        r"(?P<brief_en>[^.!?]{1,120})",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        brief = _clean_foreground_compose_text(
+            match.groupdict().get("brief")
+            or match.groupdict().get("brief_en")
+            or ""
+        )
+        if brief:
+            return brief
+    return ""
 
 
 def _model_generated_foreground_content_brief(text: str) -> str:

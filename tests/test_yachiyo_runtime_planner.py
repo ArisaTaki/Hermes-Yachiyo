@@ -2992,6 +2992,41 @@ def test_runtime_planner_routes_generated_desktop_app_content_to_model_followup(
         "container_action": "new_document",
     }
 
+    title_prompt = "帮我在 Notion 里新建页面，标题是本周计划，内容写三条待办"
+    title_allowed_tools = [
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    title_decision = RuntimePlanner().decision(
+        title_prompt,
+        allowed_tools=title_allowed_tools,
+    )
+    title_requests = planner_tool_requests(title_prompt, title_allowed_tools)
+
+    assert title_decision.selected_intent.inputs == {
+        "app_name_hint": "Notion",
+        "operation_hint": "safe_shortcut",
+        "safe_shortcut_hint": {"action": "new_document"},
+        "foreground_compose_text_hint": "本周计划",
+        "model_generated_content_hint": {
+            "body_source": "model_generated_content",
+            "brief": "三条待办",
+            "title": "本周计划",
+        },
+    }
+    assert [request["tool"] for request in title_requests] == [
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert title_requests[0]["input"] == {
+        "app_name": "Notion",
+        "action": "new_document",
+    }
+    assert title_requests[1]["input"] == {"text": "本周计划"}
+    assert title_requests[2]["continue_to_model"] is True
+
     generic_prompt = "用任意可用的表格应用创建预算表并填入三行示例数据"
     generic_allowed_tools = [
         "desktop.list_apps",
