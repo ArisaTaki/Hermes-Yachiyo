@@ -32231,15 +32231,33 @@ def test_runtime_execution_envelope_can_project_full_data_analysis_plan() -> Non
     assert default_envelope is not None
     assert full_envelope is not None
     assert [request.tool_name for request in default_envelope.requests] == ["workspace.read"]
+    assert default_envelope.runtime_stage_counts == {"discover": 1}
+    assert default_envelope.requests[0].runtime_stage == "discover"
+    assert default_envelope.requests[0].runtime_role == "inspect_workspace"
     assert [request.tool_name for request in full_envelope.requests] == [
         "workspace.read",
         "terminal.run",
         "artifact.write",
     ]
+    assert full_envelope.runtime_stage_counts == {
+        "discover": 1,
+        "operate": 1,
+        "produce": 1,
+    }
     assert [request.step_id for request in full_envelope.requests] == [
         "inspect-data-source",
         "run-analysis",
         "write-analysis-artifact",
+    ]
+    assert [request.runtime_stage for request in full_envelope.requests] == [
+        "discover",
+        "operate",
+        "produce",
+    ]
+    assert [request.runtime_role for request in full_envelope.requests] == [
+        "inspect_workspace",
+        "execute",
+        "artifact",
     ]
     assert full_envelope.requests[1].approval_required is True
     assert full_envelope.requests[1].depends_on == ["inspect-data-source"]
@@ -32354,6 +32372,10 @@ def test_runtime_execution_requests_preserve_replan_fallback_tools() -> None:
 
     assert envelope is not None
     assert envelope.requests[0].tool_name == "data.analyze"
+    assert envelope.runtime_stage_counts == {"operate": 1}
+    assert envelope.requests[0].runtime_stage == "operate"
+    assert envelope.requests[0].runtime_role == "analyze_data"
+    assert envelope.requests[0].requires_post_action_verification is True
     assert envelope.requests[0].fallback_tools == ["terminal.run"]
     projected_requests = runtime_execution_requests_from_envelope_payload(
         envelope.model_dump(mode="json"),
@@ -32528,6 +32550,11 @@ def test_agent_studio_service_projects_full_data_analysis_execution_plan() -> No
         "terminal.run",
         "artifact.write",
     ]
+    assert envelope.runtime_stage_counts == {
+        "discover": 1,
+        "operate": 1,
+        "produce": 1,
+    }
     assert envelope.requests[1].approval_required is True
     assert envelope.requests[1].task_todo["step_id"] == "run-analysis"
     assert envelope.requests[1].task_checkpoints[0]["after_step_id"] == "run-analysis"

@@ -13341,9 +13341,28 @@ def _runtime_dov_step_applies(step: ToolPlanStepSnapshot) -> bool:
     capability_id = str(step.capability_id or "").strip()
     step_id = str(step.step_id or "").strip()
     return bool(
-        tool_name.startswith(("app.", "desktop."))
+        tool_name.startswith(
+            (
+                "app.",
+                "desktop.",
+                "workspace.",
+                "data.",
+                "artifact.",
+                "terminal.",
+                "browser.",
+            )
+        )
         or tool_name == "screen.capture"
-        or capability_id.startswith("desktop.")
+        or capability_id.startswith(
+            (
+                "desktop.",
+                "file.",
+                "data.",
+                "artifact.",
+                "terminal.",
+                "browser.",
+            )
+        )
         or _runtime_dov_code_step_applies(step_id)
     )
 
@@ -13367,9 +13386,15 @@ def _runtime_dov_code_step_applies(step_id: str) -> bool:
 def _runtime_dov_stage(step: ToolPlanStepSnapshot) -> str:
     step_id = str(step.step_id or "").strip()
     action = str(step.action or "").strip()
+    tool_name = str(step.tool_name or "").strip()
     if "verify" in step_id or action == "verify":
         return "verify"
-    if step_id == "write-code-report":
+    if (
+        step_id == "write-code-report"
+        or action == "write_artifact"
+        or tool_name == "artifact.write"
+        or step_id.startswith("write-")
+    ):
         return "produce"
     if step_id == "run-terminal-command":
         return "operate"
@@ -13400,8 +13425,9 @@ def _runtime_dov_stage(step: ToolPlanStepSnapshot) -> str:
 def _runtime_dov_role(step: ToolPlanStepSnapshot, stage: str) -> str:
     step_id = str(step.step_id or "").strip()
     action = str(step.action or "").strip()
+    tool_name = str(step.tool_name or "").strip()
     if stage == "produce":
-        if step_id == "write-code-report":
+        if step_id == "write-code-report" or tool_name == "artifact.write":
             return "artifact"
         return "produce_output"
     if stage == "discover":
@@ -13411,6 +13437,10 @@ def _runtime_dov_role(step: ToolPlanStepSnapshot, stage: str) -> str:
             "inspect-code-area-"
         ):
             return "inspect_workspace"
+        if tool_name.startswith("workspace.") or action in {"read_file", "list_files"}:
+            return "inspect_workspace"
+        if tool_name.startswith("browser."):
+            return "inspect_web_context"
         if action == "list_apps" or "discover_apps" in step_id:
             return "find_target_app"
         if action in {"inspect_app", "read_ui"}:
@@ -13422,7 +13452,9 @@ def _runtime_dov_role(step: ToolPlanStepSnapshot, stage: str) -> str:
         return "inspect_desktop_state"
     if stage == "verify":
         return "verify_result"
-    if step_id == "run-terminal-command":
+    if tool_name.startswith("data.") or action.startswith("analyze_"):
+        return "analyze_data"
+    if step_id == "run-terminal-command" or tool_name == "terminal.run":
         return "execute"
     if step_id == "apply-code-changes" or action == "apply_patch":
         return "apply_patch"

@@ -645,6 +645,9 @@ def test_yachiyo_agent_service_plans_shared_chat_execution_envelope() -> None:
     assert request.workspace_id == envelope.task_core.workspace.workspace_id
     assert request.task_todo["step_id"] == "analyze-data-file"
     assert request.task_checkpoints[0]["after_step_id"] == "analyze-data-file"
+    assert envelope.runtime_stage_counts == {"operate": 1}
+    assert request.runtime_stage == "operate"
+    assert request.runtime_role == "analyze_data"
     assert envelope.replan_signal_count == len(envelope.task_core.replan_signals)
 
 
@@ -693,6 +696,9 @@ def test_agent_studio_service_plans_shared_execution_envelope() -> None:
     assert envelope.requests[0].task_checkpoints[0]["after_step_id"] == (
         "analyze-data-file"
     )
+    assert envelope.runtime_stage_counts == {"operate": 1}
+    assert envelope.requests[0].runtime_stage == "operate"
+    assert envelope.requests[0].runtime_role == "analyze_data"
 
 
 def test_agent_studio_service_plans_discovered_desktop_app_execution() -> None:
