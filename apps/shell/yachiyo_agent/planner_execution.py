@@ -3028,51 +3028,42 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
         input_preview = getattr(data_analyze_step, "input_preview", None)
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
         path_value = str(payload.get("path") or "").strip()
+        uses_workspace_file_selection = (
+            path_value == "<selected file from workspace.list>"
+            and str(payload.get("selection_source") or "").strip() == "workspace.list"
+        )
         if (
             path_value
-            and str(payload.get("selection_source") or "").strip() != "workspace.list"
-            and not (path_value.startswith("<") and path_value.endswith(">"))
+            and (
+                uses_workspace_file_selection
+                or not (path_value.startswith("<") and path_value.endswith(">"))
+            )
         ):
-            request_input = {
-                "path": path_value,
-                "artifact_path": str(payload.get("artifact_path") or "analysis-report.md"),
-            }
-            source_kind = str(payload.get("source_kind") or "").strip()
-            if source_kind:
-                request_input["source_kind"] = source_kind
-            requested_outputs = payload.get("requested_outputs")
-            if isinstance(requested_outputs, list):
-                request_input["requested_outputs"] = [
-                    str(item or "").strip()
-                    for item in requested_outputs
-                    if str(item or "").strip()
-                ]
-            artifact_manifest = payload.get("artifact_manifest")
-            if isinstance(artifact_manifest, list):
-                request_input["artifact_manifest"] = [
-                    dict(item)
-                    for item in artifact_manifest
-                    if isinstance(item, Mapping)
-                ]
-            artifact_paths = payload.get("artifact_paths")
-            if isinstance(artifact_paths, list):
-                request_input["artifact_paths"] = [
-                    str(path or "").strip()
-                    for path in artifact_paths
-                    if str(path or "").strip()
-                ]
-            if payload.get("max_rows"):
-                request_input["max_rows"] = int(payload.get("max_rows") or 1000)
+            request_input = _data_analysis_request_input_from_payload(
+                payload,
+                include_workspace_file_selection=uses_workspace_file_selection,
+            )
             analyze_request = _request(
                 "data.analyze",
                 request_input,
                 planning_reason="planner_builtin_data_analysis",
             )
+            workspace_file_selection_requests: list[dict[str, Any]] = []
+            if uses_workspace_file_selection:
+                workspace_file_selection_requests = _context_prefetch_tool_requests(
+                    decision,
+                    allowed,
+                    step_ids=("inspect-data-source",),
+                    planning_reason="planner_prefetch_data_source",
+                )
+                for request in workspace_file_selection_requests:
+                    request.pop("continue_to_model", None)
             if _data_analysis_requires_model_followup(decision):
                 analyze_request["continue_to_model"] = True
                 return [
                     *app_requests,
                     *file_open_requests,
+                    *workspace_file_selection_requests,
                     analyze_request,
                 ]
             artifact_reveal_requests = _artifact_reveal_tool_requests(
@@ -3085,6 +3076,7 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
             return [
                 *app_requests,
                 *file_open_requests,
+                *workspace_file_selection_requests,
                 analyze_request,
                 *artifact_reveal_requests,
             ]
@@ -3137,6 +3129,49 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
         planning_reason="planner_prefetch_data_source",
     )
     return _append_model_followup_requests(context_requests, [*app_requests, *file_open_requests])
+
+
+def _data_analysis_request_input_from_payload(
+    payload: Mapping[str, Any],
+    *,
+    include_workspace_file_selection: bool = False,
+) -> dict[str, Any]:
+    request_input: dict[str, Any] = {
+        "path": str(payload.get("path") or "").strip(),
+        "artifact_path": str(payload.get("artifact_path") or "analysis-report.md"),
+    }
+    source_kind = str(payload.get("source_kind") or "").strip()
+    if source_kind:
+        request_input["source_kind"] = source_kind
+    requested_outputs = payload.get("requested_outputs")
+    if isinstance(requested_outputs, list):
+        request_input["requested_outputs"] = [
+            str(item or "").strip()
+            for item in requested_outputs
+            if str(item or "").strip()
+        ]
+    artifact_manifest = payload.get("artifact_manifest")
+    if isinstance(artifact_manifest, list):
+        request_input["artifact_manifest"] = [
+            dict(item)
+            for item in artifact_manifest
+            if isinstance(item, Mapping)
+        ]
+    artifact_paths = payload.get("artifact_paths")
+    if isinstance(artifact_paths, list):
+        request_input["artifact_paths"] = [
+            str(path or "").strip()
+            for path in artifact_paths
+            if str(path or "").strip()
+        ]
+    if payload.get("max_rows"):
+        request_input["max_rows"] = int(payload.get("max_rows") or 1000)
+    if include_workspace_file_selection:
+        for key in ("selection_source", "source_scope", "pattern", "file_type", "selection"):
+            value = str(payload.get(key) or "").strip()
+            if value:
+                request_input[key] = value
+    return request_input
 
 
 def _data_analysis_requires_model_followup(decision: Any) -> bool:

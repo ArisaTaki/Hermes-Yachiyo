@@ -485,8 +485,30 @@ def test_runtime_planner_plans_builtin_analysis_after_scoped_data_discovery() ->
             "input": {"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_data_source",
-            "continue_to_model": True,
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "path": "<selected file from workspace.list>",
+                "artifact_path": "analysis-report.md",
+                "source_kind": "csv",
+                "requested_outputs": ["chart", "report"],
+                "artifact_manifest": [
+                    {"path": "analysis-report.md", "kind": "markdown"},
+                    {"path": "analysis-chart.png", "kind": "chart"},
+                ],
+                "artifact_paths": [
+                    "analysis-report.md",
+                    "analysis-chart.png",
+                ],
+                "selection_source": "workspace.list",
+                "source_scope": "Downloads",
+                "pattern": "*.csv",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+        },
     ]
 
 

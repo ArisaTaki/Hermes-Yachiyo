@@ -1738,6 +1738,288 @@ def test_runtime_tool_request_runner_normalizes_discovered_app_open_path_input()
     assert ("run-selected-open-path", "agent.tool.input_resolved", resolution_payload) in run_events
 
 
+def test_runtime_tool_request_runner_resolves_selected_workspace_file_from_previous_list() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    seen_requests: list[dict[str, Any]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        calls.append((tool_name, payload))
+        seen_requests.append(tool_request)
+        result = (
+            {
+                "ok": True,
+                "path": "Downloads",
+                "entries": [
+                    {"name": "old.csv", "type": "file", "mtime": 10},
+                    {"name": "latest.csv", "type": "file", "mtime": 20},
+                ],
+            }
+            if tool_name == "workspace.list"
+            else {"ok": True, "path": payload["path"], "artifact": {"path": "analysis-report.md"}}
+        )
+        timeline_arg.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+
+    runner.run(
+        [
+            {
+                "tool": "workspace.list",
+                "input": {
+                    "path": "Downloads",
+                    "pattern": "*.csv",
+                    "file_type": "csv",
+                    "include_metadata": True,
+                },
+            },
+            {
+                "tool": "data.analyze",
+                "input": {
+                    "path": "<selected file from workspace.list>",
+                    "selection_source": "workspace.list",
+                    "selection": "最近",
+                    "source_scope": "Downloads",
+                    "pattern": "*.csv",
+                    "file_type": "csv",
+                    "source_kind": "csv",
+                    "artifact_path": "analysis-report.md",
+                },
+                "source": "runtime_planner",
+                "step_id": "analyze-discovered-data",
+                "capability_id": "data.analysis",
+            },
+        ],
+        ["workspace.list", "data.analyze"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "分析 Downloads 里最新的 CSV"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-selected-workspace-file",
+        budget=FakeBudget(),
+    )
+
+    assert calls == [
+        (
+            "workspace.list",
+            {
+                "path": "Downloads",
+                "pattern": "*.csv",
+                "file_type": "csv",
+                "include_metadata": True,
+            },
+        ),
+        (
+            "data.analyze",
+            {
+                "path": "Downloads/latest.csv",
+                "source_kind": "csv",
+                "artifact_path": "analysis-report.md",
+            },
+        ),
+    ]
+    assert seen_requests[-1]["input_resolution"]["resolved_path"] == "Downloads/latest.csv"
+    resolution_payload = {
+        "tool": "data.analyze",
+        "field": "path",
+        "requested_path": "<selected file from workspace.list>",
+        "resolved_path": "Downloads/latest.csv",
+        "source_tool": "workspace.list",
+        "source_path": "Downloads",
+        "resolved_file_name": "latest.csv",
+        "selection": "最近",
+    }
+    assert [
+        event for event in timeline if event["event"] == "agent.tool.input_resolved"
+    ] == [
+        {
+            "event": "agent.tool.input_resolved",
+            "detail": "data.analyze",
+            **resolution_payload,
+        }
+    ]
+    assert ("run-selected-workspace-file", "agent.tool.input_resolved", resolution_payload) in run_events
+
+
+def test_runtime_tool_request_runner_skips_unresolved_selected_workspace_file() -> None:
+    calls: list[dict[str, Any]] = []
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "workspace.list",
+            input_preview={"path": "Downloads", "pattern": "*.csv", "file_type": "csv"},
+            result={
+                "ok": True,
+                "path": "Downloads",
+                "entries": [
+                    {"name": "sales.csv", "type": "file"},
+                    {"name": "inventory.csv", "type": "file"},
+                ],
+            },
+        )
+    ]
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        calls.append(tool_request)
+        return {"ok": True}
+
+    runner = _runner(call_agent_tool=call_agent_tool)
+
+    runner.run(
+        [
+            {
+                "tool": "data.analyze",
+                "input": {
+                    "path": "<selected file from workspace.list>",
+                    "selection_source": "workspace.list",
+                    "source_scope": "Downloads",
+                    "pattern": "*.csv",
+                    "file_type": "csv",
+                },
+            },
+        ],
+        ["data.analyze"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "分析 Downloads 里的 CSV"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-unresolved-file",
+        budget=FakeBudget(),
+    )
+
+    assert calls == []
+    skipped = next(event for event in timeline if event["event"] == "agent.tool.skipped")
+    assert skipped["detail"] == "data.analyze"
+    assert skipped["result"]["blocked_by_file_resolution"] is True
+    assert skipped["result"]["recommended_tools"] == ["workspace.list"]
+    assert skipped["result"]["recovery_actions"][0]["input"] == {
+        "path": "Downloads",
+        "pattern": "*.csv",
+        "file_type": "csv",
+    }
+
+
+def test_runtime_tool_request_runner_resolves_selected_app_and_workspace_file() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    seen_requests: list[dict[str, Any]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        calls.append((tool_name, payload))
+        seen_requests.append(tool_request)
+        if tool_name == "workspace.list":
+            result = {
+                "ok": True,
+                "path": "Downloads",
+                "entries": [{"name": "report.pdf", "type": "file", "mtime": 100}],
+            }
+        elif tool_name == "desktop.list_apps":
+            result = {
+                "ok": True,
+                "action": "desktop.list_apps",
+                "data": {
+                    "query": payload["query"],
+                    "apps": [
+                        {
+                            "name": "Preview",
+                            "path": "/System/Applications/Preview.app",
+                            "match_score": 100,
+                        }
+                    ],
+                },
+            }
+        else:
+            result = {"ok": True, "action": tool_name, "data": payload}
+        timeline_arg.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+
+    runner.run(
+        [
+            {
+                "tool": "workspace.list",
+                "input": {
+                    "path": "Downloads",
+                    "pattern": "*.pdf",
+                    "file_type": "pdf",
+                    "include_metadata": True,
+                },
+            },
+            {"tool": "desktop.list_apps", "input": {"query": "pdf", "limit": 20}},
+            {
+                "tool": "desktop.open_path_with_app",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "query": "pdf",
+                    "target_path": "<selected file from workspace.list>",
+                    "selection_source": "workspace.list",
+                    "selection": "最近",
+                    "source_scope": "Downloads",
+                    "pattern": "*.pdf",
+                    "file_type": "pdf",
+                },
+            },
+        ],
+        ["workspace.list", "desktop.list_apps", "desktop.open_path_with_app"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "用能打开 PDF 的应用打开最新 PDF"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-app-file-resolution",
+        budget=FakeBudget(),
+    )
+
+    assert calls[-1] == (
+        "desktop.open_path_with_app",
+        {"app_name": "Preview", "path": "Downloads/report.pdf"},
+    )
+    open_resolution = seen_requests[-1]["input_resolution"]
+    assert open_resolution["source_tool"] == "desktop.list_apps"
+    assert open_resolution["file_resolution_source_tool"] == "workspace.list"
+    assert open_resolution["resolved_path"] == "Downloads/report.pdf"
+    assert [
+        event["field"]
+        for event in timeline
+        if event["event"] == "agent.tool.input_resolved"
+    ] == ["app_name", "target_path"]
+    assert any(
+        event_type == "agent.tool.input_resolved"
+        and payload.get("resolved_path") == "Downloads/report.pdf"
+        for _run_id, event_type, payload in run_events
+    )
+
+
 def test_runtime_tool_request_runner_records_best_match_resolution_evidence() -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
     timeline: list[dict[str, Any]] = []

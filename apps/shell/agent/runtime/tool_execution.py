@@ -231,6 +231,7 @@ def _tool_result_requests_user_recovery(result: dict[str, Any]) -> bool:
         or data.get("permission_error")
         or result.get("blocked_by_runtime_readiness")
         or result.get("blocked_by_app_resolution")
+        or result.get("blocked_by_file_resolution")
         or result.get("recovery_actions")
         or data.get("recovery_actions")
         or result.get("permission_targets")
@@ -243,6 +244,7 @@ def _normalized_app_lookup(value: Any) -> str:
 
 
 _SELECTED_DESKTOP_APP_NAME = "<selected app from desktop.list_apps>"
+_SELECTED_WORKSPACE_FILE_PATH = "<selected file from workspace.list>"
 
 
 def _app_lookups_related(left: Any, right: Any) -> bool:
@@ -385,6 +387,294 @@ def _tool_request_with_app_name_resolution(
         "input_resolution": resolution,
         "input": resolved_input,
     }
+
+
+def _tool_request_existing_app_name_resolution(
+    tool_request: dict[str, Any],
+) -> dict[str, str]:
+    resolution = (
+        tool_request.get("input_resolution")
+        if isinstance(tool_request.get("input_resolution"), dict)
+        else {}
+    )
+    if not resolution:
+        return {}
+    if (
+        str(resolution.get("field") or "").strip() == "app_name"
+        or str(resolution.get("resolved_app_name") or "").strip()
+    ):
+        app_resolution_keys = {
+            "field",
+            "requested_app_name",
+            "resolved_app_name",
+            "source_tool",
+            "app_resolution_score",
+            "app_resolution_confidence",
+            "app_resolution_reason",
+            "resolved_app_path",
+            "tool",
+        }
+        app_resolution = {
+            str(key): str(value)
+            for key, value in resolution.items()
+            if key in app_resolution_keys and key != "field" and value is not None
+        }
+        app_resolution["field"] = "app_name"
+        return app_resolution
+    return {}
+
+
+def _tool_request_workspace_file_resolution(
+    tool_request: dict[str, Any],
+    timeline: list[dict[str, Any]],
+) -> dict[str, str]:
+    raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+    if not _tool_request_uses_selected_workspace_file(raw_input):
+        return {}
+    candidate = _selected_workspace_file_from_timeline(raw_input, timeline)
+    if not candidate:
+        return {}
+    field = _selected_workspace_file_field(raw_input) or "path"
+    requested_path = str(
+        raw_input.get(field)
+        or raw_input.get("path")
+        or raw_input.get("target_path")
+        or _SELECTED_WORKSPACE_FILE_PATH
+    ).strip()
+    resolution = {
+        "field": field,
+        "requested_path": requested_path,
+        "resolved_path": str(candidate.get("path") or "").strip(),
+        "source_tool": str(candidate.get("source_tool") or "workspace.list").strip(),
+    }
+    source_path = str(candidate.get("source_path") or "").strip()
+    if source_path:
+        resolution["source_path"] = source_path
+    entry_name = str(candidate.get("name") or "").strip()
+    if entry_name:
+        resolution["resolved_file_name"] = entry_name
+    selection = str(raw_input.get("selection") or "").strip()
+    if selection:
+        resolution["selection"] = selection
+    return resolution
+
+
+def _tool_request_with_workspace_file_resolution(
+    tool_request: dict[str, Any],
+    resolution: dict[str, str],
+) -> dict[str, Any]:
+    if not resolution:
+        return tool_request
+    raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+    resolved_path = str(resolution.get("resolved_path") or "").strip()
+    if not resolved_path:
+        return tool_request
+    field = str(resolution.get("field") or "path").strip() or "path"
+    resolved_input = dict(raw_input)
+    resolved_input[field] = resolved_path
+    if field == "target_path":
+        resolved_input.setdefault("path", resolved_path)
+    if str(resolved_input.get("path") or "").strip() == _SELECTED_WORKSPACE_FILE_PATH:
+        resolved_input["path"] = resolved_path
+    if str(resolved_input.get("target_path") or "").strip() == _SELECTED_WORKSPACE_FILE_PATH:
+        resolved_input["target_path"] = resolved_path
+    if str(resolved_input.get("selection_source") or "").strip() == "workspace.list":
+        for key in (
+            "selection_source",
+            "source_scope",
+            "source_path",
+            "selection",
+            "selection_hint",
+            "pattern",
+            "file_type",
+        ):
+            resolved_input.pop(key, None)
+    existing_resolution = (
+        tool_request.get("input_resolution")
+        if isinstance(tool_request.get("input_resolution"), dict)
+        else {}
+    )
+    merged_resolution = {**existing_resolution, **resolution}
+    if str(existing_resolution.get("resolved_app_name") or "").strip():
+        merged_resolution = {
+            **existing_resolution,
+            "file_field": str(resolution.get("field") or "").strip(),
+            "requested_path": str(resolution.get("requested_path") or "").strip(),
+            "resolved_path": resolved_path,
+            "file_resolution_source_tool": str(resolution.get("source_tool") or "").strip(),
+        }
+        for key in ("source_path", "resolved_file_name", "selection"):
+            value = str(resolution.get(key) or "").strip()
+            if value:
+                merged_resolution[key] = value
+    return {
+        **tool_request,
+        "input_resolution": merged_resolution,
+        "input": resolved_input,
+    }
+
+
+def _tool_request_uses_selected_workspace_file(raw_input: dict[str, Any]) -> bool:
+    if _selected_workspace_file_field(raw_input):
+        return True
+    if str(raw_input.get("selection_source") or "").strip() != "workspace.list":
+        return False
+    path_value = str(
+        raw_input.get("path") or raw_input.get("target_path") or raw_input.get("file_path") or ""
+    ).strip()
+    return not path_value or (path_value.startswith("<") and path_value.endswith(">"))
+
+
+def _selected_workspace_file_field(raw_input: dict[str, Any]) -> str:
+    for field in ("path", "target_path", "file_path"):
+        if str(raw_input.get(field) or "").strip() == _SELECTED_WORKSPACE_FILE_PATH:
+            return field
+    return ""
+
+
+def _selected_workspace_file_from_timeline(
+    raw_input: dict[str, Any],
+    timeline: list[dict[str, Any]],
+) -> dict[str, str]:
+    for event in reversed(timeline):
+        if event.get("event") != "agent.tool.call":
+            continue
+        source_tool = str(event.get("detail") or "").strip()
+        if source_tool not in {"workspace.list", "file.search", "fs.find_files"}:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        if result.get("ok") is False:
+            continue
+        input_preview = event.get("input_preview") if isinstance(event.get("input_preview"), dict) else {}
+        if not _workspace_file_selection_event_matches(raw_input, input_preview, result):
+            continue
+        source_path = _workspace_file_source_path(input_preview, result)
+        entries = _workspace_file_entries_from_result(result)
+        entry = _select_workspace_file_entry(entries, raw_input, source_path)
+        if not entry:
+            continue
+        path = _workspace_file_entry_path(entry, source_path)
+        if not path:
+            continue
+        return {
+            "path": path,
+            "name": str(entry.get("name") or "").strip(),
+            "source_tool": source_tool,
+            "source_path": source_path,
+        }
+    return {}
+
+
+def _workspace_file_selection_event_matches(
+    raw_input: dict[str, Any],
+    input_preview: dict[str, Any],
+    result: dict[str, Any],
+) -> bool:
+    source_scope = str(
+        raw_input.get("source_scope")
+        or raw_input.get("source_path")
+        or raw_input.get("directory")
+        or ""
+    ).strip()
+    if source_scope:
+        event_path = _workspace_file_source_path(input_preview, result)
+        if _normalized_workspace_path(event_path) != _normalized_workspace_path(source_scope):
+            return False
+    pattern = str(raw_input.get("pattern") or "").strip()
+    event_pattern = str(input_preview.get("pattern") or "").strip()
+    if pattern and event_pattern and pattern != event_pattern:
+        return False
+    file_type = str(raw_input.get("source_kind") or raw_input.get("file_type") or "").strip()
+    event_file_type = str(input_preview.get("file_type") or "").strip()
+    if file_type and event_file_type and file_type != event_file_type:
+        return False
+    return True
+
+
+def _workspace_file_source_path(
+    input_preview: dict[str, Any],
+    result: dict[str, Any],
+) -> str:
+    return str(result.get("path") or input_preview.get("path") or ".").strip() or "."
+
+
+def _workspace_file_entries_from_result(result: dict[str, Any]) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    for container in (result, result.get("data") if isinstance(result.get("data"), dict) else {}):
+        if not isinstance(container, dict):
+            continue
+        for key in ("entries", "files", "matches", "results"):
+            raw_entries = container.get(key)
+            if not isinstance(raw_entries, list):
+                continue
+            entries.extend(entry for entry in raw_entries if isinstance(entry, dict))
+    return entries
+
+
+def _select_workspace_file_entry(
+    entries: list[dict[str, Any]],
+    raw_input: dict[str, Any],
+    source_path: str,
+) -> dict[str, Any]:
+    files = [
+        entry
+        for entry in entries
+        if _workspace_file_entry_path(entry, source_path)
+        and str(entry.get("type") or entry.get("kind") or "file").strip() not in {
+            "dir",
+            "directory",
+        }
+    ]
+    if not files:
+        return {}
+    selection = str(raw_input.get("selection") or raw_input.get("selection_hint") or "").casefold()
+    if any(token in selection for token in ("最近", "最新", "latest", "newest", "recent")):
+        with_mtime = [
+            (entry, _workspace_file_entry_mtime(entry))
+            for entry in files
+            if _workspace_file_entry_mtime(entry) is not None
+        ]
+        if with_mtime:
+            return max(with_mtime, key=lambda item: item[1] or 0)[0]
+        return {}
+    if any(token in selection for token in ("最后", "last")):
+        return files[-1]
+    if any(token in selection for token in ("第一个", "第1个", "first", "top")):
+        return files[0]
+    if len(files) == 1:
+        return files[0]
+    return {}
+
+
+def _workspace_file_entry_mtime(entry: dict[str, Any]) -> float | None:
+    for key in ("mtime", "modified_at", "last_modified", "mtime_ns"):
+        value = entry.get(key)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _workspace_file_entry_path(entry: dict[str, Any], source_path: str) -> str:
+    for key in ("path", "relative_path", "relpath", "display_path"):
+        path = str(entry.get(key) or "").strip()
+        if path:
+            return _normalized_workspace_path(path)
+    name = str(entry.get("name") or "").strip()
+    if not name:
+        return ""
+    base = _normalized_workspace_path(source_path)
+    if not base or base == ".":
+        return name
+    return f"{base.rstrip('/')}/{name}"
+
+
+def _normalized_workspace_path(value: Any) -> str:
+    path = str(value or "").strip().replace("\\", "/")
+    while path.startswith("./"):
+        path = path[2:]
+    return path.rstrip("/") or "."
 
 
 def _tool_request_input_accepts_app_name_resolution(tool_name: str) -> bool:
@@ -917,16 +1207,17 @@ class RuntimeToolRequestRunner:
         foreground_readiness_blocker: dict[str, Any] | None = None
         active_window_verification_target: dict[str, Any] | None = None
         for index, tool_request in enumerate(tool_requests):
-            app_name_resolution = (
-                tool_request.get("input_resolution")
-                if isinstance(tool_request.get("input_resolution"), dict)
-                else {}
-            )
+            app_name_resolution = _tool_request_existing_app_name_resolution(tool_request)
             if not app_name_resolution:
                 app_name_resolution = _tool_request_app_name_resolution(tool_request, timeline)
             tool_request = _tool_request_with_app_name_resolution(
                 tool_request,
                 app_name_resolution,
+            )
+            file_resolution = _tool_request_workspace_file_resolution(tool_request, timeline)
+            tool_request = _tool_request_with_workspace_file_resolution(
+                tool_request,
+                file_resolution,
             )
             tool_name = self._normalize_tool_name(tool_request.get("tool"))
             tool_request = _tool_request_with_verification_target(
@@ -943,8 +1234,10 @@ class RuntimeToolRequestRunner:
                 if isinstance(tool_request.get("input"), dict)
                 else {}
             )
-            if app_name_resolution:
-                resolution_payload = {**app_name_resolution, "tool": tool_name}
+            for resolution in (app_name_resolution, file_resolution):
+                if not resolution:
+                    continue
+                resolution_payload = {**resolution, "tool": tool_name}
                 timeline.append(
                     self._timeline(
                         "agent.tool.input_resolved",
@@ -968,6 +1261,11 @@ class RuntimeToolRequestRunner:
                 tool_name,
                 raw_input,
                 app_name_resolution,
+            )
+            runtime_skip = runtime_skip or _unresolved_workspace_file_skip_result(
+                tool_name,
+                raw_input,
+                file_resolution,
             )
             if not _broker_requires_approval(broker, tool_name):
                 runtime_skip = runtime_skip or _runtime_readiness_skip_result(
@@ -1356,6 +1654,65 @@ def _unresolved_discovered_app_skip_result(
         ],
     }
     return result
+
+
+def _unresolved_workspace_file_skip_result(
+    tool_name: str,
+    raw_input: dict[str, Any],
+    file_resolution: dict[str, str],
+) -> dict[str, Any] | None:
+    if file_resolution:
+        return None
+    if not _tool_request_uses_selected_workspace_file(raw_input):
+        return None
+    requested_path = str(
+        raw_input.get("path")
+        or raw_input.get("target_path")
+        or raw_input.get("file_path")
+        or _SELECTED_WORKSPACE_FILE_PATH
+    ).strip()
+    source_scope = str(raw_input.get("source_scope") or raw_input.get("source_path") or "").strip()
+    recovery_input: dict[str, Any] = {"path": source_scope or "."}
+    pattern = str(raw_input.get("pattern") or "").strip()
+    if pattern:
+        recovery_input["pattern"] = pattern
+    source_kind = str(raw_input.get("source_kind") or raw_input.get("file_type") or "").strip()
+    if source_kind:
+        recovery_input["file_type"] = source_kind
+    if str(raw_input.get("selection") or "").strip():
+        recovery_input["include_metadata"] = True
+    return {
+        "ok": False,
+        "skipped": True,
+        "blocked_by_file_resolution": True,
+        "tool": tool_name,
+        "action": tool_name,
+        "error": "file_resolution_failed",
+        "blocking_condition": "file_resolution_failed",
+        "blocking_conditions": ["file_resolution_failed"],
+        "source_tool": "workspace.list",
+        "source_summary": "No workspace file was selected from workspace.list.",
+        "hint": (
+            "workspace.list did not return a unique usable file candidate for this step. "
+            "List the target directory again or ask the user to choose a candidate before executing."
+        ),
+        "data": {
+            "requested_path": requested_path,
+            "selection_source": "workspace.list",
+            "skipped_tool": tool_name,
+            "skipped_input": raw_input,
+        },
+        "recommended_tools": ["workspace.list"],
+        "recovery_actions": [
+            {
+                "label": "重新列出候选文件",
+                "tool": "workspace.list",
+                "input": recovery_input,
+                "permission_target": "workspace_discovery",
+                "risk_level": "low",
+            }
+        ],
+    }
 
 
 def _selected_discovered_app_requested_name(raw_input: dict[str, Any]) -> str:
