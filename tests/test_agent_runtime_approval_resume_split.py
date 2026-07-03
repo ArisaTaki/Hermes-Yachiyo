@@ -4,8 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
+import pytest
+
 from apps.shell import agent_runtime
 from apps.shell.agent.runtime.approval_resume import ApprovalResumeCoordinator
+from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.tool_approvals import ToolApprovalResumeContext
 
 
@@ -74,6 +77,9 @@ def test_approval_resume_records_runtime_task_progress_events() -> None:
             decision_id="decision-1",
             plan_id="plan-1",
             core_id="core-approval",
+            task_id="task-approval",
+            group_run_id="group-run-approval",
+            workflow_run_id="workflow-run-approval",
             task_core=task_core,
         ),
         _timeline(
@@ -158,12 +164,152 @@ def test_approval_resume_records_runtime_task_progress_events() -> None:
     )
     assert click_todo["previous_status"] == "blocked"
     assert click_checkpoint["previous_status"] == "waiting_approval"
+    assert click_todo["task_id"] == "task-approval"
+    assert click_todo["group_run_id"] == "group-run-approval"
+    assert click_todo["workflow_run_id"] == "workflow-run-approval"
     assert {
         (run_id, event_type)
         for run_id, event_type, _payload in run_events
     } >= {
         ("run-approval", "agent.task.todo.updated"),
         ("run-approval", "agent.task.checkpoint.updated"),
+    }
+
+
+def test_approval_resume_records_replan_and_blocked_progress_for_failed_tool() -> None:
+    task_core = {
+        "core_id": "core-approval",
+        "workspace": {"workspace_id": "workspace-1", "title": "Approval task"},
+        "todos": [
+            {
+                "todo_id": "todo-analysis",
+                "step_id": "run-analysis",
+                "title": "Run analysis",
+                "status": "pending",
+            }
+        ],
+        "checkpoints": [
+            {
+                "checkpoint_id": "checkpoint-analysis",
+                "after_step_id": "run-analysis",
+                "title": "Analysis completed",
+                "status": "planned",
+            }
+        ],
+    }
+    timeline = [
+        _timeline(
+            "agent.plan.created",
+            "plan",
+            decision_id="decision-1",
+            plan_id="plan-1",
+            plan={
+                "plan_id": "plan-1",
+                "tool_plan": {
+                    "steps": [
+                        {
+                            "step_id": "run-analysis",
+                            "tool_name": "terminal.run",
+                        }
+                    ]
+                },
+            },
+        ),
+        _timeline(
+            "agent.task_core.created",
+            "task core",
+            decision_id="decision-1",
+            plan_id="plan-1",
+            core_id="core-approval",
+            task_id="task-approval",
+            group_run_id="group-run-approval",
+            workflow_run_id="workflow-run-approval",
+            task_core=task_core,
+        ),
+    ]
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    context = ToolApprovalResumeContext(
+        run_id="run-approval",
+        timeline=timeline,
+        artifacts=[],
+        broker={"broker": True},
+        allowed_tools=["terminal.run", "python.run"],
+        budget={"events": 4},
+        messages=[{"role": "assistant", "content": "Need approval"}],
+        tool_request={
+            "tool": "terminal.run",
+            "input": {"command": "python analyze.py"},
+            "step_id": "run-analysis",
+            "capability_id": "terminal.execution",
+            "decision_id": "decision-1",
+            "plan_id": "plan-1",
+            "core_id": "core-approval",
+            "workspace_id": "workspace-1",
+            "task_id": "task-approval",
+            "group_run_id": "group-run-approval",
+            "workflow_run_id": "workflow-run-approval",
+            "fallback_tools": ["python.run"],
+            "replan_triggers": ["tool_failure"],
+            "replan_signal_ids": ["replan-run-analysis"],
+        },
+        tool_name="terminal.run",
+        input_preview={"command": "python analyze.py"},
+        remaining_requests=[],
+        next_iteration=3,
+    )
+    coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "script failed",
+        },
+        fatal_tool_failure_detail=lambda *_args: "terminal.run failed fatally",
+        append_tool_result_message=_append_tool_result_message,
+        run_tool_requests=_run_remaining_tool_requests,
+        timeline_factory=_timeline,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            (run_id, event_type, payload)
+        ),
+    )
+
+    with pytest.raises(AgentRuntimeError):
+        coordinator.execute_approved_tool(context)
+
+    blocked_todo = next(
+        event
+        for event in context.timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event.get("status") == "blocked"
+    )
+    blocked_checkpoint = next(
+        event
+        for event in context.timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event.get("status") == "blocked"
+    )
+    replan_event = next(
+        event
+        for event in context.timeline
+        if event["event"] == "agent.replan.requested"
+    )
+    replan_payload = replan_event["payload"]
+
+    assert blocked_todo["task_id"] == "task-approval"
+    assert blocked_todo["group_run_id"] == "group-run-approval"
+    assert blocked_todo["workflow_run_id"] == "workflow-run-approval"
+    assert blocked_checkpoint["task_id"] == "task-approval"
+    assert replan_payload["source_step_id"] == "run-analysis"
+    assert replan_payload["source_tool_name"] == "terminal.run"
+    assert replan_payload["fallback_tools"] == ["python.run"]
+    assert replan_payload["task_id"] == "task-approval"
+    assert replan_payload["group_run_id"] == "group-run-approval"
+    assert replan_payload["workflow_run_id"] == "workflow-run-approval"
+    assert {
+        (run_id, event_type)
+        for run_id, event_type, _payload in run_events
+    } >= {
+        ("run-approval", "agent.task.todo.updated"),
+        ("run-approval", "agent.task.checkpoint.updated"),
+        ("run-approval", "agent.replan.requested"),
     }
 
 

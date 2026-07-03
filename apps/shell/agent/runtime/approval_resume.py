@@ -7,6 +7,7 @@ from copy import deepcopy
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
+from apps.shell.agent.runtime.tool_execution import append_replan_request_event_for_tool_result
 from apps.shell.agent.runtime.tool_approvals import (
     ToolApprovalClaimProjection,
     ToolApprovalContinuationHandoff,
@@ -85,6 +86,11 @@ class ApprovalResumeCoordinator:
                 fatal_failure,
             )
             context.timeline.append(failure.timeline_event(self._timeline))
+            self._record_task_progress_after_resume(
+                context,
+                tool_timeline_start=task_progress_start,
+            )
+            self._record_replan_request_after_resume_failure(context, tool_result)
             raise AgentRuntimeError(failure.detail)
         context.remaining_requests = _approval_resume_remaining_requests_after_tool(
             context,
@@ -118,6 +124,24 @@ class ApprovalResumeCoordinator:
             context.timeline.append(self._timeline(event_type, detail, **payload))
             if self._append_run_event is not None:
                 self._append_run_event(context.run_id, event_type, payload)
+
+    def _record_replan_request_after_resume_failure(
+        self,
+        context: ToolApprovalResumeContext,
+        tool_result: Any,
+    ) -> None:
+        append_replan_request_event_for_tool_result(
+            tool_request={**context.tool_request, "tool": context.tool_name},
+            tool_event={
+                "event": "agent.tool.failed",
+                "detail": context.tool_name,
+                "result": tool_result if isinstance(tool_result, Mapping) else {},
+            },
+            timeline=context.timeline,
+            timeline_factory=self._timeline,
+            append_run_event=self._append_run_event,
+            run_id=context.run_id,
+        )
 
     def continue_custom_api_agent_after_approved_tool(
         self,
@@ -251,7 +275,7 @@ def _approval_resume_task_progress_events(
         for event in timeline[tool_timeline_start:]
         if isinstance(event, dict)
         and str(event.get("event") or "").strip()
-        in {"agent.tool.call", "agent.tool.skipped"}
+        in {"agent.tool.call", "agent.tool.failed", "agent.tool.skipped"}
     ]
     if not tool_events:
         return []
@@ -305,6 +329,19 @@ def _approval_resume_task_progress_events(
             "source_event": source_event,
             "result_preview": _task_progress_result_preview(result),
         }
+        for key in (
+            "task_id",
+            "run_group_id",
+            "group_run_id",
+            "group_id",
+            "workflow_id",
+            "workflow_run_id",
+            "workflow_node_id",
+            "workflow_node_label",
+        ):
+            value = str(task_context.get(key) or "").strip()
+            if value:
+                base_payload[key] = value
         events.append(_todo_progress_event(timeline, todo, base_payload, todo_status))
         for checkpoint in checkpoints_by_step.get(step_id, []):
             events.append(
@@ -427,6 +464,20 @@ def _latest_task_core_context(timeline: list[dict[str, Any]]) -> dict[str, Any]:
             "plan_id": str(payload.get("plan_id") or "").strip(),
             "core_id": str(payload.get("core_id") or task_core.get("core_id") or "").strip(),
             "workspace_id": str(workspace.get("workspace_id") or "").strip(),
+            **{
+                key: str(payload.get(key) or "").strip()
+                for key in (
+                    "task_id",
+                    "run_group_id",
+                    "group_run_id",
+                    "group_id",
+                    "workflow_id",
+                    "workflow_run_id",
+                    "workflow_node_id",
+                    "workflow_node_label",
+                )
+                if str(payload.get(key) or "").strip()
+            },
         }
     return {}
 
