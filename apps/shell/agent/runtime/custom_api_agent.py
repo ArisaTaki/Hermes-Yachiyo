@@ -6587,6 +6587,21 @@ def _model_followup_execution_request_payload(
         values = _string_list(request.get(key))
         if values:
             payload[key] = values
+    task_todo = request.get("task_todo")
+    if isinstance(task_todo, Mapping) and task_todo:
+        payload["task_todo"] = dict(task_todo)
+    for key in (
+        "task_checkpoints",
+        "task_workspace_items",
+        "task_verification_targets",
+    ):
+        items = [
+            dict(item)
+            for item in request.get(key, [])
+            if isinstance(item, Mapping)
+        ]
+        if items:
+            payload[key] = items
     return {key: value for key, value in payload.items() if value not in ("", [], {})}
 
 
@@ -15608,6 +15623,19 @@ def _attach_model_followup_pending_plan_trace_metadata(
         value = step.get(key)
         if value not in (None, "", [], {}):
             request[key] = value
+    for key in (
+        "task_todo",
+        "task_checkpoints",
+        "task_workspace_items",
+        "task_verification_targets",
+    ):
+        if key in request:
+            continue
+        value = step.get(key)
+        if isinstance(value, Mapping) and value:
+            request[key] = dict(value)
+        elif isinstance(value, list) and value:
+            request[key] = [dict(item) for item in value if isinstance(item, Mapping)]
 
 
 def _model_followup_requests_with_pending_plan_metadata(
@@ -15732,6 +15760,7 @@ def _model_followup_task_core_pending_trace_items(
             ).strip(),
             "input_preview": dict(input_preview),
             "status": status or "pending",
+            "task_todo": dict(todo),
         }
         for key in (
             "runtime_doctrine",

@@ -8028,6 +8028,30 @@ def test_model_followup_context_defers_materialization_execution_requests() -> N
                         "status": "planned",
                         "runtime_stage": "operate",
                         "runtime_role": "type_ui",
+                        "task_todo": {
+                            "todo_id": "todo-insert-generated-note",
+                            "step_id": "insert-generated-note",
+                            "title": "Insert generated note",
+                            "tool_name": "desktop.safe_type_text",
+                            "status": "pending",
+                        },
+                        "task_checkpoints": [
+                            {
+                                "checkpoint_id": "checkpoint-insert-generated-note",
+                                "after_step_id": "insert-generated-note",
+                                "title": "Generated note inserted",
+                                "status": "planned",
+                            }
+                        ],
+                        "task_workspace_items": [
+                            {
+                                "item_id": "workspace-note-draft",
+                                "source_step_id": "insert-generated-note",
+                                "title": "Generated note draft",
+                                "kind": "note",
+                                "status": "planned",
+                            }
+                        ],
                     },
                     {
                         "request_id": "runtime-plan-note:request:3:desktop.ui_elements",
@@ -8066,6 +8090,15 @@ def test_model_followup_context_defers_materialization_execution_requests() -> N
         "runtime-plan-note:request:3:desktop.ui_elements",
     ]
     assert payload["pending_execution_requests"][0]["approval_required"] is True
+    assert payload["pending_execution_requests"][0]["task_todo"]["todo_id"] == (
+        "todo-insert-generated-note"
+    )
+    assert payload["pending_execution_requests"][0]["task_checkpoints"][0][
+        "checkpoint_id"
+    ] == "checkpoint-insert-generated-note"
+    assert payload["pending_execution_requests"][0]["task_workspace_items"][0][
+        "item_id"
+    ] == "workspace-note-draft"
 
     pending_requests = custom_api_agent_module._model_followup_pending_plan_requests(
         payload,
@@ -8082,6 +8115,13 @@ def test_model_followup_context_defers_materialization_execution_requests() -> N
     }
     assert pending_requests[0]["request_id"] == (
         "runtime-plan-note:request:2:desktop.safe_type_text"
+    )
+    assert pending_requests[0]["task_todo"]["step_id"] == "insert-generated-note"
+    assert pending_requests[0]["task_checkpoints"][0]["after_step_id"] == (
+        "insert-generated-note"
+    )
+    assert pending_requests[0]["task_workspace_items"][0]["source_step_id"] == (
+        "insert-generated-note"
     )
     assert pending_requests[1]["input"] == {"limit": 80}
 
@@ -8120,6 +8160,30 @@ def test_custom_api_agent_loop_defers_materialization_until_model_content(
             "capability_id": "desktop.ui_operation",
             "runtime_stage": "operate",
             "runtime_role": "type_ui",
+            "task_todo": {
+                "todo_id": "todo-insert-generated-note",
+                "step_id": "insert-generated-note",
+                "title": "Insert generated note",
+                "tool_name": "desktop.safe_type_text",
+                "status": "pending",
+            },
+            "task_checkpoints": [
+                {
+                    "checkpoint_id": "checkpoint-insert-generated-note",
+                    "after_step_id": "insert-generated-note",
+                    "title": "Generated note inserted",
+                    "status": "planned",
+                }
+            ],
+            "task_workspace_items": [
+                {
+                    "item_id": "workspace-note-draft",
+                    "source_step_id": "insert-generated-note",
+                    "title": "Generated note draft",
+                    "kind": "note",
+                    "status": "planned",
+                }
+            ],
         },
         {
             "protocol": "json_fallback",
@@ -8150,6 +8214,9 @@ def test_custom_api_agent_loop_defers_materialization_until_model_content(
                     "status": "planned",
                     "runtime_stage": request.get("runtime_stage", ""),
                     "runtime_role": request.get("runtime_role", ""),
+                    "task_todo": request.get("task_todo", {}),
+                    "task_checkpoints": request.get("task_checkpoints", []),
+                    "task_workspace_items": request.get("task_workspace_items", []),
                 }
                 for request in planner_requests
             ],
@@ -8240,6 +8307,13 @@ def test_custom_api_agent_loop_defers_materialization_until_model_content(
     assert tool_runs[1][0]["input"] == {
         "text": "今天的会议纪要：先整理任务，再同步日程。"
     }
+    assert tool_runs[1][0]["task_todo"]["todo_id"] == "todo-insert-generated-note"
+    assert tool_runs[1][0]["task_checkpoints"][0]["checkpoint_id"] == (
+        "checkpoint-insert-generated-note"
+    )
+    assert tool_runs[1][0]["task_workspace_items"][0]["item_id"] == (
+        "workspace-note-draft"
+    )
     assert len(model_calls) == 1
     followup_context = next(
         event
