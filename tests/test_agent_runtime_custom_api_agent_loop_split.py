@@ -21809,6 +21809,145 @@ def test_runtime_replan_event_drives_fallback_without_decision_and_preserves_sco
     assert "sales.csv" in fallback_request["input"]["command"]
 
 
+def test_resume_continuation_consumes_pending_replan_event_without_model_call() -> None:
+    budget = FakeBudget()
+    timeline: list[dict[str, Any]] = [
+        _timeline(
+            "agent.replan.requested",
+            "Runtime requested a replan after a failed approved tool.",
+            payload={
+                "request_id": "runtime-replan:approval-data",
+                "trigger": "tool_failure",
+                "source": "runtime_tool_request_runner",
+                "run_id": "run-approval",
+                "task_id": "task-approval",
+                "core_id": "task-core-approval",
+                "workspace_id": "task-workspace-approval",
+                "group_run_id": "group-run-approval",
+                "workflow_run_id": "workflow-run-approval",
+                "source_step_id": "analyze-data-file",
+                "source_tool_name": "data.analyze",
+                "target_capability_id": "data.analysis",
+                "fallback_tools": ["terminal.run"],
+                "input_preview": {
+                    "path": "sales.csv",
+                    "source_kind": "csv",
+                    "artifact_path": "analysis-report.md",
+                },
+                "metadata": {
+                    "input_preview": {
+                        "path": "sales.csv",
+                        "source_kind": "csv",
+                        "artifact_path": "analysis-report.md",
+                    }
+                },
+            },
+        )
+    ]
+    tool_runs: list[list[dict[str, Any]]] = []
+    model_calls: list[Any] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append([dict(request) for request in tool_requests])
+        for tool_request in tool_requests:
+            tool = str(tool_request.get("tool") or "")
+            payload = (
+                tool_request.get("input")
+                if isinstance(tool_request.get("input"), dict)
+                else {}
+            )
+            assert tool == "terminal.run"
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool,
+                    input_preview=payload,
+                    result={"ok": True, "stdout": "fallback complete\n"},
+                )
+            )
+            timeline_arg.append(
+                _timeline(
+                    "agent.replan.recovery.updated",
+                    "terminal.run",
+                    request_id=str(tool_request.get("replan_request_id") or ""),
+                    status="completed",
+                    selected_tool_name=tool,
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["terminal.run"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner recovery.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: model_calls.append(True)
+        or {"role": "assistant", "content": "unexpected model fallback"},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Analyst"},
+        "",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=[{"role": "user", "content": "Analyze sales.csv"}],
+        start_iteration=2,
+        run_id="run-approval",
+    )
+
+    assert model_calls == []
+    assert "fallback complete" in str(result)
+    assert len(tool_runs) == 1
+    fallback_request = tool_runs[0][0]
+    assert fallback_request["tool"] == "terminal.run"
+    assert fallback_request["planning_reason"] == "planner_replan_fallback_recovery"
+    assert fallback_request["replan_request_id"] == "runtime-replan:approval-data"
+    assert fallback_request["task_id"] == "task-approval"
+    assert fallback_request["core_id"] == "task-core-approval"
+    assert fallback_request["workspace_id"] == "task-workspace-approval"
+    assert fallback_request["group_run_id"] == "group-run-approval"
+    assert fallback_request["workflow_run_id"] == "workflow-run-approval"
+    assert fallback_request["step_id"] == "analyze-data-file"
+    assert fallback_request["capability_id"] == "data.analysis"
+    assert "sales.csv" in fallback_request["input"]["command"]
+    assert custom_api_agent_module._pending_runtime_replan_payloads(timeline) == []
+    assert any(
+        event["event"] == "agent.desktop.intent_completed"
+        and event.get("planning_reason") == "planner_replan_fallback_recovery"
+        for event in timeline
+    )
+
+
 def test_runtime_planner_replan_accepts_tool_failed_timeline_events() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",

@@ -209,6 +209,20 @@ class RuntimeCustomApiAgentLoop:
             )
             if resumed_result:
                 return resumed_result
+            if start_iteration > 0:
+                replan_recovery_result = self._run_pending_runtime_replan_recovery(
+                    allowed_tools,
+                    broker,
+                    messages,
+                    timeline,
+                    artifacts,
+                    agent=agent,
+                    run_id=run_id,
+                    budget=budget,
+                    next_iteration=start_iteration,
+                )
+                if replan_recovery_result:
+                    return replan_recovery_result
         if default_messages or start_iteration == 0:
             planning_context = (
                 str(daily_desktop_planning_context or "").strip()
@@ -2515,6 +2529,71 @@ class RuntimeCustomApiAgentLoop:
             run_id=run_id,
         )
         return tool_timeline_start
+
+    def _run_pending_runtime_replan_recovery(
+        self,
+        allowed_tools: Iterable[str],
+        broker: Any,
+        messages: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        *,
+        agent: dict[str, Any],
+        run_id: str,
+        budget: Any,
+        next_iteration: int,
+    ) -> str:
+        replan_payloads = _pending_runtime_replan_payloads(timeline)
+        if not replan_payloads:
+            return ""
+        allowed_tool_list = list(allowed_tools)
+        recovery_requests = _auto_replan_recovery_requests_with_task_context(
+            replan_payloads,
+            allowed_tool_list,
+            timeline,
+        )
+        if not recovery_requests:
+            if not _timeline_has_replan_followup_context(timeline, replan_payloads):
+                self._append_replan_followup_context(
+                    replan_payloads,
+                    allowed_tools=allowed_tool_list,
+                    messages=messages,
+                    timeline=timeline,
+                    run_id=run_id,
+                )
+            return ""
+
+        recovery_timeline_start = self._run_auto_runtime_planner_requests(
+            recovery_requests,
+            allowed_tool_list,
+            broker,
+            messages,
+            timeline,
+            artifacts,
+            agent=agent,
+            runtime_planner_decision=None,
+            run_id=run_id,
+            budget=budget,
+            next_iteration=next_iteration,
+        )
+        if not _replan_recovery_requests_need_model_followup(recovery_requests):
+            direct_result = self._direct_daily_desktop_sequence_result(
+                _tool_requests_without_model_followup(recovery_requests),
+                timeline,
+                tool_timeline_start=recovery_timeline_start,
+                run_id=run_id,
+            )
+            if direct_result:
+                return direct_result
+        if not _timeline_has_replan_followup_context(timeline, replan_payloads):
+            self._append_replan_followup_context(
+                replan_payloads,
+                allowed_tools=allowed_tool_list,
+                messages=messages,
+                timeline=timeline,
+                run_id=run_id,
+            )
+        return ""
 
     def _run_deferred_observed_ui_replan_recovery(
         self,
@@ -6548,6 +6627,91 @@ def _timeline_replan_request_payloads(
                 continue
             payloads.append(dict(payload))
     return payloads
+
+
+def _pending_runtime_replan_payloads(
+    timeline: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    handled = _handled_runtime_replan_request_identities(timeline)
+    payloads: list[dict[str, Any]] = []
+    for payload in _timeline_replan_request_payloads(timeline):
+        identity = _runtime_replan_payload_identity(payload)
+        if identity and identity in handled:
+            continue
+        payloads.append(payload)
+    return payloads
+
+
+def _handled_runtime_replan_request_identities(
+    timeline: list[dict[str, Any]],
+) -> set[str]:
+    handled: set[str] = set()
+    for event in timeline:
+        if not isinstance(event, Mapping):
+            continue
+        if str(event.get("event") or "").strip() != "agent.replan.recovery.updated":
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+        identity = str(
+            event.get("request_id")
+            or payload.get("request_id")
+            or event.get("replan_request_id")
+            or payload.get("replan_request_id")
+            or ""
+        ).strip()
+        if identity:
+            handled.add(identity)
+    return handled
+
+
+def _timeline_has_replan_followup_context(
+    timeline: list[dict[str, Any]],
+    replan_payloads: list[dict[str, Any]],
+) -> bool:
+    target = {
+        identity
+        for identity in (
+            _runtime_replan_payload_identity(payload)
+            for payload in replan_payloads
+            if isinstance(payload, Mapping)
+        )
+        if identity
+    }
+    if not target:
+        return False
+    for event in timeline:
+        if not isinstance(event, Mapping):
+            continue
+        if str(event.get("event") or "").strip() != "agent.model.followup_context":
+            continue
+        event_payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+        requests = event.get("replan_requests")
+        if not isinstance(requests, list):
+            requests = event_payload.get("replan_requests")
+        if not isinstance(requests, list):
+            continue
+        existing = {
+            identity
+            for identity in (
+                _runtime_replan_payload_identity(request)
+                for request in requests
+                if isinstance(request, Mapping)
+            )
+            if identity
+        }
+        if target.issubset(existing):
+            return True
+    return False
+
+
+def _runtime_replan_payload_identity(payload: Mapping[str, Any]) -> str:
+    request_id = str(payload.get("request_id") or "").strip()
+    if request_id:
+        return request_id
+    dedupe_key = _replan_payload_dedupe_key(payload)
+    if not dedupe_key:
+        return ""
+    return "|".join(dedupe_key)
 
 
 def _replan_payload_dedupe_key(payload: Mapping[str, Any]) -> tuple[str, str, str] | None:
