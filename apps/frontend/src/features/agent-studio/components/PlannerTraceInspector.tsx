@@ -732,15 +732,18 @@ function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnap
   const actionTarget = objectRecord(recovery.action_target);
   const observationEvidence = objectRecord(recovery.observation_evidence);
   const observationRetry = objectRecord(recovery.observation_retry);
+  const verificationTargets = arrayRecords(recovery.verification_targets);
   const actionTargetPreview = replanRecoveryActionTargetPreview(actionTarget);
   const observationEvidencePreview = replanRecoveryObservationEvidencePreview(observationEvidence);
   const observationRetryPreview = replanRecoveryObservationRetryPreview(observationRetry);
   const observedCenterPreview = replanRecoveryObservedCenterPreview(observationEvidence);
+  const verificationTargetsPreview = replanRecoveryVerificationTargetsPreview(verificationTargets);
   const title = [
     recovery.failure_detail,
     planningReasonLabel ? `reason: ${planningReasonLabel}` : '',
     recovery.permission_target ? `permission: ${recovery.permission_target}` : '',
     recovery.risk_level ? `risk: ${recovery.risk_level}` : '',
+    verificationTargetsPreview ? `verification: ${verificationTargetsPreview}` : '',
     actionTargetPreview ? `target: ${actionTargetPreview}` : '',
     observationEvidencePreview ? `evidence: ${observationEvidencePreview}` : '',
     observationRetryPreview ? `retry: ${observationRetryPreview}` : '',
@@ -759,11 +762,13 @@ function ReplanRecoverySnapshotPill({ recovery }: { recovery: ReplanRecoverySnap
       data-replan-recovery-planning-reason-label={planningReasonLabel}
       data-replan-recovery-risk={recovery.risk_level || ''}
       data-replan-recovery-status={recovery.status || 'requested'}
+      data-replan-recovery-verification-targets={verificationTargetsPreview}
       key={`recovery:${recovery.request_id}`}
       title={title}
     >
       recovery · {label || recovery.trigger} · {recovery.status || 'requested'}
       {planningReasonLabel ? ` · ${planningReasonLabel}` : ''}
+      {verificationTargetsPreview ? ` · verifies: ${verificationTargetsPreview}` : ''}
       {actionTargetPreview ? ` · target: ${actionTargetPreview}` : ''}
       {observationRetryPreview ? ` · retry: ${observationRetryPreview}` : ''}
     </span>
@@ -815,6 +820,25 @@ function replanRecoveryObservedCenterPreview(evidence: Record<string, unknown>):
   const x = coordinateValue(center.x ?? fallbackPoint.x);
   const y = coordinateValue(center.y ?? fallbackPoint.y);
   return x && y ? `${x},${y}` : '';
+}
+
+function replanRecoveryVerificationTargetsPreview(targets: Array<Record<string, unknown>>): string {
+  const parts = targets.slice(0, 3).map((target) => {
+    const label = (
+      stringValue(target.todo_title)
+      || stringValue(target.title)
+      || stringValue(target.step_id)
+      || stringValue(target.todo_id)
+      || stringValue(target.tool_name)
+    );
+    const checkpoints = Array.isArray(target.checkpoint_titles)
+      ? uniqueStrings(target.checkpoint_titles).slice(0, 2).join(', ')
+      : '';
+    return [label, checkpoints].filter(Boolean).join(' -> ');
+  }).filter(Boolean);
+  if (!parts.length) return '';
+  const suffix = targets.length > parts.length ? ` +${targets.length - parts.length}` : '';
+  return truncatePlannerPreview(`${parts.join(' | ')}${suffix}`);
 }
 
 function coordinateValue(value: unknown): string {

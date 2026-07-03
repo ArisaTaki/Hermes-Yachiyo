@@ -575,6 +575,12 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         source_tool_name="data.analyze",
         target_capability_id="data.analysis",
         fallback_tools=["terminal.run"],
+        verification_targets=[
+            {
+                "step_id": "run-analysis",
+                "todo_id": "todo-run-analysis",
+            }
+        ],
         selected_tool_name="terminal.run",
         selected_step_id="run-analysis",
         planning_reason="planner_replan_fallback_recovery",
@@ -622,6 +628,7 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         "source_tool_name",
         "target_capability_id",
         "fallback_tools",
+        "verification_targets",
         "selected_tool_name",
         "selected_step_id",
         "planning_reason",
@@ -646,6 +653,12 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
     assert payload["recovery_action_label"] == "Run terminal fallback"
     assert payload["permission_target"] == "terminal_execution"
     assert payload["risk_level"] == "medium"
+    assert payload["verification_targets"] == [
+        {
+            "step_id": "run-analysis",
+            "todo_id": "todo-run-analysis",
+        }
+    ]
     assert payload["action_target"] == {
         "action": "click",
         "label": "Apple Music result",
@@ -1577,6 +1590,14 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
                         "source_tool_name": "data.analyze",
                         "target_capability_id": "data.analysis",
                         "fallback_tools": ["terminal.run"],
+                        "verification_targets": [
+                            {
+                                "step_id": "analyze-data-file",
+                                "todo_id": "todo-analyze-data-file",
+                                "todo_title": "Analyze data file",
+                                "checkpoint_ids": ["checkpoint:analyze-data-file"],
+                            }
+                        ],
                         "failure_detail": "data.analyze failed",
                         "metadata": {
                             "recovery_actions": [
@@ -1659,6 +1680,14 @@ def test_run_timeline_snapshot_projects_completed_replan_recovery() -> None:
     assert recovery.recovery_action_label == "Run terminal fallback"
     assert recovery.permission_target == "terminal_execution"
     assert recovery.risk_level == "medium"
+    assert recovery.verification_targets == [
+        {
+            "step_id": "analyze-data-file",
+            "todo_id": "todo-analyze-data-file",
+            "todo_title": "Analyze data file",
+            "checkpoint_ids": ["checkpoint:analyze-data-file"],
+        }
+    ]
     assert recovery.action_target == {
         "action": "click",
         "label": "Apple Music result",

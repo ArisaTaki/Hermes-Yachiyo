@@ -4945,6 +4945,9 @@ def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
             if value:
                 action[text_key] = value
         for dict_key in (
+            "action_target",
+            "observation_evidence",
+            "observation_retry",
             "retry_input",
             "recovery_retry_input",
             "retry_input_schema",
@@ -4961,6 +4964,14 @@ def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
                 normalized = [str(item).strip() for item in value if str(item or "").strip()]
                 if normalized:
                     action[list_key] = normalized
+        for list_key in ("verification_targets",):
+            value = raw_action.get(list_key)
+            if isinstance(value, list):
+                normalized_targets = [
+                    dict(item) for item in value if isinstance(item, dict) and item
+                ]
+                if normalized_targets:
+                    action[list_key] = normalized_targets
         if raw_action.get("desktop_permission_retry") is True:
             action["desktop_permission_retry"] = True
         actions.append(action)
@@ -12777,6 +12788,13 @@ def _auto_replan_runtime_recovery_action_requests(
                     value = payload.get(key)
                 if isinstance(value, Mapping) and value:
                     request[key] = dict(value)
+            verification_targets = _mapping_list(action.get("verification_targets"))
+            if not verification_targets:
+                verification_targets = _mapping_list(metadata.get("verification_targets"))
+            if not verification_targets:
+                verification_targets = _mapping_list(payload.get("verification_targets"))
+            if verification_targets:
+                request["verification_targets"] = [dict(target) for target in verification_targets]
             request["continue_to_model"] = True
             _attach_replan_payload_trace_metadata(request, payload)
             requests.append(request)

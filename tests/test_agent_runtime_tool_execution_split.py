@@ -727,6 +727,46 @@ def test_runtime_tool_request_runner_records_verification_failure_recovery_conte
     assert run_replan_event["request_id"] == payload["request_id"]
     assert run_replan_event["metadata"]["action_target"] == payload["action_target"]
 
+    runner.run(
+        [
+            {
+                "tool": "desktop.active_window",
+                "input": {"reason": "re-observe failed verification target"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_replan_runtime_recovery_action",
+                "step_id": "verify-desktop-result",
+                "replan_request_id": payload["request_id"],
+                "replan_trigger": "verification_failed",
+                "verification_targets": payload["verification_targets"],
+                "action_target": payload["action_target"],
+                "observation_evidence": payload["observation_evidence"],
+                "observation_retry": payload["observation_retry"],
+                "recovery_action_label": "Re-observe failed verification target",
+            }
+        ],
+        ["desktop.active_window"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "click export"}],
+        timeline,
+        [],
+        next_iteration=2,
+        run_id="run-verify-failed",
+        budget=FakeBudget(),
+    )
+
+    recovery_update = next(
+        event for event in timeline if event["event"] == "agent.replan.recovery.updated"
+    )
+    assert recovery_update["request_id"] == payload["request_id"]
+    assert recovery_update["verification_targets"] == payload["verification_targets"]
+    assert recovery_update["action_target"] == payload["action_target"]
+    run_recovery_update = next(
+        payload
+        for _run_id, event_type, payload in run_events
+        if event_type == "agent.replan.recovery.updated"
+    )
+    assert run_recovery_update["verification_targets"] == payload["verification_targets"]
+
 
 def test_runtime_tool_request_runner_records_replan_request_for_failed_planned_step() -> None:
     run_events: list[tuple[str, str, dict[str, Any]]] = []

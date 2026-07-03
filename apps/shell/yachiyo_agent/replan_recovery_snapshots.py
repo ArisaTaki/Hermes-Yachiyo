@@ -30,6 +30,7 @@ class _RecoveryRecord:
     source_tool_name: str | None = None
     target_capability_id: str = ""
     fallback_tools: list[str] = field(default_factory=list)
+    verification_targets: list[dict[str, Any]] = field(default_factory=list)
     selected_tool_name: str | None = None
     selected_step_id: str | None = None
     planning_reason: str = ""
@@ -129,6 +130,7 @@ def replan_recovery_snapshots_from_events(
             source_tool_name=record.source_tool_name or None,
             target_capability_id=record.target_capability_id,
             fallback_tools=list(record.fallback_tools),
+            verification_targets=list(record.verification_targets),
             selected_tool_name=record.selected_tool_name or None,
             selected_step_id=record.selected_step_id or None,
             planning_reason=record.planning_reason,
@@ -215,6 +217,7 @@ def _apply_request_event(
         request.get("capability_id"),
     )
     _extend_unique(record.fallback_tools, _string_list(request.get("fallback_tools")))
+    _apply_verification_target_metadata(record, request)
     _apply_recovery_action_metadata(record, request)
     _apply_observed_action_metadata(record, request)
     record.failure_detail = _first_text(
@@ -281,6 +284,7 @@ def _apply_planned_event(
         payload.get("reason"),
     )
     _extend_unique(record.fallback_tools, _string_list(payload.get("fallback_tools")))
+    _apply_verification_target_metadata(record, payload)
     _apply_recovery_action_metadata(record, payload, selected_tool=selected_tool)
     _apply_observed_action_metadata(record, payload)
     _mark_event(record, event)
@@ -329,6 +333,7 @@ def _apply_tool_event(
             payload.get("reason"),
             record.planning_reason,
         )
+        _apply_verification_target_metadata(record, payload, call=call)
         _apply_recovery_action_metadata(
             record,
             payload,
@@ -426,6 +431,7 @@ def _apply_recovery_update_event(
     _extend_unique(record.fallback_tools, _string_list(payload.get("fallback_tools")))
     if selected_tool and selected_tool not in record.fallback_tools:
         record.fallback_tools.append(selected_tool)
+    _apply_verification_target_metadata(record, payload)
     record.tool_status = _first_text(payload.get("tool_status"), status, record.tool_status)
     record.todo_status = _first_text(payload.get("todo_status"), record.todo_status)
     record.checkpoint_status = _first_text(
@@ -505,6 +511,8 @@ def _merge_recovery_snapshots(
     observation_retry = dict(current.observation_retry or {})
     if incoming.observation_retry:
         observation_retry.update(incoming.observation_retry)
+    verification_targets = list(current.verification_targets or [])
+    _extend_unique_mappings(verification_targets, incoming.verification_targets)
     event_ids = list(current.recovery_event_ids)
     _extend_unique(event_ids, incoming.recovery_event_ids)
     return current.model_copy(
@@ -521,6 +529,7 @@ def _merge_recovery_snapshots(
             "source_tool_name": current.source_tool_name or incoming.source_tool_name,
             "target_capability_id": current.target_capability_id or incoming.target_capability_id,
             "fallback_tools": _merged_string_lists(current.fallback_tools, incoming.fallback_tools),
+            "verification_targets": verification_targets,
             "selected_tool_name": current.selected_tool_name or incoming.selected_tool_name,
             "selected_step_id": current.selected_step_id or incoming.selected_step_id,
             "planning_reason": current.planning_reason or incoming.planning_reason,
@@ -705,6 +714,26 @@ def _apply_observed_action_metadata(
         record.observation_retry.update(observation_retry)
 
 
+def _apply_verification_target_metadata(
+    record: _RecoveryRecord,
+    payload: Mapping[str, Any],
+    *,
+    call: ToolCallSnapshot | None = None,
+) -> None:
+    targets = _verification_target_records(payload)
+    if call is not None and not targets:
+        targets = _verification_target_records(call.metadata)
+    _extend_unique_mappings(record.verification_targets, targets)
+
+
+def _verification_target_records(payload: Mapping[str, Any]) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    _extend_unique_mappings(records, payload.get("verification_targets"))
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    _extend_unique_mappings(records, metadata.get("verification_targets"))
+    return records
+
+
 def _observed_mapping(payload: Mapping[str, Any], key: str) -> dict[str, Any]:
     value = _mapping(payload.get(key))
     if value:
@@ -733,6 +762,14 @@ def _append_unique_mapping(target: list[dict[str, Any]], value: Mapping[str, Any
     clean = _mapping(value)
     if clean and clean not in target:
         target.append(clean)
+
+
+def _extend_unique_mappings(target: list[dict[str, Any]], value: Any) -> None:
+    if not isinstance(value, list):
+        return
+    for item in value:
+        if isinstance(item, Mapping):
+            _append_unique_mapping(target, item)
 
 
 def _selected_recovery_action(

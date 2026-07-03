@@ -382,6 +382,7 @@ class ReplanRecoverySnapshot(_PublicSnapshot):
     source_tool_name: str | None = None
     target_capability_id: str = ""
     fallback_tools: list[str] = Field(default_factory=list)
+    verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     selected_tool_name: str | None = None
     selected_step_id: str | None = None
     planning_reason: str = ""

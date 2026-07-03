@@ -27821,6 +27821,12 @@ def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> No
                         "input": {"query": "pdf", "limit": 20},
                         "permission_target": "app_discovery",
                         "risk_level": "low",
+                        "verification_targets": [
+                            {
+                                "step_id": "open-selected-discovered-app",
+                                "todo_id": "todo-open-selected-app",
+                            }
+                        ],
                     }
                 ],
             },
@@ -27851,6 +27857,12 @@ def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> No
             "input": {"query": "pdf", "limit": 20},
             "permission_target": "app_discovery",
             "risk_level": "low",
+            "verification_targets": [
+                {
+                    "step_id": "open-selected-discovered-app",
+                    "todo_id": "todo-open-selected-app",
+                }
+            ],
         }
     ]
     assert timeline[-1]["event"] == "agent.replan.requested"
@@ -27894,6 +27906,12 @@ def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> No
     assert recovery_request["continue_to_model"] is True
     assert recovery_request["recovery_action_label"] == "重新发现应用"
     assert recovery_request["permission_target"] == "app_discovery"
+    assert recovery_request["verification_targets"] == [
+        {
+            "step_id": "open-selected-discovered-app",
+            "todo_id": "todo-open-selected-app",
+        }
+    ]
     assert recovery_request["task_todo"]["step_id"] == "open-selected-discovered-app"
     assert recovery_request["task_checkpoints"][0]["after_step_id"] == "open-selected-discovered-app"
     assert recovery_request["workspace_id"]

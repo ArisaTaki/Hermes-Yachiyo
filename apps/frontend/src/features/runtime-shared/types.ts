@@ -298,6 +298,7 @@ export type ReplanRecoverySnapshot = {
   source_tool_name?: string | null;
   target_capability_id?: string;
   fallback_tools?: string[];
+  verification_targets?: Array<Record<string, unknown>>;
   selected_tool_name?: string | null;
   selected_step_id?: string | null;
   planning_reason?: string;

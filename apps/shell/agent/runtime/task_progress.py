@@ -345,6 +345,9 @@ def _append_replan_recovery_update_event(
         value = tool_request.get(key)
         if isinstance(value, Mapping) and value:
             payload[key] = dict(value)
+    verification_targets = _mapping_items(tool_request.get("verification_targets"))
+    if verification_targets:
+        payload["verification_targets"] = [dict(target) for target in verification_targets]
     _append_replan_progress_event(
         "agent.replan.recovery.updated",
         str(payload.get("recovery_action_label") or selected_tool or request_id),
