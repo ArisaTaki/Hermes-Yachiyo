@@ -23,8 +23,15 @@ def append_task_progress_events_for_tool_result(
     todo = tool_request.get("task_todo") if isinstance(tool_request.get("task_todo"), Mapping) else {}
     checkpoints = _mapping_items(tool_request.get("task_checkpoints"))
     workspace_items = _mapping_items(tool_request.get("task_workspace_items"))
+    verification_targets = _mapping_items(tool_request.get("task_verification_targets"))
     replan_request_id = str(tool_request.get("replan_request_id") or "").strip()
-    if not todo and not checkpoints and not workspace_items and not replan_request_id:
+    if (
+        not todo
+        and not checkpoints
+        and not workspace_items
+        and not verification_targets
+        and not replan_request_id
+    ):
         return
 
     result = tool_event.get("result") if isinstance(tool_event.get("result"), Mapping) else {}
@@ -138,6 +145,17 @@ def append_task_progress_events_for_tool_result(
                 run_id=run_id,
             )
 
+    _append_verification_target_progress_events(
+        tool_request,
+        verification_targets,
+        base_payload,
+        result,
+        timeline=timeline,
+        timeline_factory=timeline_factory,
+        append_run_event=append_run_event,
+        run_id=run_id,
+    )
+
     if replan_request_id:
         _append_replan_recovery_update_event(
             tool_request,
@@ -150,6 +168,110 @@ def append_task_progress_events_for_tool_result(
             append_run_event=append_run_event,
             run_id=run_id,
         )
+
+
+def _append_verification_target_progress_events(
+    tool_request: Mapping[str, Any],
+    verification_targets: list[Mapping[str, Any]],
+    base_payload: Mapping[str, Any],
+    result: Mapping[str, Any],
+    *,
+    timeline: list[dict[str, Any]],
+    timeline_factory: Callable[..., dict[str, Any]],
+    append_run_event: Callable[[str, str, dict[str, Any]], Any] | None,
+    run_id: str,
+) -> None:
+    if not verification_targets:
+        return
+    target_todo_status = _verification_target_todo_status(result)
+    target_checkpoint_status = _verification_target_checkpoint_status(result)
+    verify_step_id = str(
+        tool_request.get("step_id") or tool_request.get("planner_step_id") or ""
+    ).strip()
+    verify_tool = str(tool_request.get("tool") or tool_request.get("tool_name") or "").strip()
+    for target in verification_targets:
+        target_step_id = str(target.get("step_id") or "").strip()
+        if not target_step_id:
+            continue
+        target_base_payload = {
+            **dict(base_payload),
+            "step_id": target_step_id,
+            "verified_by_step_id": verify_step_id,
+            "verification_tool": verify_tool,
+        }
+        todo = target.get("todo") if isinstance(target.get("todo"), Mapping) else {}
+        if todo and not _runtime_planner_step_has_status(
+            timeline,
+            decision_id=str(tool_request.get("decision_id") or ""),
+            step_id=target_step_id,
+            statuses={target_todo_status},
+        ):
+            todo_payload = dict(todo)
+            todo_payload["status"] = target_todo_status
+            payload = {
+                **target_base_payload,
+                "todo_id": str(todo.get("todo_id") or "").strip(),
+                "status": target_todo_status,
+                "previous_status": _latest_task_update_status(
+                    timeline,
+                    "agent.task.todo.updated",
+                    "todo_id",
+                    str(todo.get("todo_id") or "").strip(),
+                    decision_id=str(tool_request.get("decision_id") or ""),
+                )
+                or str(todo.get("status") or "pending"),
+                "todo": todo_payload,
+            }
+            _append_task_progress_event(
+                "agent.task.todo.updated",
+                str(todo.get("title") or target_step_id),
+                payload,
+                timeline=timeline,
+                timeline_factory=timeline_factory,
+                append_run_event=append_run_event,
+                run_id=run_id,
+            )
+        for checkpoint in _mapping_items(target.get("checkpoints")):
+            checkpoint_id = str(checkpoint.get("checkpoint_id") or "").strip()
+            checkpoint_payload = dict(checkpoint)
+            checkpoint_payload["status"] = target_checkpoint_status
+            payload = {
+                **target_base_payload,
+                "checkpoint_id": checkpoint_id,
+                "status": target_checkpoint_status,
+                "previous_status": _latest_task_update_status(
+                    timeline,
+                    "agent.task.checkpoint.updated",
+                    "checkpoint_id",
+                    checkpoint_id,
+                    decision_id=str(tool_request.get("decision_id") or ""),
+                )
+                or str(checkpoint.get("status") or "planned"),
+                "checkpoint": checkpoint_payload,
+            }
+            _append_task_progress_event(
+                "agent.task.checkpoint.updated",
+                str(checkpoint.get("title") or target_step_id),
+                payload,
+                timeline=timeline,
+                timeline_factory=timeline_factory,
+                append_run_event=append_run_event,
+                run_id=run_id,
+            )
+
+
+def _verification_target_todo_status(result: Mapping[str, Any]) -> str:
+    if not isinstance(result, Mapping):
+        return "blocked"
+    if result.get("approval_required"):
+        return "blocked"
+    return "completed" if result.get("ok") is True else "blocked"
+
+
+def _verification_target_checkpoint_status(result: Mapping[str, Any]) -> str:
+    if isinstance(result, Mapping) and result.get("approval_required"):
+        return "waiting_approval"
+    return "completed" if isinstance(result, Mapping) and result.get("ok") is True else "blocked"
 
 
 def _append_replan_recovery_update_event(
@@ -486,6 +608,38 @@ def _runtime_planner_step_has_status(
         if event_status in expected_statuses:
             return True
     return False
+
+
+def _latest_task_update_status(
+    timeline: list[dict[str, Any]],
+    event_type: str,
+    identity_key: str,
+    identity: str,
+    *,
+    decision_id: str,
+) -> str:
+    clean_identity = str(identity or "").strip()
+    if not clean_identity:
+        return ""
+    clean_decision_id = str(decision_id or "").strip()
+    for event in reversed(timeline):
+        if not isinstance(event, Mapping):
+            continue
+        if str(event.get("event") or "").strip() != event_type:
+            continue
+        payload = _event_payload(event)
+        event_identity = str(
+            event.get(identity_key) or payload.get(identity_key) or ""
+        ).strip()
+        if event_identity != clean_identity:
+            continue
+        event_decision_id = str(
+            event.get("decision_id") or payload.get("decision_id") or ""
+        ).strip()
+        if clean_decision_id and event_decision_id != clean_decision_id:
+            continue
+        return str(event.get("status") or payload.get("status") or "").strip()
+    return ""
 
 
 def _mapping_items(value: Any) -> list[Mapping[str, Any]]:

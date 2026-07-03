@@ -261,6 +261,7 @@ def _tool_request_from_execution_request(
         "requires_post_action_verification",
         "replan_triggers",
         "replan_signal_ids",
+        "task_verification_targets",
     ):
         value = request.get(key)
         if value not in (None, "", [], {}):
@@ -303,6 +304,9 @@ def _apply_envelope_task_context(
     workspace_items = _task_workspace_items_for_step(task_core, step_id)
     if workspace_items and "task_workspace_items" not in payload:
         payload["task_workspace_items"] = workspace_items
+    verification_targets = _task_verification_targets_for_request(task_core, payload)
+    if verification_targets and "task_verification_targets" not in payload:
+        payload["task_verification_targets"] = verification_targets
 
 
 def _task_core_payload(envelope: Mapping[str, Any]) -> Mapping[str, Any]:
@@ -352,10 +356,37 @@ def _task_workspace_items_for_step(
     ]
 
 
+def _task_verification_targets_for_request(
+    task_core: Mapping[str, Any],
+    payload: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    if str(payload.get("runtime_stage") or "").strip() != "verify":
+        return []
+    targets: list[dict[str, Any]] = []
+    for dependency in _string_list(payload.get("depends_on")):
+        todo = _task_todo_for_step(task_core, dependency)
+        checkpoints = _task_checkpoints_for_step(task_core, dependency)
+        if not todo and not checkpoints:
+            continue
+        target: dict[str, Any] = {"step_id": dependency}
+        if todo:
+            target["todo"] = todo
+        if checkpoints:
+            target["checkpoints"] = checkpoints
+        targets.append(target)
+    return targets
+
+
 def _mapping_list(value: Any) -> list[Mapping[str, Any]]:
     if not isinstance(value, list):
         return []
     return [item for item in value if isinstance(item, Mapping)]
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item or "").strip() for item in value if str(item or "").strip()]
 
 
 def _mapping(value: Any) -> dict[str, Any]:

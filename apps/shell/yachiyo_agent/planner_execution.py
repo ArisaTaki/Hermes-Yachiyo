@@ -761,6 +761,7 @@ def _deferred_request_context(source: Mapping[str, Any]) -> dict[str, Any]:
         "task_todo",
         "task_checkpoints",
         "task_workspace_items",
+        "task_verification_targets",
     ):
         value = source.get(key)
         if value not in (None, "", [], {}):
@@ -1447,6 +1448,13 @@ def _task_execution_context_for_step(decision: Any, step_id: str) -> dict[str, A
     workspace_items = _task_workspace_items_for_step(workspace, clean_step_id)
     if workspace_items:
         payload["task_workspace_items"] = workspace_items
+    verification_targets = _task_verification_targets_for_step(
+        decision,
+        task_core,
+        clean_step_id,
+    )
+    if verification_targets:
+        payload["task_verification_targets"] = verification_targets
 
     replan_metadata = _task_replan_metadata_for_step(task_core, clean_step_id)
     if replan_metadata:
@@ -1479,6 +1487,42 @@ def _task_workspace_items_for_step(workspace: Any, step_id: str) -> list[dict[st
         for payload in [_snapshot_payload(item)]
         if payload
     ]
+
+
+def _task_verification_targets_for_step(
+    decision: Any,
+    task_core: Any,
+    step_id: str,
+) -> list[dict[str, Any]]:
+    if _runtime_trace_metadata_for_step(decision, step_id).get("runtime_stage") != "verify":
+        return []
+    step = _tool_plan_step_for_id(decision, step_id)
+    if step is None:
+        return []
+    targets: list[dict[str, Any]] = []
+    for dependency in list(getattr(step, "depends_on", []) or []):
+        dependency_id = str(dependency or "").strip()
+        if not dependency_id:
+            continue
+        todo = _task_todo_for_step(task_core, dependency_id)
+        checkpoints = _task_checkpoints_for_step(task_core, dependency_id)
+        if not todo and not checkpoints:
+            continue
+        target: dict[str, Any] = {"step_id": dependency_id}
+        if todo:
+            target["todo"] = todo
+        if checkpoints:
+            target["checkpoints"] = checkpoints
+        targets.append(target)
+    return targets
+
+
+def _tool_plan_step_for_id(decision: Any, step_id: str) -> Any | None:
+    tool_plan = getattr(getattr(decision, "plan", None), "tool_plan", None)
+    for step in list(getattr(tool_plan, "steps", []) or []):
+        if str(getattr(step, "step_id", "") or "").strip() == step_id:
+            return step
+    return None
 
 
 def _task_replan_metadata_for_step(task_core: Any, step_id: str) -> dict[str, list[str]]:
@@ -2190,6 +2234,7 @@ _COMBINED_REQUEST_TRACE_KEYS = (
     "task_todo",
     "task_checkpoints",
     "task_workspace_items",
+    "task_verification_targets",
     "replan_signal_ids",
     "replan_triggers",
 )

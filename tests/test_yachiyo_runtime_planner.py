@@ -30875,6 +30875,17 @@ def test_planner_first_direct_selection_can_include_task_execution_context() -> 
     assert operation_request["task_workspace_items"][0]["source_step_id"] == "operate-foreground-ui"
     assert operation_request["replan_signal_ids"]
     assert operation_request["replan_triggers"] == ["verification_failed"]
+    verify_request = selection.requests[2]
+    assert verify_request["runtime_stage"] == "verify"
+    assert verify_request["task_verification_targets"][0]["step_id"] == "operate-foreground-ui"
+    assert (
+        verify_request["task_verification_targets"][0]["todo"]["step_id"]
+        == "operate-foreground-ui"
+    )
+    assert (
+        verify_request["task_verification_targets"][0]["checkpoints"][0]["after_step_id"]
+        == "operate-foreground-ui"
+    )
 
 
 def test_runtime_planner_routes_app_scoped_meeting_minutes_to_desktop_create_flow() -> None:
@@ -31086,6 +31097,16 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
         projected_requests[1]["task_workspace_items"][0]["source_step_id"]
         == "operate-foreground-ui"
     )
+    assert projected_requests[2]["runtime_stage"] == "verify"
+    assert projected_requests[2]["task_verification_targets"][0]["step_id"] == (
+        "operate-foreground-ui"
+    )
+    assert projected_requests[2]["task_verification_targets"][0]["todo"]["step_id"] == (
+        "operate-foreground-ui"
+    )
+    assert projected_requests[2]["task_verification_targets"][0]["checkpoints"][0][
+        "after_step_id"
+    ] == "operate-foreground-ui"
 
 
 def test_runtime_execution_envelope_preserves_app_search_prepare_chain() -> None:
