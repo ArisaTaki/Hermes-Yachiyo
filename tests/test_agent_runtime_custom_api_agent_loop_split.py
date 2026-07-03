@@ -4224,6 +4224,17 @@ def test_model_replan_followup_context_includes_task_core_workspace() -> None:
                     "kind": "input",
                     "path": "sales.csv",
                     "status": "available",
+                },
+                {
+                    "item_id": "code-area-studio",
+                    "kind": "input",
+                    "path": "apps/frontend/src/features/agent-studio",
+                    "status": "planned",
+                    "source_step_id": "inspect-code-area-1",
+                    "metadata": {
+                        "role": "code_area_context",
+                        "pattern": "*Timeline*",
+                    },
                 }
             ],
         },
@@ -4297,6 +4308,11 @@ def test_model_replan_followup_context_includes_task_core_workspace() -> None:
     assert payload["task_progress"]["blocked_steps"] == ["analyze-data-file"]
     assert "Task workspace:" in message
     assert "- workspace: Data Analysis Workspace" in message
+    assert "input · available · sales.csv" in message
+    assert (
+        "input · planned · apps/frontend/src/features/agent-studio · "
+        "inspect-code-area-1 · *Timeline*"
+    ) in message
     assert "analyze-data-file · blocked · data.analyze" in message
     assert "analyze-data-file · blocked · Verify analysis output" in message
 

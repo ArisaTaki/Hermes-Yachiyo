@@ -6687,6 +6687,25 @@ def _runtime_replan_task_core_message_lines(task_core: Mapping[str, Any]) -> lis
     ).strip()
     if workspace_title:
         lines.append(f"- workspace: {workspace_title}")
+    workspace_items = [
+        item
+        for item in workspace.get("items", [])
+        if isinstance(item, Mapping)
+    ]
+    if workspace_items:
+        rendered = []
+        for item in workspace_items[:8]:
+            kind = str(item.get("kind") or "").strip()
+            status = str(item.get("status") or "planned").strip()
+            path = str(item.get("path") or item.get("title") or "").strip()
+            source_step_id = str(item.get("source_step_id") or "").strip()
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), Mapping) else {}
+            pattern = str(metadata.get("pattern") or "").strip()
+            parts = [part for part in (kind, status, path, source_step_id, pattern) if part]
+            if parts:
+                rendered.append(" · ".join(parts))
+        if rendered:
+            lines.append(f"- workspace_items: {'; '.join(rendered)}")
     todos = [todo for todo in task_core.get("todos", []) if isinstance(todo, Mapping)]
     if todos:
         rendered = []
