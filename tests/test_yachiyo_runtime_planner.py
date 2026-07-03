@@ -5187,6 +5187,10 @@ def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> 
         "运行 ls 看一下当前目录",
         allowed_tools=["terminal.run", "workspace.list", "artifact.write"],
     )
+    command_with_followup = RuntimePlanner().decision(
+        "打开终端运行 pwd 并把结果告诉我",
+        allowed_tools=["app.open", "desktop.list_apps", "terminal.run"],
+    )
 
     assert decision.selected_intent.kind == "code_task"
     assert decision.selected_intent.title == "Terminal Command"
@@ -5212,6 +5216,14 @@ def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> 
         assert _step_by_id(extra_decision, "run-terminal-command").tool_name == (
             "terminal.run"
         )
+    assert command_with_followup.selected_intent.kind == "code_task"
+    assert command_with_followup.selected_intent.inputs == {
+        "terminal_command_hint": {"command": "pwd"}
+    }
+    assert _step_by_id(
+        command_with_followup,
+        "run-terminal-command",
+    ).input_preview == {"command": "pwd"}
     assert planner_direct_tool_requests(
         "run npm test in terminal",
         ["terminal.run"],
@@ -5229,6 +5241,24 @@ def test_runtime_planner_routes_explicit_terminal_command_to_approval_plan() -> 
             "protocol": "json_fallback",
             "tool": "terminal.run",
             "input": {"command": "ls"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_terminal_command",
+        }
+    ]
+    assert planner_tool_requests("打开终端运行 pwd 并把结果告诉我", ["terminal.run"]) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "terminal.run",
+            "input": {"command": "pwd"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_terminal_command",
+        }
+    ]
+    assert planner_direct_tool_requests("run npm test and summarize failures", ["terminal.run"]) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "terminal.run",
+            "input": {"command": "npm test"},
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_terminal_command",
         }

@@ -41,6 +41,14 @@ def terminal_command_hint(text: str) -> dict[str, str]:
 def _clean_terminal_command(value: str) -> str:
     command = str(value or "").strip()
     command = re.split(
+        r"\s*(?:并|然后|再|之后|随后|并且)\s*(?:把|将)?\s*"
+        r"(?:命令)?(?:结果|输出|返回值)?\s*"
+        r"(?:告诉|展示|显示|打印|总结|概括|解释|说明|汇报|发给|给我看).*$",
+        command,
+        maxsplit=1,
+        flags=re.IGNORECASE,
+    )[0].strip()
+    command = re.split(
         r"\s+(?:看一下|看下|看看|查看|检查|列出|显示|确认)(?:一下|下)?"
         r"(?:当前目录|当前文件夹|当前路径|当前工作区|结果|输出)?$",
         command,
@@ -48,7 +56,8 @@ def _clean_terminal_command(value: str) -> str:
         flags=re.IGNORECASE,
     )[0].strip()
     command = re.split(
-        r"\s+(?:and|then|to)\s+(?:show|see|check|list|print|display)\b.*$",
+        r"\s+(?:and|then|to)\s+"
+        r"(?:show|see|check|list|print|display|tell|summari[sz]e|explain|report|describe)\b.*$",
         command,
         maxsplit=1,
         flags=re.IGNORECASE,
