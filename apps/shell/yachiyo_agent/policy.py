@@ -679,18 +679,36 @@ DEGRADED_DESKTOP_TOOL_PERMISSION_FALLBACKS: dict[str, tuple[str, ...]] = {
     "system.brightness": ("accessibility",),
 }
 
+_GROUP_POLICY_LEGACY_MEDIA_COMPAT_TOOLS = frozenset(
+    {
+        "media.apple_music_play",
+        "media.apple_music_status",
+        "media.apple_music_open_and_play",
+        "media.apple_music_control",
+    }
+)
+
+
+def _group_policy_default_tools(capability_id: str) -> tuple[str, ...]:
+    return tuple(
+        tool
+        for tool in DESKTOP_CAPABILITY_TOOLS.get(capability_id, ())
+        if tool not in _GROUP_POLICY_LEGACY_MEDIA_COMPAT_TOOLS
+    )
+
+
 GROUP_TOOL_POLICY_PRESETS: dict[str, tuple[str, ...]] = {
-    "desktop_execution": DESKTOP_CAPABILITY_TOOLS["desktop_execution"],
-    "desktop": DESKTOP_CAPABILITY_TOOLS["desktop_execution"],
-    "daily_desktop": DESKTOP_CAPABILITY_TOOLS["desktop_execution"],
-    "desktop_low_medium": DESKTOP_CAPABILITY_TOOLS["desktop_execution"],
+    "desktop_execution": _group_policy_default_tools("desktop_execution"),
+    "desktop": _group_policy_default_tools("desktop_execution"),
+    "daily_desktop": _group_policy_default_tools("desktop_execution"),
+    "desktop_low_medium": _group_policy_default_tools("desktop_execution"),
     "screen_capture": DESKTOP_CAPABILITY_TOOLS["screen_capture"],
     "screen": DESKTOP_CAPABILITY_TOOLS["screen_capture"],
     "active_window": DESKTOP_CAPABILITY_TOOLS["active_window"],
     "app_control": DESKTOP_CAPABILITY_TOOLS["app_control"],
     "app": DESKTOP_CAPABILITY_TOOLS["app_control"],
-    "media_control": DESKTOP_CAPABILITY_TOOLS["media_control"],
-    "media": DESKTOP_CAPABILITY_TOOLS["media_control"],
+    "media_control": _group_policy_default_tools("media_control"),
+    "media": _group_policy_default_tools("media_control"),
     "foreground_activation": DESKTOP_CAPABILITY_TOOLS["foreground_activation"],
     "focus": DESKTOP_CAPABILITY_TOOLS["foreground_activation"],
     "foreground_input": DESKTOP_CAPABILITY_TOOLS["foreground_input"],

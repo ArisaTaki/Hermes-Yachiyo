@@ -8,6 +8,7 @@ from typing import Any
 
 from apps.shell.yachiyo_agent.legacy_groups import chat_group_snapshot, chat_group_snapshots
 from apps.shell.yachiyo_agent.legacy_ports import LegacyStudioPort
+from apps.shell.yachiyo_agent.policy import group_tool_policy_for_id
 
 
 def test_legacy_studio_port_persists_groups_in_existing_chat_store(monkeypatch) -> None:
@@ -189,8 +190,10 @@ def test_legacy_group_run_inherits_builtin_desktop_policy_for_member_runs(
     assert "desktop.running_apps" in allowed_tools
     assert "desktop.windows" in allowed_tools
     assert "app.status" in allowed_tools
-    assert "media.apple_music_play" in allowed_tools
-    assert "media.apple_music_control" in allowed_tools
+    assert "media.music_app_open_and_play" in allowed_tools
+    assert "media.music_app_control" in allowed_tools
+    assert "media.apple_music_play" not in allowed_tools
+    assert "media.apple_music_control" not in allowed_tools
     assert "desktop.reveal_path" in allowed_tools
     assert "desktop.safe_type_text" in allowed_tools
     assert "desktop.safe_click" in allowed_tools
@@ -226,6 +229,15 @@ def test_legacy_group_run_inherits_builtin_desktop_policy_for_member_runs(
     assert runtime.private_agents["agent-reviewer"]["tool_policy"]["allowed_tools"] == [
         "workspace.read",
     ]
+
+
+def test_group_media_policy_defaults_to_generic_music_app_tools() -> None:
+    allowed_tools = group_tool_policy_for_id("media_control")["allowed_tools"]
+
+    assert "media.music_app_open_and_play" in allowed_tools
+    assert "media.music_app_control" in allowed_tools
+    assert "media.apple_music_play" not in allowed_tools
+    assert "media.apple_music_control" not in allowed_tools
 
 
 def test_legacy_group_run_keeps_unknown_group_policy_id_as_metadata_only(
