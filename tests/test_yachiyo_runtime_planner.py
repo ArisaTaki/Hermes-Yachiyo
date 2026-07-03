@@ -1396,10 +1396,12 @@ def test_runtime_planner_handles_natural_data_analysis_contexts() -> None:
     assert latest_local_data.selected_intent.kind == "data_analysis"
     assert latest_local_data.selected_intent.inputs["data_source_scope_hint"] == "data"
     assert latest_local_data.selected_intent.inputs["data_source_kind"] == "text_table"
+    assert latest_local_data.selected_intent.inputs["data_source_selection_hint"] == "latest"
     assert _step_by_id(latest_local_data, "inspect-data-source").input_preview == {
         "path": "data",
         "pattern": "*.{csv,tsv,xls,xlsx,json,jsonl,txt,md,markdown}",
         "file_type": "text_table",
+        "selection": "latest",
     }
 
     assert current_page_price_table.selected_intent.kind == "data_analysis"
@@ -4792,16 +4794,20 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
     }
     assert recent_download_data_decision.selected_intent.kind == "data_analysis"
     assert recent_download_data_decision.selected_intent.inputs["data_source_scope_hint"] == "Downloads"
+    assert recent_download_data_decision.selected_intent.inputs["data_source_selection_hint"] == "latest"
     assert _step_by_id(recent_download_data_decision, "inspect-data-source").input_preview == {
-        "path": "Downloads"
+        "path": "Downloads",
+        "selection": "latest",
     }
     assert recent_download_csv_decision.selected_intent.kind == "data_analysis"
     assert recent_download_csv_decision.selected_intent.inputs["data_source_kind"] == "csv"
     assert recent_download_csv_decision.selected_intent.inputs["data_source_scope_hint"] == "Downloads"
+    assert recent_download_csv_decision.selected_intent.inputs["data_source_selection_hint"] == "latest"
     assert _step_by_id(recent_download_csv_decision, "inspect-data-source").input_preview == {
         "path": "Downloads",
         "pattern": "*.csv",
         "file_type": "csv",
+        "selection": "latest",
     }
     assert named_download_file_decision.selected_intent.kind == "data_analysis"
     assert named_download_file_decision.selected_intent.inputs["data_source_hint"] == "Downloads/sales.csv"
@@ -4856,9 +4862,11 @@ def test_runtime_planner_discovers_data_source_scope_for_analysis() -> None:
     }
     assert bare_csv_decision.selected_intent.kind == "data_analysis"
     assert bare_csv_decision.selected_intent.inputs["data_source_kind"] == "csv"
+    assert bare_csv_decision.selected_intent.inputs["data_source_selection_hint"] == "latest"
     assert _step_by_id(bare_csv_decision, "inspect-data-source").input_preview == {
         "pattern": "*.csv",
         "file_type": "csv",
+        "selection": "latest",
     }
     assert xlsx_scoped_decision.selected_intent.inputs["data_source_kind"] == "xlsx"
     assert xlsx_scoped_decision.selected_intent.inputs["data_source_scope_hint"] == "Desktop"
@@ -4972,6 +4980,7 @@ def test_runtime_planner_routes_data_analysis_output_to_clipboard() -> None:
     assert scoped.selected_intent.inputs == {
         "data_source_hint": "",
         "data_source_kind": "csv",
+        "data_source_selection_hint": "latest",
         "data_source_scope_hint": "Downloads",
         "output_target_hint": "clipboard",
     }
@@ -10308,6 +10317,10 @@ def test_runtime_planner_routes_local_file_report_to_file_terminal_artifact_plan
         "查找 Downloads 里的 PDF 并生成摘要报告",
         allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
     )
+    latest_pdf = RuntimePlanner().decision(
+        "把 Downloads 里最新的 pdf 转成 markdown 摘要",
+        allowed_tools=["workspace.list", "workspace.read", "terminal.run", "artifact.write"],
+    )
 
     assert decision.selected_intent.kind == "report_generation"
     assert decision.selected_intent.inputs == {
@@ -10342,6 +10355,29 @@ def test_runtime_planner_routes_local_file_report_to_file_terminal_artifact_plan
         "body_source": "local_file_context",
     }
     assert decision.plan.tool_plan.artifacts_expected == ["report.md"]
+
+    assert latest_pdf.selected_intent.kind == "report_generation"
+    assert latest_pdf.selected_intent.inputs == {
+        "file_context_hint": {
+            "location": "Downloads",
+            "file_type": "pdf",
+            "pattern": "*.pdf",
+            "selection": "latest",
+        }
+    }
+    assert _step_by_id(latest_pdf, "inspect-report-file-scope").input_preview == {
+        "path": "Downloads",
+        "file_type": "pdf",
+        "pattern": "*.pdf",
+        "selection": "latest",
+    }
+    assert _step_by_id(latest_pdf, "extract-report-file-context").input_preview == {
+        "path": "Downloads",
+        "file_type": "pdf",
+        "pattern": "*.pdf",
+        "selection": "latest",
+        "operation": "extract_text_for_report",
+    }
 
 
 def test_runtime_planner_routes_document_analysis_report_to_report_generation() -> None:
@@ -20878,6 +20914,7 @@ def test_runtime_planner_routes_file_context_communication_without_app_alias() -
             "path": "Downloads",
             "file_type": "pdf",
             "pattern": "*.pdf",
+            "selection": "latest",
         },
         "content_transform_hint": "summary",
         "direct_message_hint": {
@@ -20903,6 +20940,7 @@ def test_runtime_planner_routes_file_context_communication_without_app_alias() -
         "path": "Downloads",
         "pattern": "*.pdf",
         "file_type": "pdf",
+        "selection": "latest",
     }
     assert _step_by_id(recent_pdf_decision, "draft-communication-message").input_preview == {
         "body_source": "file",

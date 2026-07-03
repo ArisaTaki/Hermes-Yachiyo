@@ -196,6 +196,7 @@ class TaskIntentRouter:
         source_scope = data_source_scope_hint(text, metadata)
         named_source = named_data_source_hint(text)
         source_name = str(named_source.get("name") or "").strip()
+        source_selection = _file_open_selection_hint(text)
         context_source = _task_context_source_hint(text)
         current_page_context = _looks_like_current_page_data_context_source(text)
         visible_context = _looks_like_visible_data_context_source(text)
@@ -269,6 +270,8 @@ class TaskIntentRouter:
             inputs["analysis_result_open_app_hint"] = result_open_app_hint
         if source_name and not source_hint:
             inputs["data_source_name_hint"] = source_name
+        if source_selection and not source_hint:
+            inputs["data_source_selection_hint"] = source_selection
         if context_source:
             inputs["context_source"] = context_source
         if app_search_result_source:
@@ -2743,6 +2746,7 @@ class RuntimePlanner:
                     source_hint or source_scope,
                     source_kind,
                     str(intent.inputs.get("data_source_name_hint") or ""),
+                    str(intent.inputs.get("data_source_selection_hint") or ""),
                 ),
                 reason="Find and inspect the dataset before analysis.",
                 fallback_tools=["desktop.open_path", "browser.current_page"],
@@ -5906,6 +5910,7 @@ class RuntimePlanner:
             location = str(file_context.get("location") or "").strip()
             file_type = str(file_context.get("file_type") or "").strip()
             pattern = str(file_context.get("pattern") or "").strip()
+            selection = str(file_context.get("selection") or "").strip()
             if target_path and _report_text_file_path(target_path):
                 artifact_path = _artifact_output_path(
                     intent.user_goal,
@@ -5964,6 +5969,7 @@ class RuntimePlanner:
                     "path": location,
                     "file_type": file_type,
                     "pattern": pattern,
+                    "selection": selection,
                 }.items()
                 if value
             }
@@ -6003,6 +6009,7 @@ class RuntimePlanner:
                             "path": location,
                             "file_type": file_type,
                             "pattern": pattern,
+                            "selection": selection,
                             "operation": "extract_text_for_report",
                         }.items()
                         if value
@@ -7389,6 +7396,7 @@ def _context_source_steps(
             return []
         pattern = str(file_context.get("pattern") or "").strip()
         file_type = str(file_context.get("file_type") or "").strip()
+        selection = str(file_context.get("selection") or "").strip()
         tool_candidates = (
             (
                 "workspace.list",
@@ -7415,6 +7423,8 @@ def _context_source_steps(
                 input_preview["pattern"] = pattern
             if file_type:
                 input_preview["file_type"] = file_type
+            if selection:
+                input_preview["selection"] = selection
         return [
             _step(
                 intent,
@@ -7970,6 +7980,7 @@ def _data_source_inspect_input_preview(
     path: str,
     source_kind: str,
     source_name: str = "",
+    selection_hint: str = "",
 ) -> dict[str, str]:
     preview: dict[str, str] = {}
     clean_path = str(path or "").strip()
@@ -7985,6 +7996,8 @@ def _data_source_inspect_input_preview(
         preview["pattern"] = pattern
         if str(source_kind or "").strip() != "unknown":
             preview["file_type"] = str(source_kind or "").strip()
+    if selection_hint:
+        preview["selection"] = selection_hint
     return preview
 
 
@@ -12669,6 +12682,7 @@ def _discovered_data_analysis_input_preview(
     source_kind = str(intent.inputs.get("data_source_kind") or "").strip()
     source_scope = str(intent.inputs.get("data_source_scope_hint") or "").strip()
     source_name = str(intent.inputs.get("data_source_name_hint") or "").strip()
+    selection_hint = str(intent.inputs.get("data_source_selection_hint") or "").strip()
     pattern = _data_source_pattern_hint(source_kind)
     clean_name = _clean_data_source_name_pattern(source_name)
     if clean_name and pattern:
@@ -12687,6 +12701,8 @@ def _discovered_data_analysis_input_preview(
         preview["source_scope"] = source_scope
     if pattern:
         preview["pattern"] = pattern
+    if selection_hint:
+        preview["selection"] = selection_hint
     if len(artifact_paths) > 1:
         preview["artifact_paths"] = artifact_paths
     return preview
@@ -14427,7 +14443,11 @@ def _communication_file_context_hint(
         source_scope = str(data_source_scope_hint(text, metadata) or "").strip()
         source_kind = data_source_kind_hint(source_hint, text)
         path = _scoped_data_source_path(source_hint, source_scope)
-        hint = _data_source_inspect_input_preview(path, source_kind)
+        hint = _data_source_inspect_input_preview(
+            path,
+            source_kind,
+            selection_hint=_file_open_selection_hint(text),
+        )
         if source_kind:
             hint.setdefault("source_kind", source_kind)
         return hint
@@ -14438,7 +14458,7 @@ def _communication_file_context_hint(
     location = str(file_context.get("location") or "").strip()
     if location:
         hint["path"] = location
-    for key in ("file_type", "pattern"):
+    for key in ("file_type", "pattern", "selection"):
         value = str(file_context.get(key) or "").strip()
         if value:
             hint[key] = value
@@ -16168,6 +16188,9 @@ def _report_file_context_hint(text: str) -> dict[str, str]:
     name_pattern = _report_named_file_pattern(text)
     if name_pattern and not _looks_like_specific_data_source_path(location):
         hint["pattern"] = name_pattern
+    selection = _file_open_selection_hint(text)
+    if selection:
+        hint["selection"] = selection
     return hint
 
 
@@ -25399,7 +25422,7 @@ def _file_open_selection_hint(text: str) -> str:
     if re.search(r"(?:最大|最大的|largest|biggest)", value, flags=re.IGNORECASE):
         return "largest"
     if re.search(
-        r"(?:最新|最近|最后|上一个|recent|latest|newest|last|most\s+recent)",
+        r"(?:最新|最近|最后|上一个|刚刚|刚才|刚下载|新下载|recent|latest|newest|last|most\s+recent)",
         value,
         flags=re.IGNORECASE,
     ):
