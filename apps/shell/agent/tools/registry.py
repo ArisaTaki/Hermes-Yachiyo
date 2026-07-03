@@ -130,6 +130,30 @@ def _terminal_run(broker: Any, payload: dict[str, Any], approved: bool) -> dict[
     )
 
 
+def _python_run_command(payload: dict[str, Any]) -> str:
+    command = str(payload.get("command") or "").strip()
+    if command:
+        return command
+    code = str(payload.get("code") or "")
+    marker = "__YACHIYO_PYTHON_RUN__"
+    while marker in code:
+        marker = f"{marker}_END"
+    return f"python - <<'{marker}'\n{code}\n{marker}"
+
+
+def _python_run(broker: Any, payload: dict[str, Any], approved: bool) -> dict[str, Any]:
+    command = _python_run_command(payload)
+    result = broker.terminal_run(
+        command,
+        approved=approved,
+        timeout_seconds=int(payload.get("timeout_seconds") or 30),
+        shell=True,
+    )
+    if isinstance(result, dict):
+        return {**result, "tool": "python.run", "alias_for": "terminal.run"}
+    return result
+
+
 def _artifact_write(broker: Any, payload: dict[str, Any], _approved: bool) -> dict[str, Any]:
     return broker.artifact_write(
         str(payload.get("path") or ""),
@@ -943,6 +967,7 @@ TOOL_DISPATCH_REGISTRY: dict[str, ToolDispatchHandler] = {
     "file.read": _workspace_read,
     "file.organize": _file_organize,
     "terminal.run": _terminal_run,
+    "python.run": _python_run,
     "artifact.write": _artifact_write,
     "data.analyze": _data_analyze,
     "screen.capture": _screen_capture,

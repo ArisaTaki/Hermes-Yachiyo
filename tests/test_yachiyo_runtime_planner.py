@@ -23919,8 +23919,8 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
             "file.read",
         ],
         "file.workspace_write": ["workspace.write_patch"],
-        "terminal.execution": ["terminal.run"],
-        "data.analysis": ["data.analyze", "terminal.run"],
+        "terminal.execution": ["terminal.run", "python.run"],
+        "data.analysis": ["data.analyze", "terminal.run", "python.run"],
         "artifact.write": ["artifact.write"],
         "browser.research": ["browser.open_url", "browser.current_page", "browser.click"],
         "desktop.app_discovery": [

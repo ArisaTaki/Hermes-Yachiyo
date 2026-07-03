@@ -592,6 +592,9 @@ def _fallback_notes_for_tool(tool_name: str) -> list[str]:
         "terminal.run": [
             "Always requires approval before command execution.",
         ],
+        "python.run": [
+            "Always requires approval; executes Python through the terminal.run path in the Agent workdir.",
+        ],
         "workspace.write_patch": [
             "Always requires approval before modifying workspace files.",
         ],

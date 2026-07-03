@@ -1186,7 +1186,7 @@ class RuntimeToolCallExecutor:
             raise
         budget.claim_tool_call(
             tool_name,
-            terminal_execution=tool_name == "terminal.run" and approved,
+            terminal_execution=tool_name in {"terminal.run", "python.run"} and approved,
         )
         self._tool_call_events.started(
             run_id,

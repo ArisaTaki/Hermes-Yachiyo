@@ -1173,6 +1173,24 @@ def test_runtime_tool_call_executor_records_non_workspace_failures() -> None:
     assert [call[0] for call in events.calls] == ["requested", "started", "failed"]
 
 
+def test_runtime_tool_call_executor_counts_approved_python_run_as_terminal_execution() -> None:
+    executor = _executor(tool_call_events=FakeToolCallEvents())
+    budget = FakeBudget()
+
+    result = executor.execute(
+        {"tool": "python.run", "input": {"code": "print('ok')"}},
+        ["python.run"],
+        FakeBroker({"ok": True}),
+        [],
+        approved=True,
+        run_id="run-1",
+        budget=budget,
+    )
+
+    assert result["ok"] is True
+    assert budget.claims == [("python.run", True)]
+
+
 def test_runtime_tool_call_executor_projects_trace_and_artifact_events() -> None:
     events = FakeToolCallEvents()
     run_events: list[tuple[str, str, dict[str, Any]]] = []

@@ -143,6 +143,59 @@ def test_tool_broker_call_passes_fs_find_files_filters(tmp_path) -> None:
     }
 
 
+def test_tool_dispatch_registry_routes_python_run_through_terminal(tmp_path, monkeypatch) -> None:
+    broker = _broker(tmp_path)
+    calls = []
+
+    monkeypatch.setattr(
+        broker,
+        "terminal_run",
+        lambda command, *, approved=False, timeout_seconds=30, shell=False: calls.append(
+            (command, approved, timeout_seconds, shell)
+        )
+        or {"ok": bool(approved), "approval_required": not approved},
+    )
+
+    approval = dispatch_tool_call(
+        broker,
+        "python.run",
+        {"code": "print('ok')", "timeout_seconds": 45},
+    )
+    result = dispatch_tool_call(
+        broker,
+        "python.run",
+        {"code": "print('ok')", "timeout_seconds": 45},
+        approved=True,
+    )
+
+    assert approval == {
+        "ok": False,
+        "approval_required": True,
+        "tool": "python.run",
+        "alias_for": "terminal.run",
+    }
+    assert result == {
+        "ok": True,
+        "approval_required": False,
+        "tool": "python.run",
+        "alias_for": "terminal.run",
+    }
+    assert calls == [
+        (
+            "python - <<'__YACHIYO_PYTHON_RUN__'\nprint('ok')\n__YACHIYO_PYTHON_RUN__",
+            False,
+            45,
+            True,
+        ),
+        (
+            "python - <<'__YACHIYO_PYTHON_RUN__'\nprint('ok')\n__YACHIYO_PYTHON_RUN__",
+            True,
+            45,
+            True,
+        ),
+    ]
+
+
 def test_tool_broker_call_workspace_list_metadata_is_opt_in(tmp_path) -> None:
     (tmp_path / "recent.pdf").write_text("pdf", encoding="utf-8")
     broker = _broker(tmp_path)
@@ -911,6 +964,21 @@ def test_fs_portable_alias_schemas_validate_payloads() -> None:
         ToolDescriptorRegistry.validate_payload("fs.read_file", {})
 
 
+def test_python_run_schema_requires_command_or_code() -> None:
+    ToolDescriptorRegistry.validate_payload("python.run", {"code": "print('ok')"})
+    ToolDescriptorRegistry.validate_payload(
+        "python.run",
+        {"command": "python scripts/analyze.py", "timeout_seconds": 60},
+    )
+
+    with pytest.raises(AgentRuntimeError, match="python.run 参数 command 或 code 必须提供一个"):
+        ToolDescriptorRegistry.validate_payload("python.run", {})
+    with pytest.raises(AgentRuntimeError, match="python.run 参数 code 必须是字符串"):
+        ToolDescriptorRegistry.validate_payload("python.run", {"code": 123})
+    with pytest.raises(AgentRuntimeError, match="python.run 参数 timeout_seconds 必须是 1-120 的整数"):
+        ToolDescriptorRegistry.validate_payload("python.run", {"code": "print('ok')", "timeout_seconds": 0})
+
+
 def test_desktop_permissions_schema_accepts_empty_payload() -> None:
     ToolDescriptorRegistry.validate_payload("desktop.permissions", {})
 
@@ -1673,6 +1741,19 @@ def test_compile_tool_policy_accepts_desktop_tools_with_foreground_approval() ->
         "desktop.type_text": True,
         "terminal.run": True,
     }
+
+
+def test_compile_tool_policy_marks_python_run_as_approval_required() -> None:
+    policy = RuntimePolicyCompiler().compile_tool_policy(
+        "custom",
+        {"allowed_tools": ["python.run", "workspace.read"]},
+    )
+
+    assert policy == {
+        "allowed_tools": ["python.run", "workspace.read"],
+        "approval_required": {"python.run": True},
+    }
+    assert "python.run" in HIGH_RISK_AGENT_TOOLS
 
 
 def test_desktop_click_schema_accepts_coordinates_and_rejects_bad_payload() -> None:
