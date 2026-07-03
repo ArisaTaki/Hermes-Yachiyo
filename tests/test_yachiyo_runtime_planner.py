@@ -3434,16 +3434,24 @@ def test_runtime_planner_routes_data_analysis_report_to_app_write_target() -> No
         "terminal.execution",
         "artifact.write",
         "desktop.app_control",
+        "desktop.ui_operation",
     ]
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "analyze-data-file",
         "prepare-analysis-target-app",
+        "insert-analysis-into-target-app",
+        "verify-analysis-target-app",
     ]
     assert _step_by_id(decision, "prepare-analysis-target-app").input_preview == {
         "app_name": "Obsidian",
+        "action": "new_note",
+    }
+    assert _step_by_id(decision, "insert-analysis-into-target-app").input_preview == {
+        "app_name": "Obsidian",
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
         "target_action": "app_paste",
         "container_action": "new_note",
-        "body_source": "model_generated_content",
     }
 
     requests = planner_tool_requests(prompt, allowed_tools)
@@ -3525,6 +3533,8 @@ def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -
         "analyze-data-file",
         "discover-analysis-target-app",
         "prepare-analysis-discovered-target-app",
+        "insert-analysis-into-target-app",
+        "verify-analysis-target-app",
     ]
     assert _step_by_id(decision, "analyze-data-file").input_preview == {
         "path": "sales.csv",
@@ -3549,8 +3559,18 @@ def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -
         "selection_source": "desktop.list_apps",
         "query": "markdown",
         "target_action": "app_paste",
-        "body_source": "model_generated_content",
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
         "action": "new_document",
+    }
+    assert _step_by_id(
+        decision,
+        "insert-analysis-into-target-app",
+    ).input_preview == {
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
+        "target_action": "app_paste",
+        "container_action": "new_document",
     }
 
     requests = planner_tool_requests(prompt, allowed_tools)
@@ -3617,6 +3637,8 @@ def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -
         "analyze-data-file",
         "discover-analysis-target-app",
         "prepare-analysis-discovered-target-app",
+        "insert-analysis-into-target-app",
+        "verify-analysis-target-app",
     ]
     assert _step_by_id(document_decision, "discover-analysis-target-app").input_preview == {
         "query": "document",
@@ -3630,7 +3652,8 @@ def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -
         "selection_source": "desktop.list_apps",
         "query": "document",
         "target_action": "app_paste",
-        "body_source": "model_generated_content",
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
         "action": "new_document",
     }
     assert planner_tool_requests(document_prompt, allowed_tools) == [
@@ -3745,6 +3768,8 @@ def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -
         "analyze-data-context",
         "discover-analysis-target-app",
         "prepare-analysis-discovered-target-app",
+        "insert-analysis-into-target-app",
+        "verify-analysis-target-app",
     ]
     assert planner_tool_requests(visible_prompt, allowed_tools) == [
         {
@@ -22830,10 +22855,9 @@ def test_runtime_planner_cleans_desktop_app_surface_qualifiers() -> None:
     }
     assert _step_by_id(numbers_target, "prepare-analysis-target-app").input_preview == {
         "app_name": "Numbers",
-        "target_action": "app_paste",
-        "container_action": "new_document",
-        "body_source": "model_generated_content",
+        "action": "new_document",
     }
+    assert _step_by_id(numbers_target, "prepare-analysis-target-app").status == "unavailable"
 
 
 def test_planner_direct_tool_requests_keeps_unknown_app_discover_and_verify_steps() -> None:
@@ -29576,6 +29600,75 @@ def test_runtime_execution_envelope_can_project_full_report_app_write_plan() -> 
     assert (
         projected_requests[3]["workspace_id"]
         == decision.plan.task_core.workspace.workspace_id
+    )
+
+
+def test_runtime_execution_envelope_can_project_full_analysis_app_write_plan() -> None:
+    allowed_tools = [
+        "desktop.ui_elements",
+        "data.analyze",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+    ]
+    decision = RuntimePlanner().decision(
+        "分析当前窗口里的表格并把报告写进 Notion 新页面",
+        allowed_tools=allowed_tools,
+    )
+
+    default_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+    full_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert default_envelope is not None
+    assert full_envelope is not None
+    assert [request.tool_name for request in default_envelope.requests] == [
+        "desktop.ui_elements"
+    ]
+    assert [request.tool_name for request in full_envelope.requests] == [
+        "desktop.ui_elements",
+        "data.analyze",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert [request.step_id for request in full_envelope.requests] == [
+        "read-data-context",
+        "analyze-data-context",
+        "prepare-analysis-target-app",
+        "insert-analysis-into-target-app",
+        "verify-analysis-target-app",
+    ]
+    assert full_envelope.requests[1].input["artifact_path"] == "analysis-report.md"
+    assert full_envelope.requests[2].input == {
+        "app_name": "Notion",
+        "action": "new_document",
+    }
+    assert full_envelope.requests[3].input == {
+        "body_source": "analysis_artifact",
+        "artifact_path": "analysis-report.md",
+        "target_action": "app_paste",
+        "container_action": "new_document",
+    }
+    assert full_envelope.requests[3].approval_required is True
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        full_envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    assert [request["tool"] for request in projected_requests] == [
+        "desktop.ui_elements",
+        "data.analyze",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    assert projected_requests[3]["task_todo"]["step_id"] == (
+        "insert-analysis-into-target-app"
     )
 
 

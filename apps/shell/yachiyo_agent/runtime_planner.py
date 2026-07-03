@@ -312,6 +312,7 @@ class TaskIntentRouter:
             )
         if app_write_target:
             preferred_capabilities.append("desktop.app_control")
+            preferred_capabilities.append("desktop.ui_operation")
             if app_write_target_capability:
                 preferred_capabilities.extend(
                     ["desktop.app_discovery", "desktop.ui_operation"]
@@ -354,6 +355,11 @@ class TaskIntentRouter:
                         else []
                     ),
                     *(["desktop.app_control"] if app_write_target else []),
+                    *(
+                        ["desktop.ui_operation"]
+                        if app_write_target and not app_write_target_capability
+                        else []
+                    ),
                 ]
             ),
             preferred_capabilities=preferred_capabilities,
@@ -6385,6 +6391,20 @@ def _step(
     )
 
 
+def _step_is_unavailable(
+    steps: Iterable[ToolPlanStepSnapshot],
+    step_id: str,
+) -> bool:
+    target = str(step_id or "").strip()
+    if not target:
+        return True
+    return any(
+        str(step.step_id or "").strip() == target
+        and str(step.status or "").strip() == "unavailable"
+        for step in steps
+    )
+
+
 def _file_open_with_app_discovery_steps(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
@@ -10305,12 +10325,14 @@ def _append_data_analysis_followup_steps(
         intent,
         allowed,
         followup_steps,
+        artifact_paths=paths,
         depends_on=depends_on,
     )
     followup_steps = _append_analysis_discovered_app_write_target_steps(
         intent,
         allowed,
         followup_steps,
+        artifact_paths=paths,
         depends_on=depends_on,
     )
     return _append_analysis_communication_steps(
@@ -10388,48 +10410,109 @@ def _append_analysis_app_write_target_steps(
     allowed: set[str] | None,
     steps: list[ToolPlanStepSnapshot],
     *,
+    artifact_paths: Iterable[str],
     depends_on: str,
 ) -> list[ToolPlanStepSnapshot]:
     target_app = str(intent.inputs.get("target_app_hint") or "").strip()
     target_action = str(intent.inputs.get("target_action_hint") or "").strip()
     if not target_app or target_action != "app_paste":
         return steps
+    artifact_path = _analysis_communication_artifact_path(
+        intent.user_goal,
+        artifact_paths,
+    )
+    if not artifact_path:
+        return steps
     container_action = str(
         intent.inputs.get("target_container_action_hint") or ""
     ).strip()
-    return [
-        *steps,
+    next_steps = [*steps]
+    previous_step = depends_on
+    if container_action:
+        previous_step = _append_app_scoped_safe_shortcut_steps(
+            next_steps,
+            intent,
+            step_id="prepare-analysis-target-app",
+            title="Prepare target app",
+            app_name=target_app,
+            mode="open",
+            shortcut_action=container_action,
+            allowed=allowed,
+            depends_on=[previous_step],
+            prepare_reason=(
+                "Open or focus the requested app after the analysis artifact is available."
+            ),
+            shortcut_reason=(
+                "Create the requested target container before inserting the analysis report."
+            ),
+            fallback_reason=(
+                "Open or focus the requested app and create the target container with one safe app-scoped action."
+            ),
+        )
+    else:
+        next_steps.append(
+            _step(
+                intent,
+                "prepare-analysis-target-app",
+                "Prepare target app",
+                "desktop.app_control",
+                _first_allowed(("app.focus", "app.open"), allowed),
+                input_preview={
+                    "app_name": target_app,
+                    "target_action": target_action,
+                    "body_source": "analysis_artifact",
+                    "artifact_path": artifact_path,
+                },
+                depends_on=[previous_step],
+                reason=(
+                    "Open or focus the requested app after the local analysis artifact is available."
+                ),
+            )
+        )
+        previous_step = "prepare-analysis-target-app"
+
+    if _step_is_unavailable(next_steps, previous_step):
+        return next_steps
+
+    insert_tool, insert_input = _safe_type_text_operation_preview(
+        app_name=target_app,
+        mode="focus",
+        allowed=allowed,
+        payload={
+            "body_source": "analysis_artifact",
+            "artifact_path": artifact_path,
+            "target_action": target_action,
+            **(
+                {"container_action": container_action}
+                if container_action
+                else {}
+            ),
+        },
+    )
+    next_steps.append(
         _step(
             intent,
-            "prepare-analysis-target-app",
-            "Prepare target app",
-            "desktop.app_control",
-            _first_allowed(
-                (
-                    "app.focus",
-                    "app.open",
-                    "app.focus_and_safe_shortcut",
-                    "app.open_and_safe_shortcut",
-                ),
-                allowed,
-            ),
-            input_preview={
-                "app_name": target_app,
-                "target_action": target_action,
-                **(
-                    {"container_action": container_action}
-                    if container_action
-                    else {}
-                ),
-                "body_source": "model_generated_content",
-            },
-            depends_on=[depends_on],
+            "insert-analysis-into-target-app",
+            "Insert analysis into target app",
+            "desktop.ui_operation",
+            insert_tool,
+            input_preview=insert_input,
+            risk_level=_desktop_operation_risk_level(insert_tool),
+            approval_required=_desktop_operation_approval_required(insert_tool),
+            depends_on=[previous_step],
+            action="type",
             reason=(
-                "After the local data analysis artifact is available, focus the requested app "
-                "before inserting the model-generated report."
+                "Insert the generated analysis artifact into the prepared foreground target app."
             ),
-        ),
-    ]
+        )
+    )
+    return _append_analysis_target_app_verification_step(
+        intent,
+        allowed,
+        next_steps,
+        app_name=target_app,
+        depends_on="insert-analysis-into-target-app",
+    )
 
 
 def _append_analysis_discovered_app_write_target_steps(
@@ -10437,11 +10520,18 @@ def _append_analysis_discovered_app_write_target_steps(
     allowed: set[str] | None,
     steps: list[ToolPlanStepSnapshot],
     *,
+    artifact_paths: Iterable[str],
     depends_on: str,
 ) -> list[ToolPlanStepSnapshot]:
     target_capability = intent.inputs.get("target_app_capability_hint")
     target_action = str(intent.inputs.get("target_action_hint") or "").strip()
     if not isinstance(target_capability, Mapping) or target_action != "app_paste":
+        return steps
+    artifact_path = _analysis_communication_artifact_path(
+        intent.user_goal,
+        artifact_paths,
+    )
+    if not artifact_path:
         return steps
     query = str(target_capability.get("query") or "").strip()
     if not query:
@@ -10461,7 +10551,8 @@ def _append_analysis_discovered_app_write_target_steps(
         "selection_source": "desktop.list_apps",
         "query": query,
         "target_action": target_action,
-        "body_source": "model_generated_content",
+        "body_source": "analysis_artifact",
+        "artifact_path": artifact_path,
         **_selected_discovered_app_operation_preview(
             selected_app_tool,
             safe_shortcut=safe_shortcut,
@@ -10477,7 +10568,7 @@ def _append_analysis_discovered_app_write_target_steps(
         if selected_app_tool == "app.open_and_safe_shortcut"
         else "open_app"
     )
-    return [
+    next_steps = [
         *steps,
         _step(
             intent,
@@ -10504,6 +10595,93 @@ def _append_analysis_discovered_app_write_target_steps(
             reason=(
                 "After desktop.list_apps returns candidates, the model selects the best "
                 "matching app and prepares it for the generated analysis report."
+            ),
+        ),
+    ]
+    insert_tool, insert_input = _safe_type_text_operation_preview(
+        app_name="<selected app from desktop.list_apps>",
+        mode="focus",
+        allowed=allowed,
+        payload={
+            "body_source": "analysis_artifact",
+            "artifact_path": artifact_path,
+            "target_action": target_action,
+            **(
+                {"container_action": container_action}
+                if container_action
+                else {}
+            ),
+        },
+    )
+    insert_input = _with_selected_app_payload(
+        insert_tool,
+        insert_input,
+        {"selection_source": "desktop.list_apps", "query": query},
+    )
+    next_steps.append(
+        _step(
+            intent,
+            "insert-analysis-into-target-app",
+            "Insert analysis into target app",
+            "desktop.ui_operation",
+            insert_tool,
+            input_preview=insert_input,
+            risk_level=_desktop_operation_risk_level(insert_tool),
+            approval_required=_desktop_operation_approval_required(insert_tool),
+            depends_on=["prepare-analysis-discovered-target-app"],
+            action="type",
+            reason=(
+                "Insert the generated analysis artifact into the selected foreground target app."
+            ),
+        )
+    )
+    return _append_analysis_target_app_verification_step(
+        intent,
+        allowed,
+        next_steps,
+        app_name="<selected app from desktop.list_apps>",
+        depends_on="insert-analysis-into-target-app",
+        selected_app_payload={"selection_source": "desktop.list_apps", "query": query},
+    )
+
+
+def _append_analysis_target_app_verification_step(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    app_name: str,
+    depends_on: str,
+    selected_app_payload: Mapping[str, Any] | None = None,
+) -> list[ToolPlanStepSnapshot]:
+    verify_tool = _first_allowed(
+        ("desktop.ui_elements", "desktop.read_ui", "screen.capture"),
+        allowed,
+    )
+    if not verify_tool:
+        return steps
+    if verify_tool == "screen.capture":
+        input_preview = {"reason": "Verify the analysis was inserted into the target app."}
+    else:
+        input_preview = {
+            "app_name": app_name,
+            **dict(selected_app_payload or {}),
+            "role_filter": "text",
+            "limit": 80,
+        }
+    return [
+        *steps,
+        _step(
+            intent,
+            "verify-analysis-target-app",
+            "Verify analysis target app",
+            "desktop.ui_operation",
+            verify_tool,
+            input_preview=input_preview,
+            depends_on=[depends_on],
+            action="read_ui" if verify_tool != "screen.capture" else "capture_screen",
+            reason=(
+                "Inspect the target app after insertion so the runtime can replan if the analysis is not visible."
             ),
         ),
     ]
@@ -10835,6 +11013,9 @@ def _append_report_app_write_target_steps(
             )
         )
         previous_step = "prepare-report-target-app"
+
+    if _step_is_unavailable(next_steps, previous_step):
+        return next_steps
 
     insert_tool, insert_input = _safe_type_text_operation_preview(
         app_name=target_app,
