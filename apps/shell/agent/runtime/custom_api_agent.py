@@ -10327,7 +10327,14 @@ def _observed_type_submit_request(
         source="runtime_planner",
         planning_reason=planning_reason,
     )
-    if _observed_submit_action_risk_level(submit_action) == "high":
+    if (
+        _observed_submit_action_risk_level(
+            submit_action,
+            target,
+            planning_reason=planning_reason,
+        )
+        == "high"
+    ):
         request["approval_required"] = True
         request["risk_level"] = "high"
     return _with_observed_action_metadata(
@@ -10340,9 +10347,21 @@ def _observed_type_submit_request(
     )
 
 
-def _observed_submit_action_risk_level(action: str) -> str:
+def _observed_submit_action_risk_level(
+    action: str,
+    target: Mapping[str, Any] | None = None,
+    *,
+    planning_reason: str = "",
+) -> str:
     normalized = str(action or "").strip().lower().replace("-", "_")
-    if normalized in {"confirm", "search", "select", "choose", "continue"}:
+    target_kind = str((target or {}).get("kind") or "").strip()
+    if normalized == "confirm" and (
+        target_kind == "communication_message"
+        or str(planning_reason or "").strip()
+        == "planner_followup_communication_observed_compose"
+    ):
+        return "low"
+    if normalized in {"search", "select", "choose", "continue"}:
         return "low"
     return "high"
 

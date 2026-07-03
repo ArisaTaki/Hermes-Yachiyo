@@ -1918,7 +1918,7 @@ def _has_unavailable_required_desktop_step(decision: Any) -> bool:
                 continue
             if (
                 has_actionable_discovery
-                and _unavailable_desktop_ui_payload_is_model_resolvable(payload)
+                and _unavailable_desktop_ui_step_is_model_resolvable(step, payload)
             ):
                 continue
             return True
@@ -1969,13 +1969,29 @@ def _unavailable_desktop_ui_step_can_continue_with_model(
         return False
     input_preview = getattr(step, "input_preview", None)
     payload = input_preview if isinstance(input_preview, Mapping) else {}
-    if not _unavailable_desktop_ui_payload_is_model_resolvable(payload):
+    if not _unavailable_desktop_ui_step_is_model_resolvable(step, payload):
         return False
     return _has_later_available_desktop_observation_step(steps, index)
 
 
+def _unavailable_desktop_ui_step_is_model_resolvable(
+    step: Any,
+    payload: Mapping[str, Any],
+) -> bool:
+    if _unavailable_desktop_ui_payload_is_model_resolvable(payload):
+        return True
+    step_id = str(getattr(step, "step_id", "") or "").strip()
+    if step_id in {
+        "hotkey-selected-discovered-app",
+        "key-selected-discovered-app",
+        "save-discovered-app-creative-result",
+    }:
+        return bool(str(payload.get("key") or "").strip())
+    return False
+
+
 def _unavailable_desktop_ui_payload_is_model_resolvable(payload: Mapping[str, Any]) -> bool:
-    for key in ("target", "role_filter", "action"):
+    for key in ("target", "role_filter", "action", "text", "direction"):
         if str(payload.get(key) or "").strip():
             return True
     if payload.get("click_count") is not None:

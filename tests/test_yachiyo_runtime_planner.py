@@ -1423,8 +1423,19 @@ def test_runtime_planner_handles_natural_data_analysis_contexts() -> None:
         step.step_id != "open-spreadsheet-app"
         for step in no_excel_ui.plan.tool_plan.steps
     )
-    assert _step_by_id(no_excel_ui, "write-analysis-artifact").input_preview == {
-        "paths": ["analysis-report.md", "analysis-chart.png"],
+    assert [step.step_id for step in no_excel_ui.plan.tool_plan.steps] == [
+        "inspect-data-source",
+        "analyze-discovered-data",
+    ]
+    assert _step_by_id(no_excel_ui, "analyze-discovered-data").input_preview == {
+        **_data_analysis_preview(
+            "<selected file from workspace.list>",
+            "xlsx",
+            requested_outputs=["chart"],
+            artifact_paths=["analysis-report.md", "analysis-chart.png"],
+        ),
+        "selection_source": "workspace.list",
+        "pattern": "*.xlsx",
     }
 
 
@@ -10504,7 +10515,7 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "query": "image",
         "action": "new_document",
     }
-    assert unknown_image_requests[2]["continue_to_model"] is True
+    assert "continue_to_model" not in unknown_image_requests[2]
     assert project_task.selected_intent.inputs["app_name_hint"] == ""
     assert project_task.selected_intent.inputs["app_capability_hint"] == {
         "query": "project management",
@@ -26392,8 +26403,18 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
             "input": {"pattern": "*budget*.xlsx", "file_type": "xlsx"},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_data_source",
-            "continue_to_model": True,
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                **_data_analysis_preview("<selected file from workspace.list>", "xlsx"),
+                "selection_source": "workspace.list",
+                "pattern": "*budget*.xlsx",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+        },
     ]
     assert named_scoped_csv_requests == [
         {
@@ -26402,8 +26423,19 @@ def test_planner_tool_requests_discovers_data_source_for_analysis() -> None:
             "input": {"path": "Downloads", "pattern": "*sales*.csv", "file_type": "csv"},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_data_source",
-            "continue_to_model": True,
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                **_data_analysis_preview("<selected file from workspace.list>", "csv"),
+                "selection_source": "workspace.list",
+                "source_scope": "Downloads",
+                "pattern": "*sales*.csv",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+        },
     ]
     assert english_named_xlsx_requests == named_xlsx_requests
     assert xlsx_requests == [
@@ -29661,6 +29693,74 @@ def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> 
             "planning_reason": "planner_desktop_operation",
         },
     ]
+    assert legacy_calls == []
+
+
+def test_planner_first_owns_generic_discovered_app_launch_without_creative_action() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    selection = planner_first_direct_tool_selection(
+        "打开一个能画图的应用",
+        ["desktop.list_apps", "app.open", "desktop.active_window", "desktop.ui_elements"],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert [request["tool"] for request in selection.requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert selection.requests[1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "image",
+    }
+    assert not any(request.get("continue_to_model") for request in selection.requests)
+    assert [
+        step.step_id
+        for step in selection.decision.plan.tool_plan.steps
+    ] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "verify-desktop-result",
+    ]
+    assert legacy_calls == []
+
+
+def test_planner_first_owns_generic_discovered_app_creative_action_over_legacy() -> None:
+    legacy_calls: list[dict[str, Any]] = []
+
+    selection = planner_first_direct_tool_selection(
+        "打开一个能画图的应用，画一个圆并保存到桌面",
+        [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.ui_elements",
+            "desktop.click_ui_element",
+            "desktop.shortcut",
+            "screen.capture",
+        ],
+        legacy_tool_requests=_recording_legacy_requests(legacy_calls),
+    )
+
+    assert selection.selected_source == "runtime_planner"
+    assert selection.event_payload["legacy_request_count"] == 0
+    assert [request["tool"] for request in selection.requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "desktop.click_ui_element",
+        "desktop.shortcut",
+        "desktop.ui_elements",
+    ]
+    assert selection.requests[0]["continue_to_model"] is True
+    assert selection.requests[1]["input"] == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "image",
+    }
     assert legacy_calls == []
 
 

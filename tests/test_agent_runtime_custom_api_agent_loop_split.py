@@ -23276,13 +23276,13 @@ def test_custom_api_agent_loop_auto_dispatches_creative_pending_steps(
             "desktop.ui_elements",
             "desktop.click_ui_element",
             "desktop.shortcut",
-            "screen.capture",
+            "desktop.ui_elements",
         ]
     ]
     assert [request["tool"] for request in tool_runs[0][2:]] == [
         "desktop.click_ui_element",
         "desktop.shortcut",
-        "screen.capture",
+        "desktop.ui_elements",
     ]
     assert tool_runs[0][2]["input"] == {
         "target": "circle ellipse shape",
@@ -23493,7 +23493,7 @@ def test_custom_api_agent_loop_auto_dispatches_generic_discovered_app_pending_st
             "app.open",
             "desktop.ui_elements",
             "desktop.click_ui_element",
-            "screen.capture",
+            "desktop.ui_elements",
         ]
     ]
     assert tool_runs[0][0]["input"] == {
@@ -23510,7 +23510,7 @@ def test_custom_api_agent_loop_auto_dispatches_generic_discovered_app_pending_st
     }
     assert [request["tool"] for request in tool_runs[0][2:]] == [
         "desktop.click_ui_element",
-        "screen.capture",
+        "desktop.ui_elements",
     ]
     assert model_calls == []
     assert not any(event["event"] == "agent.model.followup_context" for event in timeline)
@@ -24352,7 +24352,7 @@ def test_runtime_planner_discovered_app_types_into_named_form_field() -> None:
         "app.open",
         "desktop.ui_elements",
         "desktop.type_into_ui_element",
-        "screen.capture",
+        "desktop.ui_elements",
     ]
     assert execution_requests[3]["input"] == {
         "target": "收件人",

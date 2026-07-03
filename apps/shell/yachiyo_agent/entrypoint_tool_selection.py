@@ -541,6 +541,7 @@ _RUNTIME_PLANNER_DESKTOP_OPERATION_TOOLS = frozenset(
         "desktop.safe_click",
         "desktop.safe_type_text",
         "desktop.hotkey",
+        "desktop.shortcut",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
         "desktop.open_path_with_app",
@@ -581,6 +582,7 @@ def _runtime_planner_desktop_operation_owns_selection(
         return False
     if any(bool(request.get("continue_to_model")) for request in requests) and not (
         _runtime_planner_desktop_followup_is_verification_only(requests)
+        or _runtime_planner_desktop_followup_is_discovered_app_resolution_only(requests)
     ):
         return False
     reasons = _request_planning_reasons(requests)
@@ -603,6 +605,35 @@ def _runtime_planner_desktop_followup_is_verification_only(
     return bool(followup_tools) and followup_tools <= _RUNTIME_PLANNER_DESKTOP_VERIFICATION_TOOLS
 
 
+def _runtime_planner_desktop_followup_is_discovered_app_resolution_only(
+    requests: list[dict[str, Any]],
+) -> bool:
+    followup_requests = [
+        request
+        for request in requests
+        if isinstance(request, dict) and bool(request.get("continue_to_model"))
+    ]
+    if not followup_requests:
+        return False
+    if any(str(request.get("tool") or "").strip() != "desktop.list_apps" for request in followup_requests):
+        return False
+    discovery_queries = {
+        str(
+            (request.get("input") if isinstance(request.get("input"), Mapping) else {}).get("query")
+            or ""
+        ).strip()
+        for request in followup_requests
+    }
+    discovery_queries.discard("")
+    if not discovery_queries:
+        return False
+    return any(
+        _runtime_request_uses_discovered_app_resolution(request, discovery_queries)
+        for request in requests
+        if isinstance(request, dict)
+    )
+
+
 def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> bool:
     tool_name = str(request.get("tool") or "").strip()
     request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
@@ -610,7 +641,7 @@ def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> boo
         "desktop.open_app",
         "desktop.focus_app",
     }
-    if app_scoped_tool and not _runtime_app_name_is_specific(str(request_input.get("app_name") or "")):
+    if app_scoped_tool and not _runtime_app_input_is_complete(request_input):
         return False
     if tool_name in {
         *_RUNTIME_PLANNER_APP_OPEN_FOCUS_TOOLS,
@@ -625,12 +656,7 @@ def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> boo
         path = str(request_input.get("path") or request_input.get("target_path") or "").strip()
         if not path or (path.startswith("<") and path.endswith(">")):
             return False
-        app_name = str(request_input.get("app_name") or "").strip()
-        return _runtime_app_name_is_specific(app_name) or (
-            app_name == "<selected app from desktop.list_apps>"
-            and str(request_input.get("selection_source") or "").strip() == "desktop.list_apps"
-            and bool(str(request_input.get("query") or "").strip())
-        )
+        return _runtime_app_input_is_complete(request_input)
     if tool_name in {
         "desktop.hide_app",
         "desktop.show_all_apps",
@@ -662,7 +688,7 @@ def _runtime_planner_desktop_request_is_complete(request: dict[str, Any]) -> boo
         return _has_numeric_input(request_input, "x") and _has_numeric_input(request_input, "y")
     if tool_name.endswith("safe_type_text") or tool_name == "desktop.safe_type_text":
         return _has_text_input(request_input, "text")
-    if tool_name.endswith("hotkey") or tool_name == "desktop.hotkey":
+    if tool_name.endswith("hotkey") or tool_name in {"desktop.hotkey", "desktop.shortcut"}:
         return _has_text_input(request_input, "key")
     if tool_name.endswith("click_ui_element") or tool_name == "desktop.click_ui_element":
         return _has_text_input(request_input, "target")
@@ -684,6 +710,35 @@ def _has_numeric_input(payload: Mapping[str, Any], key: str) -> bool:
     if isinstance(value, bool):
         return False
     return isinstance(value, (int, float))
+
+
+def _runtime_app_input_is_complete(payload: Mapping[str, Any]) -> bool:
+    if _runtime_selected_app_resolution_input(payload):
+        return True
+    return _runtime_app_name_is_specific(str(payload.get("app_name") or ""))
+
+
+def _runtime_selected_app_resolution_input(payload: Mapping[str, Any]) -> bool:
+    return bool(
+        str(payload.get("app_name") or "").strip() == "<selected app from desktop.list_apps>"
+        and str(
+            payload.get("selection_source") or payload.get("app_selection_source") or ""
+        ).strip()
+        == "desktop.list_apps"
+        and str(payload.get("query") or "").strip()
+    )
+
+
+def _runtime_request_uses_discovered_app_resolution(
+    request: Mapping[str, Any],
+    discovery_queries: set[str],
+) -> bool:
+    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    query = str(request_input.get("query") or "").strip()
+    return bool(
+        query in discovery_queries
+        and _runtime_selected_app_resolution_input(request_input)
+    )
 
 
 def _runtime_app_name_is_specific(app_name: str) -> bool:

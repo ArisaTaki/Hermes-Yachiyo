@@ -3450,7 +3450,7 @@ class RuntimePlanner:
                         ],
                         action=selected_app_action,
                         reason=(
-                            "After desktop.list_apps returns candidates, the model selects the "
+                            "After desktop.list_apps returns candidates, runtime resolves the "
                             "best matching app before opening it or continuing with the target file."
                         ),
                     )
@@ -3591,7 +3591,7 @@ class RuntimePlanner:
                         depends_on=[desktop_discovery_step_id],
                         action=selected_app_action,
                         reason=(
-                            "After desktop.list_apps returns candidates, the model selects the "
+                            "After desktop.list_apps returns candidates, runtime resolves the "
                             "best matching app before continuing with the in-app operation."
                         ),
                     )
@@ -6761,7 +6761,7 @@ def _file_open_with_app_discovery_steps(
             depends_on=["discover-file-open-target"],
             action="open_path_with_app",
             reason=(
-                "After workspace.list returns candidates, the model selects the matching "
+                "After workspace.list returns candidates, runtime resolves the matching "
                 "file path and opens it with the requested app."
             ),
         ),
@@ -8471,7 +8471,7 @@ def _direct_communication_discovered_app_steps(
             depends_on=["discover_apps-desktop-state"],
             action="safe_shortcut",
             reason=(
-                "After desktop.list_apps returns candidates, the model selects the best "
+                "After desktop.list_apps returns candidates, runtime resolves the best "
                 "matching communication app before opening compose."
             ),
         )
@@ -8890,7 +8890,7 @@ def _append_selected_discovered_foreground_compose_steps(
             depends_on=[depends_on],
             action="type",
             reason=(
-                "After the model selects and opens a capable app, type only the explicit "
+                "After runtime resolves and opens a capable app, type only the explicit "
                 "text requested by the user."
             ),
         )
@@ -8916,7 +8916,7 @@ def _append_selected_discovered_foreground_compose_steps(
                 risk_level="high",
                 approval_required=True,
                 reason=(
-                    "Submit only after the model-selected app has been opened and the "
+                    "Submit only after the runtime-resolved selected app has been opened and the "
                     "explicit user text has been typed."
                 ),
             )
@@ -8967,7 +8967,23 @@ def _append_selected_discovered_app_observation_step(
     depends_on: str,
 ) -> None:
     inputs = intent.inputs if isinstance(intent.inputs, Mapping) else {}
-    if not discovered_app_open_needs_model_followup(inputs, intent.user_goal):
+    ui_inspection = (
+        inputs.get("ui_inspection_hint")
+        if isinstance(inputs.get("ui_inspection_hint"), Mapping)
+        else {}
+    )
+    needs_followup_observation = discovered_app_open_needs_model_followup(
+        inputs,
+        intent.user_goal,
+    )
+    if ui_inspection and not needs_followup_observation:
+        if (
+            isinstance(inputs.get("safe_shortcut_hint"), Mapping)
+            or str(inputs.get("foreground_compose_text_hint") or "").strip()
+            or isinstance(inputs.get("creative_canvas_hint"), Mapping)
+        ):
+            return
+    if not ui_inspection and not needs_followup_observation:
         return
     pending_action = discovered_app_pending_user_action(intent.user_goal)
     if (
@@ -8984,13 +9000,18 @@ def _append_selected_discovered_app_observation_step(
         ("desktop.ui_elements", "desktop.read_ui", "screen.capture"),
         allowed,
     )
-    input_preview = (
-        {"limit": 80}
-        if tool_name in {"desktop.ui_elements", "desktop.read_ui"}
-        else {"reason": "continue requested discovered app action"}
-        if tool_name == "screen.capture"
-        else {}
-    )
+    if tool_name in {"desktop.ui_elements", "desktop.read_ui"}:
+        input_preview = {
+            key: ui_inspection[key]
+            for key in ("role_filter", "limit")
+            if key in ui_inspection and ui_inspection[key] not in (None, "")
+        } or {"limit": 80}
+    else:
+        input_preview = (
+            {"reason": "continue requested discovered app action"}
+            if tool_name == "screen.capture"
+            else {}
+        )
     steps.append(
         _step(
             intent,
@@ -9002,7 +9023,7 @@ def _append_selected_discovered_app_observation_step(
             depends_on=[depends_on],
             action=_desktop_discovery_action(tool_name),
             reason=(
-                "Observe the model-selected app after opening it because the user asked "
+                "Observe the runtime-resolved selected app after opening it because the user asked "
                 "for a follow-up desktop action, not just app launch."
             ),
         )
@@ -9220,7 +9241,7 @@ def _append_selected_discovered_generic_action_steps(
                     risk_level="medium",
                     approval_required=True,
                     reason=(
-                        "After opening and observing the model-selected app, execute the "
+                        "After opening and observing the runtime-resolved selected app, execute the "
                         "requested safe foreground shortcut without adding app-specific rules."
                     ),
                 )
@@ -9256,7 +9277,7 @@ def _append_selected_discovered_generic_action_steps(
                     risk_level="medium",
                     approval_required=True,
                     reason=(
-                        "Use the parsed foreground hotkey against the model-selected app "
+                        "Use the parsed foreground hotkey against the runtime-resolved selected app "
                         "after discovery and UI observation."
                     ),
                 )
@@ -9291,7 +9312,7 @@ def _append_selected_discovered_generic_action_steps(
                     risk_level="medium",
                     approval_required=True,
                     reason=(
-                        "Press the requested safe key in the model-selected app through "
+                        "Press the requested safe key in the runtime-resolved selected app through "
                         "the generic foreground operation path."
                     ),
                 )
@@ -9326,7 +9347,7 @@ def _append_selected_discovered_generic_action_steps(
                     risk_level="medium",
                     approval_required=True,
                     reason=(
-                        "Scroll the model-selected app after discovery instead of falling "
+                        "Scroll the runtime-resolved selected app after discovery instead of falling "
                         "back to app-specific rules."
                     ),
                 )
@@ -9361,7 +9382,7 @@ def _append_selected_discovered_generic_action_steps(
                     risk_level="medium",
                     approval_required=True,
                     reason=(
-                        "Type the requested text into a visible UI element of the model-selected "
+                        "Type the requested text into a visible UI element of the runtime-resolved selected "
                         "app using the generic UI operation path."
                     ),
                 )
@@ -9579,7 +9600,10 @@ def _append_selected_discovered_creative_action_steps(
             ),
             allowed,
         )
-        if shortcut_tool:
+        if shortcut_tool and not _selected_discovered_open_step_already_runs_shortcut(
+            steps,
+            dict(safe_shortcut),
+        ):
             steps.append(
                 _step(
                     intent,
@@ -9597,7 +9621,7 @@ def _append_selected_discovered_creative_action_steps(
                     risk_level="medium",
                     approval_required=True,
                     reason=(
-                        "Create the requested document or canvas in the model-selected app "
+                        "Create the requested document or canvas in the runtime-resolved selected app "
                         "before typing foreground content."
                     ),
                 )
@@ -9665,7 +9689,7 @@ def _append_selected_discovered_creative_action_steps(
                 risk_level="medium",
                 approval_required=True,
                 reason=(
-                    "After observing the model-selected drawing app, choose the visible "
+                    "After observing the runtime-resolved selected drawing app, choose the visible "
                     "circle or ellipse shape control using the app UI rather than a hardcoded app rule."
                 ),
             )
@@ -9733,6 +9757,28 @@ def _looks_like_discovered_creative_action(
     intent: TaskIntentSnapshot,
     pending_action: str,
 ) -> bool:
+    clean_pending_action = str(pending_action or "").strip()
+    safe_shortcut = (
+        intent.inputs.get("safe_shortcut_hint")
+        if isinstance(intent.inputs.get("safe_shortcut_hint"), Mapping)
+        else {}
+    )
+    compose_text = str(intent.inputs.get("foreground_compose_text_hint") or "").strip()
+    creative_canvas = (
+        intent.inputs.get("creative_canvas_hint")
+        if isinstance(intent.inputs.get("creative_canvas_hint"), Mapping)
+        else {}
+    )
+    if not str(pending_action or "").strip() and not safe_shortcut and not compose_text and not creative_canvas:
+        return False
+    if (
+        clean_pending_action
+        and not safe_shortcut
+        and not compose_text
+        and not creative_canvas
+        and _looks_like_discovered_app_capability_phrase(clean_pending_action)
+    ):
+        return False
     text = f"{intent.user_goal} {pending_action}".strip()
     if not text:
         return False
@@ -9747,6 +9793,8 @@ def _looks_like_discovered_creative_action(
         if isinstance(app_capability, Mapping)
         else ""
     )
+    safe_shortcut_action = str((safe_shortcut or {}).get("action") or "").strip()
+    action_text = clean_pending_action or compose_text or safe_shortcut_action
     creative_app = bool(
         re.search(
             r"(?:画图|绘图|图片|图像|image|drawing|paint|design)",
@@ -9755,13 +9803,29 @@ def _looks_like_discovered_creative_action(
         )
     )
     creative_action = bool(
+        creative_canvas
+        or compose_text
+        or safe_shortcut_action in {"new_document", "new_note"}
+        or
         re.search(
             r"(?:画|绘制|设计|draw|paint|sketch|design)",
-            text,
+            action_text,
             flags=re.IGNORECASE,
         )
     )
     return creative_app and creative_action
+
+
+def _looks_like_discovered_app_capability_phrase(value: str) -> bool:
+    return bool(
+        re.fullmatch(
+            r"(?:一个|一款|一类|某个|某款|some|an?|any)?\s*"
+            r"(?:能|可以|可用于|用于|用来|capable\s+of|for)?\s*"
+            r".{0,40}?(?:应用(?:程序)?|app|application|软件|工具|程序|编辑器)",
+            str(value or "").strip(),
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _creative_action_requests_circle(text: str) -> bool:
@@ -9835,7 +9899,7 @@ def _append_selected_discovered_communication_compose_steps(
             depends_on=[depends_on],
             action="read_ui",
             reason=(
-                "After the model selects and opens a capable communication app, inspect "
+                "After runtime resolves and opens a capable communication app, inspect "
                 "the compose UI before filling recipient or message fields."
             ),
         )
@@ -11168,7 +11232,7 @@ def _append_analysis_discovered_app_write_target_steps(
             depends_on=["discover-analysis-target-app"],
             action=selected_app_action,
             reason=(
-                "After desktop.list_apps returns candidates, the model selects the best "
+                "After desktop.list_apps returns candidates, runtime resolves the best "
                 "matching app and prepares it for the generated analysis report."
             ),
         ),
@@ -11721,7 +11785,7 @@ def _append_report_discovered_app_write_target_steps(
             depends_on=["discover-report-target-app"],
             action=selected_app_action,
             reason=(
-                "After desktop.list_apps returns candidates, the model selects the best "
+                "After desktop.list_apps returns candidates, runtime resolves the best "
                 "matching app and prepares it for the generated report."
             ),
         ),
