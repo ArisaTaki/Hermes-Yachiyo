@@ -152,6 +152,24 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
         output_kinds=("desktop_state",),
     ),
     CapabilityDefinition(
+        capability_id="desktop.visual_verification",
+        title="Verify Desktop Result",
+        category="desktop",
+        description="Observe the foreground app, UI, window, or screen after a desktop action.",
+        tools=(
+            "desktop.verify",
+            "desktop.active_window",
+            "desktop.list_windows",
+            "desktop.windows",
+            "desktop.read_ui",
+            "desktop.ui_elements",
+            "screen.capture",
+        ),
+        discovery_actions=("verify", "read_active_window", "read_ui", "capture"),
+        execution_actions=("verify_result",),
+        output_kinds=("desktop_state", "screenshot", "verification"),
+    ),
+    CapabilityDefinition(
         capability_id="file.workspace_read",
         title="Read Workspace Files",
         category="file",
@@ -478,6 +496,15 @@ _DYNAMIC_CAPABILITY_TOOL_PREFIXES: dict[str, tuple[str, ...]] = {
         "desktop.search_",
         "desktop.submit_",
     ),
+    "desktop.visual_verification": (
+        "screen.",
+        "desktop.verify",
+        "desktop.active_",
+        "desktop.list_",
+        "desktop.read_",
+        "desktop.window_",
+        "desktop.ui_",
+    ),
     "media.playback": ("media.",),
     "system.control": ("system.",),
     "information.capture": ("notes.",),
@@ -553,6 +580,15 @@ _DYNAMIC_CAPABILITY_TOOL_NAMES: dict[str, tuple[str, ...]] = {
     "memory.runtime": ("memory.add", "memory.replace", "memory.remove"),
     "skill.runtime": ("skill.read",),
     "system.control": ("system.volume", "system.brightness", "system.display_sleep", "system.screen_saver_start"),
+    "desktop.visual_verification": (
+        "desktop.verify",
+        "desktop.active_window",
+        "desktop.list_windows",
+        "desktop.windows",
+        "desktop.read_ui",
+        "desktop.ui_elements",
+        "screen.capture",
+    ),
 }
 
 

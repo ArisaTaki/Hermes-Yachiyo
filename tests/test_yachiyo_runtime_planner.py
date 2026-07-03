@@ -10982,6 +10982,9 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "desktop.visual_verification",
     ]
     assert markdown.plan.tool_plan.missing_capabilities == []
+    verification_capability = _capability_by_id(markdown, "desktop.visual_verification")
+    assert "desktop.ui_elements" in verification_capability.available_tools
+    assert "screen.capture" not in verification_capability.available_tools
     assert _step_by_id(markdown, "discover_apps-desktop-state").input_preview == {
         "query": "markdown",
         "limit": 20,
@@ -23933,6 +23936,12 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
             "desktop.type_text",
             "desktop.click",
         ],
+        "desktop.visual_verification": [
+            "desktop.verify",
+            "desktop.active_window",
+            "desktop.ui_elements",
+            "screen.capture",
+        ],
         "clipboard.read_write": ["clipboard.read", "clipboard.write"],
         "schedule.reminder": [
             "reminders.create",
@@ -23961,6 +23970,8 @@ def test_capability_registry_covers_desktop_agent_capability_domains() -> None:
     assert {"click", "type", "shortcut", "verify"} <= set(
         by_id["desktop.ui_operation"].execution_actions
     )
+    assert "verify_result" in by_id["desktop.visual_verification"].execution_actions
+    assert "capture" in by_id["desktop.visual_verification"].discovery_actions
     assert by_id["memory.runtime"].category == "memory"
     assert by_id["memory.runtime"].approval_required is True
     assert "retrieve_memory" in by_id["memory.runtime"].discovery_actions
