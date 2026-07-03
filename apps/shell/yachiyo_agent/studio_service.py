@@ -59,7 +59,10 @@ from .groups import agent_group_snapshot_from_payload, group_run_snapshot_from_p
 from .memories import memory_snapshot_from_payload
 from .ports import StudioPort
 from .planner_projection import runtime_planner_metadata
-from .runtime_execution import runtime_execution_envelope_from_decision
+from .runtime_execution import (
+    runtime_execution_envelope_from_decision,
+    runtime_execution_envelope_payload_with_request_context,
+)
 from .runtime_planner import RuntimePlanner
 from .runtime_progress import ProgressEventScope, public_runtime_tool_result_events
 from .start_event_enrichment import (
@@ -264,6 +267,10 @@ class AgentStudioService:
                 target_name=target_name,
             )
             if target.target_id:
+                metadata_context = _planner_orchestration_execution_context(
+                    kind="workflow",
+                    target_id=target.target_id,
+                )
                 workflow_payload = {
                     "workflow_id": target.target_id,
                     "objective": objective,
@@ -276,12 +283,19 @@ class AgentStudioService:
                         target_id=target.target_id,
                         target_name=target.target_name,
                         allowed_tools=allowed_tools,
+                        execution_context=metadata_context,
                     ),
                 }
+                raw_workflow_run = self._studio_port.start_workflow_run(workflow_payload)
                 workflow_run = workflow_run_snapshot_from_payload(
                     start_payload_with_planner_decision_events(
-                        self._studio_port.start_workflow_run(workflow_payload),
+                        raw_workflow_run,
                         decision,
+                        event_context=_planner_orchestration_execution_context(
+                            kind="workflow",
+                            target_id=target.target_id,
+                            run_payload=raw_workflow_run,
+                        ),
                     )
                 )
                 return PlannerOrchestrationStartSnapshot(
@@ -317,6 +331,10 @@ class AgentStudioService:
                 target_name=target_name,
             )
             if target.target_id:
+                metadata_context = _planner_orchestration_execution_context(
+                    kind="group_run",
+                    target_id=target.target_id,
+                )
                 group_payload = {
                     "group_id": target.target_id,
                     "objective": objective,
@@ -329,12 +347,19 @@ class AgentStudioService:
                         target_id=target.target_id,
                         target_name=target.target_name,
                         allowed_tools=allowed_tools,
+                        execution_context=metadata_context,
                     ),
                 }
+                raw_group_run = self._studio_port.start_group_run(group_payload)
                 group_run = group_run_snapshot_from_payload(
                     start_payload_with_planner_decision_events(
-                        self._studio_port.start_group_run(group_payload),
+                        raw_group_run,
                         decision,
+                        event_context=_planner_orchestration_execution_context(
+                            kind="group_run",
+                            target_id=target.target_id,
+                            run_payload=raw_group_run,
+                        ),
                     )
                 )
                 return PlannerOrchestrationStartSnapshot(
@@ -1096,11 +1121,20 @@ def _planner_orchestration_run_metadata(
     target_id: str,
     target_name: str,
     allowed_tools: Iterable[str] | None = None,
+    execution_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = {
         **dict(metadata),
         **runtime_planner_metadata(decision, allowed_tools=allowed_tools),
     }
+    envelope = payload.get("yachiyo_execution_envelope")
+    if isinstance(envelope, Mapping):
+        payload["yachiyo_execution_envelope"] = (
+            runtime_execution_envelope_payload_with_request_context(
+                envelope,
+                execution_context,
+            )
+        )
     payload.setdefault("source", "agent_studio_planner_orchestration")
     payload.update(
         {
@@ -1115,6 +1149,53 @@ def _planner_orchestration_run_metadata(
         }
     )
     return payload
+
+
+def _planner_orchestration_execution_context(
+    *,
+    kind: str,
+    target_id: str,
+    run_payload: Mapping[str, Any] | None = None,
+) -> dict[str, str]:
+    payload = run_payload if isinstance(run_payload, Mapping) else {}
+    if kind == "workflow":
+        context = {"workflow_id": str(target_id or "").strip()}
+        workflow_run_id = str(
+            payload.get("workflow_run_id") or payload.get("run_id") or ""
+        ).strip()
+        if workflow_run_id:
+            context["workflow_run_id"] = workflow_run_id
+        workflow_node_id = str(
+            payload.get("workflow_node_id") or payload.get("current_node_id") or ""
+        ).strip()
+        if workflow_node_id:
+            context["workflow_node_id"] = workflow_node_id
+        workflow_node_label = str(
+            payload.get("workflow_node_label") or payload.get("current_node_label") or ""
+        ).strip()
+        if workflow_node_label:
+            context["workflow_node_label"] = workflow_node_label
+        workflow_node_kind = str(payload.get("workflow_node_kind") or "").strip()
+        if workflow_node_kind:
+            context["workflow_node_kind"] = workflow_node_kind
+        return {key: value for key, value in context.items() if value}
+
+    if kind == "group_run":
+        context = {"group_id": str(target_id or "").strip()}
+        group_run_id = str(
+            payload.get("group_run_id")
+            or payload.get("run_group_id")
+            or payload.get("run_id")
+            or ""
+        ).strip()
+        if group_run_id:
+            context["group_run_id"] = group_run_id
+            context["run_group_id"] = str(
+                payload.get("run_group_id") or group_run_id
+            ).strip()
+        return {key: value for key, value in context.items() if value}
+
+    return {}
 
 
 def _planner_orchestration_handoff_snapshot(

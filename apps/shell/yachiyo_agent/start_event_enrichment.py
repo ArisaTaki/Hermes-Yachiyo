@@ -7,6 +7,7 @@ from typing import Any, Protocol
 
 from .contracts import PlannerDecisionSnapshot
 from .planner_projection import planner_run_event_payloads
+from .runtime_execution import runtime_execution_envelope_payload_with_request_context
 
 
 class StartPayloadPlanner(Protocol):
@@ -55,6 +56,8 @@ def start_payload_with_planner_events(
 def start_payload_with_planner_decision_events(
     raw_payload: Mapping[str, Any],
     decision: PlannerDecisionSnapshot | None,
+    *,
+    event_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload = dict(raw_payload)
     if decision is None or _payload_has_planner_events(payload):
@@ -64,6 +67,7 @@ def start_payload_with_planner_decision_events(
         decision,
         run_id=_started_run_id(payload),
         after_sequence=_max_event_sequence(payload),
+        event_context=event_context,
     )
     if not planner_events:
         return payload
@@ -132,6 +136,7 @@ def _planner_public_events_for_start_payload(
     *,
     run_id: str,
     after_sequence: int,
+    event_context: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     sequence = after_sequence + 1
@@ -139,13 +144,35 @@ def _planner_public_events_for_start_payload(
         event = {
             "event_type": event_type,
             "sequence": sequence,
-            "payload": payload,
+            "payload": _planner_payload_with_event_context(payload, event_context),
         }
         if run_id:
             event["run_id"] = run_id
         events.append(event)
         sequence += 1
     return events
+
+
+def _planner_payload_with_event_context(
+    payload: Mapping[str, Any],
+    context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    enriched = dict(payload)
+    if not isinstance(context, Mapping):
+        return enriched
+
+    for key, value in context.items():
+        if key == "runtime_execution_envelope":
+            continue
+        if value not in ("", None) and key not in enriched:
+            enriched[key] = value
+
+    envelope = payload.get("runtime_execution_envelope")
+    if isinstance(envelope, Mapping):
+        enriched["runtime_execution_envelope"] = (
+            runtime_execution_envelope_payload_with_request_context(envelope, context)
+        )
+    return enriched
 
 
 def _payload_has_planner_events(payload: Mapping[str, Any]) -> bool:

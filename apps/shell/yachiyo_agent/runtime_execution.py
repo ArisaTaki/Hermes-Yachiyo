@@ -83,6 +83,26 @@ def runtime_execution_envelope_payload(
     return envelope.model_dump(mode="json")
 
 
+def runtime_execution_envelope_payload_with_request_context(
+    envelope: Mapping[str, Any],
+    context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    payload = dict(envelope)
+    request_context = _execution_request_context(context)
+    if not request_context:
+        return payload
+
+    requests = payload.get("requests")
+    if isinstance(requests, list):
+        payload["requests"] = [
+            _execution_request_with_context(request, request_context)
+            if isinstance(request, Mapping)
+            else request
+            for request in requests
+        ]
+    return payload
+
+
 def _supports_full_plan_projection(decision: PlannerDecisionSnapshot) -> bool:
     return str(decision.selected_intent.kind or "").strip() in {
         "clipboard_operation",
@@ -170,6 +190,40 @@ def _request_needs_model_materialization(
             request_input.get("text") or ""
         ).strip()
     return False
+
+
+_EXECUTION_REQUEST_CONTEXT_KEYS = {
+    "workspace_id",
+    "group_run_id",
+    "run_group_id",
+    "group_id",
+    "workflow_run_id",
+    "workflow_id",
+    "workflow_node_id",
+    "workflow_node_label",
+    "workflow_node_kind",
+}
+
+
+def _execution_request_context(context: Mapping[str, Any] | None) -> dict[str, str]:
+    if not isinstance(context, Mapping):
+        return {}
+    return {
+        key: text
+        for key in _EXECUTION_REQUEST_CONTEXT_KEYS
+        if (text := _text(context.get(key)))
+    }
+
+
+def _execution_request_with_context(
+    request: Mapping[str, Any],
+    context: Mapping[str, str],
+) -> dict[str, Any]:
+    payload = dict(request)
+    for key, value in context.items():
+        if not _text(payload.get(key)):
+            payload[key] = value
+    return payload
 
 
 def runtime_execution_requests_from_metadata(

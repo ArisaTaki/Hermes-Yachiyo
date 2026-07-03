@@ -1110,6 +1110,8 @@ def test_agent_studio_service_starts_workflow_from_planner_orchestration() -> No
     assert metadata["yachiyo_intent_kind"] == "workflow_orchestration"
     assert metadata["yachiyo_execution_requests"] == ["workflow.run"]
     assert metadata["yachiyo_execution_envelope"]["intent_kind"] == "workflow_orchestration"
+    metadata_request = metadata["yachiyo_execution_envelope"]["requests"][0]
+    assert metadata_request["workflow_id"] == "workflow-1"
     planner_events = [
         event
         for event in started.workflow_run.events
@@ -1128,6 +1130,11 @@ def test_agent_studio_service_starts_workflow_from_planner_orchestration() -> No
         plan_event.payload["runtime_execution_envelope"]["requests"][0]["input"],
         dict,
     )
+    event_request = plan_event.payload["runtime_execution_envelope"]["requests"][0]
+    assert plan_event.payload["workflow_id"] == "workflow-1"
+    assert plan_event.payload["workflow_run_id"] == "workflow-run-1"
+    assert event_request["workflow_id"] == "workflow-1"
+    assert event_request["workflow_run_id"] == "workflow-run-1"
 
 
 def test_agent_studio_service_starts_group_run_from_planner_orchestration() -> None:
@@ -1173,6 +1180,8 @@ def test_agent_studio_service_starts_group_run_from_planner_orchestration() -> N
     assert metadata["yachiyo_intent_kind"] == "multi_agent"
     assert metadata["yachiyo_execution_requests"] == ["group.run"]
     assert metadata["yachiyo_execution_envelope"]["intent_kind"] == "multi_agent"
+    metadata_request = metadata["yachiyo_execution_envelope"]["requests"][0]
+    assert metadata_request["group_id"] == "group-1"
     planner_events = [
         event
         for event in started.group_run.events
@@ -1191,6 +1200,13 @@ def test_agent_studio_service_starts_group_run_from_planner_orchestration() -> N
         plan_event.payload["runtime_execution_envelope"]["requests"][0]["input"],
         dict,
     )
+    event_request = plan_event.payload["runtime_execution_envelope"]["requests"][0]
+    assert plan_event.payload["group_id"] == "group-1"
+    assert plan_event.payload["group_run_id"] == "group-run-1"
+    assert plan_event.payload["run_group_id"] == "group-run-1"
+    assert event_request["group_id"] == "group-1"
+    assert event_request["group_run_id"] == "group-run-1"
+    assert event_request["run_group_id"] == "group-run-1"
 
 
 def test_agent_studio_service_returns_structured_handoff_when_planner_target_missing() -> None:
