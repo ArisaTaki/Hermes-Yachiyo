@@ -104,6 +104,8 @@ def planner_execution_tool_requests(
 def runtime_execution_verified_tool_requests(
     requests: Iterable[Mapping[str, Any]],
     allowed_tools: Iterable[str],
+    *,
+    include_model_app_foreground: bool = False,
 ) -> list[dict[str, Any]]:
     """Append low-risk verification reads for execution requests from any source."""
 
@@ -117,10 +119,16 @@ def runtime_execution_verified_tool_requests(
     ]
     if not normalized_requests:
         return []
-    return _append_system_volume_status_verification_requests(
+    verified_requests = _append_system_volume_status_verification_requests(
         normalized_requests,
         allowed,
     )
+    if include_model_app_foreground:
+        verified_requests = _append_model_app_foreground_verification_requests(
+            verified_requests,
+            allowed,
+        )
+    return verified_requests
 
 
 def _prepend_unknown_app_discovery_requests(
@@ -4003,6 +4011,105 @@ def _system_control_verify_request(
 
 
 _SYSTEM_VOLUME_MUTATION_ACTIONS = frozenset({"set", "up", "down", "mute", "unmute"})
+
+
+_MODEL_APP_FOREGROUND_MUTATION_TOOLS = frozenset(
+    {
+        "app.open",
+        "app.focus",
+        "desktop.open_app",
+        "desktop.focus_app",
+    }
+)
+
+
+def _append_model_app_foreground_verification_requests(
+    requests: list[dict[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    verification_tool = _first_allowed(
+        (
+            "desktop.active_window",
+            "desktop.running_apps",
+            "desktop.ui_elements",
+            "screen.capture",
+        ),
+        allowed,
+    )
+    if not verification_tool:
+        return requests
+    if _has_native_tool_call_protocol(requests):
+        return _append_model_app_foreground_verification_after_native_tool_calls(
+            requests,
+            verification_tool,
+        )
+    normalized: list[dict[str, Any]] = []
+    for index, request in enumerate(requests):
+        normalized.append(request)
+        if not _model_app_foreground_request_needs_verification(request):
+            continue
+        if _has_later_execution_verification_before_mutation(requests, index):
+            continue
+        normalized.append(
+            _model_app_foreground_verification_request(request, verification_tool)
+        )
+    return normalized
+
+
+def _append_model_app_foreground_verification_after_native_tool_calls(
+    requests: list[dict[str, Any]],
+    verification_tool: str,
+) -> list[dict[str, Any]]:
+    mutation_request: dict[str, Any] | None = None
+    mutation_index = -1
+    for index, request in enumerate(requests):
+        if _model_app_foreground_request_needs_verification(request):
+            mutation_request = request
+            mutation_index = index
+    if mutation_request is None:
+        return requests
+    if _has_later_execution_verification_before_mutation(requests, mutation_index):
+        return requests
+    return [
+        *requests,
+        _model_app_foreground_verification_request(mutation_request, verification_tool),
+    ]
+
+
+def _model_app_foreground_request_needs_verification(request: Mapping[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in _MODEL_APP_FOREGROUND_MUTATION_TOOLS:
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return bool(str(payload.get("app_name") or "").strip())
+
+
+def _model_app_foreground_verification_request(
+    source_request: Mapping[str, Any],
+    verification_tool: str,
+) -> dict[str, Any]:
+    payload = (
+        source_request.get("input")
+        if isinstance(source_request.get("input"), Mapping)
+        else {}
+    )
+    app_name = str(payload.get("app_name") or "").strip()
+    if verification_tool in {"desktop.ui_elements", "desktop.read_ui"}:
+        input_preview: dict[str, Any] = {"limit": 80}
+    elif verification_tool == "screen.capture":
+        input_preview = {"reason": f"verify {app_name} foreground"}
+    else:
+        input_preview = {}
+    request = _request(
+        verification_tool,
+        input_preview,
+        planning_reason="runtime_desktop_app_foreground_verification",
+    )
+    request["source"] = "runtime_verification"
+    request["continue_to_model"] = True
+    if app_name:
+        request["target_app_name"] = app_name
+    return request
 
 
 def _append_system_volume_status_verification_requests(

@@ -24206,6 +24206,94 @@ def test_custom_api_agent_loop_verifies_model_system_volume_tool_call() -> None:
     ]
 
 
+def test_custom_api_agent_loop_verifies_model_app_open_tool_call() -> None:
+    budget = FakeBudget()
+    tool_runs: list[list[dict[str, Any]]] = []
+    model_calls = 0
+    open_request = {
+        "protocol": "tool_calls",
+        "tool": "app.open",
+        "input": {"app_name": "Music"},
+        "tool_call_id": "call_open",
+        "function_name": "app.open",
+    }
+
+    def call_model(_base_url, _model, _api_key, _messages, **_kwargs):
+        nonlocal model_calls
+        model_calls += 1
+        if model_calls == 1:
+            return {"content": "", "requests": [open_request]}
+        return {"content": "done"}
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        _timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append(tool_requests)
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["app.open", "desktop.active_window"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use tools for desktop execution.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=call_model,
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda message, _content: list(
+            message.get("requests") or []
+        ),
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "use the model tool loop",
+        broker={"broker": True},
+        timeline=[],
+        artifacts=[],
+        run_id="run-model-app-open-verify",
+    )
+
+    assert str(result) == "done"
+    assert tool_runs == [
+        [
+            open_request,
+            {
+                "protocol": "json_fallback",
+                "tool": "desktop.active_window",
+                "input": {},
+                "source": "runtime_verification",
+                "planning_reason": "runtime_desktop_app_foreground_verification",
+                "continue_to_model": True,
+                "target_app_name": "Music",
+            },
+        ]
+    ]
+
+
 def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rules(
     monkeypatch,
 ) -> None:

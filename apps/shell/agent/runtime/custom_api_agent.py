@@ -1585,6 +1585,7 @@ class RuntimeCustomApiAgentLoop:
             tool_requests = runtime_execution_verified_tool_requests(
                 tool_requests,
                 allowed_tools,
+                include_model_app_foreground=True,
             )
             detail = content[:500] if content else ", ".join(
                 request["tool"] for request in tool_requests

@@ -27,6 +27,7 @@ from apps.shell.yachiyo_agent.planner_execution import (
     planner_orchestration_requests,
     planner_direct_tool_requests,
     planner_desktop_tool_requests,
+    runtime_execution_verified_tool_requests,
     planner_tool_requests_for_decision,
     planner_tool_requests,
 )
@@ -27849,6 +27850,32 @@ def test_planner_tool_requests_maps_system_control_plan() -> None:
             "source": "runtime_verification",
             "planning_reason": "runtime_system_control_verification",
             "continue_to_model": True,
+        },
+    ]
+    app_open_request = {
+        "protocol": "tool_calls",
+        "tool": "app.open",
+        "input": {"app_name": "Music"},
+        "tool_call_id": "call_open",
+    }
+    assert planner_execution_tool_requests(
+        [app_open_request],
+        allowed_tools=["app.open", "desktop.active_window"],
+    ) == [app_open_request]
+    assert runtime_execution_verified_tool_requests(
+        [app_open_request],
+        allowed_tools=["app.open", "desktop.active_window"],
+        include_model_app_foreground=True,
+    ) == [
+        app_open_request,
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_verification",
+            "planning_reason": "runtime_desktop_app_foreground_verification",
+            "continue_to_model": True,
+            "target_app_name": "Music",
         },
     ]
     assert planner_tool_requests(
