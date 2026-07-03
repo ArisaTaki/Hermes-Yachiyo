@@ -24,6 +24,10 @@ from apps.shell.yachiyo_agent.planner_projection import planner_run_event_payloa
 from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 
 
+def _port_call_payload(port: Any, call_name: str) -> dict[str, Any]:
+    return next(payload for name, payload in port.calls if name == call_name)
+
+
 class _FakeStudioPort:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any]] = []
@@ -904,27 +908,33 @@ def test_agent_studio_service_starts_workflow_from_planner_orchestration() -> No
     assert started.workflow_run is not None
     assert started.workflow_run.workflow_run_id == "workflow-run-1"
     assert started.group_run is None
-    assert (
-        "start_workflow_run",
-        {
-            "workflow_id": "workflow-1",
-            "objective": "Build report",
-            "title": "Run Review workflow",
-            "client_run_id": "studio-planner-workflow-1",
-            "metadata": {
-                "surface": "agent_studio",
-                "source": "agent_studio_planner_orchestration",
-                "planner_orchestration": True,
-                "planner_orchestration_kind": "workflow",
-                "planner_orchestration_target_id": "workflow-1",
-                "planner_orchestration_target": "Review workflow",
-                "decision_id": started.decision.decision_id,
-                "plan_id": started.decision.plan.plan_id,
-                "intent_kind": "workflow_orchestration",
-                "route_to_studio": True,
-            },
-        },
-    ) in port.calls
+    workflow_payload = _port_call_payload(port, "start_workflow_run")
+    assert workflow_payload["workflow_id"] == "workflow-1"
+    assert workflow_payload["objective"] == "Build report"
+    assert workflow_payload["title"] == "Run Review workflow"
+    assert workflow_payload["client_run_id"] == "studio-planner-workflow-1"
+    metadata = workflow_payload["metadata"]
+    assert metadata["surface"] == "agent_studio"
+    assert metadata["source"] == "agent_studio_planner_orchestration"
+    assert metadata["planner_orchestration"] is True
+    assert metadata["planner_orchestration_kind"] == "workflow"
+    assert metadata["planner_orchestration_target_id"] == "workflow-1"
+    assert metadata["planner_orchestration_target"] == "Review workflow"
+    assert metadata["decision_id"] == started.decision.decision_id
+    assert metadata["plan_id"] == started.decision.plan.plan_id
+    assert metadata["intent_kind"] == "workflow_orchestration"
+    assert metadata["route_to_studio"] is True
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "workflow_orchestration"
+    assert metadata["yachiyo_execution_requests"] == ["workflow.run"]
+    assert metadata["yachiyo_execution_envelope"]["intent_kind"] == "workflow_orchestration"
+    planner_events = [
+        event
+        for event in started.workflow_run.events
+        if event.payload.get("planner_event_type") == "agent.intent.selected"
+    ]
+    assert planner_events[0].event_type == "workflow.run.intent.selected"
+    assert planner_events[0].payload["intent"]["kind"] == "workflow_orchestration"
 
 
 def test_agent_studio_service_starts_group_run_from_planner_orchestration() -> None:
@@ -950,27 +960,33 @@ def test_agent_studio_service_starts_group_run_from_planner_orchestration() -> N
     assert started.group_run is not None
     assert started.group_run.group_run_id == "group-run-1"
     assert started.workflow_run is None
-    assert (
-        "start_group_run",
-        {
-            "group_id": "group-1",
-            "objective": "调研 Hanako",
-            "title": "Research Team GroupRun",
-            "client_run_id": "studio-planner-group-1",
-            "metadata": {
-                "surface": "agent_studio",
-                "source": "agent_studio_planner_orchestration",
-                "planner_orchestration": True,
-                "planner_orchestration_kind": "group_run",
-                "planner_orchestration_target_id": "group-1",
-                "planner_orchestration_target": "Research Team",
-                "decision_id": started.decision.decision_id,
-                "plan_id": started.decision.plan.plan_id,
-                "intent_kind": "multi_agent",
-                "route_to_studio": True,
-            },
-        },
-    ) in port.calls
+    group_payload = _port_call_payload(port, "start_group_run")
+    assert group_payload["group_id"] == "group-1"
+    assert group_payload["objective"] == "调研 Hanako"
+    assert group_payload["title"] == "Research Team GroupRun"
+    assert group_payload["client_run_id"] == "studio-planner-group-1"
+    metadata = group_payload["metadata"]
+    assert metadata["surface"] == "agent_studio"
+    assert metadata["source"] == "agent_studio_planner_orchestration"
+    assert metadata["planner_orchestration"] is True
+    assert metadata["planner_orchestration_kind"] == "group_run"
+    assert metadata["planner_orchestration_target_id"] == "group-1"
+    assert metadata["planner_orchestration_target"] == "Research Team"
+    assert metadata["decision_id"] == started.decision.decision_id
+    assert metadata["plan_id"] == started.decision.plan.plan_id
+    assert metadata["intent_kind"] == "multi_agent"
+    assert metadata["route_to_studio"] is True
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "multi_agent"
+    assert metadata["yachiyo_execution_requests"] == ["group.run"]
+    assert metadata["yachiyo_execution_envelope"]["intent_kind"] == "multi_agent"
+    planner_events = [
+        event
+        for event in started.group_run.events
+        if event.payload.get("planner_event_type") == "agent.intent.selected"
+    ]
+    assert planner_events[0].event_type == "group.run.intent.selected"
+    assert planner_events[0].payload["intent"]["kind"] == "multi_agent"
 
 
 def test_agent_studio_service_returns_structured_handoff_when_planner_target_missing() -> None:

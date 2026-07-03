@@ -52,6 +52,27 @@ def start_payload_with_planner_events(
     return payload
 
 
+def start_payload_with_planner_decision_events(
+    raw_payload: Mapping[str, Any],
+    decision: PlannerDecisionSnapshot | None,
+) -> dict[str, Any]:
+    payload = dict(raw_payload)
+    if decision is None or _payload_has_planner_events(payload):
+        return payload
+
+    planner_events = _planner_public_events_for_start_payload(
+        decision,
+        run_id=_started_run_id(payload),
+        after_sequence=_max_event_sequence(payload),
+    )
+    if not planner_events:
+        return payload
+
+    key = _event_list_key(payload)
+    payload[key] = [*list(payload.get(key) or []), *planner_events]
+    return payload
+
+
 def _optional_string_list(value: Any) -> list[str] | None:
     if not isinstance(value, Iterable) or isinstance(value, (str, bytes, Mapping)):
         return None

@@ -55,10 +55,14 @@ from .future_tasks import (
 from .groups import agent_group_snapshot_from_payload, group_run_snapshot_from_payload
 from .memories import memory_snapshot_from_payload
 from .ports import StudioPort
+from .planner_projection import runtime_planner_metadata
 from .runtime_execution import runtime_execution_envelope_from_decision
 from .runtime_planner import RuntimePlanner
 from .runtime_progress import ProgressEventScope, public_runtime_tool_result_events
-from .start_event_enrichment import start_payload_with_planner_events
+from .start_event_enrichment import (
+    start_payload_with_planner_decision_events,
+    start_payload_with_planner_events,
+)
 from .skills import (
     skill_folder_snapshot_from_payload,
     skill_snapshot_from_payload,
@@ -220,12 +224,13 @@ class AgentStudioService:
             if isinstance(payload.get("metadata"), Mapping)
             else {}
         )
+        allowed_tools = _string_list(
+            payload.get("allowed_tools"),
+            fallback=["workflow.run", "group.run", "agent.group_run"],
+        )
         decision = self.plan_task(
             prompt,
-            allowed_tools=_string_list(
-                payload.get("allowed_tools"),
-                fallback=["workflow.run", "group.run", "agent.group_run"],
-            ),
+            allowed_tools=allowed_tools,
             metadata=metadata,
         )
         kind = _planner_orchestration_kind(decision)
@@ -256,20 +261,25 @@ class AgentStudioService:
                 target_name=target_name,
             )
             if target.target_id:
-                workflow_run = self.start_workflow_run(
-                    {
-                        "workflow_id": target.target_id,
-                        "objective": objective,
-                        "title": title or target.target_name or "Workflow run",
-                        "client_run_id": client_run_id or None,
-                        "metadata": _planner_orchestration_run_metadata(
-                            metadata,
-                            decision,
-                            kind="workflow",
-                            target_id=target.target_id,
-                            target_name=target.target_name,
-                        ),
-                    }
+                workflow_payload = {
+                    "workflow_id": target.target_id,
+                    "objective": objective,
+                    "title": title or target.target_name or "Workflow run",
+                    "client_run_id": client_run_id or None,
+                    "metadata": _planner_orchestration_run_metadata(
+                        metadata,
+                        decision,
+                        kind="workflow",
+                        target_id=target.target_id,
+                        target_name=target.target_name,
+                        allowed_tools=allowed_tools,
+                    ),
+                }
+                workflow_run = workflow_run_snapshot_from_payload(
+                    start_payload_with_planner_decision_events(
+                        self._studio_port.start_workflow_run(workflow_payload),
+                        decision,
+                    )
                 )
                 return PlannerOrchestrationStartSnapshot(
                     kind="workflow",
@@ -304,20 +314,25 @@ class AgentStudioService:
                 target_name=target_name,
             )
             if target.target_id:
-                group_run = self.start_group_run(
-                    {
-                        "group_id": target.target_id,
-                        "objective": objective,
-                        "title": title or target.target_name or "Group run",
-                        "client_run_id": client_run_id or None,
-                        "metadata": _planner_orchestration_run_metadata(
-                            metadata,
-                            decision,
-                            kind="group_run",
-                            target_id=target.target_id,
-                            target_name=target.target_name,
-                        ),
-                    }
+                group_payload = {
+                    "group_id": target.target_id,
+                    "objective": objective,
+                    "title": title or target.target_name or "Group run",
+                    "client_run_id": client_run_id or None,
+                    "metadata": _planner_orchestration_run_metadata(
+                        metadata,
+                        decision,
+                        kind="group_run",
+                        target_id=target.target_id,
+                        target_name=target.target_name,
+                        allowed_tools=allowed_tools,
+                    ),
+                }
+                group_run = group_run_snapshot_from_payload(
+                    start_payload_with_planner_decision_events(
+                        self._studio_port.start_group_run(group_payload),
+                        decision,
+                    )
                 )
                 return PlannerOrchestrationStartSnapshot(
                     kind="group_run",
@@ -948,8 +963,12 @@ def _planner_orchestration_run_metadata(
     kind: str,
     target_id: str,
     target_name: str,
+    allowed_tools: Iterable[str] | None = None,
 ) -> dict[str, Any]:
-    payload = dict(metadata)
+    payload = {
+        **dict(metadata),
+        **runtime_planner_metadata(decision, allowed_tools=allowed_tools),
+    }
     payload.setdefault("source", "agent_studio_planner_orchestration")
     payload.update(
         {
