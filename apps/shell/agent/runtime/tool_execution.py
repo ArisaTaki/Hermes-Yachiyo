@@ -1732,7 +1732,7 @@ def _runtime_replan_request_payload_for_tool_result(
     *,
     run_id: str,
 ) -> dict[str, Any]:
-    result = tool_event.get("result") if isinstance(tool_event.get("result"), Mapping) else {}
+    result = _runtime_replan_tool_event_result(tool_event)
     if not _tool_event_requests_runtime_replan(tool_event, result):
         return {}
     replan_signal_ids = _string_list(tool_request.get("replan_signal_ids"))
@@ -1837,6 +1837,14 @@ def _tool_event_requests_runtime_replan(
         return True
     event_type = str(tool_event.get("event") or tool_event.get("event_type") or "").strip().lower()
     return event_type.endswith(".failed") or event_type.endswith("_failed")
+
+
+def _runtime_replan_tool_event_result(tool_event: Mapping[str, Any]) -> dict[str, Any]:
+    raw_result = tool_event.get("result") if isinstance(tool_event.get("result"), Mapping) else {}
+    result = dict(raw_result)
+    if tool_event.get("verification_failed") is True:
+        result["verification_failed"] = True
+    return result
 
 
 def _runtime_replan_trigger(

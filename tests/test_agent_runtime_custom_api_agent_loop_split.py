@@ -3534,9 +3534,9 @@ def test_custom_api_agent_loop_records_explicit_verification_failure_replan() ->
             "agent.tool.call",
             "data.analyze",
             input_preview={"path": "sales.csv"},
+            verification_failed=True,
             result={
                 "ok": True,
-                "verification_failed": True,
                 "summary": "The generated report did not include the requested chart.",
             },
         )

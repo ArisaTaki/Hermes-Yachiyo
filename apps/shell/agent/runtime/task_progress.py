@@ -34,7 +34,7 @@ def append_task_progress_events_for_tool_result(
     ):
         return
 
-    result = tool_event.get("result") if isinstance(tool_event.get("result"), Mapping) else {}
+    result = _tool_event_result(tool_event)
     todo_status = _task_todo_status_for_tool_result(
         str(tool_event.get("event") or ""),
         result,
@@ -341,6 +341,14 @@ def _verification_targets_from_replan_recovery(
             }
         )
     return targets
+
+
+def _tool_event_result(tool_event: Mapping[str, Any]) -> dict[str, Any]:
+    raw_result = tool_event.get("result") if isinstance(tool_event.get("result"), Mapping) else {}
+    result = dict(raw_result)
+    if tool_event.get("verification_failed") is True:
+        result["verification_failed"] = True
+    return result
 
 
 def _append_replan_recovery_update_event(

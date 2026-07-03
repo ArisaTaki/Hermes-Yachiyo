@@ -2789,6 +2789,8 @@ class RuntimeCustomApiAgentLoop:
         failure_payloads: list[dict[str, Any]] = []
         for event_index, event in enumerate(tool_events):
             result = event.get("result") if isinstance(event.get("result"), dict) else {}
+            if event.get("verification_failed") is True:
+                result = {**result, "verification_failed": True}
             if not _tool_result_requests_replan(result):
                 continue
             tool_name = str(event.get("detail") or "").strip()

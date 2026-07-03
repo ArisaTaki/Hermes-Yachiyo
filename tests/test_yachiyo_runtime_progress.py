@@ -45,9 +45,9 @@ def test_public_task_progress_events_block_explicit_verification_failure() -> No
         tool_event={
             "event": "agent.tool.call",
             "detail": "artifact.write",
+            "verification_failed": True,
             "result": {
                 "ok": True,
-                "verification_failed": True,
                 "summary": "Report artifact was written but failed verification.",
             },
         },
@@ -156,9 +156,9 @@ def test_public_task_replan_events_project_explicit_verification_failure() -> No
         tool_event={
             "event": "agent.tool.call",
             "detail": "data.analyze",
+            "verification_failed": True,
             "result": {
                 "ok": True,
-                "verification_failed": True,
                 "summary": "The generated report did not include the requested chart.",
             },
         },
