@@ -758,12 +758,20 @@ class AgentStudioService:
                 after_sequence=clean_after_sequence,
                 limit=clean_limit,
             )
+            events = _group_run_events_from_port_payload(
+                raw_page,
+                group_run_id=group_run_id,
+            )
+            if clean_after_sequence == 0 and page.has_more:
+                events = _events_with_first_page_key_event_window(
+                    events,
+                    self.get_group_run_event_stream(group_run_id),
+                    page=page,
+                    event_types=_GROUP_RUN_FIRST_PAGE_KEY_EVENT_TYPES,
+                )
             return _run_event_page_with_projected_events(
                 page,
-                _group_run_events_from_port_payload(
-                    raw_page,
-                    group_run_id=group_run_id,
-                ),
+                events,
             )
 
         events = [
@@ -1079,6 +1087,12 @@ _GROUP_RUN_LIFECYCLE_EVENT_TYPES = {
     "group.run.failed",
     "group.run.cancelled",
 }
+_GROUP_RUN_FIRST_PAGE_KEY_EVENT_TYPES = {
+    "group.run.approval_required",
+    "group.run.completed",
+    "group.run.failed",
+    "group.run.cancelled",
+}
 
 _WORKFLOW_RUN_LIFECYCLE_EVENT_TYPES = {
     "workflow.run.started",
@@ -1177,6 +1191,43 @@ def _run_event_page_with_projected_events(
             "next_after_sequence": max(int(page.next_after_sequence or 0), next_after_sequence),
         }
     )
+
+
+def _events_with_first_page_key_event_window(
+    events: list[PublicRunEvent],
+    full_stream: Iterable[PublicRunEvent],
+    *,
+    page: RunEventPageSnapshot,
+    event_types: set[str],
+) -> list[PublicRunEvent]:
+    if not events or not event_types:
+        return events
+    next_after_sequence = int(page.next_after_sequence or 0)
+    stream = sorted(
+        [
+            event
+            for event in full_stream
+            if int(event.sequence or 0) > next_after_sequence
+        ],
+        key=lambda event: int(event.sequence or 0),
+    )
+    key_event_sequence = 0
+    for event in stream:
+        if event.event_type in event_types:
+            key_event_sequence = int(event.sequence or 0)
+            break
+    if key_event_sequence <= next_after_sequence:
+        return events
+    existing_sequences = {int(event.sequence or 0) for event in events}
+    supplement = [
+        event
+        for event in stream
+        if next_after_sequence < int(event.sequence or 0) <= key_event_sequence
+        and int(event.sequence or 0) not in existing_sequences
+    ]
+    if not supplement:
+        return events
+    return [*events, *supplement]
 
 
 def _payload_items(payload: Any, key: str) -> list[dict[str, Any]]:

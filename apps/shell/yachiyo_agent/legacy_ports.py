@@ -109,9 +109,182 @@ def _prefer_execution_requests_for_metadata(metadata: dict[str, Any] | None) -> 
     return source == "launcher" or bool(launcher_mode) or bool(launcher_surface)
 
 
+def _prefer_legacy_planned_timeline_for_metadata(metadata: dict[str, Any] | None) -> bool:
+    if not isinstance(metadata, dict):
+        return False
+    if _prefer_execution_requests_for_metadata(metadata):
+        return False
+    return bool(metadata.get("daily_desktop_intent"))
+
+
+def _runtime_planner_compatible_legacy_plan_requests(
+    requests: list[dict[str, Any]],
+    metadata: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    if not isinstance(metadata, dict) or not bool(metadata.get("yachiyo_runtime_planner")):
+        return requests
+    compatible: list[dict[str, Any]] = []
+    for request in requests:
+        if str(request.get("tool") or "").strip() == "media.apple_music_play":
+            compatible.append(
+                {
+                    **request,
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_fallback_media_playback",
+                }
+            )
+            continue
+        compatible.append(request)
+    return compatible
+
+
+def _legacy_direct_execution_override_requests(
+    prompt: str,
+    metadata: dict[str, Any] | None,
+    allowed_tools: list[str],
+    planner_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    legacy_requests = daily_desktop_entrypoint_requests(
+        prompt,
+        metadata=metadata,
+        allowed_tools=allowed_tools,
+    )
+    if not legacy_requests:
+        return []
+    if _legacy_information_capture_override_requests(legacy_requests, planner_requests):
+        return legacy_requests
+    if _legacy_clipboard_link_open_override_requests(legacy_requests, planner_requests):
+        return legacy_requests
+    if not _prefer_legacy_planned_timeline_for_metadata(metadata):
+        return []
+    legacy_tools = _tool_names_for_requests(legacy_requests)
+    if "media.apple_music_play" in legacy_tools:
+        return legacy_requests
+    if _has_approval_plan_tool(legacy_requests) and _planner_requests_need_model_followup(
+        planner_requests
+    ):
+        return _legacy_requests_with_type_sequence_verification(
+            legacy_requests,
+            allowed_tools,
+        )
+    return []
+
+
+def _legacy_information_capture_override_requests(
+    legacy_requests: list[dict[str, Any]],
+    planner_requests: list[dict[str, Any]],
+) -> bool:
+    if not _planner_requests_need_model_followup(planner_requests):
+        return False
+    planner_tools = set(_tool_names_for_requests(planner_requests))
+    if planner_tools != {"clipboard.read"}:
+        return False
+    legacy_tools = _tool_names_for_requests(legacy_requests)
+    if "app.open_and_safe_shortcut" not in legacy_tools:
+        return False
+    for request in legacy_requests:
+        if str(request.get("tool") or "").strip() != "desktop.safe_shortcut":
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        if str(payload.get("action") or "").strip() == "paste":
+            return True
+    return False
+
+
+def _legacy_clipboard_link_open_override_requests(
+    legacy_requests: list[dict[str, Any]],
+    planner_requests: list[dict[str, Any]],
+) -> bool:
+    if not legacy_requests or not planner_requests:
+        return False
+    legacy_first = legacy_requests[0]
+    planner_first = planner_requests[0]
+    if str(legacy_first.get("tool") or "").strip() != "app.open_and_safe_shortcut":
+        return False
+    if str(planner_first.get("tool") or "").strip() != "desktop.safe_shortcut":
+        return False
+    legacy_input = legacy_first.get("input") if isinstance(legacy_first.get("input"), dict) else {}
+    planner_input = planner_first.get("input") if isinstance(planner_first.get("input"), dict) else {}
+    if str(legacy_input.get("action") or "").strip() != "focus_address_bar":
+        return False
+    if str(planner_input.get("action") or "").strip() != "focus_address_bar":
+        return False
+    return _tool_names_for_requests(planner_requests) == [
+        "desktop.safe_shortcut",
+        "desktop.safe_shortcut",
+        "desktop.search_submit",
+    ]
+
+
+def _legacy_requests_with_type_sequence_verification(
+    requests: list[dict[str, Any]],
+    allowed_tools: list[str],
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if "desktop.ui_elements" not in allowed:
+        return requests
+    if any(str(request.get("tool") or "").strip() == "desktop.ui_elements" for request in requests):
+        return requests
+    type_request = next(
+        (
+            request
+            for request in requests
+            if str(request.get("tool") or "").strip() == "desktop.type_into_ui_element"
+        ),
+        None,
+    )
+    if type_request is None:
+        return requests
+    has_return_hotkey = False
+    for request in requests:
+        if str(request.get("tool") or "").strip() != "desktop.hotkey":
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        key = str(payload.get("key") or "").strip().lower()
+        if key in {"return", "enter"}:
+            has_return_hotkey = True
+            break
+    if not has_return_hotkey:
+        return requests
+    type_payload = type_request.get("input") if isinstance(type_request.get("input"), dict) else {}
+    return [
+        *requests,
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {
+                "role_filter": str(type_payload.get("role_filter") or "text").strip() or "text",
+                "limit": type_payload.get("limit") or 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
+def _planner_requests_need_model_followup(requests: list[dict[str, Any]]) -> bool:
+    if not requests:
+        return False
+    if any(bool(request.get("continue_to_model")) for request in requests):
+        return True
+    tools = set(_tool_names_for_requests(requests))
+    return bool(tools) and tools <= {"desktop.ui_elements", "screen.capture"}
+
+
+def _tool_names_for_requests(requests: list[dict[str, Any]]) -> list[str]:
+    return [
+        str(request.get("tool") or "").strip()
+        for request in requests
+        if isinstance(request, dict) and str(request.get("tool") or "").strip()
+    ]
+
+
 def _visible_daily_desktop_metadata_requests(
     requests: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
+    for index, request in enumerate(requests):
+        if str(request.get("tool") or "").strip() == "data.analyze":
+            return requests[index:]
     primary = [
         request
         for request in requests
@@ -141,6 +314,75 @@ def _legacy_app_launch_metadata_compat(requests: list[dict[str, Any]]) -> bool:
     return (
         str(request.get("tool") or "").strip() == "app.open"
         and str(request.get("planning_reason") or "").strip() == "planner_desktop_operation"
+    )
+
+
+def _legacy_daily_desktop_metadata_compat(
+    requests: list[dict[str, Any]],
+    existing_user_metadata: dict[str, Any] | None,
+) -> bool:
+    if _prefer_execution_requests_for_metadata(existing_user_metadata):
+        return False
+    if _legacy_app_launch_metadata_compat(requests):
+        return True
+    tools = set(_tool_names_for_requests(requests))
+    if not tools:
+        return False
+    if tools <= set(_APPROVAL_PLAN_TOOLS):
+        return True
+    if tools <= set(_SAFE_SHORTCUT_APPROVAL_TOOLS):
+        return True
+    if tools <= {"desktop.safe_shortcut", "desktop.hotkey"}:
+        return True
+    return False
+
+
+def _legacy_daily_desktop_compatible_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
+    if str(metadata.get("daily_desktop_source") or "").strip() != "runtime_planner":
+        return metadata
+    return {
+        **metadata,
+        "daily_desktop_source": "daily_desktop_intent",
+        "daily_desktop_planning_reason": "clear_daily_desktop_intent",
+        "entrypoint_plan_source": "daily_desktop_intent",
+        "entrypoint_plan_reason": "clear_daily_desktop_intent",
+        "entrypoint_plan_legacy_fallback": True,
+    }
+
+
+def _expose_runtime_planner_user_metadata(
+    requests: list[dict[str, Any]],
+    existing_user_metadata: dict[str, Any] | None,
+) -> bool:
+    if _prefer_execution_requests_for_metadata(existing_user_metadata):
+        return True
+    if _legacy_daily_desktop_metadata_compat(requests, existing_user_metadata):
+        return False
+    tools = set(_tool_names_for_requests(requests))
+    if not tools:
+        return False
+    if tools & {
+        "artifact.write",
+        "browser.current_page",
+        "browser.extract",
+        "browser.extract_text",
+        "browser.open_url_and_extract_text",
+        "data.analyze",
+        "future_task.schedule",
+        "terminal.run",
+        "workspace.read",
+    }:
+        return True
+    reasons = {
+        str(request.get("planning_reason") or "").strip()
+        for request in requests
+        if str(request.get("planning_reason") or "").strip()
+    }
+    return any(
+        reason.startswith("planner_builtin_")
+        or reason.startswith("planner_prefetch_")
+        or reason.startswith("planner_fallback_data_analysis")
+        for reason in reasons
     )
 
 
@@ -271,6 +513,23 @@ class LegacyChatTaskStarter:
             self._runtime,
             fallback=allowed_daily_desktop_tools,
         )
+        if _prefer_legacy_planned_timeline_for_metadata(metadata):
+            legacy_requests = daily_desktop_entrypoint_requests(
+                prompt,
+                metadata=metadata,
+                allowed_tools=allowed_daily_desktop_tools,
+            )
+            legacy_requests = _runtime_planner_compatible_legacy_plan_requests(
+                legacy_requests,
+                metadata,
+            )
+            if legacy_requests:
+                return daily_desktop_planned_timeline(
+                    prompt,
+                    requests=legacy_requests,
+                    metadata=metadata,
+                    allowed_tools=allowed_entrypoint_tools,
+                )
         planned_requests = planner_first_daily_desktop_entrypoint_requests(
             prompt,
             metadata=metadata,
@@ -336,9 +595,20 @@ class LegacyChatTaskStarter:
                 ),
             )
             planner_decision = selection.decision
+            selection_requests = selection.requests
+            selected_source = selection.selected_source
+            legacy_override_requests = _legacy_direct_execution_override_requests(
+                prompt or execution_prompt,
+                metadata,
+                allowed_entrypoint_tools,
+                selection_requests,
+            )
+            if legacy_override_requests:
+                selection_requests = legacy_override_requests
+                selected_source = "daily_desktop_intent"
             selected_requests = _apply_legacy_search_field_target_label(
                 prompt or execution_prompt,
-                selection.requests,
+                selection_requests,
             )
             selected_requests = _apply_legacy_return_hotkey_projection(
                 prompt or execution_prompt,
@@ -356,7 +626,6 @@ class LegacyChatTaskStarter:
                 selected_requests,
                 planner_decision,
             )
-            selected_source = selection.selected_source
             direct_tool_selection_payload = (
                 _selection_payload_with_selected_requests(
                     selection.event_payload,
@@ -365,15 +634,32 @@ class LegacyChatTaskStarter:
                 if selected_requests != raw_selected_requests
                 else selection.event_payload
             )
+            if selected_source != selection.selected_source:
+                direct_tool_selection_payload = _selection_payload_with_selected_source(
+                    direct_tool_selection_payload,
+                    selected_source,
+                    selected_requests,
+                )
             direct_tool_selection_payload = _approval_first_selection_payload(
                 direct_tool_selection_payload,
                 selected_requests,
             )
-            envelope_tool_requests = _safe_runtime_execution_envelope_requests(
+            direct_tool_selection_payload = _legacy_daily_desktop_selection_payload(
+                direct_tool_selection_payload,
                 prompt or execution_prompt,
                 metadata,
                 allowed_entrypoint_tools,
-                selected_requests=selected_requests,
+                selected_requests,
+            )
+            envelope_tool_requests = (
+                _safe_runtime_execution_envelope_requests(
+                    prompt or execution_prompt,
+                    metadata,
+                    allowed_entrypoint_tools,
+                    selected_requests=selected_requests,
+                )
+                if selected_source in {"runtime_planner", "none", ""}
+                else []
             )
             if envelope_tool_requests:
                 direct_tool_requests = envelope_tool_requests
@@ -518,20 +804,18 @@ class LegacyChatTaskStarter:
             return
         visible_requests = _visible_daily_desktop_metadata_requests(desktop_requests)
         existing_user_metadata = _task_message_metadata(chat_session, task_id, role="user")
+        entrypoint_metadata = entrypoint_plan_user_metadata(visible_requests)
+        if _legacy_daily_desktop_metadata_compat(visible_requests, existing_user_metadata):
+            entrypoint_metadata = _legacy_daily_desktop_compatible_metadata(entrypoint_metadata)
+        planner_metadata = (
+            runtime_planner_metadata(planner_decision)
+            if _expose_runtime_planner_user_metadata(visible_requests, existing_user_metadata)
+            else {}
+        )
         metadata = {
-            **runtime_planner_metadata(planner_decision),
-            **entrypoint_plan_user_metadata(visible_requests),
+            **planner_metadata,
+            **entrypoint_metadata,
         }
-        if (
-            metadata.get("daily_desktop_source") == "runtime_planner"
-            and _legacy_app_launch_metadata_compat(visible_requests)
-            and not _prefer_execution_requests_for_metadata(existing_user_metadata)
-        ):
-            metadata["daily_desktop_source"] = "daily_desktop_intent"
-            metadata["daily_desktop_planning_reason"] = "clear_daily_desktop_intent"
-            metadata["entrypoint_plan_source"] = "daily_desktop_intent"
-            metadata["entrypoint_plan_reason"] = "clear_daily_desktop_intent"
-            metadata["entrypoint_plan_legacy_fallback"] = True
         if not metadata:
             return
         try:
@@ -1210,13 +1494,15 @@ def _safe_runtime_planner_tool_requests(
         requests = _prepend_legacy_focus_app_search_discovery_request(prompt, requests)
         if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
             return []
-        requests = _coalesce_legacy_direct_app_shortcut_requests(
-            prompt,
-            requests,
-            allowed_tools,
-        )
-        requests = _drop_legacy_open_then_plain_find_submit(prompt, requests)
-        return planner_execution_tool_requests(requests, allowed_tools) or requests
+    requests = _coalesce_legacy_direct_app_shortcut_requests(
+        prompt,
+        requests,
+        allowed_tools,
+    )
+    requests = _split_redundant_app_safe_shortcut_requests(requests)
+    requests = _drop_legacy_open_then_plain_find_submit(prompt, requests)
+    execution_requests = planner_execution_tool_requests(requests, allowed_tools) or requests
+    return _drop_data_analysis_prepare_app_requests(execution_requests)
     requests = planner_direct_tool_requests(
         prompt,
         allowed_tools,
@@ -1230,6 +1516,7 @@ def _safe_runtime_planner_tool_requests(
     if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
         return []
     requests = _coalesce_legacy_direct_app_shortcut_requests(prompt, requests, allowed_tools)
+    requests = _split_redundant_app_safe_shortcut_requests(requests)
     requests = _drop_legacy_open_then_plain_find_submit(prompt, requests)
     return planner_execution_tool_requests(requests, allowed_tools) or requests
 
@@ -1254,7 +1541,24 @@ def _safe_runtime_execution_envelope_requests(
         return []
     if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
         return []
+    requests = _split_redundant_app_safe_shortcut_requests(requests)
     return requests
+
+
+def _drop_data_analysis_prepare_app_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not any(str(request.get("tool") or "").strip() == "data.analyze" for request in requests):
+        return requests
+    return [
+        request
+        for request in requests
+        if not (
+            str(request.get("tool") or "").strip() == "app.open"
+            and str(request.get("planning_reason") or "").strip()
+            == "planner_fallback_data_analysis_spreadsheet_app"
+        )
+    ]
 
 
 def _safe_selected_entrypoint_tool_requests(
@@ -1265,10 +1569,11 @@ def _safe_selected_entrypoint_tool_requests(
     if not selected_requests:
         return []
     if _has_approval_plan_tool(selected_requests):
-        return []
+        return selected_requests
     if _has_explicit_hotkey_safe_shortcut(prompt, selected_requests, allowed_tools):
         return []
-    return planner_execution_tool_requests(selected_requests, allowed_tools) or selected_requests
+    requests = planner_execution_tool_requests(selected_requests, allowed_tools) or selected_requests
+    return _split_redundant_app_safe_shortcut_requests(requests)
 
 
 def _apply_legacy_file_transfer_app_alias(
@@ -1504,6 +1809,68 @@ def _selection_payload_with_selected_requests(
     }
 
 
+def _selection_payload_with_selected_source(
+    payload: dict[str, Any],
+    selected_source: str,
+    selected_requests: list[dict[str, Any]],
+) -> dict[str, Any]:
+    source = str(selected_source or "").strip()
+    if not source:
+        return payload
+    selected_tools = _tool_names_for_requests(selected_requests)
+    result = {
+        **payload,
+        "selection_source": source,
+        "selected_tools": selected_tools,
+        "selected_request_count": len(selected_tools),
+    }
+    if source == "daily_desktop_intent":
+        result.update(
+            {
+                "selection_role": "legacy_desktop_intent_fallback",
+                "selection_reason": "legacy_compatible_daily_desktop_entrypoint",
+                "legacy_fallback": True,
+                "legacy_tools": selected_tools,
+                "legacy_request_count": len(selected_tools),
+            }
+        )
+    return result
+
+
+def _legacy_daily_desktop_selection_payload(
+    payload: dict[str, Any],
+    prompt: str,
+    metadata: dict[str, Any] | None,
+    allowed_tools: list[str],
+    selected_requests: list[dict[str, Any]],
+) -> dict[str, Any]:
+    if str(payload.get("selection_source") or "").strip() != "runtime_planner":
+        return payload
+    visible_requests = _visible_daily_desktop_metadata_requests(selected_requests)
+    if not _legacy_daily_desktop_metadata_compat(visible_requests, metadata):
+        return payload
+    legacy_requests = daily_desktop_entrypoint_requests(
+        prompt,
+        metadata=metadata,
+        allowed_tools=allowed_tools,
+    )
+    legacy_tools = _tool_names_for_requests(legacy_requests) or _tool_names_for_requests(
+        visible_requests
+    )
+    selected_tools = _tool_names_for_requests(visible_requests)
+    return {
+        **payload,
+        "selection_source": "daily_desktop_intent",
+        "selection_role": "legacy_desktop_intent_fallback",
+        "selection_reason": "legacy_compatible_daily_desktop_entrypoint",
+        "legacy_fallback": True,
+        "legacy_tools": legacy_tools,
+        "legacy_request_count": len(legacy_tools),
+        "selected_tools": selected_tools,
+        "selected_request_count": len(selected_tools),
+    }
+
+
 def _annotate_legacy_selected_requests_with_planner_trace(
     selected_requests: list[dict[str, Any]],
     planner_decision: Any | None,
@@ -1713,6 +2080,41 @@ def _coalesce_legacy_direct_app_shortcut_requests(
         )
         index = shortcut_index + 1
     return coalesced
+
+
+def _split_redundant_app_safe_shortcut_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if not requests:
+        return requests
+    prepared_apps: set[str] = set()
+    updated: list[dict[str, Any]] = []
+    for request in requests:
+        tool_name = str(request.get("tool") or "").strip()
+        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+        app_name = str(payload.get("app_name") or "").strip()
+        if tool_name in {"app.open", "app.focus", "desktop.open_app", "desktop.focus_app"}:
+            if app_name:
+                prepared_apps.add(app_name)
+            updated.append(request)
+            continue
+        if (
+            tool_name in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}
+            and app_name
+            and app_name in prepared_apps
+        ):
+            action = str(payload.get("action") or "").strip()
+            if action:
+                updated.append(
+                    {
+                        **request,
+                        "tool": "desktop.safe_shortcut",
+                        "input": {"action": action},
+                    }
+                )
+                continue
+        updated.append(request)
+    return updated
 
 
 def _has_discovered_runtime_planner_verification_chain(

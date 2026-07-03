@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import json
 from typing import Any
 from uuid import uuid4
@@ -136,13 +137,27 @@ def create_runnable_run(
         payload["runtime_planner_entrypoint"] = True
     if callable(create_async):
         payload["on_complete"] = on_complete
-        return create_async(
-            **payload,
-        )
+        return _call_with_supported_kwargs(create_async, payload)
     payload["client_run_id"] = client_run_id
-    return runtime.create_run_for_runnable(
-        **payload,
-    )
+    return _call_with_supported_kwargs(runtime.create_run_for_runnable, payload)
+
+
+def _call_with_supported_kwargs(callable_obj: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        signature = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return callable_obj(**payload)
+    if any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in signature.parameters.values()
+    ):
+        return callable_obj(**payload)
+    supported_payload = {
+        key: value
+        for key, value in payload.items()
+        if key in signature.parameters
+    }
+    return callable_obj(**supported_payload)
 
 
 def append_group_member_event(

@@ -114,12 +114,16 @@ def planner_enriched_chat_request(
         str(payload.get("prompt") or payload.get("goal") or ""),
         metadata=metadata,
     )
+    planner_metadata = runtime_planner_metadata(
+        decision,
+        allowed_tools=allowed_tools or _request_allowed_tools(payload),
+    )
+    compatible_plan_tools = _daily_desktop_compatible_plan_tools(decision, metadata)
+    if compatible_plan_tools:
+        planner_metadata["yachiyo_plan_tools"] = compatible_plan_tools
     payload["metadata"] = {
         **dict(metadata),
-        **runtime_planner_metadata(
-            decision,
-            allowed_tools=allowed_tools or _request_allowed_tools(payload),
-        ),
+        **planner_metadata,
         **orchestration_metadata,
     }
     return payload
@@ -209,6 +213,21 @@ def _normalized_entrypoint_metadata(metadata: Mapping[str, Any]) -> dict[str, An
 
 def _metadata_text(metadata: Mapping[str, Any], key: str) -> str:
     return str(metadata.get(key) or "").strip()
+
+
+def _daily_desktop_compatible_plan_tools(
+    decision: PlannerDecisionSnapshot,
+    metadata: Mapping[str, Any],
+) -> list[str]:
+    if not bool(metadata.get("daily_desktop_intent")):
+        return []
+    source = _metadata_text(metadata, "entrypoint_source") or _metadata_text(metadata, "source")
+    if source == "launcher" or _metadata_text(metadata, "launcher_mode"):
+        return []
+    intent = decision.selected_intent
+    if intent.kind == "media_playback" and str(intent.inputs.get("query") or "").strip():
+        return ["media.apple_music_play", "desktop.ui_elements"]
+    return []
 
 
 def _planner_orchestration_metadata(
@@ -305,7 +324,7 @@ def planner_selection_payload(
         "open_questions": open_questions,
         "planner_tools": _tool_names(planner_request_list),
         "legacy_tools": _tool_names(legacy_request_list),
-        "selected_tools": _tool_names(selected_request_list),
+        "selected_tools": _selection_display_tool_names(selected_request_list),
         "plan_step_count": len(plan_steps),
         "plan_capability_count": len(plan_capabilities),
         "missing_capability_count": len(missing_capabilities),
@@ -314,7 +333,7 @@ def planner_selection_payload(
         "open_question_count": len(open_questions),
         "planner_request_count": len(planner_request_list),
         "legacy_request_count": len(legacy_request_list),
-        "selected_request_count": len(selected_request_list),
+        "selected_request_count": len(_selection_display_tool_names(selected_request_list)),
     }
     if decision is not None:
         payload.update(_decision_trace_payload(decision))
@@ -1352,6 +1371,87 @@ def _tool_names(requests: Iterable[Mapping[str, Any]]) -> list[str]:
         for request in requests
         if str(request.get("tool") or "").strip()
     ]
+
+
+def _selection_display_tool_names(requests: Iterable[Mapping[str, Any]]) -> list[str]:
+    items = _request_list(requests)
+    tools: list[str] = []
+    index = 0
+    while index < len(items):
+        request = items[index]
+        tool_name = str(request.get("tool") or "").strip()
+        if not tool_name:
+            index += 1
+            continue
+        next_request = items[index + 1] if index + 1 < len(items) else None
+        if _is_app_focus_or_open(tool_name) and next_request is not None:
+            next_tool = str(next_request.get("tool") or "").strip()
+            if (
+                next_tool in {"app.focus_and_safe_shortcut", "app.open_and_safe_shortcut"}
+                and _same_or_unspecified_app(request, next_request)
+            ):
+                tools.append(next_tool)
+                index += 2
+                continue
+            if (
+                next_tool == "desktop.safe_shortcut"
+                and _shortcut_action(next_request)
+                and _same_or_unspecified_app(request, next_request)
+                and not _preceded_by_app_prepare(items, index - 1)
+                and not _followed_by_context_transfer_shortcut(items, index + 2)
+            ):
+                prefix = "app.open" if tool_name in {"app.open", "desktop.open_app"} else "app.focus"
+                tools.append(f"{prefix}_and_safe_shortcut")
+                index += 2
+                continue
+        tools.append(tool_name)
+        index += 1
+    return tools
+
+
+def _is_app_focus_or_open(tool_name: str) -> bool:
+    return tool_name in {"app.open", "desktop.open_app", "app.focus", "desktop.focus_app"}
+
+
+def _same_or_unspecified_app(
+    first: Mapping[str, Any],
+    second: Mapping[str, Any],
+) -> bool:
+    first_app = _request_app_name(first)
+    second_app = _request_app_name(second)
+    return not first_app or not second_app or first_app == second_app
+
+
+def _request_app_name(request: Mapping[str, Any]) -> str:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return str(payload.get("app_name") or "").strip().lower()
+
+
+def _shortcut_action(request: Mapping[str, Any]) -> str:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    return str(payload.get("action") or "").strip()
+
+
+def _followed_by_context_transfer_shortcut(
+    requests: list[Mapping[str, Any]],
+    index: int,
+) -> bool:
+    if index >= len(requests):
+        return False
+    request = requests[index]
+    if str(request.get("tool") or "").strip() != "desktop.safe_shortcut":
+        return False
+    return _shortcut_action(request) in {"copy", "paste"}
+
+
+def _preceded_by_app_prepare(
+    requests: list[Mapping[str, Any]],
+    index: int,
+) -> bool:
+    if index < 0 or index >= len(requests):
+        return False
+    tool_name = str(requests[index].get("tool") or "").strip()
+    return _is_app_focus_or_open(tool_name)
 
 
 def _plan_steps(decision: Any | None) -> list[Any]:

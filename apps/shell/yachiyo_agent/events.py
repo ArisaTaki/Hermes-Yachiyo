@@ -10,6 +10,28 @@ from apps.shell.agent.runtime.events import redact_run_event_payload, redact_sec
 from .contracts import PublicRunEvent, RunEventPageSnapshot
 
 _SECRET_EVENT_PAYLOAD = {"redacted": True, "reason": "secret_event"}
+_CONTEXT_PAYLOAD_KEYS = {
+    "parent_run_id",
+    "source_run_id",
+    "source_runnable_id",
+    "source_agent_id",
+    "member_agent_id",
+    "agent_id",
+    "source_runnable_name",
+    "source_agent_name",
+    "member_agent_name",
+    "agent_name",
+    "workflow_id",
+    "workflow_run_id",
+    "workflow_node_id",
+    "workflow_node_label",
+    "group_id",
+    "group_run_id",
+    "run_group_id",
+    "core_id",
+    "workspace_id",
+    "task_id",
+}
 
 
 def public_run_event_from_payload(
@@ -22,6 +44,7 @@ def public_run_event_from_payload(
     if isinstance(payload, PublicRunEvent):
         return _redacted_public_run_event(_public_run_event_with_context(payload, context))
 
+    has_explicit_payload = isinstance(payload.get("payload"), Mapping)
     payload = _payload_with_parent_context(payload, context)
     raw_payload = _mapping(payload.get("payload"))
     event_type = _text(payload.get("event_type") or payload.get("event"))
@@ -52,6 +75,16 @@ def public_run_event_from_payload(
             "created_at",
         }
     }
+    if (
+        not has_explicit_payload
+        and event_type.endswith(".desktop.intent_planned")
+        and str(timeline_payload.get("source") or "").strip() == "runtime_planner"
+    ):
+        timeline_payload = {
+            key: value
+            for key, value in timeline_payload.items()
+            if key not in _CONTEXT_PAYLOAD_KEYS
+        }
     if timeline_payload:
         raw_payload = {**timeline_payload, **raw_payload}
 

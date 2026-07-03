@@ -234,7 +234,7 @@ def _visible_daily_desktop_completed_steps(raw_steps: Any) -> list[dict[str, Any
             in _DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS
         ):
             visible_steps = visible_steps[1:]
-        return visible_steps
+        return _coalesced_open_focus_find_steps(visible_steps)
 
     first_primary = primary_indexes[0]
     last_primary = primary_indexes[-1]
@@ -252,7 +252,63 @@ def _visible_daily_desktop_completed_steps(raw_steps: Any) -> list[dict[str, Any
         ):
             continue
         visible_steps.append(step)
-    return visible_steps or steps
+    return _coalesced_open_focus_find_steps(visible_steps or steps)
+
+
+def _coalesced_open_focus_find_steps(
+    steps: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if len(steps) < 3:
+        return steps
+    coalesced: list[dict[str, Any]] = []
+    index = 0
+    while index < len(steps):
+        if index + 2 >= len(steps):
+            coalesced.append(steps[index])
+            index += 1
+            continue
+        open_step = steps[index]
+        focus_step = steps[index + 1]
+        shortcut_step = steps[index + 2]
+        app_name = _summary_step_app_name(open_step)
+        if (
+            _text(open_step.get("tool") or open_step.get("tool_name"))
+            in {"app.open", "desktop.open_app"}
+            and _text(focus_step.get("tool") or focus_step.get("tool_name"))
+            in {"app.focus", "desktop.focus_app"}
+            and _text(shortcut_step.get("tool") or shortcut_step.get("tool_name"))
+            == "desktop.safe_shortcut"
+            and app_name
+            and _summary_step_app_name(focus_step) == app_name
+            and _summary_step_shortcut_action(shortcut_step) == "find"
+        ):
+            coalesced.append(
+                {
+                    **shortcut_step,
+                    "tool": "app.open_and_safe_shortcut",
+                    "tool_name": "app.open_and_safe_shortcut",
+                    "input_preview": {"app_name": app_name, "action": "find"},
+                }
+            )
+            index += 3
+            continue
+        coalesced.append(open_step)
+        index += 1
+    return coalesced
+
+
+def _summary_step_app_name(step: Mapping[str, Any]) -> str:
+    input_preview = step.get("input_preview") if isinstance(step.get("input_preview"), Mapping) else {}
+    result = step.get("result") if isinstance(step.get("result"), Mapping) else {}
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    return _text(input_preview.get("app_name") or data.get("app_name"))
+
+
+def _summary_step_shortcut_action(step: Mapping[str, Any]) -> str:
+    input_preview = step.get("input_preview") if isinstance(step.get("input_preview"), Mapping) else {}
+    result = step.get("result") if isinstance(step.get("result"), Mapping) else {}
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    return _text(input_preview.get("action") or data.get("shortcut_action"))
 
 
 def _is_requested_ui_readback(

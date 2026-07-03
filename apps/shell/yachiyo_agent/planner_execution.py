@@ -3242,6 +3242,9 @@ def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[st
             request_payload["app_name"] = _canonical_app_name(app_name)
             _copy_app_selection_metadata(payload, request_payload)
         return request_payload
+    if tool_name == "media.music_app_open_and_play":
+        app_name = str(payload.get("app_name") or "").strip()
+        return {"app_name": _canonical_app_name(app_name)} if app_name else {}
     return payload
 
 

@@ -17279,6 +17279,7 @@ def _daily_desktop_sequence_summary_steps(
 ) -> list[dict[str, Any]]:
     if not visible_steps:
         return []
+    visible_steps = _coalesced_open_focus_find_summary_steps(visible_steps)
     if (
         str(visible_steps[-1].get("tool") or "") == "desktop.active_window"
         and _direct_action_with_active_window_verification(visible_steps)
@@ -17290,6 +17291,67 @@ def _daily_desktop_sequence_summary_steps(
         ]
         return primary_steps or visible_steps
     return visible_steps
+
+
+def _coalesced_open_focus_find_summary_steps(
+    visible_steps: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if len(visible_steps) < 3:
+        return visible_steps
+    coalesced: list[dict[str, Any]] = []
+    index = 0
+    while index < len(visible_steps):
+        if index + 2 >= len(visible_steps):
+            coalesced.append(visible_steps[index])
+            index += 1
+            continue
+        open_step = visible_steps[index]
+        focus_step = visible_steps[index + 1]
+        shortcut_step = visible_steps[index + 2]
+        app_name = _summary_step_app_name(open_step)
+        if (
+            str(open_step.get("tool") or "") in {"app.open", "desktop.open_app"}
+            and str(focus_step.get("tool") or "") in {"app.focus", "desktop.focus_app"}
+            and str(shortcut_step.get("tool") or "") == "desktop.safe_shortcut"
+            and app_name
+            and _summary_step_app_name(focus_step) == app_name
+            and _summary_step_shortcut_action(shortcut_step) == "find"
+        ):
+            coalesced.append(
+                {
+                    **shortcut_step,
+                    "tool": "app.open_and_safe_shortcut",
+                    "input_preview": {"app_name": app_name, "action": "find"},
+                    "summary": f"已打开{_display_target_name(app_name, '并打开查找')}。",
+                }
+            )
+            index += 3
+            continue
+        coalesced.append(open_step)
+        index += 1
+    return coalesced
+
+
+def _summary_step_app_name(step: Mapping[str, Any]) -> str:
+    input_preview = step.get("input_preview") if isinstance(step.get("input_preview"), Mapping) else {}
+    result = step.get("result") if isinstance(step.get("result"), Mapping) else {}
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    return str(
+        input_preview.get("app_name")
+        or data.get("app_name")
+        or ""
+    ).strip()
+
+
+def _summary_step_shortcut_action(step: Mapping[str, Any]) -> str:
+    input_preview = step.get("input_preview") if isinstance(step.get("input_preview"), Mapping) else {}
+    result = step.get("result") if isinstance(step.get("result"), Mapping) else {}
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    return str(
+        input_preview.get("action")
+        or data.get("shortcut_action")
+        or ""
+    ).strip()
 
 
 def _is_requested_ui_readback(
