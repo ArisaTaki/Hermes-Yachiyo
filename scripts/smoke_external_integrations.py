@@ -409,9 +409,24 @@ async def run_astrbot_plugin_bridge_check(
     config = PluginConfig(oha_url=bridge_url, bridge_token=bridge_token)
     responses: dict[str, str] = {}
 
+    def require_success_response(label: str, response: str) -> None:
+        failure_markers = (
+            "命令执行失败",
+            "执行失败",
+            "无法连接到 Oha-Yachiyo",
+            "Bridge 响应超时",
+            "Traceback",
+            "RuntimeError",
+            "⚠️",
+        )
+        for marker in failure_markers:
+            if marker in response:
+                raise SmokeError(f"/y {label} returned an error response: {response[:160]}")
+
     async def command(label: str, text: str) -> str:
         response = await on_y_command(text, sender_id=sender_id, config=config)
         responses[label] = response
+        require_success_response(label, response)
         return response
 
     status = await command("status", "/y status")
