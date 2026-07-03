@@ -20,6 +20,7 @@ FOLLOWUP_CONTENT_SNAPSHOT_TOOLS: frozenset[str] = frozenset(
         "desktop.windows",
         "desktop.ui_elements",
         "file.read",
+        "file.search",
         "screen.capture",
         "terminal.run",
         "workspace.list",
@@ -95,8 +96,12 @@ def followup_content_snapshot_for_tool_call(
         return data_analyze_content_snapshot(result, input_preview)
     if tool_name == "terminal.run":
         return terminal_run_content_snapshot(result, input_preview)
-    if tool_name == "workspace.list":
-        return workspace_list_content_snapshot(result, input_preview)
+    if tool_name in {"workspace.list", "file.search"}:
+        return workspace_list_content_snapshot(
+            result,
+            input_preview,
+            source_tool=tool_name,
+        )
     if tool_name == "desktop.list_apps":
         return desktop_list_apps_content_snapshot(result, input_preview)
     if tool_name in {"workspace.read", "file.read"}:
@@ -454,6 +459,8 @@ def terminal_run_content_snapshot(
 def workspace_list_content_snapshot(
     result: dict[str, Any],
     input_preview: dict[str, Any],
+    *,
+    source_tool: str = "workspace.list",
 ) -> dict[str, Any]:
     entries = _workspace_list_entries(result)
     entry_candidates = _workspace_list_entry_candidates(entries)
@@ -466,7 +473,7 @@ def workspace_list_content_snapshot(
         lines.append(f"- {name}" + (f" ({entry_type})" if entry_type else ""))
     text = "\n".join(lines)
     snapshot: dict[str, Any] = {
-        "source_tool": "workspace.list",
+        "source_tool": source_tool,
         "ok": bool(result.get("ok")),
         "path": str(result.get("path") or input_preview.get("path") or ".").strip(),
         "pattern": str(

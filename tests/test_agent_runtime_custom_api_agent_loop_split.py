@@ -1509,6 +1509,230 @@ def test_runtime_planner_routes_ui_development_to_code_task_area_context(
     assert requests[-1]["continue_to_model"] is True
 
 
+def test_followup_content_snapshot_preserves_file_search_candidates() -> None:
+    snapshot = custom_api_agent_module.followup_content_snapshot_for_tool_call(
+        "file.search",
+        {
+            "ok": True,
+            "path": "apps/frontend/src/features/agent-studio",
+            "entries": [
+                {"name": "RunTimelinePanel.tsx", "type": "file"},
+                {"name": "components", "type": "dir"},
+            ],
+        },
+        {
+            "path": "apps/frontend/src/features/agent-studio",
+            "pattern": "*Timeline*",
+        },
+    )
+
+    assert snapshot["source_tool"] == "file.search"
+    assert snapshot["path"] == "apps/frontend/src/features/agent-studio"
+    assert snapshot["pattern"] == "*Timeline*"
+    assert snapshot["entries"][0]["name"] == "RunTimelinePanel.tsx"
+    assert "RunTimelinePanel.tsx" in snapshot["text"]
+
+
+def test_auto_code_context_read_requests_select_source_candidates() -> None:
+    requests = custom_api_agent_module._auto_code_context_read_requests(
+        {
+            "intent_kind": "code_task",
+            "decision_id": "decision-code",
+            "plan_id": "plan-code",
+        },
+        ["workspace.read", "file.search"],
+        [
+            _timeline(
+                "agent.tool.call",
+                "workspace.list",
+                planning_reason="planner_prefetch_code_context",
+                input_preview={},
+                result={
+                    "ok": True,
+                    "path": ".",
+                    "entries": [
+                        {"name": "node_modules", "type": "dir"},
+                        {"name": "package.json", "type": "file"},
+                    ],
+                },
+            ),
+            _timeline(
+                "agent.tool.call",
+                "file.search",
+                planning_reason="planner_prefetch_code_context",
+                input_preview={
+                    "path": "apps/frontend/src/features/agent-studio",
+                    "pattern": "*Timeline*",
+                },
+                result={
+                    "ok": True,
+                    "path": "apps/frontend/src/features/agent-studio",
+                    "entries": [
+                        {"name": "RunTimelinePanel.tsx", "type": "file"},
+                        {"name": "screenshot.png", "type": "file"},
+                        {"name": "components", "type": "dir"},
+                    ],
+                },
+            ),
+        ],
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "workspace.read",
+        "workspace.read",
+    ]
+    assert requests[0]["input"] == {
+        "path": "apps/frontend/src/features/agent-studio/RunTimelinePanel.tsx"
+    }
+    assert requests[0]["planning_reason"] == "planner_auto_code_context_read"
+    assert requests[0]["decision_id"] == "decision-code"
+    assert requests[-1]["continue_to_model"] is True
+    assert requests[-1]["input"] == {"path": "package.json"}
+
+
+def test_custom_api_agent_loop_reads_code_candidates_after_area_search() -> None:
+    budget = FakeBudget()
+    tool_runs: list[dict[str, Any]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+    messages = [
+        {
+            "role": "user",
+            "content": "帮我实现一个小功能：给 Agent Studio 的 run timeline 增加 filter",
+        }
+    ]
+    timeline: list[dict[str, Any]] = []
+
+    def fake_search_result(path: str, pattern: str) -> dict[str, Any]:
+        if "runtime-shared" in path:
+            entries = [{"name": "RuntimeTimeline.tsx", "type": "file"}]
+        elif "Timeline" in pattern:
+            entries = [{"name": "RunTimelinePanel.tsx", "type": "file"}]
+        else:
+            entries = [{"name": "AgentStudioToolsTab.tsx", "type": "file"}]
+        return {"ok": True, "path": path, "entries": entries}
+
+    def fake_run_tool_requests(
+        tool_requests,
+        allowed_tools,
+        broker,
+        messages_arg,
+        timeline_arg,
+        artifacts,
+        **kwargs,
+    ) -> None:
+        tool_runs.append(
+            {
+                "tool_requests": [dict(request) for request in tool_requests],
+                "allowed_tools": allowed_tools,
+                "broker": broker,
+                "messages": messages_arg,
+                "timeline": timeline_arg,
+                "artifacts": artifacts,
+                "kwargs": kwargs,
+            }
+        )
+        for request in tool_requests:
+            tool_name = str(request.get("tool") or "")
+            input_preview = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if tool_name == "workspace.list":
+                result = {
+                    "ok": True,
+                    "path": ".",
+                    "entries": [{"name": "apps", "type": "dir"}],
+                }
+            elif tool_name == "file.search":
+                result = fake_search_result(
+                    str(input_preview.get("path") or ""),
+                    str(input_preview.get("pattern") or ""),
+                )
+            else:
+                result = {
+                    "ok": True,
+                    "path": str(input_preview.get("path") or ""),
+                    "content": "export function RunTimelinePanel() { return null }",
+                }
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool_name,
+                    input_preview=input_preview,
+                    result=result,
+                    planning_reason=str(request.get("planning_reason") or ""),
+                    step_id=str(request.get("step_id") or ""),
+                )
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {
+                "allowed_tools": [
+                    "workspace.list",
+                    "file.search",
+                    "workspace.read",
+                    "workspace.write_patch",
+                ]
+            }
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=3,
+        operating_doctrine="Use runtime planner for code changes.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": "patch ready"},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=fake_run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Coder"},
+        "ignored context",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=messages,
+        run_id="run-code-area-read",
+    )
+
+    assert str(result) == "patch ready"
+    assert len(tool_runs) == 2
+    assert [request["tool"] for request in tool_runs[0]["tool_requests"]] == [
+        "workspace.list",
+        "file.search",
+        "file.search",
+        "file.search",
+    ]
+    assert [request["tool"] for request in tool_runs[1]["tool_requests"]] == [
+        "workspace.read",
+        "workspace.read",
+        "workspace.read",
+    ]
+    read_paths = [request["input"]["path"] for request in tool_runs[1]["tool_requests"]]
+    assert "apps/frontend/src/features/agent-studio/RunTimelinePanel.tsx" in read_paths
+    assert "apps/frontend/src/features/runtime-shared/RuntimeTimeline.tsx" in read_paths
+    followup_message = str(model_calls[0][-1]["content"])
+    assert "workspace.read" in followup_message
+    assert "workspace.write_patch with path and patch" in followup_message
+
+
 def test_runtime_planner_routes_repository_entry_summary_to_code_task_report() -> None:
     allowed_tools = [
         "workspace.list",

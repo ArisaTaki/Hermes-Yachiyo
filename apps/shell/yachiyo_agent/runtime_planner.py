@@ -5960,26 +5960,24 @@ class RuntimePlanner:
                     reason="Run exactly the terminal command explicitly requested by the user.",
                 )
             ]
-        inspect_step = _step(
-            intent,
-            "inspect-workspace",
-            "Inspect workspace",
-            "file.workspace_read",
-            _first_allowed(
-                (
-                    "workspace.list",
-                    "fs.find_files",
-                    "file.search",
-                    "workspace.read",
-                    "fs.read_file",
-                    "file.read",
-                ),
-                allowed,
-            ),
-            reason="Understand the repo before editing or testing.",
+        inspect_tool = _first_allowed(
+            ("workspace.list", "fs.find_files", "file.search"),
+            allowed,
         )
-        context_steps = [inspect_step]
-        context_depends_on = ["inspect-workspace"]
+        context_steps: list[ToolPlanStepSnapshot] = []
+        context_depends_on: list[str] = []
+        if inspect_tool:
+            context_steps.append(
+                _step(
+                    intent,
+                    "inspect-workspace",
+                    "Inspect workspace",
+                    "file.workspace_read",
+                    inspect_tool,
+                    reason="Understand the repo before editing or testing.",
+                )
+            )
+            context_depends_on = ["inspect-workspace"]
         file_context = intent.inputs.get("code_file_context_hint")
         if isinstance(file_context, Mapping):
             target_path = str(file_context.get("path") or "").strip()
@@ -5993,7 +5991,7 @@ class RuntimePlanner:
                         "file.workspace_read",
                         read_tool,
                         input_preview={"path": target_path},
-                        depends_on=["inspect-workspace"],
+                        depends_on=context_depends_on,
                         reason="Read the explicit target file before generating a patch.",
                     )
                 )
@@ -6024,7 +6022,7 @@ class RuntimePlanner:
                         "file.workspace_read",
                         search_tool,
                         input_preview=input_preview,
-                        depends_on=["inspect-workspace"],
+                        depends_on=context_depends_on,
                         reason=str(hint.get("reason") or "").strip()
                         or "Inspect the likely product surface before patching.",
                     )
@@ -6032,7 +6030,11 @@ class RuntimePlanner:
                 area_step_ids.append(step_id)
             if area_step_ids:
                 context_depends_on = [
-                    *[step_id for step_id in context_depends_on if step_id != "inspect-workspace"],
+                    *[
+                        step_id
+                        for step_id in context_depends_on
+                        if step_id != "inspect-workspace"
+                    ],
                     *area_step_ids,
                 ]
         diagnostic_hint = intent.inputs.get("code_diagnostic_command_hint")

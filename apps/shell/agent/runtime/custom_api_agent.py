@@ -1400,6 +1400,39 @@ class RuntimeCustomApiAgentLoop:
                             )
                             if direct_result:
                                 return direct_result
+                    auto_code_context_requests = _auto_code_context_read_requests(
+                        followup_selection_payload,
+                        allowed_tools,
+                        timeline,
+                    )
+                    auto_code_context_requests = _drop_completed_auto_followup_prefix(
+                        auto_code_context_requests,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    )
+                    if auto_code_context_requests:
+                        auto_tool_timeline_start = len(timeline)
+                        self._run_tool_requests(
+                            auto_code_context_requests,
+                            allowed_tools,
+                            broker,
+                            messages,
+                            timeline,
+                            artifacts,
+                            next_iteration=start_iteration,
+                            run_id=run_id,
+                            budget=budget,
+                        )
+                        self._record_runtime_planner_task_progress_events(
+                            runtime_planner_decision,
+                            timeline=timeline,
+                            tool_timeline_start=auto_tool_timeline_start,
+                            run_id=run_id,
+                        )
+                        planned_tool_requests = [
+                            *planned_tool_requests,
+                            *auto_code_context_requests,
+                        ]
                     if not replan_payloads:
                         self._append_model_followup_context(
                             planned_tool_requests,
@@ -9069,6 +9102,252 @@ def _auto_discovered_followup_requests(
         if requests:
             return requests
     return []
+
+
+_CODE_CONTEXT_READ_EXTENSIONS = {
+    ".c",
+    ".cc",
+    ".cjs",
+    ".cpp",
+    ".css",
+    ".go",
+    ".h",
+    ".hpp",
+    ".html",
+    ".java",
+    ".js",
+    ".json",
+    ".jsx",
+    ".kt",
+    ".md",
+    ".mjs",
+    ".py",
+    ".rb",
+    ".rs",
+    ".scss",
+    ".sh",
+    ".svelte",
+    ".swift",
+    ".toml",
+    ".ts",
+    ".tsx",
+    ".vue",
+    ".yaml",
+    ".yml",
+}
+
+_CODE_CONTEXT_CONFIG_FILES = {
+    "package.json",
+    "pyproject.toml",
+    "tsconfig.json",
+    "vite.config.js",
+    "vite.config.ts",
+}
+
+_CODE_CONTEXT_SKIP_PARTS = {
+    ".git",
+    ".next",
+    ".venv",
+    "__pycache__",
+    "build",
+    "coverage",
+    "dist",
+    "node_modules",
+}
+
+
+def _auto_code_context_read_requests(
+    selection_payload: Mapping[str, Any],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    max_files: int = 3,
+) -> list[dict[str, Any]]:
+    if str(selection_payload.get("intent_kind") or "").strip() != "code_task":
+        return []
+    allowed = {
+        str(tool or "").strip()
+        for tool in allowed_tools
+        if str(tool or "").strip()
+    }
+    read_tool = _first_allowed_tool(
+        ("workspace.read", "file.read", "fs.read_file"),
+        allowed,
+    )
+    if not read_tool:
+        return []
+    already_read = _code_context_already_read_paths(timeline)
+    selected_paths = _select_code_context_candidate_paths(
+        timeline,
+        already_read=already_read,
+        max_files=max_files,
+    )
+    requests: list[dict[str, Any]] = []
+    for index, path in enumerate(selected_paths, start=1):
+        request = _request_like(
+            read_tool,
+            {"path": path},
+            source="runtime_planner",
+            planning_reason="planner_auto_code_context_read",
+        )
+        request["step_id"] = f"read-code-context-candidate-{index}"
+        request["capability_id"] = "file.workspace_read"
+        request["intent_kind"] = "code_task"
+        _attach_selection_trace_fields(request, selection_payload)
+        requests.append(request)
+    if requests:
+        requests[-1]["continue_to_model"] = True
+    return requests
+
+
+def _attach_selection_trace_fields(
+    request: dict[str, Any],
+    selection_payload: Mapping[str, Any],
+) -> None:
+    for key in (
+        "decision_id",
+        "plan_id",
+        "tool_plan_id",
+        "core_id",
+        "workspace_id",
+        "task_id",
+    ):
+        value = str(selection_payload.get(key) or "").strip()
+        if value:
+            request[key] = value
+
+
+def _select_code_context_candidate_paths(
+    timeline: list[dict[str, Any]],
+    *,
+    already_read: set[str],
+    max_files: int,
+) -> list[str]:
+    candidates: dict[str, tuple[int, int]] = {}
+    order = 0
+    for event in timeline:
+        if not _code_context_search_event(event):
+            continue
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        if result.get("ok") is not True:
+            continue
+        input_preview = (
+            event.get("input_preview")
+            if isinstance(event.get("input_preview"), dict)
+            else {}
+        )
+        base_path = str(result.get("path") or input_preview.get("path") or "").strip()
+        pattern = str(
+            input_preview.get("pattern")
+            or (result.get("filter") if isinstance(result.get("filter"), dict) else {}).get("pattern")
+            or ""
+        ).strip()
+        entries = result.get("entries") if isinstance(result.get("entries"), list) else []
+        for entry in entries:
+            path = _code_context_entry_path(entry, base_path)
+            if not path or path in already_read or not _code_context_readable_path(path):
+                continue
+            score = _code_context_candidate_score(path, pattern)
+            if score <= 0:
+                continue
+            order += 1
+            previous = candidates.get(path)
+            value = (score, -order)
+            if previous is None or value > previous:
+                candidates[path] = value
+    ranked = sorted(candidates.items(), key=lambda item: item[1], reverse=True)
+    clean_max = max(1, int(max_files or 3))
+    return [path for path, _score in ranked[:clean_max]]
+
+
+def _code_context_search_event(event: Mapping[str, Any]) -> bool:
+    if event.get("event") != "agent.tool.call":
+        return False
+    tool_name = str(event.get("detail") or event.get("tool") or "").strip()
+    if tool_name not in {"workspace.list", "file.search", "fs.find_files"}:
+        return False
+    planning_reason = str(event.get("planning_reason") or "").strip()
+    if planning_reason:
+        return planning_reason == "planner_prefetch_code_context"
+    step_id = str(event.get("step_id") or "").strip()
+    return step_id == "inspect-workspace" or step_id.startswith("inspect-code-area-")
+
+
+def _code_context_already_read_paths(timeline: list[dict[str, Any]]) -> set[str]:
+    paths: set[str] = set()
+    for event in timeline:
+        if event.get("event") != "agent.tool.call":
+            continue
+        tool_name = str(event.get("detail") or event.get("tool") or "").strip()
+        if tool_name not in {"workspace.read", "file.read", "fs.read_file"}:
+            continue
+        input_preview = (
+            event.get("input_preview")
+            if isinstance(event.get("input_preview"), dict)
+            else {}
+        )
+        path = str(input_preview.get("path") or "").strip()
+        if path:
+            paths.add(path)
+    return paths
+
+
+def _code_context_entry_path(entry: Any, base_path: str) -> str:
+    if isinstance(entry, str):
+        return _join_workspace_list_path(base_path, entry)
+    if not isinstance(entry, Mapping):
+        return ""
+    entry_type = str(entry.get("type") or entry.get("kind") or "").strip()
+    if entry_type and entry_type != "file":
+        return ""
+    path = str(entry.get("path") or "").strip()
+    if path:
+        return path.strip("/")
+    name = str(entry.get("name") or "").strip()
+    if not name:
+        return ""
+    return _join_workspace_list_path(base_path, name)
+
+
+def _code_context_readable_path(path: str) -> bool:
+    clean = str(path or "").strip().strip("/")
+    if not clean:
+        return False
+    parts = {part for part in clean.split("/") if part}
+    if parts & _CODE_CONTEXT_SKIP_PARTS:
+        return False
+    name = posixpath.basename(clean)
+    if name in _CODE_CONTEXT_CONFIG_FILES:
+        return True
+    extension = _code_context_extension(name)
+    return extension in _CODE_CONTEXT_READ_EXTENSIONS
+
+
+def _code_context_candidate_score(path: str, pattern: str) -> int:
+    clean = str(path or "").strip()
+    name = posixpath.basename(clean).lower()
+    extension = _code_context_extension(name)
+    score = 0
+    if name in _CODE_CONTEXT_CONFIG_FILES:
+        score += 45
+    if extension in {".ts", ".tsx", ".py", ".js", ".jsx"}:
+        score += 70
+    elif extension in _CODE_CONTEXT_READ_EXTENSIONS:
+        score += 35
+    lowered = clean.lower()
+    if "/test" in lowered or "test_" in name or name.endswith((".test.ts", ".test.tsx")):
+        score += 20
+    for term in re.findall(r"[a-zA-Z0-9_]+", str(pattern or "").lower()):
+        if len(term) >= 3 and term in lowered:
+            score += 30
+    return score
+
+
+def _code_context_extension(name: str) -> str:
+    lowered = str(name or "").lower()
+    if lowered.endswith(".d.ts"):
+        return ".ts"
+    return posixpath.splitext(lowered)[1]
 
 
 def _auto_communication_message_followup_requests(

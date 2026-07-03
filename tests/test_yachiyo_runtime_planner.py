@@ -28096,6 +28096,8 @@ def test_planner_tool_requests_prefetches_code_context_for_model_loop() -> None:
             "input": {},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_code_context",
+            "step_id": "inspect-workspace",
+            "capability_id": "file.workspace_read",
             "continue_to_model": True,
         }
     ]
@@ -30388,11 +30390,12 @@ def test_agent_studio_service_projects_full_code_and_file_execution_plans() -> N
         "terminal.run",
     ]
     assert [request.step_id for request in code_envelope.requests] == [
-        "inspect-workspace",
+        "read-code-target-file",
         "run-code-diagnostic",
         "apply-code-changes",
         "verify-code-changes",
     ]
+    assert code_envelope.requests[0].input == {"path": "README.md"}
     assert code_envelope.requests[1].approval_required is True
     assert code_envelope.requests[2].approval_required is True
     assert [request.tool_name for request in file_envelope.requests] == [
