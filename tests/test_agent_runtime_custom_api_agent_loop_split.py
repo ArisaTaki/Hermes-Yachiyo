@@ -24122,12 +24122,19 @@ def test_custom_api_agent_loop_verifies_model_system_volume_tool_call() -> None:
         "tool_call_id": "call_volume",
         "function_name": "system.volume",
     }
+    window_request = {
+        "protocol": "tool_calls",
+        "tool": "desktop.active_window",
+        "input": {},
+        "tool_call_id": "call_window",
+        "function_name": "desktop.active_window",
+    }
 
     def call_model(_base_url, _model, _api_key, _messages, **_kwargs):
         nonlocal model_calls
         model_calls += 1
         if model_calls == 1:
-            return {"content": "", "requests": [original_request]}
+            return {"content": "", "requests": [original_request, window_request]}
         return {"content": "done"}
 
     def run_tool_requests(
@@ -24148,7 +24155,7 @@ def test_custom_api_agent_loop_verifies_model_system_volume_tool_call() -> None:
             "api_key": "k",
         },
         compile_agent_runtime=lambda _agent: {
-            "tool_policy": {"allowed_tools": ["system.volume"]}
+            "tool_policy": {"allowed_tools": ["system.volume", "desktop.active_window"]}
         },
         run_budget=lambda _run_id, _timeline_value: budget,
         check_context_budget=lambda _budget, _messages: None,
@@ -24186,6 +24193,7 @@ def test_custom_api_agent_loop_verifies_model_system_volume_tool_call() -> None:
     assert tool_runs == [
         [
             original_request,
+            window_request,
             {
                 "protocol": "json_fallback",
                 "tool": "system.volume",

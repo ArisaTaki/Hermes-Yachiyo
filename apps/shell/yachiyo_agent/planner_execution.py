@@ -4011,6 +4011,8 @@ def _append_system_volume_status_verification_requests(
 ) -> list[dict[str, Any]]:
     if "system.volume" not in allowed:
         return requests
+    if _has_native_tool_call_protocol(requests):
+        return _append_system_volume_status_after_native_tool_calls(requests)
     normalized: list[dict[str, Any]] = []
     for index, request in enumerate(requests):
         normalized.append(request)
@@ -4020,6 +4022,29 @@ def _append_system_volume_status_verification_requests(
             continue
         normalized.append(_system_volume_status_verification_request(request))
     return normalized
+
+
+def _has_native_tool_call_protocol(requests: list[dict[str, Any]]) -> bool:
+    return any(
+        str(request.get("protocol") or "").strip() == "tool_calls"
+        for request in requests
+    )
+
+
+def _append_system_volume_status_after_native_tool_calls(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    mutation_request: dict[str, Any] | None = None
+    mutation_index = -1
+    for index, request in enumerate(requests):
+        if _system_volume_request_needs_status_verification(request):
+            mutation_request = request
+            mutation_index = index
+    if mutation_request is None:
+        return requests
+    if _has_later_system_volume_status_request(requests, mutation_index):
+        return requests
+    return [*requests, _system_volume_status_verification_request(mutation_request)]
 
 
 def _system_volume_request_needs_status_verification(request: Mapping[str, Any]) -> bool:
@@ -4044,6 +4069,23 @@ def _next_request_is_system_volume_status(
         if isinstance(next_request.get("input"), Mapping)
         else {}
     )
+    return str(payload.get("action") or "").strip() == "status"
+
+
+def _has_later_system_volume_status_request(
+    requests: list[dict[str, Any]],
+    index: int,
+) -> bool:
+    return any(
+        _request_is_system_volume_status(request)
+        for request in requests[index + 1 :]
+    )
+
+
+def _request_is_system_volume_status(request: Mapping[str, Any]) -> bool:
+    if str(request.get("tool") or "").strip() != "system.volume":
+        return False
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     return str(payload.get("action") or "").strip() == "status"
 
 
