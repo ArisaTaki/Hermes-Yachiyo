@@ -1,17 +1,20 @@
 import { type FormEvent, useEffect, useMemo, useState } from 'react';
 
 import {
+  planYachiyoStudioExecution,
   planYachiyoStudioTask,
   startYachiyoStudioPlannerOrchestration,
 } from '../../yachiyo-studio/api';
 import type {
   PlannerDecisionSnapshot,
   PlannerOrchestrationStartSnapshot,
+  RuntimeExecutionEnvelopeSnapshot,
+  RuntimeExecutionRequestSnapshot,
   ToolCatalogItemSnapshot,
   ToolCatalogSnapshot,
   ToolPlanStepSnapshot,
 } from '../../yachiyo-studio/types';
-import { TaskCoreInspector } from './PlannerTraceInspector';
+import { TaskCoreInspector, TaskProgressInspector } from './PlannerTraceInspector';
 
 type RiskFilter = 'all' | 'low' | 'medium' | 'high' | 'unknown';
 
@@ -47,6 +50,9 @@ export function AgentStudioToolsTab({
   const [plannerStartError, setPlannerStartError] = useState('');
   const [plannerStartLoading, setPlannerStartLoading] = useState(false);
   const [plannerStartResult, setPlannerStartResult] = useState<PlannerOrchestrationStartSnapshot | null>(null);
+  const [plannerExecutionEnvelope, setPlannerExecutionEnvelope] = useState<RuntimeExecutionEnvelopeSnapshot | null>(null);
+  const [plannerExecutionError, setPlannerExecutionError] = useState('');
+  const [plannerExecutionLoading, setPlannerExecutionLoading] = useState(false);
 
   useEffect(() => {
     const tools = catalog.tools || [];
@@ -84,10 +90,16 @@ export function AgentStudioToolsTab({
     return catalog.tools.find((tool) => tool.tool_name === selectedToolName) || filteredTools[0] || null;
   }, [catalog.tools, filteredTools, selectedToolName]);
 
+  const plannerAllowedTools = useMemo(() => catalog.tools
+    .map((tool) => tool.tool_name)
+    .filter((toolName): toolName is string => Boolean(toolName)), [catalog.tools]);
+
   function handlePlannerPromptChange(value: string) {
     setPlannerPrompt(value);
     setPlannerStartError('');
     setPlannerStartResult(null);
+    setPlannerExecutionError('');
+    setPlannerExecutionEnvelope(null);
   }
 
   async function handlePlannerSubmit(event: FormEvent<HTMLFormElement>) {
@@ -99,18 +111,38 @@ export function AgentStudioToolsTab({
     try {
       const decision = await planYachiyoStudioTask({
         prompt,
-        allowed_tools: catalog.tools
-          .map((tool) => tool.tool_name)
-          .filter((toolName): toolName is string => Boolean(toolName)),
+        allowed_tools: plannerAllowedTools,
         metadata: { surface: 'agent_studio_tools' },
       });
       setPlannerDecision(decision);
       setPlannerStartError('');
       setPlannerStartResult(null);
+      setPlannerExecutionError('');
+      setPlannerExecutionEnvelope(null);
     } catch (error) {
       setPlannerError(errorMessage(error));
     } finally {
       setPlannerLoading(false);
+    }
+  }
+
+  async function handlePlannerExecutionPreview() {
+    const prompt = plannerPrompt.trim();
+    if (!prompt || plannerExecutionLoading) return;
+    setPlannerExecutionLoading(true);
+    setPlannerExecutionError('');
+    setPlannerExecutionEnvelope(null);
+    try {
+      const envelope = await planYachiyoStudioExecution({
+        prompt,
+        allowed_tools: plannerAllowedTools,
+        metadata: { surface: 'agent_studio_tools', preview: 'runtime_execution_envelope' },
+      });
+      setPlannerExecutionEnvelope(envelope);
+    } catch (error) {
+      setPlannerExecutionError(errorMessage(error));
+    } finally {
+      setPlannerExecutionLoading(false);
     }
   }
 
@@ -123,9 +155,7 @@ export function AgentStudioToolsTab({
     try {
       const result = await startYachiyoStudioPlannerOrchestration({
         prompt,
-        allowed_tools: catalog.tools
-          .map((tool) => tool.tool_name)
-          .filter((toolName): toolName is string => Boolean(toolName)),
+        allowed_tools: plannerAllowedTools,
         metadata: { surface: 'agent_studio_tools' },
       });
       setPlannerStartResult(result);
@@ -220,8 +250,12 @@ export function AgentStudioToolsTab({
         <RuntimePlannerPreview
           decision={plannerDecision}
           error={plannerError}
+          executionEnvelope={plannerExecutionEnvelope}
+          executionError={plannerExecutionError}
+          executionLoading={plannerExecutionLoading}
           loading={plannerLoading}
           onPromptChange={handlePlannerPromptChange}
+          onPlanExecution={() => void handlePlannerExecutionPreview()}
           onStartOrchestration={() => void handlePlannerStartOrchestration()}
           onSubmit={handlePlannerSubmit}
           prompt={plannerPrompt}
@@ -240,8 +274,12 @@ export function AgentStudioToolsTab({
 function RuntimePlannerPreview({
   decision,
   error,
+  executionEnvelope,
+  executionError,
+  executionLoading,
   loading,
   onPromptChange,
+  onPlanExecution,
   onStartOrchestration,
   onSubmit,
   prompt,
@@ -251,8 +289,12 @@ function RuntimePlannerPreview({
 }: {
   decision: PlannerDecisionSnapshot | null;
   error: string;
+  executionEnvelope: RuntimeExecutionEnvelopeSnapshot | null;
+  executionError: string;
+  executionLoading: boolean;
   loading: boolean;
   onPromptChange: (value: string) => void;
+  onPlanExecution: () => void;
   onStartOrchestration: () => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
   prompt: string;
@@ -280,27 +322,40 @@ function RuntimePlannerPreview({
           value={prompt}
           onChange={(event) => onPromptChange(event.target.value)}
         />
-        <button
-          type="submit"
-          className="hy-btn hy-btn-primary"
-          disabled={loading || !prompt.trim()}
-          data-testid="studio-runtime-planner-run"
-        >
-          {loading ? 'Planning...' : 'Plan'}
-        </button>
-        <button
-          type="button"
-          className="hy-btn hy-btn-secondary"
-          disabled={startLoading || loading || !prompt.trim()}
-          data-testid="studio-runtime-planner-start-orchestration"
-          onClick={onStartOrchestration}
-        >
-          {startLoading ? 'Starting...' : 'Start in Studio'}
-        </button>
+        <div className="studio-planner-actions">
+          <button
+            type="submit"
+            className="hy-btn hy-btn-primary"
+            disabled={loading || !prompt.trim()}
+            data-testid="studio-runtime-planner-run"
+          >
+            {loading ? 'Planning...' : 'Plan'}
+          </button>
+          <button
+            type="button"
+            className="hy-btn hy-btn-secondary"
+            disabled={executionLoading || loading || !prompt.trim()}
+            data-testid="studio-runtime-planner-build-execution"
+            onClick={onPlanExecution}
+          >
+            {executionLoading ? 'Building...' : 'Build Envelope'}
+          </button>
+          <button
+            type="button"
+            className="hy-btn hy-btn-secondary"
+            disabled={startLoading || loading || !prompt.trim()}
+            data-testid="studio-runtime-planner-start-orchestration"
+            onClick={onStartOrchestration}
+          >
+            {startLoading ? 'Starting...' : 'Start in Studio'}
+          </button>
+        </div>
       </form>
       {error ? <div className="notice danger" data-testid="studio-runtime-planner-error">{error}</div> : null}
+      {executionError ? <div className="notice danger" data-testid="studio-runtime-planner-execution-error">{executionError}</div> : null}
       {startError ? <div className="notice danger" data-testid="studio-runtime-planner-start-error">{startError}</div> : null}
       {startResult ? <PlannerOrchestrationStartResult result={startResult} /> : null}
+      {executionEnvelope ? <RuntimeExecutionEnvelopePreview envelope={executionEnvelope} /> : null}
       {decision ? (
         <div className="studio-planner-result" data-testid="studio-runtime-planner-result">
           <div className="studio-tool-detail-grid">
@@ -372,6 +427,117 @@ function RuntimePlannerPreview({
           {plan?.task_core ? <TaskCoreInspector taskCore={plan.task_core} /> : null}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function RuntimeExecutionEnvelopePreview({
+  envelope,
+}: {
+  envelope: RuntimeExecutionEnvelopeSnapshot;
+}) {
+  const requests = envelope.requests || [];
+  const stageCounts = Object.entries(envelope.runtime_stage_counts || {});
+  const approvals = envelope.approvals_required || [];
+  const artifacts = envelope.artifacts_expected || [];
+  const openQuestions = envelope.open_questions || [];
+  return (
+    <div
+      className="studio-tool-inspector-section studio-runtime-execution-envelope"
+      data-envelope-id={envelope.envelope_id}
+      data-intent-kind={envelope.intent_kind}
+      data-request-count={requests.length}
+      data-testid="studio-runtime-execution-envelope"
+    >
+      <div className="studio-tool-inspector-heading">
+        <h3>Runtime Execution Envelope</h3>
+        <span>{envelope.runtime_doctrine || envelope.source || 'discover / operate / verify'}</span>
+      </div>
+      <div className="studio-tool-detail-grid">
+        <span>
+          <small>Envelope</small>
+          <strong>{envelope.envelope_id || 'pending'}</strong>
+        </span>
+        <span>
+          <small>Intent</small>
+          <strong>{envelope.intent_kind || 'unknown'}</strong>
+        </span>
+        <span>
+          <small>Requests</small>
+          <strong>{requests.length}</strong>
+        </span>
+        <span>
+          <small>Route</small>
+          <strong>{envelope.route_to_studio ? 'Studio' : 'Direct'}</strong>
+        </span>
+      </div>
+      {stageCounts.length || approvals.length || artifacts.length || openQuestions.length ? (
+        <div className="studio-tool-pill-row" data-testid="studio-runtime-execution-debug-pills">
+          {stageCounts.map(([stage, count]) => (
+            <span className="studio-tool-permission" data-runtime-stage={stage} key={`stage:${stage}`}>
+              stage · {stage}: {count}
+            </span>
+          ))}
+          {approvals.map((approval) => (
+            <span className="studio-tool-permission missing" data-execution-approval={approval} key={`approval:${approval}`}>
+              approval · {approval}
+            </span>
+          ))}
+          {artifacts.map((artifact) => (
+            <span className="studio-tool-permission" data-execution-artifact={artifact} key={`artifact:${artifact}`}>
+              artifact · {artifact}
+            </span>
+          ))}
+          {openQuestions.map((question) => (
+            <span className="studio-tool-permission missing" data-execution-open-question={question} key={`question:${question}`}>
+              question · {question}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      <div className="studio-planner-step-list" data-testid="studio-runtime-execution-requests">
+        {requests.map((request, index) => (
+          <RuntimeExecutionRequestRow
+            index={index}
+            key={request.request_id || `${request.tool_name}-${index}`}
+            request={request}
+          />
+        ))}
+        {!requests.length ? <span className="studio-tool-empty">No execution requests</span> : null}
+      </div>
+      {envelope.task_core ? <TaskCoreInspector taskCore={envelope.task_core} /> : null}
+      {envelope.task_progress ? (
+        <TaskProgressInspector
+          replanRecoveries={[]}
+          taskProgress={envelope.task_progress}
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function RuntimeExecutionRequestRow({
+  index,
+  request,
+}: {
+  index: number;
+  request: RuntimeExecutionRequestSnapshot;
+}) {
+  const stage = request.runtime_stage || request.runtime_role || request.capability_id || '';
+  return (
+    <div
+      className="studio-planner-step"
+      data-approval-required={String(request.approval_required === true)}
+      data-execution-request-id={request.request_id}
+      data-execution-tool={request.tool_name}
+      data-runtime-stage={request.runtime_stage || ''}
+      data-testid="studio-runtime-execution-request"
+    >
+      <div>
+        <strong>{index + 1}. {request.tool_name || request.capability_id || 'runtime request'}</strong>
+        <span>{request.step_id || request.capability_id || request.request_id}</span>
+      </div>
+      <small>{stage || 'operate'}{request.approval_required ? ' / approval' : ''}</small>
     </div>
   );
 }

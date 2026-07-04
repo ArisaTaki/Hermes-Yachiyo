@@ -15378,15 +15378,26 @@ button.activity-item {
 
 .studio-planner-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: 10px;
-  align-items: end;
+  align-items: stretch;
   min-width: 0;
 }
 
 .studio-planner-form textarea {
   min-height: 72px;
   resize: vertical;
+}
+
+.studio-planner-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-start;
+}
+
+.studio-planner-actions .hy-btn {
+  white-space: nowrap;
 }
 
 .studio-planner-result {
