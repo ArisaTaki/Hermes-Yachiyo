@@ -908,6 +908,9 @@ def test_agent_studio_service_plans_discovered_desktop_app_execution() -> None:
     }
     assert envelope.requests[1].requires_post_action_verification is True
     assert envelope.requests[2].input == {
+        "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
         "limit": 80,
     }
     assert envelope.requests[2].runtime_stage == "verify"
@@ -963,7 +966,12 @@ def test_agent_studio_service_normalizes_known_app_submit_execution() -> None:
     assert envelope.requests[7].runtime_role == "verify_result"
     assert envelope.requests[7].continue_to_model is True
     assert envelope.requests[7].requires_observation is True
-    assert envelope.requests[7].input == {"limit": 80}
+    assert envelope.requests[7].input == {
+        "app_name": "Slack",
+        "selection_source": "desktop.list_apps",
+        "query": "Slack",
+        "limit": 80,
+    }
 
 
 def test_yachiyo_agent_service_projects_runtime_tool_result_events() -> None:

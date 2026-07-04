@@ -99,6 +99,7 @@ def planner_execution_tool_requests(
         normalized_requests,
         allowed,
     )
+    normalized_requests = _scope_desktop_ui_verification_requests(normalized_requests)
     normalized_requests = _drop_redundant_execution_verification_requests(
         normalized_requests
     )
@@ -132,6 +133,7 @@ def planner_full_plan_execution_tool_requests(
         normalized_requests,
         allowed,
     )
+    normalized_requests = _scope_desktop_ui_verification_requests(normalized_requests)
     return runtime_execution_verified_tool_requests(normalized_requests, allowed)
 
 
@@ -1043,22 +1045,77 @@ def _append_foreground_submit_verification_requests(
             continue
         if _has_later_foreground_operation_before_verification(requests, index):
             continue
-        verification = _foreground_submit_verification_request(request, verification_tool)
+        verification = _foreground_submit_verification_request(
+            request,
+            verification_tool,
+            previous_requests=normalized[:-1],
+        )
         if not verification or _last_request_matches_tool_and_input(normalized, verification):
             continue
         normalized.append(verification)
     return normalized
 
 
+def _scope_desktop_ui_verification_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for request in requests:
+        if not _is_desktop_ui_verification_request(request):
+            normalized.append(request)
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        if str(payload.get("app_name") or "").strip():
+            normalized.append(request)
+            continue
+        app_scope = _desktop_verification_app_scope(
+            request,
+            normalized,
+        )
+        if not app_scope:
+            normalized.append(request)
+            continue
+        normalized.append(
+            {
+                **request,
+                "input": {
+                    **app_scope,
+                    **dict(payload),
+                },
+            }
+        )
+    return normalized
+
+
+def _is_desktop_ui_verification_request(request: Mapping[str, Any]) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in {"desktop.ui_elements", "desktop.read_ui"}:
+        return False
+    step_id = str(
+        request.get("step_id") or request.get("planner_step_id") or ""
+    ).strip()
+    return bool(
+        str(request.get("source") or "").strip() == "runtime_verification"
+        or str(request.get("runtime_stage") or "").strip() == "verify"
+        or str(request.get("runtime_role") or "").strip() == "verify_result"
+        or step_id.startswith("verify-")
+    )
+
+
 def _foreground_submit_verification_request(
     source_request: Mapping[str, Any],
     verification_tool: str,
+    *,
+    previous_requests: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     planning_reason = str(
         source_request.get("planning_reason") or "planner_desktop_operation"
     ).strip() or "planner_desktop_operation"
     if verification_tool in {"desktop.ui_elements", "desktop.read_ui"}:
-        payload: dict[str, Any] = {"limit": 80}
+        payload: dict[str, Any] = _desktop_ui_verification_payload(
+            source_request,
+            previous_requests=previous_requests,
+        )
     elif verification_tool == "screen.capture":
         payload = {"reason": "verify foreground submit"}
     else:
@@ -1102,7 +1159,7 @@ def _unknown_app_execution_verification_request(
     if verification_tool in {"desktop.ui_elements", "desktop.read_ui"}:
         return _request(
             verification_tool,
-            {"limit": 80},
+            _desktop_ui_verification_payload(request),
             planning_reason=planning_reason,
         )
     if verification_tool == "screen.capture":
@@ -1112,6 +1169,60 @@ def _unknown_app_execution_verification_request(
             planning_reason=planning_reason,
         )
     return _request(verification_tool, {}, planning_reason=planning_reason)
+
+
+def _desktop_ui_verification_payload(
+    source_request: Mapping[str, Any],
+    *,
+    previous_requests: Iterable[Mapping[str, Any]] = (),
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {"limit": 80}
+    app_scope = _desktop_verification_app_scope(source_request, previous_requests)
+    if app_scope:
+        payload = {**app_scope, **payload}
+    return payload
+
+
+def _desktop_verification_app_scope(
+    source_request: Mapping[str, Any],
+    previous_requests: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    source_payload = (
+        source_request.get("input")
+        if isinstance(source_request.get("input"), Mapping)
+        else {}
+    )
+    source_scope = _desktop_verification_app_scope_from_payload(source_payload)
+    if source_scope:
+        return source_scope
+    scoped_previous_requests = [
+        item for item in previous_requests if isinstance(item, Mapping)
+    ]
+    for previous in reversed(scoped_previous_requests):
+        tool_name = str(previous.get("tool") or "").strip()
+        if not (
+            _tool_changes_unknown_app_foreground_state(tool_name)
+            or _tool_continues_foreground_operation_chain(tool_name)
+        ):
+            continue
+        previous_payload = (
+            previous.get("input") if isinstance(previous.get("input"), Mapping) else {}
+        )
+        previous_scope = _desktop_verification_app_scope_from_payload(previous_payload)
+        if previous_scope:
+            return previous_scope
+    return {}
+
+
+def _desktop_verification_app_scope_from_payload(
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    app_name = str(payload.get("app_name") or "").strip()
+    if not app_name:
+        return {}
+    scope = {"app_name": app_name}
+    _copy_app_selection_metadata(payload, scope)
+    return scope
 
 
 def _tool_performs_foreground_ui_operation(tool_name: str) -> bool:
