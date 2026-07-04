@@ -4792,6 +4792,79 @@ def test_auto_replan_verification_continuation_runs_remaining_plan_after_focus_r
     }
 
 
+def test_auto_replan_verification_continuation_verifies_followup_active_window() -> None:
+    payload = {
+        "request_id": "replan-verify-followup-window",
+        "trigger": "verification_failed",
+        "decision_id": "decision-verify-followup-window",
+        "plan_id": "plan-verify-followup-window",
+        "source_step_id": "verify-opened-file",
+        "source_tool_name": "desktop.active_window",
+        "failure_detail": "foreground_focus_unverified",
+        "metadata": {
+            "expected_app_name": "Preview",
+            "blocking_conditions": ["foreground_focus_unverified"],
+        },
+    }
+    planned = [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.open_path_with_app",
+            "input": {"path": "/tmp/report.pdf", "app_name": "Preview"},
+            "source": "runtime_planner",
+            "step_id": "open-report-file",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "step_id": "verify-opened-file",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "find"},
+            "source": "runtime_planner",
+            "step_id": "find-in-opened-file",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_planner",
+            "step_id": "verify-find-window",
+        },
+    ]
+
+    requests = custom_api_agent_module._auto_replan_verification_continuation_requests(
+        [payload],
+        planned,
+        ["desktop.open_path_with_app", "desktop.active_window", "desktop.safe_shortcut"],
+        [
+            _timeline(
+                "agent.tool.call",
+                "desktop.active_window",
+                input_preview={},
+                result={"ok": True, "data": {"app_name": "Preview", "title": "report.pdf"}},
+                planning_reason="planner_replan_focus_recovery",
+                replan_request_id="replan-verify-followup-window",
+            ),
+        ],
+        tool_timeline_start=0,
+        planning_reason="planner_replan_verification_continuation",
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.safe_shortcut",
+        "desktop.active_window",
+    ]
+    assert requests[1]["verification_target"] == {"app_name": "Preview"}
+    assert requests[1]["target_app_name"] == "Preview"
+    assert requests[1]["planning_reason"] == "planner_replan_verification_continuation"
+    assert requests[1]["replan_request_id"] == "replan-verify-followup-window"
+
+
 def test_auto_replan_ui_search_observed_result_clicks_after_result_observation() -> None:
     payload = {
         "request_id": "replan-ui-result",

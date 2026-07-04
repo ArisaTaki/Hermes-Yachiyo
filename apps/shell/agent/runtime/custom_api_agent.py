@@ -13224,6 +13224,10 @@ def _replan_ui_continuation_slice(
             payload,
             timeline,
         )
+        _attach_replan_active_window_verification_target(
+            item,
+            _replan_recovery_target(payload),
+        )
         requests.append(item)
         if tool_name == "desktop.search_submit" and _replan_ui_next_result_click_request(
             planned[index + 1 :]
