@@ -3607,17 +3607,21 @@ class RuntimePlanner:
                         ),
                     )
                 )
+                selected_context_intent = _with_selected_app_selection_source(
+                    intent,
+                    selection_source,
+                )
                 _append_selected_discovered_communication_compose_steps(
                     steps,
-                    intent,
+                    selected_context_intent,
                     allowed,
-                    query=str(input_preview.get("query") or "").strip(),
+                    query=discovery_query,
                     selected_app_tool=selected_app_tool,
                     depends_on="open-selected-discovered-app",
                 )
                 if _append_selected_discovered_dynamic_context_transfer_steps(
                     steps,
-                    intent,
+                    selected_context_intent,
                     allowed,
                     dict(dynamic_context_transfer),
                     discovery_step_id=f"{action}-desktop-state"
@@ -3628,13 +3632,13 @@ class RuntimePlanner:
                     return steps
                 _append_selected_discovered_foreground_compose_steps(
                     steps,
-                    intent,
+                    selected_context_intent,
                     allowed,
                     depends_on="open-selected-discovered-app",
                 )
                 _append_selected_discovered_app_observation_step(
                     steps,
-                    intent,
+                    selected_context_intent,
                     allowed,
                     depends_on="open-selected-discovered-app",
                 )
@@ -3648,19 +3652,19 @@ class RuntimePlanner:
                 )
                 _append_selected_discovered_generic_action_steps(
                     steps,
-                    intent,
+                    selected_context_intent,
                     allowed,
                     depends_on=selected_discovered_app_action_dependency,
                 )
                 _append_selected_discovered_creative_action_steps(
                     steps,
-                    intent,
+                    selected_context_intent,
                     allowed,
                     depends_on=selected_discovered_app_action_dependency,
                 )
                 _append_selected_discovered_launch_verification_step(
                     steps,
-                    intent,
+                    selected_context_intent,
                     allowed,
                     depends_on="open-selected-discovered-app",
                 )
@@ -9418,6 +9422,39 @@ def _selected_discovered_app_query(intent: TaskIntentSnapshot) -> str:
     return ""
 
 
+def _with_selected_app_selection_source(
+    intent: TaskIntentSnapshot,
+    selection_source: str,
+) -> TaskIntentSnapshot:
+    clean_source = _selected_discovered_app_selection_source_value(selection_source)
+    if not clean_source:
+        return intent
+    return intent.model_copy(
+        update={
+            "inputs": {
+                **intent.inputs,
+                "selected_app_selection_source_hint": clean_source,
+            }
+        }
+    )
+
+
+def _selected_discovered_app_selection_source(intent: TaskIntentSnapshot) -> str:
+    return (
+        _selected_discovered_app_selection_source_value(
+            intent.inputs.get("selected_app_selection_source_hint")
+        )
+        or "desktop.list_apps"
+    )
+
+
+def _selected_discovered_app_selection_source_value(value: Any) -> str:
+    clean = str(value or "").strip()
+    if clean in {"desktop.list_apps", "desktop.running_apps"}:
+        return clean
+    return ""
+
+
 def _append_selected_discovered_app_observation_step(
     steps: list[ToolPlanStepSnapshot],
     intent: TaskIntentSnapshot,
@@ -9552,9 +9589,10 @@ def _append_selected_discovered_launch_verification_step(
 
 
 def _selected_discovered_app_input_context(intent: TaskIntentSnapshot) -> dict[str, str]:
+    selection_source = _selected_discovered_app_selection_source(intent)
     return {
-        "app_name": "<selected app from desktop.list_apps>",
-        "selection_source": "desktop.list_apps",
+        "app_name": _selected_app_placeholder(selection_source),
+        "selection_source": selection_source,
         "query": _selected_discovered_app_query(intent),
     }
 
@@ -9579,10 +9617,13 @@ def _selected_discovered_app_verify_input(
 ) -> dict[str, Any]:
     payload = _desktop_verify_input_preview(
         tool_name,
-        app_name="<selected app from desktop.list_apps>",
+        app_name=_selected_app_placeholder(_selected_discovered_app_selection_source(intent)),
         operation_preview=operation_preview,
     )
-    if str(payload.get("app_name") or "").strip() == "<selected app from desktop.list_apps>":
+    if str(payload.get("app_name") or "").strip() in {
+        "<selected app from desktop.list_apps>",
+        "<selected app from desktop.running_apps>",
+    }:
         return {**payload, **_selected_discovered_app_input_context(intent)}
     return payload
 
@@ -25774,21 +25815,31 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
     value = _clean_prompt(text)
     if not value:
         return {}
+    if safe_shortcut_hint(value) and re.search(
+        r"(?:当前|前台)\s*窗口|\b(?:current|foreground)\s+window\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return {}
     generic_prefix = (
         r"(?:(?:一个|一款|任意|任何|默认|可用|合适|适合|推荐|能用|可使用|已安装|"
+        r"当前打开|当前已打开|已打开|正在运行|运行中|开着|已开启|前台|当前|"
         r"没提过|没有提过|我没提过|我没有提过|从未提过|未知|陌生|新|新装|刚装|刚安装)"
         r"(?:的)?\s*)*"
     )
     required_generic_prefix = (
         r"(?:(?:一个|一款|任意|任何|默认|可用|合适|适合|推荐|能用|可使用|已安装|"
+        r"当前打开|当前已打开|已打开|正在运行|运行中|开着|已开启|前台|当前|"
         r"没提过|没有提过|我没提过|我没有提过|从未提过|未知|陌生|新|新装|刚装|刚安装)"
         r"(?:的)?\s*)+"
     )
     generic_prefix_en = (
-        r"(?:(?:an?|any|some|available|default|suitable|best|usable|installed|local)\s+)*"
+        r"(?:(?:an?|any|some|available|default|suitable|best|usable|installed|local|"
+        r"currently\s+open|already\s+open|running|open|current|foreground)\s+)*"
     )
     required_generic_prefix_en = (
-        r"(?:(?:an?|any|some|available|default|suitable|best|usable|installed|local)\s+)+"
+        r"(?:(?:an?|any|some|available|default|suitable|best|usable|installed|local|"
+        r"currently\s+open|already\s+open|running|open|current|foreground)\s+)+"
     )
     local_scope_prefix = (
         r"(?:(?:(?:我(?:的)?|这台|这个)?(?:电脑|机器|mac|Mac|系统)"
@@ -25804,11 +25855,11 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         rf"{local_scope_prefix}"
         rf"{generic_prefix}"
         r"(?:能|可以|适合|适用于|可用于|用来|用于)\s*(?P<capability>[^。！？!?，,]{1,40}?)"
-        r"(?:的)?(?:应用(?:程序)?|app|软件|工具|程序)",
+        r"(?:的)?(?:应用(?:程序)?|app|软件|工具|程序|窗口)",
         r"(?:有没有|有无|是否有|装了|安装了|有没有安装).{0,12}"
         rf"{local_scope_prefix}"
         r"(?:能|可以|适合|适用于|可用于|用来|用于)\s*(?P<installed_capability>[^。！？!?，,]{1,40}?)"
-        r"(?:的)?(?:应用(?:程序)?|app|软件|工具|程序)",
+        r"(?:的)?(?:应用(?:程序)?|app|软件|工具|程序|窗口)",
         r"\b(?:open|launch|start|find|use)\s+"
         rf"{generic_prefix_en}"
         r"(?:app|application|tool|program)\s+"
@@ -25827,14 +25878,14 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
         r"聊天|通讯|通信|消息|即时通讯|日历|项目管理|任务管理|工单|看板|"
         r"issue|ticket)"
-        r"(?:\s*)?(?:编辑器|阅读器|查看器|浏览器|应用(?:程序)?|app|软件|客户端|工具|程序)",
+        r"(?:\s*)?(?:编辑器|阅读器|查看器|浏览器|应用(?:程序)?|app|软件|客户端|工具|程序|窗口)",
         r"\b(?:write|save|export|output|put|send|copy|paste)\b.{0,80}?"
         rf"\b(?:to|into|in)\s+{generic_prefix_en}"
         r"(?P<target_capability_en>markdown|code|image|photo|design|video|audio|archive|"
         r"zip|whiteboard|database|screenshot|diagram|mindmap|document|text|spreadsheet|"
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
-        r"(?:app|application|client|tool|program|editor)\b",
+        r"(?:app|application|client|tool|program|editor|window)\b",
         r"(?:打开|启动|找|找个|找一个|找一款|使用|在|用|通过)\s*"
         rf"{local_scope_prefix}"
         rf"{generic_prefix}"
@@ -25844,23 +25895,23 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
         r"聊天|通讯|通信|消息|即时通讯|日历|项目管理|任务管理|工单|看板|"
         r"issue|ticket)"
-        r"(?:\s*)?(?:编辑器|阅读器|查看器|浏览器|应用(?:程序)?|app|软件|客户端|工具|程序)",
+        r"(?:\s*)?(?:编辑器|阅读器|查看器|浏览器|应用(?:程序)?|app|软件|客户端|工具|程序|窗口)",
         r"\b(?:open|launch|start|find|use)\s+"
         rf"{generic_prefix_en}"
         r"(?P<direct_capability_en>markdown|code|image|photo|design|video|audio|archive|"
         r"zip|whiteboard|database|screenshot|diagram|mindmap|document|text|spreadsheet|"
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
-        r"(?:app|application|client|tool|program|editor)\b",
+        r"(?:app|application|client|tool|program|editor|window)\b",
         r"(?:打开|启动|找|找个|找一个|找一款|使用|在|用|通过)\s*"
         rf"{local_scope_prefix}"
         rf"{required_generic_prefix}"
         r"(?P<generic_prefixed_capability_cn>[^。！？!?，,]{1,24}?)"
-        r"(?:编辑器|阅读器|查看器|浏览器|应用(?:程序)?|app|软件|客户端|工具|程序)",
+        r"(?:编辑器|阅读器|查看器|浏览器|应用(?:程序)?|app|软件|客户端|工具|程序|窗口)",
         r"\b(?:open|launch|start|find|use)\s+"
         rf"{required_generic_prefix_en}"
         r"(?P<generic_prefixed_capability_en>[\w\s-]{2,40}?)\s*"
-        r"(?:app|application|client|tool|program|editor)\b",
+        r"(?:app|application|client|tool|program|editor|window)\b",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
@@ -26489,6 +26540,21 @@ def _clean_app_capability_description(value: str) -> str:
     description = re.sub(
         r"^(?:用来|用于|可以|能够|能|处理|编辑|写|创建|新建|打开|查看|分析|生成|输出|"
         r"to|for|can|edit|write|create|open|view|analy[sz]e|generate|produce)\s*",
+        "",
+        description,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    description = re.sub(
+        r"^(?:(?:一个|一款|任意|任何|默认|可用|合适|适合|推荐|能用|可使用|已安装|"
+        r"当前打开|当前已打开|已打开|正在运行|运行中|开着|已开启|前台|当前)"
+        r"(?:的)?\s*)+",
+        "",
+        description,
+        flags=re.IGNORECASE,
+    ).strip(" .，,。")
+    description = re.sub(
+        r"^(?:(?:an?|any|some|available|default|suitable|best|usable|installed|local|"
+        r"currently\s+open|already\s+open|running|open|current|foreground)\s+)+",
         "",
         description,
         flags=re.IGNORECASE,

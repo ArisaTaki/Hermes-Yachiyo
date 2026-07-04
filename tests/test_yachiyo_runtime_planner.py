@@ -14480,6 +14480,37 @@ def test_runtime_planner_focuses_generic_browser_window_through_discovery() -> N
     }
 
 
+def test_runtime_planner_searches_running_browser_window_by_capability() -> None:
+    decision = RuntimePlanner().decision("在一个正在运行的浏览器窗口里搜索 OpenAI")
+    envelope = runtime_execution_envelope_from_decision(decision, full_plan=True)
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == ""
+    assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "browser",
+    }
+    assert decision.selected_intent.inputs["app_capability_hint"] == {
+        "query": "browser",
+        "description": "浏览器",
+    }
+    assert _step_by_id(decision, "discover_apps-desktop-state").tool_name == (
+        "desktop.running_apps"
+    )
+    open_step = _step_by_id(decision, "open-selected-discovered-app")
+    assert open_step.input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "browser",
+    }
+    assert _step_by_id(decision, "type-app-search-query").input_preview == {
+        "text": "OpenAI"
+    }
+    assert envelope is not None
+    assert envelope.requests[0].tool_name == "desktop.running_apps"
+    assert envelope.requests[1].input["selection_source"] == "desktop.running_apps"
+
+
 def test_runtime_planner_routes_current_ui_inspection_to_ui_elements() -> None:
     decision = RuntimePlanner().decision(
         "当前界面有哪些按钮",
@@ -34352,3 +34383,45 @@ def test_runtime_planner_projects_current_app_paste_as_focus_safe_shortcut() -> 
     assert paste_request.runtime_role == "shortcut_ui"
     assert paste_request.input["selection_source"] == "desktop.running_apps"
     assert paste_request.task_todo["metadata"]["runtime_role"] == "shortcut_ui"
+
+
+def test_runtime_planner_keeps_running_app_selection_for_followup_ui_action() -> None:
+    decision = RuntimePlanner().decision("在当前打开的图片应用里点击导出按钮")
+    envelope = runtime_execution_envelope_from_decision(decision, full_plan=True)
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_name_hint"] == ""
+    assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+        "action": "discover_apps",
+        "query": "image",
+    }
+    assert decision.selected_intent.inputs["app_capability_hint"] == {
+        "query": "image",
+        "description": "图片",
+    }
+    assert _step_by_id(decision, "discover_apps-desktop-state").tool_name == (
+        "desktop.running_apps"
+    )
+    assert _step_by_id(decision, "open-selected-discovered-app").input_preview[
+        "selection_source"
+    ] == "desktop.running_apps"
+    click_step = _step_by_id(decision, "operate-selected-discovered-app-ui")
+    assert click_step.tool_name == "app.focus_and_click_ui_element"
+    assert click_step.input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "image",
+        "target": "导出",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }
+    verify_step = _step_by_id(decision, "verify-selected-discovered-app-action")
+    assert verify_step.input_preview["selection_source"] == "desktop.running_apps"
+    assert envelope is not None
+    assert [request.input.get("selection_source") for request in envelope.requests] == [
+        None,
+        "desktop.running_apps",
+        "desktop.running_apps",
+        "desktop.running_apps",
+    ]
