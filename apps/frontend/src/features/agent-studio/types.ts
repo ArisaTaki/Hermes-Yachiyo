@@ -4,6 +4,7 @@ import type {
   ArtifactSnapshot,
   PublicRunEvent,
   RecoveryRunProvenanceSnapshot,
+  RuntimeDebugSummarySnapshot,
 } from '../runtime-shared/types';
 
 export type AgentModelMode = 'follow_main' | 'profile' | 'custom_api';
@@ -187,6 +188,7 @@ export type RunSpec = {
   status: string;
   user_goal?: string;
   result?: string;
+  runtime_debug?: RuntimeDebugSummarySnapshot | null;
   timeline?: Array<Record<string, unknown>>;
   artifacts?: Array<Record<string, unknown>>;
   pending_approval?: {

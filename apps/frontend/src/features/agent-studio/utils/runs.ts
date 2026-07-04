@@ -150,6 +150,7 @@ export function publicRunTimelineToRunSpec(
     status: snapshot.status || 'processing',
     user_goal: (fallback.userGoal ?? workflowObjective) || legacyUserGoal || snapshot.title || '',
     result: finalAnswer || legacyResult || undefined,
+    runtime_debug: snapshot.runtime_debug || undefined,
     timeline: (snapshot.events || []).map(publicRunEventToTimelineEvent),
     artifacts: publicArtifactsOrLegacy(snapshot.artifacts, undefined),
     pending_approval: pendingApproval
@@ -339,6 +340,7 @@ function runSearchHaystack(run: RunSpec, extraText = ''): string {
     runKindLabel(run.kind),
     run.user_goal,
     run.result,
+    run.runtime_debug,
     timelineText,
     artifactText,
     extraText,

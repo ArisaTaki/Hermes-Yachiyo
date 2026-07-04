@@ -3968,6 +3968,17 @@ def test_agent_studio_uses_extracted_runtime_shared_components() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/RunHistoryList.tsx",
+        [
+            "import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';",
+            "data-runtime-capability-id={run.runtime_debug?.current_capability_id || ''}",
+            "data-runtime-stage={run.runtime_debug?.runtime_stage || ''}",
+            "data-runtime-replan-request-id={run.runtime_debug?.latest_replan_request_id || ''}",
+            "className=\"run-history-runtime-debug\"",
+            "testId=\"agent-run-history-runtime-debug\"",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/agent-studio/components/RunDetailPanel.tsx",
         [
             "ApprovalInspector",
@@ -8926,6 +8937,7 @@ def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> Non
             "session_id: 'session_id' in snapshot ? snapshot.session_id || undefined : undefined",
             "task_run_link_created_at: 'task_run_link_created_at' in snapshot",
             "task_run_link_last_event_sequence: 'task_run_link_last_event_sequence' in snapshot",
+            "runtime_debug: snapshot.runtime_debug || undefined,",
             "group_id: snapshot.group_id || undefined,",
             "objective: snapshot.objective || undefined,",
             "participants: snapshot.participants || [],",
@@ -8933,6 +8945,7 @@ def test_agent_frontend_run_helpers_preserve_native_run_bridge_contract() -> Non
             "pending_approvals: snapshot.pending_approvals || [],",
             "shared_artifacts: snapshot.shared_artifacts || [],",
             "final_answer: snapshot.final_answer || undefined,",
+            "run.runtime_debug,",
         ],
     )
     _assert_function_contains(

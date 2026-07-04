@@ -1,3 +1,4 @@
+import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
 import type { RunSpec } from '../types';
 
 export type RunHistoryGroupView = {
@@ -74,6 +75,12 @@ export function RunHistoryList({
                     data-run-id={run.run_id}
                     data-run-kind={run.kind}
                     data-run-status={run.status}
+                    data-runtime-capability-id={run.runtime_debug?.current_capability_id || ''}
+                    data-runtime-deferred-tool={run.runtime_debug?.latest_deferred_tool || ''}
+                    data-runtime-doctrine={run.runtime_debug?.runtime_doctrine || ''}
+                    data-runtime-replan-request-id={run.runtime_debug?.latest_replan_request_id || ''}
+                    data-runtime-role={run.runtime_debug?.runtime_role || ''}
+                    data-runtime-stage={run.runtime_debug?.runtime_stage || ''}
                     data-task-id={run.task_id || ''}
                     data-testid="agent-run-history-row"
                     key={run.run_id}
@@ -102,6 +109,13 @@ export function RunHistoryList({
                         {run.result ? <small>{run.result}</small> : null}
                       </span>
                     </button>
+                    <RuntimeDebugSummary
+                      className="run-history-runtime-debug"
+                      compact
+                      sourceLabel="Run list"
+                      summary={run.runtime_debug}
+                      testId="agent-run-history-runtime-debug"
+                    />
                   </div>
                 ))}
               </div>

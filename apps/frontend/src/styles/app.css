@@ -18309,6 +18309,12 @@ button.studio-tool-permission:disabled {
   overflow-wrap: anywhere;
 }
 
+.run-history-runtime-debug.runtime-debug-summary {
+  grid-column: 2;
+  margin-top: 8px;
+  background: oklch(255 0 0 / 0.018);
+}
+
 .run-detail {
   display: grid;
   gap: 14px;
