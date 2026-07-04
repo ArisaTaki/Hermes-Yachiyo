@@ -3783,6 +3783,56 @@ def test_planner_does_not_duplicate_selected_app_open_shortcut_followup() -> Non
     ]
 
 
+def test_runtime_planner_does_not_type_generic_app_capability_description() -> None:
+    prompt = "打开一个能写文档的应用"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["app_capability_hint"] == {
+        "query": "document",
+        "description": "文档",
+    }
+    assert "foreground_compose_text_hint" not in decision.selected_intent.inputs
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "document",
+    }
+    assert [request["tool"] for request in planner_tool_requests(prompt, allowed_tools)] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+
+    compose_prompt = "打开一个能写文档的应用，然后输入 hello"
+    compose_decision = RuntimePlanner().decision(
+        compose_prompt,
+        allowed_tools=allowed_tools,
+    )
+    assert compose_decision.selected_intent.inputs["foreground_compose_text_hint"] == "hello"
+    assert [step.step_id for step in compose_decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "operate-foreground-ui-followup-type",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(compose_decision, "operate-foreground-ui-followup-type").input_preview == {
+        "text": "hello"
+    }
+
+
 def test_planner_selection_payload_surfaces_discovered_app_open_path_target() -> None:
     prompt = "找一个代码编辑器打开 README.md"
     allowed_tools = [

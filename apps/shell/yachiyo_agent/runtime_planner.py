@@ -3312,6 +3312,8 @@ class RuntimePlanner:
                 else safe_type_text_hint(intent.user_goal) or foreground_compose_text
             )
         )
+        if _looks_like_discovered_app_capability_phrase(safe_type_text):
+            safe_type_text = ""
         foreground_submit_action = str(
             intent.inputs.get("foreground_submit_action_hint")
             or _foreground_submit_action_hint(intent.user_goal)
@@ -9719,6 +9721,8 @@ def _append_selected_discovered_generic_action_steps(
         and safe_shortcut_action not in {"new_document", "new_note"}
     ):
         safe_type_text = safe_type_text_hint(pending_action)
+    if _looks_like_discovered_app_capability_phrase(safe_type_text):
+        safe_type_text = ""
     safe_shortcut = (
         dict(raw_safe_shortcut)
         if isinstance(raw_safe_shortcut, Mapping) and raw_safe_shortcut
@@ -18520,6 +18524,8 @@ def _foreground_compose_text_hint(text: str) -> str:
         typed_text = _clean_foreground_compose_text(match.group("text"))
         if not typed_text:
             continue
+        if _looks_like_discovered_app_capability_phrase(typed_text):
+            continue
         if not app and not _looks_like_foreground_text_scope(value):
             continue
         if not app and not re.search(r"(?:输入|键入|填写|写入|type|enter|write)", value, flags=re.IGNORECASE):
@@ -18558,6 +18564,8 @@ def _generic_followup_compose_text_hint(text: str) -> str:
             or match.groupdict().get("text_en")
             or ""
         )
+        if _looks_like_discovered_app_capability_phrase(text_value):
+            continue
         if text_value:
             return text_value
     return ""
