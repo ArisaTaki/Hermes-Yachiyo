@@ -12532,6 +12532,9 @@ def test_runtime_planner_discovers_prefixed_generic_tool_categories() -> None:
             assert _step_by_id(decision, "focus-app-search-field").depends_on == [
                 "open-selected-discovered-app"
             ]
+            assert _step_by_id(decision, "focus-app-search-field").input_preview[
+                "selection_source"
+            ] == "desktop.list_apps"
             assert _step_by_id(decision, "type-app-search-query").input_preview == {
                 "text": search_query
             }
@@ -12552,26 +12555,29 @@ def test_runtime_planner_discovers_prefixed_generic_tool_categories() -> None:
             },
         ]
         if search_query:
+            focus_search_step = _step_by_id(decision, "focus-app-search-field")
+            type_search_step = _step_by_id(decision, "type-app-search-query")
+            submit_search_step = _step_by_id(decision, "submit-app-search")
             expected_requests.extend(
                 [
                     {
                         "protocol": "json_fallback",
-                        "tool": "desktop.safe_shortcut",
-                        "input": {"action": "find"},
+                        "tool": focus_search_step.tool_name,
+                        "input": dict(focus_search_step.input_preview),
                         "source": "runtime_planner",
                         "planning_reason": "planner_desktop_operation",
                     },
                     {
                         "protocol": "json_fallback",
-                        "tool": "desktop.safe_type_text",
-                        "input": {"text": search_query},
+                        "tool": type_search_step.tool_name,
+                        "input": dict(type_search_step.input_preview),
                         "source": "runtime_planner",
                         "planning_reason": "planner_desktop_operation",
                     },
                     {
                         "protocol": "json_fallback",
-                        "tool": "desktop.search_submit",
-                        "input": {},
+                        "tool": submit_search_step.tool_name,
+                        "input": dict(submit_search_step.input_preview),
                         "source": "runtime_planner",
                         "planning_reason": "planner_desktop_operation",
                     },
@@ -14504,12 +14510,29 @@ def test_runtime_planner_searches_running_browser_window_by_capability() -> None
         "selection_source": "desktop.running_apps",
         "query": "browser",
     }
+    assert _step_by_id(decision, "focus-app-search-field").tool_name == (
+        "app.focus_and_safe_shortcut"
+    )
+    assert _step_by_id(decision, "focus-app-search-field").input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "browser",
+        "action": "find",
+    }
+    assert _step_by_id(decision, "type-app-search-query").tool_name == (
+        "app.focus_and_safe_type_text"
+    )
     assert _step_by_id(decision, "type-app-search-query").input_preview == {
-        "text": "OpenAI"
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "browser",
+        "text": "OpenAI",
     }
     assert envelope is not None
     assert envelope.requests[0].tool_name == "desktop.running_apps"
     assert envelope.requests[1].input["selection_source"] == "desktop.running_apps"
+    assert envelope.requests[2].action_target["selection_source"] == "desktop.running_apps"
+    assert envelope.requests[3].action_target["selection_source"] == "desktop.running_apps"
 
 
 def test_runtime_planner_routes_current_ui_inspection_to_ui_elements() -> None:

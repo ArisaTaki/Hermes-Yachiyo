@@ -3777,6 +3777,7 @@ class RuntimePlanner:
                     )
                 )
                 selected_discovered_app_step_id = "open-selected-discovered-app"
+                intent = _with_selected_app_selection_source(intent, selection_source)
         else:
             discovery_tool = _first_allowed(
                 (
@@ -4610,6 +4611,17 @@ class RuntimePlanner:
             app_search_needs_verify = False
             app_search_context_source = _app_search_query_context_source(app_search)
             context_shortcut_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
+            selected_app_payload = (
+                _selected_discovered_app_input_context(intent)
+                if selected_discovered_app_step_id
+                else {}
+            )
+            search_app_name = str(selected_app_payload.get("app_name") or app_name).strip()
+            search_mode = (
+                "focus"
+                if selected_app_payload
+                else _app_search_prepare_mode(intent.user_goal, mode)
+            )
             app_search_prepare_step_id = selected_discovered_app_step_id or "open-or-focus-app"
             if app_search_context_source == "selection":
                 if not context_shortcut_tool:
@@ -4657,14 +4669,19 @@ class RuntimePlanner:
                     app_search_prepare_step_id = "discover-desktop-state"
             search_focus_tool = _app_search_focus_operation_tool(
                 allowed,
-                app_name=app_name,
-                mode=_app_search_prepare_mode(intent.user_goal, mode),
+                app_name=search_app_name,
+                mode=search_mode,
             )
             search_focus_tool_name = str(search_focus_tool or "")
             search_focus_preview = _app_search_focus_input_preview(
                 search_focus_tool_name,
-                app_name=app_name,
+                app_name=search_app_name,
                 search_target=search_target,
+            )
+            search_focus_preview = _with_selected_app_payload(
+                search_focus_tool,
+                search_focus_preview,
+                selected_app_payload,
             )
             search_depends_on = [
                 selected_discovered_app_step_id
@@ -4689,16 +4706,26 @@ class RuntimePlanner:
                 )
             )
             if app_search_context_source in {"selection", "clipboard"}:
-                if not context_shortcut_tool:
+                paste_shortcut_tool = _app_search_selected_shortcut_tool(
+                    allowed,
+                    selected_app_payload=selected_app_payload,
+                    mode=search_mode,
+                )
+                if not paste_shortcut_tool:
                     return steps
+                paste_input = _with_selected_app_payload(
+                    paste_shortcut_tool,
+                    {"action": "paste"},
+                    selected_app_payload,
+                )
                 steps.append(
                     _step(
                         intent,
                         "paste-app-search-query",
                         "Paste app search query",
                         "desktop.ui_operation",
-                        context_shortcut_tool,
-                        input_preview={"action": "paste"},
+                        paste_shortcut_tool,
+                        input_preview=paste_input,
                         depends_on=["focus-app-search-field"],
                         action="shortcut",
                         reason="Paste the dynamic app-search query instead of typing its source label.",
@@ -4708,12 +4735,20 @@ class RuntimePlanner:
             else:
                 search_type_tool = _app_search_type_operation_tool(
                     allowed,
-                    app_name=app_name,
-                    mode=_app_search_prepare_mode(intent.user_goal, mode),
+                    app_name=search_app_name,
+                    mode=search_mode,
+                    prefer_app_scoped=bool(selected_app_payload),
                 )
                 search_type_payload = {"text": search_query}
                 if str(search_type_tool or "").startswith("app."):
-                    search_type_payload = {"app_name": app_name, **search_type_payload}
+                    search_type_payload = {
+                        **_with_selected_app_payload(
+                            search_type_tool,
+                            {"app_name": search_app_name},
+                            selected_app_payload,
+                        ),
+                        **search_type_payload,
+                    }
                 steps.append(
                     _step(
                         intent,
@@ -4785,8 +4820,8 @@ class RuntimePlanner:
                     click_tool = _first_allowed(
                         _app_search_operation_candidates(
                             "click_ui_element",
-                            app_name=app_name,
-                            mode=_app_search_prepare_mode(intent.user_goal, mode),
+                            app_name=search_app_name,
+                            mode=search_mode,
                             generic=("desktop.click_ui_element",),
                         ),
                         allowed,
@@ -4798,7 +4833,14 @@ class RuntimePlanner:
                         "click_count": int(search_followup.get("click_count") or 1),
                     }
                     if str(click_tool or "").startswith("app."):
-                        click_payload = {"app_name": app_name, **click_payload}
+                        click_payload = {
+                            **_with_selected_app_payload(
+                                click_tool,
+                                {"app_name": search_app_name},
+                                selected_app_payload,
+                            ),
+                            **click_payload,
+                        }
                     steps.append(
                         _step(
                             intent,
@@ -23690,12 +23732,36 @@ def _app_search_type_operation_tool(
     *,
     app_name: str,
     mode: str,
+    prefer_app_scoped: bool = False,
 ) -> str | None:
+    if prefer_app_scoped and str(app_name or "").strip():
+        app_tool = _first_allowed(
+            app_foreground_tool_candidates(mode, "safe_type_text"),
+            allowed,
+        )
+        if app_tool:
+            return app_tool
     return _safe_type_text_operation_tool(
         app_name=app_name,
         mode=mode,
         allowed=allowed,
     )
+
+
+def _app_search_selected_shortcut_tool(
+    allowed: set[str] | None,
+    *,
+    selected_app_payload: Mapping[str, Any],
+    mode: str,
+) -> str | None:
+    if selected_app_payload:
+        app_tool = _first_allowed(
+            app_foreground_tool_candidates(mode, "safe_shortcut"),
+            allowed,
+        )
+        if app_tool:
+            return app_tool
+    return _first_allowed(("desktop.safe_shortcut",), allowed)
 
 
 def _safe_type_text_operation_tool(
