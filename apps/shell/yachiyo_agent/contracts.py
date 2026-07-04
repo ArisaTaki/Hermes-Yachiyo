@@ -605,6 +605,10 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     latest_replan_request_id: str | None = None
     latest_replan_trigger: str | None = None
     latest_replan_status: str | None = None
+    latest_recovery_action_id: str | None = None
+    latest_recovery_tool: str | None = None
+    latest_recovery_action_label: str | None = None
+    latest_recovery_action_count: int = 0
     latest_deferred_tool: str | None = None
     latest_tool_call_id: str | None = None
     latest_tool_name: str | None = None

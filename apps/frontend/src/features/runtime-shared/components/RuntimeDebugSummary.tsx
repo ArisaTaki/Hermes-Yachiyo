@@ -42,6 +42,7 @@ export function RuntimeDebugSummary({
       data-current-capability-id={summary?.current_capability_id || ''}
       data-has-user-action={String(Boolean(summary?.needs_user_action))}
       data-latest-deferred-tool={summary?.latest_deferred_tool || ''}
+      data-latest-recovery-tool={summary?.latest_recovery_tool || ''}
       data-latest-replan-request-id={summary?.latest_replan_request_id || ''}
       data-latest-replan-trigger={summary?.latest_replan_trigger || ''}
       data-needs-replan={String(Boolean(summary?.needs_replan))}
@@ -124,6 +125,9 @@ export function runtimeDebugSummaryHasContent(summary?: RuntimeDebugSummarySnaps
     || summary.latest_replan_request_id
     || summary.latest_replan_trigger
     || summary.latest_replan_status
+    || summary.latest_recovery_action_id
+    || summary.latest_recovery_tool
+    || summary.latest_recovery_action_label
     || summary.latest_deferred_tool
     || summary.latest_tool_call_id
     || summary.latest_tool_name
@@ -166,6 +170,7 @@ function runtimeDebugMetrics(summary: RuntimeDebugSummarySnapshot): RuntimeDebug
   );
   addMetric(metrics, 'artifacts', 'artifacts', summary.artifact_count);
   addMetric(metrics, 'replans', 'replans', summary.replan_recovery_count, 'warning');
+  addMetric(metrics, 'recovery_actions', 'recoveries', summary.latest_recovery_action_count, 'warning');
   addMetric(metrics, 'children', 'children', summary.child_run_count);
   addMetric(metrics, 'memory', 'memory', summary.memory_trace_count);
   addMetric(metrics, 'skills', 'skills', summary.skill_trace_count);
@@ -216,6 +221,9 @@ function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): 
     summary.latest_replan_request_id ? `replan ${summary.latest_replan_request_id}` : '',
     summary.latest_replan_trigger ? `trigger ${summary.latest_replan_trigger}` : '',
     summary.latest_replan_status ? `replan status ${summary.latest_replan_status}` : '',
+    summary.latest_recovery_tool ? `recovery ${summary.latest_recovery_tool}` : '',
+    summary.latest_recovery_action_label ? `recovery action ${summary.latest_recovery_action_label}` : '',
+    summary.latest_recovery_action_id ? `recovery id ${summary.latest_recovery_action_id}` : '',
     summary.latest_deferred_tool ? `deferred ${summary.latest_deferred_tool}` : '',
     summary.latest_tool_call_id ? `tool call ${summary.latest_tool_call_id}` : '',
     summary.latest_tool_name ? `tool ${summary.latest_tool_name}` : '',

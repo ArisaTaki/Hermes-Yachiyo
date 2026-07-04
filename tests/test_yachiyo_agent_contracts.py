@@ -3122,6 +3122,10 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
             tool_call_count=1,
             pending_approval_count=1,
             artifact_count=1,
+            latest_recovery_action_id="replan-1:action:1:desktop.list_apps",
+            latest_recovery_tool="desktop.list_apps",
+            latest_recovery_action_label="Discover installed apps",
+            latest_recovery_action_count=1,
             debug_surfaces=["timeline", "tools", "approvals", "artifacts"],
         ),
         runtime_execution_envelope=RuntimeExecutionEnvelopeSnapshot(
@@ -3169,6 +3173,8 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
     assert payload["planner_summary"]["intent_kind"] == "code_task"
     assert payload["planner_summary"]["plan_capabilities"] == ["terminal.execute"]
     assert payload["runtime_debug"]["tool_call_count"] == 1
+    assert payload["runtime_debug"]["latest_recovery_tool"] == "desktop.list_apps"
+    assert payload["runtime_debug"]["latest_recovery_action_count"] == 1
     assert payload["runtime_debug"]["debug_surfaces"] == [
         "timeline",
         "tools",

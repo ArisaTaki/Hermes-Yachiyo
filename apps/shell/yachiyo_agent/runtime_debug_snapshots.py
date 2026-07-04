@@ -54,6 +54,8 @@ def runtime_debug_summary_from_runtime_objects(
     request_items = _items(_field(runtime_execution_envelope, "requests"))
     latest_request = request_items[-1] if request_items else None
     latest_replan = replan_items[-1] if replan_items else None
+    latest_recovery_actions = _recovery_actions(latest_replan)
+    latest_recovery_action = _preferred_recovery_action(latest_recovery_actions)
     effective_task_core = _richer_task_core(
         task_core,
         _field(runtime_execution_envelope, "task_core"),
@@ -202,6 +204,14 @@ def runtime_debug_summary_from_runtime_objects(
             )
         ),
         latest_replan_status=_optional_text(_field(latest_replan, "status")),
+        latest_recovery_action_id=_optional_text(
+            _field(latest_recovery_action, "action_id")
+        ),
+        latest_recovery_tool=_optional_text(_field(latest_recovery_action, "tool")),
+        latest_recovery_action_label=_optional_text(
+            _field(latest_recovery_action, "label")
+        ),
+        latest_recovery_action_count=len(latest_recovery_actions),
         latest_deferred_tool=_first_text_from_items(
             [latest_tool, latest_approval, latest_request, latest_replan],
             "deferred_tool",
@@ -428,6 +438,17 @@ def _first_string_list_value(items: Iterable[Any], key: str) -> str | None:
         if values:
             return values[0]
     return None
+
+
+def _recovery_actions(replan_item: Any | None) -> list[Any]:
+    return _items(_field(replan_item, "recovery_actions"))
+
+
+def _preferred_recovery_action(actions: list[Any]) -> Any | None:
+    for action in reversed(actions):
+        if _field(action, "selected") is True:
+            return action
+    return actions[0] if actions else None
 
 
 def _matching_runtime_request(

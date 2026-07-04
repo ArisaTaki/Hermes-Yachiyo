@@ -517,6 +517,10 @@ export type RuntimeDebugSummarySnapshot = {
   latest_replan_request_id?: string | null;
   latest_replan_trigger?: string | null;
   latest_replan_status?: string | null;
+  latest_recovery_action_id?: string | null;
+  latest_recovery_tool?: string | null;
+  latest_recovery_action_label?: string | null;
+  latest_recovery_action_count?: number;
   latest_deferred_tool?: string | null;
   latest_tool_call_id?: string | null;
   latest_tool_name?: string | null;

@@ -1277,6 +1277,12 @@ def test_agent_task_snapshot_links_deferred_approval_to_replan_recovery() -> Non
     assert task.runtime_debug.current_capability_id == "desktop.ui_operation"
     assert task.runtime_debug.latest_replan_request_id == "replan-1"
     assert task.runtime_debug.latest_replan_trigger == "verification_failed"
+    assert task.runtime_debug.latest_recovery_action_id == (
+        "replan-1:action:1:desktop.click_ui_element"
+    )
+    assert task.runtime_debug.latest_recovery_tool == "desktop.click_ui_element"
+    assert task.runtime_debug.latest_recovery_action_label == "Click observed Export control"
+    assert task.runtime_debug.latest_recovery_action_count == 1
     assert task.runtime_debug.latest_deferred_tool == "desktop.click_ui_element"
     assert task.runtime_debug.runtime_stage == "operate"
     assert task.runtime_debug.runtime_role == "desktop_ui_action"
