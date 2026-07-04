@@ -98,6 +98,24 @@ def _app_discovery_request(query: str) -> dict[str, Any]:
     }
 
 
+def _app_discovered_input(app_name: str, **values: Any) -> dict[str, Any]:
+    return {
+        "app_name": app_name,
+        **values,
+        "selection_source": "desktop.list_apps",
+        "query": app_name,
+    }
+
+
+def _selected_discovered_app_verify_input(query: str, **values: Any) -> dict[str, Any]:
+    return {
+        "app_name": "<selected app from desktop.list_apps>",
+        **values,
+        "selection_source": "desktop.list_apps",
+        "query": query,
+    }
+
+
 def _selected_discovered_app_open_request(query: str) -> dict[str, Any]:
     return {
         "protocol": "json_fallback",
@@ -2458,7 +2476,7 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         },
         "post_action_observation": {
             "tool": "desktop.ui_elements",
-            "input": {"limit": 80},
+            "input": _selected_discovered_app_verify_input("notes", limit=80),
         },
         "source_action": "copy_current_page_link",
         "capability_description": "笔记",
@@ -2641,7 +2659,7 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"limit": 80},
+            "input": _selected_discovered_app_verify_input("spreadsheet", limit=80),
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -2810,7 +2828,7 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"limit": 80},
+            "input": _selected_discovered_app_verify_input("presentation", limit=80),
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -3201,7 +3219,7 @@ def test_runtime_planner_routes_generated_desktop_app_content_to_model_followup(
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Keynote"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
             "continue_to_model": True,
@@ -3555,7 +3573,7 @@ def test_planner_adds_generic_discovered_app_followup_action_steps() -> None:
         "selection_source": "desktop.list_apps",
         "query": "image",
     }
-    assert requests[-1]["input"] == {"limit": 80}
+    assert requests[-1]["input"] == _selected_discovered_app_verify_input("image", limit=80)
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
         "discover_apps-desktop-state",
         "open-selected-discovered-app",
@@ -8243,7 +8261,7 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Linear"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -13274,7 +13292,7 @@ def test_runtime_planner_discovers_generic_communication_app_before_acting() -> 
                 {
                     "protocol": "json_fallback",
                     "tool": "desktop.ui_elements",
-                    "input": {"limit": 80},
+                    "input": _selected_discovered_app_verify_input("messaging", limit=80),
                     "source": "runtime_planner",
                     "planning_reason": "planner_desktop_operation",
                 },
@@ -13906,7 +13924,7 @@ def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation(
             "operate-foreground-ui",
             "app.focus_and_safe_type_text",
             {"app_name": "SuperData Studio", "text": "hello"},
-            {},
+            {"app_name": "SuperData Studio"},
         ),
         (
             "in an app called SuperData Studio type hello",
@@ -13914,7 +13932,7 @@ def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation(
             "operate-foreground-ui",
             "app.focus_and_safe_type_text",
             {"app_name": "SuperData Studio", "text": "hello"},
-            {},
+            {"app_name": "SuperData Studio"},
         ),
         (
             "inside the app named SuperData Studio click Export button",
@@ -13928,7 +13946,7 @@ def test_runtime_planner_normalizes_named_app_scope_before_foreground_operation(
                 "click_count": 1,
                 "limit": 80,
             },
-            {"role_filter": "button", "limit": 80},
+            {"app_name": "SuperData Studio", "role_filter": "button", "limit": 80},
         ),
     )
 
@@ -15762,7 +15780,7 @@ def test_runtime_planner_creates_container_before_direct_app_text() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Obsidian"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -17321,7 +17339,7 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
             {
                 "protocol": "json_fallback",
                 "tool": "desktop.ui_elements",
-                "input": {},
+                "input": {"app_name": "Google Chrome"},
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
@@ -17404,7 +17422,7 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
             {
                 "protocol": "json_fallback",
                 "tool": "desktop.ui_elements",
-                "input": {},
+                "input": {"app_name": "Google Chrome"},
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
@@ -17431,7 +17449,7 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Google Chrome"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -17457,7 +17475,7 @@ def test_runtime_planner_routes_browser_internal_pages_to_desktop_sequence() -> 
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Google Chrome"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -17579,7 +17597,7 @@ def test_runtime_planner_routes_app_preferences_without_system_settings() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Slack"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -17606,7 +17624,7 @@ def test_runtime_planner_routes_app_preferences_without_system_settings() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Slack"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -17886,7 +17904,7 @@ def test_runtime_planner_focuses_opened_app_before_generic_foreground_shortcut()
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Notes"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -18005,7 +18023,7 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Finder"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -18022,7 +18040,7 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "WeChat"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -18045,7 +18063,7 @@ def test_runtime_planner_routes_remaining_app_scoped_legacy_samples() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"role_filter": "button", "limit": 80},
+            "input": {"app_name": "Google Chrome", "role_filter": "button", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -18195,7 +18213,7 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Notion"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -18227,7 +18245,7 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Notion"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
             "continue_to_model": True,
@@ -18735,7 +18753,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Slack"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -18760,7 +18778,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Slack"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -18785,7 +18803,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Google Chrome"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -18837,7 +18855,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
             {
                 "protocol": "json_fallback",
                 "tool": "desktop.ui_elements",
-                "input": {},
+                "input": {"app_name": payload["app_name"]},
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
@@ -18886,7 +18904,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_safe_operations() -> None:
             {
                 "protocol": "json_fallback",
                 "tool": "desktop.ui_elements",
-                "input": {},
+                "input": {"app_name": "PixelForge"},
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
@@ -19213,7 +19231,7 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "TextEdit"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -19246,7 +19264,7 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Obsidian"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -19263,7 +19281,7 @@ def test_runtime_planner_routes_app_scoped_compose_then_send() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Notes"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -19339,7 +19357,7 @@ def test_runtime_planner_prefers_ui_readback_after_foreground_operation() -> Non
     verify = _step_by_id(decision, "verify-desktop-result")
     assert verify.tool_name == "desktop.ui_elements"
     assert verify.action == "read_ui"
-    assert verify.input_preview == {"role_filter": "text", "limit": 80}
+    assert verify.input_preview == {"app_name": "PixelForge", "role_filter": "text", "limit": 80}
     assert verify.depends_on == ["submit-foreground-ui"]
     assert "Read foreground UI" in verify.reason
 
@@ -25015,7 +25033,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Spotify"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -25065,7 +25083,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "WeChat"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -25123,7 +25141,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Slack"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -25182,7 +25200,7 @@ def test_planner_direct_tool_requests_maps_app_scoped_search_sequence() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Raycast"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -25404,6 +25422,7 @@ def test_planner_selection_owns_app_search_send_sequence_with_send_approval() ->
         "desktop.search_submit",
         "desktop.safe_type_text",
         "desktop.submit_foreground",
+        "desktop.active_window",
     ]
 
 
@@ -25448,7 +25467,7 @@ def test_planner_desktop_tool_requests_preserves_discover_operate_verify_steps()
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"role_filter": "button", "limit": 80},
+            "input": {"app_name": "PixelForge", "role_filter": "button", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -25496,7 +25515,7 @@ def test_planner_desktop_tool_requests_uses_list_apps_when_available() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"role_filter": "button", "limit": 80},
+            "input": {"app_name": "PixelForge", "role_filter": "button", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -25840,7 +25859,7 @@ def test_planner_direct_tool_requests_keeps_unknown_app_discover_and_verify_step
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"role_filter": "button", "limit": 80},
+            "input": {"app_name": "PixelForge", "role_filter": "button", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -26341,7 +26360,7 @@ def test_entrypoint_selection_resolves_known_web_destinations_without_legacy() -
         {
             "protocol": "json_fallback",
             "tool": "app.open",
-            "input": {"app_name": "Notion"},
+            "input": _app_discovered_input("Notion"),
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         }
@@ -26610,7 +26629,7 @@ def test_planner_desktop_tool_requests_discovers_app_name_from_in_app_phrase() -
             "input": {
                 "app_name": "PixelForge",
                 "target": "Export",
-                "role_filter": "",
+                "role_filter": "button",
                 "limit": 80,
                 "click_count": 1,
             },
@@ -27239,7 +27258,7 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "SuperData Studio"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -27291,7 +27310,7 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.read_ui",
-            "input": {},
+            "input": {"app_name": "Obsidian"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -27342,7 +27361,7 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "SuperData Studio"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -27393,7 +27412,7 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "SuperData Studio"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -27455,7 +27474,7 @@ def test_planner_desktop_tool_requests_maps_app_search_content_artifact() -> Non
                 "click_count": 1,
             },
         ),
-        ("desktop.ui_elements", {}),
+        ("desktop.ui_elements", {"app_name": "Slack"}),
     ]
 
 
@@ -29597,7 +29616,7 @@ def test_planner_keeps_app_hotkey_discover_operate_verify_when_hotkey_is_availab
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Notion"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -32001,6 +32020,14 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
         "source": "runtime_planner",
         "planning_reason": "planner_desktop_operation",
     }
+    slack_verify_ui = {
+        **verify_ui,
+        "input": {"app_name": "Slack"},
+    }
+    obsidian_verify_ui = {
+        **verify_ui,
+        "input": {"app_name": "Obsidian"},
+    }
 
     cases = (
         ("复制当前网页内容", [*current_content_copy]),
@@ -32009,42 +32036,42 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
             current_page_link_copy,
             slack_focus,
             paste,
-            verify_ui,
+            slack_verify_ui,
         ]),
         ("在 Slack 粘贴当前页面内容", [
             *current_content_copy,
             slack_focus,
             paste,
-            verify_ui,
+            slack_verify_ui,
         ]),
         ("打开 Slack 粘贴当前页面内容", [
             *current_content_copy,
             slack_open,
             paste,
-            verify_ui,
+            slack_verify_ui,
         ]),
         ("把当前网页内容写进 Obsidian", [
             *current_content_copy,
             obsidian_focus,
             paste,
-            verify_ui,
+            obsidian_verify_ui,
         ]),
         ("把当前网页内容保存到 Obsidian 新笔记", [
             *current_content_copy,
             obsidian_focus,
             paste,
-            verify_ui,
+            obsidian_verify_ui,
         ]),
         ("把当前网页链接写进 Obsidian", [
             current_page_link_copy,
             obsidian_focus,
             paste,
-            verify_ui,
+            obsidian_verify_ui,
         ]),
         ("把剪贴板内容粘贴到 Slack", [
             slack_focus,
             paste,
-            verify_ui,
+            slack_verify_ui,
         ]),
         ("把选中的内容填到当前输入框", [selected_copy, paste, verify_ui]),
         ("把剪贴板内容填到当前输入框", [paste, verify_ui]),
@@ -32066,21 +32093,21 @@ def test_runtime_planner_routes_dynamic_context_ui_transfers() -> None:
             slack_focus,
             foreground_search_click,
             paste,
-            verify_ui,
+            slack_verify_ui,
         ]),
         ("把当前页面内容输入到 Slack 搜索框", [
             *current_content_copy,
             slack_focus,
             foreground_search_click,
             paste,
-            verify_ui,
+            slack_verify_ui,
         ]),
         ("打开 Slack 搜索框输入选中的内容", [
             selected_copy,
             slack_open,
             foreground_search_click,
             paste,
-            verify_ui,
+            slack_verify_ui,
         ]),
     )
     for prompt, expected_requests in cases:
@@ -32280,7 +32307,7 @@ def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> 
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
-            "input": {"app_name": "Slack"},
+            "input": _app_discovered_input("Slack"),
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -32299,7 +32326,7 @@ def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> 
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
-            "input": {"app_name": "Slack"},
+            "input": _app_discovered_input("Slack"),
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -32318,7 +32345,7 @@ def test_planner_first_owns_app_scoped_ui_observation_requests_over_legacy() -> 
         {
             "protocol": "json_fallback",
             "tool": "desktop.focus_app",
-            "input": {"app_name": "Slack"},
+            "input": _app_discovered_input("Slack"),
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -32559,7 +32586,10 @@ def test_planner_first_owns_app_scoped_creation_with_verification_over_legacy() 
         "desktop.safe_type_text",
         "desktop.ui_elements",
     ]
-    assert selection.requests[1]["input"] == {"app_name": "Notion", "action": "new_document"}
+    assert selection.requests[1]["input"] == _app_discovered_input(
+        "Notion",
+        action="new_document",
+    )
     assert selection.requests[2]["input"] == {"text": "本周业绩总结"}
     assert "continue_to_model" not in selection.requests[3]
     assert legacy_calls == []
@@ -32594,7 +32624,7 @@ def test_runtime_planner_preserves_app_scope_for_browser_safe_shortcuts() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Google Chrome"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -32618,7 +32648,7 @@ def test_runtime_planner_preserves_app_scope_for_browser_safe_shortcuts() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Google Chrome"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -32653,7 +32683,7 @@ def test_runtime_planner_preserves_app_scope_for_browser_safe_shortcuts() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Google Chrome"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -32688,7 +32718,7 @@ def test_runtime_planner_preserves_app_scope_for_browser_safe_shortcuts() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Google Chrome"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -32913,10 +32943,10 @@ def test_runtime_planner_routes_app_scoped_meeting_minutes_to_desktop_create_flo
         "operate-foreground-ui-followup-type",
         "verify-desktop-result",
     ]
-    assert selection.requests[1]["input"] == {
-        "app_name": "Notion",
-        "action": "new_document",
-    }
+    assert selection.requests[1]["input"] == _app_discovered_input(
+        "Notion",
+        action="new_document",
+    )
     assert selection.requests[2]["input"] == {"text": "今天的会议纪要"}
     assert selection.requests[-1]["runtime_stage"] == "verify"
 

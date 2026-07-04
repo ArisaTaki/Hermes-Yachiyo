@@ -1626,6 +1626,10 @@ class TaskIntentRouter:
         clipboard_hint = clipboard_operation_hint(text)
         transform_target = _dynamic_context_transform_target_hint(text)
         document_artifact_transform = _looks_like_document_artifact_transform_request(text)
+        plain_app_context_transfer = _app_scoped_dynamic_context_ui_transfer_hint(
+            text,
+            _app_name_hint(text),
+        )
         if (
             (
                 _looks_like_file_organization_request(text)
@@ -1694,6 +1698,14 @@ class TaskIntentRouter:
                 text,
                 require_data_analysis=False,
             )
+        if (
+            plain_app_context_transfer
+            and not app_write_target
+            and not transform_target
+            and not document_artifact_transform
+            and not _dynamic_context_transform_requested(text)
+        ):
+            return _empty_intent("report_generation", text)
         if _plain_dynamic_context_discovered_app_transfer(
             text,
             app_write_target,
@@ -9542,6 +9554,21 @@ def _selected_discovered_app_operation_input(
     return dict(payload)
 
 
+def _selected_discovered_app_verify_input(
+    intent: TaskIntentSnapshot,
+    tool_name: str | None,
+    operation_preview: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = _desktop_verify_input_preview(
+        tool_name,
+        app_name="<selected app from desktop.list_apps>",
+        operation_preview=operation_preview,
+    )
+    if str(payload.get("app_name") or "").strip() == "<selected app from desktop.list_apps>":
+        return {**payload, **_selected_discovered_app_input_context(intent)}
+    return payload
+
+
 def _append_selected_discovered_dynamic_context_transfer_steps(
     steps: list[ToolPlanStepSnapshot],
     intent: TaskIntentSnapshot,
@@ -9635,10 +9662,10 @@ def _append_selected_discovered_dynamic_context_transfer_steps(
                 input_preview=(
                     {"reason": "verify selected discovered app context transfer"}
                     if verify_tool == "screen.capture"
-                    else _desktop_verify_input_preview(
+                    else _selected_discovered_app_verify_input(
+                        intent,
                         verify_tool,
-                        app_name="<selected app from desktop.list_apps>",
-                        operation_preview={"limit": 80},
+                        {"limit": 80},
                     )
                     or {"limit": 80}
                 ),
@@ -10148,7 +10175,12 @@ def _append_selected_discovered_generic_action_steps(
             input_preview=(
                 {"reason": "verify selected discovered app action"}
                 if verify_tool == "screen.capture"
-                else {"limit": 80}
+                else _selected_discovered_app_verify_input(
+                    intent,
+                    verify_tool,
+                    {"limit": 80},
+                )
+                or {"limit": 80}
             ),
             depends_on=[previous_step],
             action=_desktop_discovery_action(verify_tool),
@@ -18971,7 +19003,8 @@ def _plain_dynamic_context_discovered_app_transfer(
     if transform_target:
         return False
     target_app_capability = app_write_target.get("target_app_capability_hint")
-    if not isinstance(target_app_capability, Mapping):
+    target_app = str(app_write_target.get("target_app_hint") or "").strip()
+    if not target_app and not isinstance(target_app_capability, Mapping):
         return False
     value = _clean_prompt(text)
     source = _dynamic_context_source_hint(value)
