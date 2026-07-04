@@ -34668,3 +34668,56 @@ def test_runtime_planner_keeps_running_app_selection_for_followup_ui_action() ->
         "desktop.running_apps",
         "desktop.running_apps",
     ]
+
+
+def test_runtime_planner_reads_current_open_capability_app_by_running_scope() -> None:
+    for prompt, query, description in (
+        ("读取当前打开的笔记应用里有哪些按钮", "notes", "笔记"),
+        ("读取当前打开的图片应用里有哪些按钮", "image", "图片"),
+        ("读取当前打开的邮件应用里有哪些按钮", "mail", "邮件"),
+    ):
+        decision = RuntimePlanner().decision(prompt)
+        envelope = runtime_execution_envelope_from_decision(decision, full_plan=True)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == ""
+        assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+            "action": "discover_apps",
+            "query": query,
+        }
+        assert decision.selected_intent.inputs["app_capability_hint"] == {
+            "query": query,
+            "description": description,
+        }
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover_apps-desktop-state",
+            "open-selected-discovered-app",
+            "observe-selected-discovered-app",
+        ]
+        assert _step_by_id(decision, "discover_apps-desktop-state").tool_name == (
+            "desktop.running_apps"
+        )
+        assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+            "app_name": "<selected app from desktop.running_apps>",
+            "selection_source": "desktop.running_apps",
+            "query": query,
+        }
+        assert _step_by_id(decision, "observe-selected-discovered-app").input_preview == {
+            "role_filter": "button",
+            "limit": 80,
+        }
+
+        assert envelope is not None
+        assert [request.tool_name for request in envelope.requests] == [
+            "desktop.running_apps",
+            "app.focus",
+            "desktop.ui_elements",
+        ]
+        assert envelope.requests[-1].action_target == {
+            "kind": "desktop_app",
+            "action": "read_ui",
+            "selection_source": "desktop.running_apps",
+            "app_name": "<selected app from desktop.running_apps>",
+            "query": query,
+            "step_id": "observe-selected-discovered-app",
+        }

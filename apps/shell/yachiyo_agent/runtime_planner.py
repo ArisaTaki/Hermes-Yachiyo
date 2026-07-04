@@ -455,6 +455,10 @@ class TaskIntentRouter:
         ):
             return _empty_intent("desktop_operation", text)
         ui_inspection = ui_inspection_hint(text)
+        if not app_capability and isinstance(ui_inspection, Mapping):
+            app_capability = _scoped_app_label_capability_hint(
+                str(ui_inspection.get("app_name") or "")
+            )
         screen_capture = screen_capture_hint(text)
         if (
             ui_inspection is None
@@ -26075,6 +26079,54 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
                 "description": _clean_app_capability_description(raw),
             }
     return {}
+
+
+def _scoped_app_label_capability_hint(value: str) -> dict[str, str]:
+    label = _clean_prompt(value)
+    if not label:
+        return {}
+    if not _contains_any(
+        label,
+        (
+            "当前打开",
+            "当前已打开",
+            "已打开",
+            "打开的",
+            "正在运行",
+            "运行中",
+            "开着",
+            "已开启",
+            "当前",
+            "前台",
+            "currently open",
+            "already open",
+            "running",
+            "open",
+            "current",
+            "foreground",
+        ),
+    ):
+        return {}
+    scoped_label = re.sub(
+        r"(?:当前打开|当前已打开|已打开|打开的|正在运行|运行中|开着|已开启|当前|前台)",
+        " ",
+        label,
+        flags=re.IGNORECASE,
+    )
+    scoped_label = re.sub(
+        r"\b(?:currently\s+open|already\s+open|running|open|current|foreground)\b",
+        " ",
+        scoped_label,
+        flags=re.IGNORECASE,
+    )
+    scoped_label = re.sub(r"^\s*(?:的|地|得)\s*", "", scoped_label).strip()
+    query = _app_capability_discovery_query(scoped_label)
+    if not query:
+        return {}
+    return {
+        "query": query,
+        "description": _clean_app_capability_description(scoped_label),
+    }
 
 
 def _app_capability_discovery_query(value: str) -> str:
