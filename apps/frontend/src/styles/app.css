@@ -4392,6 +4392,34 @@ button:hover {
   border-radius: 999px;
 }
 
+.launcher-agent-task-runtime-debug.runtime-debug-summary {
+  grid-column: 1 / -1;
+  gap: 3px;
+  padding: 3px 5px;
+  border-radius: 7px;
+}
+
+.launcher-agent-task-runtime-debug .runtime-debug-summary-head,
+.launcher-agent-task-runtime-debug .runtime-debug-context,
+.launcher-agent-task-runtime-debug .runtime-debug-metrics {
+  display: none;
+}
+
+.launcher-agent-task-runtime-debug .runtime-debug-facts {
+  flex-wrap: nowrap;
+  gap: 3px;
+  overflow: hidden;
+}
+
+.launcher-agent-task-runtime-debug .runtime-debug-facts span,
+.launcher-agent-task-runtime-debug .runtime-debug-facts em {
+  min-height: 16px;
+  max-width: 100%;
+  padding: 1px 4px;
+  border-radius: 999px;
+  font-size: 9px;
+}
+
 .launcher-desktop-readiness-notice {
   position: absolute;
   left: 50%;

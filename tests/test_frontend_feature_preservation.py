@@ -328,6 +328,7 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
         "apps/frontend/src/features/yachiyo-chat/components/LauncherAgentTaskLight.tsx",
         [
             "export function LauncherAgentTaskLight",
+            "import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';",
             "export function launcherAgentTaskSummary",
             "export function launcherAgentTaskTitle",
             "AgentTaskLightSnapshot",
@@ -378,9 +379,11 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             "bubble-launcher-agent-task-approve",
             "bubble-launcher-agent-task-open-diagnostics",
             "bubble-launcher-agent-task-run-recovery-action",
+            "bubble-launcher-agent-task-runtime-debug",
             "live2d-launcher-agent-task-reject",
             "live2d-launcher-agent-task-open-diagnostics",
             "live2d-launcher-agent-task-run-recovery-action",
+            "live2d-launcher-agent-task-runtime-debug",
             "function launcherAgentTaskTestIds(",
             "testIdPrefix = `${mode}-launcher`",
             "if (testIdPrefix === `${mode}-launcher`) return DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS[mode];",
@@ -393,6 +396,9 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             "onRunRecoveryAction?: LauncherTaskRecoveryHandler;",
             "const permissionRecoveryAction = permissionRecovery?.actions[0] || null;",
             "const primaryReplanRecoveryAction = permissionRecoveryAction ? null : replanRecoveryAction;",
+            "testId={testIds.runtimeDebug}",
+            "summary={currentTask.runtime_debug}",
+            "sourceLabel={mode === 'bubble' ? 'Bubble runtime' : 'Live2D runtime'}",
             "const primaryRuntimeRetryAction = permissionRecoveryAction || primaryReplanRecoveryAction ? null : runtimeRetryAction;",
             "const primaryRecoveryAction = permissionRecoveryAction || primaryReplanRecoveryAction?.action || primaryRuntimeRetryAction || null;",
             "data-replan-recovery-action-id={primaryReplanRecoveryAction?.action.action_id || ''}",
@@ -434,6 +440,14 @@ def test_launcher_views_expose_session_summary_e2e_selectors() -> None:
             "studioRunRouteParams",
             "yachiyoTaskStudioGroupRunId",
             "yachiyoTaskStudioRunId",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/styles/app.css",
+        [
+            ".launcher-agent-task-runtime-debug.runtime-debug-summary",
+            ".launcher-agent-task-runtime-debug .runtime-debug-summary-head",
+            ".launcher-agent-task-runtime-debug .runtime-debug-facts",
         ],
     )
     _assert_contains(

@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { openAppView } from '../../../lib/bridge';
 import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
+import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
 import { runtimeTimelineEventLabel } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import { taskPermissionRecoveryFromTaskFacts, type TaskPermissionRecoveryAction } from './AgentTaskCard';
 import {
@@ -35,6 +36,7 @@ type LauncherAgentTaskTestIds = {
   openStudio: string;
   recovery: string;
   reject: string;
+  runtimeDebug: string;
 };
 
 export type LauncherAgentTask = AgentTaskSnapshot | null | undefined;
@@ -51,6 +53,7 @@ const DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS: Record<LauncherTaskMode, LauncherAge
     openStudio: 'bubble-launcher-agent-task-open-studio',
     recovery: 'bubble-launcher-agent-task-run-recovery-action',
     reject: 'bubble-launcher-agent-task-reject',
+    runtimeDebug: 'bubble-launcher-agent-task-runtime-debug',
   },
   live2d: {
     approvalActions: 'live2d-launcher-agent-task-approval-actions',
@@ -63,6 +66,7 @@ const DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS: Record<LauncherTaskMode, LauncherAge
     openStudio: 'live2d-launcher-agent-task-open-studio',
     recovery: 'live2d-launcher-agent-task-run-recovery-action',
     reject: 'live2d-launcher-agent-task-reject',
+    runtimeDebug: 'live2d-launcher-agent-task-runtime-debug',
   },
 };
 
@@ -266,6 +270,7 @@ function launcherAgentTaskTestIds(
     openStudio: `${testIdPrefix}-agent-task-open-studio`,
     recovery: `${testIdPrefix}-agent-task-run-recovery-action`,
     reject: `${testIdPrefix}-agent-task-reject`,
+    runtimeDebug: `${testIdPrefix}-agent-task-runtime-debug`,
   };
 }
 
@@ -392,6 +397,13 @@ export function LauncherAgentTaskLight({
         ) : null}
         {needsAction ? <em>待处理</em> : null}
       </button>
+      <RuntimeDebugSummary
+        className="launcher-agent-task-runtime-debug"
+        compact
+        sourceLabel={mode === 'bubble' ? 'Bubble runtime' : 'Live2D runtime'}
+        summary={currentTask.runtime_debug}
+        testId={testIds.runtimeDebug}
+      />
       {runId && studioUrl && studioParams ? (
         <a
           href={studioUrl}
