@@ -1122,6 +1122,120 @@ def test_yachiyo_agent_service_projects_replan_recovery_actions_from_fallback_to
     assert recovery.recovery_actions[0].approval_required is False
 
 
+def test_agent_task_snapshot_links_deferred_approval_to_replan_recovery() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-1",
+            "run_id": "run-1",
+            "status": "approval_required",
+            "events": [
+                {
+                    "event_type": "agent.replan.requested",
+                    "sequence": 1,
+                    "run_id": "run-1",
+                    "payload": {
+                        "request_id": "replan-1",
+                        "trigger": "verification_failed",
+                        "source_step_id": "operate-foreground-ui",
+                        "source_tool_name": "desktop.ui_elements",
+                        "target_capability_id": "desktop.ui_operation",
+                        "fallback_tools": ["desktop.click_ui_element"],
+                        "decision_id": "decision-1",
+                        "plan_id": "runtime-plan-1",
+                        "core_id": "task-core-1",
+                    },
+                },
+                {
+                    "event_type": "agent.desktop.intent_planned",
+                    "sequence": 2,
+                    "run_id": "run-1",
+                    "payload": {
+                        "tool": "desktop.ui_elements",
+                        "step_id": "operate-foreground-ui",
+                        "planner_step_id": "operate-foreground-ui",
+                        "capability_id": "desktop.ui_operation",
+                        "replan_request_id": "replan-1",
+                        "replan_trigger": "verification_failed",
+                        "deferred_tool": "desktop.click_ui_element",
+                        "deferred_input": {
+                            "target": "Export",
+                            "role_filter": "",
+                            "click_count": 1,
+                            "limit": 80,
+                        },
+                        "deferred_context": {"step_id": "operate-foreground-ui"},
+                        "deferred_continuation": [
+                            {"tool": "desktop.ui_elements", "step_id": "verify-desktop-result"}
+                        ],
+                        "recovery_actions": [
+                            {
+                                "label": "Click observed Export control",
+                                "tool": "desktop.click_ui_element",
+                                "input": {"target": "Export", "limit": 80},
+                                "approval_required": True,
+                                "selected": True,
+                            }
+                        ],
+                    },
+                },
+                {
+                    "event_type": "agent.desktop.intent_approval_required",
+                    "sequence": 3,
+                    "run_id": "run-1",
+                    "payload": {
+                        "tool": "desktop.click_ui_element",
+                        "step_id": "operate-foreground-ui",
+                        "replan_request_id": "replan-1",
+                        "approval_id": "approval-1",
+                        "status": "approval_required",
+                    },
+                },
+                {
+                    "event_type": "agent.tool.approval_approved",
+                    "sequence": 4,
+                    "run_id": "run-1",
+                    "payload": {
+                        "tool": "desktop.click_ui_element",
+                        "step_id": "operate-foreground-ui",
+                        "replan_request_id": "replan-1",
+                        "approval_id": "approval-1",
+                    },
+                },
+                {
+                    "event_type": "agent.tool.call",
+                    "sequence": 5,
+                    "run_id": "run-1",
+                    "payload": {
+                        "tool": "desktop.click_ui_element",
+                        "step_id": "operate-foreground-ui",
+                        "replan_request_id": "replan-1",
+                        "approval_id": "approval-1",
+                        "input_preview": {"target": "Export", "limit": 80},
+                        "result": {"ok": True, "summary": "Clicked Export"},
+                    },
+                },
+            ],
+        }
+    )
+
+    assert task.replan_recoveries
+    recovery = task.replan_recoveries[0]
+    assert recovery.request_id == "replan-1"
+    assert recovery.approval_id == "approval-1"
+    assert recovery.approval_status == "approved"
+    assert recovery.deferred_tool == "desktop.click_ui_element"
+    assert recovery.deferred_input["target"] == "Export"
+    assert recovery.deferred_context == {"step_id": "operate-foreground-ui"}
+    assert recovery.deferred_continuation == [
+        {"tool": "desktop.ui_elements", "step_id": "verify-desktop-result"}
+    ]
+    assert recovery.selected_tool_name == "desktop.click_ui_element"
+    assert recovery.tool_status == "completed"
+    assert recovery.recovery_actions[0].approval_id == "approval-1"
+    assert recovery.recovery_actions[0].approval_status == "approved"
+    assert recovery.recovery_actions[0].deferred_tool == "desktop.click_ui_element"
+
+
 def test_agent_studio_service_projects_scoped_group_runtime_tool_result_events() -> None:
     service = AgentStudioService(_FakeStudioExecutionPort())
     decision = service.plan_task(

@@ -2,6 +2,12 @@ export type RuntimeToolRecoveryAction = {
   action_id?: string;
   action_kind?: 'permission_recovery' | 'retry_original';
   approval_required?: boolean;
+  approval_id?: string;
+  approval_status?: string;
+  deferred_tool?: string;
+  deferred_input?: Record<string, unknown>;
+  deferred_context?: Record<string, unknown>;
+  deferred_continuation?: Array<Record<string, unknown>>;
   input: Record<string, unknown>;
   label: string;
   permission_target: string;
@@ -52,6 +58,12 @@ export type RuntimeToolRecoveryActionTaskMetadata = {
   recovery_input: Record<string, unknown>;
   recovery_permission_target: string;
   recovery_risk_level?: string;
+  approval_id?: string;
+  approval_status?: string;
+  deferred_tool?: string;
+  deferred_input?: Record<string, unknown>;
+  deferred_context?: Record<string, unknown>;
+  deferred_continuation?: Array<Record<string, unknown>>;
   replan_recovery_action_id?: string;
   replan_request_id?: string;
   recovery_retry_input?: Record<string, unknown>;
@@ -113,6 +125,12 @@ export const RUNTIME_TOOL_RECOVERY_TASK_METADATA_KEYS = [
   'recovery_input',
   'recovery_permission_target',
   'recovery_risk_level',
+  'approval_id',
+  'approval_status',
+  'deferred_tool',
+  'deferred_input',
+  'deferred_context',
+  'deferred_continuation',
   'replan_recovery_action_id',
   'replan_request_id',
   'recovery_retry_tool',
@@ -164,6 +182,12 @@ export function runtimeToolRecoveryActionTaskMetadata(
     recovery_permission_target: action.permission_target,
     recovery_risk_level: riskLevel,
     recovery_tool: action.tool,
+    ...(action.approval_id ? { approval_id: action.approval_id } : {}),
+    ...(action.approval_status ? { approval_status: action.approval_status } : {}),
+    ...(action.deferred_tool ? { deferred_tool: action.deferred_tool } : {}),
+    ...(Object.keys(action.deferred_input || {}).length ? { deferred_input: action.deferred_input } : {}),
+    ...(Object.keys(action.deferred_context || {}).length ? { deferred_context: action.deferred_context } : {}),
+    ...(action.deferred_continuation?.length ? { deferred_continuation: action.deferred_continuation } : {}),
     ...(action.replan_request_id ? { replan_request_id: action.replan_request_id } : {}),
     ...(action.retry_tool ? { recovery_retry_tool: action.retry_tool } : {}),
     ...(action.retry_tool || action.retry_input ? { recovery_retry_input: action.retry_input || {} } : {}),
@@ -210,6 +234,7 @@ export function runtimeToolRecoveryActionRunStartRequest(
     continue_to_model: true,
     metadata: {
       permission_target: action.permission_target,
+      ...runtimeToolRecoveryApprovalDeferredMetadata(action),
       ...(action.verification_targets?.length ? { verification_targets: action.verification_targets } : {}),
       ...extra,
     },
@@ -236,6 +261,7 @@ export function runtimeToolRecoveryActionToolRunStartRequest(
       : {}),
     metadata: {
       permission_target: action.permission_target,
+      ...runtimeToolRecoveryApprovalDeferredMetadata(action),
       source_group_run_id: toolCall.group_run_id || '',
       source_run_id: toolCall.run_id || toolCall.source_run_id || '',
       source_tool_call_id: toolCallId,
@@ -243,6 +269,19 @@ export function runtimeToolRecoveryActionToolRunStartRequest(
       ...(action.verification_targets?.length ? { verification_targets: action.verification_targets } : {}),
       ...extra,
     },
+  };
+}
+
+function runtimeToolRecoveryApprovalDeferredMetadata(
+  action: RuntimeToolRecoveryAction,
+): Record<string, unknown> {
+  return {
+    ...(action.approval_id ? { approval_id: action.approval_id } : {}),
+    ...(action.approval_status ? { approval_status: action.approval_status } : {}),
+    ...(action.deferred_tool ? { deferred_tool: action.deferred_tool } : {}),
+    ...(Object.keys(action.deferred_input || {}).length ? { deferred_input: action.deferred_input } : {}),
+    ...(Object.keys(action.deferred_context || {}).length ? { deferred_context: action.deferred_context } : {}),
+    ...(action.deferred_continuation?.length ? { deferred_continuation: action.deferred_continuation } : {}),
   };
 }
 
@@ -259,6 +298,12 @@ export function runtimeToolRecoveryRetryAction(
     action_id: action.action_id,
     action_kind: 'retry_original',
     approval_required: action.approval_required,
+    approval_id: action.approval_id,
+    approval_status: action.approval_status,
+    deferred_tool: action.deferred_tool,
+    deferred_input: action.deferred_input,
+    deferred_context: action.deferred_context,
+    deferred_continuation: action.deferred_continuation,
     input: retryInput,
     label: '恢复后重试原操作',
     permission_target: action.permission_target,
@@ -346,6 +391,14 @@ export function runtimeToolRecoveryActionsFromRecord(
     return [{
       action_id: String(action.action_id || action.id || '').trim() || undefined,
       approval_required: Boolean(action.approval_required || action.requires_approval),
+      approval_id: String(action.approval_id || source.approval_id || '').trim() || undefined,
+      approval_status: String(action.approval_status || source.approval_status || '').trim() || undefined,
+      deferred_tool: String(action.deferred_tool || source.deferred_tool || '').trim() || undefined,
+      deferred_input: objectValue(action.deferred_input || source.deferred_input),
+      deferred_context: objectValue(action.deferred_context || source.deferred_context),
+      deferred_continuation: recoveryRecordList(
+        action.deferred_continuation || source.deferred_continuation,
+      ),
       input,
       label,
       permission_target: String(action.permission_target || '').trim(),

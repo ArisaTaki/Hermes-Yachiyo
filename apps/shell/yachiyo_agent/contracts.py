@@ -381,7 +381,13 @@ class ReplanRecoveryActionSnapshot(_PublicSnapshot):
     permission_target: str = ""
     risk_level: str = ""
     approval_required: bool = False
+    approval_id: str | None = None
+    approval_status: str | None = None
     selected: bool = False
+    deferred_tool: str | None = None
+    deferred_input: dict[str, Any] = Field(default_factory=dict)
+    deferred_context: dict[str, Any] = Field(default_factory=dict)
+    deferred_continuation: list[dict[str, Any]] = Field(default_factory=list)
     action_target: dict[str, Any] = Field(default_factory=dict)
     observation_evidence: dict[str, Any] = Field(default_factory=dict)
     observation_retry: dict[str, Any] = Field(default_factory=dict)
@@ -413,6 +419,12 @@ class ReplanRecoverySnapshot(_PublicSnapshot):
     recovery_actions: list[ReplanRecoveryActionSnapshot] = Field(default_factory=list)
     permission_target: str = ""
     risk_level: str = ""
+    approval_id: str | None = None
+    approval_status: str | None = None
+    deferred_tool: str | None = None
+    deferred_input: dict[str, Any] = Field(default_factory=dict)
+    deferred_context: dict[str, Any] = Field(default_factory=dict)
+    deferred_continuation: list[dict[str, Any]] = Field(default_factory=list)
     action_target: dict[str, Any] = Field(default_factory=dict)
     observation_evidence: dict[str, Any] = Field(default_factory=dict)
     observation_retry: dict[str, Any] = Field(default_factory=dict)

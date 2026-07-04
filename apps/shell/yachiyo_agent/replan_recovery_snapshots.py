@@ -46,6 +46,12 @@ class _RecoveryRecord:
     recovery_action_label: str = ""
     permission_target: str = ""
     risk_level: str = ""
+    approval_id: str | None = None
+    approval_status: str | None = None
+    deferred_tool: str | None = None
+    deferred_input: dict[str, Any] = field(default_factory=dict)
+    deferred_context: dict[str, Any] = field(default_factory=dict)
+    deferred_continuation: list[dict[str, Any]] = field(default_factory=list)
     action_target: dict[str, Any] = field(default_factory=dict)
     observation_evidence: dict[str, Any] = field(default_factory=dict)
     observation_retry: dict[str, Any] = field(default_factory=dict)
@@ -113,6 +119,9 @@ def replan_recovery_snapshots_from_events(
         if planner_event_type == "agent.replan.recovery.updated":
             _apply_recovery_update_event(records, order, event, payload)
             continue
+        if _is_approval_event(planner_event_type):
+            _apply_approval_event(records, order, event, payload)
+            continue
         if _is_runtime_tool_event(event):
             _apply_tool_event(records, order, event)
             continue
@@ -146,6 +155,12 @@ def replan_recovery_snapshots_from_events(
             recovery_actions=_recovery_action_snapshots(record),
             permission_target=record.permission_target,
             risk_level=record.risk_level,
+            approval_id=record.approval_id or None,
+            approval_status=record.approval_status or None,
+            deferred_tool=record.deferred_tool or None,
+            deferred_input=dict(record.deferred_input),
+            deferred_context=dict(record.deferred_context),
+            deferred_continuation=list(record.deferred_continuation),
             action_target=dict(record.action_target),
             observation_evidence=dict(record.observation_evidence),
             observation_retry=dict(record.observation_retry),
@@ -276,6 +291,7 @@ def _apply_request_event(
     _extend_unique(record.fallback_tools, _string_list(request.get("fallback_tools")))
     _apply_verification_target_metadata(record, request)
     _apply_recovery_action_metadata(record, request)
+    _apply_deferred_approval_metadata(record, request)
     _apply_observed_action_metadata(record, request)
     record.failure_detail = _first_text(
         record.failure_detail,
@@ -343,7 +359,63 @@ def _apply_planned_event(
     _extend_unique(record.fallback_tools, _string_list(payload.get("fallback_tools")))
     _apply_verification_target_metadata(record, payload)
     _apply_recovery_action_metadata(record, payload, selected_tool=selected_tool)
+    _apply_deferred_approval_metadata(record, payload)
     _apply_observed_action_metadata(record, payload)
+    _mark_event(record, event)
+
+
+def _apply_approval_event(
+    records: dict[str, _RecoveryRecord],
+    order: list[str],
+    event: PublicRunEvent,
+    payload: Mapping[str, Any],
+) -> None:
+    record = _matching_record(records, order, event, payload, create_if_referenced=True)
+    if record is None:
+        return
+    record.approval_id = _first_text(record.approval_id, payload.get("approval_id"))
+    record.approval_status = _first_text(
+        _approval_status_from_event_type(_planner_event_type(event)),
+        record.approval_status,
+    )
+    record.run_id = _first_text(record.run_id, payload.get("run_id"), event.run_id)
+    record.task_id = _first_text(record.task_id, payload.get("task_id"))
+    record.group_run_id = _first_text(
+        record.group_run_id,
+        payload.get("group_run_id"),
+        payload.get("run_group_id"),
+        event.group_run_id,
+    )
+    record.workflow_run_id = _first_text(
+        record.workflow_run_id,
+        payload.get("workflow_run_id"),
+        event.workflow_run_id,
+    )
+    record.decision_id = _first_text(record.decision_id, payload.get("decision_id"))
+    record.plan_id = _first_text(record.plan_id, payload.get("plan_id"))
+    record.core_id = _first_text(record.core_id, payload.get("core_id"))
+    record.source_step_id = _first_text(
+        record.source_step_id,
+        payload.get("source_step_id"),
+        payload.get("step_id"),
+        payload.get("planner_step_id"),
+    )
+    record.selected_step_id = _first_text(
+        record.selected_step_id,
+        payload.get("step_id"),
+        payload.get("planner_step_id"),
+    )
+    record.selected_tool_name = _first_text(
+        record.selected_tool_name,
+        payload.get("tool_name"),
+        payload.get("tool"),
+    )
+    record.target_capability_id = _first_text(
+        record.target_capability_id,
+        payload.get("capability_id"),
+        payload.get("target_capability_id"),
+    )
+    _apply_deferred_approval_metadata(record, payload)
     _mark_event(record, event)
 
 
@@ -390,12 +462,16 @@ def _apply_tool_event(
             payload.get("reason"),
             record.planning_reason,
         )
+        record.approval_id = _first_text(record.approval_id, call.approval_id, payload.get("approval_id"))
+        if call.approval_id and call.status == "waiting_approval":
+            record.approval_status = _first_text(record.approval_status, "pending")
         _apply_verification_target_metadata(record, payload, call=call)
         _apply_recovery_action_metadata(
             record,
             payload,
             selected_tool=record.selected_tool_name or call.tool_name,
         )
+        _apply_deferred_approval_metadata(record, payload, call=call)
         _apply_observed_action_metadata(record, payload, call=call)
         record.result_preview = _mapping(call.output_preview)
         _mark_event(record, event)
@@ -503,6 +579,7 @@ def _apply_recovery_update_event(
         payload.get("failure_detail"),
     )
     _apply_recovery_action_metadata(record, payload, selected_tool=selected_tool)
+    _apply_deferred_approval_metadata(record, payload)
     _apply_observed_action_metadata(record, payload)
     _mark_event(record, event)
 
@@ -568,6 +645,14 @@ def _merge_recovery_snapshots(
     observation_retry = dict(current.observation_retry or {})
     if incoming.observation_retry:
         observation_retry.update(incoming.observation_retry)
+    deferred_input = dict(current.deferred_input or {})
+    if incoming.deferred_input:
+        deferred_input.update(incoming.deferred_input)
+    deferred_context = dict(current.deferred_context or {})
+    if incoming.deferred_context:
+        deferred_context.update(incoming.deferred_context)
+    deferred_continuation = list(current.deferred_continuation or [])
+    _extend_unique_mappings(deferred_continuation, incoming.deferred_continuation)
     verification_targets = list(current.verification_targets or [])
     _extend_unique_mappings(verification_targets, incoming.verification_targets)
     recovery_actions = _merged_recovery_action_snapshots(
@@ -599,6 +684,15 @@ def _merge_recovery_snapshots(
             "recovery_actions": recovery_actions,
             "permission_target": current.permission_target or incoming.permission_target,
             "risk_level": current.risk_level or incoming.risk_level,
+            "approval_id": current.approval_id or incoming.approval_id,
+            "approval_status": _stronger_approval_status(
+                current.approval_status,
+                incoming.approval_status,
+            ),
+            "deferred_tool": current.deferred_tool or incoming.deferred_tool,
+            "deferred_input": deferred_input,
+            "deferred_context": deferred_context,
+            "deferred_continuation": deferred_continuation,
             "action_target": action_target,
             "observation_evidence": observation_evidence,
             "observation_retry": observation_retry,
@@ -628,6 +722,39 @@ def _planner_event_type(event: PublicRunEvent) -> str:
     if event_type.endswith(".desktop.intent_planned"):
         return "agent.desktop.intent_planned"
     return _SCOPED_PLANNER_EVENT_TYPES.get(event_type, event_type)
+
+
+def _is_approval_event(event_type: str) -> bool:
+    return (
+        event_type.endswith(".approval_required")
+        or event_type.endswith(".intent_approval_required")
+        or event_type.endswith(".approval_approved")
+        or event_type.endswith(".approval_rejected")
+        or event_type.endswith(".approval_timeout")
+        or event_type.endswith(".approval_cancelled")
+        or event_type in {
+            "approval.required",
+            "approval.approved",
+            "approval.rejected",
+            "approval.timeout",
+            "approval.cancelled",
+            "tool.approved",
+            "tool.rejected",
+        }
+    )
+
+
+def _approval_status_from_event_type(event_type: str) -> str:
+    clean = _text(event_type)
+    if clean.endswith(".approval_approved") or clean in {"approval.approved", "tool.approved"}:
+        return "approved"
+    if clean.endswith(".approval_rejected") or clean in {"approval.rejected", "tool.rejected"}:
+        return "rejected"
+    if clean.endswith(".approval_cancelled") or clean == "approval.cancelled":
+        return "cancelled"
+    if clean.endswith(".approval_timeout") or clean == "approval.timeout":
+        return "expired"
+    return "pending"
 
 
 def _is_runtime_tool_event(event: PublicRunEvent) -> bool:
@@ -695,6 +822,27 @@ def _stronger_status(current: str, candidate: str) -> str:
     return (
         clean_candidate
         if _STATUS_RANK.get(clean_candidate, 0) >= _STATUS_RANK.get(clean_current, 0)
+        else clean_current
+    )
+
+
+def _stronger_approval_status(current: str | None, candidate: str | None) -> str | None:
+    clean_current = _text(current)
+    clean_candidate = _text(candidate)
+    if not clean_current:
+        return clean_candidate or None
+    if not clean_candidate:
+        return clean_current or None
+    rank = {
+        "pending": 1,
+        "approved": 2,
+        "rejected": 3,
+        "cancelled": 3,
+        "expired": 3,
+    }
+    return (
+        clean_candidate
+        if rank.get(clean_candidate, 0) >= rank.get(clean_current, 0)
         else clean_current
     )
 
@@ -780,6 +928,16 @@ def _recovery_action_snapshots(
             if not observation_retry:
                 observation_retry = dict(record.observation_retry)
             _extend_unique_mappings(verification_targets, record.verification_targets)
+        deferred_input = _mapping(action.get("deferred_input"))
+        deferred_context = _mapping(action.get("deferred_context"))
+        deferred_continuation = _mapping_list(action.get("deferred_continuation"))
+        if selected:
+            if not deferred_input:
+                deferred_input = dict(record.deferred_input)
+            if not deferred_context:
+                deferred_context = dict(record.deferred_context)
+            if not deferred_continuation:
+                deferred_continuation = list(record.deferred_continuation)
         action_id = _first_text(
             action.get("action_id"),
             action.get("id"),
@@ -812,7 +970,16 @@ def _recovery_action_snapshots(
                     or action.get("requires_approval")
                     or action.get("requiresApproval")
                 ),
+                approval_id=_first_text(action.get("approval_id"), record.approval_id) or None,
+                approval_status=_stronger_approval_status(
+                    _approval_status_value(action.get("approval_status") or action.get("status")),
+                    record.approval_status,
+                ),
                 selected=selected,
+                deferred_tool=_first_text(action.get("deferred_tool"), record.deferred_tool) or None,
+                deferred_input=deferred_input,
+                deferred_context=deferred_context,
+                deferred_continuation=deferred_continuation,
                 action_target=action_target,
                 observation_evidence=observation_evidence,
                 observation_retry=observation_retry,
@@ -884,6 +1051,63 @@ def _apply_observed_action_metadata(
         record.observation_evidence.update(observation_evidence)
     if observation_retry:
         record.observation_retry.update(observation_retry)
+
+
+def _apply_deferred_approval_metadata(
+    record: _RecoveryRecord,
+    payload: Mapping[str, Any],
+    *,
+    call: ToolCallSnapshot | None = None,
+) -> None:
+    sources = _metadata_sources(payload)
+    if call is not None:
+        sources.append(call.metadata)
+        sources.append(call.input_preview)
+        sources.append(call.output_preview)
+    for source in sources:
+        approval_id = _text(source.get("approval_id"))
+        if approval_id:
+            record.approval_id = _first_text(record.approval_id, approval_id)
+        status = _approval_status_value(source.get("approval_status") or source.get("status"))
+        if status:
+            record.approval_status = _stronger_approval_status(record.approval_status, status)
+        deferred_tool = _text(source.get("deferred_tool"))
+        if deferred_tool:
+            record.deferred_tool = _first_text(record.deferred_tool, deferred_tool) or None
+            if _text(record.selected_tool_name) in {"", "desktop.ui_elements", "desktop.read_ui", "screen.capture"}:
+                record.selected_tool_name = deferred_tool
+            if deferred_tool not in record.fallback_tools:
+                record.fallback_tools.append(deferred_tool)
+        deferred_input = _mapping(source.get("deferred_input"))
+        if deferred_input:
+            record.deferred_input.update(deferred_input)
+        deferred_context = _mapping(source.get("deferred_context"))
+        if deferred_context:
+            record.deferred_context.update(deferred_context)
+        _extend_unique_mappings(record.deferred_continuation, source.get("deferred_continuation"))
+
+
+def _metadata_sources(payload: Mapping[str, Any]) -> list[Mapping[str, Any]]:
+    sources: list[Mapping[str, Any]] = [payload]
+    metadata = payload.get("metadata")
+    if isinstance(metadata, Mapping):
+        sources.append(metadata)
+    pending = payload.get("pending_approval")
+    if isinstance(pending, Mapping):
+        sources.append(pending)
+    approval = payload.get("approval")
+    if isinstance(approval, Mapping):
+        sources.append(approval)
+    return sources
+
+
+def _approval_status_value(value: Any) -> str:
+    clean = _text(value).lower()
+    if clean in {"pending", "approved", "rejected", "cancelled", "expired"}:
+        return clean
+    if clean in {"approval_required", "waiting_approval", "requires_approval"}:
+        return "pending"
+    return ""
 
 
 def _apply_verification_target_metadata(
@@ -1019,6 +1243,10 @@ def _runtime_execution_request_recovery_snapshot(
     risk_level = "medium" if approval_required else "low"
     verification_targets = _runtime_execution_verification_targets(request, retry)
     action_target = _runtime_execution_action_target(request, retry)
+    deferred_tool = _first_text(_runtime_request_value(request, "deferred_tool"))
+    deferred_input = _mapping(_runtime_request_value(request, "deferred_input"))
+    deferred_context = _mapping(_runtime_request_value(request, "deferred_context"))
+    deferred_continuation = _mapping_list(_runtime_request_value(request, "deferred_continuation"))
     source_group_run_id = _first_text(
         _runtime_request_value(request, "group_run_id"),
         _runtime_request_value(request, "run_group_id"),
@@ -1037,7 +1265,12 @@ def _runtime_execution_request_recovery_snapshot(
         permission_target=permission_target,
         risk_level=risk_level,
         approval_required=approval_required,
+        approval_status="pending" if approval_required else None,
         selected=True,
+        deferred_tool=deferred_tool or None,
+        deferred_input=deferred_input,
+        deferred_context=deferred_context,
+        deferred_continuation=deferred_continuation,
         action_target=action_target,
         observation_evidence=evidence,
         observation_retry=retry,
@@ -1072,6 +1305,11 @@ def _runtime_execution_request_recovery_snapshot(
         recovery_actions=[action],
         permission_target=permission_target,
         risk_level=risk_level,
+        approval_status="pending" if approval_required else None,
+        deferred_tool=deferred_tool or None,
+        deferred_input=deferred_input,
+        deferred_context=deferred_context,
+        deferred_continuation=deferred_continuation,
         action_target=action_target,
         observation_evidence=evidence,
         observation_retry=retry,

@@ -297,7 +297,13 @@ export type ReplanRecoveryActionSnapshot = {
   permission_target?: string;
   risk_level?: string;
   approval_required?: boolean;
+  approval_id?: string | null;
+  approval_status?: string | null;
   selected?: boolean;
+  deferred_tool?: string | null;
+  deferred_input?: Record<string, unknown>;
+  deferred_context?: Record<string, unknown>;
+  deferred_continuation?: Array<Record<string, unknown>>;
   action_target?: Record<string, unknown>;
   observation_evidence?: Record<string, unknown>;
   observation_retry?: Record<string, unknown>;
@@ -329,6 +335,12 @@ export type ReplanRecoverySnapshot = {
   recovery_actions?: ReplanRecoveryActionSnapshot[];
   permission_target?: string;
   risk_level?: string;
+  approval_id?: string | null;
+  approval_status?: string | null;
+  deferred_tool?: string | null;
+  deferred_input?: Record<string, unknown>;
+  deferred_context?: Record<string, unknown>;
+  deferred_continuation?: Array<Record<string, unknown>>;
   action_target?: Record<string, unknown>;
   observation_evidence?: Record<string, unknown>;
   observation_retry?: Record<string, unknown>;

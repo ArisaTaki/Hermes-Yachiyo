@@ -612,7 +612,13 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
                 permission_target="terminal_execution",
                 risk_level="medium",
                 approval_required=True,
+                approval_id="approval-1",
+                approval_status="approved",
                 selected=True,
+                deferred_tool="terminal.run",
+                deferred_input={"command": "python analyze.py sales.csv"},
+                deferred_context={"step_id": "run-analysis"},
+                deferred_continuation=[{"tool": "desktop.active_window"}],
                 verification_targets=[
                     {
                         "step_id": "run-analysis",
@@ -623,6 +629,12 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         ],
         permission_target="terminal_execution",
         risk_level="medium",
+        approval_id="approval-1",
+        approval_status="approved",
+        deferred_tool="terminal.run",
+        deferred_input={"command": "python analyze.py sales.csv"},
+        deferred_context={"step_id": "run-analysis"},
+        deferred_continuation=[{"tool": "desktop.active_window"}],
         action_target={
             "action": "click",
             "label": "Apple Music result",
@@ -672,6 +684,12 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
         "recovery_actions",
         "permission_target",
         "risk_level",
+        "approval_id",
+        "approval_status",
+        "deferred_tool",
+        "deferred_input",
+        "deferred_context",
+        "deferred_continuation",
         "action_target",
         "observation_evidence",
         "observation_retry",
@@ -691,11 +709,20 @@ def test_replan_recovery_contract_links_request_fallback_and_checkpoint() -> Non
     assert payload["recovery_actions"][0]["tool"] == "terminal.run"
     assert payload["recovery_actions"][0]["selected"] is True
     assert payload["recovery_actions"][0]["approval_required"] is True
+    assert payload["recovery_actions"][0]["approval_id"] == "approval-1"
+    assert payload["recovery_actions"][0]["approval_status"] == "approved"
+    assert payload["recovery_actions"][0]["deferred_tool"] == "terminal.run"
+    assert payload["recovery_actions"][0]["deferred_context"] == {"step_id": "run-analysis"}
     assert payload["recovery_actions"][0]["input"] == {
         "command": "python analyze.py sales.csv",
     }
     assert payload["permission_target"] == "terminal_execution"
     assert payload["risk_level"] == "medium"
+    assert payload["approval_id"] == "approval-1"
+    assert payload["approval_status"] == "approved"
+    assert payload["deferred_tool"] == "terminal.run"
+    assert payload["deferred_input"] == {"command": "python analyze.py sales.csv"}
+    assert payload["deferred_continuation"] == [{"tool": "desktop.active_window"}]
     assert payload["verification_targets"] == [
         {
             "step_id": "run-analysis",

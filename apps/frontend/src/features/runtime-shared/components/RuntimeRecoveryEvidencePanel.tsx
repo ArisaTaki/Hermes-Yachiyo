@@ -1,7 +1,13 @@
 type RuntimeRecoveryEvidencePanelProps = {
   actionTarget?: Record<string, unknown> | null;
+  approvalId?: string | null;
   approvalRequired?: boolean;
+  approvalStatus?: string | null;
   className?: string;
+  deferredContext?: Record<string, unknown> | null;
+  deferredContinuation?: Array<Record<string, unknown>> | null;
+  deferredInput?: Record<string, unknown> | null;
+  deferredTool?: string | null;
   input?: Record<string, unknown> | null;
   observationEvidence?: Record<string, unknown> | null;
   observationRetry?: Record<string, unknown> | null;
@@ -16,8 +22,14 @@ type RuntimeRecoveryEvidencePanelProps = {
 
 export function RuntimeRecoveryEvidencePanel({
   actionTarget,
+  approvalId,
   approvalRequired = false,
+  approvalStatus,
   className = '',
+  deferredContext,
+  deferredContinuation,
+  deferredInput,
+  deferredTool,
   input,
   observationEvidence,
   observationRetry,
@@ -33,15 +45,24 @@ export function RuntimeRecoveryEvidencePanel({
   const evidence = objectRecord(observationEvidence);
   const retry = objectRecord(observationRetry);
   const inputRecord = objectRecord(input);
+  const deferredInputRecord = objectRecord(deferredInput);
+  const deferredContextRecord = objectRecord(deferredContext);
+  const deferredContinuationRecords = Array.isArray(deferredContinuation) ? deferredContinuation : [];
   const targets = Array.isArray(verificationTargets) ? verificationTargets : [];
   const targetPreview = runtimeRecoveryActionTargetPreview(target);
   const evidencePreview = runtimeRecoveryObservationEvidencePreview(evidence);
   const retryPreview = runtimeRecoveryObservationRetryPreview(retry);
   const verificationPreview = runtimeRecoveryVerificationTargetsPreview(targets);
   const inputPreview = runtimeRecoveryValuePreview(inputRecord);
+  const deferredInputPreview = runtimeRecoveryValuePreview(deferredInputRecord);
+  const deferredContextPreview = runtimeRecoveryValuePreview(deferredContextRecord);
+  const deferredContinuationPreview = runtimeRecoveryDeferredContinuationPreview(deferredContinuationRecords);
   const blocker = runtimeRecoveryEvidenceBlocker(evidence);
+  const cleanApprovalId = stringValue(approvalId);
+  const cleanApprovalStatus = stringValue(approvalStatus);
   const cleanPermission = stringValue(permissionTarget);
   const cleanRisk = stringValue(riskLevel);
+  const cleanDeferredTool = stringValue(deferredTool);
   const cleanTool = stringValue(tool);
   const cleanStatus = stringValue(status);
   const cleanReason = stringValue(planningReason);
@@ -49,10 +70,16 @@ export function RuntimeRecoveryEvidencePanel({
     cleanTool
     || cleanStatus
     || cleanReason
+    || cleanApprovalId
+    || cleanApprovalStatus
     || cleanPermission
     || cleanRisk
+    || cleanDeferredTool
     || approvalRequired
     || inputPreview
+    || deferredInputPreview
+    || deferredContextPreview
+    || deferredContinuationPreview
     || targetPreview
     || evidencePreview
     || retryPreview
@@ -69,8 +96,14 @@ export function RuntimeRecoveryEvidencePanel({
     <div
       className={classes}
       data-runtime-recovery-action-target={targetPreview}
+      data-runtime-recovery-approval-id={cleanApprovalId}
       data-runtime-recovery-approval-required={String(approvalRequired)}
+      data-runtime-recovery-approval-status={cleanApprovalStatus}
       data-runtime-recovery-blocker={blocker}
+      data-runtime-recovery-deferred-context={deferredContextPreview}
+      data-runtime-recovery-deferred-continuation={deferredContinuationPreview}
+      data-runtime-recovery-deferred-input={deferredInputPreview}
+      data-runtime-recovery-deferred-tool={cleanDeferredTool}
       data-runtime-recovery-input={inputPreview}
       data-runtime-recovery-observation-evidence={evidencePreview}
       data-runtime-recovery-observation-retry={retryPreview}
@@ -85,6 +118,11 @@ export function RuntimeRecoveryEvidencePanel({
       {cleanTool ? <span data-runtime-recovery-evidence-kind="tool">tool · {cleanTool}</span> : null}
       {cleanStatus ? <span data-runtime-recovery-evidence-kind="status">status · {cleanStatus}</span> : null}
       {cleanReason ? <span data-runtime-recovery-evidence-kind="reason">reason · {cleanReason}</span> : null}
+      {cleanApprovalId || cleanApprovalStatus ? (
+        <span data-runtime-recovery-evidence-kind="approval">
+          approval · {[cleanApprovalId, cleanApprovalStatus].filter(Boolean).join(' / ')}
+        </span>
+      ) : null}
       {cleanPermission ? <span data-runtime-recovery-evidence-kind="permission">permission · {cleanPermission}</span> : null}
       {cleanRisk || approvalRequired ? (
         <span data-runtime-recovery-evidence-kind="risk">
@@ -93,6 +131,14 @@ export function RuntimeRecoveryEvidencePanel({
       ) : null}
       {blocker ? <span className="missing" data-runtime-recovery-evidence-kind="blocker">blocker · {blocker}</span> : null}
       {inputPreview ? <span data-runtime-recovery-evidence-kind="input">input · {inputPreview}</span> : null}
+      {cleanDeferredTool ? <span data-runtime-recovery-evidence-kind="deferred-tool">deferred · {cleanDeferredTool}</span> : null}
+      {deferredInputPreview ? <span data-runtime-recovery-evidence-kind="deferred-input">deferred input · {deferredInputPreview}</span> : null}
+      {deferredContextPreview ? <span data-runtime-recovery-evidence-kind="deferred-context">deferred context · {deferredContextPreview}</span> : null}
+      {deferredContinuationPreview ? (
+        <span data-runtime-recovery-evidence-kind="deferred-continuation">
+          deferred continuation · {deferredContinuationPreview}
+        </span>
+      ) : null}
       {targetPreview ? <span data-runtime-recovery-evidence-kind="target">target · {targetPreview}</span> : null}
       {evidencePreview ? <span data-runtime-recovery-evidence-kind="evidence">evidence · {evidencePreview}</span> : null}
       {retryPreview ? <span data-runtime-recovery-evidence-kind="retry">retry · {retryPreview}</span> : null}
@@ -203,6 +249,18 @@ export function runtimeRecoveryVerificationTargetsPreview(targets: Array<Record<
   if (!parts.length) return '';
   const suffix = targets.length > parts.length ? ` +${targets.length - parts.length}` : '';
   return truncatePreview(`${parts.join(' | ')}${suffix}`, 160);
+}
+
+function runtimeRecoveryDeferredContinuationPreview(items: Array<Record<string, unknown>>): string {
+  const parts = items.slice(0, 3).map((item) => (
+    stringValue(item.tool_name)
+    || stringValue(item.tool)
+    || stringValue(item.step_id)
+    || stringValue(item.request_id)
+  )).filter(Boolean);
+  if (!parts.length) return '';
+  const suffix = items.length > parts.length ? ` +${items.length - parts.length}` : '';
+  return truncatePreview(`${parts.join(' -> ')}${suffix}`, 160);
 }
 
 export function runtimeRecoveryEvidenceBlocker(evidence: Record<string, unknown>): string {

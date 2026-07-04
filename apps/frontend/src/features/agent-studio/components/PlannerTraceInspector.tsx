@@ -791,11 +791,17 @@ function ReplanRecoverySnapshotPill({
   const actionTarget = objectRecord(recovery.action_target);
   const observationEvidence = objectRecord(recovery.observation_evidence);
   const observationRetry = objectRecord(recovery.observation_retry);
+  const deferredInput = objectRecord(recovery.deferred_input);
+  const deferredContext = objectRecord(recovery.deferred_context);
+  const deferredContinuation = arrayRecords(recovery.deferred_continuation);
   const verificationTargets = arrayRecords(recovery.verification_targets);
   const actionTargetPreview = replanRecoveryActionTargetPreview(actionTarget);
   const observationEvidencePreview = replanRecoveryObservationEvidencePreview(observationEvidence);
   const observationRetryPreview = replanRecoveryObservationRetryPreview(observationRetry);
   const observedCenterPreview = replanRecoveryObservedCenterPreview(observationEvidence);
+  const deferredInputPreview = plannerValuePreview(deferredInput);
+  const deferredContextPreview = plannerValuePreview(deferredContext);
+  const deferredContinuationPreview = replanRecoveryDeferredContinuationPreview(deferredContinuation);
   const verificationTargetsPreview = replanRecoveryVerificationTargetsPreview(verificationTargets);
   const recoveryActions = runtimeToolRecoveryActionsFromRecords([
     recovery as unknown as Record<string, unknown>,
@@ -806,7 +812,12 @@ function ReplanRecoverySnapshotPill({
     planningReasonLabel ? `reason: ${planningReasonLabel}` : '',
     recovery.permission_target ? `permission: ${recovery.permission_target}` : '',
     recovery.risk_level ? `risk: ${recovery.risk_level}` : '',
+    recovery.approval_id ? `approval: ${recovery.approval_id}` : '',
+    recovery.approval_status ? `approval status: ${recovery.approval_status}` : '',
+    recovery.deferred_tool ? `deferred: ${recovery.deferred_tool}` : '',
     verificationTargetsPreview ? `verification: ${verificationTargetsPreview}` : '',
+    deferredInputPreview ? `deferred input: ${deferredInputPreview}` : '',
+    deferredContinuationPreview ? `deferred continuation: ${deferredContinuationPreview}` : '',
     actionTargetPreview ? `target: ${actionTargetPreview}` : '',
     observationEvidencePreview ? `evidence: ${observationEvidencePreview}` : '',
     observationRetryPreview ? `retry: ${observationRetryPreview}` : '',
@@ -818,6 +829,12 @@ function ReplanRecoverySnapshotPill({
         data-replan-recovery-action={label}
         data-replan-recovery-action-count={recoveryActions.length}
         data-replan-recovery-action-target={actionTargetPreview}
+        data-replan-recovery-approval-id={recovery.approval_id || ''}
+        data-replan-recovery-approval-status={recovery.approval_status || ''}
+        data-replan-recovery-deferred-context={deferredContextPreview}
+        data-replan-recovery-deferred-continuation={deferredContinuationPreview}
+        data-replan-recovery-deferred-input={deferredInputPreview}
+        data-replan-recovery-deferred-tool={recovery.deferred_tool || ''}
         data-replan-recovery-id={recovery.request_id}
         data-replan-recovery-observation-evidence={observationEvidencePreview}
         data-replan-recovery-observation-retry={observationRetryPreview}
@@ -833,14 +850,22 @@ function ReplanRecoverySnapshotPill({
       >
         recovery · {label || recovery.trigger} · {recovery.status || 'requested'}
         {planningReasonLabel ? ` · ${planningReasonLabel}` : ''}
+        {recovery.approval_status ? ` · approval: ${recovery.approval_status}` : ''}
+        {recovery.deferred_tool ? ` · deferred: ${recovery.deferred_tool}` : ''}
         {verificationTargetsPreview ? ` · verifies: ${verificationTargetsPreview}` : ''}
         {actionTargetPreview ? ` · target: ${actionTargetPreview}` : ''}
         {observationRetryPreview ? ` · retry: ${observationRetryPreview}` : ''}
       </span>
       <RuntimeRecoveryEvidencePanel
         actionTarget={actionTarget}
+        approvalId={recovery.approval_id || ''}
         approvalRequired={recoveryApprovalRequired}
+        approvalStatus={recovery.approval_status || ''}
         className="studio-replan-recovery-evidence"
+        deferredContext={deferredContext}
+        deferredContinuation={deferredContinuation}
+        deferredInput={deferredInput}
+        deferredTool={recovery.deferred_tool || ''}
         observationEvidence={observationEvidence}
         observationRetry={observationRetry}
         permissionTarget={recovery.permission_target || ''}
@@ -907,6 +932,18 @@ function replanRecoveryVerificationTargetsPreview(targets: Array<Record<string, 
   if (!parts.length) return '';
   const suffix = targets.length > parts.length ? ` +${targets.length - parts.length}` : '';
   return truncatePlannerPreview(`${parts.join(' | ')}${suffix}`);
+}
+
+function replanRecoveryDeferredContinuationPreview(items: Array<Record<string, unknown>>): string {
+  const parts = items.slice(0, 3).map((item) => (
+    stringValue(item.tool_name)
+    || stringValue(item.tool)
+    || stringValue(item.step_id)
+    || stringValue(item.request_id)
+  )).filter(Boolean);
+  if (!parts.length) return '';
+  const suffix = items.length > parts.length ? ` +${items.length - parts.length}` : '';
+  return truncatePlannerPreview(`${parts.join(' -> ')}${suffix}`);
 }
 
 function replanRecoveryVerificationTargetWorkspacePreview(target: Record<string, unknown>): string {
@@ -1082,6 +1119,11 @@ function ReplanRecoveryActionPill({
 }) {
   const inputPreview = plannerValuePreview(action.input);
   const recommendedTools = uniqueStrings(action.recommended_tools || []);
+  const deferredInputPreview = plannerValuePreview(action.deferred_input || {});
+  const deferredContextPreview = plannerValuePreview(action.deferred_context || {});
+  const deferredContinuationPreview = replanRecoveryDeferredContinuationPreview(
+    arrayRecords(action.deferred_continuation),
+  );
   const verificationTargetsPreview = replanRecoveryVerificationTargetsPreview(
     arrayRecords(action.verification_targets),
   );
@@ -1091,7 +1133,13 @@ function ReplanRecoveryActionPill({
     <button
       type="button"
       className="studio-tool-permission"
+      data-replan-recovery-action-approval-id={action.approval_id || ''}
       data-replan-recovery-action-approval-required={String(action.approval_required === true)}
+      data-replan-recovery-action-approval-status={action.approval_status || ''}
+      data-replan-recovery-action-deferred-context={deferredContextPreview}
+      data-replan-recovery-action-deferred-continuation={deferredContinuationPreview}
+      data-replan-recovery-action-deferred-input={deferredInputPreview}
+      data-replan-recovery-action-deferred-tool={action.deferred_tool || ''}
       data-replan-recovery-action-id={action.action_id || ''}
       data-replan-recovery-input={inputPreview}
       data-replan-recovery-label={label}
@@ -1107,12 +1155,17 @@ function ReplanRecoveryActionPill({
       onClick={() => void onRunReplanRecoveryAction?.(requestId, action)}
       title={[
         action.prompt,
+        action.approval_status ? `approval: ${action.approval_status}` : '',
+        action.deferred_tool ? `deferred: ${action.deferred_tool}` : '',
         inputPreview ? `input: ${inputPreview}` : '',
+        deferredInputPreview ? `deferred input: ${deferredInputPreview}` : '',
         verificationTargetsPreview ? `verification: ${verificationTargetsPreview}` : '',
       ].filter(Boolean).join(' · ')}
     >
       recovery · {action.label || action.tool}
       {action.tool ? ` · ${action.tool}` : ''}
+      {action.approval_status ? ` · approval: ${action.approval_status}` : ''}
+      {action.deferred_tool ? ` · deferred: ${action.deferred_tool}` : ''}
       {inputPreview ? ` · input: ${inputPreview}` : ''}
       {verificationTargetsPreview ? ` · verifies: ${verificationTargetsPreview}` : ''}
     </button>
