@@ -25,6 +25,9 @@ _TOOL_REQUEST_TRACE_TEXT_KEYS = (
     "step_id",
     "planner_step_id",
     "capability_id",
+    "capability_title",
+    "capability_status",
+    "capability_reason",
     "core_id",
     "workspace_id",
     "task_id",
@@ -52,6 +55,8 @@ _TOOL_REQUEST_TRACE_BOOL_KEYS = (
 )
 
 _TOOL_REQUEST_TRACE_LIST_KEYS = (
+    "capability_selected_tools",
+    "capability_planned_step_ids",
     "replan_triggers",
     "replan_signal_ids",
 )
@@ -94,6 +99,9 @@ _INPUT_PREVIEW_TRACE_KEYS = (
     "step_id",
     "planner_step_id",
     "capability_id",
+    "capability_title",
+    "capability_status",
+    "capability_reason",
     "core_id",
     "workspace_id",
     "task_id",
@@ -115,6 +123,8 @@ _INPUT_PREVIEW_TRACE_KEYS = (
     "runtime_role",
     "requires_observation",
     "requires_post_action_verification",
+    "capability_selected_tools",
+    "capability_planned_step_ids",
     "replan_triggers",
     "replan_signal_ids",
 )
@@ -129,6 +139,11 @@ _ARTIFACT_CONTEXT_KEYS = (
     "step_id",
     "planner_step_id",
     "capability_id",
+    "capability_title",
+    "capability_status",
+    "capability_reason",
+    "capability_selected_tools",
+    "capability_planned_step_ids",
     "core_id",
     "workspace_id",
     "task_id",

@@ -1378,6 +1378,11 @@ def test_runtime_tool_call_executor_preserves_planner_trace_on_tool_call_events(
             "planning_reason": "planner_replan_fallback_recovery",
             "step_id": "inspect-data-source",
             "capability_id": "file.workspace_read",
+            "capability_title": "Read workspace file",
+            "capability_status": "selected",
+            "capability_reason": "The task needs to inspect a local source file.",
+            "capability_selected_tools": ["workspace.read", "desktop.open_path"],
+            "capability_planned_step_ids": ["inspect-data-source", "open-source-file"],
             "core_id": "core-1",
             "workspace_id": "workspace-1",
             "task_id": "task-1",
@@ -1399,12 +1404,20 @@ def test_runtime_tool_call_executor_preserves_planner_trace_on_tool_call_events(
     assert timeline[0]["status"] == "running"
     assert timeline[0]["step_id"] == "inspect-data-source"
     assert timeline[0]["capability_id"] == "file.workspace_read"
+    assert timeline[0]["capability_title"] == "Read workspace file"
+    assert timeline[0]["capability_selected_tools"] == ["workspace.read", "desktop.open_path"]
+    assert timeline[0]["capability_planned_step_ids"] == [
+        "inspect-data-source",
+        "open-source-file",
+    ]
     assert timeline[0]["core_id"] == "core-1"
     assert timeline[0]["target_app_name"] == "Figma"
     assert timeline[0]["replan_request_id"] == "replan-1"
     assert timeline[-1]["event"] == "agent.tool.call"
     assert timeline[-1]["step_id"] == "inspect-data-source"
     assert timeline[-1]["capability_id"] == "file.workspace_read"
+    assert timeline[-1]["capability_title"] == "Read workspace file"
+    assert timeline[-1]["capability_reason"] == "The task needs to inspect a local source file."
     assert timeline[-1]["core_id"] == "core-1"
     assert timeline[-1]["target_app_name"] == "Figma"
     assert timeline[-1]["replan_request_id"] == "replan-1"
@@ -1414,6 +1427,11 @@ def test_runtime_tool_call_executor_preserves_planner_trace_on_tool_call_events(
         "planning_reason": "planner_replan_fallback_recovery",
         "step_id": "inspect-data-source",
         "capability_id": "file.workspace_read",
+        "capability_title": "Read workspace file",
+        "capability_status": "selected",
+        "capability_reason": "The task needs to inspect a local source file.",
+        "capability_selected_tools": ["workspace.read", "desktop.open_path"],
+        "capability_planned_step_ids": ["inspect-data-source", "open-source-file"],
         "core_id": "core-1",
         "workspace_id": "workspace-1",
         "task_id": "task-1",
@@ -1596,6 +1614,11 @@ def test_runtime_tool_call_executor_preserves_scope_on_artifact_events() -> None
         "plan_id": "plan-1",
         "step_id": "write-analysis",
         "capability_id": "data.analysis",
+        "capability_title": "Analyze data",
+        "capability_status": "selected",
+        "capability_reason": "The user asked for a data-backed report artifact.",
+        "capability_selected_tools": ["data.analyze", "artifact.write"],
+        "capability_planned_step_ids": ["analyze-data", "write-analysis"],
         "core_id": "core-1",
         "workspace_id": "workspace-1",
         "task_id": "task-1",
