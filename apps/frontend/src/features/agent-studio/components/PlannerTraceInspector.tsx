@@ -1,5 +1,11 @@
 import { Fragment } from 'react';
 
+import {
+  RuntimeRecoveryEvidencePanel,
+  runtimeRecoveryActionTargetPreview,
+  runtimeRecoveryObservationEvidencePreview,
+  runtimeRecoveryObservationRetryPreview,
+} from '../../runtime-shared/components/RuntimeRecoveryEvidencePanel';
 import { publicRunEventIsSecret } from '../../runtime-shared/runEvents';
 import { runtimePlannerReasonLabel } from '../../runtime-shared/plannerReasonLabels';
 import {
@@ -794,6 +800,7 @@ function ReplanRecoverySnapshotPill({
   const recoveryActions = runtimeToolRecoveryActionsFromRecords([
     recovery as unknown as Record<string, unknown>,
   ]);
+  const recoveryApprovalRequired = recoveryActions.some((action) => action.approval_required === true);
   const title = [
     recovery.failure_detail,
     planningReasonLabel ? `reason: ${planningReasonLabel}` : '',
@@ -830,6 +837,20 @@ function ReplanRecoverySnapshotPill({
         {actionTargetPreview ? ` · target: ${actionTargetPreview}` : ''}
         {observationRetryPreview ? ` · retry: ${observationRetryPreview}` : ''}
       </span>
+      <RuntimeRecoveryEvidencePanel
+        actionTarget={actionTarget}
+        approvalRequired={recoveryApprovalRequired}
+        className="studio-replan-recovery-evidence"
+        observationEvidence={observationEvidence}
+        observationRetry={observationRetry}
+        permissionTarget={recovery.permission_target || ''}
+        planningReason={planningReasonLabel || recovery.planning_reason || ''}
+        riskLevel={recovery.risk_level || ''}
+        status={recovery.status || 'requested'}
+        testId="agent-run-detail-replan-recovery-evidence"
+        tool={recovery.selected_tool_name || recovery.source_tool_name || ''}
+        verificationTargets={verificationTargets}
+      />
       {recoveryActions.slice(0, 5).map((action, index) => (
         <ReplanRecoveryActionPill
           action={action}
@@ -845,42 +866,15 @@ function ReplanRecoverySnapshotPill({
 }
 
 function replanRecoveryActionTargetPreview(target: Record<string, unknown>): string {
-  if (!Object.keys(target).length) return '';
-  const label = (
-    stringValue(target.label)
-    || stringValue(target.name)
-    || stringValue(target.title)
-    || stringValue(target.text)
-    || stringValue(target.role)
-  );
-  const parts = [
-    stringValue(target.action),
-    label,
-    stringValue(target.app_name) || stringValue(target.app) || stringValue(target.bundle_id),
-  ].filter(Boolean);
-  return parts.length ? truncatePlannerPreview(parts.join(' · ')) : plannerValuePreview(target);
+  return runtimeRecoveryActionTargetPreview(target);
 }
 
 function replanRecoveryObservationEvidencePreview(evidence: Record<string, unknown>): string {
-  if (!Object.keys(evidence).length) return '';
-  const center = replanRecoveryObservedCenterPreview(evidence);
-  const parts = [
-    stringValue(evidence.strategy),
-    stringValue(evidence.source),
-    stringValue(evidence.reason),
-    center ? `center ${center}` : '',
-  ].filter(Boolean);
-  return parts.length ? truncatePlannerPreview(parts.join(' · ')) : plannerValuePreview(evidence);
+  return runtimeRecoveryObservationEvidencePreview(evidence);
 }
 
 function replanRecoveryObservationRetryPreview(retry: Record<string, unknown>): string {
-  if (!Object.keys(retry).length) return '';
-  const parts = [
-    stringValue(retry.from_tool) || stringValue(retry.source_tool),
-    stringValue(retry.reason),
-    stringValue(retry.target) || stringValue(retry.label) || stringValue(retry.target_label),
-  ].filter(Boolean);
-  return parts.length ? truncatePlannerPreview(parts.join(' · ')) : plannerValuePreview(retry);
+  return runtimeRecoveryObservationRetryPreview(retry);
 }
 
 function replanRecoveryObservedCenterPreview(evidence: Record<string, unknown>): string {
@@ -1264,6 +1258,21 @@ function ExecutionRequestRow({
         {actionTargetPreview ? <span>target: {actionTargetPreview}</span> : null}
         {observationEvidencePreview ? <span>observed: {observationEvidencePreview}</span> : null}
         {observationRetryPreview ? <span>retry observe: {observationRetryPreview}</span> : null}
+        <RuntimeRecoveryEvidencePanel
+          actionTarget={objectRecord(request.action_target)}
+          approvalRequired={Boolean(request.approval_required)}
+          className="studio-execution-request-evidence"
+          input={objectRecord(request.input)}
+          observationEvidence={objectRecord(request.observation_evidence)}
+          observationRetry={objectRecord(request.observation_retry)}
+          permissionTarget={request.approval_required ? 'approval_required' : ''}
+          planningReason={planningReasonLabel || request.planning_reason || ''}
+          riskLevel=""
+          status={request.status || 'planned'}
+          testId="agent-run-detail-planner-execution-request-evidence"
+          tool={request.tool_name || ''}
+          verificationTargets={taskVerificationTargets}
+        />
       </div>
       <small>
         {request.status || 'planned'}

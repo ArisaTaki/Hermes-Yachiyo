@@ -15582,6 +15582,37 @@ button.studio-tool-permission:disabled {
   color: oklch(84% 0.13 86);
 }
 
+.runtime-recovery-evidence-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-width: 0;
+  max-width: 100%;
+}
+
+.studio-tool-pill-row>.runtime-recovery-evidence-panel {
+  flex-basis: 100%;
+}
+
+.runtime-recovery-evidence-panel span {
+  display: inline-flex;
+  max-width: 100%;
+  padding: 3px 7px;
+  border: 1px solid var(--hy-border-soft);
+  border-radius: 999px;
+  background: oklch(255 0 0 / 0.022);
+  color: var(--hy-muted);
+  font-size: 10.5px;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.runtime-recovery-evidence-panel span.missing {
+  border-color: oklch(76% 0.12 86 / 0.36);
+  background: oklch(76% 0.12 86 / 0.12);
+  color: oklch(84% 0.13 86);
+}
+
 .studio-tool-schema-property-list {
   display: grid;
   gap: 8px;

@@ -1,6 +1,13 @@
 import type { ReactNode } from 'react';
 
 import type { RuntimeExecutionEnvelopeSnapshot, RuntimeExecutionRequestSnapshot } from '../types';
+import {
+  RuntimeRecoveryEvidencePanel,
+  runtimeRecoveryActionTargetPreview,
+  runtimeRecoveryEvidenceBlocker,
+  runtimeRecoveryObservationEvidencePreview,
+  runtimeRecoveryObservationRetryPreview,
+} from './RuntimeRecoveryEvidencePanel';
 
 export type RuntimeExecutionEnvelopeSummaryVariant = 'chat' | 'studio';
 
@@ -285,6 +292,20 @@ function RuntimeExecutionRequestRow({
         {actionTargetPreview ? <span>target: {actionTargetPreview}</span> : null}
         {observationEvidencePreview ? <span>evidence: {observationEvidencePreview}</span> : null}
         {observationRetryPreview ? <span>retry: {observationRetryPreview}</span> : null}
+        <RuntimeRecoveryEvidencePanel
+          actionTarget={objectRecord(request.action_target)}
+          approvalRequired={request.approval_required === true}
+          className="runtime-execution-request-evidence"
+          input={objectRecord(request.input)}
+          observationEvidence={objectRecord(request.observation_evidence)}
+          observationRetry={objectRecord(request.observation_retry)}
+          permissionTarget={request.approval_required ? 'approval_required' : ''}
+          planningReason={request.planning_reason || ''}
+          status={request.status || ''}
+          testId={`${testId}-evidence`}
+          tool={request.tool_name || ''}
+          verificationTargets={recordList(request.task_verification_targets)}
+        />
       </div>
       <small>{stage || 'operate'}{request.approval_required ? ' / approval' : ''}</small>
     </div>
@@ -292,67 +313,15 @@ function RuntimeExecutionRequestRow({
 }
 
 function requestActionTargetPreview(target: Record<string, unknown>): string {
-  if (!Object.keys(target).length) return '';
-  const label = (
-    stringValue(target.target)
-    || stringValue(target.label)
-    || stringValue(target.name)
-    || stringValue(target.title)
-    || stringValue(target.text)
-    || stringValue(target.role)
-  );
-  const app = (
-    stringValue(target.app_name)
-    || stringValue(target.resolved_app_name)
-    || stringValue(target.app)
-    || stringValue(target.bundle_id)
-  );
-  const query = stringValue(target.query) || stringValue(target.app_query);
-  return compactPreview([
-    stringValue(target.action),
-    label,
-    app,
-    query && query !== app ? `query ${query}` : '',
-  ]);
+  return runtimeRecoveryActionTargetPreview(target);
 }
 
 function requestObservationEvidencePreview(evidence: Record<string, unknown>): string {
-  if (!Object.keys(evidence).length) return '';
-  const source = (
-    stringValue(evidence.source_tool)
-    || stringValue(evidence.source)
-  );
-  const app = (
-    stringValue(evidence.app_name)
-    || stringValue(evidence.resolved_app_name)
-    || stringValue(evidence.app)
-  );
-  const query = stringValue(evidence.query) || stringValue(evidence.app_query);
-  return compactPreview([
-    source,
-    stringValue(evidence.strategy),
-    stringValue(evidence.reason),
-    stringValue(evidence.blocking_condition),
-    app,
-    query && query !== app ? `query ${query}` : '',
-  ]);
+  return runtimeRecoveryObservationEvidencePreview(evidence);
 }
 
 function requestObservationRetryPreview(retry: Record<string, unknown>): string {
-  if (!Object.keys(retry).length) return '';
-  const retryInput = objectRecord(retry.input);
-  const retryTarget = (
-    stringValue(retry.target)
-    || stringValue(retry.label)
-    || stringValue(retry.target_label)
-    || stringValue(retryInput.app_name)
-    || stringValue(retryInput.query)
-  );
-  return compactPreview([
-    stringValue(retry.from_tool) || stringValue(retry.tool) || stringValue(retry.source_tool),
-    stringValue(retry.reason),
-    retryTarget,
-  ]);
+  return runtimeRecoveryObservationRetryPreview(retry);
 }
 
 function compactPreview(parts: string[]): string {
@@ -397,7 +366,8 @@ function runtimeExecutionBlockers(requests: RuntimeExecutionRequestSnapshot[]): 
   const values: string[] = [];
   requests.forEach((request) => {
     const evidence = objectRecord(request.observation_evidence);
-    addUniqueString(values, evidence.blocking_condition);
+    addUniqueString(values, stringValue(evidence.blocking_condition));
+    addUniqueString(values, runtimeRecoveryEvidenceBlocker(evidence));
     const conditions = evidence.blocking_conditions;
     if (Array.isArray(conditions)) {
       conditions.forEach((condition) => addUniqueString(values, condition));
@@ -427,6 +397,13 @@ function stringValue(value: unknown): string {
 function addUniqueString(values: string[], value: unknown): void {
   const text = stringValue(value);
   if (text && !values.includes(text)) values.push(text);
+}
+
+function recordList(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => (
+    Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+  ));
 }
 
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
