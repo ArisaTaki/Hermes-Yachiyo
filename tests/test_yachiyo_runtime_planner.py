@@ -9059,6 +9059,59 @@ def test_planner_execution_tool_requests_prepends_unknown_app_discovery() -> Non
     ]
 
 
+def test_planner_execution_tool_requests_uses_desktop_verify_for_unknown_app() -> None:
+    allowed = ["desktop.list_apps", "app.open", "desktop.verify"]
+
+    assert planner_execution_tool_requests(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open",
+                "input": {"app_name": "PixelForge"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            }
+        ],
+        allowed,
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "capability_id": "desktop.app_discovery",
+            "runtime_doctrine": "discover_operate_verify",
+            "runtime_stage": "discover",
+            "runtime_role": "find_target_app",
+            "requires_observation": True,
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {
+                "app_name": "PixelForge",
+                "selection_source": "desktop.list_apps",
+                "query": "PixelForge",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.verify",
+            "input": {
+                "app_name": "PixelForge",
+                "selection_source": "desktop.list_apps",
+                "query": "PixelForge",
+                "limit": 80,
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+    ]
+
+
 def test_planner_execution_tool_requests_annotates_selected_app_placeholders() -> None:
     allowed = ["desktop.list_apps", "desktop.inspect_app"]
 

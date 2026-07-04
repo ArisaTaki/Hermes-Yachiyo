@@ -99,7 +99,7 @@ def planner_execution_tool_requests(
         normalized_requests,
         allowed,
     )
-    normalized_requests = _scope_desktop_ui_verification_requests(normalized_requests)
+    normalized_requests = _scope_desktop_app_verification_requests(normalized_requests)
     normalized_requests = _drop_redundant_execution_verification_requests(
         normalized_requests
     )
@@ -133,7 +133,7 @@ def planner_full_plan_execution_tool_requests(
         normalized_requests,
         allowed,
     )
-    normalized_requests = _scope_desktop_ui_verification_requests(normalized_requests)
+    normalized_requests = _scope_desktop_app_verification_requests(normalized_requests)
     return runtime_execution_verified_tool_requests(normalized_requests, allowed)
 
 
@@ -1028,6 +1028,7 @@ def _append_foreground_submit_verification_requests(
         (
             "desktop.ui_elements",
             "desktop.read_ui",
+            "desktop.verify",
             "desktop.active_window",
             "screen.capture",
         ),
@@ -1056,12 +1057,12 @@ def _append_foreground_submit_verification_requests(
     return normalized
 
 
-def _scope_desktop_ui_verification_requests(
+def _scope_desktop_app_verification_requests(
     requests: list[dict[str, Any]],
 ) -> list[dict[str, Any]]:
     normalized: list[dict[str, Any]] = []
     for request in requests:
-        if not _is_desktop_ui_verification_request(request):
+        if not _is_desktop_app_verification_request(request):
             normalized.append(request)
             continue
         payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
@@ -1087,9 +1088,9 @@ def _scope_desktop_ui_verification_requests(
     return normalized
 
 
-def _is_desktop_ui_verification_request(request: Mapping[str, Any]) -> bool:
+def _is_desktop_app_verification_request(request: Mapping[str, Any]) -> bool:
     tool_name = str(request.get("tool") or "").strip()
-    if tool_name not in {"desktop.ui_elements", "desktop.read_ui"}:
+    if tool_name not in {"desktop.ui_elements", "desktop.read_ui", "desktop.verify"}:
         return False
     step_id = str(
         request.get("step_id") or request.get("planner_step_id") or ""
@@ -1112,7 +1113,12 @@ def _foreground_submit_verification_request(
         source_request.get("planning_reason") or "planner_desktop_operation"
     ).strip() or "planner_desktop_operation"
     if verification_tool in {"desktop.ui_elements", "desktop.read_ui"}:
-        payload: dict[str, Any] = _desktop_ui_verification_payload(
+        payload: dict[str, Any] = _desktop_app_verification_payload(
+            source_request,
+            previous_requests=previous_requests,
+        )
+    elif verification_tool == "desktop.verify":
+        payload = _desktop_app_verification_payload(
             source_request,
             previous_requests=previous_requests,
         )
@@ -1146,12 +1152,24 @@ def _unknown_app_execution_verification_request(
     ).strip() or "planner_desktop_operation"
     if _tool_performs_foreground_ui_operation(tool_name):
         verification_tool = _first_allowed(
-            ("desktop.ui_elements", "desktop.read_ui", "desktop.active_window", "screen.capture"),
+            (
+                "desktop.ui_elements",
+                "desktop.read_ui",
+                "desktop.verify",
+                "desktop.active_window",
+                "screen.capture",
+            ),
             allowed,
         )
     else:
         verification_tool = _first_allowed(
-            ("desktop.active_window", "desktop.ui_elements", "desktop.read_ui", "screen.capture"),
+            (
+                "desktop.active_window",
+                "desktop.verify",
+                "desktop.ui_elements",
+                "desktop.read_ui",
+                "screen.capture",
+            ),
             allowed,
         )
     if not verification_tool:
@@ -1159,7 +1177,13 @@ def _unknown_app_execution_verification_request(
     if verification_tool in {"desktop.ui_elements", "desktop.read_ui"}:
         return _request(
             verification_tool,
-            _desktop_ui_verification_payload(request),
+            _desktop_app_verification_payload(request),
+            planning_reason=planning_reason,
+        )
+    if verification_tool == "desktop.verify":
+        return _request(
+            verification_tool,
+            _desktop_app_verification_payload(request),
             planning_reason=planning_reason,
         )
     if verification_tool == "screen.capture":
@@ -1171,7 +1195,7 @@ def _unknown_app_execution_verification_request(
     return _request(verification_tool, {}, planning_reason=planning_reason)
 
 
-def _desktop_ui_verification_payload(
+def _desktop_app_verification_payload(
     source_request: Mapping[str, Any],
     *,
     previous_requests: Iterable[Mapping[str, Any]] = (),
@@ -2811,6 +2835,9 @@ def _keep_post_mutation_verification_request(
         return False
     if tool_name in {"desktop.ui_elements", "desktop.read_ui", "desktop.windows", "desktop.list_windows"}:
         return True
+    if tool_name == "desktop.verify":
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        return bool(str(payload.get("app_name") or "").strip())
     if previous_mutation_tool in {
         "app.quit",
         "app.hide",
