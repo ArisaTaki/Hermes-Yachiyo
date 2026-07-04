@@ -13581,9 +13581,7 @@ def _auto_replan_focus_recovery_requests(
     allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
     if not allowed:
         return []
-    focus_tool = "app.focus" if "app.focus" in allowed else ""
-    if not focus_tool and "desktop.focus_app" in allowed:
-        focus_tool = "desktop.focus_app"
+    focus_tool = _replan_focus_recovery_tool(allowed)
     if not focus_tool:
         return []
     requests: list[dict[str, Any]] = []
@@ -13622,6 +13620,18 @@ def _auto_replan_focus_recovery_requests(
             _attach_replan_active_window_verification_target(request, target)
             requests.append(request)
     return _dedupe_replan_recovery_requests(requests)
+
+
+def _replan_focus_recovery_tool(allowed: set[str]) -> str:
+    for tool_name in (
+        "app.focus",
+        "desktop.focus_app",
+        "app.open",
+        "desktop.open_app",
+    ):
+        if tool_name in allowed:
+            return tool_name
+    return ""
 
 
 def _replan_payload_is_focus_mismatch(payload: Mapping[str, Any]) -> bool:

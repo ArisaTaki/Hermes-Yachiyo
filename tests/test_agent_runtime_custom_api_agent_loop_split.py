@@ -3881,6 +3881,72 @@ def test_auto_replan_focus_recovery_refocuses_expected_app_without_model_followu
     }
 
 
+def test_auto_replan_focus_recovery_reopens_when_focus_tool_unavailable() -> None:
+    requests = custom_api_agent_module._auto_replan_recovery_requests_with_task_context(
+        [
+            {
+                "request_id": "replan-open-focus",
+                "trigger": "verification_failed",
+                "decision_id": "decision-open-focus",
+                "plan_id": "plan-open-focus",
+                "source_step_id": "verify-desktop-result",
+                "source_tool_name": "desktop.active_window",
+                "target_capability_id": "desktop.app_discovery",
+                "failure_detail": "foreground_focus_unverified",
+                "metadata": {
+                    "runtime_stage": "verify",
+                    "runtime_role": "verify_result",
+                    "expected_app_name": "PixelForge",
+                    "blocking_conditions": ["foreground_focus_unverified"],
+                },
+            }
+        ],
+        ["app.open", "desktop.active_window"],
+        [],
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert requests[0]["input"] == {"app_name": "PixelForge"}
+    assert requests[1]["input"] == {}
+    assert requests[1]["verification_target"] == {"app_name": "PixelForge"}
+    assert {request["target_app_name"] for request in requests} == {"PixelForge"}
+    assert {request["planning_reason"] for request in requests} == {
+        "planner_replan_focus_recovery"
+    }
+    assert all("continue_to_model" not in request for request in requests)
+    assert {request["replan_request_id"] for request in requests} == {
+        "replan-open-focus"
+    }
+
+    alias_requests = custom_api_agent_module._auto_replan_recovery_requests_with_task_context(
+        [
+            {
+                "request_id": "replan-desktop-open-focus",
+                "trigger": "verification_failed",
+                "source_step_id": "verify-desktop-result",
+                "source_tool_name": "desktop.active_window",
+                "failure_detail": "foreground_focus_unverified",
+                "metadata": {
+                    "expected_app_name": "PixelForge",
+                    "blocking_conditions": ["foreground_focus_unverified"],
+                },
+            }
+        ],
+        ["desktop.open_app", "desktop.active_window"],
+        [],
+    )
+
+    assert [request["tool"] for request in alias_requests] == [
+        "desktop.open_app",
+        "desktop.active_window",
+    ]
+    assert alias_requests[0]["input"] == {"app_name": "PixelForge"}
+    assert alias_requests[1]["verification_target"] == {"app_name": "PixelForge"}
+
+
 def test_auto_replan_verification_recovery_inspects_target_app_when_available() -> None:
     recovery_requests = custom_api_agent_module._auto_replan_verification_recovery_requests(
         [
