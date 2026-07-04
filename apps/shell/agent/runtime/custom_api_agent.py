@@ -5054,8 +5054,11 @@ def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
             "risk_level": str(raw_action.get("risk_level") or "low"),
         }
         for text_key in (
+            "planning_reason",
             "action_kind",
             "recovery_action_kind",
+            "runtime_stage",
+            "runtime_role",
             "retry_prompt",
             "recovery_retry_prompt",
             "retry_source_event_type",
@@ -5078,6 +5081,8 @@ def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
                 action[text_key] = value
         for dict_key in (
             "action_target",
+            "desktop_loop",
+            "metadata",
             "observation_evidence",
             "observation_retry",
             "retry_input",
@@ -5106,6 +5111,8 @@ def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:
                     action[list_key] = normalized_targets
         if raw_action.get("desktop_permission_retry") is True:
             action["desktop_permission_retry"] = True
+        if raw_action.get("approval_required") is True:
+            action["approval_required"] = True
         actions.append(action)
     return actions
 
@@ -13609,7 +13616,10 @@ def _auto_replan_runtime_recovery_action_requests(
                 tool_name,
                 request_input,
                 source="runtime_planner",
-                planning_reason="planner_replan_runtime_recovery_action",
+                planning_reason=(
+                    str(action.get("planning_reason") or "").strip()
+                    or "planner_replan_runtime_recovery_action"
+                ),
             )
             if request_id:
                 request["replan_request_id"] = request_id
@@ -13629,6 +13639,20 @@ def _auto_replan_runtime_recovery_action_requests(
             permission_target = str(action.get("permission_target") or "").strip()
             if permission_target:
                 request["permission_target"] = permission_target
+            if bool(action.get("approval_required")):
+                request["approval_required"] = True
+            action_metadata = (
+                action.get("metadata") if isinstance(action.get("metadata"), Mapping) else {}
+            )
+            desktop_loop = action_metadata.get("desktop_loop")
+            if not isinstance(desktop_loop, Mapping):
+                desktop_loop = metadata.get("desktop_loop")
+            if isinstance(desktop_loop, Mapping) and desktop_loop:
+                request["desktop_loop"] = dict(desktop_loop)
+            for key in ("runtime_stage", "runtime_role"):
+                value = str(action_metadata.get(key) or metadata.get(key) or "").strip()
+                if value:
+                    request[key] = value
             for key in ("action_target", "observation_evidence", "observation_retry"):
                 value = action.get(key)
                 if not isinstance(value, Mapping):

@@ -28979,8 +28979,18 @@ def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> No
                         "label": "重新发现应用",
                         "tool": "desktop.list_apps",
                         "input": {"query": "pdf", "limit": 20},
+                        "planning_reason": "planner_desktop_loop_auto_retry",
                         "permission_target": "app_discovery",
                         "risk_level": "low",
+                        "metadata": {
+                            "desktop_loop": {
+                                "stage": "operate",
+                                "retry_tool": "desktop.list_apps",
+                                "can_auto_retry": True,
+                            },
+                            "runtime_stage": "operate",
+                            "runtime_role": "prepare_target_app",
+                        },
                         "verification_targets": [
                             {
                                 "step_id": "open-selected-discovered-app",
@@ -29015,8 +29025,18 @@ def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> No
             "label": "重新发现应用",
             "tool": "desktop.list_apps",
             "input": {"query": "pdf", "limit": 20},
+            "planning_reason": "planner_desktop_loop_auto_retry",
             "permission_target": "app_discovery",
             "risk_level": "low",
+            "metadata": {
+                "desktop_loop": {
+                    "stage": "operate",
+                    "retry_tool": "desktop.list_apps",
+                    "can_auto_retry": True,
+                },
+                "runtime_stage": "operate",
+                "runtime_role": "prepare_target_app",
+            },
             "verification_targets": [
                 {
                     "step_id": "open-selected-discovered-app",
@@ -29058,7 +29078,10 @@ def test_runtime_planner_replans_unresolved_selected_discovered_app_skip() -> No
     recovery_request = recovery_requests[0]
     assert recovery_request["tool"] == "desktop.list_apps"
     assert recovery_request["input"] == {"query": "pdf", "limit": 20}
-    assert recovery_request["planning_reason"] == "planner_replan_runtime_recovery_action"
+    assert recovery_request["planning_reason"] == "planner_desktop_loop_auto_retry"
+    assert recovery_request["desktop_loop"]["can_auto_retry"] is True
+    assert recovery_request["runtime_stage"] == "operate"
+    assert recovery_request["runtime_role"] == "prepare_target_app"
     assert recovery_request["replan_request_id"] == payload["request_id"]
     assert recovery_request["replan_trigger"] == "tool_failure"
     assert recovery_request["step_id"] == "open-selected-discovered-app"
