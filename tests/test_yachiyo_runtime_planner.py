@@ -33812,6 +33812,9 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     assert envelope.requests[2].task_verification_targets[0]["workspace_items"][0][
         "source_step_id"
     ] == "operate-foreground-ui"
+    assert envelope.requests[2].replan_triggers == ["verification_failed"]
+    for signal_id in envelope.requests[1].replan_signal_ids:
+        assert signal_id in envelope.requests[2].replan_signal_ids
     projected_requests = runtime_execution_requests_from_envelope_payload(
         envelope.model_dump(mode="json"),
         allowed_tools=allowed_tools,
@@ -33856,6 +33859,9 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     assert projected_requests[2]["task_verification_targets"][0]["workspace_items"][0][
         "source_step_id"
     ] == "operate-foreground-ui"
+    assert projected_requests[2]["replan_triggers"] == ["verification_failed"]
+    for signal_id in projected_requests[1]["replan_signal_ids"]:
+        assert signal_id in projected_requests[2]["replan_signal_ids"]
 
     scoped_payload = envelope.model_dump(mode="json")
     scoped_payload["requests"][1].update(

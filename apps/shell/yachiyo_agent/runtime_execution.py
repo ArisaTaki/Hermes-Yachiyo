@@ -1229,6 +1229,65 @@ def _execution_request_replan_metadata(
             signal_ids.append(signal_id)
         if trigger:
             triggers.append(trigger)
+    if _execution_request_runtime_stage(request, decision, clean_step_id) == "verify":
+        dependency_signal_metadata = _dependency_verification_replan_metadata(
+            decision,
+            _execution_request_dependency_step_ids(request, step),
+        )
+        signal_ids.extend(dependency_signal_metadata["replan_signal_ids"])
+        triggers.extend(dependency_signal_metadata["replan_triggers"])
+    return {
+        "replan_triggers": _dedupe(triggers),
+        "replan_signal_ids": _dedupe(signal_ids),
+    }
+
+
+def _execution_request_runtime_stage(
+    request: Mapping[str, Any] | None,
+    decision: PlannerDecisionSnapshot,
+    step_id: str,
+) -> str:
+    runtime_stage = _text((request or {}).get("runtime_stage"))
+    if runtime_stage:
+        return runtime_stage
+    return _text(
+        _task_core_step_runtime_metadata(decision, step_id).get("runtime_stage")
+    )
+
+
+def _execution_request_dependency_step_ids(
+    request: Mapping[str, Any] | None,
+    step: ToolPlanStepSnapshot | None,
+) -> list[str]:
+    dependency_ids: list[str] = []
+    if request is not None:
+        dependency_ids.extend(_string_values(request.get("depends_on")))
+    if step is not None:
+        dependency_ids.extend(str(item or "").strip() for item in list(step.depends_on))
+    return _dedupe(item for item in dependency_ids if item)
+
+
+def _dependency_verification_replan_metadata(
+    decision: PlannerDecisionSnapshot,
+    dependency_step_ids: Iterable[str],
+) -> dict[str, list[str]]:
+    dependency_ids = {
+        str(step_id or "").strip()
+        for step_id in dependency_step_ids
+        if str(step_id or "").strip()
+    }
+    signal_ids: list[str] = []
+    triggers: list[str] = []
+    for signal in _task_replan_signals(decision):
+        if _text(signal.source_step_id) not in dependency_ids:
+            continue
+        trigger = _text(signal.trigger)
+        if trigger != "verification_failed":
+            continue
+        signal_id = _text(signal.signal_id)
+        if signal_id:
+            signal_ids.append(signal_id)
+        triggers.append(trigger)
     return {
         "replan_triggers": _dedupe(triggers),
         "replan_signal_ids": _dedupe(signal_ids),
