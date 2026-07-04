@@ -478,6 +478,31 @@ class RuntimeCustomApiAgentLoop:
                     run_id=run_id,
                 )
                 explicit_model_followup = explicit_model_followup_requested
+                auto_permission_recovery_requests = _auto_direct_permission_recovery_requests(
+                    execution_tool_requests,
+                    allowed_tools,
+                    timeline,
+                    tool_timeline_start=tool_timeline_start,
+                )
+                if auto_permission_recovery_requests:
+                    self._run_auto_runtime_planner_requests(
+                        auto_permission_recovery_requests,
+                        allowed_tools,
+                        broker,
+                        messages,
+                        timeline,
+                        artifacts,
+                        agent=agent,
+                        runtime_planner_decision=runtime_planner_decision,
+                        run_id=run_id,
+                        budget=budget,
+                        next_iteration=start_iteration,
+                    )
+                    planned_tool_requests = [
+                        *planned_tool_requests,
+                        *auto_permission_recovery_requests,
+                    ]
+                    explicit_model_followup = True
                 if (
                     explicit_model_followup
                     and not replan_payloads
@@ -10992,6 +11017,11 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
         "run_id",
         "replan_request_id",
         "replan_trigger",
+        "recovery_action_label",
+        "recovery_source_tool",
+        "recovery_source_event_type",
+        "permission_target",
+        "risk_level",
         "target_app_name",
         "target_app_query",
         "target_search_text",
@@ -12848,6 +12878,127 @@ def _replan_recovery_requests_need_model_followup(
         bool(request.get("continue_to_model"))
         for request in requests
         if isinstance(request, Mapping)
+    )
+
+
+def _auto_direct_permission_recovery_requests(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return []
+    planned_signatures = _tool_request_signatures(planned_tool_requests)
+    requests: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for event in timeline[max(0, int(tool_timeline_start or 0)):]:
+        if not isinstance(event, Mapping):
+            continue
+        if str(event.get("event") or "").strip() not in {"agent.tool.call", "agent.tool.skipped"}:
+            continue
+        source_tool = str(event.get("detail") or event.get("tool") or "").strip()
+        if not source_tool:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if not result or result.get("approval_required"):
+            continue
+        input_preview = (
+            event.get("input_preview") if isinstance(event.get("input_preview"), Mapping) else {}
+        )
+        enriched_result = _with_retry_recovery_action(
+            source_tool,
+            dict(input_preview),
+            dict(result),
+        )
+        if not _has_permission_recovery_signal(enriched_result):
+            continue
+        for action in _recovery_actions(enriched_result):
+            tool_name = str(action.get("tool") or "").strip()
+            if not tool_name or tool_name not in allowed:
+                continue
+            risk_level = str(action.get("risk_level") or "low").strip().lower()
+            if risk_level and risk_level != "low":
+                continue
+            action_input = (
+                dict(action.get("input"))
+                if isinstance(action.get("input"), Mapping)
+                else {}
+            )
+            signature = _tool_request_signature(tool_name, action_input)
+            if signature in planned_signatures or signature in seen:
+                continue
+            seen.add(signature)
+            request = _request_like(
+                tool_name,
+                action_input,
+                source="runtime_planner",
+                planning_reason="planner_direct_permission_recovery_action",
+            )
+            request["continue_to_model"] = True
+            request["permission_recovery"] = True
+            request["recovery_source_tool"] = source_tool
+            request["recovery_source_event_type"] = str(event.get("event") or "").strip()
+            label = str(action.get("label") or "").strip()
+            if label:
+                request["recovery_action_label"] = label
+            permission_target = str(action.get("permission_target") or "").strip()
+            if permission_target:
+                request["permission_target"] = permission_target
+            if risk_level:
+                request["risk_level"] = risk_level
+            for key in (
+                "action_kind",
+                "recovery_action_kind",
+                "retry_tool",
+                "recovery_retry_tool",
+                "retry_prompt",
+                "recovery_retry_prompt",
+            ):
+                value = str(action.get(key) or "").strip()
+                if value:
+                    request[key] = value
+            for key in (
+                "retry_input",
+                "recovery_retry_input",
+                "action_target",
+                "observation_evidence",
+                "observation_retry",
+            ):
+                value = action.get(key)
+                if isinstance(value, Mapping) and value:
+                    request[key] = dict(value)
+            verification_targets = _mapping_list(action.get("verification_targets"))
+            if verification_targets:
+                request["verification_targets"] = [
+                    dict(target) for target in verification_targets
+                ]
+            requests.append(request)
+    return _dedupe_replan_recovery_requests(requests)
+
+
+def _tool_request_signatures(
+    requests: Iterable[Mapping[str, Any]],
+) -> set[tuple[str, str]]:
+    return {
+        _tool_request_signature(
+            str(request.get("tool") or "").strip(),
+            request.get("input") if isinstance(request.get("input"), Mapping) else {},
+        )
+        for request in requests
+        if isinstance(request, Mapping) and str(request.get("tool") or "").strip()
+    }
+
+
+def _tool_request_signature(
+    tool_name: str,
+    request_input: Mapping[str, Any],
+) -> tuple[str, str]:
+    return (
+        str(tool_name or "").strip(),
+        repr(sorted(dict(request_input).items())),
     )
 
 

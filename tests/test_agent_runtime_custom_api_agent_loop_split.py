@@ -30315,6 +30315,233 @@ def test_main_chat_desktop_intent_permission_failure_records_recovery_event() ->
     assert appended_events[-1]["payload"]["recovery_actions"] == expected_recovery_actions
 
 
+def test_direct_desktop_permission_recovery_runs_allowed_recovery_action() -> None:
+    tool_order: list[str] = []
+    model_messages: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    run_events: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ) -> None:
+        for request in tool_requests:
+            tool_name = str(request.get("tool") or "")
+            tool_order.append(tool_name)
+            if tool_name == "screen.capture":
+                timeline_arg.append(
+                    _timeline(
+                        "agent.tool.call",
+                        "screen.capture",
+                        input_preview=dict(request.get("input") or {}),
+                        result={
+                            "ok": False,
+                            "error": "screen recording permission denied",
+                            "permission_error": True,
+                            "permission_targets": ["screen_recording"],
+                            "recovery_actions": [
+                                {
+                                    "label": "打开屏幕录制权限",
+                                    "tool": "system.settings_open",
+                                    "input": {"target": "屏幕录制权限"},
+                                    "permission_target": "screen_recording",
+                                    "risk_level": "low",
+                                }
+                            ],
+                        },
+                    )
+                )
+            elif tool_name == "system.settings_open":
+                timeline_arg.append(
+                    _timeline(
+                        "agent.tool.call",
+                        "system.settings_open",
+                        input_preview=dict(request.get("input") or {}),
+                        result={
+                            "ok": True,
+                            "summary": "Opened Screen Recording settings.",
+                        },
+                    )
+                )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://example.invalid",
+            "model": "test-model",
+            "api_key": "test-key",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["screen.capture", "system.settings_open"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda _allowed_tools: [],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=1,
+        operating_doctrine="Use desktop tools.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, messages, **_kwargs: (
+            model_messages.append(list(messages))
+            or {
+                "role": "assistant",
+                "content": "已打开屏幕录制权限设置，请授权后重试截图。",
+            }
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+
+    result = loop.run(
+        {"agent_id": MAIN_CHAT_AGENT_ID, "name": "Yachiyo"},
+        "截图当前屏幕",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        direct_tool_request={"tool": "screen.capture", "input": {"reason": "user request"}},
+        run_id="run-screen-recovery",
+    )
+
+    assert str(result) == "已打开屏幕录制权限设置，请授权后重试截图。"
+    assert tool_order == ["screen.capture", "system.settings_open"]
+    recovery_plan = next(
+        event
+        for event in timeline
+        if event.get("event") == "agent.desktop.intent_planned"
+        and event.get("tool") == "system.settings_open"
+    )
+    assert recovery_plan["source"] == "runtime_planner"
+    assert recovery_plan["planning_reason"] == "planner_direct_permission_recovery_action"
+    assert recovery_plan["input_preview"] == {"target": "屏幕录制权限"}
+    assert recovery_plan["recovery_action_label"] == "打开屏幕录制权限"
+    assert recovery_plan["permission_target"] == "screen_recording"
+    assert any(
+        "system.settings_open" in str(message.get("content") or "")
+        for message in model_messages[0]
+    )
+    assert any(
+        event["event_type"] == "agent.tool.policy_decision"
+        and event["payload"]["tool"] == "system.settings_open"
+        for event in run_events
+    )
+
+
+def test_direct_desktop_permission_recovery_preserves_approval_gate() -> None:
+    timeline: list[dict[str, Any]] = []
+    run_events: list[dict[str, Any]] = []
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ) -> None:
+        tool_name = str(tool_requests[0].get("tool") or "")
+        if tool_name == "screen.capture":
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    "screen.capture",
+                    input_preview={"reason": "user request"},
+                    result={
+                        "ok": False,
+                        "permission_error": True,
+                        "permission_targets": ["screen_recording"],
+                        "recovery_actions": [
+                            {
+                                "label": "打开屏幕录制权限",
+                                "tool": "system.settings_open",
+                                "input": {"target": "屏幕录制权限"},
+                                "permission_target": "screen_recording",
+                                "risk_level": "low",
+                            }
+                        ],
+                    },
+                )
+            )
+            return
+        if tool_name == "system.settings_open":
+            raise AgentApprovalRequired(
+                {
+                    "tool": "system.settings_open",
+                    "approval_id": "approval-settings",
+                    "risk_level": "medium",
+                    "policy_reason": "open_system_settings",
+                    "input_preview": {"target": "屏幕录制权限"},
+                }
+            )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["screen.capture", "system.settings_open"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda _allowed_tools: [],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=1,
+        operating_doctrine="Use desktop tools.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: {},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+        append_run_event=lambda run_id, event_type, payload: run_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        ),
+    )
+
+    with pytest.raises(AgentApprovalRequired):
+        loop.run(
+            {"agent_id": MAIN_CHAT_AGENT_ID, "name": "Yachiyo"},
+            "截图当前屏幕",
+            broker={"broker": True},
+            timeline=timeline,
+            artifacts=[],
+            direct_tool_request={"tool": "screen.capture", "input": {"reason": "user request"}},
+            run_id="run-screen-recovery-approval",
+        )
+
+    approval_event = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.desktop.intent_approval_required"
+    )
+    assert approval_event["tool"] == "system.settings_open"
+    assert approval_event["approval_id"] == "approval-settings"
+    assert approval_event["planning_reason"] == "planner_direct_permission_recovery_action"
+    assert approval_event["input_preview"] == {"target": "屏幕录制权限"}
+    assert run_events[-1]["event_type"] == "agent.desktop.intent_approval_required"
+
+
 def test_main_chat_desktop_intent_summarizes_apple_music_control() -> None:
     open_and_play = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "media.apple_music_open_and_play",
