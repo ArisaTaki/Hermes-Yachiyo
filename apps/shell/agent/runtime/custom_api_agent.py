@@ -485,7 +485,7 @@ class RuntimeCustomApiAgentLoop:
                     tool_timeline_start=tool_timeline_start,
                 )
                 if auto_permission_recovery_requests:
-                    self._run_auto_runtime_planner_requests(
+                    recovery_timeline_start = self._run_auto_runtime_planner_requests(
                         auto_permission_recovery_requests,
                         allowed_tools,
                         broker,
@@ -498,11 +498,42 @@ class RuntimeCustomApiAgentLoop:
                         budget=budget,
                         next_iteration=start_iteration,
                     )
+                    auto_permission_retry_requests = _auto_direct_permission_retry_requests(
+                        auto_permission_recovery_requests,
+                        allowed_tools,
+                        timeline,
+                        tool_timeline_start=recovery_timeline_start,
+                    )
+                    retry_timeline_start = len(timeline)
+                    if auto_permission_retry_requests:
+                        retry_timeline_start = self._run_auto_runtime_planner_requests(
+                            auto_permission_retry_requests,
+                            allowed_tools,
+                            broker,
+                            messages,
+                            timeline,
+                            artifacts,
+                            agent=agent,
+                            runtime_planner_decision=runtime_planner_decision,
+                            run_id=run_id,
+                            budget=budget,
+                            next_iteration=start_iteration,
+                        )
                     planned_tool_requests = [
                         *planned_tool_requests,
                         *auto_permission_recovery_requests,
+                        *auto_permission_retry_requests,
                     ]
-                    explicit_model_followup = True
+                    explicit_model_followup = (
+                        explicit_model_followup_requested
+                        if auto_permission_retry_requests
+                        and _auto_direct_permission_retry_completed(
+                            auto_permission_retry_requests,
+                            timeline,
+                            tool_timeline_start=retry_timeline_start,
+                        )
+                        else True
+                    )
                 if (
                     explicit_model_followup
                     and not replan_payloads
@@ -11018,6 +11049,7 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
         "replan_request_id",
         "replan_trigger",
         "recovery_action_label",
+        "recovery_action_tool",
         "recovery_source_tool",
         "recovery_source_event_type",
         "permission_target",
@@ -11031,6 +11063,8 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
             payload[key] = value
     if payload.get("step_id") and not payload.get("planner_step_id"):
         payload["planner_step_id"] = payload["step_id"]
+    if isinstance(request.get("permission_recovery_retry"), bool):
+        payload["permission_recovery_retry"] = bool(request.get("permission_recovery_retry"))
     payload.update(_runtime_trace_metadata_from_mapping(request))
     for key in ("followup_target", "action_target", "observation_evidence"):
         value = request.get(key)
@@ -12977,6 +13011,109 @@ def _auto_direct_permission_recovery_requests(
                 ]
             requests.append(request)
     return _dedupe_replan_recovery_requests(requests)
+
+
+def _auto_direct_permission_retry_requests(
+    recovery_requests: Iterable[Mapping[str, Any]],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return []
+    requests: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for recovery_request in recovery_requests:
+        if not isinstance(recovery_request, Mapping):
+            continue
+        recovery_tool = str(recovery_request.get("tool") or "").strip()
+        if not _direct_permission_recovery_tool_supports_retry(recovery_tool):
+            continue
+        if not _auto_followup_request_completed(
+            recovery_request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        ):
+            continue
+        retry_tool = str(
+            recovery_request.get("recovery_retry_tool")
+            or recovery_request.get("retry_tool")
+            or ""
+        ).strip()
+        if (
+            not retry_tool
+            or retry_tool not in allowed
+            or retry_tool not in _DIRECT_DAILY_DESKTOP_TOOLS
+        ):
+            continue
+        retry_input = (
+            recovery_request.get("recovery_retry_input")
+            if isinstance(recovery_request.get("recovery_retry_input"), Mapping)
+            else recovery_request.get("retry_input")
+            if isinstance(recovery_request.get("retry_input"), Mapping)
+            else {}
+        )
+        signature = _tool_request_signature(retry_tool, retry_input)
+        if signature in seen:
+            continue
+        seen.add(signature)
+        retry_request = _request_like(
+            retry_tool,
+            dict(retry_input),
+            source="runtime_planner",
+            planning_reason="planner_direct_permission_recovery_retry",
+        )
+        retry_request["permission_recovery_retry"] = True
+        retry_request["recovery_source_tool"] = str(
+            recovery_request.get("recovery_source_tool") or ""
+        ).strip()
+        retry_request["recovery_action_tool"] = recovery_tool
+        label = str(recovery_request.get("recovery_action_label") or "").strip()
+        if label:
+            retry_request["recovery_action_label"] = label
+        permission_target = str(recovery_request.get("permission_target") or "").strip()
+        if permission_target:
+            retry_request["permission_target"] = permission_target
+        risk_level = str(recovery_request.get("risk_level") or "").strip()
+        if risk_level:
+            retry_request["risk_level"] = risk_level
+        retry_prompt = str(
+            recovery_request.get("recovery_retry_prompt")
+            or recovery_request.get("retry_prompt")
+            or ""
+        ).strip()
+        if retry_prompt:
+            retry_request["recovery_retry_prompt"] = retry_prompt
+        requests.append(retry_request)
+    return _dedupe_replan_recovery_requests(requests)
+
+
+def _direct_permission_recovery_tool_supports_retry(tool_name: str) -> bool:
+    return str(tool_name or "").strip() in {
+        "app.open",
+        "app.focus",
+        "desktop.open_app",
+        "desktop.focus_app",
+    }
+
+
+def _auto_direct_permission_retry_completed(
+    retry_requests: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    requests = [request for request in retry_requests if isinstance(request, Mapping)]
+    return bool(requests) and all(
+        _auto_followup_request_completed(
+            request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        )
+        for request in requests
+    )
 
 
 def _tool_request_signatures(

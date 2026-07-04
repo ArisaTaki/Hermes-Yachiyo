@@ -30542,6 +30542,134 @@ def test_direct_desktop_permission_recovery_preserves_approval_gate() -> None:
     assert run_events[-1]["event_type"] == "agent.desktop.intent_approval_required"
 
 
+def test_direct_desktop_permission_recovery_retries_after_app_open() -> None:
+    tool_order: list[str] = []
+    timeline: list[dict[str, Any]] = []
+    play_attempts = 0
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ) -> None:
+        nonlocal play_attempts
+        for request in tool_requests:
+            tool_name = str(request.get("tool") or "")
+            tool_order.append(tool_name)
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if tool_name == "media.apple_music_play":
+                play_attempts += 1
+                result = (
+                    {
+                        "ok": False,
+                        "error": "Music is not ready",
+                        "permission_error": True,
+                        "permission_targets": ["music_app"],
+                        "recovery_actions": [
+                            {
+                                "label": "打开 Apple Music",
+                                "tool": "app.open",
+                                "input": {"app_name": "Music"},
+                                "permission_target": "music_app",
+                                "risk_level": "low",
+                            }
+                        ],
+                    }
+                    if play_attempts == 1
+                    else {
+                        "ok": True,
+                        "data": {
+                            "track": "超时空辉夜姬",
+                            "artist": "Yachiyo",
+                        },
+                    }
+                )
+            elif tool_name == "app.open":
+                result = {"ok": True, "data": {"app_name": payload.get("app_name")}}
+            else:
+                raise AssertionError(f"unexpected tool: {tool_name}")
+            timeline_arg.append(
+                _timeline(
+                    "agent.tool.call",
+                    tool_name,
+                    input_preview=payload,
+                    result=result,
+                    **{
+                        key: request[key]
+                        for key in (
+                            "planning_reason",
+                            "recovery_action_label",
+                            "recovery_action_tool",
+                            "recovery_source_tool",
+                            "permission_recovery_retry",
+                            "permission_target",
+                        )
+                        if key in request
+                    },
+                )
+            )
+            messages_arg.append({"role": "user", "content": f"Tool result for {tool_name}: {result}"})
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["media.apple_music_play", "app.open"]}
+        },
+        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda _allowed_tools: [],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=1,
+        operating_doctrine="Use desktop tools.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("successful recovery retry should not call the model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"agent_id": MAIN_CHAT_AGENT_ID, "name": "Yachiyo"},
+        "播放超时空辉夜姬",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        direct_tool_request={
+            "tool": "media.apple_music_play",
+            "input": {"query": "超时空辉夜姬"},
+        },
+        run_id="run-music-recovery-retry",
+    )
+
+    assert str(result) == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
+    assert tool_order == ["media.apple_music_play", "app.open", "media.apple_music_play"]
+    retry_plan = next(
+        event
+        for event in timeline
+        if event.get("event") == "agent.desktop.intent_planned"
+        and event.get("tool") == "media.apple_music_play"
+        and event.get("planning_reason") == "planner_direct_permission_recovery_retry"
+    )
+    assert retry_plan["input_preview"] == {"query": "超时空辉夜姬"}
+    assert retry_plan["recovery_action_tool"] == "app.open"
+    assert retry_plan["recovery_source_tool"] == "media.apple_music_play"
+    assert retry_plan["permission_target"] == "music_app"
+
+
 def test_main_chat_desktop_intent_summarizes_apple_music_control() -> None:
     open_and_play = RuntimeCustomApiAgentLoop._daily_desktop_summary(
         "media.apple_music_open_and_play",
