@@ -896,6 +896,7 @@ class RunTimelineSnapshot(_PublicSnapshot):
     rerun_original_updated_at: str | None = None
     planner_summary: PlannerTraceSummarySnapshot | None = None
     runtime_debug: RuntimeDebugSummarySnapshot | None = None
+    runtime_execution_envelope: RuntimeExecutionEnvelopeSnapshot | None = None
     task_core: TaskCoreSnapshot | None = None
     task_progress: TaskProgressSummarySnapshot | None = None
     replan_recoveries: list[ReplanRecoverySnapshot] = Field(default_factory=list)

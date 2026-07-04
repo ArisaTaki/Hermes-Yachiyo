@@ -935,6 +935,7 @@ def test_runtime_core_split_acceptance_paths_are_guarded() -> None:
             "def run_timeline_snapshot_from_payload",
             "def approval_snapshots_from_payload",
             "def artifact_snapshots_from_timeline_payload",
+            "runtime_execution_envelope_from_payload(",
             "tool_call_snapshots_from_payloads(",
             "memory_trace_snapshots_from_events(events)",
             "skill_trace_snapshots_from_events(events)",

@@ -9,11 +9,11 @@ import type {
   PlannerDecisionSnapshot,
   PlannerOrchestrationStartSnapshot,
   RuntimeExecutionEnvelopeSnapshot,
-  RuntimeExecutionRequestSnapshot,
   ToolCatalogItemSnapshot,
   ToolCatalogSnapshot,
   ToolPlanStepSnapshot,
 } from '../../yachiyo-studio/types';
+import { RuntimeExecutionEnvelopeSummary } from '../../runtime-shared/components/RuntimeExecutionEnvelopeSummary';
 import { TaskCoreInspector, TaskProgressInspector } from './PlannerTraceInspector';
 
 type RiskFilter = 'all' | 'low' | 'medium' | 'high' | 'unknown';
@@ -436,75 +436,17 @@ function RuntimeExecutionEnvelopePreview({
 }: {
   envelope: RuntimeExecutionEnvelopeSnapshot;
 }) {
-  const requests = envelope.requests || [];
-  const stageCounts = Object.entries(envelope.runtime_stage_counts || {});
-  const approvals = envelope.approvals_required || [];
-  const artifacts = envelope.artifacts_expected || [];
-  const openQuestions = envelope.open_questions || [];
   return (
-    <div
-      className="studio-tool-inspector-section studio-runtime-execution-envelope"
-      data-envelope-id={envelope.envelope_id}
-      data-intent-kind={envelope.intent_kind}
-      data-request-count={requests.length}
-      data-testid="studio-runtime-execution-envelope"
-    >
-      <div className="studio-tool-inspector-heading">
-        <h3>Runtime Execution Envelope</h3>
-        <span>{envelope.runtime_doctrine || envelope.source || 'discover / operate / verify'}</span>
-      </div>
-      <div className="studio-tool-detail-grid">
-        <span>
-          <small>Envelope</small>
-          <strong>{envelope.envelope_id || 'pending'}</strong>
-        </span>
-        <span>
-          <small>Intent</small>
-          <strong>{envelope.intent_kind || 'unknown'}</strong>
-        </span>
-        <span>
-          <small>Requests</small>
-          <strong>{requests.length}</strong>
-        </span>
-        <span>
-          <small>Route</small>
-          <strong>{envelope.route_to_studio ? 'Studio' : 'Direct'}</strong>
-        </span>
-      </div>
-      {stageCounts.length || approvals.length || artifacts.length || openQuestions.length ? (
-        <div className="studio-tool-pill-row" data-testid="studio-runtime-execution-debug-pills">
-          {stageCounts.map(([stage, count]) => (
-            <span className="studio-tool-permission" data-runtime-stage={stage} key={`stage:${stage}`}>
-              stage · {stage}: {count}
-            </span>
-          ))}
-          {approvals.map((approval) => (
-            <span className="studio-tool-permission missing" data-execution-approval={approval} key={`approval:${approval}`}>
-              approval · {approval}
-            </span>
-          ))}
-          {artifacts.map((artifact) => (
-            <span className="studio-tool-permission" data-execution-artifact={artifact} key={`artifact:${artifact}`}>
-              artifact · {artifact}
-            </span>
-          ))}
-          {openQuestions.map((question) => (
-            <span className="studio-tool-permission missing" data-execution-open-question={question} key={`question:${question}`}>
-              question · {question}
-            </span>
-          ))}
-        </div>
-      ) : null}
-      <div className="studio-planner-step-list" data-testid="studio-runtime-execution-requests">
-        {requests.map((request, index) => (
-          <RuntimeExecutionRequestRow
-            index={index}
-            key={request.request_id || `${request.tool_name}-${index}`}
-            request={request}
-          />
-        ))}
-        {!requests.length ? <span className="studio-tool-empty">No execution requests</span> : null}
-      </div>
+    <div className="studio-planner-result">
+      <RuntimeExecutionEnvelopeSummary
+        debugPillsTestId="studio-runtime-execution-debug-pills"
+        envelope={envelope}
+        requestListTestId="studio-runtime-execution-requests"
+        requestTestId="studio-runtime-execution-request"
+        showRequests
+        testId="studio-runtime-execution-envelope"
+        variant="studio"
+      />
       {envelope.task_core ? <TaskCoreInspector taskCore={envelope.task_core} /> : null}
       {envelope.task_progress ? (
         <TaskProgressInspector
@@ -512,32 +454,6 @@ function RuntimeExecutionEnvelopePreview({
           taskProgress={envelope.task_progress}
         />
       ) : null}
-    </div>
-  );
-}
-
-function RuntimeExecutionRequestRow({
-  index,
-  request,
-}: {
-  index: number;
-  request: RuntimeExecutionRequestSnapshot;
-}) {
-  const stage = request.runtime_stage || request.runtime_role || request.capability_id || '';
-  return (
-    <div
-      className="studio-planner-step"
-      data-approval-required={String(request.approval_required === true)}
-      data-execution-request-id={request.request_id}
-      data-execution-tool={request.tool_name}
-      data-runtime-stage={request.runtime_stage || ''}
-      data-testid="studio-runtime-execution-request"
-    >
-      <div>
-        <strong>{index + 1}. {request.tool_name || request.capability_id || 'runtime request'}</strong>
-        <span>{request.step_id || request.capability_id || request.request_id}</span>
-      </div>
-      <small>{stage || 'operate'}{request.approval_required ? ' / approval' : ''}</small>
     </div>
   );
 }

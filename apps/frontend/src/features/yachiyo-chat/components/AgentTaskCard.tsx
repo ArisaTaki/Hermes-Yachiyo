@@ -2,6 +2,7 @@ import { useState } from 'react';
 
 import { UiIcon } from '../../../components/UiIcon';
 import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
+import { RuntimeExecutionEnvelopeSummary } from '../../runtime-shared/components/RuntimeExecutionEnvelopeSummary';
 import type { RuntimeImageArtifactPointSelection } from '../../runtime-shared/components/RuntimeReadableArtifactPreview';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import { runtimeEventIsDesktopReadinessRecovered } from '../../runtime-shared/desktopEvents';
@@ -25,7 +26,6 @@ import type {
   AgentTaskSnapshot,
   ApprovalCardSnapshot,
   PlannerTraceSummarySnapshot,
-  RuntimeExecutionEnvelopeSnapshot,
 } from '../types';
 import { ApprovalCard } from './ApprovalCard';
 import { ArtifactPreview } from './ArtifactPreview';
@@ -125,7 +125,12 @@ export function AgentTaskCard({
       {task.summary ? <p className="yachiyo-agent-task-summary">{task.summary}</p> : null}
       {plannerSummary ? <TaskPlannerSummary summary={plannerSummary} /> : null}
       {task.runtime_execution_envelope ? (
-        <TaskRuntimeExecutionSummary envelope={task.runtime_execution_envelope} />
+        <RuntimeExecutionEnvelopeSummary
+          envelope={task.runtime_execution_envelope}
+          leading={<UiIcon name="activity" title="Runtime Execution" />}
+          testId="yachiyo-agent-task-runtime-execution"
+          variant="chat"
+        />
       ) : null}
       {task.replan_recoveries?.length ? (
         <TaskReplanRecoverySummary
@@ -539,61 +544,6 @@ function TaskPlannerSummary({ summary }: { summary: TaskPlannerSummarySnapshot }
             ))}
           </div>
         ) : null}
-      </div>
-    </div>
-  );
-}
-
-function TaskRuntimeExecutionSummary({ envelope }: { envelope: RuntimeExecutionEnvelopeSnapshot }) {
-  const requests = envelope.requests || [];
-  const stageCounts = Object.entries(envelope.runtime_stage_counts || {});
-  const tools = uniqueStrings(requests.map((request) => request.tool_name).filter(Boolean));
-  const approvals = envelope.approvals_required || [];
-  const artifacts = envelope.artifacts_expected || [];
-  return (
-    <div
-      className="yachiyo-agent-task-planner yachiyo-agent-task-runtime-execution"
-      data-envelope-id={envelope.envelope_id || ''}
-      data-request-count={requests.length}
-      data-runtime-stages={stageCounts.map(([stage, count]) => `${stage}:${count}`).join(',')}
-      data-testid="yachiyo-agent-task-runtime-execution"
-    >
-      <UiIcon name="activity" title="Runtime Execution" />
-      <div className="yachiyo-agent-task-planner-body">
-        <div className="yachiyo-agent-task-planner-head">
-          <strong>Runtime execution</strong>
-          <span>{requests.length} requests · {envelope.runtime_doctrine || envelope.intent_kind || 'planner'}</span>
-        </div>
-        <div className="yachiyo-agent-task-planner-chips">
-          {stageCounts.map(([stage, count]) => (
-            <span
-              className="yachiyo-agent-task-planner-chip"
-              data-runtime-stage={stage}
-              key={`stage:${stage}`}
-            >
-              {stage} · {count}
-            </span>
-          ))}
-          {tools.slice(0, 5).map((toolName) => (
-            <span
-              className="yachiyo-agent-task-planner-chip"
-              data-runtime-tool={toolName}
-              key={`tool:${toolName}`}
-            >
-              {toolName}
-            </span>
-          ))}
-          {approvals.length ? (
-            <span className="yachiyo-agent-task-planner-chip approval" data-runtime-approvals={approvals.join(',')}>
-              approval · {approvals.length}
-            </span>
-          ) : null}
-          {artifacts.length ? (
-            <span className="yachiyo-agent-task-planner-chip" data-runtime-artifacts={artifacts.join(',')}>
-              artifact · {artifacts.length}
-            </span>
-          ) : null}
-        </div>
       </div>
     </div>
   );

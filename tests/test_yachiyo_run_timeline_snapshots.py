@@ -36,6 +36,21 @@ def test_run_timeline_snapshot_projects_studio_runtime_facts() -> None:
                     "output_preview": {"ok": True},
                 }
             ],
+            "runtime_execution_envelope": {
+                "envelope_id": "envelope-1",
+                "decision_id": "decision-1",
+                "plan_id": "plan-1",
+                "intent_kind": "data_analysis",
+                "requests": [
+                    {
+                        "request_id": "request-1",
+                        "tool_name": "workspace.read",
+                        "runtime_stage": "discover",
+                    }
+                ],
+                "runtime_stage_counts": {"discover": 1},
+                "runtime_doctrine": "discover / operate / verify",
+            },
             "artifacts": [
                 {
                     "artifact_id": "artifact-direct",
@@ -124,6 +139,9 @@ def test_run_timeline_snapshot_projects_studio_runtime_facts() -> None:
     assert timeline.pending_approval.group_run_id == "group-run-1"
     assert timeline.tool_calls[0].tool_call_id == "call-direct"
     assert timeline.tool_calls[0].output_preview == {"ok": True}
+    assert timeline.runtime_execution_envelope is not None
+    assert timeline.runtime_execution_envelope.envelope_id == "envelope-1"
+    assert timeline.runtime_execution_envelope.requests[0].runtime_stage == "discover"
     assert timeline.memory_traces[0].memory_id == "memory-1"
     assert timeline.skill_traces[0].skill_id == "skill-1"
     assert [artifact.artifact_id for artifact in timeline.artifacts] == [

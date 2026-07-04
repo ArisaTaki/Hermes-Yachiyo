@@ -23,7 +23,11 @@ from .contracts import (
     PublicRunEvent,
     RunTimelineSnapshot,
 )
-from .task_snapshots import run_events_from_payload, task_status_from_value
+from .task_snapshots import (
+    run_events_from_payload,
+    runtime_execution_envelope_from_payload,
+    task_status_from_value,
+)
 from .task_core_snapshots import task_core_snapshot_from_payload
 from .task_progress_snapshots import task_progress_summary_from_task_core
 from .replan_event_projection import run_events_with_replan_requests
@@ -147,6 +151,10 @@ def run_timeline_snapshot_from_payload(
             replan_recoveries=replan_recoveries,
             needs_user_action=pending_approval is not None,
             needs_replan=bool(task_progress and task_progress.needs_replan),
+        ),
+        runtime_execution_envelope=runtime_execution_envelope_from_payload(
+            payload,
+            events=events,
         ),
         task_core=task_core,
         task_progress=task_progress,

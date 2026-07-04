@@ -161,7 +161,7 @@ def agent_task_snapshot_from_payload(
     )
     tool_calls = _chat_task_tool_calls(tool_calls, recent_events)
     tool_calls = _chat_sanitized_tool_calls(tool_calls)
-    runtime_execution_envelope = _runtime_execution_envelope_from_task_payload(
+    runtime_execution_envelope = runtime_execution_envelope_from_payload(
         payload,
         events=all_events,
     )
@@ -258,7 +258,7 @@ def _public_task_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
     return dict(redacted) if isinstance(redacted, Mapping) else {}
 
 
-def _runtime_execution_envelope_from_task_payload(
+def runtime_execution_envelope_from_payload(
     payload: Mapping[str, Any],
     *,
     events: list[PublicRunEvent],

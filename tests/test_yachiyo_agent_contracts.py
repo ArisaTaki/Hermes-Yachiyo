@@ -5226,6 +5226,20 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
             artifact_count=1,
             child_run_count=1,
         ),
+        runtime_execution_envelope=RuntimeExecutionEnvelopeSnapshot(
+            envelope_id="envelope-1",
+            decision_id="decision-1",
+            plan_id="plan-1",
+            intent_kind="data_analysis",
+            requests=[
+                RuntimeExecutionRequestSnapshot(
+                    request_id="request-1",
+                    tool_name="workspace.read",
+                    runtime_stage="discover",
+                )
+            ],
+            runtime_stage_counts={"discover": 1},
+        ),
         recovery_source=RecoveryRunProvenanceSnapshot(
             source="agent_studio_replan_recovery",
             kind="replan",
@@ -5323,6 +5337,7 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
         "rerun_original_updated_at",
         "planner_summary",
         "runtime_debug",
+        "runtime_execution_envelope",
         "task_core",
         "task_progress",
         "replan_recoveries",
@@ -5344,6 +5359,8 @@ def test_run_timeline_snapshot_json_shape_covers_runtime_debug_objects() -> None
     assert payload["rerun_of_run_id"] == "original-run-1"
     assert payload["planner_summary"] is None
     assert payload["runtime_debug"]["child_run_count"] == 1
+    assert payload["runtime_execution_envelope"]["envelope_id"] == "envelope-1"
+    assert payload["runtime_execution_envelope"]["requests"][0]["runtime_stage"] == "discover"
     assert payload["recovery_source"]["kind"] == "replan"
     assert payload["recovery_source"]["recovery_tool"] == "desktop.list_apps"
     assert payload["tool_calls"][0]["tool_name"] == "workspace.read"

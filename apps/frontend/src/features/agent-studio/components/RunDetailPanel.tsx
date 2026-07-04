@@ -12,6 +12,7 @@ import type {
 import type { RuntimeImageArtifactPointSelection } from '../../runtime-shared/components/RuntimeReadableArtifactPreview';
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
 import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
+import { RuntimeExecutionEnvelopeSummary } from '../../runtime-shared/components/RuntimeExecutionEnvelopeSummary';
 import {
   runtimeToolRecoveryActionsFromRecords,
   runtimeToolRecoveryRetryAction,
@@ -439,6 +440,18 @@ export function RunDetailPanel({
             sourceLabel="RunTimelineSnapshot"
             summary={selectedPublicRunTimeline?.runtime_debug}
             testId="agent-run-detail-runtime-debug"
+          />
+          <RuntimeExecutionEnvelopeSummary
+            className="run-detail-block run-runtime-execution-envelope-block"
+            debugPillsTestId="agent-run-detail-runtime-execution-debug-pills"
+            envelope={selectedPublicRunTimeline?.runtime_execution_envelope}
+            requestListTestId="agent-run-detail-runtime-execution-requests"
+            requestTestId="agent-run-detail-runtime-execution-request"
+            showRequests
+            sourceLabel="RunTimelineSnapshot runtime execution envelope"
+            testId="agent-run-detail-runtime-execution-envelope"
+            title="Runtime Execution"
+            variant="studio"
           />
           {showTaskWorkspace ? (
             <details
