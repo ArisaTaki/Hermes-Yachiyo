@@ -22,6 +22,7 @@ from .artifact_event_snapshots import (
 from .artifacts import artifact_snapshots_from_payloads
 from .contracts import (
     AgentTaskSnapshot,
+    ApprovalCardSnapshot,
     PublicRunEvent,
     RuntimeExecutionEnvelopeSnapshot,
     ToolCallSnapshot,
@@ -115,6 +116,15 @@ _CHAT_TOOL_INPUT_TRACE_KEYS = {
     "deferred_input",
     "deferred_context",
     "deferred_continuation",
+    "selection_source",
+    "app_selection_source",
+    "app_resolution_source",
+    "app_resolution_score",
+    "app_resolution_confidence",
+    "app_resolution_reason",
+    "requested_app_name",
+    "resolved_app_name",
+    "resolved_app_path",
 }
 _CHAT_TASK_EVENT_PAYLOAD_TRACE_KEYS = {
     "core_id",
@@ -155,6 +165,7 @@ def agent_task_snapshot_from_payload(
         )
         if approval.status == "pending"
     ]
+    approvals = _chat_sanitized_approvals(approvals)
     status = task_status_from_value(payload.get("status"))
     current_step = _optional_text(payload.get("current_step"))
     progress_text = _optional_text(payload.get("progress_text"))
@@ -331,11 +342,33 @@ def _chat_task_tool_calls(
         for event in events
         if event.event_type == _COMPLETED_DESKTOP_INTENT_EVENT_TYPE
     ]
-    if not completed_events:
+    approval_events = [
+        event
+        for event in events
+        if event.event_type == _APPROVAL_REQUIRED_DESKTOP_INTENT_EVENT_TYPE
+    ]
+    if not completed_events and approval_events:
+        approval_tool_calls = tool_call_snapshots_from_payloads(
+            None,
+            events=approval_events,
+        )
+        return _chat_tool_calls_with_pending_approvals(
+            tool_calls,
+            approval_tool_calls,
+        )
+
+    desktop_step_events = [
+        *completed_events,
+        *approval_events,
+    ]
+    if not desktop_step_events:
         return tool_calls
 
     visible_events: list[PublicRunEvent] = []
-    for event in completed_events:
+    for event in desktop_step_events:
+        if event.event_type != _COMPLETED_DESKTOP_INTENT_EVENT_TYPE:
+            visible_events.append(event)
+            continue
         payload = dict(event.payload) if isinstance(event.payload, Mapping) else {}
         steps = _visible_daily_desktop_completed_steps(payload.get("steps"))
         if steps:
@@ -345,21 +378,81 @@ def _chat_task_tool_calls(
     return visible_tool_calls or tool_calls
 
 
+def _chat_tool_calls_with_pending_approvals(
+    tool_calls: list[ToolCallSnapshot],
+    approval_tool_calls: list[ToolCallSnapshot],
+) -> list[ToolCallSnapshot]:
+    if not approval_tool_calls:
+        return tool_calls
+    visible = list(tool_calls)
+    for approval in approval_tool_calls:
+        visible = [
+            call
+            for call in visible
+            if not _same_chat_tool_call_input(call, approval)
+        ]
+        visible.append(approval)
+    return visible
+
+
+def _same_chat_tool_call_input(
+    current: ToolCallSnapshot,
+    approval: ToolCallSnapshot,
+) -> bool:
+    return (
+        current.tool_name == approval.tool_name
+        and current.input_preview == approval.input_preview
+    )
+
+
 def _chat_sanitized_tool_calls(
     tool_calls: list[ToolCallSnapshot],
 ) -> list[ToolCallSnapshot]:
     return [_chat_sanitized_tool_call(tool_call) for tool_call in tool_calls]
 
 
+def _chat_sanitized_approvals(
+    approvals: list[ApprovalCardSnapshot],
+) -> list[ApprovalCardSnapshot]:
+    return [_chat_sanitized_approval(approval) for approval in approvals]
+
+
+def _chat_sanitized_approval(approval: ApprovalCardSnapshot) -> ApprovalCardSnapshot:
+    clean_input = {
+        key: value
+        for key, value in approval.input_preview.items()
+        if key not in _CHAT_TOOL_INPUT_TRACE_KEYS
+    }
+    if clean_input == approval.input_preview:
+        return approval
+    return approval.model_copy(update={"input_preview": clean_input})
+
+
 def _chat_sanitized_tool_call(tool_call: ToolCallSnapshot) -> ToolCallSnapshot:
+    trace_keys = set(_CHAT_TOOL_INPUT_TRACE_KEYS)
+    if _chat_tool_input_query_is_trace(tool_call):
+        trace_keys.add("query")
     clean_input = {
         key: value
         for key, value in tool_call.input_preview.items()
-        if key not in _CHAT_TOOL_INPUT_TRACE_KEYS
+        if key not in trace_keys
     }
     if clean_input == tool_call.input_preview:
         return tool_call
     return tool_call.model_copy(update={"input_preview": clean_input})
+
+
+def _chat_tool_input_query_is_trace(tool_call: ToolCallSnapshot) -> bool:
+    if tool_call.tool_name == "desktop.list_apps":
+        return False
+    preview = tool_call.input_preview
+    if not isinstance(preview, Mapping):
+        return False
+    return bool(
+        str(preview.get("selection_source") or preview.get("app_selection_source") or "").strip()
+        == "desktop.list_apps"
+        or str(preview.get("app_resolution_source") or "").strip() == "desktop.list_apps"
+    )
 
 
 def _visible_daily_desktop_completed_steps(raw_steps: Any) -> list[dict[str, Any]]:

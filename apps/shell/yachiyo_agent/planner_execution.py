@@ -1299,8 +1299,18 @@ def _expand_inspect_app_execution_requests(
         if tool_name != "desktop.inspect_app" or not app_name or "desktop.ui_elements" not in allowed:
             expanded.append(request)
             continue
-        if _has_later_app_ui_approval_request(requests[index + 1 :]):
+        canonical_app_name = legacy_app_name_hint(app_name)
+        if canonical_app_name and canonical_app_name != app_name:
+            request = {**request, "input": {**payload, "app_name": canonical_app_name}}
+            payload = request["input"]
+            app_name = canonical_app_name
+        if _has_later_app_ui_approval_request_for_app(requests[index + 1 :], app_name):
             expanded.append(request)
+            continue
+        if is_legacy_app_name_hint(app_name) and _has_later_app_scoped_operation_for_app(
+            requests[index + 1 :],
+            app_name,
+        ):
             continue
         focus_tool = _first_allowed(
             ("app.focus", "desktop.focus_app", "app.open", "desktop.open_app"),
@@ -1317,6 +1327,8 @@ def _expand_inspect_app_execution_requests(
                 planning_reason=planning_reason,
             )
         )
+        if _has_later_app_scoped_operation_for_app(requests[index + 1 :], app_name):
+            continue
         ui_payload = {
             key: payload[key]
             for key in ("app_name", "role_filter", "limit")
@@ -1333,20 +1345,56 @@ def _expand_inspect_app_execution_requests(
     return expanded
 
 
-def _has_later_app_ui_approval_request(requests: Iterable[Mapping[str, Any]]) -> bool:
-    return any(
-        str(request.get("tool") or "").strip()
-        in {
+def _has_later_app_scoped_operation_for_app(
+    requests: Iterable[Mapping[str, Any]],
+    app_name: str,
+) -> bool:
+    expected = legacy_app_name_hint(app_name)
+    if not expected:
+        return False
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        tool_name = str(request.get("tool") or "").strip()
+        if not (
+            tool_name.startswith("app.open_and_")
+            or tool_name.startswith("app.focus_and_")
+        ):
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        later_app = str(payload.get("app_name") or "").strip()
+        if later_app and legacy_app_name_hint(later_app) == expected:
+            return True
+    return False
+
+
+def _has_later_app_ui_approval_request_for_app(
+    requests: Iterable[Mapping[str, Any]],
+    app_name: str,
+) -> bool:
+    expected = legacy_app_name_hint(app_name)
+    if not expected:
+        return False
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name not in {
             "app.open_and_click_ui_element",
             "app.focus_and_click_ui_element",
             "app.open_and_type_into_ui_element",
             "app.focus_and_type_into_ui_element",
             "desktop.click_ui_element",
             "desktop.type_into_ui_element",
-        }
-        for request in requests
-        if isinstance(request, Mapping)
-    )
+        }:
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        later_app = str(
+            payload.get("app_name") or payload.get("expected_app_name") or ""
+        ).strip()
+        if later_app and legacy_app_name_hint(later_app) == expected:
+            return True
+    return False
 
 
 def planner_orchestration_requests(

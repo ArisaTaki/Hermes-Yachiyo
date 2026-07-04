@@ -76,7 +76,7 @@ class ToolPendingApprovalBuilder:
     ) -> dict[str, Any]:
         raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
         context = _pending_approval_context(tool_request)
-        input_preview = _pending_approval_input_preview(_tool_input_preview(raw_input), context)
+        input_preview = _tool_input_preview(raw_input)
         return {
             "approval_id": str(self._approval_id_factory()),
             "tool": normalize_tool_name(tool_request.get("tool")),

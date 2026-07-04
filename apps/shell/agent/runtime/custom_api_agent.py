@@ -1987,6 +1987,8 @@ class RuntimeCustomApiAgentLoop:
             for request in cleaned
         ):
             return cleaned
+        if _preserve_direct_daily_desktop_tool_requests(cleaned):
+            return cleaned
         requests = planner_execution_tool_requests(cleaned, allowed_tools)
         if any(
             str(request.get("planning_reason") or "").strip() == "explicit_full_plan"
@@ -4987,6 +4989,33 @@ def _daily_desktop_retry_prompt(tool_name: str, planned_input: dict[str, Any]) -
         phrase = _app_foreground_action_phrase(tool_name, {}, planned_input)
         return f"{action}{app_name}并{phrase}" if phrase else f"{action}{app_name}"
     return ""
+
+
+def _preserve_direct_daily_desktop_tool_requests(
+    requests: list[dict[str, Any]],
+) -> bool:
+    if not requests:
+        return False
+    tools = {
+        str(request.get("tool") or "").strip()
+        for request in requests
+        if isinstance(request, dict)
+    }
+    if not tools or tools & _DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS:
+        return False
+    app_ui_approval_tools = {
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+    }
+    app_shortcut_tools = {
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+    }
+    if tools & app_ui_approval_tools:
+        return True
+    return "desktop.submit_foreground" in tools and bool(tools & app_shortcut_tools)
 
 
 def _recovery_actions(result: dict[str, Any]) -> list[dict[str, Any]]:

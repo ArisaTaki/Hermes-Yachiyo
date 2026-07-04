@@ -171,21 +171,7 @@ def _input_preview_with_trace_payload(
     input_preview: Any,
     trace_payload: dict[str, Any],
 ) -> Any:
-    if not isinstance(input_preview, dict) or not trace_payload:
-        return input_preview
-    if not (
-        trace_payload.get("plan_id")
-        or trace_payload.get("decision_id")
-        or trace_payload.get("capability_id")
-    ):
-        return input_preview
-    enriched = dict(input_preview)
-    for key in _INPUT_PREVIEW_TRACE_KEYS:
-        value = trace_payload.get(key)
-        if value in (None, "", [], {}):
-            continue
-        enriched.setdefault(key, value)
-    return enriched
+    return input_preview
 
 
 def _artifact_context_from_trace_payload(trace_payload: dict[str, Any]) -> dict[str, Any]:
@@ -948,8 +934,6 @@ _FOREGROUND_APP_CONTEXT_TOOLS = {
     "desktop.inspect_app",
     "desktop.list_windows",
     "desktop.windows",
-    "desktop.read_ui",
-    "desktop.ui_elements",
     "desktop.verify",
 }
 
@@ -1032,41 +1016,46 @@ def _discovered_app_resolution_evidence(
         if not _app_lookups_related(input_preview.get("query"), clean_requested):
             continue
         result = event.get("result") if isinstance(event.get("result"), dict) else {}
-        candidates = []
         best_match = _best_match_from_list_apps_result(result)
-        if isinstance(best_match, dict):
-            candidates.append(best_match)
-        candidates.extend(
-            app for app in _apps_from_list_apps_result(result) if isinstance(app, dict)
-        )
-        for app in candidates:
+        if (
+            isinstance(best_match, dict)
+            and _normalized_app_lookup(_app_candidate_name(best_match)) == clean_resolved
+        ):
+            return _discovered_app_best_match_evidence(best_match)
+        for app in _apps_from_list_apps_result(result):
+            if not isinstance(app, dict):
+                continue
             if _normalized_app_lookup(_app_candidate_name(app)) != clean_resolved:
                 continue
-            evidence: dict[str, str] = {}
-            score = _app_match_score(app)
-            if score is not None:
-                evidence["app_resolution_score"] = str(score)
-            confidence = str(
-                app.get("match_confidence")
-                or app.get("confidence")
-                or app.get("app_resolution_confidence")
-                or ""
-            ).strip()
-            if confidence:
-                evidence["app_resolution_confidence"] = confidence
-            reason = str(
-                app.get("match_reason")
-                or app.get("reason")
-                or app.get("app_resolution_reason")
-                or ""
-            ).strip()
-            if reason:
-                evidence["app_resolution_reason"] = reason
-            path = _app_candidate_path(app)
-            if path:
-                evidence["resolved_app_path"] = path
-            return evidence
+            return {}
     return {}
+
+
+def _discovered_app_best_match_evidence(app: Mapping[str, Any]) -> dict[str, str]:
+    evidence: dict[str, str] = {}
+    score = _app_match_score(dict(app))
+    if score is not None:
+        evidence["app_resolution_score"] = str(score)
+    confidence = str(
+        app.get("match_confidence")
+        or app.get("confidence")
+        or app.get("app_resolution_confidence")
+        or ""
+    ).strip()
+    if confidence:
+        evidence["app_resolution_confidence"] = confidence
+    reason = str(
+        app.get("match_reason")
+        or app.get("reason")
+        or app.get("app_resolution_reason")
+        or ""
+    ).strip()
+    if reason:
+        evidence["app_resolution_reason"] = reason
+    path = _app_candidate_path(app)
+    if path:
+        evidence["resolved_app_path"] = path
+    return evidence
 
 
 def _input_preview_with_app_name_resolution(
@@ -1096,6 +1085,29 @@ def _input_preview_with_app_name_resolution(
         if value:
             preview.setdefault(key, value)
     return preview
+
+
+def _tool_event_input_preview(tool_name: str, input_preview: Any) -> Any:
+    if str(tool_name or "").strip() not in {"desktop.ui_elements", "desktop.read_ui"}:
+        return input_preview
+    if not isinstance(input_preview, dict):
+        return input_preview
+    trace_scope_keys = {
+        "app_name",
+        "selection_source",
+        "app_selection_source",
+        "query",
+        "requested_app_name",
+        "resolved_app_name",
+        "resolved_app_path",
+        "app_resolution_source",
+        "app_resolution_score",
+        "app_resolution_confidence",
+        "app_resolution_reason",
+    }
+    if input_preview and all(key in trace_scope_keys for key in input_preview):
+        return {}
+    return input_preview
 
 
 def _tool_result_artifact(tool_name: str, tool_result: dict[str, Any]) -> dict[str, Any] | None:
@@ -1186,6 +1198,7 @@ class RuntimeToolCallExecutor:
         trace_payload = _tool_request_trace_payload(tool_request)
         input_preview = _input_preview_with_app_name_resolution(input_preview, input_resolution)
         input_preview = _input_preview_with_trace_payload(input_preview, trace_payload)
+        input_preview = _tool_event_input_preview(tool_name, input_preview)
         budget = budget or self._run_budget(run_id, timeline)
         if not self._allows_tool(tool_name, allowed_tools):
             budget.claim_tool_call(tool_name)
@@ -1481,6 +1494,7 @@ class RuntimeToolRequestRunner:
             )
             trace_payload = _tool_request_trace_payload(tool_request)
             input_preview = _input_preview_with_trace_payload(input_preview, trace_payload)
+            input_preview = _tool_event_input_preview(tool_name, input_preview)
             runtime_skip = _unresolved_discovered_app_skip_result(
                 tool_name,
                 raw_input,

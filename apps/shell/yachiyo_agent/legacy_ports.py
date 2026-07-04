@@ -163,6 +163,12 @@ def _legacy_direct_execution_override_requests(
         return legacy_requests
     if _legacy_clipboard_link_open_override_requests(legacy_requests, planner_requests):
         return legacy_requests
+    if _legacy_default_browser_open_override_requests(prompt, legacy_requests, planner_requests):
+        return legacy_requests
+    if _legacy_app_ui_approval_override_requests(legacy_requests, planner_requests):
+        return legacy_requests
+    if _legacy_app_submit_approval_override_requests(legacy_requests, planner_requests):
+        return legacy_requests
     if not _prefer_legacy_planned_timeline_for_metadata(metadata):
         return []
     legacy_tools = _tool_names_for_requests(legacy_requests)
@@ -181,6 +187,64 @@ def _legacy_direct_execution_override_requests(
             allowed_tools,
         )
     return []
+
+
+def _legacy_default_browser_open_override_requests(
+    prompt: str,
+    legacy_requests: list[dict[str, Any]],
+    planner_requests: list[dict[str, Any]],
+) -> bool:
+    if not _looks_like_legacy_default_browser_open(prompt):
+        return False
+    if _tool_names_for_requests(legacy_requests) != ["app.open"]:
+        return False
+    legacy_payload = (
+        legacy_requests[0].get("input")
+        if isinstance(legacy_requests[0].get("input"), dict)
+        else {}
+    )
+    if str(legacy_payload.get("app_name") or "").strip() != "Google Chrome":
+        return False
+    return True
+
+
+def _looks_like_legacy_default_browser_open(prompt: str) -> bool:
+    value = str(prompt or "").strip()
+    if not value:
+        return False
+    patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?打开\s*(?:默认)?(?:浏览器|网页)\s*[?？。！!]*$",
+        r"^(?:open|launch|start)\s+(?:a\s+|the\s+|default\s+)?(?:browser|webpage|web\s+page)\s*[.!?]*$",
+    )
+    return any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in patterns)
+
+
+def _legacy_app_ui_approval_override_requests(
+    legacy_requests: list[dict[str, Any]],
+    planner_requests: list[dict[str, Any]],
+) -> bool:
+    if not _planner_requests_need_model_followup(planner_requests):
+        return False
+    return any(
+        str(request.get("tool") or "").strip()
+        in {
+            "app.open_and_click_ui_element",
+            "app.focus_and_click_ui_element",
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_type_into_ui_element",
+        }
+        for request in legacy_requests
+        if isinstance(request, dict)
+    )
+
+
+def _legacy_app_submit_approval_override_requests(
+    legacy_requests: list[dict[str, Any]],
+    planner_requests: list[dict[str, Any]],
+) -> bool:
+    if "desktop.list_apps" not in _tool_names_for_requests(planner_requests):
+        return False
+    return _legacy_app_submit_approval_plan(legacy_requests)
 
 
 def _legacy_information_capture_override_requests(
@@ -721,6 +785,20 @@ class LegacyChatTaskStarter:
                     selected_requests,
                     allowed_entrypoint_tools,
                 )
+            if direct_tool_requests and direct_tool_selection_payload:
+                direct_tool_selection_payload = _selection_payload_with_selected_requests(
+                    direct_tool_selection_payload,
+                    direct_tool_requests,
+                )
+                direct_tool_selection_payload = _approval_first_selection_payload(
+                    direct_tool_selection_payload,
+                    direct_tool_requests,
+                )
+            elif direct_tool_request and direct_tool_selection_payload:
+                direct_tool_selection_payload = _selection_payload_with_selected_requests(
+                    direct_tool_selection_payload,
+                    [direct_tool_request],
+                )
         if not task_id:
             return None
         if not direct_tool_request and not selected_requests and not direct_tool_requests:
@@ -728,14 +806,16 @@ class LegacyChatTaskStarter:
         if direct_tool_request:
             metadata_tool_requests = [direct_tool_request]
         elif _prefer_execution_requests_for_metadata(metadata):
-            metadata_tool_requests = (
-                planner_execution_tool_requests(
-                    direct_tool_requests or selected_requests,
-                    allowed_entrypoint_tools,
+            if direct_tool_requests:
+                metadata_tool_requests = direct_tool_requests
+            else:
+                metadata_tool_requests = (
+                    planner_execution_tool_requests(
+                        selected_requests,
+                        allowed_entrypoint_tools,
+                    )
+                    or selected_requests
                 )
-                or direct_tool_requests
-                or selected_requests
-            )
         else:
             metadata_tool_requests = selected_requests or direct_tool_requests
         self._sync_chat_user_daily_desktop_metadata(
@@ -1652,6 +1732,39 @@ def _safe_runtime_planner_tool_requests(
 ) -> list[dict[str, Any]]:
     selected_requests = selected_requests or []
     if _has_approval_plan_tool(selected_requests):
+        requests = planner_tool_requests(
+            prompt,
+            allowed_tools,
+            metadata=metadata,
+        )
+        raw_approval_sequence = _runtime_planner_direct_approval_sequence_requests(
+            requests,
+            allowed_tools,
+        )
+        if raw_approval_sequence:
+            if _has_explicit_hotkey_safe_shortcut(prompt, raw_approval_sequence, allowed_tools):
+                return []
+            return raw_approval_sequence
+        requests = _apply_legacy_file_transfer_app_alias(prompt, requests, allowed_tools)
+        requests = _apply_legacy_plain_search_open_mode(prompt, requests, allowed_tools)
+        requests = _apply_legacy_search_field_target_label(prompt, requests)
+        requests = _apply_legacy_return_hotkey_projection(prompt, requests, allowed_tools)
+        approval_sequence = _runtime_planner_direct_approval_sequence_requests(
+            requests,
+            allowed_tools,
+        )
+        if approval_sequence:
+            if _has_explicit_hotkey_safe_shortcut(prompt, approval_sequence, allowed_tools):
+                return []
+            return approval_sequence
+        approval_sequence = _runtime_planner_direct_approval_sequence_requests(
+            selected_requests,
+            allowed_tools,
+        )
+        if approval_sequence:
+            if _has_explicit_hotkey_safe_shortcut(prompt, approval_sequence, allowed_tools):
+                return []
+            return approval_sequence
         return []
     if _has_explicit_hotkey_safe_shortcut(prompt, selected_requests, allowed_tools):
         return []
@@ -1661,6 +1774,12 @@ def _safe_runtime_planner_tool_requests(
             allowed_tools,
             metadata=metadata,
         )
+        approval_sequence = _runtime_planner_direct_approval_sequence_requests(
+            requests,
+            allowed_tools,
+        )
+        if approval_sequence:
+            return approval_sequence
         requests = _apply_legacy_file_transfer_app_alias(prompt, requests, allowed_tools)
         requests = _apply_legacy_plain_search_open_mode(prompt, requests, allowed_tools)
         requests = _apply_legacy_search_field_target_label(prompt, requests)
@@ -1668,6 +1787,12 @@ def _safe_runtime_planner_tool_requests(
         requests = _prepend_legacy_focus_app_search_discovery_request(prompt, requests)
         if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
             return []
+        approval_sequence = _runtime_planner_direct_approval_sequence_requests(
+            requests,
+            allowed_tools,
+        )
+        if approval_sequence:
+            return approval_sequence
     requests = _coalesce_legacy_direct_app_shortcut_requests(
         prompt,
         requests,
@@ -1677,6 +1802,154 @@ def _safe_runtime_planner_tool_requests(
     requests = _drop_legacy_open_then_plain_find_submit(prompt, requests)
     execution_requests = planner_execution_tool_requests(requests, allowed_tools) or requests
     return _drop_data_analysis_prepare_app_requests(execution_requests)
+
+
+def _runtime_planner_direct_approval_sequence_requests(
+    selected_requests: list[dict[str, Any]],
+    allowed_tools: list[str],
+) -> list[dict[str, Any]]:
+    app_ui_approval_plan = _runtime_planner_app_ui_approval_plan(selected_requests)
+    app_submit_approval_plan = _runtime_planner_app_submit_approval_plan(selected_requests)
+    communication_send_plan = _runtime_planner_communication_send_plan(selected_requests)
+    if not (communication_send_plan or app_ui_approval_plan or app_submit_approval_plan):
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools}
+    executable = [
+        dict(request)
+        for request in selected_requests
+        if isinstance(request, dict)
+        and not _runtime_planner_model_followup_verification_request(request)
+    ]
+    if not executable:
+        return []
+    if any(str(request.get("tool") or "").strip() not in allowed for request in executable):
+        return []
+    if app_ui_approval_plan:
+        return executable
+    execution_requests = planner_execution_tool_requests(executable, allowed_tools) or executable
+    return [
+        request
+        for request in execution_requests
+        if not _runtime_planner_model_followup_verification_request(request)
+    ]
+
+
+def _runtime_planner_communication_send_plan(
+    requests: list[dict[str, Any]],
+) -> bool:
+    reasons = {
+        str(request.get("planning_reason") or "").strip()
+        for request in requests
+        if isinstance(request, dict) and str(request.get("planning_reason") or "").strip()
+    }
+    if reasons != {"planner_fallback_communication_send"}:
+        return False
+    tools = _tool_names_for_requests(requests)
+    return "desktop.submit_foreground" in tools
+
+
+def _runtime_planner_app_ui_approval_plan(
+    requests: list[dict[str, Any]],
+) -> bool:
+    reasons = {
+        str(request.get("planning_reason") or "").strip()
+        for request in requests
+        if isinstance(request, dict) and str(request.get("planning_reason") or "").strip()
+    }
+    if reasons not in (
+        {"planner_desktop_operation"},
+        {"planner_fallback_desktop_operation"},
+    ):
+        return False
+    tools = set(_tool_names_for_requests(requests))
+    app_ui_tools = {
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+    }
+    if not tools & app_ui_tools:
+        return False
+    allowed_tools = {
+        "desktop.inspect_app",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.active_window",
+        "app.open",
+        "app.focus",
+        *app_ui_tools,
+    }
+    if not tools <= allowed_tools:
+        return False
+    for request in requests:
+        if not isinstance(request, dict):
+            return False
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name not in app_ui_tools:
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        if not str(payload.get("app_name") or "").strip():
+            return False
+        if not str(payload.get("target") or "").strip():
+            return False
+    return True
+
+
+def _runtime_planner_app_submit_approval_plan(
+    requests: list[dict[str, Any]],
+) -> bool:
+    reasons = {
+        str(request.get("planning_reason") or "").strip()
+        for request in requests
+        if isinstance(request, dict) and str(request.get("planning_reason") or "").strip()
+    }
+    if reasons not in (
+        {"planner_desktop_operation"},
+        {"planner_fallback_desktop_operation"},
+    ):
+        return False
+    tools = set(_tool_names_for_requests(requests))
+    app_shortcut_tools = {
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+    }
+    if "desktop.submit_foreground" not in tools or not (tools & app_shortcut_tools):
+        return False
+    allowed_tools = {
+        "desktop.list_apps",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.active_window",
+        "desktop.submit_foreground",
+        *app_shortcut_tools,
+    }
+    if not tools <= allowed_tools:
+        return False
+    for request in requests:
+        if not isinstance(request, dict):
+            return False
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name not in app_shortcut_tools:
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        if not str(payload.get("app_name") or "").strip():
+            return False
+        if not str(payload.get("action") or "").strip():
+            return False
+    return True
+
+
+def _runtime_planner_model_followup_verification_request(
+    request: dict[str, Any],
+) -> bool:
+    tool_name = str(request.get("tool") or "").strip()
+    return bool(request.get("continue_to_model")) and tool_name in {
+        "desktop.active_window",
+        "desktop.read_ui",
+        "desktop.ui_elements",
+        "desktop.windows",
+        "screen.capture",
+    }
 
 
 def _safe_runtime_execution_envelope_requests(
@@ -1690,6 +1963,21 @@ def _safe_runtime_execution_envelope_requests(
     selected_requests = selected_requests or []
     if _has_approval_plan_tool(selected_requests):
         return []
+    raw_requests = planner_tool_requests(
+        prompt,
+        allowed_tools,
+        metadata=metadata,
+    )
+    raw_approval_sequence = _runtime_planner_direct_approval_sequence_requests(
+        raw_requests,
+        allowed_tools,
+    )
+    if raw_approval_sequence and not _has_explicit_hotkey_safe_shortcut(
+        prompt,
+        raw_approval_sequence,
+        allowed_tools,
+    ):
+        return raw_approval_sequence
     for requests in _runtime_execution_envelope_request_candidates(
         runtime_execution_envelope,
         metadata,
@@ -1945,11 +2233,25 @@ def _safe_selected_entrypoint_tool_requests(
     if not selected_requests:
         return []
     if _has_approval_plan_tool(selected_requests):
+        if _legacy_app_submit_approval_plan(selected_requests):
+            return _split_redundant_app_safe_shortcut_requests(selected_requests)
         return []
     if _has_explicit_hotkey_safe_shortcut(prompt, selected_requests, allowed_tools):
         return []
     requests = planner_execution_tool_requests(selected_requests, allowed_tools) or selected_requests
     return _split_redundant_app_safe_shortcut_requests(requests)
+
+
+def _legacy_app_submit_approval_plan(
+    requests: list[dict[str, Any]],
+) -> bool:
+    tools = set(_tool_names_for_requests(requests))
+    if "desktop.submit_foreground" not in tools:
+        return False
+    app_shortcut_tools = {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}
+    if not tools & app_shortcut_tools:
+        return False
+    return tools <= {*app_shortcut_tools, "desktop.submit_foreground"}
 
 
 def _apply_legacy_file_transfer_app_alias(
