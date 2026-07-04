@@ -52,8 +52,10 @@ def test_studio_start_group_run_enriches_bare_port_payload_with_group_scoped_eve
     assert "group.run.task_core.created" in event_types
     assert group_run.task_core is not None
     assert group_run.task_core.todos
-    request_envelope = port.group_run_payloads[0]["metadata"]["yachiyo_execution_envelope"]
+    start_payload = port.group_run_payloads[0]
+    request_envelope = start_payload["metadata"]["yachiyo_execution_envelope"]
     assert request_envelope["requests"][0]["group_id"] == "group-1"
+    assert start_payload["direct_tool_requests"][0]["group_id"] == "group-1"
     plan_event = next(event for event in group_run.events if event.event_type == "group.run.plan.created")
     event_request = plan_event.payload["runtime_execution_envelope"]["requests"][0]
     assert event_request["group_id"] == "group-1"
@@ -79,8 +81,10 @@ def test_studio_start_workflow_run_enriches_bare_port_payload_with_workflow_scop
     assert "workflow.run.task_core.created" in event_types
     assert workflow_run.task_core is not None
     assert workflow_run.task_core.todos
-    request_envelope = port.workflow_run_payloads[0]["metadata"]["yachiyo_execution_envelope"]
+    start_payload = port.workflow_run_payloads[0]
+    request_envelope = start_payload["metadata"]["yachiyo_execution_envelope"]
     assert request_envelope["requests"][0]["workflow_id"] == "workflow-1"
+    assert start_payload["direct_tool_requests"][0]["workflow_id"] == "workflow-1"
     plan_event = next(
         event for event in workflow_run.events if event.event_type == "workflow.run.plan.created"
     )

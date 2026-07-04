@@ -1531,15 +1531,8 @@ class LegacyStudioPort:
         user_goal = str(request.get("objective") or request.get("goal") or "").strip()
         metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
         planner_metadata = _planner_metadata_with_desktop_readiness(metadata)
-        run = self._runtime.create_workflow_run(
-            {
-                "workflow_id": request.get("workflow_id"),
-                "user_goal": user_goal,
-                "source": "yachiyo_studio",
-                "client_run_id": request.get("client_run_id"),
-                "run_group_id": request.get("run_group_id"),
-            }
-        )
+        run_payload = _studio_workflow_run_payload(request, user_goal=user_goal)
+        run = self._runtime.create_workflow_run(run_payload)
         self._append_planner_run_events(
             _run_id_from_payload(run),
             runtime_planner_decision(user_goal, metadata=planner_metadata),
@@ -2031,6 +2024,74 @@ def _runtime_execution_envelope_request_candidates(
     if metadata_requests:
         candidates.append(metadata_requests)
     return candidates
+
+
+def _studio_workflow_run_payload(
+    request: dict[str, Any],
+    *,
+    user_goal: str,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "workflow_id": request.get("workflow_id"),
+        "user_goal": user_goal,
+        "source": "yachiyo_studio",
+        "client_run_id": request.get("client_run_id"),
+        "run_group_id": request.get("run_group_id"),
+    }
+    metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+    if metadata:
+        payload["metadata"] = dict(metadata)
+
+    envelope = request.get("runtime_execution_envelope")
+    if envelope is None and isinstance(metadata.get("yachiyo_execution_envelope"), dict):
+        envelope = metadata.get("yachiyo_execution_envelope")
+    if envelope is not None:
+        payload["runtime_execution_envelope"] = envelope
+
+    direct_tool_requests = _studio_workflow_direct_tool_requests(
+        request,
+        envelope,
+        metadata,
+    )
+    if direct_tool_requests:
+        payload["direct_tool_requests"] = direct_tool_requests
+
+    planning_context = str(request.get("daily_desktop_planning_context") or "").strip()
+    if planning_context:
+        payload["daily_desktop_planning_context"] = planning_context
+    elif direct_tool_requests or envelope is not None:
+        payload["daily_desktop_planning_context"] = user_goal
+    return payload
+
+
+def _studio_workflow_direct_tool_requests(
+    request: dict[str, Any],
+    runtime_execution_envelope: Any | None,
+    metadata: dict[str, Any],
+) -> list[dict[str, Any]]:
+    direct_tool_request = _explicit_direct_tool_request(
+        request.get("direct_tool_request"),
+        [],
+    )
+    direct_tool_requests = _explicit_direct_tool_requests(
+        request.get("direct_tool_requests"),
+        [],
+    )
+    if direct_tool_request:
+        return [direct_tool_request, *direct_tool_requests]
+    if direct_tool_requests:
+        return direct_tool_requests
+
+    envelope_requests = runtime_execution_requests_from_envelope_payload(
+        runtime_execution_envelope,
+        allowed_tools=None,
+    )
+    if envelope_requests:
+        return envelope_requests
+    return runtime_execution_requests_from_metadata(
+        metadata,
+        allowed_tools=None,
+    )
 
 
 def _direct_tool_request_sequence(

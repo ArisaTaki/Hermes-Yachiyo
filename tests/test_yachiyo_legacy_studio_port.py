@@ -138,6 +138,48 @@ def test_legacy_studio_workflow_run_appends_runtime_planner_events() -> None:
     assert events[2]["payload"]["task_core"]["workspace"]["title"] == "Desktop Operation Workspace"
 
 
+def test_legacy_studio_workflow_run_forwards_direct_tool_requests() -> None:
+    runtime = _FakeStudioRunRuntime()
+    envelope = {
+        "decision_id": "decision-workflow",
+        "plan_id": "plan-workflow",
+        "requests": [
+            {
+                "request_id": "request-open",
+                "tool": "desktop.list_apps",
+                "input": {"query": "PixelForge"},
+            }
+        ],
+    }
+
+    run = LegacyStudioPort(runtime).start_workflow_run(
+        {
+            "workflow_id": "workflow-1",
+            "objective": "打开 PixelForge",
+            "runtime_execution_envelope": envelope,
+            "direct_tool_requests": [
+                {
+                    "tool": "desktop.list_apps",
+                    "input": {"query": "PixelForge"},
+                    "source": "agent_studio_runtime_plan",
+                }
+            ],
+        }
+    )
+
+    assert run["workflow_run_id"] == "workflow-run-1"
+    assert runtime.workflow_run_payload is not None
+    assert runtime.workflow_run_payload["runtime_execution_envelope"] == envelope
+    assert runtime.workflow_run_payload["direct_tool_requests"] == [
+        {
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge"},
+            "source": "agent_studio_runtime_plan",
+        }
+    ]
+    assert runtime.workflow_run_payload["daily_desktop_planning_context"] == "打开 PixelForge"
+
+
 def test_legacy_studio_group_run_records_group_run_started_event() -> None:
     runtime = _FakeGroupRuntime()
 
