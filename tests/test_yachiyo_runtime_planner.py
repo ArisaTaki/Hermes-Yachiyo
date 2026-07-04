@@ -32916,6 +32916,45 @@ def test_runtime_planner_execution_keeps_open_and_focus_verification_steps() -> 
     ]
     assert open_envelope.requests[-1].runtime_stage == "verify"
     assert open_envelope.requests[-1].depends_on == ["open-or-focus-app"]
+    assert open_envelope.requests[1].action_target == {
+        "kind": "desktop_app",
+        "action": "open_app",
+        "selection_source": "desktop.list_apps",
+        "app_name": "PixelForge",
+        "query": "PixelForge",
+        "step_id": "open-or-focus-app",
+    }
+    assert open_envelope.requests[-1].action_target == {
+        "kind": "desktop_app",
+        "action": "verify_after_action",
+        "selection_source": "desktop.list_apps",
+        "app_name": "PixelForge",
+        "query": "PixelForge",
+        "step_id": "verify-desktop-result",
+        "verified_step_ids": ["open-or-focus-app"],
+    }
+    assert open_envelope.requests[-1].observation_retry == {
+        "from_tool": "desktop.active_window",
+        "tool": "desktop.active_window",
+        "input": {
+            "app_name": "PixelForge",
+            "query": "PixelForge",
+            "selection_source": "desktop.list_apps",
+        },
+        "reason": "verification_failed",
+    }
+    open_projected_requests = runtime_execution_requests_from_envelope_payload(
+        open_envelope.model_dump(mode="json"),
+        allowed_tools=open_allowed_tools,
+    )
+    assert (
+        open_projected_requests[1]["action_target"]
+        == open_envelope.requests[1].action_target
+    )
+    assert (
+        open_projected_requests[-1]["action_target"]
+        == open_envelope.requests[-1].action_target
+    )
 
     focus_allowed_tools = [
         "desktop.list_apps",

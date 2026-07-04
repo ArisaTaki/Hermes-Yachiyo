@@ -42,15 +42,17 @@ def runtime_execution_envelope_from_decision(
         )
     )
     steps = _steps_by_id(decision)
-    requests = [
-        _execution_request_snapshot(
-            request,
-            index=index,
-            decision=decision,
-            steps=steps,
+    requests: list[RuntimeExecutionRequestSnapshot] = []
+    for index, request in enumerate(request_payloads, start=1):
+        requests.append(
+            _execution_request_snapshot(
+                request,
+                index=index,
+                decision=decision,
+                steps=steps,
+                previous_requests=requests,
+            )
         )
-        for index, request in enumerate(request_payloads, start=1)
-    ]
     tool_plan = decision.plan.tool_plan
     runtime_metadata = _execution_envelope_runtime_metadata(requests, decision)
     return RuntimeExecutionEnvelopeSnapshot(
@@ -285,6 +287,7 @@ def _execution_request_snapshot(
     index: int,
     decision: PlannerDecisionSnapshot,
     steps: Mapping[str, ToolPlanStepSnapshot],
+    previous_requests: Iterable[RuntimeExecutionRequestSnapshot] = (),
 ) -> RuntimeExecutionRequestSnapshot:
     tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
     step_id = str(request.get("step_id") or request.get("planner_step_id") or "").strip()
@@ -303,6 +306,15 @@ def _execution_request_snapshot(
         step_id=step_id,
         depends_on=depends_on,
         runtime_stage=runtime_metadata["runtime_stage"],
+    )
+    desktop_contract = _desktop_execution_request_contract(
+        tool_name=tool_name,
+        request_input=request_input,
+        request=request,
+        runtime_metadata=runtime_metadata,
+        step_id=step_id,
+        depends_on=depends_on,
+        previous_requests=previous_requests,
     )
     tool_plan_id = str(getattr(decision.plan.tool_plan, "plan_id", "") or "").strip()
     return RuntimeExecutionRequestSnapshot(
@@ -353,9 +365,18 @@ def _execution_request_snapshot(
         replan_triggers=replan_metadata["replan_triggers"],
         replan_signal_ids=replan_metadata["replan_signal_ids"],
         followup_target=_mapping(request.get("followup_target")),
-        action_target=_mapping(request.get("action_target")),
-        observation_evidence=_mapping(request.get("observation_evidence")),
-        observation_retry=_mapping(request.get("observation_retry")),
+        action_target=(
+            _mapping(request.get("action_target"))
+            or desktop_contract["action_target"]
+        ),
+        observation_evidence=(
+            _mapping(request.get("observation_evidence"))
+            or desktop_contract["observation_evidence"]
+        ),
+        observation_retry=(
+            _mapping(request.get("observation_retry"))
+            or desktop_contract["observation_retry"]
+        ),
         task_todo=task_context["task_todo"],
         task_checkpoints=task_context["task_checkpoints"],
         task_workspace_items=task_context["task_workspace_items"],
@@ -411,6 +432,9 @@ def _tool_request_from_execution_request(
         "task_checkpoints",
         "task_workspace_items",
         "task_verification_targets",
+        "action_target",
+        "observation_evidence",
+        "observation_retry",
     ):
         value = request.get(key)
         if value not in (None, "", [], {}):
@@ -418,6 +442,230 @@ def _tool_request_from_execution_request(
     if isinstance(envelope, Mapping):
         _apply_envelope_task_context(payload, envelope)
     return payload
+
+
+_SELECTED_DESKTOP_APP_NAME = "<selected app from desktop.list_apps>"
+_DESKTOP_APP_SELECTION_SOURCE = "desktop.list_apps"
+
+
+def _desktop_execution_request_contract(
+    *,
+    tool_name: str,
+    request_input: Mapping[str, Any],
+    request: Mapping[str, Any],
+    runtime_metadata: Mapping[str, Any],
+    step_id: str,
+    depends_on: list[str],
+    previous_requests: Iterable[RuntimeExecutionRequestSnapshot],
+) -> dict[str, dict[str, Any]]:
+    scope = _desktop_app_selection_scope(request_input, request)
+    runtime_stage = str(runtime_metadata.get("runtime_stage") or "").strip()
+    if not scope and _desktop_request_can_inherit_selection_scope(
+        tool_name,
+        runtime_stage,
+    ):
+        scope = _desktop_app_selection_scope_from_previous_requests(
+            depends_on,
+            previous_requests,
+        )
+    if not scope:
+        return {
+            "action_target": {},
+            "observation_evidence": {},
+            "observation_retry": {},
+        }
+
+    action = _desktop_request_action(tool_name, runtime_stage)
+    action_target = {
+        "kind": "desktop_app",
+        "action": action,
+        **scope,
+    }
+    if step_id:
+        action_target["step_id"] = step_id
+    if runtime_stage == "verify":
+        action_target["verified_step_ids"] = list(depends_on)
+
+    observation_evidence = {
+        "source_tool": (
+            _DESKTOP_APP_SELECTION_SOURCE
+            if runtime_stage != "verify"
+            else (tool_name or "runtime_verification")
+        ),
+        **scope,
+    }
+    observation_retry = _desktop_observation_retry(
+        tool_name=tool_name,
+        request_input=request_input,
+        runtime_stage=runtime_stage,
+        scope=scope,
+    )
+    return {
+        "action_target": _non_empty_mapping(action_target),
+        "observation_evidence": _non_empty_mapping(observation_evidence),
+        "observation_retry": observation_retry,
+    }
+
+
+def _desktop_app_selection_scope(
+    request_input: Mapping[str, Any],
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    selection_source = str(
+        request_input.get("selection_source")
+        or request_input.get("app_selection_source")
+        or ""
+    ).strip()
+    input_resolution = (
+        request.get("input_resolution")
+        if isinstance(request.get("input_resolution"), Mapping)
+        else {}
+    )
+    resolution_source = str(input_resolution.get("source_tool") or "").strip()
+    app_name = str(
+        request_input.get("app_name")
+        or input_resolution.get("resolved_app_name")
+        or ""
+    ).strip()
+    query = str(
+        request_input.get("query")
+        or input_resolution.get("requested_app_name")
+        or input_resolution.get("query")
+        or ("" if app_name == _SELECTED_DESKTOP_APP_NAME else app_name)
+    ).strip()
+    if (
+        selection_source != _DESKTOP_APP_SELECTION_SOURCE
+        and resolution_source != _DESKTOP_APP_SELECTION_SOURCE
+        and app_name != _SELECTED_DESKTOP_APP_NAME
+    ):
+        return {}
+    scope: dict[str, Any] = {
+        "selection_source": _DESKTOP_APP_SELECTION_SOURCE,
+    }
+    if app_name:
+        scope["app_name"] = app_name
+    if query:
+        scope["query"] = query
+    resolved_app = str(input_resolution.get("resolved_app_name") or "").strip()
+    if resolved_app:
+        scope["resolved_app_name"] = resolved_app
+    resolved_path = str(input_resolution.get("resolved_app_path") or "").strip()
+    if resolved_path:
+        scope["resolved_app_path"] = resolved_path
+    return scope
+
+
+def _desktop_app_selection_scope_from_previous_requests(
+    depends_on: list[str],
+    previous_requests: Iterable[RuntimeExecutionRequestSnapshot],
+) -> dict[str, Any]:
+    dependency_ids = {
+        str(value or "").strip()
+        for value in depends_on
+        if str(value or "").strip()
+    }
+    fallback_scope: dict[str, Any] = {}
+    for previous in reversed(list(previous_requests)):
+        request_input = previous.input if isinstance(previous.input, Mapping) else {}
+        scope = _desktop_app_selection_scope(
+            request_input,
+            {
+                "input_resolution": {},
+            },
+        )
+        if not scope:
+            continue
+        if not fallback_scope:
+            fallback_scope = scope
+        previous_step_id = str(previous.step_id or "").strip()
+        if dependency_ids and previous_step_id in dependency_ids:
+            return scope
+    return fallback_scope
+
+
+def _desktop_request_action(tool_name: str, runtime_stage: str) -> str:
+    clean_tool = str(tool_name or "").strip()
+    if runtime_stage == "verify":
+        return "verify_after_action"
+    if clean_tool in {"app.open", "desktop.open_app"}:
+        return "open_app"
+    if clean_tool in {"app.focus", "desktop.focus_app"}:
+        return "focus_app"
+    if "click" in clean_tool:
+        return "click_ui"
+    if "type" in clean_tool:
+        return "type_ui"
+    if "shortcut" in clean_tool or "hotkey" in clean_tool:
+        return "keyboard_shortcut"
+    if "key" in clean_tool:
+        return "keyboard_key"
+    if "scroll" in clean_tool:
+        return "scroll_ui"
+    return clean_tool or "desktop_operation"
+
+
+def _desktop_request_can_inherit_selection_scope(
+    tool_name: str,
+    runtime_stage: str,
+) -> bool:
+    if str(runtime_stage or "").strip() == "verify":
+        return True
+    return str(tool_name or "").strip() in {
+        "desktop.active_window",
+        "desktop.verify",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "screen.capture",
+    }
+
+
+def _desktop_observation_retry(
+    *,
+    tool_name: str,
+    request_input: Mapping[str, Any],
+    runtime_stage: str,
+    scope: Mapping[str, Any],
+) -> dict[str, Any]:
+    if runtime_stage == "verify":
+        retry_input = {
+            key: request_input[key]
+            for key in ("app_name", "role_filter", "limit", "reason")
+            if key in request_input and request_input[key] not in (None, "")
+        }
+        if not retry_input:
+            retry_input = {
+                key: scope[key]
+                for key in ("app_name", "query", "selection_source")
+                if key in scope and scope[key] not in (None, "")
+            }
+        return _non_empty_mapping(
+            {
+                "from_tool": tool_name,
+                "tool": tool_name,
+                "input": retry_input,
+                "reason": "verification_failed",
+            }
+        )
+    query = str(scope.get("query") or scope.get("app_name") or "").strip()
+    retry_input: dict[str, Any] = {"limit": 20}
+    if query:
+        retry_input["query"] = query
+    return _non_empty_mapping(
+        {
+            "from_tool": _DESKTOP_APP_SELECTION_SOURCE,
+            "tool": _DESKTOP_APP_SELECTION_SOURCE,
+            "input": retry_input,
+            "reason": "resolve_desktop_app",
+        }
+    )
+
+
+def _non_empty_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: item
+        for key, item in value.items()
+        if item not in (None, "", [], {})
+    }
 
 
 def _apply_envelope_task_context(
