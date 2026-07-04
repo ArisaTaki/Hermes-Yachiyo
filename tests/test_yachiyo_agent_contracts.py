@@ -359,6 +359,11 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         request_id="runtime-plan-1:request:1:desktop.list_apps",
         step_id="discover-desktop-state",
         capability_id="desktop.app_discovery",
+        capability_title="Discover Desktop Apps",
+        capability_status="available",
+        capability_reason="Selected because the tool plan has concrete steps for this capability.",
+        capability_selected_tools=["desktop.list_apps"],
+        capability_planned_step_ids=["discover-desktop-state"],
         tool_name="desktop.list_apps",
         input={"query": "PixelForge", "limit": 20},
         planning_reason="planner_desktop_app_discovery",
@@ -410,6 +415,24 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         decision_id="decision-1",
         plan_id="runtime-plan-1",
         intent_kind="desktop_operation",
+        capability_plan=CapabilityPlanSnapshot(
+            plan_id="capability-plan-1",
+            title="Desktop Capability Plan",
+            intent_kind="desktop_operation",
+            items=[
+                CapabilityPlanItemSnapshot(
+                    capability_id="desktop.app_discovery",
+                    title="Discover Desktop Apps",
+                    status="available",
+                    required=True,
+                    reason="Selected because the tool plan has concrete steps for this capability.",
+                    selected_tools=["desktop.list_apps"],
+                    planned_step_ids=["discover-desktop-state"],
+                )
+            ],
+            required_capabilities=["desktop.app_discovery"],
+            available_capabilities=["desktop.app_discovery"],
+        ),
         requests=[request],
         approvals_required=["operate-foreground-ui"],
         route_to_studio=True,
@@ -425,6 +448,7 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         "decision_id",
         "plan_id",
         "intent_kind",
+        "capability_plan",
         "requests",
         "task_core",
         "task_progress",
@@ -438,6 +462,9 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         "source",
     ]
     assert payload["requests"][0]["tool_name"] == "desktop.list_apps"
+    assert payload["capability_plan"]["items"][0]["capability_id"] == "desktop.app_discovery"
+    assert payload["requests"][0]["capability_title"] == "Discover Desktop Apps"
+    assert payload["requests"][0]["capability_selected_tools"] == ["desktop.list_apps"]
     assert payload["requests"][0]["input"] == {"query": "PixelForge", "limit": 20}
     assert payload["requests"][0]["runtime_stage"] == "discover"
     assert payload["requests"][0]["replan_triggers"] == ["verification_failed"]
@@ -1912,6 +1939,7 @@ def test_planner_plan_created_event_includes_execution_envelope_for_studio_debug
     assert plan_event["payload"]["capability_plan"]["plan_id"] == (
         decision.plan.capability_plan.plan_id
     )
+    assert envelope["capability_plan"]["plan_id"] == decision.plan.capability_plan.plan_id
     assert envelope["decision_id"] == decision.decision_id
     assert envelope["plan_id"] == decision.plan.plan_id
     assert envelope["intent_kind"] == "data_analysis"

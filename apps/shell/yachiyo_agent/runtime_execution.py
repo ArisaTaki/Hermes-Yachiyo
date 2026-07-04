@@ -62,6 +62,7 @@ def runtime_execution_envelope_from_decision(
         decision_id=decision.decision_id,
         plan_id=decision.plan.plan_id,
         intent_kind=str(decision.selected_intent.kind or ""),
+        capability_plan=decision.plan.capability_plan,
         requests=requests,
         task_core=decision.plan.task_core,
         task_progress=task_progress_summary_from_task_core(decision.plan.task_core),
@@ -283,6 +284,27 @@ def runtime_execution_requests_from_envelope_payload(
     return projected
 
 
+def _execution_request_capability_plan_item(
+    decision: PlannerDecisionSnapshot,
+    *,
+    capability_id: str,
+    step_id: str,
+) -> Any | None:
+    capability_plan = getattr(getattr(decision, "plan", None), "capability_plan", None)
+    items = list(getattr(capability_plan, "items", None) or [])
+    clean_capability_id = _text(capability_id)
+    if clean_capability_id:
+        for item in items:
+            if _text(getattr(item, "capability_id", None)) == clean_capability_id:
+                return item
+    clean_step_id = _text(step_id)
+    if clean_step_id:
+        for item in items:
+            if clean_step_id in _string_values(getattr(item, "planned_step_ids", None)):
+                return item
+    return None
+
+
 def _execution_request_snapshot(
     request: Mapping[str, Any],
     *,
@@ -307,6 +329,11 @@ def _execution_request_snapshot(
         or (step.capability_id if step is not None else "")
         or ""
     ).strip()
+    capability_plan_item = _execution_request_capability_plan_item(
+        decision,
+        capability_id=capability_id,
+        step_id=step_id,
+    )
     request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     runtime_metadata = _execution_request_runtime_metadata(request, step, decision)
     replan_metadata = _execution_request_replan_metadata(
@@ -351,6 +378,15 @@ def _execution_request_snapshot(
         ),
         step_id=step_id or None,
         capability_id=capability_id or None,
+        capability_title=_text(getattr(capability_plan_item, "title", None)),
+        capability_status=_text(getattr(capability_plan_item, "status", None)),
+        capability_reason=_text(getattr(capability_plan_item, "reason", None)),
+        capability_selected_tools=_string_values(
+            getattr(capability_plan_item, "selected_tools", None)
+        ),
+        capability_planned_step_ids=_string_values(
+            getattr(capability_plan_item, "planned_step_ids", None)
+        ),
         decision_id=decision.decision_id,
         plan_id=decision.plan.plan_id,
         tool_plan_id=(
@@ -451,6 +487,11 @@ def _tool_request_from_execution_request(
         "request_id",
         "step_id",
         "capability_id",
+        "capability_title",
+        "capability_status",
+        "capability_reason",
+        "capability_selected_tools",
+        "capability_planned_step_ids",
         "decision_id",
         "plan_id",
         "tool_plan_id",

@@ -1228,6 +1228,8 @@ function ExecutionRequestRow({
   const dependsOn = uniqueStrings(request.depends_on || []);
   const fallbackTools = uniqueStrings(request.fallback_tools || []);
   const replanTriggers = uniqueStrings(request.replan_triggers || []);
+  const capabilitySelectedTools = uniqueStrings(request.capability_selected_tools || []);
+  const capabilityPlannedStepIds = uniqueStrings(request.capability_planned_step_ids || []);
   const inputPreview = plannerStepInputPreview(request.input);
   const planningReasonLabel = runtimePlannerReasonLabel(request.planning_reason);
   const followupTargetPreview = plannerValuePreview(objectRecord(request.followup_target));
@@ -1259,6 +1261,11 @@ function ExecutionRequestRow({
       className="studio-planner-step"
       data-approval-required={String(Boolean(request.approval_required))}
       data-capability-id={request.capability_id || ''}
+      data-capability-planned-step-ids={capabilityPlannedStepIds.join(',')}
+      data-capability-reason={request.capability_reason || ''}
+      data-capability-selected-tools={capabilitySelectedTools.join(',')}
+      data-capability-status={request.capability_status || ''}
+      data-capability-title={request.capability_title || ''}
       data-continue-to-model={String(Boolean(request.continue_to_model))}
       data-decision-id={request.decision_id || ''}
       data-depends-on={dependsOn.join(',')}
@@ -1301,7 +1308,12 @@ function ExecutionRequestRow({
       <div>
         <strong>{index + 1}. {request.tool_name || 'tool request'}</strong>
         {request.step_id ? <span>step: {request.step_id}</span> : null}
-        {request.capability_id ? <span>capability: {request.capability_id}</span> : null}
+        {request.capability_id ? (
+          <span title={request.capability_reason || request.capability_title || request.capability_id}>
+            capability: {request.capability_title || request.capability_id}
+            {request.capability_status ? ` · ${request.capability_status}` : ''}
+          </span>
+        ) : null}
         {workflowScope ? <span>workflow: {workflowScope}</span> : null}
         {groupScope ? <span>group: {groupScope}</span> : null}
         {request.core_id || request.workspace_id ? (
@@ -1329,6 +1341,7 @@ function ExecutionRequestRow({
         {inputPreview ? <span>input: {inputPreview}</span> : null}
         {dependsOn.length ? <span>depends on: {dependsOn.join(', ')}</span> : null}
         {fallbackTools.length ? <span>fallbacks: {fallbackTools.join(', ')}</span> : null}
+        {capabilitySelectedTools.length ? <span>capability tools: {capabilitySelectedTools.join(', ')}</span> : null}
         {replanTriggers.length ? <span>replan: {replanTriggers.join(', ')}</span> : null}
         {followupTargetPreview ? <span>follow-up: {followupTargetPreview}</span> : null}
         {actionTargetPreview ? <span>target: {actionTargetPreview}</span> : null}
@@ -1681,6 +1694,11 @@ function runtimeExecutionRequestSnapshot(value: unknown): RuntimeExecutionReques
     workflow_node_kind: stringValue(record.workflow_node_kind) || null,
     step_id: stepId || null,
     capability_id: stringValue(record.capability_id) || null,
+    capability_title: stringValue(record.capability_title),
+    capability_status: stringValue(record.capability_status),
+    capability_reason: stringValue(record.capability_reason),
+    capability_selected_tools: uniqueStrings(Array.isArray(record.capability_selected_tools) ? record.capability_selected_tools : []),
+    capability_planned_step_ids: uniqueStrings(Array.isArray(record.capability_planned_step_ids) ? record.capability_planned_step_ids : []),
     tool_name: toolName || 'tool',
     protocol: stringValue(record.protocol) || 'json_fallback',
     input: objectRecord(record.input),

@@ -558,6 +558,11 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     request_id: str
     step_id: str | None = None
     capability_id: str | None = None
+    capability_title: str = ""
+    capability_status: str = ""
+    capability_reason: str = ""
+    capability_selected_tools: list[str] = Field(default_factory=list)
+    capability_planned_step_ids: list[str] = Field(default_factory=list)
     decision_id: str | None = None
     plan_id: str | None = None
     tool_plan_id: str | None = None
@@ -610,6 +615,7 @@ class RuntimeExecutionEnvelopeSnapshot(_PublicSnapshot):
     decision_id: str
     plan_id: str
     intent_kind: str
+    capability_plan: CapabilityPlanSnapshot | None = None
     requests: list[RuntimeExecutionRequestSnapshot] = Field(default_factory=list)
     task_core: TaskCoreSnapshot | None = None
     task_progress: TaskProgressSummarySnapshot | None = None

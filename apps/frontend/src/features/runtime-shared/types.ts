@@ -488,6 +488,11 @@ export type RuntimeExecutionRequestSnapshot = {
   workflow_node_kind?: string | null;
   step_id?: string | null;
   capability_id?: string | null;
+  capability_title?: string;
+  capability_status?: string;
+  capability_reason?: string;
+  capability_selected_tools?: string[];
+  capability_planned_step_ids?: string[];
   tool_name: string;
   protocol?: string;
   input?: Record<string, unknown>;
@@ -522,6 +527,7 @@ export type RuntimeExecutionEnvelopeSnapshot = {
   decision_id: string;
   plan_id: string;
   intent_kind: string;
+  capability_plan?: CapabilityPlanSnapshot | null;
   requests?: RuntimeExecutionRequestSnapshot[];
   task_core?: TaskCoreSnapshot | null;
   task_progress?: TaskProgressSummarySnapshot | null;

@@ -33928,6 +33928,8 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     assert envelope is not None
     assert envelope.decision_id == decision.decision_id
     assert envelope.plan_id == decision.plan.plan_id
+    assert envelope.capability_plan is not None
+    assert envelope.capability_plan.plan_id == decision.plan.capability_plan.plan_id
     assert envelope.task_core is not None
     assert envelope.task_core.core_id == decision.plan.task_core.core_id
     assert envelope.task_progress is not None
@@ -33953,6 +33955,13 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     ]
     assert envelope.requests[1].step_id == "operate-foreground-ui"
     assert envelope.requests[1].capability_id == "desktop.ui_operation"
+    assert envelope.requests[1].capability_title == "Operate Desktop UI"
+    assert envelope.requests[1].capability_status in {"available", "degraded"}
+    assert envelope.requests[1].capability_reason == (
+        "Selected because the tool plan has concrete steps for this capability."
+    )
+    assert "app.open_and_click_ui_element" in envelope.requests[1].capability_selected_tools
+    assert "operate-foreground-ui" in envelope.requests[1].capability_planned_step_ids
     assert envelope.requests[1].approval_required is True
     assert envelope.requests[1].runtime_doctrine == "discover_operate_verify"
     assert envelope.requests[1].runtime_role == "click_ui"
@@ -33996,6 +34005,13 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     ]
     assert projected_requests[1]["step_id"] == "operate-foreground-ui"
     assert projected_requests[1]["capability_id"] == "desktop.ui_operation"
+    assert projected_requests[1]["capability_title"] == "Operate Desktop UI"
+    assert projected_requests[1]["capability_reason"] == (
+        "Selected because the tool plan has concrete steps for this capability."
+    )
+    assert "app.open_and_click_ui_element" in projected_requests[1][
+        "capability_selected_tools"
+    ]
     assert projected_requests[1]["approval_required"] is True
     assert projected_requests[1]["runtime_stage"] == "operate"
     assert projected_requests[1]["runtime_role"] == "click_ui"
