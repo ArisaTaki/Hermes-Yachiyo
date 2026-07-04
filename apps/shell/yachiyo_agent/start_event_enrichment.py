@@ -122,12 +122,17 @@ def _payload_with_request_metadata(
         if isinstance(request_payload.get("metadata"), Mapping)
         else {}
     )
-    if not request_metadata:
-        return payload
-    response_metadata = (
-        dict(payload.get("metadata")) if isinstance(payload.get("metadata"), Mapping) else {}
-    )
-    payload["metadata"] = {**request_metadata, **response_metadata}
+    if request_metadata:
+        response_metadata = (
+            dict(payload.get("metadata")) if isinstance(payload.get("metadata"), Mapping) else {}
+        )
+        payload["metadata"] = {**request_metadata, **response_metadata}
+    request_envelope = request_payload.get("runtime_execution_envelope")
+    if (
+        isinstance(request_envelope, Mapping)
+        and not isinstance(payload.get("runtime_execution_envelope"), Mapping)
+    ):
+        payload["runtime_execution_envelope"] = dict(request_envelope)
     return payload
 
 

@@ -690,6 +690,44 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     assert [todo.step_id for todo in task.task_core.todos] == ["analyze-data-file"]
 
 
+def test_yachiyo_agent_service_starts_chat_with_full_runtime_execution_envelope() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="请分析 data/sales.csv 并输出报告",
+            conversation_id="chat-1",
+            title="Data analysis",
+        )
+    )
+
+    request_payload = port.calls[0][1]
+    metadata = request_payload["metadata"]
+    envelope = request_payload["runtime_execution_envelope"]
+    assert [request["tool_name"] for request in envelope["requests"]] == [
+        "workspace.read",
+        "python.run",
+        "artifact.write",
+    ]
+    assert [request["runtime_stage"] for request in envelope["requests"]] == [
+        "discover",
+        "operate",
+        "produce",
+    ]
+    assert [request["tool_name"] for request in metadata["yachiyo_execution_envelope"]["requests"]] == [
+        "data.analyze",
+    ]
+    assert task.runtime_execution_envelope is not None
+    assert [request.tool_name for request in task.runtime_execution_envelope.requests] == [
+        "workspace.read",
+        "python.run",
+        "artifact.write",
+    ]
+    assert task.runtime_execution_envelope.task_progress is not None
+    assert task.runtime_execution_envelope.task_progress.total_todos == 3
+
+
 def test_yachiyo_agent_service_plans_shared_chat_execution_envelope() -> None:
     service = YachiyoAgentService(_FakeRuntimePort())
 

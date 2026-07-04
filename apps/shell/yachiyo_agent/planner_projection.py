@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .contracts import PlannerDecisionSnapshot
+from .capability_registry import runtime_execution_tool_names
 from .desktop_plan_hints import (
     discovered_app_open_needs_model_followup,
     discovered_app_pending_user_action,
@@ -114,9 +115,27 @@ def planner_enriched_chat_request(
         str(payload.get("prompt") or payload.get("goal") or ""),
         metadata=metadata,
     )
+    request_allowed_tools = _request_allowed_tools(payload)
     planner_metadata = runtime_planner_metadata(
         decision,
-        allowed_tools=allowed_tools or _request_allowed_tools(payload),
+        allowed_tools=allowed_tools or request_allowed_tools,
+    )
+    execution_allowed_tools = _entrypoint_runtime_execution_allowed_tools(
+        decision,
+        explicit_allowed_tools=allowed_tools or request_allowed_tools,
+    )
+    execution_decision = (
+        runtime_planner_decision(
+            str(payload.get("prompt") or payload.get("goal") or ""),
+            allowed_tools=execution_allowed_tools,
+            metadata=metadata,
+        )
+        or decision
+    )
+    runtime_execution_envelope = runtime_execution_envelope_payload(
+        execution_decision,
+        allowed_tools=execution_allowed_tools,
+        full_plan=True,
     )
     compatible_plan_tools = _daily_desktop_compatible_plan_tools(decision, metadata)
     if compatible_plan_tools:
@@ -126,7 +145,26 @@ def planner_enriched_chat_request(
         **planner_metadata,
         **orchestration_metadata,
     }
+    if runtime_execution_envelope:
+        payload["runtime_execution_envelope"] = runtime_execution_envelope
     return payload
+
+
+def _entrypoint_runtime_execution_allowed_tools(
+    decision: PlannerDecisionSnapshot,
+    *,
+    explicit_allowed_tools: Iterable[str] | None,
+) -> list[str] | None:
+    if explicit_allowed_tools is not None:
+        return [
+            str(tool or "").strip()
+            for tool in explicit_allowed_tools
+            if str(tool or "").strip()
+        ] or None
+    return runtime_execution_tool_names(
+        intent_kind=decision.selected_intent.kind,
+        prefer_low_level=True,
+    )
 
 
 def _request_allowed_tools(payload: Mapping[str, Any]) -> list[str] | None:

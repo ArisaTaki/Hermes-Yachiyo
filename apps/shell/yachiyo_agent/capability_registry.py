@@ -601,6 +601,21 @@ def capability_definition_map() -> dict[str, CapabilityDefinition]:
     return {definition.capability_id: definition for definition in CAPABILITY_DEFINITIONS}
 
 
+def runtime_execution_tool_names(
+    *,
+    intent_kind: str | None = None,
+    prefer_low_level: bool = False,
+) -> list[str]:
+    tools = _dedupe(
+        tool
+        for definition in CAPABILITY_DEFINITIONS
+        for tool in definition.tools
+    )
+    if prefer_low_level:
+        tools = _low_level_runtime_tools(tools, intent_kind=intent_kind)
+    return tools
+
+
 def _dynamic_tools_for_capability(capability_id: str, allowed_tools: Iterable[str]) -> list[str]:
     allowed = sorted({str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()})
     if not allowed:
@@ -617,6 +632,29 @@ def _dynamic_tools_for_capability(capability_id: str, allowed_tools: Iterable[st
             and not any(tool.startswith(prefix) for prefix in excluded_prefixes)
         )
     ]
+
+
+def _low_level_runtime_tools(
+    tools: Iterable[str],
+    *,
+    intent_kind: str | None,
+) -> list[str]:
+    excluded = set()
+    if str(intent_kind or "").strip() in {"data_analysis", "report_generation"}:
+        excluded.add("data.analyze")
+    return _dedupe(tool for tool in tools if tool not in excluded)
+
+
+def _dedupe(values: Iterable[str]) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for value in values:
+        clean = str(value or "").strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        result.append(clean)
+    return result
 
 
 def capability_snapshots(
