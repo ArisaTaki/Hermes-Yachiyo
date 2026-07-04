@@ -27,7 +27,11 @@ import { ApprovalInspector, type RunPendingApproval } from './ApprovalInspector'
 import { ArtifactInspector } from './ArtifactInspector';
 import { GroupRunDetailPanel } from './GroupRunDetailPanel';
 import { MemorySkillTraceInspector } from './MemorySkillTraceInspector';
-import { PlannerTraceInspector } from './PlannerTraceInspector';
+import {
+  PlannerTraceInspector,
+  TaskCoreInspector,
+  TaskProgressInspector,
+} from './PlannerTraceInspector';
 import { RunTimeline } from './RunTimeline';
 import { ToolCallInspector } from './ToolCallInspector';
 import { WorkflowChildApprovalBridge } from './WorkflowChildApprovalBridge';
@@ -249,6 +253,23 @@ export function RunDetailPanel({
   const recoverySourceLabel = recoveryRunSourceLabel(recoverySource);
   const recoverySourceMeta = recoveryRunSourceMeta(recoverySource);
   const showRunDetailRecoverySource = Boolean(selectedRun && recoverySource);
+  const selectedRunIdForReplanRecovery = selectedRun
+    ? selectedPublicRunTimeline?.run_id || selectedRun.run_id
+    : '';
+  const handleRunReplanRecoveryAction = selectedRunIdForReplanRecovery
+    ? (requestId: string, action: RuntimeToolRecoveryAction) => {
+      void onRunReplanRecoveryAction?.(
+        selectedRunIdForReplanRecovery,
+        requestId,
+        action,
+      );
+    }
+    : undefined;
+  const showTaskWorkspace = Boolean(
+    selectedPublicRunTimeline?.task_core
+    || selectedPublicRunTimeline?.task_progress
+    || selectedPublicRunTimeline?.replan_recoveries?.length,
+  );
   const selectedRunScopedWorkflowRerunDisabledReason = selectedRun?.kind === 'workflow_run'
     ? isActiveRunStatus(selectedRun.status)
       ? '当前 Workflow Run 还在进行中，请完成、失败或取消后再重跑。'
@@ -419,6 +440,36 @@ export function RunDetailPanel({
             summary={selectedPublicRunTimeline?.runtime_debug}
             testId="agent-run-detail-runtime-debug"
           />
+          {showTaskWorkspace ? (
+            <details
+              className="run-detail-block run-detail-fold run-task-workspace"
+              data-core-id={selectedPublicRunTimeline?.task_core?.core_id || ''}
+              data-task-progress-status={selectedPublicRunTimeline?.task_progress?.status || ''}
+              data-testid="agent-run-detail-task-workspace"
+              data-workspace-id={selectedPublicRunTimeline?.task_core?.workspace?.workspace_id || selectedPublicRunTimeline?.task_progress?.workspace_id || ''}
+              open
+            >
+              <summary className="run-detail-section-head">
+                <div>
+                  <h4>Task Workspace</h4>
+                  <span>{selectedPublicRunTimeline?.task_progress?.progress_text || selectedPublicRunTimeline?.task_core?.workspace?.title || 'workspace / todos / checkpoints / replan'}</span>
+                </div>
+              </summary>
+              <div className="run-detail-fold-body studio-task-workspace">
+                {selectedPublicRunTimeline?.task_core ? (
+                  <TaskCoreInspector taskCore={selectedPublicRunTimeline.task_core} />
+                ) : null}
+                {selectedPublicRunTimeline?.task_progress || selectedPublicRunTimeline?.replan_recoveries?.length ? (
+                  <TaskProgressInspector
+                    onRunReplanRecoveryAction={handleRunReplanRecoveryAction}
+                    recoveryActionDisabled={busy || !onRunReplanRecoveryAction}
+                    replanRecoveries={selectedPublicRunTimeline?.replan_recoveries || []}
+                    taskProgress={selectedPublicRunTimeline?.task_progress || null}
+                  />
+                ) : null}
+              </div>
+            </details>
+          ) : null}
           {selectedWorkflowApprovalChildRunId ? (
             <WorkflowChildApprovalBridge
               busy={busy}
@@ -456,18 +507,11 @@ export function RunDetailPanel({
           />
           <PlannerTraceInspector
             events={selectedRunPlannerEvents}
-            onRunReplanRecoveryAction={(
-              selectedPublicRunTimeline?.run_id || selectedRun.run_id
-            ) ? (requestId, action) => {
-              void onRunReplanRecoveryAction?.(
-                selectedPublicRunTimeline?.run_id || selectedRun.run_id,
-                requestId,
-                action,
-              );
-            } : undefined}
+            onRunReplanRecoveryAction={handleRunReplanRecoveryAction}
             plannerSummary={selectedPublicRunTimeline?.planner_summary}
             recoveryActionDisabled={busy || !onRunReplanRecoveryAction}
             replanRecoveries={selectedPublicRunTimeline?.replan_recoveries || []}
+            showTaskWorkspace={!showTaskWorkspace}
             sourceLabel={plannerTraceSource}
             taskCore={selectedPublicRunTimeline?.task_core}
             taskProgress={selectedPublicRunTimeline?.task_progress || null}

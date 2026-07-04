@@ -18277,6 +18277,22 @@ button.studio-tool-permission:disabled {
   padding: 0 12px 12px;
 }
 
+.studio-task-workspace {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+.studio-task-workspace>section {
+  padding-top: 10px;
+  border-top: 1px solid var(--hy-border-soft);
+}
+
+.studio-task-workspace>section:first-child {
+  padding-top: 0;
+  border-top: 0;
+}
+
 .run-task-block {
   background: oklch(66% 0.12 188 / 0.045);
 }

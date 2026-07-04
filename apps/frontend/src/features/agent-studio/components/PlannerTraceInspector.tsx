@@ -116,6 +116,7 @@ type PlannerTraceInspectorProps = {
   plannerSummary?: PlannerTraceSummarySnapshot | null;
   recoveryActionDisabled?: boolean;
   replanRecoveries?: ReplanRecoverySnapshot[];
+  showTaskWorkspace?: boolean;
   sourceLabel?: string;
   taskCore?: TaskCoreSnapshot | null;
   taskProgress?: TaskProgressSummarySnapshot | null;
@@ -128,6 +129,7 @@ export function PlannerTraceInspector({
   plannerSummary = null,
   recoveryActionDisabled = false,
   replanRecoveries = [],
+  showTaskWorkspace = true,
   sourceLabel = 'Intent / Capability / Plan 的 Runtime Planner replay 事实',
   taskCore: taskCoreFallback = null,
   taskProgress = null,
@@ -270,8 +272,8 @@ export function PlannerTraceInspector({
           </section>
         ) : null}
 
-        {taskCore ? <TaskCoreInspector taskCore={taskCore} /> : null}
-        {effectiveTaskProgress || replanRecoveries.length ? (
+        {showTaskWorkspace && taskCore ? <TaskCoreInspector taskCore={taskCore} /> : null}
+        {showTaskWorkspace && (effectiveTaskProgress || replanRecoveries.length) ? (
           <TaskProgressInspector
             onRunReplanRecoveryAction={onRunReplanRecoveryAction}
             recoveryActionDisabled={recoveryActionDisabled}
