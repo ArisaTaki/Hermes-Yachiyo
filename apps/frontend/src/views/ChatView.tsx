@@ -118,9 +118,7 @@ import {
   responsiveChatSidebarMaxWidth,
 } from '../features/yachiyo-chat/layoutState';
 import { publicTaskSnapshotForMessage } from '../features/yachiyo-chat/taskSnapshots';
-import {
-  runtimeToolRecoveryActionTaskStart,
-} from '../features/runtime-shared/toolRecoveryActions';
+import { startYachiyoTaskRecoveryAction } from '../features/yachiyo-chat/taskRecoveryActions';
 import type {
   AgentTaskSnapshot,
   ApprovalCardSnapshot,
@@ -439,25 +437,32 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
     task: AgentTaskSnapshot,
     action: TaskPermissionRecoveryAction,
   ) => {
-    const recoveryStart = runtimeToolRecoveryActionTaskStart(action, {
-      source_task_id: task.task_id,
-      source_task_title: task.title || '',
-    });
-    const prompt = recoveryStart.prompt;
+    const prompt = action.prompt || action.label || action.tool;
     if (!prompt || approvalActionMessageId) return;
     const busyId = `task:${task.task_id || 'unknown'}:recovery:${action.permission_target || action.tool}`;
     setApprovalActionMessageId(busyId);
     setStatus(`正在执行权限恢复：${action.label || prompt}...`);
     try {
-      const handled = await startPublicYachiyoTask({
-        clientMessageId: createClientMessageId(),
-        conversationId: sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null,
-        prompt,
-        runnableId: null,
-        runnableKind: 'main',
-        metadata: recoveryStart.metadata,
+      const conversationId = sessions?.current_session_id || latestChatSnapshotRef.current.currentSessionId || null;
+      const result = await startYachiyoTaskRecoveryAction({
+        action,
+        conversationId,
+        onStartedTask: (startedTask) => rememberYachiyoTasks([startedTask]),
+        startFallbackTask: (recoveryStart) => startPublicYachiyoTask({
+          clientMessageId: createClientMessageId(),
+          conversationId,
+          prompt: recoveryStart.prompt,
+          runnableId: null,
+          runnableKind: 'main',
+          metadata: recoveryStart.metadata,
+        }),
+        task,
       });
-      if (!handled) setStatus('权限恢复动作提交失败');
+      if (result.mode === 'replan') {
+        setStatus(`已启动恢复动作：${action.label || result.title || result.prompt}`);
+      } else if (result.fallbackResult === false) {
+        setStatus('权限恢复动作提交失败');
+      }
     } finally {
       setApprovalActionMessageId('');
       focusComposerSoon();
@@ -465,6 +470,7 @@ export function ChatView({ embedded = false }: ChatViewProps = {}) {
   }, [
     approvalActionMessageId,
     focusComposerSoon,
+    rememberYachiyoTasks,
     sessions?.current_session_id,
     setApprovalActionMessageId,
     setStatus,

@@ -146,6 +146,25 @@ export async function startYachiyoTask(request: StartChatTaskRequest): Promise<A
   return apiPost('/yachiyo/tasks', request);
 }
 
+export type YachiyoTaskReplanRecoveryActionRequest = {
+  request_id: string;
+  action_id?: string;
+  title?: string;
+  continue_to_model?: boolean;
+  conversation_id?: string | null;
+  metadata?: Record<string, unknown>;
+};
+
+export async function startYachiyoTaskReplanRecoveryAction(
+  taskId: string,
+  request: YachiyoTaskReplanRecoveryActionRequest,
+): Promise<AgentTaskSnapshot> {
+  return apiPost(
+    `/yachiyo/tasks/${encodeURIComponent(taskId)}/replan-recovery-actions/start`,
+    request,
+  );
+}
+
 export type PlanYachiyoTaskExecutionRequest = {
   prompt: string;
   allowed_tools?: string[];

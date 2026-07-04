@@ -75,6 +75,20 @@ async def start_task(
     return await yachiyo_chat_handlers.start_task(request, http_request)
 
 
+@router.post("/tasks/{task_id}/replan-recovery-actions/start")
+@router.post("/chat/tasks/{task_id}/replan-recovery-actions/start")
+async def start_task_replan_recovery_action(
+    task_id: str,
+    request: RunReplanRecoveryActionBody,
+    http_request: Request = None,  # type: ignore[assignment]
+) -> dict[str, Any]:
+    return await yachiyo_chat_handlers.start_replan_recovery_action(
+        task_id,
+        request,
+        http_request,
+    )
+
+
 @router.post("/tasks/plan")
 @router.post("/chat/tasks/plan")
 async def plan_task_execution(

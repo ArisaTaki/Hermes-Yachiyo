@@ -23,12 +23,10 @@ import {
   launcherTaskConversationId,
   launcherTaskTitle,
 } from '../features/yachiyo-chat/launcherTasks';
+import { startYachiyoTaskRecoveryAction } from '../features/yachiyo-chat/taskRecoveryActions';
 import { chatDesktopPermissionNotice } from '../features/yachiyo-chat/readiness';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot, ChatNotice } from '../features/yachiyo-chat/types';
-import {
-  runtimeToolRecoveryActionTaskStart,
-  type RuntimeToolRecoveryAction,
-} from '../features/runtime-shared/toolRecoveryActions';
+import type { RuntimeToolRecoveryAction } from '../features/runtime-shared/toolRecoveryActions';
 import type { AppView } from '../lib/view';
 import {
   LIVE2D_DEFAULT_RENDER_FPS,
@@ -356,22 +354,30 @@ function handleContextMenu(event: MouseEvent, mode: LauncherMode) {
   void openLauncherMenu(mode);
 }
 
-function runLauncherRecoveryAction(
+async function runLauncherRecoveryAction(
   startAgentTask: LauncherStartAgentTask,
   task: AgentTaskSnapshot,
   action: RuntimeToolRecoveryAction,
   surface: string,
+  rememberTask: (task: AgentTaskSnapshot) => void,
+  refresh: () => Promise<unknown>,
 ) {
-  const recoveryStart = runtimeToolRecoveryActionTaskStart(action, {
-    launcher_recovery: true,
-    launcher_recovery_surface: surface,
-    source_task_id: task.task_id || '',
-    source_task_title: task.title || '',
+  const result = await startYachiyoTaskRecoveryAction({
+    action,
+    conversationId: task.conversation_id || null,
+    metadata: {
+      launcher_recovery: true,
+      launcher_recovery_surface: surface,
+    },
+    onStartedTask: rememberTask,
+    startFallbackTask: (recoveryStart) => startAgentTask(recoveryStart.prompt, {
+      title: recoveryStart.title,
+      metadata: recoveryStart.metadata,
+    }),
+    task,
   });
-  return startAgentTask(recoveryStart.prompt, {
-    title: recoveryStart.title,
-    metadata: recoveryStart.metadata,
-  });
+  if (result.mode === 'replan') await refresh();
+  return result.task;
 }
 
 function BubbleLauncher({
@@ -612,7 +618,14 @@ function BubbleLauncher({
         onApproveApproval={onApproveTaskApproval}
         onCancelTask={onCancelTask}
         onRejectApproval={onRejectTaskApproval}
-        onRunRecoveryAction={(task, action) => void runLauncherRecoveryAction(startAgentTask, task, action, 'bubble')}
+        onRunRecoveryAction={(task, action) => void runLauncherRecoveryAction(
+          startAgentTask,
+          task,
+          action,
+          'bubble',
+          onAgentTaskSnapshot,
+          refresh,
+        )}
         task={agentTask}
       />
       <LauncherDesktopReadinessNotice
@@ -1209,7 +1222,14 @@ function Live2DLauncher({
         onApproveApproval={onApproveTaskApproval}
         onCancelTask={onCancelTask}
         onRejectApproval={onRejectTaskApproval}
-        onRunRecoveryAction={(task, action) => void runLauncherRecoveryAction(startAgentTask, task, action, 'live2d')}
+        onRunRecoveryAction={(task, action) => void runLauncherRecoveryAction(
+          startAgentTask,
+          task,
+          action,
+          'live2d',
+          onAgentTaskSnapshot,
+          refresh,
+        )}
         task={agentTask}
       />
       <LauncherDesktopReadinessNotice

@@ -640,6 +640,65 @@ async def test_yachiyo_task_routes_use_injected_runtime_and_return_public_snapsh
 
 
 @pytest.mark.asyncio
+async def test_yachiyo_task_route_starts_replan_recovery_action(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class _FakeAgentService:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, Any]] = []
+
+        def start_replan_recovery_action(
+            self,
+            task_id: str,
+            payload: dict[str, Any],
+        ) -> AgentTaskSnapshot:
+            self.calls.append(("start_replan_recovery_action", {"task_id": task_id, "payload": payload}))
+            return AgentTaskSnapshot(
+                task_id="recovery-task-1",
+                conversation_id=payload.get("conversation_id") or "chat-1",
+                title="Recover",
+                status="running",
+                metadata={
+                    "source": "yachiyo_chat_replan_recovery",
+                    "replan_request_id": payload.get("request_id"),
+                    "replan_recovery_action_id": payload.get("action_id"),
+                },
+            )
+
+    service = _FakeAgentService()
+    monkeypatch.setattr(yachiyo_chat_handlers, "agent_service", lambda _request=None: service)
+
+    response = await yachiyo.start_task_replan_recovery_action(
+        "task-1",
+        yachiyo.RunReplanRecoveryActionBody(
+            request_id="replan-1",
+            action_id="replan-1:action:1:desktop.list_apps",
+            conversation_id="chat-1",
+            metadata={"surface": "chat"},
+        ),
+        None,
+    )
+
+    assert response["task_id"] == "recovery-task-1"
+    assert response["metadata"]["source"] == "yachiyo_chat_replan_recovery"
+    assert service.calls == [
+        (
+            "start_replan_recovery_action",
+            {
+                "task_id": "task-1",
+                "payload": {
+                    "request_id": "replan-1",
+                    "action_id": "replan-1:action:1:desktop.list_apps",
+                    "conversation_id": "chat-1",
+                    "continue_to_model": True,
+                    "metadata": {"surface": "chat"},
+                },
+            },
+        )
+    ]
+
+
+@pytest.mark.asyncio
 async def test_yachiyo_task_approve_preserves_approval_decision_payload(monkeypatch: pytest.MonkeyPatch) -> None:
     class _ApproveRecordingService:
         def __init__(self) -> None:
@@ -8447,6 +8506,7 @@ def test_yachiyo_chat_routes_are_registered_as_light_surface_aliases() -> None:
     assert '@router.get("/tasks/{task_id}/timeline")' in source
     assert '@router.get("/tasks/{task_id}/events")' in source
     assert '@router.get("/tasks/{task_id}/artifacts/{artifact_path:path}")' in source
+    assert '@router.post("/tasks/{task_id}/replan-recovery-actions/start")' in source
     assert '@router.post("/tasks/{task_id}/approve")' in source
     assert '@router.post("/tasks/{task_id}/reject")' in source
     assert '@router.post("/tasks/{task_id}/cancel")' in source
@@ -8458,6 +8518,7 @@ def test_yachiyo_chat_routes_are_registered_as_light_surface_aliases() -> None:
     assert '@router.get("/chat/tasks/{task_id}/timeline")' in source
     assert '@router.get("/chat/tasks/{task_id}/events")' in source
     assert '@router.get("/chat/tasks/{task_id}/artifacts/{artifact_path:path}")' in source
+    assert '@router.post("/chat/tasks/{task_id}/replan-recovery-actions/start")' in source
     assert '@router.post("/chat/tasks/{task_id}/approve")' in source
     assert '@router.post("/chat/tasks/{task_id}/reject")' in source
     assert '@router.post("/chat/tasks/{task_id}/cancel")' in source
@@ -8479,6 +8540,7 @@ def test_yachiyo_public_routes_delegate_to_chat_and_studio_handlers() -> None:
     assert "from apps.bridge.routes import yachiyo_chat_handlers" in source
     assert "from apps.bridge.routes import yachiyo_studio_handlers" in source
     assert "return await yachiyo_chat_handlers.start_task(request, http_request)" in source
+    assert "return await yachiyo_chat_handlers.start_replan_recovery_action(" in source
     assert "return await yachiyo_chat_handlers.plan_task_execution(request, http_request)" in source
     assert "return await yachiyo_chat_handlers.get_task_timeline(task_id, http_request)" in source
     assert "return await yachiyo_studio_handlers.update_agent(agent_id, request, http_request)" in source

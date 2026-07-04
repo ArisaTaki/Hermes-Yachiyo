@@ -20,11 +20,9 @@ import {
   launcherTaskConversationId,
   launcherTaskTitle,
 } from '../features/yachiyo-chat/launcherTasks';
+import { startYachiyoTaskRecoveryAction } from '../features/yachiyo-chat/taskRecoveryActions';
 import type { AgentTaskSnapshot, ApprovalCardSnapshot } from '../features/yachiyo-chat/types';
-import {
-  runtimeToolRecoveryActionTaskStart,
-  type RuntimeToolRecoveryAction,
-} from '../features/runtime-shared/toolRecoveryActions';
+import type { RuntimeToolRecoveryAction } from '../features/runtime-shared/toolRecoveryActions';
 import { studioRunClearParams, studioRunRouteParams } from '../features/runtime-shared/studioLinks';
 import { AssistantProfileSeedContext, type AssistantProfileSeed } from '../lib/assistantProfileSeed';
 import { apiDelete, apiGet, apiPost, checkAppUpdate, openDesktopMode, openExternalUrl, openPath, quitApp } from '../lib/bridge';
@@ -1397,6 +1395,7 @@ function useLauncherModePayload(mode: 'bubble' | 'live2d', active = true) {
     cancelAgentTask,
     data,
     loading,
+    rememberAgentTask: setPublicAgentTask,
     refresh,
     rejectAgentTaskApproval,
     startAgentTask,
@@ -1407,22 +1406,30 @@ function launcherPayloadHasActiveTask(data: LauncherPayload | null) {
   return ['queued', 'running', 'waiting_approval'].includes(String(data?.chat?.agent_task?.status || ''));
 }
 
-function runLauncherModeRecoveryAction(
+async function runLauncherModeRecoveryAction(
   startAgentTask: LauncherModeStartTask,
   task: AgentTaskSnapshot,
   action: RuntimeToolRecoveryAction,
   surface: string,
+  rememberTask: (task: AgentTaskSnapshot) => void,
+  refresh: () => Promise<unknown>,
 ) {
-  const recoveryStart = runtimeToolRecoveryActionTaskStart(action, {
-    launcher_recovery: true,
-    launcher_recovery_surface: surface,
-    source_task_id: task.task_id || '',
-    source_task_title: task.title || '',
+  const result = await startYachiyoTaskRecoveryAction({
+    action,
+    conversationId: task.conversation_id || null,
+    metadata: {
+      launcher_recovery: true,
+      launcher_recovery_surface: surface,
+    },
+    onStartedTask: rememberTask,
+    startFallbackTask: (recoveryStart) => startAgentTask(recoveryStart.prompt, {
+      title: recoveryStart.title,
+      metadata: recoveryStart.metadata,
+    }),
+    task,
   });
-  return startAgentTask(recoveryStart.prompt, {
-    title: recoveryStart.title,
-    metadata: recoveryStart.metadata,
-  });
+  if (result.mode === 'replan') await refresh();
+  return result.task;
 }
 
 export function BubbleModePage() {
@@ -1432,7 +1439,9 @@ export function BubbleModePage() {
     cancelAgentTask,
     data,
     loading,
+    rememberAgentTask,
     rejectAgentTaskApproval,
+    refresh,
     startAgentTask,
   } = useLauncherModePayload('bubble');
   usePageLoading(loading && !data);
@@ -1476,7 +1485,14 @@ export function BubbleModePage() {
             onApproveApproval={approveAgentTaskApproval}
             onCancelTask={cancelAgentTask}
             onRejectApproval={rejectAgentTaskApproval}
-            onRunRecoveryAction={(task, action) => void runLauncherModeRecoveryAction(startAgentTask, task, action, 'bubble-mode-page')}
+            onRunRecoveryAction={(task, action) => void runLauncherModeRecoveryAction(
+              startAgentTask,
+              task,
+              action,
+              'bubble-mode-page',
+              rememberAgentTask,
+              refresh,
+            )}
             task={agentTask}
             testIdPrefix="bubble-mode"
             variant="panel"
@@ -1505,7 +1521,9 @@ export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
     cancelAgentTask,
     data,
     loading,
+    rememberAgentTask,
     rejectAgentTaskApproval,
+    refresh,
     startAgentTask,
   } = useLauncherModePayload('live2d', active);
   usePageLoading(active && loading && !data);
@@ -1557,7 +1575,14 @@ export function Live2DModePage({ active = true }: { active?: boolean } = {}) {
             onApproveApproval={approveAgentTaskApproval}
             onCancelTask={cancelAgentTask}
             onRejectApproval={rejectAgentTaskApproval}
-            onRunRecoveryAction={(task, action) => void runLauncherModeRecoveryAction(startAgentTask, task, action, 'live2d-mode-page')}
+            onRunRecoveryAction={(task, action) => void runLauncherModeRecoveryAction(
+              startAgentTask,
+              task,
+              action,
+              'live2d-mode-page',
+              rememberAgentTask,
+              refresh,
+            )}
             task={agentTask}
             testIdPrefix="live2d-mode"
             variant="panel"

@@ -7,7 +7,11 @@ from typing import Any
 
 from fastapi import HTTPException, Request
 
-from apps.bridge.routes.yachiyo_models import PlanExecutionBody, TaskApprovalRequest
+from apps.bridge.routes.yachiyo_models import (
+    PlanExecutionBody,
+    RunReplanRecoveryActionBody,
+    TaskApprovalRequest,
+)
 from apps.bridge.routes.yachiyo_services import (
     agent_service,
     app_runtime_from_request,
@@ -45,6 +49,24 @@ async def start_task(
         task_snapshot = await asyncio.to_thread(agent_service(http_request).start_chat_task, request)
         return snapshot(task_snapshot)
     except (AgentRuntimeError, KeyError, ValueError) as exc:
+        raise bad_request(exc) from exc
+
+
+async def start_replan_recovery_action(
+    task_id: str,
+    request: RunReplanRecoveryActionBody,
+    http_request: Request | None = None,
+) -> dict[str, Any]:
+    try:
+        task_snapshot = await asyncio.to_thread(
+            agent_service(http_request).start_replan_recovery_action,
+            task_id,
+            request.model_dump(exclude_none=True),
+        )
+        return snapshot(task_snapshot)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail="Task 不存在") from exc
+    except (AgentRuntimeError, ValueError) as exc:
         raise bad_request(exc) from exc
 
 
