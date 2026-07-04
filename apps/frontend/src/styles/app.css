@@ -4606,6 +4606,14 @@ button:hover {
   min-width: 0;
 }
 
+.launcher-agent-task-planner {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-width: 0;
+}
+
 .launcher-agent-task-main .launcher-agent-task-progress-chip {
   grid-column: auto;
   display: inline-flex;
@@ -4617,6 +4625,21 @@ button:hover {
   border-radius: 999px;
   background: rgba(255, 244, 203, 0.055);
   color: rgba(255, 247, 223, 0.68);
+  font-size: 8px;
+  line-height: 1.15;
+}
+
+.launcher-agent-task-main .launcher-agent-task-planner-chip {
+  grid-column: auto;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 14px;
+  padding: 1px 4px;
+  border: 1px solid rgba(129, 224, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(129, 224, 255, 0.045);
+  color: rgba(184, 236, 255, 0.72);
   font-size: 8px;
   line-height: 1.15;
 }
@@ -4640,7 +4663,17 @@ button:hover {
   gap: 2px;
 }
 
+.bubble-shell .launcher-agent-task-planner {
+  gap: 2px;
+}
+
 .bubble-shell .launcher-agent-task-main .launcher-agent-task-progress-chip {
+  min-height: 12px;
+  padding: 0 3px;
+  font-size: 7px;
+}
+
+.bubble-shell .launcher-agent-task-main .launcher-agent-task-planner-chip {
   min-height: 12px;
   padding: 0 3px;
   font-size: 7px;

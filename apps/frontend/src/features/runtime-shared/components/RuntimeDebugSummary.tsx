@@ -41,11 +41,14 @@ export function RuntimeDebugSummary({
       className={classes}
       data-current-capability-id={summary?.current_capability_id || ''}
       data-has-user-action={String(Boolean(summary?.needs_user_action))}
+      data-intent-kind={summary?.intent_kind || ''}
       data-latest-deferred-tool={summary?.latest_deferred_tool || ''}
       data-latest-recovery-tool={summary?.latest_recovery_tool || ''}
       data-latest-replan-request-id={summary?.latest_replan_request_id || ''}
       data-latest-replan-trigger={summary?.latest_replan_trigger || ''}
       data-needs-replan={String(Boolean(summary?.needs_replan))}
+      data-plan-capabilities={(summary?.plan_capabilities || []).join(',')}
+      data-plan-tools={(summary?.plan_tools || []).join(',')}
       data-runtime-doctrine={summary?.runtime_doctrine || ''}
       data-runtime-role={summary?.runtime_role || ''}
       data-runtime-stage={summary?.runtime_stage || ''}

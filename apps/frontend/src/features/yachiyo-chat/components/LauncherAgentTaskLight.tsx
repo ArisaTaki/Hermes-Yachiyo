@@ -10,6 +10,12 @@ import {
   yachiyoTaskRuntimeExecutionRetryActions,
   type YachiyoTaskReplanRecoverySnapshot,
 } from '../taskRecoveryActions';
+import {
+  plannerSummaryChips,
+  plannerSummaryDetail,
+  plannerSummaryFromTask,
+  type TaskPlannerSummarySnapshot,
+} from '../taskPlannerSummary';
 import { yachiyoTaskStudioTarget, yachiyoTaskStudioUrl } from '../taskSnapshots';
 import type { AgentTaskLightSnapshot, AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '../types';
 
@@ -34,6 +40,7 @@ type LauncherAgentTaskTestIds = {
   light: string;
   openChat: string;
   openStudio: string;
+  plannerSummary: string;
   recovery: string;
   reject: string;
   runtimeDebug: string;
@@ -51,6 +58,7 @@ const DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS: Record<LauncherTaskMode, LauncherAge
     light: 'bubble-launcher-agent-task-light',
     openChat: 'bubble-launcher-agent-task-open-chat',
     openStudio: 'bubble-launcher-agent-task-open-studio',
+    plannerSummary: 'bubble-launcher-agent-task-planner-summary',
     recovery: 'bubble-launcher-agent-task-run-recovery-action',
     reject: 'bubble-launcher-agent-task-reject',
     runtimeDebug: 'bubble-launcher-agent-task-runtime-debug',
@@ -64,6 +72,7 @@ const DEFAULT_LAUNCHER_AGENT_TASK_TEST_IDS: Record<LauncherTaskMode, LauncherAge
     light: 'live2d-launcher-agent-task-light',
     openChat: 'live2d-launcher-agent-task-open-chat',
     openStudio: 'live2d-launcher-agent-task-open-studio',
+    plannerSummary: 'live2d-launcher-agent-task-planner-summary',
     recovery: 'live2d-launcher-agent-task-run-recovery-action',
     reject: 'live2d-launcher-agent-task-reject',
     runtimeDebug: 'live2d-launcher-agent-task-runtime-debug',
@@ -226,6 +235,13 @@ function launcherAgentTaskProgressChips(
   return chips.slice(0, Math.max(0, limit));
 }
 
+function launcherAgentTaskPlannerChips(
+  summary: TaskPlannerSummarySnapshot,
+  limit: number,
+) {
+  return plannerSummaryChips(summary).slice(0, Math.max(0, limit));
+}
+
 export function launcherAgentTaskChatParams(task: LauncherAgentTask): Record<string, string> | undefined {
   if (!task) return undefined;
   const params: Record<string, string> = {};
@@ -268,6 +284,7 @@ function launcherAgentTaskTestIds(
     light: `${testIdPrefix}-agent-task-light`,
     openChat: `${testIdPrefix}-agent-task-open-chat`,
     openStudio: `${testIdPrefix}-agent-task-open-studio`,
+    plannerSummary: `${testIdPrefix}-agent-task-planner-summary`,
     recovery: `${testIdPrefix}-agent-task-run-recovery-action`,
     reject: `${testIdPrefix}-agent-task-reject`,
     runtimeDebug: `${testIdPrefix}-agent-task-runtime-debug`,
@@ -336,6 +353,10 @@ export function LauncherAgentTaskLight({
     mode === 'bubble' ? 2 : variant === 'panel' ? 5 : 4,
   );
   const progress = lightTask.task_progress || currentTask.task_progress || null;
+  const plannerSummary = plannerSummaryFromTask(currentTask);
+  const plannerChips = plannerSummary
+    ? launcherAgentTaskPlannerChips(plannerSummary, mode === 'bubble' ? 2 : variant === 'panel' ? 4 : 3)
+    : [];
   async function handleApproval(action: LauncherTaskApprovalAction) {
     if (!approval || taskAction) return;
     const handler = action === 'approve' ? onApproveApproval : onRejectApproval;
@@ -361,6 +382,12 @@ export function LauncherAgentTaskLight({
       className={`launcher-agent-task-light ${launcherAgentTaskTone(status)} ${variant === 'panel' ? 'is-panel' : ''}`}
       data-run-id={runId}
       data-task-id={currentTask.task_id}
+      data-planner-intent-kind={plannerSummary?.intentKind || ''}
+      data-plan-approvals={plannerSummary?.approvals.join(',') || ''}
+      data-plan-capabilities={plannerSummary?.capabilities.join(',') || ''}
+      data-plan-missing-capabilities={plannerSummary?.missingCapabilities.join(',') || ''}
+      data-plan-tools={plannerSummary?.tools.join(',') || ''}
+      data-route-to-studio={plannerSummary ? plannerSummary.routeToStudio === null ? '' : String(plannerSummary.routeToStudio) : ''}
       data-task-progress-status={progress?.status || ''}
       data-task-needs-replan={String(progress?.needs_replan === true)}
       data-testid={testIds.light}
@@ -391,6 +418,25 @@ export function LauncherAgentTaskLight({
                 title={chip.title || chip.label}
               >
                 {chip.label}
+              </small>
+            ))}
+          </div>
+        ) : null}
+        {plannerSummary && plannerChips.length ? (
+          <div
+            className="launcher-agent-task-planner"
+            data-testid={testIds.plannerSummary}
+            title={plannerSummaryDetail(plannerSummary)}
+          >
+            {plannerChips.map((chip) => (
+              <small
+                className={`launcher-agent-task-planner-chip ${chip.kind}`}
+                data-planner-chip-kind={chip.kind}
+                data-planner-chip-value={chip.value}
+                key={`${chip.kind}:${chip.value}`}
+                title={chip.value}
+              >
+                {chip.label} · {chip.value}
               </small>
             ))}
           </div>
