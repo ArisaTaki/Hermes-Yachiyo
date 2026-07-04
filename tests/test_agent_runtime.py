@@ -4982,6 +4982,184 @@ def test_agent_run_runtime_planner_entrypoint_opens_desktop_app_before_model(
         service.close()
 
 
+def test_agent_run_runtime_planner_entrypoint_surfaces_deferred_ui_context(
+    tmp_path,
+    monkeypatch,
+):
+    service = make_service(tmp_path)
+    desktop_calls: list[tuple[str, dict[str, Any]]] = []
+    model_calls: list[list[dict[str, Any]]] = []
+
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict[str, Any]:
+        desktop_calls.append(("desktop.list_apps", {"query": query, "limit": limit}))
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": f"Found PixelForge for {query}",
+            "data": {
+                "query": query,
+                "apps": [{"name": "PixelForge", "path": "/Applications/PixelForge.app"}],
+                "best_match": {
+                    "name": "PixelForge",
+                    "path": "/Applications/PixelForge.app",
+                    "match_score": 96,
+                    "match_confidence": "high",
+                },
+            },
+        }
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        desktop_calls.append(("app.open", {"app_name": app_name}))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        desktop_calls.append(
+            (
+                "desktop.ui_elements",
+                {"role_filter": role_filter, "limit": limit, "app_name": app_name},
+            )
+        )
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read PixelForge export controls",
+            "data": {
+                "app_name": "PixelForge",
+                "elements": [{"role": "AXButton", "name": "Export"}],
+            },
+        }
+
+    def fake_chat(_base_url, _model, _api_key, messages, **_kwargs):
+        model_calls.append([dict(message) for message in messages])
+        assert any(
+            "Tool result for desktop.ui_elements" in str(message.get("content") or "")
+            for message in messages
+        )
+        return {"content": "已观察到 Export 按钮，等待确认后可继续点击。"}
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
+    monkeypatch.setattr("apps.shell.agent_runtime.openai_compatible_chat_message", fake_chat)
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Deferred Desktop Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {
+                    "allowed_tools": [
+                        "desktop.list_apps",
+                        "app.open",
+                        "desktop.click_ui_element",
+                        "desktop.ui_elements",
+                    ],
+                    "approval_required": {},
+                },
+            }
+        )
+
+        run = service.create_agent_run(
+            {
+                "agent_id": agent["agent_id"],
+                "user_goal": "打开 PixelForge 并点击 Export",
+                "runtime_planner_entrypoint": True,
+            }
+        )
+        events = service.list_run_events(run["run_id"])["events"]
+        planned_events = [
+            event
+            for event in events
+            if event["event_type"] == "agent.desktop.intent_planned"
+        ]
+        policy_events = [
+            event
+            for event in events
+            if event["event_type"] == "agent.tool.policy_decision"
+        ]
+        deferred_ui = next(
+            event
+            for event in planned_events
+            if event["payload"]["tool"] == "desktop.ui_elements"
+            and event["payload"].get("deferred_tool") == "desktop.click_ui_element"
+        )
+        policy_deferred_ui = next(
+            event
+            for event in policy_events
+            if event["payload"]["tool"] == "desktop.ui_elements"
+            and event["payload"].get("deferred_tool") == "desktop.click_ui_element"
+        )
+        policy_click = next(
+            event
+            for event in policy_events
+            if event["payload"]["tool"] == "desktop.click_ui_element"
+        )
+        pending_approval = run.get("pending_approval")
+        assert isinstance(pending_approval, dict)
+
+        assert run["status"] == "approval_required"
+        assert pending_approval["tool"] == "desktop.click_ui_element"
+        assert pending_approval["step_id"] == "operate-foreground-ui"
+        assert pending_approval["runtime_stage"] == "operate"
+        assert pending_approval["runtime_role"] == "click_ui"
+        assert pending_approval["replan_triggers"] == ["verification_failed"]
+        assert desktop_calls == [
+            ("desktop.list_apps", {"query": "PixelForge", "limit": 20}),
+            ("app.open", {"app_name": "PixelForge"}),
+            (
+                "desktop.ui_elements",
+                {"role_filter": "", "limit": 80, "app_name": "PixelForge"},
+            ),
+        ]
+        assert model_calls == []
+        assert [event["payload"]["tool"] for event in planned_events] == [
+            "desktop.list_apps",
+            "app.open",
+            "desktop.ui_elements",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ]
+        assert deferred_ui["payload"]["step_id"] == "operate-foreground-ui"
+        assert deferred_ui["payload"]["runtime_stage"] == "operate"
+        assert deferred_ui["payload"]["runtime_role"] == "click_ui"
+        assert deferred_ui["payload"]["deferred_tool"] == "desktop.click_ui_element"
+        assert deferred_ui["payload"]["deferred_input"] == {
+            "target": "Export",
+            "role_filter": "",
+            "click_count": 1,
+            "limit": 80,
+        }
+        assert deferred_ui["payload"]["deferred_context"]["step_id"] == (
+            "operate-foreground-ui"
+        )
+        assert deferred_ui["payload"]["replan_triggers"] == ["verification_failed"]
+        assert deferred_ui["payload"]["requires_post_action_verification"] is True
+        assert policy_deferred_ui["payload"]["deferred_tool"] == "desktop.click_ui_element"
+        assert policy_deferred_ui["payload"]["deferred_input"] == deferred_ui["payload"][
+            "deferred_input"
+        ]
+        assert policy_deferred_ui["payload"]["runtime_stage"] == "operate"
+        assert policy_deferred_ui["payload"]["replan_triggers"] == ["verification_failed"]
+        assert policy_click["payload"]["step_id"] == "operate-foreground-ui"
+        assert policy_click["payload"]["runtime_stage"] == "operate"
+        assert policy_click["payload"]["replan_triggers"] == ["verification_failed"]
+    finally:
+        service.close()
+
+
 def test_agent_runtime_planner_file_search_auto_analyzes_single_data_file(
     tmp_path,
     monkeypatch,

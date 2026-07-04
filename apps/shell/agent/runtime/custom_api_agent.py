@@ -3450,6 +3450,7 @@ class RuntimeCustomApiAgentLoop:
             ).strip()
             if planning_reason:
                 payload["planning_reason"] = planning_reason
+            payload.update(_request_observability_metadata(request))
             self._append_run_event(run_id, "agent.tool.policy_decision", payload)
 
     def _record_desktop_intent_approval_required(
@@ -11052,6 +11053,7 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
         "recovery_action_tool",
         "recovery_source_tool",
         "recovery_source_event_type",
+        "deferred_tool",
         "permission_target",
         "risk_level",
         "target_app_name",
@@ -11063,13 +11065,77 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
             payload[key] = value
     if payload.get("step_id") and not payload.get("planner_step_id"):
         payload["planner_step_id"] = payload["step_id"]
-    if isinstance(request.get("permission_recovery_retry"), bool):
-        payload["permission_recovery_retry"] = bool(request.get("permission_recovery_retry"))
+    deferred_context = (
+        request.get("deferred_context")
+        if isinstance(request.get("deferred_context"), Mapping)
+        else {}
+    )
+    if deferred_context:
+        for key in ("step_id", "planner_step_id", "capability_id"):
+            value = str(deferred_context.get(key) or "").strip()
+            if value and not payload.get(key):
+                payload[key] = value
+        if payload.get("step_id") and not payload.get("planner_step_id"):
+            payload["planner_step_id"] = payload["step_id"]
+        task_todo = (
+            deferred_context.get("task_todo")
+            if isinstance(deferred_context.get("task_todo"), Mapping)
+            else {}
+        )
+        task_metadata = (
+            task_todo.get("metadata")
+            if isinstance(task_todo.get("metadata"), Mapping)
+            else {}
+        )
+        for key in ("runtime_doctrine", "runtime_stage", "runtime_role"):
+            value = str(task_metadata.get(key) or "").strip()
+            if value and not payload.get(key):
+                payload[key] = value
+        for key in (
+            "approval_required",
+            "requires_observation",
+            "requires_post_action_verification",
+        ):
+            if key not in payload and isinstance(task_metadata.get(key), bool):
+                payload[key] = bool(task_metadata.get(key))
+        if (
+            "approval_required" not in payload
+            and isinstance(task_todo.get("approval_required"), bool)
+        ):
+            payload["approval_required"] = bool(task_todo.get("approval_required"))
+    for key in (
+        "permission_recovery_retry",
+        "approval_required",
+        "requires_observation",
+        "requires_post_action_verification",
+    ):
+        if isinstance(request.get(key), bool):
+            payload[key] = bool(request.get(key))
+    for key in ("replan_triggers", "replan_signal_ids"):
+        values = [
+            str(item or "").strip()
+            for item in request.get(key, [])
+            if str(item or "").strip()
+        ] if isinstance(request.get(key), list) else []
+        if values:
+            payload[key] = values
     payload.update(_runtime_trace_metadata_from_mapping(request))
-    for key in ("followup_target", "action_target", "observation_evidence"):
+    for key in (
+        "followup_target",
+        "action_target",
+        "observation_evidence",
+        "observation_retry",
+        "deferred_input",
+        "deferred_context",
+    ):
         value = request.get(key)
         if isinstance(value, Mapping) and value:
             payload[key] = dict(value)
+    deferred_continuation = request.get("deferred_continuation")
+    if isinstance(deferred_continuation, list):
+        items = [dict(item) for item in deferred_continuation if isinstance(item, Mapping)]
+        if items:
+            payload["deferred_continuation"] = items
     return payload
 
 
