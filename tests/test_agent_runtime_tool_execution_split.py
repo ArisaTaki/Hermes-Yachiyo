@@ -956,6 +956,98 @@ def test_runtime_tool_request_runner_records_explicit_verification_failure_repla
     assert run_replan_event["replan_signal_ids"] == ["signal-analyze-verify-failed"]
 
 
+def test_runtime_tool_request_runner_synthesizes_observation_retry_recovery_action() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    observation_retry = {
+        "from_tool": "desktop.active_window",
+        "tool": "desktop.active_window",
+        "input": {
+            "app_name": "PixelForge",
+            "query": "PixelForge",
+            "selection_source": "desktop.list_apps",
+        },
+        "reason": "verification_failed",
+    }
+    action_target = {
+        "kind": "desktop_app",
+        "action": "verify_after_action",
+        "app_name": "PixelForge",
+        "step_id": "verify-desktop-result",
+    }
+    observation_evidence = {
+        "source_tool": "desktop.active_window",
+        "app_name": "PixelForge",
+    }
+
+    runner = _runner(
+        call_agent_tool=lambda *_args, **_kwargs: {
+            "ok": False,
+            "verification_failed": True,
+            "summary": "Active app was not PixelForge.",
+        },
+        run_events=run_events,
+    )
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.active_window",
+                "input": {},
+                "source": "runtime_planner",
+                "step_id": "verify-desktop-result",
+                "capability_id": "desktop.visual_verification",
+                "decision_id": "decision-1",
+                "plan_id": "plan-1",
+                "runtime_stage": "verify",
+                "requires_observation": True,
+                "replan_triggers": ["verification_failed"],
+                "action_target": action_target,
+                "observation_evidence": observation_evidence,
+                "observation_retry": observation_retry,
+            }
+        ],
+        ["desktop.active_window"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "open PixelForge"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-observation-retry",
+        budget=FakeBudget(),
+    )
+
+    replan_event = next(event for event in timeline if event["event"] == "agent.replan.requested")
+    payload = replan_event["payload"]
+    assert payload["trigger"] == "verification_failed"
+    assert payload["fallback_tools"] == ["desktop.active_window"]
+    assert payload["action_target"] == action_target
+    assert payload["observation_evidence"] == observation_evidence
+    assert payload["observation_retry"] == observation_retry
+    assert payload["metadata"]["recovery_actions"] == [
+        {
+            "label": "Re-run runtime observation",
+            "tool": "desktop.active_window",
+            "input": {
+                "app_name": "PixelForge",
+                "query": "PixelForge",
+                "selection_source": "desktop.list_apps",
+            },
+            "permission_target": "runtime_observation",
+            "risk_level": "low",
+            "observation_retry": observation_retry,
+            "action_target": action_target,
+            "observation_evidence": observation_evidence,
+        }
+    ]
+    run_replan_event = next(
+        payload
+        for _run_id, event_type, payload in run_events
+        if event_type == "agent.replan.requested"
+    )
+    assert run_replan_event["metadata"]["recovery_actions"] == payload["metadata"]["recovery_actions"]
+
+
 def test_runtime_tool_call_executor_denies_unallowed_tools_before_broker_call() -> None:
     events = FakeToolCallEvents()
     executor = _executor(tool_call_events=events)

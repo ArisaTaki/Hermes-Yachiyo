@@ -1933,11 +1933,21 @@ def _runtime_replan_fallback_tools(
     tool_request: Mapping[str, Any],
     result: Mapping[str, Any],
 ) -> list[str]:
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
     tools = [
         *_string_list(tool_request.get("fallback_tools")),
         *_string_list(result.get("suggested_tool")),
         *_string_list(result.get("recommended_tools")),
     ]
+    observation_retry_tool = _runtime_observation_retry_tool(
+        _first_mapping(
+            tool_request.get("observation_retry"),
+            result.get("observation_retry"),
+            data.get("observation_retry"),
+        )
+    )
+    if observation_retry_tool:
+        tools.append(observation_retry_tool)
     recovery_actions = result.get("recovery_actions")
     if isinstance(recovery_actions, list):
         for action in recovery_actions:
@@ -2156,7 +2166,98 @@ def _runtime_replan_recovery_actions(
         data.get("recovery_actions"),
     ):
         actions.extend(_mapping_list(source))
+    observation_retry_action = _runtime_observation_retry_recovery_action(
+        observation_retry=_first_mapping(
+            tool_request.get("observation_retry"),
+            result.get("observation_retry"),
+            data.get("observation_retry"),
+        ),
+        action_target=_first_mapping(
+            tool_request.get("action_target"),
+            result.get("action_target"),
+            data.get("action_target"),
+        ),
+        observation_evidence=_first_mapping(
+            tool_request.get("observation_evidence"),
+            result.get("observation_evidence"),
+            data.get("observation_evidence"),
+        ),
+    )
+    if observation_retry_action:
+        actions.append(observation_retry_action)
     return [dict(action) for action in actions]
+
+
+_RUNTIME_OBSERVATION_RETRY_TOOLS = {
+    "desktop.list_apps",
+    "desktop.active_window",
+    "desktop.running_apps",
+    "desktop.windows",
+    "desktop.list_windows",
+    "desktop.ui_elements",
+    "desktop.read_ui",
+    "desktop.verify",
+    "screen.capture",
+}
+
+
+def _runtime_observation_retry_recovery_action(
+    *,
+    observation_retry: Mapping[str, Any],
+    action_target: Mapping[str, Any],
+    observation_evidence: Mapping[str, Any],
+) -> dict[str, Any]:
+    tool_name = _runtime_observation_retry_tool(observation_retry)
+    if not tool_name:
+        return {}
+    retry_input = (
+        observation_retry.get("input")
+        if isinstance(observation_retry.get("input"), Mapping)
+        else {}
+    )
+    action: dict[str, Any] = {
+        "label": _runtime_observation_retry_label(tool_name, observation_retry),
+        "tool": tool_name,
+        "input": dict(retry_input),
+        "permission_target": _runtime_observation_retry_permission_target(tool_name),
+        "risk_level": "low",
+        "observation_retry": dict(observation_retry),
+    }
+    if action_target:
+        action["action_target"] = dict(action_target)
+    if observation_evidence:
+        action["observation_evidence"] = dict(observation_evidence)
+    return action
+
+
+def _runtime_observation_retry_tool(observation_retry: Mapping[str, Any]) -> str:
+    tool_name = str(
+        observation_retry.get("tool")
+        or observation_retry.get("from_tool")
+        or observation_retry.get("source_tool")
+        or ""
+    ).strip()
+    if tool_name not in _RUNTIME_OBSERVATION_RETRY_TOOLS:
+        return ""
+    return tool_name
+
+
+def _runtime_observation_retry_label(
+    tool_name: str,
+    observation_retry: Mapping[str, Any],
+) -> str:
+    reason = str(observation_retry.get("reason") or "").strip()
+    if tool_name == "desktop.list_apps" or reason == "resolve_desktop_app":
+        return "Re-run desktop app discovery"
+    if reason == "verification_failed":
+        return "Re-run runtime observation"
+    return "Run runtime observation retry"
+
+
+def _runtime_observation_retry_permission_target(tool_name: str) -> str:
+    if tool_name == "desktop.list_apps":
+        return "app_discovery"
+    return "runtime_observation"
 
 
 def _dedupe_runtime_replan_recovery_actions(

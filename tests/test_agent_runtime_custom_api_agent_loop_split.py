@@ -28724,8 +28724,16 @@ def test_runtime_tool_runner_skips_unresolved_selected_discovered_app() -> None:
         }
     ]
     assert budget.tool_claims == [("app.open", False)]
-    assert run_events[-1]["event_type"] == "agent.tool.skipped"
-    assert run_events[-1]["payload"]["result"]["error"] == "app_resolution_failed"
+    skipped_run_event = next(
+        event for event in run_events if event["event_type"] == "agent.tool.skipped"
+    )
+    assert skipped_run_event["payload"]["result"]["error"] == "app_resolution_failed"
+    replan_run_event = next(
+        event for event in run_events if event["event_type"] == "agent.replan.requested"
+    )
+    assert replan_run_event["payload"]["metadata"]["recovery_actions"] == skipped["result"][
+        "recovery_actions"
+    ]
 
 
 def test_runtime_tool_runner_resolves_selected_app_for_ui_readback() -> None:
