@@ -77,6 +77,23 @@ def _assert_function_contains(relative_path: str, function_name: str, fragments:
     assert not missing, f"{relative_path}:{function_name} is missing fragments: {missing!r}"
 
 
+def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeDebugSummary.tsx",
+        [
+            "data-runtime-doctrine={summary?.runtime_doctrine || ''}",
+            "data-runtime-stage={summary?.runtime_stage || ''}",
+            "data-current-capability-id={summary?.current_capability_id || ''}",
+            "data-latest-replan-request-id={summary?.latest_replan_request_id || ''}",
+            "data-latest-deferred-tool={summary?.latest_deferred_tool || ''}",
+            "summary.runtime_doctrine ? `doctrine ${summary.runtime_doctrine}` : ''",
+            "summary.current_capability_id ? `capability ${summary.current_capability_id}` : ''",
+            "summary.latest_approval_tool_name ? "
+            "`approval tool ${summary.latest_approval_tool_name}` : ''",
+        ],
+    )
+
+
 def test_frontend_preserves_top_level_product_routes_and_navigation() -> None:
     _assert_contains(
         "apps/frontend/src/lib/view.ts",

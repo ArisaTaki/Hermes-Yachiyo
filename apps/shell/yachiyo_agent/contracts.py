@@ -580,6 +580,9 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     completed_checkpoints: int = 0
     blocked_checkpoints: int = 0
     runtime_stage_counts: dict[str, int] = Field(default_factory=dict)
+    runtime_doctrine: str | None = None
+    runtime_stage: str | None = None
+    runtime_role: str | None = None
     plan_tools: list[str] = Field(default_factory=list)
     plan_capabilities: list[str] = Field(default_factory=list)
     event_count: int = 0
@@ -598,9 +601,19 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     needs_user_action: bool = False
     needs_replan: bool = False
     latest_event_type: str | None = None
+    current_capability_id: str | None = None
+    latest_replan_request_id: str | None = None
+    latest_replan_trigger: str | None = None
+    latest_replan_status: str | None = None
+    latest_deferred_tool: str | None = None
+    latest_tool_call_id: str | None = None
     latest_tool_name: str | None = None
     latest_tool_status: str | None = None
     latest_approval_id: str | None = None
+    latest_approval_tool_name: str | None = None
+    latest_approval_status: str | None = None
+    latest_artifact_id: str | None = None
+    latest_artifact_kind: str | None = None
     latest_artifact_path: str | None = None
     debug_surfaces: list[str] = Field(default_factory=list)
 

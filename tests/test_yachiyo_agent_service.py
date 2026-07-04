@@ -801,6 +801,16 @@ def test_yachiyo_agent_service_starts_chat_with_full_runtime_execution_envelope(
         "operate": 1,
         "produce": 1,
     }
+    assert task.runtime_debug.runtime_doctrine == "discover_operate_verify"
+    assert task.runtime_debug.runtime_stage == "discover"
+    assert task.runtime_debug.runtime_role == "inspect_workspace"
+    assert task.runtime_debug.current_capability_id == "file.workspace_read"
+    assert task.runtime_debug.latest_tool_name == "workspace.write_patch"
+    assert task.runtime_debug.latest_tool_status == "waiting_approval"
+    assert task.runtime_debug.latest_approval_tool_name == "workspace.write_patch"
+    assert task.runtime_debug.latest_approval_status == "pending"
+    assert task.runtime_debug.latest_artifact_id == "artifact-1"
+    assert task.runtime_debug.latest_artifact_kind == "markdown"
     assert task.runtime_debug.plan_tools == ["data.analyze"]
     assert task.runtime_debug.plan_capabilities == ["data.analysis"]
     assert "planner" in task.runtime_debug.debug_surfaces
@@ -1249,6 +1259,14 @@ def test_agent_task_snapshot_links_deferred_approval_to_replan_recovery() -> Non
     ]
     assert recovery.selected_tool_name == "desktop.click_ui_element"
     assert recovery.tool_status == "completed"
+    assert task.runtime_debug is not None
+    assert task.runtime_debug.replan_recovery_count == 1
+    assert task.runtime_debug.current_capability_id == "desktop.ui_operation"
+    assert task.runtime_debug.latest_replan_request_id == "replan-1"
+    assert task.runtime_debug.latest_replan_trigger == "verification_failed"
+    assert task.runtime_debug.latest_deferred_tool == "desktop.click_ui_element"
+    assert task.runtime_debug.runtime_stage == "operate"
+    assert task.runtime_debug.runtime_role == "desktop_ui_action"
     assert recovery.recovery_actions[0].approval_id == "approval-1"
     assert recovery.recovery_actions[0].approval_status == "approved"
     assert recovery.recovery_actions[0].deferred_tool == "desktop.click_ui_element"

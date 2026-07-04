@@ -39,8 +39,15 @@ export function RuntimeDebugSummary({
   return (
     <section
       className={classes}
+      data-current-capability-id={summary?.current_capability_id || ''}
       data-has-user-action={String(Boolean(summary?.needs_user_action))}
+      data-latest-deferred-tool={summary?.latest_deferred_tool || ''}
+      data-latest-replan-request-id={summary?.latest_replan_request_id || ''}
+      data-latest-replan-trigger={summary?.latest_replan_trigger || ''}
       data-needs-replan={String(Boolean(summary?.needs_replan))}
+      data-runtime-doctrine={summary?.runtime_doctrine || ''}
+      data-runtime-role={summary?.runtime_role || ''}
+      data-runtime-stage={summary?.runtime_stage || ''}
       data-source={summary?.source || ''}
       data-testid={testId}
     >
@@ -109,10 +116,23 @@ export function runtimeDebugSummaryHasContent(summary?: RuntimeDebugSummarySnaps
     || summary.current_step_id
     || summary.current_step_title
     || summary.current_tool_name
+    || summary.runtime_doctrine
+    || summary.runtime_stage
+    || summary.runtime_role
+    || summary.current_capability_id
     || summary.latest_event_type
+    || summary.latest_replan_request_id
+    || summary.latest_replan_trigger
+    || summary.latest_replan_status
+    || summary.latest_deferred_tool
+    || summary.latest_tool_call_id
     || summary.latest_tool_name
     || summary.latest_tool_status
     || summary.latest_approval_id
+    || summary.latest_approval_tool_name
+    || summary.latest_approval_status
+    || summary.latest_artifact_id
+    || summary.latest_artifact_kind
     || summary.latest_artifact_path
   ) return true;
   return runtimeDebugMetrics(summary).length > 0;
@@ -187,11 +207,24 @@ function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): 
     summary.task_status ? `task ${summary.task_status}` : '',
     summary.current_step_title ? `step ${summary.current_step_title}` : '',
     summary.current_tool_name ? `current tool ${summary.current_tool_name}` : '',
+    summary.runtime_doctrine ? `doctrine ${summary.runtime_doctrine}` : '',
+    summary.runtime_stage ? `stage ${summary.runtime_stage}` : '',
+    summary.runtime_role ? `role ${summary.runtime_role}` : '',
+    summary.current_capability_id ? `capability ${summary.current_capability_id}` : '',
     summary.route_to_studio ? 'route Studio' : '',
     summary.latest_event_type ? `event ${summary.latest_event_type}` : '',
+    summary.latest_replan_request_id ? `replan ${summary.latest_replan_request_id}` : '',
+    summary.latest_replan_trigger ? `trigger ${summary.latest_replan_trigger}` : '',
+    summary.latest_replan_status ? `replan status ${summary.latest_replan_status}` : '',
+    summary.latest_deferred_tool ? `deferred ${summary.latest_deferred_tool}` : '',
+    summary.latest_tool_call_id ? `tool call ${summary.latest_tool_call_id}` : '',
     summary.latest_tool_name ? `tool ${summary.latest_tool_name}` : '',
     summary.latest_tool_status ? `tool status ${summary.latest_tool_status}` : '',
     summary.latest_approval_id ? `approval ${summary.latest_approval_id}` : '',
+    summary.latest_approval_tool_name ? `approval tool ${summary.latest_approval_tool_name}` : '',
+    summary.latest_approval_status ? `approval status ${summary.latest_approval_status}` : '',
+    summary.latest_artifact_id ? `artifact id ${summary.latest_artifact_id}` : '',
+    summary.latest_artifact_kind ? `artifact kind ${summary.latest_artifact_kind}` : '',
     summary.latest_artifact_path ? `artifact ${summary.latest_artifact_path}` : '',
     planTools.length ? `plan tools ${planTools.join(', ')}` : '',
     planCapabilities.length ? `capabilities ${planCapabilities.join(', ')}` : '',

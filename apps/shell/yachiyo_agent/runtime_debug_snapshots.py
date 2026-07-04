@@ -51,6 +51,9 @@ def runtime_debug_summary_from_runtime_objects(
         approval_items[-1] if approval_items else None
     )
     latest_artifact = artifact_items[-1] if artifact_items else None
+    request_items = _items(_field(runtime_execution_envelope, "requests"))
+    latest_request = request_items[-1] if request_items else None
+    latest_replan = replan_items[-1] if replan_items else None
     effective_task_core = _richer_task_core(
         task_core,
         _field(runtime_execution_envelope, "task_core"),
@@ -63,6 +66,21 @@ def runtime_debug_summary_from_runtime_objects(
     plan_capabilities = _planner_capabilities(planner_summary, runtime_execution_envelope)
     runtime_stage_counts = _runtime_stage_counts(runtime_execution_envelope)
     task_totals = _task_totals(effective_task_core, effective_task_progress)
+    current_step_id = _optional_text(_field(effective_task_progress, "current_step_id"))
+    current_step_title = _optional_text(_field(effective_task_progress, "current_step_title"))
+    current_tool_name = _optional_text(_field(effective_task_progress, "current_tool_name"))
+    current_request = _matching_runtime_request(
+        request_items,
+        step_id=current_step_id,
+        tool_name=current_tool_name,
+    )
+    runtime_context_items = [
+        latest_tool,
+        latest_approval,
+        current_request,
+        latest_request,
+        runtime_execution_envelope,
+    ]
 
     debug_surfaces = _debug_surfaces(
         event_items=event_items,
@@ -105,9 +123,9 @@ def runtime_debug_summary_from_runtime_objects(
             _field(runtime_execution_envelope, "route_to_studio"),
         ),
         task_status=_optional_text(_field(effective_task_progress, "status")),
-        current_step_id=_optional_text(_field(effective_task_progress, "current_step_id")),
-        current_step_title=_optional_text(_field(effective_task_progress, "current_step_title")),
-        current_tool_name=_optional_text(_field(effective_task_progress, "current_tool_name")),
+        current_step_id=current_step_id,
+        current_step_title=current_step_title,
+        current_tool_name=current_tool_name,
         total_todos=task_totals["total_todos"],
         completed_todos=task_totals["completed_todos"],
         blocked_todos=task_totals["blocked_todos"],
@@ -115,6 +133,24 @@ def runtime_debug_summary_from_runtime_objects(
         completed_checkpoints=task_totals["completed_checkpoints"],
         blocked_checkpoints=task_totals["blocked_checkpoints"],
         runtime_stage_counts=runtime_stage_counts,
+        runtime_doctrine=_first_text_from_items(
+            [
+                runtime_execution_envelope,
+                current_request,
+                latest_request,
+                latest_tool,
+                latest_approval,
+            ],
+            "runtime_doctrine",
+        ),
+        runtime_stage=_first_text_from_items(
+            runtime_context_items,
+            "runtime_stage",
+        ),
+        runtime_role=_first_text_from_items(
+            runtime_context_items,
+            "runtime_role",
+        ),
         plan_tools=plan_tools,
         plan_capabilities=plan_capabilities,
         event_count=len(event_items),
@@ -136,9 +172,49 @@ def runtime_debug_summary_from_runtime_objects(
         needs_user_action=bool(needs_user_action or pending_approvals),
         needs_replan=bool(replan_needed),
         latest_event_type=_optional_text(_field(latest_event, "event_type")),
+        current_capability_id=_first_text_from_items(
+            [
+                latest_tool,
+                latest_approval,
+                current_request,
+                latest_request,
+                latest_replan,
+            ],
+            "capability_id",
+            "target_capability_id",
+        ),
+        latest_replan_request_id=(
+            _optional_text(_field(latest_replan, "request_id"))
+            or _first_text_from_items(
+                [latest_tool, latest_approval, latest_request],
+                "replan_request_id",
+            )
+        ),
+        latest_replan_trigger=(
+            _first_text_from_items(
+                [latest_replan, latest_tool, latest_approval, latest_request],
+                "trigger",
+                "replan_trigger",
+            )
+            or _first_string_list_value(
+                [latest_tool, latest_approval, latest_request],
+                "replan_triggers",
+            )
+        ),
+        latest_replan_status=_optional_text(_field(latest_replan, "status")),
+        latest_deferred_tool=_first_text_from_items(
+            [latest_tool, latest_approval, latest_request, latest_replan],
+            "deferred_tool",
+            "selected_tool_name",
+        ),
+        latest_tool_call_id=_optional_text(_field(latest_tool, "tool_call_id")),
         latest_tool_name=_optional_text(_field(latest_tool, "tool_name")),
         latest_tool_status=_optional_text(_field(latest_tool, "status")),
         latest_approval_id=_optional_text(_field(latest_approval, "approval_id")),
+        latest_approval_tool_name=_optional_text(_field(latest_approval, "tool_name")),
+        latest_approval_status=_optional_text(_field(latest_approval, "status")),
+        latest_artifact_id=_optional_text(_field(latest_artifact, "artifact_id")),
+        latest_artifact_kind=_optional_text(_field(latest_artifact, "kind")),
         latest_artifact_path=_optional_text(
             _field(latest_artifact, "path") or _field(latest_artifact, "title")
         ),
@@ -321,6 +397,40 @@ def _unique_strings(values: Iterable[str]) -> list[str]:
         seen.add(clean)
         output.append(clean)
     return output
+
+
+def _first_text_from_items(items: Iterable[Any], *keys: str) -> str | None:
+    for item in items:
+        for key in keys:
+            text = _optional_text(_field(item, key))
+            if text:
+                return text
+    return None
+
+
+def _first_string_list_value(items: Iterable[Any], key: str) -> str | None:
+    for item in items:
+        values = _string_list(_field(item, key))
+        if values:
+            return values[0]
+    return None
+
+
+def _matching_runtime_request(
+    requests: list[Any],
+    *,
+    step_id: str | None,
+    tool_name: str | None,
+) -> Any | None:
+    if step_id:
+        for request in reversed(requests):
+            if _text(_field(request, "step_id")) == step_id:
+                return request
+    if tool_name:
+        for request in reversed(requests):
+            if _text(_field(request, "tool_name")) == tool_name:
+                return request
+    return None
 
 
 def _items(values: Iterable[Any] | None) -> list[Any]:
