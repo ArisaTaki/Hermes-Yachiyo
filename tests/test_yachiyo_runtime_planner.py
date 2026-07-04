@@ -14021,6 +14021,8 @@ def test_runtime_planner_composes_in_selected_running_mail_app() -> None:
         "selection_source": "desktop.running_apps",
         "app_name": "<selected app from desktop.running_apps>",
         "query": "mail",
+        "target": "To",
+        "role_filter": "text",
         "step_id": "fill-selected-communication-recipient",
     }
     assert envelope.requests[5].action_target == {
@@ -14029,6 +14031,8 @@ def test_runtime_planner_composes_in_selected_running_mail_app() -> None:
         "selection_source": "desktop.running_apps",
         "app_name": "<selected app from desktop.running_apps>",
         "query": "mail",
+        "target": "message body",
+        "role_filter": "text",
         "step_id": "draft-selected-communication-message",
     }
 
