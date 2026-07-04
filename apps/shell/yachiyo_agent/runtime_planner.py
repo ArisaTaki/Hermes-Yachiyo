@@ -3554,7 +3554,7 @@ class RuntimePlanner:
                 allowed,
                 safe_shortcut=safe_shortcut,
                 target_path=selected_app_target_path,
-                mode=mode,
+                mode=_selected_discovered_app_prepare_mode(tool_name, mode),
             )
             if (
                 action == "discover_apps"
@@ -3724,7 +3724,7 @@ class RuntimePlanner:
                 allowed,
                 safe_shortcut=safe_shortcut,
                 target_path=str(intent.inputs.get("selected_app_target_path_hint") or "").strip(),
-                mode=mode,
+                mode=_selected_discovered_app_prepare_mode(tool_name, mode),
             )
             if (
                 action == "discover_apps"
@@ -9281,6 +9281,18 @@ def _selected_discovered_app_tool(
     if tool_name:
         return tool_name
     return ""
+
+
+def _selected_discovered_app_prepare_mode(
+    discovery_tool: str | None,
+    mode: str,
+) -> str:
+    if str(discovery_tool or "").strip() == "desktop.running_apps":
+        return "focus"
+    clean_mode = str(mode or "").strip()
+    if clean_mode in {"open", "focus"}:
+        return clean_mode
+    return "open"
 
 
 def _selected_discovered_app_operation_preview(

@@ -14498,6 +14498,7 @@ def test_runtime_planner_searches_running_browser_window_by_capability() -> None
         "desktop.running_apps"
     )
     open_step = _step_by_id(decision, "open-selected-discovered-app")
+    assert open_step.tool_name == "app.focus"
     assert open_step.input_preview == {
         "app_name": "<selected app from desktop.running_apps>",
         "selection_source": "desktop.running_apps",
@@ -34405,6 +34406,7 @@ def test_runtime_planner_keeps_running_app_selection_for_followup_ui_action() ->
     assert _step_by_id(decision, "open-selected-discovered-app").input_preview[
         "selection_source"
     ] == "desktop.running_apps"
+    assert _step_by_id(decision, "open-selected-discovered-app").tool_name == "app.focus"
     click_step = _step_by_id(decision, "operate-selected-discovered-app-ui")
     assert click_step.tool_name == "app.focus_and_click_ui_element"
     assert click_step.input_preview == {
