@@ -31,6 +31,7 @@ from .runtime_execution import runtime_execution_envelope_payload_with_request_c
 from .task_snapshots import runtime_execution_envelope_from_payload
 from .task_core_snapshots import task_core_snapshot_from_payload
 from .task_progress_snapshots import task_progress_summary_from_task_core
+from .timeline_metadata_snapshots import planner_trace_summary_from_payload
 
 _RUN_PROJECTOR = RunSnapshotProjector()
 
@@ -66,6 +67,7 @@ def group_run_snapshot_from_payload(
         run_id=group_run_id,
         task_id=_text(payload.get("task_id")),
     )
+    planner_summary = planner_trace_summary_from_payload({**dict(payload), "events": events})
     runs = [
         _RUN_PROJECTOR.timeline_snapshot_from_payload(
             group_run_child_payload(
@@ -137,6 +139,7 @@ def group_run_snapshot_from_payload(
         active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
         task_core=task_core,
         task_progress=task_progress,
+        planner_summary=planner_summary,
         runtime_execution_envelope=runtime_execution_envelope,
         runtime_debug=runtime_debug_summary_from_runtime_objects(
             run_id=group_run_id,
@@ -150,6 +153,7 @@ def group_run_snapshot_from_payload(
             skill_traces=skill_traces,
             children=runs,
             replan_recoveries=replan_recoveries,
+            planner_summary=planner_summary,
             runtime_execution_envelope=runtime_execution_envelope,
             task_core=task_core,
             task_progress=task_progress,

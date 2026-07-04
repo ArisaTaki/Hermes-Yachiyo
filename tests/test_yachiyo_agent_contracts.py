@@ -2558,6 +2558,13 @@ def test_group_run_snapshot_synthesizes_scoped_replan_event() -> None:
     assert snapshot.runtime_execution_envelope.requests
     assert snapshot.runtime_execution_envelope.requests[0].group_run_id == "group-run-1"
     assert snapshot.runtime_execution_envelope.requests[0].run_group_id == "group-run-1"
+    assert snapshot.planner_summary is not None
+    assert snapshot.planner_summary.intent_kind == decision.selected_intent.kind
+    assert "data.analyze" in snapshot.planner_summary.plan_tools
+    assert "data.analysis" in snapshot.planner_summary.plan_capabilities
+    assert snapshot.runtime_debug is not None
+    assert "data.analyze" in snapshot.runtime_debug.plan_tools
+    assert "data.analysis" in snapshot.runtime_debug.plan_capabilities
     assert snapshot.task_core is not None
     assert snapshot.task_progress is not None
     assert snapshot.task_progress.status == "replan_requested"

@@ -2,6 +2,7 @@ import type {
   AgentGroupMemberSnapshot,
   ApprovalCardSnapshot,
   ArtifactSnapshot,
+  PlannerTraceSummarySnapshot,
   PublicRunEvent,
   RecoveryRunProvenanceSnapshot,
   RuntimeDebugSummarySnapshot,
@@ -246,6 +247,7 @@ export type RunGroupSpec = {
   events?: PublicRunEvent[];
   pending_approvals?: ApprovalCardSnapshot[];
   shared_artifacts?: ArtifactSnapshot[];
+  planner_summary?: PlannerTraceSummarySnapshot | null;
   runtime_debug?: RuntimeDebugSummarySnapshot | null;
   final_answer?: string;
   child_run_ids?: string[];

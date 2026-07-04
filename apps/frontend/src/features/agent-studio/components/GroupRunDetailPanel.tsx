@@ -124,6 +124,7 @@ export function GroupRunDetailPanel({
     ? selectedGroupRunSnapshot.shared_artifacts
     : selectedRunGroup?.shared_artifacts || [];
   const groupRunRuntimeDebug = selectedGroupRunSnapshot?.runtime_debug || selectedRunGroup?.runtime_debug || null;
+  const groupRunPlannerSummary = selectedGroupRunSnapshot?.planner_summary || selectedRunGroup?.planner_summary || null;
   const replayApprovals = replayEvents.length ? approvalsFromRunEventReplay(replayEvents) : [];
   const replayArtifacts = replayEvents.length ? artifactsFromRunEventReplay(replayEvents) : [];
   const replayToolCalls = replayEvents.length ? toolCallsFromRunEventReplay(replayEvents) : [];
@@ -282,6 +283,7 @@ export function GroupRunDetailPanel({
       <PlannerTraceInspector
         events={groupRunReplayEvents}
         onRunReplanRecoveryAction={handleGroupRunReplanRecoveryAction}
+        plannerSummary={groupRunPlannerSummary}
         recoveryActionDisabled={recoveryActionDisabled || !onRunGroupReplanRecoveryAction}
         replanRecoveries={selectedGroupRunSnapshot?.replan_recoveries || []}
         showTaskWorkspace={!groupRunHasTaskWorkspace}

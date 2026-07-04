@@ -1255,6 +1255,7 @@ class GroupRunSnapshot(_PublicSnapshot):
     active_speaker_agent_id: str | None = None
     task_core: TaskCoreSnapshot | None = None
     task_progress: TaskProgressSummarySnapshot | None = None
+    planner_summary: PlannerTraceSummarySnapshot | None = None
     runtime_execution_envelope: RuntimeExecutionEnvelopeSnapshot | None = None
     runtime_debug: RuntimeDebugSummarySnapshot | None = None
     replan_recoveries: list[ReplanRecoverySnapshot] = Field(default_factory=list)
