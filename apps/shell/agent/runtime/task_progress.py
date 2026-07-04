@@ -15,7 +15,14 @@ def append_task_progress_events_for_tool_result(
     append_run_event: Callable[[str, str, dict[str, Any]], Any] | None = None,
     run_id: str = "",
 ) -> None:
-    step_id = str(tool_request.get("step_id") or tool_request.get("planner_step_id") or "").strip()
+    explicit_step_id = str(
+        tool_request.get("step_id") or tool_request.get("planner_step_id") or ""
+    ).strip()
+    replan_request_id = str(tool_request.get("replan_request_id") or "").strip()
+    step_id = explicit_step_id or _replan_recovery_projection_step_id(
+        tool_request,
+        replan_request_id,
+    )
     tool_name = str(tool_request.get("tool") or tool_request.get("tool_name") or "").strip()
     if not step_id or not tool_name:
         return
@@ -24,7 +31,6 @@ def append_task_progress_events_for_tool_result(
     checkpoints = _mapping_items(tool_request.get("task_checkpoints"))
     workspace_items = _mapping_items(tool_request.get("task_workspace_items"))
     verification_targets = _mapping_items(tool_request.get("task_verification_targets"))
-    replan_request_id = str(tool_request.get("replan_request_id") or "").strip()
     if (
         not todo
         and not checkpoints
@@ -48,11 +54,13 @@ def append_task_progress_events_for_tool_result(
     skip_statuses = {todo_status}
     if todo_status != "completed":
         skip_statuses.add("completed")
-    task_update_already_recorded = _runtime_planner_step_has_status(
-        timeline,
-        decision_id=str(tool_request.get("decision_id") or ""),
-        step_id=step_id,
-        statuses=skip_statuses,
+    task_update_already_recorded = bool(explicit_step_id) and (
+        _runtime_planner_step_has_status(
+            timeline,
+            decision_id=str(tool_request.get("decision_id") or ""),
+            step_id=explicit_step_id,
+            statuses=skip_statuses,
+        )
     )
 
     source_event = {
@@ -90,7 +98,7 @@ def append_task_progress_events_for_tool_result(
         if value:
             base_payload[key] = value
 
-    if not task_update_already_recorded:
+    if explicit_step_id and not task_update_already_recorded:
         for workspace_item in workspace_items:
             item_payload = dict(workspace_item)
             item_payload["status"] = todo_status
@@ -115,7 +123,7 @@ def append_task_progress_events_for_tool_result(
                 run_id=run_id,
             )
 
-    if todo and not task_update_already_recorded:
+    if explicit_step_id and todo and not task_update_already_recorded:
         todo_payload = dict(todo)
         todo_payload["status"] = todo_status
         _apply_todo_verification_context(todo_payload, base_payload)
@@ -136,7 +144,7 @@ def append_task_progress_events_for_tool_result(
             run_id=run_id,
         )
 
-    if not task_update_already_recorded:
+    if explicit_step_id and not task_update_already_recorded:
         for checkpoint in checkpoints:
             checkpoint_payload = dict(checkpoint)
             checkpoint_payload["status"] = checkpoint_status
@@ -208,9 +216,11 @@ def _append_verification_target_progress_events(
         return
     target_todo_status = _verification_target_todo_status(result)
     target_checkpoint_status = _verification_target_checkpoint_status(result)
-    verify_step_id = str(
-        tool_request.get("step_id") or tool_request.get("planner_step_id") or ""
-    ).strip()
+    verify_step_id = _first_text(
+        tool_request.get("step_id"),
+        tool_request.get("planner_step_id"),
+        base_payload.get("step_id"),
+    )
     verify_tool = str(tool_request.get("tool") or tool_request.get("tool_name") or "").strip()
     for target in verification_targets:
         target_step_id = str(target.get("step_id") or "").strip()
@@ -436,7 +446,15 @@ def _verification_targets_from_replan_recovery(
     if result.get("ok") is not True or result.get("verification_failed") is True:
         return []
     targets: list[dict[str, Any]] = []
-    for target in _mapping_items(tool_request.get("verification_targets")):
+    raw_targets = [
+        *_mapping_items(tool_request.get("verification_targets")),
+        *_mapping_items(tool_request.get("task_verification_targets")),
+    ]
+    if not raw_targets:
+        fallback_target = _replan_recovery_target_from_task_context(tool_request)
+        if fallback_target:
+            raw_targets = [fallback_target]
+    for target in raw_targets:
         step_id = str(target.get("step_id") or "").strip()
         if not step_id:
             continue
@@ -482,6 +500,34 @@ def _verification_targets_from_replan_recovery(
             }
         )
     return targets
+
+
+def _replan_recovery_target_from_task_context(
+    tool_request: Mapping[str, Any],
+) -> dict[str, Any]:
+    todo = (
+        tool_request.get("task_todo")
+        if isinstance(tool_request.get("task_todo"), Mapping)
+        else {}
+    )
+    checkpoints = _mapping_items(tool_request.get("task_checkpoints"))
+    workspace_items = _mapping_items(tool_request.get("task_workspace_items"))
+    step_id = _first_text(
+        todo.get("step_id") if isinstance(todo, Mapping) else "",
+        *(checkpoint.get("after_step_id") for checkpoint in checkpoints),
+        *(item.get("source_step_id") for item in workspace_items),
+        tool_request.get("source_step_id"),
+        tool_request.get("planner_step_id"),
+        tool_request.get("step_id"),
+    )
+    if not step_id or (not todo and not checkpoints):
+        return {}
+    target: dict[str, Any] = {"step_id": step_id}
+    if todo:
+        target["todo"] = dict(todo)
+    if checkpoints:
+        target["checkpoints"] = [dict(checkpoint) for checkpoint in checkpoints]
+    return target
 
 
 def _tool_event_result(tool_event: Mapping[str, Any]) -> dict[str, Any]:
@@ -530,9 +576,11 @@ def _append_replan_recovery_update_event(
             tool_request.get("source_tool_name"),
             task_todo.get("tool_name") if isinstance(task_todo, Mapping) else "",
         ),
-        "selected_step_id": str(
-            tool_request.get("step_id") or tool_request.get("planner_step_id") or ""
-        ).strip(),
+        "selected_step_id": _first_text(
+            tool_request.get("step_id"),
+            tool_request.get("planner_step_id"),
+            base_payload.get("step_id"),
+        ),
         "selected_tool_name": str(
             tool_request.get("tool") or tool_request.get("tool_name") or ""
         ).strip(),
@@ -567,6 +615,15 @@ def _append_replan_recovery_update_event(
     verification_targets = _mapping_items(tool_request.get("verification_targets"))
     if verification_targets:
         payload["verification_targets"] = [dict(target) for target in verification_targets]
+    task_verification_targets = _mapping_items(tool_request.get("task_verification_targets"))
+    if task_verification_targets:
+        payload["task_verification_targets"] = [
+            dict(target) for target in task_verification_targets
+        ]
+        payload.setdefault(
+            "verification_targets",
+            [dict(target) for target in task_verification_targets],
+        )
     _append_replan_progress_event(
         "agent.replan.recovery.updated",
         str(payload.get("recovery_action_label") or selected_tool or request_id),
@@ -584,6 +641,21 @@ def _replan_recovery_trigger(tool_request: Mapping[str, Any]) -> str:
         return trigger
     triggers = _string_list(tool_request.get("replan_triggers"))
     return triggers[0] if triggers else "tool_failure"
+
+
+def _replan_recovery_projection_step_id(
+    tool_request: Mapping[str, Any],
+    request_id: str,
+) -> str:
+    if not request_id:
+        return ""
+    action_id = _first_text(
+        tool_request.get("action_id"),
+        tool_request.get("replan_recovery_action_id"),
+    )
+    if action_id:
+        return f"replan-recovery:{request_id}:{action_id}"
+    return f"replan-recovery:{request_id}"
 
 
 def _append_replan_progress_event(

@@ -234,6 +234,62 @@ def test_task_progress_payloads_scope_replan_recovery_from_trigger_list() -> Non
     assert recovery_event["replan_trigger"] == "verification_failed"
 
 
+def test_replan_recovery_without_step_id_updates_target_progress() -> None:
+    source_request = _tool_request()
+    recovery_request = {
+        "tool": "desktop.open_app",
+        "source": "agent_studio_replan_recovery",
+        "core_id": source_request["core_id"],
+        "workspace_id": source_request["workspace_id"],
+        "decision_id": source_request["decision_id"],
+        "plan_id": source_request["plan_id"],
+        "task_id": source_request["task_id"],
+        "workflow_run_id": source_request["workflow_run_id"],
+        "replan_request_id": "replan-1",
+        "action_id": "action-open-app",
+        "replan_trigger": "tool_failure",
+        "recovery_action_label": "Open target app",
+        "task_verification_targets": [
+            {
+                "step_id": "write-report",
+                "todo": source_request["task_todo"],
+                "checkpoints": source_request["task_checkpoints"],
+            }
+        ],
+    }
+
+    events = task_progress_event_payloads_for_tool_result(
+        tool_request=recovery_request,
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "desktop.open_app",
+            "result": {"ok": True, "summary": "Opened the target app."},
+        },
+        event_scope="auto",
+    )
+
+    assert [event["event"] for event in events] == [
+        "workflow.run.task.todo.updated",
+        "workflow.run.task.checkpoint.updated",
+        "workflow.run.replan.recovery.updated",
+    ]
+    assert events[0]["status"] == "completed"
+    assert events[0]["step_id"] == "write-report"
+    assert events[0]["verified_by_step_id"] == (
+        "replan-recovery:replan-1:action-open-app"
+    )
+    assert events[0]["verification_tool"] == "desktop.open_app"
+    assert events[1]["checkpoint"]["payload"]["verified_by_step_id"] == (
+        "replan-recovery:replan-1:action-open-app"
+    )
+    recovery_event = events[2]
+    assert recovery_event["planner_event_type"] == "agent.replan.recovery.updated"
+    assert recovery_event["selected_step_id"] == (
+        "replan-recovery:replan-1:action-open-app"
+    )
+    assert recovery_event["task_verification_targets"][0]["step_id"] == "write-report"
+
+
 def test_public_task_replan_events_project_failed_tool_result() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",
