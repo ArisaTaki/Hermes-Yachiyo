@@ -3337,6 +3337,15 @@ def test_agent_task_light_snapshot_json_shape_is_stable() -> None:
         detail="Prepare patch",
         needs_user_action=True,
         pending_approval=pending,
+        task_progress=TaskProgressSummarySnapshot(
+            core_id="core-1",
+            workspace_id="workspace-1",
+            status="waiting_approval",
+            total_todos=2,
+            completed_todos=1,
+            needs_user_action=True,
+            progress_text="1/2 todos completed",
+        ),
         open_in_studio_url="#/agents?run_id=run-1",
         created_at="2026-06-14T00:00:00Z",
         updated_at="2026-06-14T00:00:01Z",
@@ -3352,11 +3361,14 @@ def test_agent_task_light_snapshot_json_shape_is_stable() -> None:
         "detail",
         "needs_user_action",
         "pending_approval",
+        "task_progress",
         "open_in_studio_url",
         "created_at",
         "updated_at",
     ]
     assert payload["pending_approval"]["approval_id"] == "approval-1"
+    assert payload["task_progress"]["workspace_id"] == "workspace-1"
+    assert payload["task_progress"]["progress_text"] == "1/2 todos completed"
     assert payload["open_in_studio_url"] == "#/agents?run_id=run-1"
 
 
@@ -3384,6 +3396,18 @@ def test_agent_task_light_snapshot_projects_full_task_for_launcher_surfaces() ->
         progress_text="1 approval pending",
         needs_user_action=False,
         pending_approvals=[approved, pending],
+        task_progress=TaskProgressSummarySnapshot(
+            core_id="core-1",
+            workspace_id="workspace-1",
+            status="waiting_approval",
+            total_todos=2,
+            completed_todos=1,
+            total_checkpoints=1,
+            latest_replan_request_id="replan-1",
+            needs_replan=True,
+            needs_user_action=True,
+            progress_text="1/2 todos completed",
+        ),
         open_in_studio_url="#/agents?run_id=run-1",
         created_at="2026-06-14T00:00:00Z",
         updated_at="2026-06-14T00:00:01Z",
@@ -3396,6 +3420,9 @@ def test_agent_task_light_snapshot_projects_full_task_for_launcher_surfaces() ->
     assert light.needs_user_action is True
     assert light.pending_approval is not None
     assert light.pending_approval.approval_id == "approval-pending"
+    assert light.task_progress is not None
+    assert light.task_progress.workspace_id == "workspace-1"
+    assert light.task_progress.needs_replan is True
     assert light.open_in_studio_url == "#/agents?run_id=run-1"
 
 

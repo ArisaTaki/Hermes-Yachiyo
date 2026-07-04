@@ -119,6 +119,80 @@ function launcherAgentTaskToolCallStatusLabel(status: string) {
   return '';
 }
 
+type LauncherAgentTaskProgressChip = {
+  kind: string;
+  label: string;
+  title?: string;
+  tone: 'ready' | 'running' | 'warning' | 'muted';
+};
+
+function launcherAgentTaskProgressChips(
+  task: AgentTaskSnapshot,
+  limit: number,
+): LauncherAgentTaskProgressChip[] {
+  const progress = task.task_progress || null;
+  const todos = task.task_core?.todos || [];
+  const checkpoints = task.task_core?.checkpoints || [];
+  const totalTodos = progress?.total_todos ?? todos.length;
+  const completedTodos = progress?.completed_todos
+    ?? todos.filter((todo) => todo.status === 'completed').length;
+  const activeTodos = progress?.active_todos
+    ?? todos.filter((todo) => todo.status === 'in_progress').length;
+  const blockedTodos = progress?.blocked_todos
+    ?? todos.filter((todo) => todo.status === 'blocked').length;
+  const totalCheckpoints = progress?.total_checkpoints ?? checkpoints.length;
+  const completedCheckpoints = progress?.completed_checkpoints
+    ?? checkpoints.filter((checkpoint) => checkpoint.status === 'completed').length;
+  const failedVerificationCount = progress?.failed_verification_count ?? 0;
+  const pendingVerificationCount = progress?.pending_verification_count ?? 0;
+  const chips: LauncherAgentTaskProgressChip[] = [];
+
+  if (totalTodos > 0) {
+    chips.push({
+      kind: 'todo',
+      label: `todo ${completedTodos}/${totalTodos}`,
+      title: progress?.current_step_title || progress?.progress_text || undefined,
+      tone: blockedTodos > 0 ? 'warning' : activeTodos > 0 ? 'running' : completedTodos >= totalTodos ? 'ready' : 'muted',
+    });
+  }
+  if (totalCheckpoints > 0) {
+    chips.push({
+      kind: 'checkpoint',
+      label: `check ${completedCheckpoints}/${totalCheckpoints}`,
+      title: progress?.latest_verification_step_id || undefined,
+      tone: failedVerificationCount > 0 ? 'warning' : completedCheckpoints >= totalCheckpoints ? 'ready' : 'muted',
+    });
+  }
+  if (progress?.needs_replan || progress?.latest_replan_request_id) {
+    chips.push({
+      kind: 'replan',
+      label: 'replan',
+      title: [
+        progress.latest_replan_trigger,
+        progress.latest_replan_step_id,
+      ].filter(Boolean).join(' · '),
+      tone: 'warning',
+    });
+  }
+  if (failedVerificationCount > 0 || pendingVerificationCount > 0) {
+    chips.push({
+      kind: 'verification',
+      label: failedVerificationCount > 0 ? `verify !${failedVerificationCount}` : `verify ${pendingVerificationCount}`,
+      title: progress?.latest_verification_status || undefined,
+      tone: failedVerificationCount > 0 ? 'warning' : 'muted',
+    });
+  }
+  if (progress?.needs_user_action) {
+    chips.push({
+      kind: 'user_action',
+      label: 'action',
+      title: progress.approval_step_ids?.join(' · ') || undefined,
+      tone: 'warning',
+    });
+  }
+  return chips.slice(0, Math.max(0, limit));
+}
+
 export function launcherAgentTaskChatParams(task: LauncherAgentTask): Record<string, string> | undefined {
   if (!task) return undefined;
   const params: Record<string, string> = {};
@@ -140,6 +214,7 @@ export function launcherAgentTaskLightSnapshot(task: LauncherAgentTask): AgentTa
     detail: launcherAgentTaskDetail(task) || null,
     needs_user_action: Boolean(task.needs_user_action || approval),
     pending_approval: approval,
+    task_progress: task.task_progress || null,
     open_in_studio_url: yachiyoTaskStudioUrl(task) || null,
     created_at: task.created_at || '',
     updated_at: task.updated_at || '',
@@ -207,6 +282,11 @@ export function LauncherAgentTaskLight({
   const canCancel = Boolean(onCancelTask && launcherAgentTaskCanCancel(currentTask));
   const testIds = launcherAgentTaskTestIds(mode, testIdPrefix);
   const primaryRecoveryAction = permissionRecovery?.actions[0] || null;
+  const progressChips = launcherAgentTaskProgressChips(
+    currentTask,
+    mode === 'bubble' ? 2 : variant === 'panel' ? 5 : 4,
+  );
+  const progress = lightTask.task_progress || currentTask.task_progress || null;
   async function handleApproval(action: LauncherTaskApprovalAction) {
     if (!approval || taskAction) return;
     const handler = action === 'approve' ? onApproveApproval : onRejectApproval;
@@ -232,6 +312,8 @@ export function LauncherAgentTaskLight({
       className={`launcher-agent-task-light ${launcherAgentTaskTone(status)} ${variant === 'panel' ? 'is-panel' : ''}`}
       data-run-id={runId}
       data-task-id={currentTask.task_id}
+      data-task-progress-status={progress?.status || ''}
+      data-task-needs-replan={String(progress?.needs_replan === true)}
       data-testid={testIds.light}
     >
       <button
@@ -249,6 +331,20 @@ export function LauncherAgentTaskLight({
         <strong>{taskTitle}</strong>
         {detail ? (
           <small data-testid={testIds.detail}>{detail}</small>
+        ) : null}
+        {progressChips.length ? (
+          <div className="launcher-agent-task-progress" data-testid={`${testIdPrefix}-agent-task-progress`}>
+            {progressChips.map((chip) => (
+              <small
+                className={`launcher-agent-task-progress-chip ${chip.tone}`}
+                data-progress-chip-kind={chip.kind}
+                key={`${chip.kind}:${chip.label}`}
+                title={chip.title || chip.label}
+              >
+                {chip.label}
+              </small>
+            ))}
+          </div>
         ) : null}
         {needsAction ? <em>待处理</em> : null}
       </button>

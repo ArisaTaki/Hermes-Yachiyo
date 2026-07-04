@@ -17,6 +17,7 @@ def agent_task_light_snapshot_from_task(task: AgentTaskSnapshot) -> AgentTaskLig
         detail=task.current_step or task.progress_text or task.summary,
         needs_user_action=task_requires_user_action(task),
         pending_approval=pending_approval,
+        task_progress=task.task_progress,
         open_in_studio_url=task.open_in_studio_url,
         created_at=task.created_at,
         updated_at=task.updated_at,

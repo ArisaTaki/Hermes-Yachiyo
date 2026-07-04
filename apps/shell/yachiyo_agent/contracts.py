@@ -826,6 +826,7 @@ class AgentTaskLightSnapshot(_PublicSnapshot):
     detail: str | None = None
     needs_user_action: bool = False
     pending_approval: ApprovalCardSnapshot | None = None
+    task_progress: TaskProgressSummarySnapshot | None = None
     open_in_studio_url: str | None = None
     created_at: str = ""
     updated_at: str = ""

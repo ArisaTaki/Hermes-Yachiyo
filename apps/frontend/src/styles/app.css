@@ -4566,8 +4566,56 @@ button:hover {
   font-size: 9px;
 }
 
-.bubble-shell .launcher-agent-task-main small {
+.bubble-shell .launcher-agent-task-main>small {
   display: none;
+}
+
+.launcher-agent-task-progress {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  min-width: 0;
+}
+
+.launcher-agent-task-main .launcher-agent-task-progress-chip {
+  grid-column: auto;
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  min-height: 14px;
+  padding: 1px 4px;
+  border: 1px solid rgba(255, 244, 203, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 244, 203, 0.055);
+  color: rgba(255, 247, 223, 0.68);
+  font-size: 8px;
+  line-height: 1.15;
+}
+
+.launcher-agent-task-progress-chip.ready {
+  border-color: rgba(158, 240, 197, 0.22);
+  color: #9ef0c5;
+}
+
+.launcher-agent-task-progress-chip.running {
+  border-color: rgba(129, 224, 255, 0.22);
+  color: #b8ecff;
+}
+
+.launcher-agent-task-progress-chip.warning {
+  border-color: rgba(255, 209, 102, 0.28);
+  color: #ffd166;
+}
+
+.bubble-shell .launcher-agent-task-progress {
+  gap: 2px;
+}
+
+.bubble-shell .launcher-agent-task-main .launcher-agent-task-progress-chip {
+  min-height: 12px;
+  padding: 0 3px;
+  font-size: 7px;
 }
 
 .launcher-agent-task-main em {

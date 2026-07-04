@@ -782,6 +782,7 @@ export type AgentTaskLightSnapshot = {
   detail?: string | null;
   needs_user_action?: boolean;
   pending_approval?: ApprovalCardSnapshot | null;
+  task_progress?: TaskProgressSummarySnapshot | null;
   open_in_studio_url?: string | null;
   created_at?: string;
   updated_at?: string;
