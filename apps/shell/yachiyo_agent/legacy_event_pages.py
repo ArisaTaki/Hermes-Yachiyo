@@ -15,6 +15,11 @@ def run_with_replay_events(run: dict[str, Any], runtime: Any) -> dict[str, Any]:
         return run
     try:
         events_payload = list_run_events(run_id, limit=500)
+    except TypeError:
+        try:
+            events_payload = list_run_events(run_id)
+        except Exception:
+            return run
     except Exception:
         return run
     events = events_payload.get("events") if isinstance(events_payload, dict) else None
@@ -52,15 +57,38 @@ def is_replay_enrichment_event(event: dict[str, Any]) -> bool:
     event_type = str(event.get("event_type") or event.get("event") or "")
     return event_type.startswith(
         (
+            "agent.artifact.",
             "agent.desktop.",
+            "agent.intent.",
+            "agent.plan.",
+            "agent.replan.",
+            "agent.run.",
+            "agent.task.",
+            "agent.task_core.",
             "agent.tool.",
+            "group.artifact.",
+            "group.member.",
+            "group.run.",
+            "group.shared_artifact.",
             "approval.",
             "artifact.",
             "memory.",
             "skill.",
             "tool.",
+            "workflow.desktop.",
+            "workflow.intent.",
+            "workflow.node.",
+            "workflow.plan.",
+            "workflow.replan.",
+            "workflow.run.",
+            "workflow.task.",
+            "workflow.task_core.",
         )
     ) or event_type in {
+        "agent.cancelled",
+        "agent.completed",
+        "agent.failed",
+        "agent.started",
         "workflow.node.artifact",
         "workflow.node.approval_required",
         "workflow.node.approval_approved",

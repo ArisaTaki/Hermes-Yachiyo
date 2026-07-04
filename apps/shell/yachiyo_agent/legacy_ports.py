@@ -1448,7 +1448,7 @@ class LegacyStudioPort:
             _run_id_from_payload(run),
             runtime_planner_decision(user_goal, metadata=planner_metadata),
         )
-        return run
+        return _run_with_replay_events(run, self._runtime)
 
     def list_run_timelines(self, limit: int = 50) -> dict[str, Any]:
         return self._runtime.list_runs(limit)

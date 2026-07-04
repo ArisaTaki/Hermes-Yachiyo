@@ -2885,9 +2885,45 @@ def test_legacy_studio_port_starts_agent_run_with_daily_desktop_overlay() -> Non
     )
 
 
+def test_legacy_studio_port_start_workflow_run_returns_runtime_events() -> None:
+    runtime = _StudioStartRuntime()
+    run = LegacyStudioPort(runtime).start_workflow_run(
+        {
+            "workflow_id": "workflow-1",
+            "objective": "分析 sales.csv 并输出报告",
+            "client_run_id": "studio-workflow-run-1",
+        }
+    )
+
+    event_types = [event.get("event_type") or event.get("event") for event in run["events"]]
+    assert run["run_id"] == "studio-workflow-run-1"
+    assert event_types[:5] == [
+        "workflow.run.started",
+        "agent.intent.selected",
+        "agent.plan.created",
+        "agent.task_core.created",
+        "agent.plan.step",
+    ]
+    assert (
+        "create_workflow_run",
+        {
+            "workflow_id": "workflow-1",
+            "user_goal": "分析 sales.csv 并输出报告",
+            "source": "yachiyo_studio",
+            "client_run_id": "studio-workflow-run-1",
+            "run_group_id": None,
+        },
+    ) in runtime.calls
+
+
 class _StudioStartRuntime:
     def __init__(self) -> None:
         self.calls: list[tuple[str, Any]] = []
+        self.run_events: dict[str, list[dict[str, Any]]] = {
+            "studio-workflow-run-1": [
+                {"event_type": "workflow.run.started", "sequence": 1},
+            ],
+        }
 
     def create_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("create_agent_run", payload))
@@ -2897,6 +2933,50 @@ class _StudioStartRuntime:
             "status": "running",
             "timeline": [],
         }
+
+    def create_workflow_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("create_workflow_run", payload))
+        return {
+            "run_id": "studio-workflow-run-1",
+            "kind": "workflow_run",
+            "workflow_run_id": "studio-workflow-run-1",
+            "workflow_id": payload.get("workflow_id"),
+            "status": "running",
+            "timeline": [{"event_type": "workflow.run.started", "sequence": 1}],
+        }
+
+    def append_run_event(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        self.calls.append(
+            (
+                "append_run_event",
+                {
+                    "run_id": run_id,
+                    "event_type": event_type,
+                    "payload": payload,
+                },
+            )
+        )
+        events = self.run_events.setdefault(run_id, [])
+        events.append(
+            {
+                "event_type": event_type,
+                "sequence": len(events) + 1,
+                "payload": dict(payload),
+            }
+        )
+
+    def list_run_events(
+        self,
+        run_id: str,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        self.calls.append(("list_run_events", run_id))
+        return {"events": list(self.run_events.get(run_id, []))}
 
     def get_agent(self, agent_id: str) -> dict[str, Any]:
         return {

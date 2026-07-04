@@ -105,7 +105,37 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
             },
             {"event_type": "memory.retrieved", "sequence": 4, "payload": {"memory_id": "mem-1"}},
             {"event_type": "skill.used", "sequence": 5, "payload": {"skill_id": "skill-1"}},
-            {"event_type": "agent.runtime.compiled", "sequence": 6, "payload": {"internal": True}},
+            {
+                "event_type": "agent.plan.created",
+                "sequence": 6,
+                "payload": {"plan_id": "plan-1"},
+            },
+            {
+                "event_type": "agent.task_core.created",
+                "sequence": 7,
+                "payload": {"core_id": "task-core-1"},
+            },
+            {
+                "event_type": "agent.task.todo.updated",
+                "sequence": 8,
+                "payload": {"todo_id": "todo-1", "status": "completed"},
+            },
+            {
+                "event_type": "agent.replan.requested",
+                "sequence": 9,
+                "payload": {"request_id": "replan-1"},
+            },
+            {
+                "event_type": "agent.artifact.write",
+                "sequence": 10,
+                "payload": {"artifact": {"path": "report.md"}},
+            },
+            {
+                "event_type": "workflow.run.task_core.created",
+                "sequence": 11,
+                "payload": {"core_id": "workflow-task-core-1"},
+            },
+            {"event_type": "agent.runtime.compiled", "sequence": 12, "payload": {"internal": True}},
         ]
     )
     run = {
@@ -121,12 +151,24 @@ def test_legacy_run_replay_enrichment_merges_observable_runtime_facts() -> None:
         "agent.desktop.intent_unavailable",
         "memory.retrieved",
         "skill.used",
+        "agent.plan.created",
+        "agent.task_core.created",
+        "agent.task.todo.updated",
+        "agent.replan.requested",
+        "agent.artifact.write",
+        "workflow.run.task_core.created",
     ]
     assert runtime.requests == [{"run_id": "run-1", "limit": 500}]
     assert is_replay_enrichment_event({"event_type": "agent.desktop.intent_planned"})
     assert is_replay_enrichment_event({"event_type": "agent.desktop.intent_unavailable"})
     assert is_replay_enrichment_event({"event_type": "memory.retrieved"})
     assert is_replay_enrichment_event({"event_type": "skill.used"})
+    assert is_replay_enrichment_event({"event_type": "agent.plan.created"})
+    assert is_replay_enrichment_event({"event_type": "agent.task.todo.updated"})
+    assert is_replay_enrichment_event({"event_type": "agent.replan.requested"})
+    assert is_replay_enrichment_event({"event_type": "agent.artifact.write"})
+    assert is_replay_enrichment_event({"event_type": "workflow.run.task_core.created"})
+    assert not is_replay_enrichment_event({"event_type": "agent.runtime.compiled"})
 
 
 class _ReplayRuntime:
