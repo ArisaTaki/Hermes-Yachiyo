@@ -145,8 +145,18 @@ function launcherAgentTaskProgressChips(
     ?? checkpoints.filter((checkpoint) => checkpoint.status === 'completed').length;
   const failedVerificationCount = progress?.failed_verification_count ?? 0;
   const pendingVerificationCount = progress?.pending_verification_count ?? 0;
+  const executionEnvelope = task.runtime_execution_envelope || null;
+  const executionRequestCount = executionEnvelope?.requests?.length || 0;
   const chips: LauncherAgentTaskProgressChip[] = [];
 
+  if (executionRequestCount > 0) {
+    chips.push({
+      kind: 'execution',
+      label: `exec ${executionRequestCount}`,
+      title: executionEnvelope?.requests?.map((request) => request.tool_name).filter(Boolean).join(' · ') || undefined,
+      tone: executionEnvelope?.approvals_required?.length ? 'warning' : 'running',
+    });
+  }
   if (totalTodos > 0) {
     chips.push({
       kind: 'todo',

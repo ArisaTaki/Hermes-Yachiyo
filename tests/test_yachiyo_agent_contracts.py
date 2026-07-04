@@ -3092,6 +3092,13 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
             artifact_count=1,
             debug_surfaces=["timeline", "tools", "approvals", "artifacts"],
         ),
+        runtime_execution_envelope=RuntimeExecutionEnvelopeSnapshot(
+            envelope_id="execution-envelope-runtime-plan-1",
+            decision_id="decision-1",
+            plan_id="runtime-plan-1",
+            intent_kind="code_task",
+            runtime_stage_counts={"operate": 1},
+        ),
         open_in_studio_url="#/agents?run_id=run-1",
         created_at="2026-06-14T00:00:00Z",
         updated_at="2026-06-14T00:00:01Z",
@@ -3115,6 +3122,7 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
         "metadata",
         "planner_summary",
         "runtime_debug",
+        "runtime_execution_envelope",
         "task_core",
         "task_progress",
         "replan_recoveries",
@@ -3135,7 +3143,87 @@ def test_agent_task_snapshot_json_shape_is_stable() -> None:
         "approvals",
         "artifacts",
     ]
+    assert payload["runtime_execution_envelope"]["intent_kind"] == "code_task"
     assert "event" not in payload["recent_events"][0]
+
+
+def test_agent_task_snapshot_projects_runtime_execution_envelope_from_metadata() -> None:
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "status": "running",
+            "metadata": {
+                "yachiyo_execution_envelope": {
+                    "envelope_id": "execution-envelope-runtime-plan-1",
+                    "decision_id": "decision-1",
+                    "plan_id": "runtime-plan-1",
+                    "intent_kind": "desktop_operation",
+                    "requests": [
+                        {
+                            "request_id": "request-1",
+                            "tool_name": "desktop.list_apps",
+                            "runtime_stage": "discover",
+                        },
+                        {
+                            "request_id": "request-2",
+                            "tool_name": "app.open",
+                            "runtime_stage": "operate",
+                            "approval_required": True,
+                        },
+                    ],
+                    "runtime_stage_counts": {"discover": 1, "operate": 1},
+                    "approvals_required": ["open-or-focus-app"],
+                }
+            },
+        }
+    )
+
+    envelope = snapshot.runtime_execution_envelope
+    assert envelope is not None
+    assert envelope.envelope_id == "execution-envelope-runtime-plan-1"
+    assert envelope.intent_kind == "desktop_operation"
+    assert [request.tool_name for request in envelope.requests] == [
+        "desktop.list_apps",
+        "app.open",
+    ]
+    assert envelope.runtime_stage_counts == {"discover": 1, "operate": 1}
+    assert envelope.approvals_required == ["open-or-focus-app"]
+
+
+def test_agent_task_snapshot_projects_runtime_execution_envelope_from_events() -> None:
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "run_id": "run-1",
+            "task_id": "task-1",
+            "status": "running",
+            "timeline": [
+                {
+                    "event_type": "agent.plan.created",
+                    "payload": {
+                        "runtime_execution_envelope": {
+                            "envelope_id": "execution-envelope-runtime-plan-2",
+                            "decision_id": "decision-2",
+                            "plan_id": "runtime-plan-2",
+                            "intent_kind": "data_analysis",
+                            "requests": [
+                                {
+                                    "request_id": "request-1",
+                                    "tool_name": "workspace.read",
+                                    "runtime_stage": "discover",
+                                }
+                            ],
+                            "runtime_stage_counts": {"discover": 1},
+                        }
+                    },
+                }
+            ],
+        }
+    )
+
+    assert snapshot.runtime_execution_envelope is not None
+    assert snapshot.runtime_execution_envelope.plan_id == "runtime-plan-2"
+    assert snapshot.runtime_execution_envelope.requests[0].tool_name == "workspace.read"
 
 
 def test_agent_task_snapshot_keeps_verify_events_but_shows_primary_desktop_tool() -> None:

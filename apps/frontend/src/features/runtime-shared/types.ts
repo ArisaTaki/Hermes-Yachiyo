@@ -766,6 +766,7 @@ export type AgentTaskSnapshot = {
   metadata?: Record<string, unknown>;
   planner_summary?: PlannerTraceSummarySnapshot | null;
   runtime_debug?: RuntimeDebugSummarySnapshot | null;
+  runtime_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
   task_core?: TaskCoreSnapshot | null;
   task_progress?: TaskProgressSummarySnapshot | null;
   replan_recoveries?: ReplanRecoverySnapshot[];

@@ -20,7 +20,12 @@ from .artifact_event_snapshots import (
     merge_artifact_snapshot_lists,
 )
 from .artifacts import artifact_snapshots_from_payloads
-from .contracts import AgentTaskSnapshot, PublicRunEvent, ToolCallSnapshot
+from .contracts import (
+    AgentTaskSnapshot,
+    PublicRunEvent,
+    RuntimeExecutionEnvelopeSnapshot,
+    ToolCallSnapshot,
+)
 from .events import public_run_event_from_payload, run_event_parent_context
 from .links import studio_run_url
 from .recovery_actions import RECOVERY_RETRY_CONTEXT_EVENT_TYPE
@@ -156,6 +161,10 @@ def agent_task_snapshot_from_payload(
     )
     tool_calls = _chat_task_tool_calls(tool_calls, recent_events)
     tool_calls = _chat_sanitized_tool_calls(tool_calls)
+    runtime_execution_envelope = _runtime_execution_envelope_from_task_payload(
+        payload,
+        events=all_events,
+    )
     active_task = status in _ACTIVE_TASK_STATUSES
     recovery_needs_user_action = (
         _has_desktop_recovery_user_action(
@@ -224,6 +233,7 @@ def agent_task_snapshot_from_payload(
             needs_user_action=needs_user_action,
             needs_replan=bool(task_progress and task_progress.needs_replan),
         ),
+        runtime_execution_envelope=runtime_execution_envelope,
         task_core=task_core,
         task_progress=task_progress,
         replan_recoveries=replan_recoveries,
@@ -246,6 +256,56 @@ def _public_task_metadata(payload: Mapping[str, Any]) -> dict[str, Any]:
         return {}
     redacted = redact_json_value(dict(metadata))
     return dict(redacted) if isinstance(redacted, Mapping) else {}
+
+
+def _runtime_execution_envelope_from_task_payload(
+    payload: Mapping[str, Any],
+    *,
+    events: list[PublicRunEvent],
+) -> RuntimeExecutionEnvelopeSnapshot | None:
+    for candidate in _runtime_execution_envelope_candidates(payload, events):
+        if isinstance(candidate, RuntimeExecutionEnvelopeSnapshot):
+            return candidate
+        if not isinstance(candidate, Mapping):
+            continue
+        try:
+            return RuntimeExecutionEnvelopeSnapshot.model_validate(candidate)
+        except ValueError:
+            continue
+    return None
+
+
+def _runtime_execution_envelope_candidates(
+    payload: Mapping[str, Any],
+    events: list[PublicRunEvent],
+) -> list[Any]:
+    candidates: list[Any] = [
+        payload.get("runtime_execution_envelope"),
+        payload.get("yachiyo_execution_envelope"),
+        payload.get("execution_envelope"),
+    ]
+    metadata = payload.get("metadata")
+    if isinstance(metadata, Mapping):
+        candidates.extend([
+            metadata.get("runtime_execution_envelope"),
+            metadata.get("yachiyo_execution_envelope"),
+            metadata.get("execution_envelope"),
+        ])
+    for event in reversed(events):
+        event_payload = event.payload if isinstance(event.payload, Mapping) else {}
+        candidates.extend([
+            event_payload.get("runtime_execution_envelope"),
+            event_payload.get("yachiyo_execution_envelope"),
+            event_payload.get("execution_envelope"),
+        ])
+        event_metadata = event_payload.get("metadata")
+        if isinstance(event_metadata, Mapping):
+            candidates.extend([
+                event_metadata.get("runtime_execution_envelope"),
+                event_metadata.get("yachiyo_execution_envelope"),
+                event_metadata.get("execution_envelope"),
+            ])
+    return candidates
 
 
 def _chat_task_tool_calls(
