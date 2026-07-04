@@ -64,7 +64,10 @@ from .recovery_actions import (
     RECOVERY_RETRY_CONTEXT_EVENT_TYPE,
     recovery_retry_context_payload,
 )
-from .runtime_execution import runtime_execution_requests_from_metadata
+from .runtime_execution import (
+    runtime_execution_requests_from_envelope_payload,
+    runtime_execution_requests_from_metadata,
+)
 from .groups import group_run_snapshot_from_payload
 from .tool_catalog import runtime_tool_catalog_snapshot
 
@@ -478,6 +481,7 @@ class LegacyChatTaskStarter:
                 conversation_id=conversation_id,
                 prompt=str(request.get("prompt") or request.get("goal") or ""),
                 metadata=metadata,
+                runtime_execution_envelope=request.get("runtime_execution_envelope"),
             )
             if executed is not None:
                 return executed
@@ -522,12 +526,14 @@ class LegacyChatTaskStarter:
         conversation_id: str,
         prompt: str,
         metadata: dict[str, Any] | None = None,
+        runtime_execution_envelope: Any | None = None,
     ) -> dict[str, Any] | None:
         return self._execute_main_daily_desktop_task(
             task_id=task_id,
             conversation_id=conversation_id,
             prompt=prompt,
             metadata=metadata,
+            runtime_execution_envelope=runtime_execution_envelope,
         )
 
     def _planner_first_planned_timeline(
@@ -596,6 +602,7 @@ class LegacyChatTaskStarter:
         conversation_id: str,
         prompt: str,
         metadata: dict[str, Any] | None = None,
+        runtime_execution_envelope: Any | None = None,
     ) -> dict[str, Any] | None:
         prompt = str(prompt or "").strip()
         metadata = _planner_metadata_with_desktop_readiness(metadata or {})
@@ -688,6 +695,7 @@ class LegacyChatTaskStarter:
                     prompt or execution_prompt,
                     metadata,
                     allowed_entrypoint_tools,
+                    runtime_execution_envelope=runtime_execution_envelope,
                     selected_requests=selected_requests,
                 )
                 if selected_source in {"runtime_planner", "none", ""}
@@ -1553,23 +1561,47 @@ def _safe_runtime_execution_envelope_requests(
     metadata: dict[str, Any] | None,
     allowed_tools: list[str],
     *,
+    runtime_execution_envelope: Any | None = None,
     selected_requests: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     selected_requests = selected_requests or []
     if _has_approval_plan_tool(selected_requests):
         return []
-    requests = runtime_execution_requests_from_metadata(
+    for requests in _runtime_execution_envelope_request_candidates(
+        runtime_execution_envelope,
+        metadata,
+        allowed_tools=allowed_tools,
+    ):
+        if not requests:
+            continue
+        if _has_approval_plan_tool(requests):
+            continue
+        if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
+            continue
+        return _split_redundant_app_safe_shortcut_requests(requests)
+    return []
+
+
+def _runtime_execution_envelope_request_candidates(
+    runtime_execution_envelope: Any | None,
+    metadata: dict[str, Any] | None,
+    *,
+    allowed_tools: list[str],
+) -> list[list[dict[str, Any]]]:
+    candidates: list[list[dict[str, Any]]] = []
+    top_level_requests = runtime_execution_requests_from_envelope_payload(
+        runtime_execution_envelope,
+        allowed_tools=allowed_tools,
+    )
+    if top_level_requests:
+        candidates.append(top_level_requests)
+    metadata_requests = runtime_execution_requests_from_metadata(
         metadata,
         allowed_tools=allowed_tools,
     )
-    if not requests:
-        return []
-    if _has_approval_plan_tool(requests):
-        return []
-    if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
-        return []
-    requests = _split_redundant_app_safe_shortcut_requests(requests)
-    return requests
+    if metadata_requests:
+        candidates.append(metadata_requests)
+    return candidates
 
 
 def _drop_data_analysis_prepare_app_requests(
