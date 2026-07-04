@@ -225,6 +225,7 @@ def test_planner_first_daily_desktop_entrypoint_verifies_known_app_submit_when_n
         "input": {"limit": 80},
         "source": "runtime_verification",
         "planning_reason": "planner_fallback_communication_send",
+        "runtime_doctrine": "discover_operate_verify",
         "continue_to_model": True,
         "requires_observation": True,
         "runtime_stage": "verify",

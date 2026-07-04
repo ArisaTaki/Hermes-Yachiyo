@@ -11,7 +11,10 @@ from .contracts import (
     RuntimeExecutionRequestSnapshot,
     ToolPlanStepSnapshot,
 )
-from .planner_execution import planner_tool_requests_for_decision
+from .planner_execution import (
+    planner_full_plan_execution_tool_requests,
+    planner_tool_requests_for_decision,
+)
 from .task_progress_snapshots import task_progress_summary_from_task_core
 
 
@@ -26,7 +29,10 @@ def runtime_execution_envelope_from_decision(
         return None
     clean_allowed = _allowed_tools(decision, allowed_tools)
     request_payloads = (
-        _full_plan_tool_requests_from_decision(decision, clean_allowed)
+        planner_full_plan_execution_tool_requests(
+            _full_plan_tool_requests_from_decision(decision, clean_allowed),
+            clean_allowed,
+        )
         if full_plan and _supports_full_plan_projection(decision)
         else planner_tool_requests_for_decision(
             decision,

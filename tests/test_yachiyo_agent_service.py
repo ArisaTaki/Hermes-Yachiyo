@@ -837,6 +837,8 @@ def test_agent_studio_service_plans_discovered_desktop_app_execution() -> None:
         "role_filter": "",
         "click_count": 1,
         "limit": 80,
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
     }
     assert envelope.requests[1].requires_post_action_verification is True
     assert envelope.requests[2].input == {
@@ -845,6 +847,57 @@ def test_agent_studio_service_plans_discovered_desktop_app_execution() -> None:
     assert envelope.requests[2].runtime_stage == "verify"
     assert envelope.requests[2].requires_observation is True
     assert envelope.requests[2].requires_post_action_verification is False
+
+
+def test_agent_studio_service_normalizes_known_app_submit_execution() -> None:
+    service = AgentStudioService(_FakeStudioExecutionPort())
+
+    envelope = service.plan_execution(
+        "在 Slack 给 Alice 发 hello",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert envelope.intent_kind == "communication"
+    assert [request.tool_name for request in envelope.requests] == [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_type_text",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    assert envelope.runtime_stage_counts == {
+        "discover": 1,
+        "operate": 6,
+        "verify": 1,
+    }
+    assert envelope.requests[0].runtime_stage == "discover"
+    assert envelope.requests[0].runtime_role == "find_target_app"
+    assert envelope.requests[0].input == {"query": "Slack", "limit": 20}
+    assert envelope.requests[1].input == {
+        "app_name": "Slack",
+        "selection_source": "desktop.list_apps",
+        "query": "Slack",
+    }
+    assert envelope.requests[6].approval_required is True
+    assert envelope.requests[6].runtime_stage == "operate"
+    assert envelope.requests[6].runtime_role == "send_message"
+    assert envelope.requests[7].source == "runtime_verification"
+    assert envelope.requests[7].runtime_stage == "verify"
+    assert envelope.requests[7].runtime_role == "verify_result"
+    assert envelope.requests[7].continue_to_model is True
+    assert envelope.requests[7].requires_observation is True
+    assert envelope.requests[7].input == {"limit": 80}
 
 
 def test_yachiyo_agent_service_projects_runtime_tool_result_events() -> None:

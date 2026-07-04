@@ -9032,6 +9032,11 @@ def test_planner_execution_tool_requests_prepends_unknown_app_discovery() -> Non
             "input": {"query": "PixelForge", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
+            "capability_id": "desktop.app_discovery",
+            "runtime_doctrine": "discover_operate_verify",
+            "runtime_stage": "discover",
+            "runtime_role": "find_target_app",
+            "requires_observation": True,
         },
         {
             "protocol": "json_fallback",
@@ -9191,6 +9196,11 @@ def test_planner_execution_tool_requests_discovers_unknown_app_scoped_operations
             "input": {"query": "PixelForge", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
+            "capability_id": "desktop.app_discovery",
+            "runtime_doctrine": "discover_operate_verify",
+            "runtime_stage": "discover",
+            "runtime_role": "find_target_app",
+            "requires_observation": True,
         },
         {
             "protocol": "json_fallback",
@@ -9258,6 +9268,11 @@ def test_planner_execution_tool_requests_verifies_after_unknown_app_foreground_c
             "input": {"query": "PixelForge", "limit": 20},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
+            "capability_id": "desktop.app_discovery",
+            "runtime_doctrine": "discover_operate_verify",
+            "runtime_stage": "discover",
+            "runtime_role": "find_target_app",
+            "requires_observation": True,
         },
         {
             "protocol": "json_fallback",
@@ -33146,25 +33161,29 @@ def test_runtime_execution_envelope_projects_full_desktop_plan_with_app_discover
         "desktop.ui_elements",
     ]
     assert [request.tool_name for request in full_envelope.requests] == [
+        "desktop.list_apps",
         "desktop.inspect_app",
         "app.open_and_click_ui_element",
         "desktop.ui_elements",
     ]
     assert [request.step_id for request in full_envelope.requests] == [
+        None,
         "inspect-app",
         "operate-foreground-ui",
         "verify-desktop-result",
     ]
     assert full_envelope.runtime_stage_counts == {
-        "discover": 1,
+        "discover": 2,
         "operate": 1,
         "verify": 1,
     }
-    assert full_envelope.requests[1].approval_required is True
-    assert full_envelope.requests[1].runtime_role == "click_ui"
-    assert full_envelope.requests[1].task_todo["step_id"] == "operate-foreground-ui"
-    assert full_envelope.requests[2].runtime_stage == "verify"
-    assert full_envelope.requests[2].task_verification_targets[0]["step_id"] == (
+    assert full_envelope.requests[0].runtime_stage == "discover"
+    assert full_envelope.requests[0].runtime_role == "find_target_app"
+    assert full_envelope.requests[2].approval_required is True
+    assert full_envelope.requests[2].runtime_role == "click_ui"
+    assert full_envelope.requests[2].task_todo["step_id"] == "operate-foreground-ui"
+    assert full_envelope.requests[3].runtime_stage == "verify"
+    assert full_envelope.requests[3].task_verification_targets[0]["step_id"] == (
         "operate-foreground-ui"
     )
 
@@ -33173,13 +33192,14 @@ def test_runtime_execution_envelope_projects_full_desktop_plan_with_app_discover
         allowed_tools=allowed_tools,
     )
     assert [request["tool"] for request in projected_requests] == [
+        "desktop.list_apps",
         "desktop.inspect_app",
         "app.open_and_click_ui_element",
         "desktop.ui_elements",
     ]
-    assert projected_requests[1]["approval_required"] is True
-    assert projected_requests[1]["requires_post_action_verification"] is True
-    assert projected_requests[2]["task_verification_targets"][0]["todo"]["step_id"] == (
+    assert projected_requests[2]["approval_required"] is True
+    assert projected_requests[2]["requires_post_action_verification"] is True
+    assert projected_requests[3]["task_verification_targets"][0]["todo"]["step_id"] == (
         "operate-foreground-ui"
     )
 

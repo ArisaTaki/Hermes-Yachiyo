@@ -105,6 +105,36 @@ def planner_execution_tool_requests(
     return runtime_execution_verified_tool_requests(normalized_requests, allowed)
 
 
+def planner_full_plan_execution_tool_requests(
+    requests: Iterable[Mapping[str, Any]],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    """Normalize Studio full-plan requests without collapsing planned operations."""
+
+    allowed = {
+        str(tool or "").strip()
+        for tool in allowed_tools
+        if str(tool or "").strip()
+    }
+    normalized_requests = [
+        dict(request) for request in requests if isinstance(request, Mapping)
+    ]
+    if not normalized_requests:
+        return []
+    normalized_requests = _prepend_unknown_app_discovery_requests(
+        normalized_requests,
+        allowed,
+    )
+    normalized_requests = _annotate_selected_app_placeholders_with_discovery_query(
+        normalized_requests
+    )
+    normalized_requests = _append_foreground_submit_verification_requests(
+        normalized_requests,
+        allowed,
+    )
+    return runtime_execution_verified_tool_requests(normalized_requests, allowed)
+
+
 def runtime_execution_verified_tool_requests(
     requests: Iterable[Mapping[str, Any]],
     allowed_tools: Iterable[str],
@@ -157,14 +187,9 @@ def _prepend_unknown_app_discovery_requests(
             query_key = _discovery_query_key(app_name)
             if query_key and query_key not in discovered_queries:
                 normalized.append(
-                    _request(
-                        "desktop.list_apps",
-                        {"query": app_name, "limit": 20},
-                        planning_reason=str(
-                            request.get("planning_reason")
-                            or "planner_desktop_app_discovery"
-                        ).strip()
-                        or "planner_desktop_app_discovery",
+                    _desktop_app_discovery_request_for_execution(
+                        app_name,
+                        request,
                     )
                 )
                 discovered_queries.add(query_key)
@@ -172,6 +197,28 @@ def _prepend_unknown_app_discovery_requests(
                 request = _request_with_desktop_app_selection_source(request, app_name)
         normalized.append(request)
     return normalized
+
+
+def _desktop_app_discovery_request_for_execution(
+    app_name: str,
+    source_request: Mapping[str, Any],
+) -> dict[str, Any]:
+    request = _request(
+        "desktop.list_apps",
+        {"query": app_name, "limit": 20},
+        planning_reason=str(
+            source_request.get("planning_reason")
+            or "planner_desktop_app_discovery"
+        ).strip()
+        or "planner_desktop_app_discovery",
+    )
+    _inherit_request_context_without_step(request, source_request)
+    request["capability_id"] = "desktop.app_discovery"
+    request["runtime_doctrine"] = "discover_operate_verify"
+    request["runtime_stage"] = "discover"
+    request["runtime_role"] = "find_target_app"
+    request["requires_observation"] = True
+    return request
 
 
 def _request_needs_app_discovery_first(
@@ -1022,6 +1069,7 @@ def _foreground_submit_verification_request(
         planning_reason=planning_reason,
     )
     request["source"] = "runtime_verification"
+    request["runtime_doctrine"] = "discover_operate_verify"
     request["continue_to_model"] = True
     request["requires_observation"] = True
     request["runtime_stage"] = "verify"
