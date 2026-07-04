@@ -157,6 +157,8 @@ class TaskIntentRouter:
             return _empty_intent("data_analysis", text)
         if _spreadsheet_cell_edit_ui_hint(text):
             return _empty_intent("data_analysis", text)
+        if _desktop_ui_field_edit_hint(text):
+            return _empty_intent("data_analysis", text)
         if _looks_like_current_page_link_artifact_request(text):
             return _empty_intent("data_analysis", text)
         if (
@@ -421,7 +423,12 @@ class TaskIntentRouter:
         if named_data_source_hint(text) and _data_analysis_action_requested(text):
             return _empty_intent("desktop_operation", text)
         spreadsheet_cell_edit = _spreadsheet_cell_edit_ui_hint(text)
-        if _looks_like_generic_data_source_analysis_request(text) and not spreadsheet_cell_edit:
+        desktop_ui_field_edit = _desktop_ui_field_edit_hint(text)
+        if (
+            _looks_like_generic_data_source_analysis_request(text)
+            and not spreadsheet_cell_edit
+            and not desktop_ui_field_edit
+        ):
             return _empty_intent("desktop_operation", text)
         app_capability = _app_capability_discovery_hint(text)
         if not app_capability and _browser_window_desktop_ui_operation_requested(text):
@@ -434,6 +441,7 @@ class TaskIntentRouter:
             return _empty_intent("desktop_operation", text)
         if generic_browser_search and not app_capability:
             app_capability = {"query": "browser", "description": "browser"}
+        ui_type_target = type_into_ui_hint(text)
         file_open_discovery_candidate = _app_file_open_discovery_hint(
             text,
             metadata,
@@ -447,7 +455,7 @@ class TaskIntentRouter:
             if file_open_discovery_candidate
             else (
                 _selected_discovered_app_target_path_hint(text)
-                if app_capability
+                if app_capability and not ui_type_target
                 else ""
             )
         )
@@ -458,6 +466,7 @@ class TaskIntentRouter:
         if (
             _explicit_system_settings_request(text)
             and not spreadsheet_cell_edit
+            and not desktop_ui_field_edit
             and not (app_search_app_hint and _app_search_hint(text, app_search_app_hint))
         ):
             return _empty_intent("desktop_operation", text)
@@ -679,7 +688,6 @@ class TaskIntentRouter:
         app_scoped_safe_shortcut_app = _app_scoped_safe_shortcut_app_name_hint(text, safe_shortcut)
         app_click_scope = _app_first_click_scope_hint(text)
         app_type_scope = _app_first_type_scope_hint(text)
-        ui_type_target = type_into_ui_hint(text)
         if app_type_scope or _target_first_foreground_type_hint(text):
             foreground_compose_text = ""
         if _standalone_hotkey_request(text):
@@ -1387,6 +1395,8 @@ class TaskIntentRouter:
             return _empty_intent("system_control", text)
         if _spreadsheet_cell_edit_ui_hint(text):
             return _empty_intent("system_control", text)
+        if _desktop_ui_field_edit_hint(text):
+            return _empty_intent("system_control", text)
         app_hint = _app_name_hint(text)
         app_search_hint = _app_search_hint(text, app_hint)
         app_hint = app_hint or str(app_search_hint.get("app_name") or "").strip()
@@ -1943,6 +1953,8 @@ class TaskIntentRouter:
 
     def _code_task_intent(self, text: str, metadata: Mapping[str, Any]) -> TaskIntentSnapshot:
         terminal_hint = terminal_command_hint(text)
+        if not terminal_hint and _desktop_ui_field_edit_hint(text):
+            return _empty_intent("code_task", text)
         if (
             not terminal_hint
             and _explicit_app_open_request(text)
@@ -16526,6 +16538,42 @@ def _spreadsheet_cell_edit_ui_hint(text: str) -> bool:
     )
 
 
+def _desktop_ui_field_edit_hint(text: str) -> bool:
+    hint = type_into_ui_hint(text)
+    if not isinstance(hint, Mapping):
+        return False
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    app_capability = _app_capability_discovery_hint(value)
+    if app_capability:
+        return True
+    return _contains_any(
+        value,
+        (
+            "当前打开",
+            "当前已打开",
+            "已打开",
+            "打开的",
+            "正在运行",
+            "运行中",
+            "前台",
+            "当前",
+            "表单",
+            "输入框",
+            "文本框",
+            "字段",
+            "currently open",
+            "already open",
+            "running",
+            "foreground",
+            "current",
+            "form",
+            "field",
+        ),
+    )
+
+
 def _deictic_visible_data_marker_matches(value: str) -> bool:
     return bool(
         re.search(
@@ -26583,7 +26631,7 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"(?:that\s+can|to|for)\s+(?P<scoped_capability_en>[^.!?,]{1,60})",
         r"(?:写进|写入|写到|放进|放到|保存到|导出到|输出到|整理到|总结到|发到)\s*"
         rf"{generic_prefix}"
-        r"(?P<target_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
+        r"(?P<target_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表单|表格|电子表格|"
         r"图片|图像|照片|看图|绘图|画图|设计|视频|视频剪辑|视频编辑|音频|音频编辑|"
         r"压缩|解压|归档|白板|数据库|截图|截屏|流程图|思维导图|脑图|pdf|PDF|"
         r"演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
@@ -26593,14 +26641,14 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"\b(?:write|save|export|output|put|send|copy|paste)\b.{0,80}?"
         rf"\b(?:to|into|in)\s+{generic_prefix_en}"
         r"(?P<target_capability_en>markdown|code|image|photo|design|video|audio|archive|"
-        r"zip|whiteboard|database|screenshot|diagram|mindmap|document|text|spreadsheet|"
+        r"zip|whiteboard|database|screenshot|diagram|mindmap|document|text|form|spreadsheet|"
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
         r"(?:app|application|client|tool|program|editor|window)\b",
         r"(?:打开|启动|找|找个|找一个|找一款|使用|在|用|通过)\s*"
         rf"{local_scope_prefix}"
         rf"{generic_prefix}"
-        r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
+        r"(?P<direct_capability_cn>markdown|代码|编程|开发|文本|文档|文章|表单|表格|电子表格|"
         r"图片|图像|照片|看图|绘图|画图|设计|视频|视频剪辑|视频编辑|音频|音频编辑|"
         r"压缩|解压|归档|白板|数据库|截图|截屏|流程图|思维导图|脑图|pdf|PDF|"
         r"演示|幻灯片|笔记|备忘录|邮件|电子邮件|邮箱|"
@@ -26610,7 +26658,7 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         r"\b(?:open|launch|start|find|use)\s+"
         rf"{generic_prefix_en}"
         r"(?P<direct_capability_en>markdown|code|image|photo|design|video|audio|archive|"
-        r"zip|whiteboard|database|screenshot|diagram|mindmap|document|text|spreadsheet|"
+        r"zip|whiteboard|database|screenshot|diagram|mindmap|document|text|form|spreadsheet|"
         r"presentation|slide|note|mail|email|chat|messaging|message|messenger|calendar|"
         r"project|task|issue|ticket|kanban)[\w\s-]{0,30}?"
         r"(?:app|application|client|tool|program|editor|window)\b",
@@ -26654,7 +26702,7 @@ def _running_scoped_app_capability_hint(text: str) -> dict[str, str]:
         r"开着|已开启|前台|当前)"
     )
     cn_capability = (
-        r"markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
+        r"markdown|代码|编程|开发|文本|文档|文章|表单|表格|电子表格|"
         r"图片|图像|照片|看图|绘图|画图|设计|视频|视频剪辑|视频编辑|"
         r"音频|音频编辑|压缩|解压|归档|白板|数据库|截图|截屏|"
         r"流程图|思维导图|脑图|pdf|PDF|演示|幻灯片|笔记|备忘录|"
@@ -26665,7 +26713,7 @@ def _running_scoped_app_capability_hint(text: str) -> dict[str, str]:
     en_capability = (
         r"markdown|code|image|photo|design|video|audio|archive|zip|"
         r"whiteboard|database|screenshot|diagram|mind\s*map|mindmap|"
-        r"document|text|spreadsheet|sheet|presentation|slide|note|mail|"
+        r"document|text|form|spreadsheet|sheet|presentation|slide|note|mail|"
         r"email|chat|messaging|message|messenger|calendar|project|task|"
         r"issue|ticket|kanban|browser|web\s+browser|terminal|command\s+line"
     )
@@ -26899,7 +26947,10 @@ def _app_capability_discovery_query(value: str) -> str:
         ),
     ):
         return "task management"
-    if _contains_any(description, ("文档", "文本", "文章", "document", "text", "writing", "write")):
+    if _contains_any(
+        description,
+        ("文档", "文本", "文章", "表单", "document", "text", "form", "writing", "write"),
+    ):
         return "document"
     return description[:40].strip()
 

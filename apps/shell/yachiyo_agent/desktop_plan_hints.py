@@ -262,6 +262,17 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
 
 
 def type_into_ui_hint(text: str, *, app_name: str = "") -> dict[str, Any] | None:
+    field_cn = (
+        r"搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
+        r"收件人|发件人|联系人|主题|标题|姓名|名称|邮箱|邮件地址|电话|"
+        r"用户名|账号|账户|密码"
+    )
+    field_en = (
+        r"search box|search field|message field|address bar|input field|"
+        r"text box|input|field|title(?: field)?|name(?: field)?|"
+        r"email(?: field| address)?|phone(?: field| number)?|username|"
+        r"account|password|subject|recipient|sender|contact"
+    )
     patterns = (
         r"(?:把|将)?\s*(?:单元格|cell)?\s*(?P<cell>[A-Z]{1,3}\d{1,7})\s*"
         r"(?:改成|改为|设为|设置为|填成|填为|写成|写为|更新为|置为|=)\s*"
@@ -269,6 +280,15 @@ def type_into_ui_hint(text: str, *, app_name: str = "") -> dict[str, Any] | None
         r"(?:set|change|update|fill|write)\s+(?:cell\s+)?"
         r"(?P<cell_en>[A-Z]{1,3}\d{1,7})\s+(?:to|as|=)\s*"
         r"(?P<cell_text_en>[^.!?,]+)",
+        rf"(?:把|将)\s*(?P<target_update_cn>{field_cn})\s*"
+        r"(?:改成|改为|设为|设置为|填成|填为|写成|写为|更新为|置为|=)\s*"
+        r"(?P<text_update_cn>[^。！？!?，,]+)",
+        rf"(?P<target_update_plain_cn>{field_cn})\s*"
+        r"(?:改成|改为|设为|设置为|填成|填为|写成|写为|更新为|置为|=)\s*"
+        r"(?P<text_update_plain_cn>[^。！？!?，,]+)",
+        r"(?:set|change|update|fill|write)\s+(?:the\s+)?"
+        rf"(?P<target_update_en>{field_en})\s+(?:to|as|=)\s*"
+        r"(?P<text_update_en>[^.!?,]+)",
         r"(?P<target>[^。！？!?，,]{1,40}?(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
         r"收件人|发件人|联系人|主题|标题|姓名|名称|邮箱|邮件地址|电话|用户名|账号|账户|密码))"
         r"\s*(?:输入|键入|填写|填入|写入|写)\s*(?P<text>[^。！？!?，,]+)",
@@ -300,6 +320,25 @@ def type_into_ui_hint(text: str, *, app_name: str = "") -> dict[str, Any] | None
                     "text": typed_text,
                     "role_filter": "text",
                 }
+            continue
+
+        raw_target = (
+            match.groupdict().get("target_update_cn")
+            or match.groupdict().get("target_update_plain_cn")
+            or match.groupdict().get("target_update_en")
+            or ""
+        )
+        if raw_target:
+            raw_text = (
+                match.groupdict().get("text_update_cn")
+                or match.groupdict().get("text_update_plain_cn")
+                or match.groupdict().get("text_update_en")
+                or ""
+            )
+            target = clean_type_target(raw_target, app_name=app_name)
+            typed_text = clean_followup_text(raw_text)
+            if target and typed_text:
+                return {"target": target, "text": typed_text, "role_filter": "text"}
             continue
 
         raw_target = (
@@ -1859,6 +1898,23 @@ def clean_type_target(value: str, *, app_name: str = "") -> str:
         target,
         flags=re.IGNORECASE,
     ).strip()
+    target = _strip_foreground_scope_prefix(target)
+    target = re.sub(
+        r"^(?:当前打开|当前已打开|已打开|打开的|正在运行|运行中|当前运行|"
+        r"开着|已开启|前台|当前)(?:的)?\s*",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    ).strip()
+    target = re.sub(
+        r"^(?:文档|文本|文章|表单|表格|电子表格|邮件|聊天|消息|浏览器)"
+        r"(?:应用(?:程序)?|app|软件|客户端|工具|程序|编辑器|阅读器|查看器|窗口)?"
+        r"\s*(?:里|中|上|内|里面|窗口)(?:的)?\s*",
+        "",
+        target,
+        flags=re.IGNORECASE,
+    ).strip()
+    target = re.sub(r"^(?:给|将|把)\s*", "", target, flags=re.IGNORECASE).strip()
     target = re.sub(
         r"^(?:并|然后|再|接着|之后|后)\s*",
         "",

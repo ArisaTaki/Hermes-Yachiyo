@@ -34144,6 +34144,102 @@ def test_runtime_planner_edits_cells_in_selected_running_spreadsheet_app() -> No
         )
 
 
+def test_runtime_planner_edits_fields_in_selected_running_document_app() -> None:
+    allowed_tools = [
+        "desktop.running_apps",
+        "app.focus",
+        "app.focus_and_type_into_ui_element",
+        "desktop.ui_elements",
+    ]
+    cases = [
+        ("在当前打开的文档应用里把标题改成 周报", "标题", "周报", "文档"),
+        ("在当前打开的文档应用里将标题设置为 周报", "标题", "周报", "文档"),
+        (
+            "in the current document app set the title field to weekly report",
+            "title",
+            "weekly report",
+            "document",
+        ),
+        (
+            "在当前打开的表单里把邮箱改成 test@example.com",
+            "邮箱",
+            "test@example.com",
+            "表单",
+        ),
+    ]
+
+    for prompt, target, text, description in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+        envelope = runtime_execution_envelope_from_decision(
+            decision,
+            allowed_tools=allowed_tools,
+            full_plan=True,
+        )
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["type_into_ui_hint"] == {
+            "target": target,
+            "text": text,
+            "role_filter": "text",
+        }
+        assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+            "action": "discover_apps",
+            "query": "document",
+        }
+        assert decision.selected_intent.inputs["app_capability_hint"] == {
+            "query": "document",
+            "description": description,
+        }
+        assert "selected_app_target_path_hint" not in decision.selected_intent.inputs
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover_apps-desktop-state",
+            "open-selected-discovered-app",
+            "type-selected-discovered-app-ui",
+            "verify-selected-discovered-app-action",
+        ]
+        assert _step_by_id(decision, "discover_apps-desktop-state").tool_name == (
+            "desktop.running_apps"
+        )
+        assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+            "app_name": "<selected app from desktop.running_apps>",
+            "selection_source": "desktop.running_apps",
+            "query": "document",
+        }
+        type_step = _step_by_id(decision, "type-selected-discovered-app-ui")
+        assert type_step.input_preview == {
+            "app_name": "<selected app from desktop.running_apps>",
+            "selection_source": "desktop.running_apps",
+            "query": "document",
+            "target": target,
+            "text": text,
+            "role_filter": "text",
+            "limit": 80,
+        }
+        assert type_step.approval_required is True
+        assert type_step.risk_level == "medium"
+
+        assert envelope is not None
+        type_request = next(
+            request
+            for request in envelope.requests
+            if request.step_id == "type-selected-discovered-app-ui"
+        )
+        assert type_request.approval_required is True
+        assert type_request.action_target == {
+            "kind": "desktop_app",
+            "action": "type_ui",
+            "selection_source": "desktop.running_apps",
+            "app_name": "<selected app from desktop.running_apps>",
+            "query": "document",
+            "target": target,
+            "role_filter": "text",
+            "step_id": "type-selected-discovered-app-ui",
+        }
+        assert envelope.requests[-1].action_target["selection_source"] == (
+            "desktop.running_apps"
+        )
+
+
 def test_runtime_execution_envelope_preserves_deferred_ui_observation_context() -> None:
     allowed_tools = [
         "desktop.list_apps",
