@@ -552,6 +552,8 @@ class LegacyChatTaskStarter:
                 prompt=str(request.get("prompt") or request.get("goal") or ""),
                 metadata=metadata,
                 runtime_execution_envelope=request.get("runtime_execution_envelope"),
+                direct_tool_request=request.get("direct_tool_request"),
+                direct_tool_requests=request.get("direct_tool_requests"),
             )
             if executed is not None:
                 return executed
@@ -599,6 +601,8 @@ class LegacyChatTaskStarter:
         prompt: str,
         metadata: dict[str, Any] | None = None,
         runtime_execution_envelope: Any | None = None,
+        direct_tool_request: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         return self._execute_main_daily_desktop_task(
             task_id=task_id,
@@ -606,6 +610,8 @@ class LegacyChatTaskStarter:
             prompt=prompt,
             metadata=metadata,
             runtime_execution_envelope=runtime_execution_envelope,
+            direct_tool_request=direct_tool_request,
+            direct_tool_requests=direct_tool_requests,
         )
 
     def _planner_first_planned_timeline(
@@ -676,6 +682,8 @@ class LegacyChatTaskStarter:
         prompt: str,
         metadata: dict[str, Any] | None = None,
         runtime_execution_envelope: Any | None = None,
+        direct_tool_request: Any | None = None,
+        direct_tool_requests: Any | None = None,
     ) -> dict[str, Any] | None:
         prompt = str(prompt or "").strip()
         metadata = _planner_metadata_with_desktop_readiness(metadata or {})
@@ -687,7 +695,15 @@ class LegacyChatTaskStarter:
         )
         execution_prompt = daily_desktop_recovery_execution_prompt(prompt, metadata)
         planning_prompt = _entrypoint_planning_context(prompt or execution_prompt, metadata)
-        direct_tool_request = daily_desktop_direct_metadata_request(
+        explicit_direct_tool_request = _explicit_direct_tool_request(
+            direct_tool_request,
+            allowed_entrypoint_tools,
+        )
+        explicit_direct_tool_requests = _explicit_direct_tool_requests(
+            direct_tool_requests,
+            allowed_entrypoint_tools,
+        )
+        direct_tool_request = explicit_direct_tool_request or daily_desktop_direct_metadata_request(
             metadata,
             allowed_tools=allowed_daily_desktop_tools,
         )
@@ -770,7 +786,9 @@ class LegacyChatTaskStarter:
                 runtime_execution_envelope=runtime_execution_envelope,
                 selected_requests=selected_requests,
             )
-            if envelope_tool_requests:
+            if explicit_direct_tool_requests:
+                direct_tool_requests = explicit_direct_tool_requests
+            elif envelope_tool_requests:
                 direct_tool_requests = envelope_tool_requests
             elif selected_source == "runtime_planner":
                 direct_tool_requests = _safe_runtime_planner_tool_requests(
@@ -2034,6 +2052,36 @@ def _direct_tool_request_sequence(
     for request in requests:
         request.setdefault("run_id", run_id)
         request.setdefault("task_id", task_id)
+    return requests
+
+
+def _explicit_direct_tool_request(
+    value: Any,
+    allowed_tools: list[str],
+) -> dict[str, Any] | None:
+    requests = _explicit_direct_tool_requests([value], allowed_tools)
+    return requests[0] if requests else None
+
+
+def _explicit_direct_tool_requests(
+    value: Any,
+    allowed_tools: list[str],
+) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    requests: list[dict[str, Any]] = []
+    for item in value:
+        if not isinstance(item, dict):
+            continue
+        tool_name = str(item.get("tool") or item.get("tool_name") or "").strip()
+        if not tool_name:
+            continue
+        if allowed and tool_name not in allowed:
+            continue
+        request = dict(item)
+        request["tool"] = tool_name
+        requests.append(request)
     return requests
 
 

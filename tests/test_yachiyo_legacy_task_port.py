@@ -1774,7 +1774,9 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     ]
     assert selection_events[0][1]["payload"]["selection_source"] == "daily_desktop_intent"
     assert selection_events[0][1]["payload"]["selected_tools"] == [
+        "desktop.list_apps",
         "app.open",
+        "desktop.active_window",
     ]
     assert selection_events[0][1]["payload"]["legacy_request_count"] == 1
     model_loop_call = [
@@ -1842,6 +1844,45 @@ def test_legacy_chat_task_starter_uses_runtime_execution_envelope_requests() -> 
     assert direct_requests[0]["replan_triggers"] == ["verification_failed"]
     assert direct_requests[0]["replan_signal_ids"] == ["replan-inspect"]
     assert direct_requests[0]["capability_id"] == "desktop.app_discovery"
+
+
+def test_legacy_chat_task_starter_prefers_explicit_direct_tool_requests() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatPlannerEventRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-main",
+        conversation_id="chat-1",
+        prompt="执行恢复动作：重新发现应用",
+        direct_tool_requests=[
+            {
+                "tool": "desktop.list_apps",
+                "input": {"query": "PixelForge", "limit": 20},
+                "planning_reason": "planner_desktop_loop_auto_retry",
+                "desktop_loop": {
+                    "stage": "discover",
+                    "retry_tool": "desktop.list_apps",
+                    "can_auto_retry": True,
+                },
+            },
+            {
+                "tool": "terminal.run",
+                "input": {"cmd": "echo should-not-run"},
+                "approval_required": True,
+            },
+        ],
+    )
+
+    assert task is not None
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    direct_requests = model_loop_call[1]["direct_tool_requests"]
+    assert [request["tool"] for request in direct_requests] == ["desktop.list_apps"]
+    assert direct_requests[0]["input"] == {"query": "PixelForge", "limit": 20}
+    assert direct_requests[0]["planning_reason"] == "planner_desktop_loop_auto_retry"
+    assert direct_requests[0]["desktop_loop"]["can_auto_retry"] is True
 
 
 def test_legacy_chat_task_starter_prefers_top_level_runtime_execution_envelope() -> None:
