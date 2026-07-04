@@ -303,11 +303,19 @@ class RuntimeCustomApiAgentLoop:
                             runtime_planner_decision,
                             timeline=timeline,
                             run_id=run_id,
+                            scope_context=_runtime_planner_scope_context(
+                                direct_tool_selection_payload,
+                                timeline=timeline,
+                            ),
                         )
                         self._record_direct_tool_selection_event(
                             direct_tool_selection_payload,
                             timeline=timeline,
                             run_id=run_id,
+                            scope_context=_runtime_planner_scope_context(
+                                direct_tool_selection_payload,
+                                timeline=timeline,
+                            ),
                         )
                         replan_payloads = self._record_runtime_planner_replan_events(
                             runtime_planner_decision,
@@ -340,15 +348,28 @@ class RuntimeCustomApiAgentLoop:
                             planned_tool_requests = [approval_hotkey_request]
             if planned_tool_requests:
                 if runtime_planner_decision is not None:
+                    planner_scope_context = _runtime_planner_scope_context(
+                        planned_tool_requests,
+                        direct_tool_selection_payload,
+                        timeline=timeline,
+                    )
                     self._record_runtime_planner_events(
                         runtime_planner_decision,
                         timeline=timeline,
                         run_id=run_id,
+                        scope_context=planner_scope_context,
+                    )
+                else:
+                    planner_scope_context = _runtime_planner_scope_context(
+                        planned_tool_requests,
+                        direct_tool_selection_payload,
+                        timeline=timeline,
                     )
                 self._record_direct_tool_selection_event(
                     direct_tool_selection_payload,
                     timeline=timeline,
                     run_id=run_id,
+                    scope_context=planner_scope_context,
                 )
                 for planned_tool_request in planned_tool_requests:
                     planned_tool = str(planned_tool_request.get("tool") or "")
@@ -2525,6 +2546,7 @@ class RuntimeCustomApiAgentLoop:
         *,
         timeline: list[dict[str, Any]],
         run_id: str = "",
+        scope_context: Mapping[str, Any] | None = None,
     ) -> None:
         decision_id = str(getattr(decision, "decision_id", "") or "").strip()
         if decision_id and any(
@@ -2550,14 +2572,22 @@ class RuntimeCustomApiAgentLoop:
         except Exception:
             return
         for event in planner_timeline_events(decision):
-            timeline.append(event)
+            timeline.append(_runtime_planner_timeline_event(event, scope_context))
         if run_id and self._append_run_event is not None:
             for event_type, payload in planner_run_event_payloads(decision):
-                self._append_run_event(run_id, event_type, payload)
+                scoped_event_type = _runtime_planner_event_type(event_type, scope_context)
+                event_payload = _runtime_planner_event_payload(
+                    payload,
+                    event_type,
+                    scoped_event_type,
+                    scope_context,
+                )
+                self._append_run_event(run_id, scoped_event_type, event_payload)
         self._record_runtime_planner_initial_task_events(
             decision,
             timeline=timeline,
             run_id=run_id,
+            scope_context=scope_context,
         )
 
     def _record_runtime_planner_initial_task_events(
@@ -2566,13 +2596,21 @@ class RuntimeCustomApiAgentLoop:
         *,
         timeline: list[dict[str, Any]],
         run_id: str = "",
+        scope_context: Mapping[str, Any] | None = None,
     ) -> None:
         for event_type, detail, payload in _runtime_planner_initial_task_updates(decision):
-            if _runtime_task_update_exists(timeline, event_type, payload):
+            event_payload = {**dict(scope_context or {}), **dict(payload)}
+            if _runtime_task_update_exists(timeline, event_type, event_payload):
                 continue
-            timeline.append(self._timeline(event_type, detail, **payload))
-            if run_id and self._append_run_event is not None:
-                self._append_run_event(run_id, event_type, payload)
+            _append_runtime_task_progress_event(
+                event_type,
+                detail,
+                event_payload,
+                timeline=timeline,
+                timeline_factory=self._timeline,
+                append_run_event=self._append_run_event,
+                run_id=run_id,
+            )
 
     def _record_direct_tool_selection_event(
         self,
@@ -2580,24 +2618,33 @@ class RuntimeCustomApiAgentLoop:
         *,
         timeline: list[dict[str, Any]],
         run_id: str = "",
+        scope_context: Mapping[str, Any] | None = None,
     ) -> None:
         if not payload:
             return
-        event_payload = dict(payload)
+        event_payload = {**dict(scope_context or {}), **dict(payload)}
         detail = str(
             event_payload.get("selection_source")
             or event_payload.get("selection_reason")
             or "direct_tool_selection"
         )
+        event_type = "agent.plan.selection"
+        scoped_event_type = _runtime_planner_event_type(event_type, event_payload)
+        event_payload = _runtime_planner_event_payload(
+            event_payload,
+            event_type,
+            scoped_event_type,
+            event_payload,
+        )
         timeline.append(
             self._timeline(
-                "agent.plan.selection",
+                scoped_event_type,
                 detail,
                 **event_payload,
             )
         )
         if run_id and self._append_run_event is not None:
-            self._append_run_event(run_id, "agent.plan.selection", event_payload)
+            self._append_run_event(run_id, scoped_event_type, event_payload)
 
     def _run_auto_runtime_planner_requests(
         self,
@@ -7837,6 +7884,7 @@ def _runtime_replan_task_progress_summary(
         if not isinstance(event, Mapping):
             continue
         event_name = str(event.get("event") or "").strip()
+        base_event_name = _runtime_progress_base_event_type(event_name)
         event_payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
         core_id = str(event.get("core_id") or event_payload.get("core_id") or "").strip()
         plan_id = str(event.get("plan_id") or event_payload.get("plan_id") or "").strip()
@@ -7844,7 +7892,7 @@ def _runtime_replan_task_progress_summary(
             continue
         if plan_ids and plan_id and plan_id not in plan_ids:
             continue
-        if event_name == "agent.task_core.created":
+        if _runtime_planner_base_event_type(event_name) == "agent.task_core.created":
             task_core = (
                 event_payload.get("task_core")
                 if isinstance(event_payload.get("task_core"), Mapping)
@@ -7861,7 +7909,7 @@ def _runtime_replan_task_progress_summary(
                 if _runtime_workspace_item_key(item)
             }
             continue
-        if event_name == "agent.task.workspace_item.updated":
+        if base_event_name == "agent.task.workspace_item.updated":
             item = (
                 event.get("workspace_item")
                 if isinstance(event.get("workspace_item"), Mapping)
@@ -7879,7 +7927,7 @@ def _runtime_replan_task_progress_summary(
                 if key:
                     workspace_items_by_id[key] = summary
             continue
-        if event_name == "agent.task.todo.updated":
+        if base_event_name == "agent.task.todo.updated":
             step_id = str(event.get("step_id") or "").strip()
             if not step_id:
                 continue
@@ -7892,7 +7940,7 @@ def _runtime_replan_task_progress_summary(
                 "approval_required": bool(todo.get("approval_required")),
             }
             continue
-        if event_name == "agent.task.checkpoint.updated":
+        if base_event_name == "agent.task.checkpoint.updated":
             step_id = str(event.get("step_id") or "").strip()
             if not step_id:
                 continue
@@ -8190,7 +8238,10 @@ def _selection_payload_with_timeline_fallback(
     for event in reversed(timeline):
         if not isinstance(event, dict):
             continue
-        if str(event.get("event") or "").strip() != "agent.plan.selection":
+        if (
+            _runtime_planner_base_event_type(str(event.get("event") or "").strip())
+            != "agent.plan.selection"
+        ):
             continue
         target = event.get("followup_target")
         if not isinstance(target, Mapping):
@@ -9479,6 +9530,146 @@ def _runtime_task_update_exists(
         )
         for event in timeline
     )
+
+
+_RUNTIME_PLANNER_GROUP_EVENT_TYPES = {
+    "agent.intent.selected": "group.run.intent.selected",
+    "agent.plan.created": "group.run.plan.created",
+    "agent.plan.step": "group.run.plan.step",
+    "agent.task_core.created": "group.run.task_core.created",
+    "agent.plan.selection": "group.run.plan.selection",
+}
+
+_RUNTIME_PLANNER_WORKFLOW_EVENT_TYPES = {
+    "agent.intent.selected": "workflow.run.intent.selected",
+    "agent.plan.created": "workflow.run.plan.created",
+    "agent.plan.step": "workflow.run.plan.step",
+    "agent.task_core.created": "workflow.run.task_core.created",
+    "agent.plan.selection": "workflow.run.plan.selection",
+}
+
+_RUNTIME_PLANNER_BASE_EVENT_TYPES = {
+    **{value: key for key, value in _RUNTIME_PLANNER_GROUP_EVENT_TYPES.items()},
+    **{value: key for key, value in _RUNTIME_PLANNER_WORKFLOW_EVENT_TYPES.items()},
+    "workflow.intent.selected": "agent.intent.selected",
+    "workflow.plan.created": "agent.plan.created",
+    "workflow.plan.step": "agent.plan.step",
+    "workflow.task_core.created": "agent.task_core.created",
+    "workflow.plan.selection": "agent.plan.selection",
+}
+
+
+def _runtime_planner_timeline_event(
+    event: Mapping[str, Any],
+    scope_context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    event_type = str(event.get("event") or event.get("event_type") or "").strip()
+    scoped_event_type = _runtime_planner_event_type(event_type, scope_context)
+    event_payload = (
+        event.get("payload")
+        if isinstance(event.get("payload"), Mapping)
+        else {}
+    )
+    scoped_payload = _runtime_planner_event_payload(
+        event_payload,
+        event_type,
+        scoped_event_type,
+        scope_context,
+    )
+    result = dict(event)
+    result["event"] = scoped_event_type
+    result.update({key: value for key, value in dict(scope_context or {}).items() if value})
+    result["payload"] = scoped_payload
+    return result
+
+
+def _runtime_planner_event_type(
+    event_type: str,
+    scope_context: Mapping[str, Any] | None,
+) -> str:
+    clean_event_type = str(event_type or "").strip()
+    context = _runtime_planner_context_from_mapping(scope_context or {})
+    if str(context.get("workflow_run_id") or "").strip():
+        return _RUNTIME_PLANNER_WORKFLOW_EVENT_TYPES.get(clean_event_type, clean_event_type)
+    if str(context.get("group_run_id") or context.get("run_group_id") or "").strip():
+        return _RUNTIME_PLANNER_GROUP_EVENT_TYPES.get(clean_event_type, clean_event_type)
+    return clean_event_type
+
+
+def _runtime_planner_event_payload(
+    payload: Mapping[str, Any],
+    base_event_type: str,
+    scoped_event_type: str,
+    scope_context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    event_payload = {**dict(scope_context or {}), **dict(payload)}
+    if scoped_event_type == base_event_type:
+        return event_payload
+    event_payload.setdefault("planner_event_type", base_event_type)
+    event_payload.setdefault("planner_scope", _runtime_planner_event_scope(scoped_event_type))
+    return event_payload
+
+
+def _runtime_planner_event_scope(event_type: str) -> str:
+    clean_event_type = str(event_type or "").strip()
+    if clean_event_type.startswith("workflow.run."):
+        return "workflow.run"
+    if clean_event_type.startswith("group.run."):
+        return "group.run"
+    return "agent"
+
+
+def _runtime_planner_base_event_type(event_type: str) -> str:
+    clean_event_type = str(event_type or "").strip()
+    return _RUNTIME_PLANNER_BASE_EVENT_TYPES.get(clean_event_type, clean_event_type)
+
+
+def _runtime_planner_scope_context(
+    *sources: Any,
+    timeline: list[dict[str, Any]] | None = None,
+) -> dict[str, str]:
+    for source in sources:
+        context = _runtime_planner_context_from_source(source)
+        if context:
+            return context
+    for event in reversed(timeline or []):
+        if not isinstance(event, Mapping):
+            continue
+        context = _runtime_planner_context_from_mapping(event)
+        if context:
+            return context
+    return {}
+
+
+def _runtime_planner_context_from_source(source: Any) -> dict[str, str]:
+    if isinstance(source, Mapping):
+        return _runtime_planner_context_from_mapping(source)
+    if isinstance(source, Iterable) and not isinstance(source, (str, bytes)):
+        for item in source:
+            context = _runtime_planner_context_from_source(item)
+            if context:
+                return context
+    return {}
+
+
+def _runtime_planner_context_from_mapping(source: Mapping[str, Any]) -> dict[str, str]:
+    payload = _runtime_task_progress_event_payload(source)
+    input_payload = payload.get("input") if isinstance(payload.get("input"), Mapping) else {}
+    context: dict[str, str] = {}
+    for key in (
+        "task_id",
+        "run_group_id",
+        "group_run_id",
+        "group_id",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+    ):
+        clean_value = str(payload.get(key) or input_payload.get(key) or "").strip()
+        if clean_value:
+            context[key] = clean_value
+    return context
 
 
 def _runtime_planner_step_has_status(

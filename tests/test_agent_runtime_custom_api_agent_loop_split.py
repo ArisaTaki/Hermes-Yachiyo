@@ -317,6 +317,110 @@ def _assert_planner_task_core_metadata(
         assert mapping.get("task_todo")
 
 
+def test_runtime_planner_events_use_workflow_scope_context() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 legacy-report.xls 并输出报告",
+        allowed_tools=[
+            "workspace.read",
+            "desktop.open_path",
+            "browser.current_page",
+            "terminal.run",
+            "artifact.write",
+        ],
+    )
+    appended_events: list[dict[str, Any]] = []
+    loop = _private_runtime_loop(
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        )
+    )
+    timeline: list[dict[str, Any]] = []
+    scope_context = {
+        "task_id": "task-workflow-1",
+        "workflow_id": "workflow-1",
+        "workflow_run_id": "workflow-run-1",
+        "workflow_node_id": "node-1",
+        "workflow_node_label": "Analyze",
+    }
+
+    loop._record_runtime_planner_events(
+        decision,
+        timeline=timeline,
+        run_id="workflow-run-1",
+        scope_context=scope_context,
+    )
+
+    assert [event["event"] for event in timeline[:4]] == [
+        "workflow.run.intent.selected",
+        "workflow.run.plan.created",
+        "workflow.run.task_core.created",
+        "workflow.run.plan.step",
+    ]
+    intent_event = timeline[0]
+    task_core_event = timeline[2]
+    todo_event = next(
+        event for event in timeline if event["event"] == "workflow.run.task.todo.updated"
+    )
+    assert intent_event["workflow_run_id"] == "workflow-run-1"
+    assert intent_event["payload"]["planner_event_type"] == "agent.intent.selected"
+    assert intent_event["payload"]["planner_scope"] == "workflow.run"
+    assert task_core_event["payload"]["planner_event_type"] == "agent.task_core.created"
+    assert task_core_event["payload"]["workflow_node_id"] == "node-1"
+    assert todo_event["planner_event_type"] == "agent.task.todo.updated"
+    assert todo_event["planner_scope"] == "workflow.run"
+    assert todo_event["task_id"] == "task-workflow-1"
+    assert [event["event_type"] for event in appended_events[:4]] == [
+        "workflow.run.intent.selected",
+        "workflow.run.plan.created",
+        "workflow.run.task_core.created",
+        "workflow.run.plan.step",
+    ]
+    assert appended_events[0]["payload"]["planner_event_type"] == "agent.intent.selected"
+
+
+def test_runtime_planner_selection_event_uses_group_scope_context() -> None:
+    appended_events: list[dict[str, Any]] = []
+    loop = _private_runtime_loop(
+        append_run_event=lambda run_id, event_type, payload: appended_events.append(
+            {"run_id": run_id, "event_type": event_type, "payload": payload}
+        )
+    )
+    timeline: list[dict[str, Any]] = []
+
+    loop._record_direct_tool_selection_event(
+        {
+            "selection_source": "runtime_planner",
+            "selection_reason": "planner_selected",
+            "decision_id": "decision-group-1",
+            "plan_id": "plan-group-1",
+        },
+        timeline=timeline,
+        run_id="group-run-1",
+        scope_context={"group_id": "group-1", "group_run_id": "group-run-1"},
+    )
+
+    assert timeline[0]["event"] == "group.run.plan.selection"
+    assert timeline[0]["planner_event_type"] == "agent.plan.selection"
+    assert timeline[0]["planner_scope"] == "group.run"
+    assert timeline[0]["group_run_id"] == "group-run-1"
+    assert appended_events == [
+        {
+            "run_id": "group-run-1",
+            "event_type": "group.run.plan.selection",
+            "payload": {
+                "group_id": "group-1",
+                "group_run_id": "group-run-1",
+                "selection_source": "runtime_planner",
+                "selection_reason": "planner_selected",
+                "decision_id": "decision-group-1",
+                "plan_id": "plan-group-1",
+                "planner_event_type": "agent.plan.selection",
+                "planner_scope": "group.run",
+            },
+        }
+    ]
+
+
 def test_runtime_planner_runtime_requests_trace_multistep_desktop_plan() -> None:
     loop = _private_runtime_loop()
     decision, requests, payload = loop._runtime_planner_tool_requests(
