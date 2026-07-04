@@ -9956,6 +9956,96 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
             "continue_to_model": True,
         }
     ]
+    running_browser_allowed_tools = [
+        "desktop.running_apps",
+        "app.focus",
+        "browser.extract_text",
+        "artifact.write",
+        "desktop.ui_elements",
+    ]
+    running_browser_report = RuntimePlanner().decision(
+        "打开我正在运行的浏览器，读取当前页面内容，然后总结成报告",
+        allowed_tools=running_browser_allowed_tools,
+    )
+    running_browser_envelope = runtime_execution_envelope_from_decision(
+        running_browser_report,
+        allowed_tools=running_browser_allowed_tools,
+        full_plan=True,
+    )
+    assert running_browser_report.selected_intent.kind == "report_generation"
+    assert running_browser_report.selected_intent.inputs == {
+        "context_source": "current_page_content",
+        "running_browser_app_hint": {
+            "query": "browser",
+            "description": "browser",
+        },
+    }
+    assert "target_app_hint" not in running_browser_report.selected_intent.inputs
+    assert [step.step_id for step in running_browser_report.plan.tool_plan.steps] == [
+        "discover-running-browser-app",
+        "focus-running-browser-app",
+        "read-report-context",
+        "write-report-artifact",
+    ]
+    assert _step_by_id(
+        running_browser_report,
+        "focus-running-browser-app",
+    ).input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "browser",
+    }
+    assert _step_by_id(running_browser_report, "read-report-context").depends_on == [
+        "focus-running-browser-app"
+    ]
+    assert _step_by_id(
+        running_browser_report,
+        "write-report-artifact",
+    ).depends_on == [
+        "discover-running-browser-app",
+        "focus-running-browser-app",
+        "read-report-context",
+    ]
+    assert running_browser_envelope is not None
+    assert [request.tool_name for request in running_browser_envelope.requests] == [
+        "desktop.running_apps",
+        "app.focus",
+        "browser.extract_text",
+        "artifact.write",
+    ]
+    assert running_browser_envelope.requests[1].action_target == {
+        "kind": "desktop_app",
+        "action": "focus_app",
+        "selection_source": "desktop.running_apps",
+        "app_name": "<selected app from desktop.running_apps>",
+        "query": "browser",
+        "step_id": "focus-running-browser-app",
+    }
+    natural_running_browser_report = RuntimePlanner().decision(
+        "读取正在运行的浏览器当前页面，输出一份摘要报告",
+        allowed_tools=running_browser_allowed_tools,
+    )
+    assert natural_running_browser_report.selected_intent.kind == "report_generation"
+    assert natural_running_browser_report.selected_intent.inputs[
+        "running_browser_app_hint"
+    ] == {
+        "query": "browser",
+        "description": "browser",
+    }
+    current_open_browser_page_report = RuntimePlanner().decision(
+        "把当前打开的浏览器页面总结成 markdown 报告",
+        allowed_tools=running_browser_allowed_tools,
+    )
+    assert current_open_browser_page_report.selected_intent.kind == "report_generation"
+    assert [
+        step.step_id
+        for step in current_open_browser_page_report.plan.tool_plan.steps
+    ] == [
+        "discover-running-browser-app",
+        "focus-running-browser-app",
+        "read-report-context",
+        "write-report-artifact",
+    ]
     assert clipboard.selected_intent.kind == "report_generation"
     assert clipboard.selected_intent.inputs == {"context_source": "clipboard"}
     assert [step.step_id for step in clipboard.plan.tool_plan.steps] == [

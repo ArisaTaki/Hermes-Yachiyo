@@ -1713,6 +1713,7 @@ class TaskIntentRouter:
                 "changelog",
             ],
         )
+        running_browser_app_hint = _running_browser_page_context_hint(text)
         app_write_target = (
             {}
             if transform_target
@@ -1748,8 +1749,13 @@ class TaskIntentRouter:
             or app_write_current_page_context
             or artifact_context_source
         )
+        if running_browser_app_hint and not context_source:
+            context_source = "current_page_content"
         if context_source == "current_page_content" and not (
-            app_write_target or transform_target or _artifact_output_location_hint(text)
+            running_browser_app_hint
+            or app_write_target
+            or transform_target
+            or _artifact_output_location_hint(text)
         ):
             return _empty_intent("report_generation", text)
         file_context = {} if artifact_context_source else _report_file_context_hint(text)
@@ -1821,6 +1827,8 @@ class TaskIntentRouter:
         inputs: dict[str, Any] = {}
         if context_source:
             inputs["context_source"] = context_source
+        if running_browser_app_hint and context_source == "current_page_content":
+            inputs["running_browser_app_hint"] = running_browser_app_hint
         target_payload = transform_target or app_write_target
         target_app = str(target_payload.get("target_app_hint") or "").strip()
         target_app_capability = target_payload.get("target_app_capability_hint")
@@ -6340,12 +6348,21 @@ class RuntimePlanner:
                 depends_on="write-report-artifact",
             )
         if context_source:
-            context_steps = _context_source_steps(
-                intent,
-                allowed,
-                context_source,
-                step_prefix="report",
-                capability_id="artifact.write",
+            context_steps = (
+                _running_browser_page_context_steps(
+                    intent,
+                    allowed,
+                    context_source,
+                    step_prefix="report",
+                    capability_id="artifact.write",
+                )
+                or _context_source_steps(
+                    intent,
+                    allowed,
+                    context_source,
+                    step_prefix="report",
+                    capability_id="artifact.write",
+                )
             )
             depends_on = [step.step_id for step in context_steps]
             artifact_path = _artifact_output_path(
@@ -7483,6 +7500,97 @@ def _running_spreadsheet_data_context_steps(
             action="read_ui",
             reason=(
                 "Read the visible spreadsheet data after discovering and focusing the running app."
+            ),
+        )
+    )
+    return steps
+
+
+def _running_browser_page_context_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    context_source: str,
+    *,
+    step_prefix: str,
+    capability_id: str,
+) -> list[ToolPlanStepSnapshot]:
+    if context_source != "current_page_content":
+        return []
+    hint = intent.inputs.get("running_browser_app_hint")
+    if not isinstance(hint, Mapping):
+        return []
+    query = str(hint.get("query") or "").strip()
+    if not query:
+        return []
+    discover_tool = _first_allowed(("desktop.running_apps",), allowed)
+    focus_tool = _first_allowed(("app.focus", "desktop.focus_app"), allowed)
+    read_tool = _first_allowed(
+        (
+            "browser.extract_text",
+            "browser.current_page",
+            "desktop.ui_elements",
+            "desktop.read_ui",
+        ),
+        allowed,
+    )
+    if not discover_tool or not read_tool:
+        return []
+    selected_app_payload = {
+        "app_name": _selected_app_placeholder("desktop.running_apps"),
+        "selection_source": "desktop.running_apps",
+        "query": query,
+    }
+    steps = [
+        _step(
+            intent,
+            "discover-running-browser-app",
+            "Discover running browser app",
+            "desktop.app_discovery",
+            discover_tool,
+            input_preview={},
+            action="list_apps",
+            reason=(
+                "The user referred to an already running browser; inspect running apps "
+                "before reading the current browser page."
+            ),
+        )
+    ]
+    read_depends_on = ["discover-running-browser-app"]
+    if focus_tool:
+        steps.append(
+            _step(
+                intent,
+                "focus-running-browser-app",
+                "Focus running browser app",
+                "desktop.app_control",
+                focus_tool,
+                input_preview=selected_app_payload,
+                depends_on=["discover-running-browser-app"],
+                action="focus_app",
+                reason="Focus the runtime-selected browser before reading its current page.",
+            )
+        )
+        read_depends_on = ["focus-running-browser-app"]
+    read_input = (
+        {}
+        if read_tool in {"browser.extract_text", "browser.current_page"}
+        else {
+            **selected_app_payload,
+            "role_filter": "text",
+            "limit": 120,
+        }
+    )
+    steps.append(
+        _step(
+            intent,
+            f"read-{step_prefix}-context",
+            "Read browser page context",
+            _context_source_capability_id("current_page_content", read_tool, capability_id),
+            read_tool,
+            input_preview=read_input,
+            depends_on=read_depends_on,
+            reason=(
+                "Read the current browser page after the runtime has focused the running browser."
             ),
         )
     )
@@ -14802,6 +14910,14 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
         if str(intent.inputs.get("context_source") or "").strip():
             score += 0.34
         if (
+            isinstance(intent.inputs.get("running_browser_app_hint"), Mapping)
+            and _contains_any(
+                text,
+                ["report", "summary", "报告", "总结", "摘要", "输出", "生成"],
+            )
+        ):
+            score += 0.18
+        if (
             str(intent.inputs.get("context_source") or "").strip()
             and str(intent.inputs.get("target_app_hint") or "").strip()
         ):
@@ -16287,9 +16403,18 @@ def _looks_like_current_page_data_context_source(text: str) -> bool:
             "current webpage",
             "this page",
             "this webpage",
+            "current browser page",
+            "current browser tab",
+            "open browser page",
+            "active browser page",
             "当前网页",
             "当前页面",
             "当前页",
+            "当前浏览器页面",
+            "当前浏览器网页",
+            "当前浏览器标签页",
+            "当前打开的浏览器页面",
+            "当前打开的浏览器网页",
             "这个网页",
             "这个页面",
             "这页",
@@ -16926,6 +17051,99 @@ def _running_spreadsheet_app_context_hint(text: str) -> dict[str, str]:
     ):
         return {"query": "spreadsheet", "description": "spreadsheet"}
     return {}
+
+
+def _running_browser_page_context_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value:
+        return {}
+    if not _contains_any(
+        value,
+        (
+            "browser",
+            "chrome",
+            "google chrome",
+            "safari",
+            "firefox",
+            "edge",
+            "brave",
+            "浏览器",
+            "谷歌",
+        ),
+    ):
+        return {}
+    if not (
+        _running_or_current_app_reference(value)
+        or _looks_like_current_browser_page_reference(value)
+    ):
+        return {}
+    if not (
+        _looks_like_current_browser_page_reference(value)
+        or _looks_like_current_page_artifact_source(value)
+        or _browser_current_page_hint(value)
+    ):
+        return {}
+    query = _browser_app_query_hint(value)
+    return {"query": query or "browser", "description": "browser"}
+
+
+def _running_or_current_app_reference(text: str) -> bool:
+    return bool(
+        re.search(
+            r"(?:当前打开|已打开|已经打开|打开着|正在运行|运行中|当前运行|already\s+open|currently\s+open|running)",
+            text,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_current_browser_page_reference(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"(?:当前打开|已打开|已经打开|打开着|正在运行|运行中|当前运行|当前)?"
+            r"(?:的)?\s*(?:浏览器|browser|chrome|safari|firefox|edge|brave)"
+            r".{0,12}(?:当前|这个|本页|打开的)?\s*(?:网页|页面|标签页|页|page|tab|content|内容)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:当前|这个|本页|打开的)\s*(?:网页|页面|标签页|页|page|tab)"
+            r".{0,12}(?:浏览器|browser|chrome|safari|firefox|edge|brave)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:current|open|active)\s+(?:browser|chrome|safari|firefox|edge|brave)"
+            r"\s+(?:page|tab|content)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _browser_app_query_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    browser_names = (
+        ("Google Chrome", "Chrome"),
+        ("Chrome", "Chrome"),
+        ("Safari", "Safari"),
+        ("Firefox", "Firefox"),
+        ("Microsoft Edge", "Edge"),
+        ("Edge", "Edge"),
+        ("Brave", "Brave"),
+        ("谷歌", "Chrome"),
+    )
+    for marker, query in browser_names:
+        if re.search(
+            rf"(?<![A-Za-z0-9]){re.escape(marker)}(?![A-Za-z0-9])",
+            value,
+            flags=re.IGNORECASE,
+        ):
+            return query
+    return "browser" if _contains_any(value, ("browser", "浏览器")) else ""
 
 
 def _analysis_result_open_app_hint(text: str) -> str:
@@ -19462,6 +19680,8 @@ def _dynamic_context_transform_target_hint(text: str) -> dict[str, Any]:
 
 def _app_write_followup_target_hint(text: str) -> dict[str, Any]:
     value = _clean_prompt(text)
+    if _running_browser_page_context_hint(value):
+        return {}
     opened_app_target = _opened_app_transform_target_hint(value)
     if opened_app_target:
         return opened_app_target
