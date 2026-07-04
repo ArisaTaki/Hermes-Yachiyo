@@ -26,6 +26,7 @@ from apps.shell.yachiyo_agent.policy import DESKTOP_CAPABILITY_TOOLS
 from apps.shell.yachiyo_agent.tool_catalog import runtime_tool_catalog_snapshot
 from apps.shell.yachiyo_agent.planner_execution import (
     planner_execution_tool_requests,
+    planner_full_plan_execution_tool_requests,
     planner_orchestration_requests,
     planner_direct_tool_requests,
     planner_desktop_tool_requests,
@@ -29506,6 +29507,48 @@ def test_planner_execution_verifies_unknown_discovered_app_ui_operation() -> Non
         "input": {},
         "source": "runtime_verification",
         "planning_reason": "runtime_desktop_app_operation_verification",
+        "runtime_doctrine": "discover_operate_verify",
+        "continue_to_model": True,
+        "requires_observation": True,
+        "runtime_stage": "verify",
+        "runtime_role": "verify_result",
+        "replan_triggers": ["verification_failed"],
+        "target_app_name": "PixelForge",
+        "verification_target": {"app_name": "PixelForge"},
+    }
+
+
+def test_planner_full_plan_execution_verifies_unknown_discovered_app_open() -> None:
+    requests = planner_full_plan_execution_tool_requests(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open",
+                "input": {"app_name": "PixelForge"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            }
+        ],
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert requests[0]["runtime_stage"] == "discover"
+    assert requests[1]["input"] == {
+        "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
+    }
+    assert requests[2] == {
+        "protocol": "json_fallback",
+        "tool": "desktop.active_window",
+        "input": {},
+        "source": "runtime_verification",
+        "planning_reason": "runtime_desktop_app_foreground_verification",
         "runtime_doctrine": "discover_operate_verify",
         "continue_to_model": True,
         "requires_observation": True,

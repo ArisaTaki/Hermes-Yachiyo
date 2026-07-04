@@ -129,6 +129,10 @@ def planner_full_plan_execution_tool_requests(
     normalized_requests = _annotate_selected_app_placeholders_with_discovery_query(
         normalized_requests
     )
+    normalized_requests = _append_unknown_app_post_execution_verification(
+        normalized_requests,
+        allowed,
+    )
     normalized_requests = _append_foreground_submit_verification_requests(
         normalized_requests,
         allowed,
