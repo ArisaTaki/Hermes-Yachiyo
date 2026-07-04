@@ -21,7 +21,11 @@ import {
   mergeToolCallSnapshots,
   toolCallsFromRunEventReplay,
 } from '../../runtime-shared/runEventFacts';
-import { PlannerTraceInspector } from './PlannerTraceInspector';
+import {
+  PlannerTraceInspector,
+  TaskCoreInspector,
+  TaskProgressInspector,
+} from './PlannerTraceInspector';
 import { runRecoveryInputPatchForAction } from '../utils/recoveryInput';
 
 type GroupRunDetailPanelProps = {
@@ -136,6 +140,16 @@ export function GroupRunDetailPanel({
     ? selectedGroupRunSnapshot.skill_traces
     : groupRunChildSkillTraces(selectedGroupRunSnapshot?.runs || []);
   const groupRunFinalAnswer = selectedGroupRunSnapshot?.final_answer || selectedRunGroup?.final_answer || '';
+  const groupRunHasTaskWorkspace = Boolean(
+    selectedGroupRunSnapshot?.task_core
+    || selectedGroupRunSnapshot?.task_progress
+    || selectedGroupRunSnapshot?.replan_recoveries?.length,
+  );
+  const handleGroupRunReplanRecoveryAction = groupOverviewId
+    ? (requestId: string, action: RuntimeToolRecoveryAction) => {
+      void onRunGroupReplanRecoveryAction?.(groupOverviewId, requestId, action);
+    }
+    : undefined;
 
   return (
     <section
@@ -193,6 +207,33 @@ export function GroupRunDetailPanel({
         summary={selectedGroupRunSnapshot?.runtime_debug}
         testId="agent-run-detail-group-run-runtime-debug"
       />
+      {groupRunHasTaskWorkspace ? (
+        <section
+          className="group-run-runtime-section group-run-task-workspace"
+          data-core-id={selectedGroupRunSnapshot?.task_core?.core_id || ''}
+          data-task-progress-status={selectedGroupRunSnapshot?.task_progress?.status || ''}
+          data-testid="agent-run-detail-group-run-task-workspace"
+          data-workspace-id={selectedGroupRunSnapshot?.task_core?.workspace?.workspace_id || selectedGroupRunSnapshot?.task_progress?.workspace_id || ''}
+        >
+          <div className="group-run-runtime-section-head">
+            <strong>GroupRun Task Workspace</strong>
+            <span>{selectedGroupRunSnapshot?.task_progress?.progress_text || selectedGroupRunSnapshot?.task_core?.workspace?.title || 'workspace / todos / checkpoints / replan'}</span>
+          </div>
+          <div className="studio-task-workspace">
+            {selectedGroupRunSnapshot?.task_core ? (
+              <TaskCoreInspector taskCore={selectedGroupRunSnapshot.task_core} />
+            ) : null}
+            {selectedGroupRunSnapshot?.task_progress || selectedGroupRunSnapshot?.replan_recoveries?.length ? (
+              <TaskProgressInspector
+                onRunReplanRecoveryAction={handleGroupRunReplanRecoveryAction}
+                recoveryActionDisabled={recoveryActionDisabled || !onRunGroupReplanRecoveryAction}
+                replanRecoveries={selectedGroupRunSnapshot?.replan_recoveries || []}
+                taskProgress={selectedGroupRunSnapshot?.task_progress || null}
+              />
+            ) : null}
+          </div>
+        </section>
+      ) : null}
       {groupRunReplayEvents.length || replayLoading || replayError ? (
         <section className="group-run-runtime-section" data-testid="agent-run-detail-group-run-replay">
           <div className="group-run-runtime-section-head">
@@ -225,11 +266,10 @@ export function GroupRunDetailPanel({
       ) : null}
       <PlannerTraceInspector
         events={groupRunReplayEvents}
-        onRunReplanRecoveryAction={groupOverviewId ? (requestId, action) => {
-          void onRunGroupReplanRecoveryAction?.(groupOverviewId, requestId, action);
-        } : undefined}
+        onRunReplanRecoveryAction={handleGroupRunReplanRecoveryAction}
         recoveryActionDisabled={recoveryActionDisabled || !onRunGroupReplanRecoveryAction}
         replanRecoveries={selectedGroupRunSnapshot?.replan_recoveries || []}
+        showTaskWorkspace={!groupRunHasTaskWorkspace}
         sourceLabel="GroupRun planner facts · Intent / Capability / Plan / Selection"
         taskCore={selectedGroupRunSnapshot?.task_core}
         taskProgress={selectedGroupRunSnapshot?.task_progress || null}
@@ -317,6 +357,7 @@ export function GroupRunDetailPanel({
             const plannerTraceSummary = groupRunChildPlannerTraceSummary(publicRun);
             const recoverySource = publicRun?.recovery_source || childRun?.recovery_source || null;
             const recoverySourceSummary = groupRunRecoverySourceSummary(recoverySource);
+            const taskProgressSummary = groupRunChildTaskProgressSummary(publicRun);
             return (
               <button
                 key={childRunId}
@@ -347,6 +388,14 @@ export function GroupRunDetailPanel({
                     data-testid="agent-run-detail-group-run-child-planner-trace"
                   >
                     Planner trace · {plannerTraceSummary}
+                  </small>
+                ) : null}
+                {taskProgressSummary ? (
+                  <small
+                    className="group-run-child-task-progress"
+                    data-testid="agent-run-detail-group-run-child-task-progress"
+                  >
+                    Task progress · {taskProgressSummary}
                   </small>
                 ) : null}
                 {recoverySourceSummary ? (
@@ -413,6 +462,21 @@ function groupRunChildPlannerTraceSummary(publicRun: RunTimelineSnapshot | null)
     summary.selection_role || summary.selection_source || summary.selected_tools?.length ? 'selection' : '',
     summary.planner_entrypoint ? `entrypoint ${summary.planner_entrypoint}` : '',
     summary.launcher_surface ? `surface ${summary.launcher_surface}` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function groupRunChildTaskProgressSummary(publicRun: RunTimelineSnapshot | null): string {
+  const progress = publicRun?.task_progress || null;
+  if (!progress) return '';
+  return [
+    progress.progress_text || progress.status || '',
+    typeof progress.completed_todos === 'number' || typeof progress.total_todos === 'number'
+      ? `todo ${progress.completed_todos ?? 0}/${progress.total_todos ?? 0}`
+      : '',
+    progress.needs_replan ? 'replan' : '',
+    progress.failed_verification_count ? `verify failed ${progress.failed_verification_count}` : '',
+    progress.pending_verification_count ? `verify pending ${progress.pending_verification_count}` : '',
+    progress.needs_user_action ? 'user action' : '',
   ].filter(Boolean).join(' · ');
 }
 

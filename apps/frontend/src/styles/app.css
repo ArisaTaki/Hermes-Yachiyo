@@ -18449,6 +18449,10 @@ button.studio-tool-permission:disabled {
   color: oklch(86% 0.12 84);
 }
 
+.run-group-overview-children .group-run-child-task-progress {
+  color: oklch(78% 0.11 190);
+}
+
 .run-result-block.ready {
   border-color: oklch(68% 0.15 155 / 0.22);
 }
