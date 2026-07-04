@@ -2114,9 +2114,22 @@ def _ui_control_presence_app_name_hint(value: str) -> str:
         r"(?:(?:当前|现在|这个|前台|该)\s*(?:窗口|界面|屏幕|应用|app|ui)|"
         r"(?:current|active|foreground|this)\s*(?:window|interface|screen|app|application|ui)?)"
     )
-    if re.search(current_scope, value, flags=re.IGNORECASE):
+    explicit_app_before_current_scope = re.search(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以|直接|检查|查看|看看|确认|识别)?\s*"
+        r"(?!当前|现在|这个|前台|该\b)"
+        r"[\w .·-]{1,40}?\s*"
+        r"(?:当前|现在|这个|前台|该)?\s*(?:窗口|界面|屏幕|应用|app|ui|UI)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if re.search(current_scope, value, flags=re.IGNORECASE) and not explicit_app_before_current_scope:
         return ""
     patterns = (
+        r"^(?:帮我|请|麻烦|能否|能不能|可以|直接|检查|查看|看看|确认|识别)?\s*"
+        r"(?P<app_surface>[\w .·-]{1,40}?)\s*"
+        r"(?:当前|现在|这个|前台|该)?\s*(?:窗口|界面|屏幕|应用|app|ui|UI)?"
+        r"(?:里|中|上|内)?\s*"
+        r"(?:有没有|是否有|有无|是否存在|是否显示|能否看到|能不能看到|看得到|找得到)",
         r"^(?:帮我|请|麻烦|能否|能不能|可以|直接|检查|查看|看看|确认|识别)?\s*"
         r"(?P<app>[\w .·-]{1,40}?)\s*(?:里|中|上|内)?\s*"
         r"(?:有没有|是否有|有无|是否存在|是否显示|能否看到|能不能看到|看得到|找得到)",

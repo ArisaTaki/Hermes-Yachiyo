@@ -10888,6 +10888,8 @@ def _desktop_verify_input_preview(
         for key in ("role_filter", "limit")
         if key in operation_preview and operation_preview[key] not in (None, "")
     }
+    if app_name:
+        preview["app_name"] = app_name
     return preview
 
 
@@ -17678,6 +17680,15 @@ def _looks_like_non_desktop_content_task(text: str) -> bool:
 def _app_first_click_scope_hint(text: str) -> dict[str, Any]:
     value = str(text or "").strip()
     patterns = (
+        r"^(?:双击|点击|点一下|点按|单击|按一下|按(?!钮)|点(?!击|按|一下))\s*"
+        r"(?P<app_cn_post>[\w .·-]{1,40}?)(?:的|里|中|上|内|里面|中的|里的|上的|内的)\s*"
+        r"(?P<target_cn_post>[^。！？!?，,]{1,40}?"
+        r"(?:按钮|控件|元素|菜单项|菜单|复选框)?)$",
+        r"^(?:double\s+click|click|press|tap)\s+(?:the\s+)?"
+        r"(?P<target_en_post>[^.!?,]{1,40}?"
+        r"(?:button|menu\s+item|menu|checkbox)?)\s+"
+        r"(?:in|on|inside|within)\s+(?:the\s+)?"
+        r"(?P<app_en_post>[A-Za-z][A-Za-z0-9 ._-]{1,40})$",
         r"^(?!(?:in|inside|within|using|with)\b)(?P<app>[A-Za-z][A-Za-z0-9_-]{1,40})\s+"
         r"(?P<target>[^。！？!?，,]{1,40}?"
         r"(?:button|menu\s+item|menu|checkbox))\s*"
@@ -17695,15 +17706,29 @@ def _app_first_click_scope_hint(text: str) -> dict[str, Any]:
         match = re.search(pattern, value, flags=re.IGNORECASE)
         if not match:
             continue
-        app_name = _canonical_app_name_hint(match.group("app"))
+        groups = match.groupdict()
+        raw_app = (
+            groups.get("app")
+            or groups.get("app_cn_post")
+            or groups.get("app_en_post")
+            or ""
+        )
+        app_name = _canonical_app_name_hint(raw_app)
         if not app_name:
             continue
-        raw_target = match.group("target")
+        raw_target = (
+            groups.get("target")
+            or groups.get("target_cn_post")
+            or groups.get("target_en_post")
+            or ""
+        )
         target = clean_type_target(raw_target, app_name=app_name) or raw_target.strip()
         target = re.sub(r"^(?:的|上(?:的)?|里(?:的)?|中(?:的)?|内(?:的)?)\s*", "", target).strip()
         if _generic_click_target_label(target):
             continue
-        verb = match.group("verb")
+        verb = groups.get("verb") or (
+            "click" if groups.get("target_en_post") else "点击"
+        )
         target_request = (
             click_target_hint(f"{verb} {raw_target}")
             if re.fullmatch(r"(?:click|press|tap)", verb, flags=re.IGNORECASE)

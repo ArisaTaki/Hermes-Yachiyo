@@ -244,7 +244,12 @@ def test_planner_first_daily_desktop_entrypoint_verifies_known_app_submit_when_n
     assert requests[7] == {
         "protocol": "json_fallback",
         "tool": "desktop.ui_elements",
-        "input": {"limit": 80},
+        "input": {
+            "app_name": "Slack",
+            "limit": 80,
+            "selection_source": "desktop.list_apps",
+            "query": "Slack",
+        },
         "source": "runtime_verification",
         "planning_reason": "planner_fallback_communication_send",
         "runtime_doctrine": "discover_operate_verify",
@@ -675,7 +680,7 @@ def test_planner_first_daily_desktop_entrypoint_requests_app_scoped_creation_wit
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Notion"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -724,7 +729,7 @@ def test_planner_first_daily_desktop_entrypoint_requests_app_scoped_creation_wit
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Obsidian"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -763,7 +768,7 @@ def test_planner_first_daily_desktop_entrypoint_requests_app_scoped_creation_wit
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Obsidian"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -802,7 +807,7 @@ def test_planner_first_daily_desktop_entrypoint_requests_app_scoped_creation_wit
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Obsidian"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -841,7 +846,7 @@ def test_planner_first_daily_desktop_entrypoint_requests_app_scoped_creation_wit
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Obsidian"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -932,7 +937,11 @@ def test_planner_first_daily_desktop_entrypoint_requests_split_app_first_click_t
             {
                 "protocol": "json_fallback",
                 "tool": "desktop.ui_elements",
-                "input": {"role_filter": "button", "limit": 80},
+                "input": {
+                    "role_filter": "button",
+                    "limit": 80,
+                    "app_name": "PixelForge",
+                },
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },
@@ -978,7 +987,11 @@ def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_clic
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"role_filter": "button", "limit": 80},
+            "input": {
+                "role_filter": "button",
+                "limit": 80,
+                "app_name": "PixelForge",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -1022,7 +1035,11 @@ def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_clic
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"role_filter": "button", "limit": 80},
+            "input": {
+                "role_filter": "button",
+                "limit": 80,
+                "app_name": "SuperData Studio",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -1202,7 +1219,7 @@ def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_inpu
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"role_filter": "text", "limit": 80},
+            "input": {"app_name": "PixelForge", "role_filter": "text", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -1259,7 +1276,7 @@ def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_inpu
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"role_filter": "text", "limit": 80},
+            "input": {"app_name": "LedgerPro", "role_filter": "text", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -1324,7 +1341,7 @@ def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_crea
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Orbit Notes"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -1408,7 +1425,7 @@ def test_planner_first_daily_desktop_entrypoint_requests_inspect_before_app_crea
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"app_name": "Orbit Notes"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -1454,7 +1471,7 @@ def test_planner_first_daily_desktop_entrypoint_requests_split_app_first_type_ta
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"role_filter": "text", "limit": 80},
+            "input": {"app_name": "PixelForge", "role_filter": "text", "limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -1489,6 +1506,100 @@ def test_planner_first_daily_desktop_entrypoint_requests_split_app_first_type_ta
             "planning_reason": "planner_desktop_operation",
         },
     ]
+
+
+def test_planner_first_daily_desktop_entrypoint_scopes_named_app_ui_presence_when_normalized() -> None:
+    requests = planner_first_daily_desktop_entrypoint_requests(
+        "查看 Figma 当前 UI 里有没有 Export 按钮",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.inspect_app",
+            "desktop.ui_elements",
+        ],
+        execution_normalized=True,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["input"] == {"query": "Figma", "limit": 20}
+    assert requests[1]["input"] == {
+        "app_name": "Figma",
+        "selection_source": "desktop.list_apps",
+        "query": "Figma",
+    }
+    assert requests[2]["input"] == {
+        "app_name": "Figma",
+        "role_filter": "button",
+        "limit": 80,
+    }
+
+    foreground_requests = planner_first_daily_desktop_entrypoint_requests(
+        "查看当前 UI 里有没有 Export 按钮",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.inspect_app",
+            "desktop.ui_elements",
+        ],
+        execution_normalized=True,
+    )
+    assert foreground_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.ui_elements",
+            "input": {"role_filter": "button", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        }
+    ]
+
+
+def test_planner_first_daily_desktop_entrypoint_scopes_verb_first_app_click_when_normalized() -> None:
+    requests = planner_first_daily_desktop_entrypoint_requests(
+        "点击 Photoshop 里的新建按钮",
+        allowed_tools=[
+            "desktop.list_apps",
+            "desktop.inspect_app",
+            "desktop.ui_elements",
+            "app.focus_and_click_ui_element",
+        ],
+        execution_normalized=True,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "desktop.inspect_app",
+        "app.focus_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["input"] == {"query": "Photoshop", "limit": 20}
+    assert requests[1]["input"] == {
+        "open_if_needed": True,
+        "focus": True,
+        "role_filter": "button",
+        "limit": 80,
+        "app_name": "Photoshop",
+        "selection_source": "desktop.list_apps",
+        "query": "Photoshop",
+    }
+    assert requests[2]["input"] == {
+        "app_name": "Photoshop",
+        "target": "新建",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+        "selection_source": "desktop.list_apps",
+        "query": "Photoshop",
+    }
+    assert requests[3]["input"] == {
+        "app_name": "Photoshop",
+        "role_filter": "button",
+        "limit": 80,
+    }
 
 
 def test_planner_first_daily_desktop_entrypoint_requests_scope_english_app_discovery() -> None:
@@ -1792,7 +1903,7 @@ def test_planner_first_daily_desktop_entrypoint_requests_scope_english_safe_oper
             {
                 "protocol": "json_fallback",
                 "tool": "desktop.ui_elements",
-                "input": {},
+                "input": {"app_name": "PixelForge"},
                 "source": "runtime_planner",
                 "planning_reason": "planner_desktop_operation",
             },

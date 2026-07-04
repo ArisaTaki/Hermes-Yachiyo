@@ -1299,7 +1299,7 @@ def _expand_inspect_app_execution_requests(
         )
         ui_payload = {
             key: payload[key]
-            for key in ("role_filter", "limit")
+            for key in ("app_name", "role_filter", "limit")
             if key in payload and payload[key] not in (None, "")
         }
         ui_request = _request(
