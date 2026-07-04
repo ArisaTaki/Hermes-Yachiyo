@@ -14540,6 +14540,70 @@ def test_runtime_planner_searches_running_browser_window_by_capability() -> None
     )
 
 
+def test_runtime_planner_clicks_running_browser_window_by_desktop_capability() -> None:
+    for prompt, target in (
+        ("在一个正在运行的浏览器窗口点击下载按钮", "下载"),
+        ("in a running browser window click download button", "download"),
+    ):
+        decision = RuntimePlanner().decision(prompt)
+        envelope = runtime_execution_envelope_from_decision(decision, full_plan=True)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == ""
+        assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+            "action": "discover_apps",
+            "query": "browser",
+        }
+        assert decision.selected_intent.inputs["app_capability_hint"]["query"] == (
+            "browser"
+        )
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover_apps-desktop-state",
+            "open-selected-discovered-app",
+            "operate-selected-discovered-app-ui",
+            "verify-selected-discovered-app-action",
+        ]
+        assert _step_by_id(decision, "discover_apps-desktop-state").tool_name == (
+            "desktop.running_apps"
+        )
+        assert _step_by_id(decision, "open-selected-discovered-app").tool_name == (
+            "app.focus"
+        )
+        operation = _step_by_id(decision, "operate-selected-discovered-app-ui")
+        assert operation.tool_name == "app.focus_and_click_ui_element"
+        assert operation.input_preview == {
+            "app_name": "<selected app from desktop.running_apps>",
+            "selection_source": "desktop.running_apps",
+            "query": "browser",
+            "target": target,
+            "role_filter": "button",
+            "click_count": 1,
+            "limit": 80,
+        }
+        assert operation.approval_required is True
+        assert _step_by_id(decision, "verify-selected-discovered-app-action").depends_on == [
+            "operate-selected-discovered-app-ui"
+        ]
+        assert envelope is not None
+        assert envelope.requests[2].action_target == {
+            "kind": "desktop_app",
+            "action": "click_ui",
+            "selection_source": "desktop.running_apps",
+            "app_name": "<selected app from desktop.running_apps>",
+            "query": "browser",
+            "step_id": "operate-selected-discovered-app-ui",
+        }
+        assert envelope.requests[3].action_target["verified_step_ids"] == [
+            "operate-selected-discovered-app-ui"
+        ]
+
+    webpage = RuntimePlanner().decision("点击网页上的下载按钮")
+    assert webpage.selected_intent.kind == "web_research"
+    assert _step_by_id(webpage, "click-current-page-element").tool_name == (
+        "browser.click"
+    )
+
+
 def test_runtime_planner_routes_current_ui_inspection_to_ui_elements() -> None:
     decision = RuntimePlanner().decision(
         "当前界面有哪些按钮",

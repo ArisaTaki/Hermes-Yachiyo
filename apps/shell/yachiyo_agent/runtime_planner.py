@@ -411,6 +411,8 @@ class TaskIntentRouter:
         if _looks_like_generic_data_source_analysis_request(text):
             return _empty_intent("desktop_operation", text)
         app_capability = _app_capability_discovery_hint(text)
+        if not app_capability and _browser_window_desktop_ui_operation_requested(text):
+            app_capability = {"query": "browser", "description": "browser"}
         generic_browser_search = _generic_browser_app_search_hint(text)
         if _web_search_query(text) and (
             _generic_browser_app_target_requested(text)
@@ -612,6 +614,7 @@ class TaskIntentRouter:
             if _explicit_hotkey_request(text)
             else (_browser_type_text_hint(text) or _browser_click_hint(text))
         )
+        browser_window_desktop_ui = _browser_window_desktop_ui_operation_requested(text)
         app_scoped_desktop_mapping = (
             app_scoped_desktop_operation
             if isinstance(app_scoped_desktop_operation, Mapping)
@@ -633,6 +636,7 @@ class TaskIntentRouter:
                 or _is_browser_or_search_app_name(browser_scoped_app)
             )
             and not dynamic_context_transfer
+            and not browser_window_desktop_ui
         ):
             return _empty_intent("desktop_operation", text)
         foreground_submit_action = _foreground_submit_action_hint(text)
@@ -16533,6 +16537,8 @@ def _foreground_ui_operation_requested(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
         return False
+    if _browser_window_desktop_ui_operation_requested(value):
+        return True
     foreground_scope = bool(
         re.search(
             r"(?:当前|现在|前台|这个|该)\s*(?:应用|app|application|窗口|界面|ui)"
@@ -16574,6 +16580,70 @@ def _foreground_ui_operation_requested(text: str) -> bool:
             value,
             flags=re.IGNORECASE,
         )
+    )
+
+
+def _browser_window_desktop_ui_operation_requested(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if _contains_any(
+        value,
+        (
+            "网页",
+            "页面",
+            "当前页",
+            "这个网页",
+            "这个页面",
+            "current page",
+            "this page",
+            "current webpage",
+            "this webpage",
+            "webpage",
+            "web page",
+        ),
+    ):
+        return False
+    browser_window_scope = bool(
+        re.search(
+            r"(?:(?:一个|一款|任意|任何|可用|默认|当前|前台|当前打开|当前已打开|"
+            r"已打开|打开的|正在运行|运行中|开着|已开启)(?:的)?\s*)+"
+            r"(?:浏览器|browser)\s*(?:窗口|window)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"(?:浏览器|browser)\s*(?:窗口|window)",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:in|inside|within|on)\s+"
+            r"(?:(?:a|an|the|any|available|default|current|active|foreground|"
+            r"running|open|already\s+open)\s+)+"
+            r"(?:browser|web\s+browser)\s+window\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"\b(?:(?:current|active|foreground|running|open|already\s+open)\s+)+"
+            r"(?:browser|web\s+browser)\s+window\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+    if not browser_window_scope:
+        return False
+    return bool(
+        click_target_hint(value)
+        or type_into_ui_hint(value)
+        or safe_type_text_hint(value)
+        or safe_click_hint(value)
+        or safe_key_hint(value)
+        or safe_scroll_hint(value)
+        or safe_shortcut_hint(value)
+        or _target_first_foreground_click_hint(value)
+        or _target_first_foreground_type_hint(value)
     )
 
 
@@ -26789,6 +26859,8 @@ def _running_app_capability_scope_requested(
             "开着",
             "已开启",
             "当前已打开",
+            "当前",
+            "前台",
             "currently open",
             "already open",
             "opened app",
@@ -26797,6 +26869,12 @@ def _running_app_capability_scope_requested(
             "running application",
             "running browser",
             "running window",
+            "current browser",
+            "current window",
+            "active browser",
+            "active window",
+            "foreground browser",
+            "foreground window",
         ),
     )
 
