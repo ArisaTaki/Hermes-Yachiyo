@@ -9376,11 +9376,7 @@ def _append_selected_discovered_foreground_compose_steps(
     compose_text = str(intent.inputs.get("foreground_compose_text_hint") or "").strip()
     if not compose_text:
         return
-    selected_app = "<selected app from desktop.list_apps>"
-    selected_app_payload = {
-        "selection_source": "desktop.list_apps",
-        "query": _selected_discovered_app_query(intent),
-    }
+    selected_app_payload = _selected_discovered_app_input_context(intent)
     type_tool = _first_allowed(
         (
             *app_foreground_tool_candidates("focus", "safe_type_text"),
@@ -9395,7 +9391,6 @@ def _append_selected_discovered_foreground_compose_steps(
     type_input_preview = {"text": compose_text}
     if str(type_tool or "").startswith("app."):
         type_input_preview = {
-            "app_name": selected_app,
             **selected_app_payload,
             "text": compose_text,
         }
@@ -9456,9 +9451,9 @@ def _append_selected_discovered_foreground_compose_steps(
             "Verify desktop result",
             "desktop.app_discovery",
             verify_tool,
-            input_preview=_desktop_verify_input_preview(
+            input_preview=_selected_discovered_app_verify_input(
+                intent,
                 verify_tool,
-                app_name=selected_app,
                 operation_preview={},
             ),
             depends_on=[verify_depends_on],

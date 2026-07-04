@@ -33450,6 +33450,66 @@ def test_runtime_execution_envelope_keeps_selected_app_scope_for_foreground_typi
     }
 
 
+def test_runtime_planner_keeps_running_app_scope_for_selected_app_compose() -> None:
+    allowed_tools = [
+        "desktop.running_apps",
+        "app.focus",
+        "app.focus_and_safe_type_text",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "在一个正在运行的表格应用里输入 hello",
+        allowed_tools=allowed_tools,
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert _step_by_id(decision, "discover_apps-desktop-state").tool_name == (
+        "desktop.running_apps"
+    )
+    assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "spreadsheet",
+    }
+    type_step = _step_by_id(decision, "operate-foreground-ui-followup-type")
+    assert type_step.tool_name == "app.focus_and_safe_type_text"
+    assert type_step.input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "spreadsheet",
+        "text": "hello",
+    }
+    verify_step = _step_by_id(decision, "verify-desktop-result")
+    assert verify_step.input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "spreadsheet",
+    }
+
+    assert envelope is not None
+    type_request = next(
+        request
+        for request in envelope.requests
+        if request.step_id == "operate-foreground-ui-followup-type"
+    )
+    assert type_request.action_target == {
+        "kind": "desktop_app",
+        "action": "type_ui",
+        "selection_source": "desktop.running_apps",
+        "app_name": "<selected app from desktop.running_apps>",
+        "query": "spreadsheet",
+        "step_id": "operate-foreground-ui-followup-type",
+    }
+    assert envelope.requests[-1].action_target["selection_source"] == (
+        "desktop.running_apps"
+    )
+
+
 def test_runtime_execution_envelope_preserves_deferred_ui_observation_context() -> None:
     allowed_tools = [
         "desktop.list_apps",
