@@ -22526,12 +22526,14 @@ def test_resume_continuation_consumes_pending_replan_event_without_model_call() 
     budget = FakeBudget()
     timeline: list[dict[str, Any]] = [
         _timeline(
-            "agent.replan.requested",
+            "workflow.run.replan.requested",
             "Runtime requested a replan after a failed approved tool.",
             payload={
                 "request_id": "runtime-replan:approval-data",
                 "trigger": "tool_failure",
                 "source": "runtime_tool_request_runner",
+                "planner_event_type": "agent.replan.requested",
+                "planner_scope": "workflow.run",
                 "run_id": "run-approval",
                 "task_id": "task-approval",
                 "core_id": "task-core-approval",

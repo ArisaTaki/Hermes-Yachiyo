@@ -2145,7 +2145,8 @@ def append_replan_request_event_for_tool_result(
     )
     if not payload or _runtime_replan_request_exists(timeline, payload):
         return
-    event_type = "agent.replan.requested"
+    event_type = _runtime_replan_event_type(payload)
+    event_payload = _runtime_replan_event_payload(payload, event_type)
     detail = (
         str(payload.get("reason") or "").strip()
         or str(payload.get("failure_detail") or "").strip()
@@ -2159,12 +2160,12 @@ def append_replan_request_event_for_tool_result(
             source="runtime_tool_request_runner",
             decision_id=str(payload.get("decision_id") or ""),
             plan_id=str(payload.get("plan_id") or ""),
-            **_runtime_replan_context_payload(payload),
-            payload=payload,
+            **_runtime_replan_context_payload(event_payload),
+            payload=event_payload,
         )
     )
     if run_id and append_run_event is not None:
-        append_run_event(run_id, event_type, payload)
+        append_run_event(run_id, event_type, event_payload)
 
 
 def _runtime_replan_request_payload_for_tool_result(
@@ -2851,6 +2852,44 @@ def _runtime_replan_context_payload(payload: Mapping[str, Any]) -> dict[str, Any
     }
 
 
+def _runtime_replan_event_type(payload: Mapping[str, Any]) -> str:
+    if str(payload.get("workflow_run_id") or "").strip():
+        return "workflow.run.replan.requested"
+    if str(payload.get("group_run_id") or payload.get("run_group_id") or "").strip():
+        return "group.run.replan.requested"
+    return "agent.replan.requested"
+
+
+def _runtime_replan_event_payload(
+    payload: Mapping[str, Any],
+    event_type: str,
+) -> dict[str, Any]:
+    event_payload = dict(payload)
+    if event_type == "agent.replan.requested":
+        return event_payload
+    event_payload.setdefault("planner_event_type", "agent.replan.requested")
+    event_payload.setdefault("planner_scope", _runtime_replan_event_scope(event_type))
+    return event_payload
+
+
+def _runtime_replan_event_scope(event_type: str) -> str:
+    if event_type == "workflow.run.replan.requested":
+        return "workflow.run"
+    if event_type == "group.run.replan.requested":
+        return "group.run"
+    return "agent"
+
+
+def _runtime_replan_base_event_type(event_type: str) -> str:
+    if event_type in {
+        "group.run.replan.requested",
+        "workflow.replan.requested",
+        "workflow.run.replan.requested",
+    }:
+        return "agent.replan.requested"
+    return event_type
+
+
 def _runtime_replan_request_exists(
     timeline: list[dict[str, Any]],
     payload: Mapping[str, Any],
@@ -2862,7 +2901,7 @@ def _runtime_replan_request_exists(
         if not isinstance(event, Mapping):
             continue
         event_type = str(event.get("event") or event.get("event_type") or "").strip()
-        if event_type != "agent.replan.requested":
+        if _runtime_replan_base_event_type(event_type) != "agent.replan.requested":
             continue
         event_payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else event
         if str(event_payload.get("request_id") or "").strip() == request_id:

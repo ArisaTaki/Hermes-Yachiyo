@@ -388,13 +388,24 @@ def _approval_resume_has_pending_replan_request(context: ToolApprovalResumeConte
         if not isinstance(event, Mapping):
             continue
         event_type = str(event.get("event") or event.get("event_type") or "").strip()
-        if event_type != "agent.replan.requested":
+        if _approval_resume_replan_event_type(event_type) != "agent.replan.requested":
             continue
         payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
         status = str(event.get("status") or payload.get("status") or "requested").strip()
         if status in {"", "requested", "pending"}:
             return True
     return False
+
+
+def _approval_resume_replan_event_type(event_type: str) -> str:
+    clean = str(event_type or "").strip()
+    if clean in {
+        "group.run.replan.requested",
+        "workflow.replan.requested",
+        "workflow.run.replan.requested",
+    }:
+        return "agent.replan.requested"
+    return clean
 
 
 def _daily_desktop_resume_result_after_remaining_tools(

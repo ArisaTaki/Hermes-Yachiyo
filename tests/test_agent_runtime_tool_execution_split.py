@@ -840,10 +840,14 @@ def test_runtime_tool_request_runner_records_replan_request_for_failed_planned_s
         budget=FakeBudget(),
     )
 
-    replan_event = next(event for event in timeline if event["event"] == "agent.replan.requested")
+    replan_event = next(
+        event for event in timeline if event["event"] == "workflow.run.replan.requested"
+    )
     assert replan_event["task_id"] == "task-1"
     assert replan_event["group_run_id"] == "group-run-1"
     assert replan_event["workflow_run_id"] == "workflow-run-1"
+    assert replan_event["payload"]["planner_event_type"] == "agent.replan.requested"
+    assert replan_event["payload"]["planner_scope"] == "workflow.run"
     assert replan_event["payload"]["trigger"] == "tool_failure"
     assert replan_event["payload"]["source_step_id"] == "analyze-data-file"
     assert replan_event["payload"]["source_tool_name"] == "data.analyze"
@@ -858,10 +862,61 @@ def test_runtime_tool_request_runner_records_replan_request_for_failed_planned_s
     run_replan_event = next(
         payload
         for _run_id, event_type, payload in run_events
-        if event_type == "agent.replan.requested"
+        if event_type == "workflow.run.replan.requested"
     )
     assert run_replan_event["request_id"] == replan_event["payload"]["request_id"]
     assert run_replan_event["replan_signal_ids"] == ["signal-analyze-failed"]
+
+
+def test_runtime_tool_request_runner_records_group_scoped_replan_request() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    runner = _runner(
+        call_agent_tool=lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "group analysis failed",
+        },
+        run_events=run_events,
+    )
+
+    runner.run(
+        [
+            {
+                "tool": "data.analyze",
+                "input": {"path": "data/sales.csv"},
+                "source": "runtime_planner",
+                "step_id": "analyze-data-file",
+                "capability_id": "data.analysis",
+                "decision_id": "decision-1",
+                "plan_id": "plan-1",
+                "group_run_id": "group-run-1",
+                "replan_triggers": ["tool_failure"],
+                "fallback_tools": ["terminal.run"],
+            }
+        ],
+        ["data.analyze", "terminal.run"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "analyze data"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="group-run-1",
+        budget=FakeBudget(),
+    )
+
+    replan_event = next(
+        event for event in timeline if event["event"] == "group.run.replan.requested"
+    )
+    assert replan_event["group_run_id"] == "group-run-1"
+    assert replan_event["payload"]["planner_event_type"] == "agent.replan.requested"
+    assert replan_event["payload"]["planner_scope"] == "group.run"
+    assert replan_event["payload"]["source_step_id"] == "analyze-data-file"
+    run_replan_event = next(
+        payload
+        for _run_id, event_type, payload in run_events
+        if event_type == "group.run.replan.requested"
+    )
+    assert run_replan_event["request_id"] == replan_event["payload"]["request_id"]
 
 
 def test_runtime_tool_request_runner_records_explicit_verification_failure_replan() -> None:

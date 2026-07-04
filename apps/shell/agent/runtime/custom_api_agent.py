@@ -2941,7 +2941,10 @@ class RuntimeCustomApiAgentLoop:
             )
             for event in timeline
             if isinstance(event, dict)
-            and str(event.get("event") or "").strip() == "agent.replan.requested"
+            and _runtime_replan_event_type(
+                str(event.get("event") or event.get("event_type") or "").strip()
+            )
+            == "agent.replan.requested"
         }
         existing_payload_by_key = {
             key: index
@@ -7209,7 +7212,12 @@ def _timeline_replan_request_payloads(
     for event in list(timeline[max(0, int(start or 0)):]):
         if not isinstance(event, Mapping):
             continue
-        if str(event.get("event") or "").strip() != "agent.replan.requested":
+        if (
+            _runtime_replan_event_type(
+                str(event.get("event") or event.get("event_type") or "").strip()
+            )
+            != "agent.replan.requested"
+        ):
             continue
         payload = event.get("payload")
         if isinstance(payload, Mapping):
@@ -7230,6 +7238,17 @@ def _pending_runtime_replan_payloads(
             continue
         payloads.append(payload)
     return payloads
+
+
+def _runtime_replan_event_type(event_type: str) -> str:
+    clean = str(event_type or "").strip()
+    if clean in {
+        "group.run.replan.requested",
+        "workflow.replan.requested",
+        "workflow.run.replan.requested",
+    }:
+        return "agent.replan.requested"
+    return clean
 
 
 def _handled_runtime_replan_request_identities(
