@@ -66,6 +66,7 @@ from .recovery_actions import (
     recovery_retry_context_payload,
 )
 from .runtime_execution import (
+    runtime_execution_envelope_payload_with_request_context,
     runtime_execution_requests_from_envelope_payload,
     runtime_execution_requests_from_metadata,
 )
@@ -1447,6 +1448,10 @@ class LegacyStudioPort:
         self._append_planner_run_events(
             _run_id_from_payload(run),
             runtime_planner_decision(user_goal, metadata=planner_metadata),
+            event_context={
+                "workflow_id": str(request.get("workflow_id") or "").strip(),
+                "workflow_run_id": _run_id_from_payload(run),
+            },
         )
         return _run_with_replay_events(run, self._runtime)
 
@@ -1526,7 +1531,13 @@ class LegacyStudioPort:
             limit=limit,
         )
 
-    def _append_planner_run_events(self, run_id: str, planner_decision: Any | None) -> None:
+    def _append_planner_run_events(
+        self,
+        run_id: str,
+        planner_decision: Any | None,
+        *,
+        event_context: Mapping[str, Any] | None = None,
+    ) -> None:
         append_run_event = getattr(self._runtime, "append_run_event", None)
         if not run_id or not callable(append_run_event):
             return
@@ -1534,7 +1545,11 @@ class LegacyStudioPort:
             return
         for event_type, payload in planner_run_event_payloads(planner_decision):
             try:
-                append_run_event(run_id, event_type, payload)
+                append_run_event(
+                    run_id,
+                    event_type,
+                    _planner_event_payload_with_context(payload, event_context),
+                )
             except Exception:
                 continue
 
@@ -1550,6 +1565,31 @@ def _run_id_from_payload(payload: dict[str, Any]) -> str:
         or payload.get("agent_run_id")
         or ""
     ).strip()
+
+
+def _planner_event_payload_with_context(
+    payload: dict[str, Any],
+    event_context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    enriched = dict(payload)
+    if not isinstance(event_context, Mapping):
+        return enriched
+    clean_context = {
+        str(key): str(value).strip()
+        for key, value in event_context.items()
+        if str(key or "").strip() and str(value or "").strip()
+    }
+    for key, value in clean_context.items():
+        enriched.setdefault(key, value)
+    envelope = enriched.get("runtime_execution_envelope")
+    if isinstance(envelope, Mapping):
+        enriched["runtime_execution_envelope"] = (
+            runtime_execution_envelope_payload_with_request_context(
+                envelope,
+                clean_context,
+            )
+        )
+    return enriched
 
 
 def _run_has_runtime_planner_events(runtime: Any, run_id: str) -> bool:

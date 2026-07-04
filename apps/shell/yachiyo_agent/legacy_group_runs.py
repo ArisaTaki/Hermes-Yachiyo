@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from typing import Any, Callable
 
 from .legacy_groups import (
@@ -25,6 +26,7 @@ from .legacy_group_orchestration import (
 )
 from .legacy_runs import LegacyRunPayloadProjector
 from .planner_projection import planner_run_event_payloads, runtime_planner_decision
+from .runtime_execution import runtime_execution_envelope_payload_with_request_context
 
 
 def start_legacy_group_run(
@@ -322,6 +324,11 @@ def append_group_run_planner_events(
         objective,
         metadata={"runnable_kind": "group_run", "group_id": group_id},
     )
+    event_context = {
+        "group_id": group_id,
+        "group_run_id": run_group_id,
+        "run_group_id": run_group_id,
+    }
     for event_type, payload in planner_run_event_payloads(decision):
         append_group_run_event(
             runtime,
@@ -337,7 +344,7 @@ def append_group_run_planner_events(
             client_run_id=client_run_id,
             orchestration={
                 **dict(orchestration or {}),
-                **dict(payload),
+                **_planner_event_payload_with_context(payload, event_context),
                 "planner_event_type": event_type,
                 "planner_scope": "group_run",
             },
@@ -378,6 +385,29 @@ def _group_run_planner_event_type(event_type: str) -> str:
     if event_type == "agent.task.checkpoint.updated":
         return "group.run.task.checkpoint.updated"
     return "group.run.planner_event"
+
+
+def _planner_event_payload_with_context(
+    payload: dict[str, Any],
+    event_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    enriched = dict(payload)
+    clean_context = {
+        str(key): str(value).strip()
+        for key, value in event_context.items()
+        if str(key or "").strip() and str(value or "").strip()
+    }
+    for key, value in clean_context.items():
+        enriched.setdefault(key, value)
+    envelope = enriched.get("runtime_execution_envelope")
+    if isinstance(envelope, Mapping):
+        enriched["runtime_execution_envelope"] = (
+            runtime_execution_envelope_payload_with_request_context(
+                envelope,
+                clean_context,
+            )
+        )
+    return enriched
 
 
 def _member_allowed_tools(member: dict[str, Any]) -> list[str] | None:

@@ -132,6 +132,9 @@ def test_legacy_studio_workflow_run_appends_runtime_planner_events() -> None:
     assert events[0]["payload"]["intent"]["kind"] == "desktop_operation"
     assert events[0]["payload"]["intent"]["inputs"]["app_name_hint"] == "PixelForge"
     assert events[1]["payload"]["plan"]["tool_plan"]["steps"][0]["action"] == "list_apps"
+    assert events[1]["payload"]["workflow_id"] == "workflow-1"
+    assert events[1]["payload"]["workflow_run_id"] == "workflow-run-1"
+    assert events[1]["payload"]["runtime_execution_envelope"]["task_core"]["core_id"]
     assert events[2]["payload"]["task_core"]["workspace"]["title"] == "Desktop Operation Workspace"
 
 
@@ -200,6 +203,28 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
         if event["event_type"] == "group.run.plan.step"
     ]
     assert group_step_tools == ["workspace.list", "artifact.write"]
+
+
+def test_legacy_studio_group_run_scopes_planner_execution_envelope_to_group_run() -> None:
+    runtime = _FakeGroupRuntime()
+
+    group_run = LegacyStudioPort(runtime).start_group_run(
+        {
+            "group_id": "group-1",
+            "objective": "请分析 data/sales.csv 并输出报告",
+        }
+    )
+
+    plan_event = next(
+        event for event in group_run["events"] if event["event_type"] == "group.run.plan.created"
+    )
+    group_request = plan_event["payload"]["runtime_execution_envelope"]["requests"][0]
+    assert plan_event["payload"]["group_id"] == "group-1"
+    assert plan_event["payload"]["group_run_id"] == "group-run-1"
+    assert plan_event["payload"]["run_group_id"] == "group-run-1"
+    assert group_request["group_id"] == "group-1"
+    assert group_request["group_run_id"] == "group-run-1"
+    assert group_request["run_group_id"] == "group-run-1"
 
 
 def test_legacy_studio_group_run_records_member_failed_and_cancelled_events() -> None:
