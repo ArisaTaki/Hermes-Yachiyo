@@ -83,6 +83,20 @@ def task_replan_request_from_failure(
         source_step,
         matched_step_id=matched_step_id,
     )
+    if not fallback_tools:
+        fallback_tools = _default_recovery_tools(
+            target_capability,
+            step,
+            failure_payload,
+        )
+    recovery_actions = _fallback_recovery_actions(
+        fallback_tools,
+        step,
+        failure_payload,
+        source_step_id=source_step,
+        target_capability_id=target_capability,
+        task_context=task_context,
+    )
     request_metadata = {
         **dict(metadata or {}),
         **_signal_metadata(signal),
@@ -90,6 +104,8 @@ def task_replan_request_from_failure(
     }
     if task_context:
         request_metadata["task_core_context"] = task_context
+    if recovery_actions and "recovery_actions" not in request_metadata:
+        request_metadata["recovery_actions"] = recovery_actions
     return TaskReplanRequestSnapshot(
         request_id=request_id,
         trigger=clean_trigger,
@@ -486,6 +502,337 @@ def _joined_label(*parts: Any) -> str:
 
 def _compact_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
     return {key: item for key, item in value.items() if item not in ("", [], {})}
+
+
+def _default_recovery_tools(
+    target_capability: str,
+    step: ToolPlanStepSnapshot | None,
+    failure: Mapping[str, Any],
+) -> list[str]:
+    capability = _text(target_capability)
+    step_action = _text(getattr(step, "action", "") if step is not None else "")
+    step_input = getattr(step, "input_preview", {}) if step is not None else {}
+    input_preview = step_input if isinstance(step_input, Mapping) else {}
+    request_input = _failure_tool_input(failure)
+    if capability == "desktop.app_control" or step_action in {
+        "open_app",
+        "focus_app",
+        "safe_shortcut",
+        "open_path_with_selected_app",
+    }:
+        if _desktop_discovery_query(request_input, input_preview):
+            return ["desktop.list_apps"]
+    return []
+
+
+def _fallback_recovery_actions(
+    fallback_tools: list[str],
+    step: ToolPlanStepSnapshot | None,
+    failure: Mapping[str, Any],
+    *,
+    source_step_id: str,
+    target_capability_id: str,
+    task_context: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    step_input = getattr(step, "input_preview", {}) if step is not None else {}
+    input_preview = step_input if isinstance(step_input, Mapping) else {}
+    request_input = _failure_tool_input(failure)
+    for tool_name in fallback_tools:
+        action = _fallback_recovery_action(
+            _text(tool_name),
+            request_input,
+            input_preview,
+            failure,
+            source_step_id=source_step_id,
+            target_capability_id=target_capability_id,
+            task_context=task_context,
+        )
+        if not action:
+            continue
+        action_input = action.get("input") if isinstance(action.get("input"), Mapping) else {}
+        signature = (_text(action.get("tool")), repr(sorted(dict(action_input).items())))
+        if signature in seen:
+            continue
+        seen.add(signature)
+        actions.append(action)
+    return actions
+
+
+def _fallback_recovery_action(
+    tool_name: str,
+    request_input: Mapping[str, Any],
+    input_preview: Mapping[str, Any],
+    failure: Mapping[str, Any],
+    *,
+    source_step_id: str,
+    target_capability_id: str,
+    task_context: Mapping[str, Any],
+) -> dict[str, Any]:
+    if not tool_name:
+        return {}
+    tool_input = _fallback_recovery_tool_input(tool_name, request_input, input_preview, failure)
+    if tool_input is None:
+        return {}
+    metadata = _fallback_recovery_tool_metadata(tool_name)
+    if not metadata:
+        return {}
+    action = {
+        "label": metadata["label"],
+        "tool": tool_name,
+        "input": tool_input,
+        "planning_reason": "planner_replan_runtime_recovery_action",
+        "permission_target": metadata["permission_target"],
+        "risk_level": metadata["risk_level"],
+        "approval_required": metadata["approval_required"],
+        "source_step_id": _text(source_step_id),
+        "target_capability_id": _text(target_capability_id),
+    }
+    verification_targets = _task_context_verification_targets(task_context)
+    if verification_targets:
+        action["verification_targets"] = verification_targets
+        action["task_verification_targets"] = verification_targets
+    return _compact_mapping(action)
+
+
+def _fallback_recovery_tool_input(
+    tool_name: str,
+    request_input: Mapping[str, Any],
+    input_preview: Mapping[str, Any],
+    failure: Mapping[str, Any],
+) -> dict[str, Any] | None:
+    if tool_name == "desktop.list_apps":
+        query = _desktop_discovery_query(request_input, input_preview)
+        if not query:
+            return None
+        limit = _positive_int(
+            request_input.get("limit")
+            or input_preview.get("limit")
+            or 20
+        )
+        return {"query": query, "limit": limit or 20}
+    if tool_name in {"desktop.ui_elements", "desktop.read_ui"}:
+        payload = {
+            key: request_input.get(key) or input_preview.get(key)
+            for key in ("app_name", "role_filter", "limit")
+            if request_input.get(key) or input_preview.get(key)
+        }
+        if "limit" not in payload:
+            payload["limit"] = 80
+        return dict(payload)
+    if tool_name in {"screen.capture", "browser.screenshot"}:
+        reason = _text(
+            request_input.get("reason")
+            or input_preview.get("reason")
+            or failure.get("detail")
+            or failure.get("error")
+        )
+        return {"reason": reason} if reason else {}
+    if tool_name in {"desktop.active_window", "browser.current_page"}:
+        return {}
+    if tool_name in {"workspace.read", "file.read", "fs.read_file"}:
+        path = _first_text(
+            request_input.get("path"),
+            input_preview.get("path"),
+            request_input.get("source"),
+            input_preview.get("source"),
+        )
+        return {"path": path} if path else None
+    if tool_name in {"app.open", "app.focus", "app.status", "desktop.list_windows"}:
+        app_name = _first_text(request_input.get("app_name"), input_preview.get("app_name"))
+        if not app_name or app_name == "<selected app from desktop.list_apps>":
+            return None
+        return {"app_name": app_name}
+    if tool_name in {"terminal.run", "python.run"}:
+        command = _first_text(
+            request_input.get("cmd"),
+            request_input.get("command"),
+            request_input.get("code"),
+            input_preview.get("cmd"),
+            input_preview.get("command"),
+            input_preview.get("code"),
+        )
+        if not command:
+            return None
+        return {"cmd": command} if tool_name == "terminal.run" else {"code": command}
+    return None
+
+
+def _fallback_recovery_tool_metadata(tool_name: str) -> dict[str, Any]:
+    return {
+        "desktop.list_apps": {
+            "label": "重新发现应用",
+            "permission_target": "app_discovery",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "desktop.ui_elements": {
+            "label": "重新读取界面",
+            "permission_target": "ui_inspection",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "desktop.read_ui": {
+            "label": "重新读取界面",
+            "permission_target": "ui_inspection",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "screen.capture": {
+            "label": "重新截图验证",
+            "permission_target": "screen_recording",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "desktop.active_window": {
+            "label": "重新检查前台窗口",
+            "permission_target": "window_inspection",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "browser.current_page": {
+            "label": "重新读取当前网页",
+            "permission_target": "browser_read",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "browser.screenshot": {
+            "label": "重新截取网页",
+            "permission_target": "browser_capture",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "workspace.read": {
+            "label": "重新读取文件",
+            "permission_target": "workspace_read",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "file.read": {
+            "label": "重新读取文件",
+            "permission_target": "workspace_read",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "fs.read_file": {
+            "label": "重新读取文件",
+            "permission_target": "workspace_read",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "app.open": {
+            "label": "重新打开应用",
+            "permission_target": "app_control",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "app.focus": {
+            "label": "重新聚焦应用",
+            "permission_target": "app_control",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "app.status": {
+            "label": "重新检查应用状态",
+            "permission_target": "app_inspection",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "desktop.list_windows": {
+            "label": "重新检查窗口",
+            "permission_target": "window_inspection",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "terminal.run": {
+            "label": "运行终端恢复命令",
+            "permission_target": "terminal_execution",
+            "risk_level": "medium",
+            "approval_required": True,
+        },
+        "python.run": {
+            "label": "运行 Python 恢复代码",
+            "permission_target": "code_execution",
+            "risk_level": "medium",
+            "approval_required": True,
+        },
+    }.get(tool_name, {})
+
+
+def _failure_tool_input(failure: Mapping[str, Any]) -> dict[str, Any]:
+    value = failure.get("tool_input")
+    return dict(value) if isinstance(value, Mapping) else {}
+
+
+def _desktop_discovery_query(
+    request_input: Mapping[str, Any],
+    input_preview: Mapping[str, Any],
+) -> str:
+    return _first_text(
+        request_input.get("query"),
+        input_preview.get("query"),
+        request_input.get("app_name"),
+        input_preview.get("app_name"),
+        request_input.get("target_app_name"),
+        input_preview.get("target_app_name"),
+    )
+
+
+def _task_context_verification_targets(context: Mapping[str, Any]) -> list[dict[str, Any]]:
+    targets = context.get("task_verification_targets")
+    if isinstance(targets, list):
+        return [dict(item) for item in targets if isinstance(item, Mapping)]
+    step_id = _text(context.get("source_step_id") or context.get("planner_step_id"))
+    if not step_id:
+        return []
+    target: dict[str, Any] = {"step_id": step_id}
+    todos = context.get("todos")
+    todo = _context_row_for_step(todos, "step_id", step_id)
+    if todo:
+        for key, value in (
+            ("todo_id", todo.get("todo_id")),
+            ("todo_title", todo.get("title")),
+        ):
+            if value:
+                target[key] = value
+    checkpoints = context.get("checkpoints")
+    if isinstance(checkpoints, list):
+        checkpoint_ids = [
+            _text(checkpoint.get("checkpoint_id"))
+            for checkpoint in checkpoints
+            if isinstance(checkpoint, Mapping)
+            and _text(checkpoint.get("after_step_id")) == step_id
+            and _text(checkpoint.get("checkpoint_id"))
+        ]
+        if checkpoint_ids:
+            target["checkpoint_ids"] = checkpoint_ids
+    return [target]
+
+
+def _context_row_for_step(value: Any, key: str, step_id: str) -> Mapping[str, Any]:
+    if not isinstance(value, list):
+        return {}
+    for item in value:
+        if isinstance(item, Mapping) and _text(item.get(key)) == step_id:
+            return item
+    return {}
+
+
+def _positive_int(value: Any) -> int | None:
+    try:
+        result = int(value)
+    except (TypeError, ValueError):
+        return None
+    return result if result > 0 else None
+
+
+def _first_text(*values: Any) -> str:
+    for value in values:
+        clean = _text(value)
+        if clean:
+            return clean
+    return ""
 
 
 def _signal_metadata(signal: ReplanSignalSnapshot | None) -> dict[str, Any]:

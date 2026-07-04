@@ -263,11 +263,13 @@ def _failure_payload_from_tool_result(
     tool_event: Mapping[str, Any],
 ) -> dict[str, Any]:
     result = tool_event.get("result") if isinstance(tool_event.get("result"), Mapping) else {}
+    request_input = tool_request.get("input") if isinstance(tool_request.get("input"), Mapping) else {}
     return {
         **dict(tool_event),
         "event_type": _text(tool_event.get("event_type") or tool_event.get("event")),
         "step_id": _text(tool_request.get("step_id") or tool_request.get("planner_step_id")),
         "tool_name": _text(tool_request.get("tool") or tool_request.get("tool_name")),
+        "tool_input": dict(request_input),
         "result": dict(result),
     }
 

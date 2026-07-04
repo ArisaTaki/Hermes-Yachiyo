@@ -10,6 +10,7 @@ from apps.shell.yachiyo_agent import (
     StartChatTaskRequest,
     YachiyoAgentService,
 )
+from apps.shell.yachiyo_agent.task_cards import agent_task_snapshot_from_payload
 
 
 class _FakeRuntimePort:
@@ -1011,6 +1012,102 @@ def test_yachiyo_agent_service_projects_runtime_tool_result_events() -> None:
     assert events[0].core_id == decision.plan.task_core.core_id
     assert events[-1].payload["source_step_id"] == "analyze-data-file"
     assert events[-1].payload["fallback_tools"] == ["terminal.run"]
+    assert "recovery_actions" not in events[-1].payload["metadata"]
+
+
+def test_yachiyo_agent_service_projects_replan_recovery_actions_from_fallback_tools() -> None:
+    service = YachiyoAgentService(_FakeRuntimePort())
+    decision = service.plan_chat_task(
+        "打开一个能看 PDF 的应用",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+    )
+    task_core = decision.plan.task_core
+    assert task_core is not None
+
+    step_id = "open-selected-discovered-app"
+    todo = next(todo for todo in task_core.todos if todo.step_id == step_id)
+    checkpoint = next(
+        checkpoint for checkpoint in task_core.checkpoints if checkpoint.after_step_id == step_id
+    )
+    events = service.project_tool_result_events(
+        decision,
+        tool_request={
+            "tool": "app.open",
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "pdf",
+            },
+            "source": "runtime_planner",
+            "step_id": step_id,
+            "core_id": task_core.core_id,
+            "workspace_id": task_core.workspace.workspace_id,
+            "decision_id": decision.decision_id,
+            "plan_id": decision.plan.plan_id,
+            "task_id": "task-1",
+            "run_id": "run-1",
+            "task_todo": todo.model_dump(mode="python"),
+            "task_checkpoints": [checkpoint.model_dump(mode="python")],
+        },
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "app.open",
+            "result": {"ok": False, "error": "app_resolution_failed"},
+        },
+        run_id="run-1",
+        task_id="task-1",
+        after_sequence=20,
+    )
+
+    replan_event = events[-1]
+    assert replan_event.event_type == "agent.replan.requested"
+    assert replan_event.payload["source_step_id"] == step_id
+    assert replan_event.payload["fallback_tools"] == ["desktop.list_apps"]
+    recovery_actions = replan_event.payload["metadata"]["recovery_actions"]
+    assert recovery_actions == [
+        {
+            "label": "重新发现应用",
+            "tool": "desktop.list_apps",
+            "input": {"query": "pdf", "limit": 20},
+            "planning_reason": "planner_replan_runtime_recovery_action",
+            "permission_target": "app_discovery",
+            "risk_level": "low",
+            "approval_required": False,
+            "source_step_id": step_id,
+            "target_capability_id": "desktop.app_control",
+            "verification_targets": [
+                {
+                    "step_id": step_id,
+                    "todo_id": todo.todo_id,
+                    "todo_title": todo.title,
+                    "checkpoint_ids": [checkpoint.checkpoint_id],
+                }
+            ],
+            "task_verification_targets": [
+                {
+                    "step_id": step_id,
+                    "todo_id": todo.todo_id,
+                    "todo_title": todo.title,
+                    "checkpoint_ids": [checkpoint.checkpoint_id],
+                }
+            ],
+        }
+    ]
+
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-1",
+            "run_id": "run-1",
+            "status": "running",
+            "events": [event.model_dump(mode="json") for event in events],
+        }
+    )
+    assert task.replan_recoveries
+    recovery = task.replan_recoveries[0]
+    assert recovery.request_id == replan_event.payload["request_id"]
+    assert recovery.recovery_actions[0].tool == "desktop.list_apps"
+    assert recovery.recovery_actions[0].input == {"query": "pdf", "limit": 20}
+    assert recovery.recovery_actions[0].approval_required is False
 
 
 def test_agent_studio_service_projects_scoped_group_runtime_tool_result_events() -> None:

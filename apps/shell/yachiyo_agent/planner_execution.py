@@ -1066,7 +1066,9 @@ def _scope_desktop_app_verification_requests(
             normalized.append(request)
             continue
         payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
-        if str(payload.get("app_name") or "").strip():
+        if str(payload.get("app_name") or "").strip() and str(
+            payload.get("selection_source") or payload.get("app_selection_source") or ""
+        ).strip():
             normalized.append(request)
             continue
         app_scope = _desktop_verification_app_scope(
@@ -1074,6 +1076,11 @@ def _scope_desktop_app_verification_requests(
             normalized,
         )
         if not app_scope:
+            normalized.append(request)
+            continue
+        if str(payload.get("app_name") or "").strip() and str(
+            app_scope.get("app_name") or ""
+        ).strip() not in {"", str(payload.get("app_name") or "").strip()}:
             normalized.append(request)
             continue
         normalized.append(
@@ -1217,7 +1224,9 @@ def _desktop_verification_app_scope(
         else {}
     )
     source_scope = _desktop_verification_app_scope_from_payload(source_payload)
-    if source_scope:
+    if source_scope and (
+        str(source_scope.get("selection_source") or source_scope.get("app_selection_source") or "").strip()
+    ):
         return source_scope
     scoped_previous_requests = [
         item for item in previous_requests if isinstance(item, Mapping)
@@ -1233,9 +1242,20 @@ def _desktop_verification_app_scope(
             previous.get("input") if isinstance(previous.get("input"), Mapping) else {}
         )
         previous_scope = _desktop_verification_app_scope_from_payload(previous_payload)
+        if previous_scope and _desktop_scope_matches(source_scope, previous_scope):
+            return {**previous_scope, **source_scope}
         if previous_scope:
             return previous_scope
-    return {}
+    return source_scope
+
+
+def _desktop_scope_matches(
+    source_scope: Mapping[str, Any],
+    previous_scope: Mapping[str, Any],
+) -> bool:
+    source_app = str(source_scope.get("app_name") or "").strip()
+    previous_app = str(previous_scope.get("app_name") or "").strip()
+    return not source_app or not previous_app or source_app == previous_app
 
 
 def _desktop_verification_app_scope_from_payload(
