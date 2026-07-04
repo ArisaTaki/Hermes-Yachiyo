@@ -44,6 +44,9 @@ export function RuntimeExecutionEnvelopeSummary({
   const approvals = uniqueStrings(envelope.approvals_required || []);
   const artifacts = uniqueStrings(envelope.artifacts_expected || []);
   const openQuestions = uniqueStrings(envelope.open_questions || []);
+  const retrySummaries = runtimeExecutionRetrySummaries(requests);
+  const retryTools = uniqueStrings(retrySummaries.map((retry) => retry.tool));
+  const blockers = runtimeExecutionBlockers(requests);
   const isChat = variant === 'chat';
   const classes = [
     isChat
@@ -59,9 +62,12 @@ export function RuntimeExecutionEnvelopeSummary({
       data-envelope-id={envelope.envelope_id || ''}
       data-intent-kind={envelope.intent_kind || ''}
       data-plan-id={envelope.plan_id || ''}
+      data-runtime-blockers={blockers.join(',')}
       data-request-count={requests.length}
       data-route-to-studio={envelope.route_to_studio === undefined ? '' : String(envelope.route_to_studio)}
       data-runtime-doctrine={envelope.runtime_doctrine || ''}
+      data-runtime-retry-count={retrySummaries.length}
+      data-runtime-retry-tools={retryTools.join(',')}
       data-runtime-stages={stageCounts.map(([stage, count]) => `${stage}:${count}`).join(',')}
       data-testid={testId}
     >
@@ -75,8 +81,10 @@ export function RuntimeExecutionEnvelopeSummary({
           <RuntimeExecutionEnvelopePills
             approvals={approvals}
             artifacts={artifacts}
+            blockers={blockers}
             debugPillsTestId={debugPillsTestId}
             openQuestions={openQuestions}
+            retrySummaries={retrySummaries}
             stageCounts={stageCounts}
             tools={tools}
             variant={variant}
@@ -109,8 +117,10 @@ export function RuntimeExecutionEnvelopeSummary({
           <RuntimeExecutionEnvelopePills
             approvals={approvals}
             artifacts={artifacts}
+            blockers={blockers}
             debugPillsTestId={debugPillsTestId}
             openQuestions={openQuestions}
+            retrySummaries={retrySummaries}
             stageCounts={stageCounts}
             tools={tools}
             variant={variant}
@@ -140,22 +150,34 @@ export function RuntimeExecutionEnvelopeSummary({
 function RuntimeExecutionEnvelopePills({
   approvals,
   artifacts,
+  blockers,
   debugPillsTestId,
   openQuestions,
+  retrySummaries,
   stageCounts,
   tools,
   variant,
 }: {
   approvals: string[];
   artifacts: string[];
+  blockers: string[];
   debugPillsTestId?: string;
   openQuestions: string[];
+  retrySummaries: RuntimeExecutionRetrySummary[];
   stageCounts: Array<[string, number]>;
   tools: string[];
   variant: RuntimeExecutionEnvelopeSummaryVariant;
 }) {
   const isChat = variant === 'chat';
-  if (!stageCounts.length && !tools.length && !approvals.length && !artifacts.length && !openQuestions.length) {
+  if (
+    !stageCounts.length
+    && !tools.length
+    && !approvals.length
+    && !artifacts.length
+    && !openQuestions.length
+    && !retrySummaries.length
+    && !blockers.length
+  ) {
     return null;
   }
   const rowClassName = isChat ? 'yachiyo-agent-task-planner-chips' : 'studio-tool-pill-row';
@@ -188,6 +210,36 @@ function RuntimeExecutionEnvelopePills({
           artifact · {artifacts.length}
         </span>
       ) : null}
+      {isChat && retrySummaries.length ? (
+        <span
+          className={pillClassName}
+          data-runtime-retry-count={retrySummaries.length}
+          data-runtime-retry-tools={uniqueStrings(retrySummaries.map((retry) => retry.tool)).join(',')}
+        >
+          retry · {retrySummaries.length}
+        </span>
+      ) : null}
+      {!isChat ? retrySummaries.slice(0, 8).map((retry, index) => (
+        <span
+          className={pillClassName}
+          data-runtime-retry-reason={retry.reason}
+          data-runtime-retry-target={retry.target}
+          data-runtime-retry-tool={retry.tool}
+          key={`retry:${retry.tool}:${retry.reason}:${retry.target}:${index}`}
+        >
+          retry · {retryPreviewLabel(retry)}
+        </span>
+      )) : null}
+      {isChat && blockers.length ? (
+        <span className={missingClassName} data-runtime-blockers={blockers.join(',')}>
+          blocker · {blockers.length}
+        </span>
+      ) : null}
+      {!isChat ? blockers.map((blocker) => (
+        <span className={missingClassName} data-runtime-blocker={blocker} key={`blocker:${blocker}`}>
+          blocker · {blocker}
+        </span>
+      )) : null}
       {!isChat ? artifacts.map((artifact) => (
         <span className={pillClassName} data-execution-artifact={artifact} key={`artifact:${artifact}`}>
           artifact · {artifact}
@@ -280,6 +332,7 @@ function requestObservationEvidencePreview(evidence: Record<string, unknown>): s
     source,
     stringValue(evidence.strategy),
     stringValue(evidence.reason),
+    stringValue(evidence.blocking_condition),
     app,
     query && query !== app ? `query ${query}` : '',
   ]);
@@ -310,6 +363,57 @@ function compactPreview(parts: string[]): string {
   return text.length > 120 ? `${text.slice(0, 117)}...` : text;
 }
 
+type RuntimeExecutionRetrySummary = {
+  reason: string;
+  target: string;
+  tool: string;
+};
+
+function runtimeExecutionRetrySummaries(
+  requests: RuntimeExecutionRequestSnapshot[],
+): RuntimeExecutionRetrySummary[] {
+  const summaries: RuntimeExecutionRetrySummary[] = [];
+  requests.forEach((request) => {
+    const retry = objectRecord(request.observation_retry);
+    if (!Object.keys(retry).length) return;
+    const retryInput = objectRecord(retry.input);
+    const tool = stringValue(retry.tool) || stringValue(retry.from_tool) || stringValue(request.tool_name);
+    if (!tool) return;
+    summaries.push({
+      reason: stringValue(retry.reason),
+      target: (
+        stringValue(retry.target)
+        || stringValue(retry.label)
+        || stringValue(retryInput.app_name)
+        || stringValue(retryInput.query)
+      ),
+      tool,
+    });
+  });
+  return summaries;
+}
+
+function runtimeExecutionBlockers(requests: RuntimeExecutionRequestSnapshot[]): string[] {
+  const values: string[] = [];
+  requests.forEach((request) => {
+    const evidence = objectRecord(request.observation_evidence);
+    addUniqueString(values, evidence.blocking_condition);
+    const conditions = evidence.blocking_conditions;
+    if (Array.isArray(conditions)) {
+      conditions.forEach((condition) => addUniqueString(values, condition));
+    }
+  });
+  return values;
+}
+
+function retryPreviewLabel(retry: RuntimeExecutionRetrySummary): string {
+  return compactPreview([
+    retry.tool,
+    retry.reason,
+    retry.target,
+  ]);
+}
+
 function objectRecord(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, unknown>
@@ -318,6 +422,11 @@ function objectRecord(value: unknown): Record<string, unknown> {
 
 function stringValue(value: unknown): string {
   return typeof value === 'string' ? value.trim() : '';
+}
+
+function addUniqueString(values: string[], value: unknown): void {
+  const text = stringValue(value);
+  if (text && !values.includes(text)) values.push(text);
 }
 
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
