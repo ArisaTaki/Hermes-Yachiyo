@@ -3113,6 +3113,20 @@ def test_tool_broker_app_focus_and_safe_shortcut_stops_when_focus_unverified(
     assert result["recovery_actions"][0]["tool"] == "app.open"
     assert result["recovery_actions"][1]["tool"] == "desktop.active_window"
     assert result["recovery_actions"][2]["tool"] == "screen.capture"
+    assert result["recovery_actions"][3] == {
+        "label": "打开自动化权限",
+        "tool": "system.settings_open",
+        "input": {"target": "自动化权限"},
+        "permission_target": "automation",
+        "risk_level": "low",
+    }
+    assert result["recovery_actions"][4] == {
+        "label": "打开辅助功能权限",
+        "tool": "system.settings_open",
+        "input": {"target": "辅助功能权限"},
+        "permission_target": "accessibility",
+        "risk_level": "low",
+    }
     assert list(result["fallback_result"]) == ["focus"]
 
 
@@ -4583,6 +4597,20 @@ def test_app_focus_reports_unverified_foreground(monkeypatch) -> None:
             "tool": "screen.capture",
             "input": {"reason": "verify foreground app after focus failure"},
             "permission_target": "foreground_focus",
+            "risk_level": "low",
+        },
+        {
+            "label": "打开自动化权限",
+            "tool": "system.settings_open",
+            "input": {"target": "自动化权限"},
+            "permission_target": "automation",
+            "risk_level": "low",
+        },
+        {
+            "label": "打开辅助功能权限",
+            "tool": "system.settings_open",
+            "input": {"target": "辅助功能权限"},
+            "permission_target": "accessibility",
             "risk_level": "low",
         },
     ]

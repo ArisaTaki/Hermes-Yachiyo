@@ -151,6 +151,29 @@ def test_real_desktop_app_open_smoke_discovers_opens_and_verifies_app(monkeypatc
     assert evidence["verify_result"]["action"] == "desktop.verify"
     assert evidence["open_result"]["action"] == "desktop.open_app"
     assert evidence["checks"]["after_status_running"] is True
+    assert evidence["action_target"] == {
+        "kind": "desktop_app",
+        "action": "open_app",
+        "selection_source": "desktop.list_apps",
+        "app_name": "Calculator",
+        "query": "Calculator",
+        "requested_app_name": "Calculator",
+        "discovered_app_name": "Calculator",
+    }
+    assert evidence["observation_evidence"]["source_tool"] == "desktop.verify"
+    assert evidence["observation_evidence"]["app_name"] == "Calculator"
+    assert evidence["observation_evidence"]["open_ok"] is True
+    assert evidence["observation_evidence"]["verify_ok"] is True
+    assert evidence["observation_evidence"]["running"] is True
+    assert evidence["observation_evidence"]["foreground_required"] is False
+    assert "foreground_ready" not in evidence["observation_evidence"]
+    assert evidence["observation_retry"] == {
+        "from_tool": "desktop.verify",
+        "tool": "desktop.verify",
+        "input": {"app_name": "Calculator", "limit": 40},
+        "reason": "verification_failed",
+    }
+    assert evidence["runtime_execution_contract"]["action_target"] == evidence["action_target"]
     assert evidence["cleanup"]["attempted"] is False
     assert calls == [
         ("status", "Calculator"),
@@ -232,6 +255,11 @@ def test_real_desktop_app_open_smoke_uses_capability_query_candidate(monkeypatch
     assert evidence["matched_capability"] == "web_browser"
     assert evidence["selected_candidate"]["name"] == "Safari"
     assert evidence["selected_candidate"]["matched_capability"] == "web_browser"
+    assert evidence["action_target"]["query"] == "browser"
+    assert evidence["action_target"]["requested_app_name"] == "Calculator"
+    assert evidence["action_target"]["discovered_app_name"] == "Safari"
+    assert evidence["action_target"]["resolved_app_path"] == "/Applications/Safari.app"
+    assert evidence["action_target"]["capability_query"] == "browser"
     assert evidence["checks"]["selected_discovered_app"] is True
     assert evidence["checks"]["capability_match_recorded"] is True
     assert list_queries == [("browser", 10)]
@@ -282,6 +310,27 @@ def test_real_desktop_app_open_smoke_capability_query_without_candidate_does_not
     assert evidence["capability_query"] == "browser"
     assert evidence["opened_app_name"] == ""
     assert evidence["error"] == "capability_app_not_found"
+    assert evidence["action_target"] == {
+        "kind": "desktop_app",
+        "action": "resolve_desktop_app",
+        "selection_source": "desktop.list_apps",
+        "query": "browser",
+        "requested_app_name": "Calculator",
+        "capability_query": "browser",
+    }
+    assert evidence["observation_evidence"] == {
+        "source_tool": "desktop.list_apps",
+        "selection_source": "desktop.list_apps",
+        "query": "browser",
+        "candidate_count": 0,
+        "selected_discovered_app": False,
+    }
+    assert evidence["observation_retry"] == {
+        "from_tool": "desktop.list_apps",
+        "tool": "desktop.list_apps",
+        "input": {"query": "browser", "limit": 10},
+        "reason": "resolve_desktop_app",
+    }
     assert evidence["checks"] == {
         "discovered_app": False,
         "selected_discovered_app": False,
@@ -526,6 +575,20 @@ def test_real_desktop_app_open_smoke_recovers_foreground_readiness(monkeypatch):
     }
     assert evidence["foreground_readiness"]["reinspect"]["ready"] is True
     assert evidence["foreground_readiness"]["final"]["ready"] is True
+    assert evidence["observation_evidence"]["source_tool"] == "desktop.inspect_app"
+    assert evidence["observation_evidence"]["foreground_required"] is True
+    assert evidence["observation_evidence"]["foreground_ready"] is True
+    assert evidence["observation_retry"] == {
+        "from_tool": "desktop.inspect_app",
+        "tool": "desktop.inspect_app",
+        "input": {
+            "app_name": "Calculator",
+            "open_if_needed": False,
+            "focus": True,
+            "limit": 80,
+        },
+        "reason": "foreground_readiness_failed",
+    }
     assert calls == [
         ("inspect_limited", "Calculator"),
         ("inspect_limited", "Calculator"),

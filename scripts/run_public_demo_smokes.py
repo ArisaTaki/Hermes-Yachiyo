@@ -451,6 +451,10 @@ def _evidence_summary(evidence: Mapping[str, Any]) -> dict[str, Any]:
         summary["checks"] = {
             str(key): value for key, value in checks.items() if isinstance(value, bool)
         }
+    for key in ("action_target", "observation_evidence", "observation_retry"):
+        value = evidence.get(key)
+        if isinstance(value, dict):
+            summary[key] = dict(value)
     return summary
 
 

@@ -171,7 +171,30 @@ def test_public_demo_smokes_real_desktop_open_can_be_opted_in_separately(
             if not report.is_absolute():
                 report = tmp_path / report
             report.parent.mkdir(parents=True, exist_ok=True)
-            report.write_text(json.dumps({"ok": True}), encoding="utf-8")
+            payload = {"ok": True}
+            if report.name == "real-desktop-app-open.json":
+                payload.update(
+                    {
+                        "mode": "real_desktop_app_open_smoke",
+                        "app_name": "Calculator",
+                        "opened_app_name": "Calculator",
+                        "action_target": {
+                            "kind": "desktop_app",
+                            "action": "open_app",
+                            "app_name": "Calculator",
+                        },
+                        "observation_evidence": {
+                            "source_tool": "desktop.verify",
+                            "running": True,
+                        },
+                        "observation_retry": {
+                            "tool": "desktop.verify",
+                            "input": {"app_name": "Calculator", "limit": 40},
+                            "reason": "verification_failed",
+                        },
+                    }
+                )
+            report.write_text(json.dumps(payload), encoding="utf-8")
         return _fake_completed(command)
 
     monkeypatch.setattr(demo, "_run_command", fake_run)
@@ -188,6 +211,23 @@ def test_public_demo_smokes_real_desktop_open_can_be_opted_in_separately(
     assert summary["selected_count"] == 12
     assert summary["passed_count"] == 12
     assert any("smoke_real_desktop_app_open.py" in part for command in commands for part in command)
+    real_open = next(
+        flow for flow in summary["flows"] if flow["id"] == "real_desktop_app_open"
+    )
+    assert real_open["evidence_summary"]["action_target"] == {
+        "kind": "desktop_app",
+        "action": "open_app",
+        "app_name": "Calculator",
+    }
+    assert real_open["evidence_summary"]["observation_evidence"] == {
+        "source_tool": "desktop.verify",
+        "running": True,
+    }
+    assert real_open["evidence_summary"]["observation_retry"] == {
+        "tool": "desktop.verify",
+        "input": {"app_name": "Calculator", "limit": 40},
+        "reason": "verification_failed",
+    }
     assert not any(
         "smoke_real_desktop_interaction.py" in part
         for command in commands

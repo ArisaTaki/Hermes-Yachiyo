@@ -2027,6 +2027,20 @@ def _foreground_focus_recovery_actions(app_name: str) -> list[dict[str, Any]]:
                 "permission_target": "foreground_focus",
                 "risk_level": "low",
             },
+            {
+                "label": "打开自动化权限",
+                "tool": "system.settings_open",
+                "input": {"target": "自动化权限"},
+                "permission_target": "automation",
+                "risk_level": "low",
+            },
+            {
+                "label": "打开辅助功能权限",
+                "tool": "system.settings_open",
+                "input": {"target": "辅助功能权限"},
+                "permission_target": "accessibility",
+                "risk_level": "low",
+            },
         ]
     )
     return actions

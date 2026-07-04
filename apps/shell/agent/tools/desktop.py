@@ -6464,7 +6464,7 @@ def _app_focus_attempt(
 
 def _app_focus_recovery_actions(app_name: str) -> list[dict[str, Any]]:
     clean_name = str(app_name or "").strip()
-    return [
+    actions = [
         {
             "label": f"重新打开{clean_name}",
             "tool": "app.open",
@@ -6487,6 +6487,8 @@ def _app_focus_recovery_actions(app_name: str) -> list[dict[str, Any]]:
             "risk_level": "low",
         },
     ]
+    actions.extend(_permission_recovery_actions_for_targets(["foreground_focus"]))
+    return actions
 
 
 def _inspect_app_recommended_tools(

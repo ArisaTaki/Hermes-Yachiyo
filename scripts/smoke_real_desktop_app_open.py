@@ -10,7 +10,7 @@ import sys
 import tempfile
 import time
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -20,6 +20,7 @@ from apps.shell.agent.tools import desktop as desktop_tools
 from apps.shell.agent.tools.registry import dispatch_tool_call
 
 DEFAULT_APP_NAME = "Calculator"
+_DESKTOP_APP_SELECTION_SOURCE = "desktop.list_apps"
 DESKTOP_APP_OPEN_TOOL_CHAIN = [
     "desktop.list_apps",
     "desktop.open_app",
@@ -452,6 +453,161 @@ def _planner_alignment(
     }
 
 
+def _compact_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        str(key): item
+        for key, item in value.items()
+        if item not in (None, "", [], {})
+    }
+
+
+def _result_action(result: dict[str, Any] | None, fallback: str) -> str:
+    if isinstance(result, dict):
+        action = str(result.get("action") or "").strip()
+        if action:
+            return action
+    return fallback
+
+
+def _runtime_discovery_contract(
+    *,
+    requested_app_name: str,
+    discovery_query: str,
+    capability_query: str,
+    selected_candidate: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    action_target = _compact_mapping(
+        {
+            "kind": "desktop_app",
+            "action": "resolve_desktop_app",
+            "selection_source": _DESKTOP_APP_SELECTION_SOURCE,
+            "query": discovery_query,
+            "requested_app_name": requested_app_name,
+            "capability_query": capability_query,
+        }
+    )
+    observation_evidence = _compact_mapping(
+        {
+            "source_tool": _DESKTOP_APP_SELECTION_SOURCE,
+            "selection_source": _DESKTOP_APP_SELECTION_SOURCE,
+            "query": discovery_query,
+            "candidate_count": 0,
+            "selected_discovered_app": False,
+            "selected_candidate": dict(selected_candidate),
+        }
+    )
+    observation_retry = _compact_mapping(
+        {
+            "from_tool": _DESKTOP_APP_SELECTION_SOURCE,
+            "tool": _DESKTOP_APP_SELECTION_SOURCE,
+            "input": {"query": discovery_query, "limit": 10},
+            "reason": "resolve_desktop_app",
+        }
+    )
+    return {
+        "action_target": action_target,
+        "observation_evidence": observation_evidence,
+        "observation_retry": observation_retry,
+    }
+
+
+def _runtime_open_contract(
+    *,
+    requested_app_name: str,
+    discovery_query: str,
+    capability_query: str,
+    discovered_app_name: str,
+    opened_app_name: str,
+    selected_candidate: Mapping[str, Any],
+    open_result: dict[str, Any],
+    verify_result: dict[str, Any],
+    foreground_final_result: dict[str, Any] | None,
+    foreground_readiness: Mapping[str, Any],
+    open_verified: Any,
+    after_running: bool | None,
+    require_foreground_ready: bool,
+    blocking_evidence: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    final_readiness = (
+        foreground_readiness.get("final")
+        if isinstance(foreground_readiness.get("final"), dict)
+        else {}
+    )
+    source_tool = _result_action(
+        foreground_final_result if require_foreground_ready else verify_result,
+        "desktop.inspect_app" if require_foreground_ready else "desktop.verify",
+    )
+    selected_path = str(selected_candidate.get("path") or "").strip()
+    action_target = _compact_mapping(
+        {
+            "kind": "desktop_app",
+            "action": "open_app",
+            "selection_source": _DESKTOP_APP_SELECTION_SOURCE,
+            "app_name": opened_app_name,
+            "query": discovery_query,
+            "requested_app_name": requested_app_name,
+            "discovered_app_name": discovered_app_name,
+            "resolved_app_path": selected_path,
+            "capability_query": capability_query,
+        }
+    )
+    observation_evidence = _compact_mapping(
+        {
+            "source_tool": source_tool,
+            "selection_source": _DESKTOP_APP_SELECTION_SOURCE,
+            "app_name": opened_app_name,
+            "query": discovery_query,
+            "requested_app_name": requested_app_name,
+            "discovered_app_name": discovered_app_name,
+            "open_ok": open_result.get("ok") is True,
+            "verify_ok": verify_result.get("ok") is True,
+            "running": after_running,
+            "launch_verified": open_verified is True,
+            "foreground_required": require_foreground_ready,
+            "foreground_ready": (
+                final_readiness.get("ready") is True
+                if require_foreground_ready
+                else None
+            ),
+            "focus_verified": (
+                final_readiness.get("focus_verified") is True
+                if require_foreground_ready
+                else None
+            ),
+            "visibility_limited": final_readiness.get("visibility_limited"),
+            "visibility_status": final_readiness.get("visibility_status"),
+            "window_count": final_readiness.get("window_count"),
+            "ui_element_count": final_readiness.get("ui_element_count"),
+            "control_like_count": final_readiness.get("control_like_count"),
+            "blocking_condition": blocking_evidence.get("blocking_condition"),
+            "blocking_conditions": blocking_evidence.get("blocking_conditions"),
+        }
+    )
+    retry_tool = "desktop.inspect_app" if require_foreground_ready else "desktop.verify"
+    retry_input: dict[str, Any] = {"app_name": opened_app_name}
+    if require_foreground_ready:
+        retry_input.update({"open_if_needed": False, "focus": True, "limit": 80})
+    else:
+        retry_input["limit"] = 40
+    observation_retry = _compact_mapping(
+        {
+            "from_tool": source_tool,
+            "tool": retry_tool,
+            "input": retry_input,
+            "reason": (
+                "foreground_readiness_failed"
+                if require_foreground_ready
+                else "verification_failed"
+            ),
+        }
+    )
+    return {
+        "action_target": action_target,
+        "observation_evidence": observation_evidence,
+        "observation_retry": observation_retry,
+    }
+
+
 def _resolved_open_app_name(requested_app_name: str, result: dict[str, Any]) -> str:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
     return str(data.get("app_name") or data.get("resolved_app_name") or requested_app_name).strip()
@@ -556,6 +712,12 @@ def run_smoke(
                 "selected_discovered_app": False,
                 "capability_match_recorded": False,
             }
+            runtime_contract = _runtime_discovery_contract(
+                requested_app_name=clean_app_name,
+                discovery_query=discovery_query,
+                capability_query=clean_capability_query,
+                selected_candidate=selected_candidate,
+            )
             return {
                 "ok": False,
                 "mode": "real_desktop_app_open_smoke",
@@ -587,6 +749,8 @@ def run_smoke(
                 "matched_capability": "",
                 "discovered_app_name": "",
                 "opened_app_name": "",
+                **runtime_contract,
+                "runtime_execution_contract": runtime_contract,
                 "error": str(discovery.get("error") or "capability_app_not_found"),
                 "discovery": {
                     "result": discovery,
@@ -752,6 +916,22 @@ def run_smoke(
         foreground_final_result,
         after_status,
     )
+    runtime_contract = _runtime_open_contract(
+        requested_app_name=clean_app_name,
+        discovery_query=discovery_query,
+        capability_query=clean_capability_query,
+        discovered_app_name=discovered_app_name,
+        opened_app_name=opened_app_name,
+        selected_candidate=selected_candidate,
+        open_result=open_result,
+        verify_result=verify_result,
+        foreground_final_result=foreground_final_result,
+        foreground_readiness=foreground_readiness,
+        open_verified=open_verified,
+        after_running=after_running,
+        require_foreground_ready=require_foreground_ready,
+        blocking_evidence=blocking_evidence,
+    )
     case = _desktop_execution_case(
         "open_discovered_app",
         app_name=opened_app_name,
@@ -786,6 +966,8 @@ def run_smoke(
         "discovered_app_name": discovered_app_name,
         "opened_app_name": opened_app_name,
         **blocking_evidence,
+        **runtime_contract,
+        "runtime_execution_contract": runtime_contract,
         "discovery": {
             "result": discovery,
             "names": discovered_names,
