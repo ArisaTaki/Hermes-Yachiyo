@@ -41,6 +41,11 @@ from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_decision_and_tool_requests,
     planner_first_direct_tool_selection,
 )
+from apps.shell.yachiyo_agent.daily_desktop import (
+    daily_desktop_planned_timeline,
+    entrypoint_plan_user_metadata,
+    planner_first_daily_desktop_entrypoint_requests,
+)
 from apps.shell.yachiyo_agent.hotkey_hints import (
     legacy_normalize_hotkey_token,
     legacy_parse_hotkey_combo,
@@ -224,6 +229,35 @@ def test_runtime_planner_file_access_keeps_relative_path_prefixes() -> None:
 def test_runtime_planner_hotkeys_are_behind_compatibility_boundary() -> None:
     assert legacy_parse_hotkey_combo("Command+L") == {"key": "l", "modifiers": ["command"]}
     assert legacy_normalize_hotkey_token("回车") == "return"
+
+
+def test_daily_desktop_legacy_fallback_marks_compatibility_boundary() -> None:
+    requests = planner_first_daily_desktop_entrypoint_requests(
+        "网页后退",
+        allowed_tools=["desktop.safe_shortcut"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_shortcut",
+            "input": {"action": "browser_back"},
+            "legacy_fallback": True,
+            "compatibility_boundary": "legacy_daily_desktop_intent",
+        }
+    ]
+
+    metadata = entrypoint_plan_user_metadata(requests)
+    assert metadata["entrypoint_plan_legacy_fallback"] is True
+    assert metadata["daily_desktop_legacy_fallback"] is True
+    assert metadata["daily_desktop_compatibility_boundary"] == "legacy_daily_desktop_intent"
+
+    timeline = daily_desktop_planned_timeline(
+        "网页后退",
+        allowed_tools=["desktop.safe_shortcut"],
+    )
+    assert timeline[0]["legacy_fallback"] is True
+    assert timeline[0]["compatibility_boundary"] == "legacy_daily_desktop_intent"
 
 
 def _recording_legacy_requests(

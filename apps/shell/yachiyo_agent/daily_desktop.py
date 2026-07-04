@@ -48,6 +48,8 @@ _ENTRYPOINT_TIMELINE_CONTEXT_KEYS = (
     "approval_required",
     "depends_on",
     "fallback_tools",
+    "legacy_fallback",
+    "compatibility_boundary",
     "runtime_doctrine",
     "runtime_stage",
     "runtime_role",
@@ -142,10 +144,12 @@ def planner_first_daily_desktop_entrypoint_requests(
         if execution_normalized:
             return planner_execution_tool_requests(planner_requests, allowed) or planner_requests
         return planner_requests
-    return daily_desktop_entrypoint_requests(
-        text,
-        metadata=metadata,
-        allowed_tools=allowed,
+    return _legacy_entrypoint_compatibility_requests(
+        daily_desktop_entrypoint_requests(
+            text,
+            metadata=metadata,
+            allowed_tools=allowed,
+        )
     )
 
 
@@ -180,7 +184,7 @@ def daily_desktop_user_metadata(
     if not tools:
         return {}
     first_request = requests[0]
-    return {
+    payload: dict[str, Any] = {
         "daily_desktop_intent": True,
         "daily_desktop_source": str(first_request.get("source") or "daily_desktop_intent"),
         "daily_desktop_planning_reason": str(
@@ -189,6 +193,12 @@ def daily_desktop_user_metadata(
         "daily_desktop_tool": tools[0],
         "daily_desktop_tools": tools,
     }
+    compatibility_boundary = str(first_request.get("compatibility_boundary") or "").strip()
+    if compatibility_boundary:
+        payload["daily_desktop_compatibility_boundary"] = compatibility_boundary
+    if first_request.get("legacy_fallback"):
+        payload["daily_desktop_legacy_fallback"] = True
+    return payload
 
 
 def entrypoint_plan_user_metadata(
@@ -247,6 +257,23 @@ def _visible_entrypoint_plan_requests(
             continue
         visible.append(request)
     return visible or items
+
+
+def _legacy_entrypoint_compatibility_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+) -> list[dict[str, Any]]:
+    compatible: list[dict[str, Any]] = []
+    for request in requests or ():
+        if not isinstance(request, Mapping):
+            continue
+        compatible.append(
+            {
+                **dict(request),
+                "legacy_fallback": True,
+                "compatibility_boundary": "legacy_daily_desktop_intent",
+            }
+        )
+    return compatible
 
 
 def daily_desktop_planned_timeline(

@@ -449,6 +449,16 @@ def test_runtime_planner_hotkeys_are_behind_discovery_compatibility_boundary() -
 
 
 def test_runtime_planner_legacy_rule_imports_stay_at_explicit_boundaries() -> None:
+    _assert_contains(
+        "apps/shell/yachiyo_agent/daily_desktop.py",
+        [
+            "def _legacy_entrypoint_compatibility_requests",
+            '"legacy_fallback": True',
+            '"compatibility_boundary": "legacy_daily_desktop_intent"',
+            '"daily_desktop_compatibility_boundary"',
+            '"daily_desktop_legacy_fallback"',
+        ],
+    )
     legacy_rule_imports = (
         "from apps.shell.agent.runtime.app_aliases import",
         "from apps.shell.agent.runtime.media_apps import",
