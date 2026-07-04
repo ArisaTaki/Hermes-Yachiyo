@@ -8742,6 +8742,25 @@ def _direct_communication_steps(
     channel = str(direct_message.get("channel") or "").strip()
     send_action = str(direct_message.get("send_action") or "send").strip() or "send"
     mode = str(direct_message.get("mode") or "focus").strip() or "focus"
+    if not channel and _running_app_scope_label(app_name):
+        channel = (
+            _generic_communication_target_channel_hint(intent.user_goal)
+            or _communication_delivery_channel_hint(intent.user_goal)
+        )
+    running_app_query = _running_scoped_communication_app_query(app_name, channel)
+    if running_app_query:
+        selected_app_steps = _direct_communication_discovered_app_steps(
+            intent,
+            allowed,
+            recipient=recipient,
+            body=body,
+            body_source=body_source,
+            channel=_communication_channel_for_app_query(running_app_query, channel),
+            send_action=send_action,
+            discovery_scope="running",
+        )
+        if selected_app_steps:
+            return selected_app_steps
     if not app_name:
         selected_app_steps = _direct_communication_discovered_app_steps(
             intent,
@@ -9149,18 +9168,29 @@ def _direct_communication_discovered_app_steps(
     body_source: str,
     channel: str,
     send_action: str,
+    discovery_scope: str = "installed",
 ) -> list[ToolPlanStepSnapshot]:
     if channel not in {"email", "message"} or not recipient:
         return []
     query = "mail" if channel == "email" else "messaging"
-    discovery_tool = _first_allowed(("desktop.list_apps",), allowed)
+    discovery_tool = _first_allowed(
+        ("desktop.running_apps",)
+        if discovery_scope == "running"
+        else ("desktop.list_apps",),
+        allowed,
+    )
     selected_app_tool = _selected_discovered_app_tool(
         allowed,
         safe_shortcut={"action": "new_message"},
+        mode=_selected_discovered_app_prepare_mode(discovery_tool, "open"),
     )
-    if not discovery_tool or selected_app_tool != "app.open_and_safe_shortcut":
+    if not discovery_tool or selected_app_tool not in {
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+    }:
         return []
-    selected_app = "<selected app from desktop.list_apps>"
+    selection_source = _selected_app_selection_source(discovery_tool)
+    selected_app = _selected_app_placeholder(selection_source)
     steps: list[ToolPlanStepSnapshot] = []
     discovery_depends_on: list[str] = []
     if body_source:
@@ -9181,10 +9211,17 @@ def _direct_communication_discovered_app_steps(
             "Discover desktop state",
             "desktop.app_discovery",
             discovery_tool,
-            input_preview={"query": query, "limit": 20},
+            input_preview=(
+                {"query": query, "limit": 20}
+                if discovery_tool == "desktop.list_apps"
+                else {}
+            ),
             depends_on=discovery_depends_on,
             reason=(
-                "Discover an installed communication app by capability before drafting "
+                "Discover a running communication app by capability before drafting "
+                "the user-requested message."
+                if discovery_tool == "desktop.running_apps"
+                else "Discover an installed communication app by capability before drafting "
                 "the user-requested message."
             ),
         )
@@ -9198,14 +9235,14 @@ def _direct_communication_discovered_app_steps(
             selected_app_tool,
             input_preview={
                 "app_name": selected_app,
-                "selection_source": "desktop.list_apps",
+                "selection_source": selection_source,
                 "query": query,
                 "action": "new_message",
             },
             depends_on=["discover_apps-desktop-state"],
             action="safe_shortcut",
             reason=(
-                "After desktop.list_apps returns candidates, runtime resolves the best "
+                f"After {selection_source} returns candidates, runtime resolves the best "
                 "matching communication app before opening compose."
             ),
         )
@@ -9226,8 +9263,13 @@ def _direct_communication_discovered_app_steps(
         update={
             "inputs": {
                 **intent.inputs,
+                "app_capability_hint": {
+                    "query": query,
+                    "description": "email" if query == "mail" else "messaging",
+                },
                 "safe_shortcut_hint": {"action": "new_message"},
                 "communication_compose_hint": compose_hint,
+                "selected_app_selection_source_hint": selection_source,
             }
         }
     )
@@ -9240,6 +9282,52 @@ def _direct_communication_discovered_app_steps(
         depends_on="open-selected-discovered-app",
     )
     return steps
+
+
+def _running_scoped_communication_app_query(app_name: str, channel: str) -> str:
+    if not _running_app_scope_label(app_name):
+        return ""
+    scoped_hint = _scoped_app_label_capability_hint(app_name)
+    query = str(scoped_hint.get("query") or "").strip()
+    if query in {"mail", "messaging"}:
+        return query
+    if channel == "email":
+        return "mail"
+    if channel == "message":
+        return "messaging"
+    return ""
+
+
+def _communication_channel_for_app_query(query: str, fallback: str) -> str:
+    if query == "mail":
+        return "email"
+    if query == "messaging":
+        return "message"
+    return fallback
+
+
+def _running_app_scope_label(value: str) -> bool:
+    return _contains_any(
+        value,
+        (
+            "当前打开",
+            "当前已打开",
+            "已打开",
+            "打开的",
+            "正在运行",
+            "运行中",
+            "开着",
+            "已开启",
+            "当前",
+            "前台",
+            "currently open",
+            "already open",
+            "running",
+            "open",
+            "current",
+            "foreground",
+        ),
+    )
 
 
 def _communication_draft_input_preview(direct_message: Mapping[str, Any]) -> dict[str, Any]:

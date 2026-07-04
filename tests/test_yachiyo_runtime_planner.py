@@ -13951,6 +13951,226 @@ def test_runtime_planner_composes_in_selected_running_mail_app() -> None:
     }
 
 
+def test_runtime_planner_sends_in_selected_running_mail_app() -> None:
+    allowed_tools = [
+        "desktop.running_apps",
+        "app.focus_and_safe_shortcut",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+
+    decision = RuntimePlanner().decision(
+        "在当前打开的邮件应用里给张三发送：明天会议改到三点",
+        allowed_tools=allowed_tools,
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert decision.selected_intent.kind == "communication"
+    assert decision.selected_intent.inputs["direct_message_hint"] == {
+        "recipient": "张三",
+        "body": "明天会议改到三点",
+        "mode": "focus",
+        "send_action": "send",
+        "app_name": "当前打开的邮件",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "inspect-selected-communication-compose-ui",
+        "fill-selected-communication-recipient",
+        "submit-selected-communication-recipient",
+        "draft-selected-communication-message",
+        "send-selected-communication-message",
+    ]
+    assert _step_by_id(decision, "discover_apps-desktop-state").tool_name == (
+        "desktop.running_apps"
+    )
+    assert _step_by_id(decision, "discover_apps-desktop-state").input_preview == {}
+    assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "mail",
+        "action": "new_message",
+    }
+    assert _step_by_id(
+        decision,
+        "inspect-selected-communication-compose-ui",
+    ).input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "open_if_needed": False,
+        "focus": True,
+        "role_filter": "text",
+        "limit": 80,
+        "selection_source": "desktop.running_apps",
+        "query": "mail",
+    }
+    recipient = _step_by_id(decision, "fill-selected-communication-recipient")
+    assert recipient.input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "mail",
+        "target": "To",
+        "text": "张三",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert recipient.approval_required is True
+    body = _step_by_id(decision, "draft-selected-communication-message")
+    assert body.input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "mail",
+        "target": "message body",
+        "text": "明天会议改到三点",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert body.approval_required is True
+    send = _step_by_id(decision, "send-selected-communication-message")
+    assert send.input_preview == {"action": "send"}
+    assert send.risk_level == "high"
+    assert send.approval_required is True
+
+    requests = planner_tool_requests(
+        "在当前打开的邮件应用里给张三发送：明天会议改到三点",
+        allowed_tools,
+    )
+    assert [request["tool"] for request in requests] == [
+        "desktop.running_apps",
+        "app.focus_and_safe_shortcut",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus_and_type_into_ui_element",
+        "desktop.submit_foreground",
+    ]
+    assert requests[1]["input"] == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "mail",
+        "action": "new_message",
+    }
+    assert requests[3]["input"]["target"] == "To"
+    assert requests[3]["input"]["text"] == "张三"
+    assert requests[5]["input"]["target"] == "message body"
+    assert requests[5]["input"]["text"] == "明天会议改到三点"
+    assert requests[6]["input"] == {"action": "send"}
+    assert {request["planning_reason"] for request in requests} == {
+        "planner_fallback_communication_send"
+    }
+
+    assert envelope is not None
+    assert [request.tool_name for request in envelope.requests] == [
+        "desktop.running_apps",
+        "app.focus_and_safe_shortcut",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus_and_type_into_ui_element",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    assert envelope.requests[6].action_target == {
+        "kind": "desktop_app",
+        "action": "submit_ui",
+        "selection_source": "desktop.running_apps",
+        "app_name": "<selected app from desktop.running_apps>",
+        "query": "mail",
+        "step_id": "send-selected-communication-message",
+    }
+    assert envelope.requests[7].input == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "mail",
+        "limit": 80,
+    }
+
+
+def test_runtime_planner_sends_in_selected_running_communication_app_variants() -> None:
+    allowed_tools = [
+        "desktop.running_apps",
+        "app.focus_and_safe_shortcut",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+    ]
+    cases = (
+        (
+            "在当前打开的聊天应用里给张三发送：明天会议改到三点",
+            "messaging",
+            "recipient",
+            "message",
+        ),
+        (
+            "在当前打开的应用里给张三发送邮件：明天会议改到三点",
+            "mail",
+            "To",
+            "message body",
+        ),
+        (
+            "在当前打开的应用里给张三发送消息：明天会议改到三点",
+            "messaging",
+            "recipient",
+            "message",
+        ),
+    )
+
+    for prompt, query, recipient_target, body_target in cases:
+        decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+        assert decision.selected_intent.kind == "communication"
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover_apps-desktop-state",
+            "open-selected-discovered-app",
+            "inspect-selected-communication-compose-ui",
+            "fill-selected-communication-recipient",
+            "submit-selected-communication-recipient",
+            "draft-selected-communication-message",
+            "send-selected-communication-message",
+        ]
+        assert _step_by_id(decision, "discover_apps-desktop-state").tool_name == (
+            "desktop.running_apps"
+        )
+        assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+            "app_name": "<selected app from desktop.running_apps>",
+            "selection_source": "desktop.running_apps",
+            "query": query,
+            "action": "new_message",
+        }
+        assert _step_by_id(
+            decision,
+            "fill-selected-communication-recipient",
+        ).input_preview == {
+            "app_name": "<selected app from desktop.running_apps>",
+            "selection_source": "desktop.running_apps",
+            "query": query,
+            "target": recipient_target,
+            "text": "张三",
+            "role_filter": "text",
+            "limit": 80,
+        }
+        assert _step_by_id(decision, "draft-selected-communication-message").input_preview == {
+            "app_name": "<selected app from desktop.running_apps>",
+            "selection_source": "desktop.running_apps",
+            "query": query,
+            "target": body_target,
+            "text": "明天会议改到三点",
+            "role_filter": "text",
+            "limit": 80,
+        }
+        send = _step_by_id(decision, "send-selected-communication-message")
+        assert send.risk_level == "high"
+        assert send.approval_required is True
+
+
 def test_runtime_planner_preserves_selected_app_resolution_for_deferred_compose_body() -> None:
     allowed_tools = [
         "desktop.list_apps",
