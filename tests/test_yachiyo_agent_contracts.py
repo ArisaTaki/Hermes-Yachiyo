@@ -5021,6 +5021,25 @@ def test_runtime_tool_catalog_surfaces_desktop_risk_schema_and_fallbacks() -> No
     assert terminal.approval_required is True
 
 
+def test_runtime_tool_catalog_surfaces_multi_file_data_analysis_schema() -> None:
+    catalog = runtime_tool_catalog_snapshot()
+    tools = {tool.tool_name: tool for tool in catalog.tools}
+
+    data_analysis = tools["data.analyze"]
+
+    assert data_analysis.capability_id == "data"
+    assert data_analysis.risk_level == "low"
+    assert data_analysis.approval_required is False
+    assert data_analysis.input_schema["required"] == []
+    assert data_analysis.input_schema["properties"]["paths"] == {
+        "type": "array",
+        "items": {"type": "string"},
+        "maxItems": 100,
+        "description": "Relative data file paths for multi-file analysis. Provide this, path, or content.",
+    }
+    assert "artifact_paths" in data_analysis.input_schema["properties"]
+
+
 def test_runtime_tool_catalog_surfaces_foreground_activation_blockers_per_tool() -> None:
     catalog = runtime_tool_catalog_snapshot(
         platform_name="Darwin",
