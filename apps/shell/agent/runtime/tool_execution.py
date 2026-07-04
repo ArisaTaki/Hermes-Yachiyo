@@ -1784,6 +1784,7 @@ def _runtime_replan_request_payload_for_tool_result(
         replan_signal_ids
         or replan_triggers
         or request_fallback_tools
+        or fallback_tools
         or bool(tool_request.get("requires_observation"))
         or bool(tool_request.get("requires_post_action_verification"))
     ):

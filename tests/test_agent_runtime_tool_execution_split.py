@@ -1767,8 +1767,13 @@ def test_runtime_tool_request_runner_skips_foreground_mutation_after_inspect_not
 
     assert calls == [("desktop.inspect_app", {"app_name": "PixelForge"})]
     assert budget.claims == [("app.open_and_click_ui_element", False)]
-    assert [event["event"] for event in timeline] == ["agent.tool.call", "agent.tool.skipped"]
-    skipped = timeline[-1]["result"]
+    assert [event["event"] for event in timeline] == [
+        "agent.tool.call",
+        "agent.replan.requested",
+        "agent.tool.skipped",
+        "agent.replan.requested",
+    ]
+    skipped = next(event for event in timeline if event["event"] == "agent.tool.skipped")["result"]
     assert skipped["blocked_by_runtime_readiness"] is True
     assert skipped["tool"] == "app.open_and_click_ui_element"
     assert skipped["blocking_conditions"] == [
@@ -1781,8 +1786,26 @@ def test_runtime_tool_request_runner_skips_foreground_mutation_after_inspect_not
     ]
     assert skipped["recommended_tools"] == ["desktop.list_apps", "app.open"]
     assert skipped["recovery_actions"][0]["tool"] == "desktop.list_apps"
-    assert run_events[-1][1] == "agent.tool.skipped"
-    assert run_events[-1][2]["result"]["blocked_by_runtime_readiness"] is True
+    skipped_run_event = next(
+        payload for _run_id, event_type, payload in run_events if event_type == "agent.tool.skipped"
+    )
+    assert skipped_run_event["result"]["blocked_by_runtime_readiness"] is True
+    replan_events = [
+        event for event in timeline if event["event"] == "agent.replan.requested"
+    ]
+    assert [event["payload"]["source_tool_name"] for event in replan_events] == [
+        "desktop.inspect_app",
+        "app.open_and_click_ui_element",
+    ]
+    assert all(event["payload"]["trigger"] == "tool_unavailable" for event in replan_events)
+    assert replan_events[0]["payload"]["fallback_tools"] == ["desktop.list_apps", "app.open"]
+    assert replan_events[0]["payload"]["metadata"]["recovery_actions"][0]["tool"] == "desktop.list_apps"
+    assert replan_events[1]["payload"]["fallback_tools"] == ["desktop.list_apps", "app.open"]
+    assert replan_events[1]["payload"]["metadata"]["recovery_actions"][0]["tool"] == "desktop.list_apps"
+    run_replan_event = next(
+        payload for _run_id, event_type, payload in run_events if event_type == "agent.replan.requested"
+    )
+    assert run_replan_event["request_id"] == replan_events[0]["payload"]["request_id"]
     assert "blocked_by_runtime_readiness" in messages[-1]["content"]
 
 
@@ -1883,11 +1906,14 @@ def test_runtime_tool_request_runner_continues_planned_recovery_after_inspect_no
     ]
     assert [event["event"] for event in timeline] == [
         "agent.tool.call",
+        "agent.replan.requested",
         "agent.tool.call",
         "agent.desktop.readiness_recovered",
         "agent.tool.call",
     ]
-    assert timeline[2]["recovery_tool"] == "desktop.list_apps"
+    assert timeline[1]["payload"]["source_tool_name"] == "desktop.inspect_app"
+    assert timeline[1]["payload"]["fallback_tools"] == ["desktop.list_apps"]
+    assert timeline[3]["recovery_tool"] == "desktop.list_apps"
     assert "blocked_by_runtime_readiness" not in messages[-1]["content"]
 
 
