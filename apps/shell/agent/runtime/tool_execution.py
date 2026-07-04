@@ -262,6 +262,11 @@ _DESKTOP_APP_SELECTION_SOURCES = {
     _DESKTOP_RUNNING_APP_SELECTION_SOURCE,
 }
 _SELECTED_WORKSPACE_FILE_PATH = "<selected file from workspace.list>"
+_SELECTED_WORKSPACE_FILES_PATH = "<selected files from workspace.list>"
+_SELECTED_WORKSPACE_FILE_PATHS = {
+    _SELECTED_WORKSPACE_FILE_PATH,
+    _SELECTED_WORKSPACE_FILES_PATH,
+}
 
 
 def _app_lookups_related(left: Any, right: Any) -> bool:
@@ -544,20 +549,49 @@ def _tool_request_existing_app_name_resolution(
 def _tool_request_workspace_file_resolution(
     tool_request: dict[str, Any],
     timeline: list[dict[str, Any]],
-) -> dict[str, str]:
+) -> dict[str, Any]:
     raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
     if not _tool_request_uses_selected_workspace_file(raw_input):
         return {}
+    field = _selected_workspace_file_field(raw_input) or "path"
     candidate = _selected_workspace_file_from_timeline(raw_input, timeline)
     if not candidate:
         return {}
-    field = _selected_workspace_file_field(raw_input) or "path"
     requested_path = str(
         raw_input.get(field)
         or raw_input.get("path")
         or raw_input.get("target_path")
         or _SELECTED_WORKSPACE_FILE_PATH
     ).strip()
+    if _tool_request_uses_selected_workspace_files(raw_input):
+        candidates = _selected_workspace_files_from_timeline(raw_input, timeline)
+        paths = [str(item.get("path") or "").strip() for item in candidates]
+        paths = [path for path in paths if path]
+        if not paths:
+            return {}
+        resolution = {
+            "field": field,
+            "requested_path": requested_path,
+            "resolved_path": paths[0],
+            "resolved_paths": paths,
+            "resolved_file_count": len(paths),
+            "source_tool": str(candidates[0].get("source_tool") or "workspace.list").strip(),
+        }
+        source_path = str(candidates[0].get("source_path") or "").strip()
+        if source_path:
+            resolution["source_path"] = source_path
+        names = [
+            str(item.get("name") or "").strip()
+            for item in candidates
+            if str(item.get("name") or "").strip()
+        ]
+        if names:
+            resolution["resolved_file_names"] = names
+            resolution["resolved_file_name"] = names[0]
+        selection = str(raw_input.get("selection") or "").strip()
+        if selection:
+            resolution["selection"] = selection
+        return resolution
     resolution = {
         "field": field,
         "requested_path": requested_path,
@@ -578,23 +612,38 @@ def _tool_request_workspace_file_resolution(
 
 def _tool_request_with_workspace_file_resolution(
     tool_request: dict[str, Any],
-    resolution: dict[str, str],
+    resolution: dict[str, Any],
 ) -> dict[str, Any]:
     if not resolution:
         return tool_request
     raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
     resolved_path = str(resolution.get("resolved_path") or "").strip()
-    if not resolved_path:
+    resolved_paths = [
+        str(path or "").strip()
+        for path in resolution.get("resolved_paths", [])
+        if str(path or "").strip()
+    ] if isinstance(resolution.get("resolved_paths"), list) else []
+    if not resolved_path and not resolved_paths:
         return tool_request
     field = str(resolution.get("field") or "path").strip() or "path"
     resolved_input = dict(raw_input)
-    resolved_input[field] = resolved_path
-    if field == "target_path":
-        resolved_input.setdefault("path", resolved_path)
-    if str(resolved_input.get("path") or "").strip() == _SELECTED_WORKSPACE_FILE_PATH:
-        resolved_input["path"] = resolved_path
-    if str(resolved_input.get("target_path") or "").strip() == _SELECTED_WORKSPACE_FILE_PATH:
-        resolved_input["target_path"] = resolved_path
+    if resolved_paths:
+        resolved_input.pop(field, None)
+        resolved_input["paths"] = resolved_paths
+    else:
+        resolved_input[field] = resolved_path
+        if field == "target_path":
+            resolved_input.setdefault("path", resolved_path)
+    if str(resolved_input.get("path") or "").strip() in _SELECTED_WORKSPACE_FILE_PATHS:
+        if resolved_paths:
+            resolved_input.pop("path", None)
+        else:
+            resolved_input["path"] = resolved_path
+    if str(resolved_input.get("target_path") or "").strip() in _SELECTED_WORKSPACE_FILE_PATHS:
+        if resolved_paths:
+            resolved_input.pop("target_path", None)
+        else:
+            resolved_input["target_path"] = resolved_path
     if str(resolved_input.get("selection_source") or "").strip() == "workspace.list":
         for key in (
             "selection_source",
@@ -624,6 +673,14 @@ def _tool_request_with_workspace_file_resolution(
             value = str(resolution.get(key) or "").strip()
             if value:
                 merged_resolution[key] = value
+        resolved_names = resolution.get("resolved_file_names")
+        if isinstance(resolved_names, list) and resolved_names:
+            merged_resolution["resolved_file_names"] = [
+                str(name or "").strip() for name in resolved_names if str(name or "").strip()
+            ]
+        if resolved_paths:
+            merged_resolution["resolved_paths"] = resolved_paths
+            merged_resolution["resolved_file_count"] = len(resolved_paths)
     return {
         **tool_request,
         "input_resolution": merged_resolution,
@@ -644,9 +701,16 @@ def _tool_request_uses_selected_workspace_file(raw_input: dict[str, Any]) -> boo
 
 def _selected_workspace_file_field(raw_input: dict[str, Any]) -> str:
     for field in ("path", "target_path", "file_path"):
-        if str(raw_input.get(field) or "").strip() == _SELECTED_WORKSPACE_FILE_PATH:
+        if str(raw_input.get(field) or "").strip() in _SELECTED_WORKSPACE_FILE_PATHS:
             return field
     return ""
+
+
+def _tool_request_uses_selected_workspace_files(raw_input: dict[str, Any]) -> bool:
+    field = _selected_workspace_file_field(raw_input)
+    if not field:
+        return False
+    return str(raw_input.get(field) or "").strip() == _SELECTED_WORKSPACE_FILES_PATH
 
 
 def _tool_request_artifact_body_resolution(
@@ -824,6 +888,43 @@ def _selected_workspace_file_from_timeline(
     return {}
 
 
+def _selected_workspace_files_from_timeline(
+    raw_input: dict[str, Any],
+    timeline: list[dict[str, Any]],
+) -> list[dict[str, str]]:
+    for event in reversed(timeline):
+        if event.get("event") != "agent.tool.call":
+            continue
+        source_tool = str(event.get("detail") or "").strip()
+        if source_tool not in {"workspace.list", "file.search", "fs.find_files"}:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        if result.get("ok") is False:
+            continue
+        input_preview = event.get("input_preview") if isinstance(event.get("input_preview"), dict) else {}
+        if not _workspace_file_selection_event_matches(raw_input, input_preview, result):
+            continue
+        source_path = _workspace_file_source_path(input_preview, result)
+        entries = _workspace_file_entries_from_result(result)
+        selected_entries = _select_workspace_file_entries(entries, raw_input, source_path)
+        candidates: list[dict[str, str]] = []
+        for entry in selected_entries:
+            path = _workspace_file_entry_path(entry, source_path)
+            if not path:
+                continue
+            candidates.append(
+                {
+                    "path": path,
+                    "name": str(entry.get("name") or "").strip(),
+                    "source_tool": source_tool,
+                    "source_path": source_path,
+                }
+            )
+        if candidates:
+            return candidates
+    return []
+
+
 def _workspace_file_selection_event_matches(
     raw_input: dict[str, Any],
     input_preview: dict[str, Any],
@@ -875,15 +976,10 @@ def _select_workspace_file_entry(
     raw_input: dict[str, Any],
     source_path: str,
 ) -> dict[str, Any]:
-    files = [
-        entry
-        for entry in entries
-        if _workspace_file_entry_path(entry, source_path)
-        and str(entry.get("type") or entry.get("kind") or "file").strip() not in {
-            "dir",
-            "directory",
-        }
-    ]
+    if _tool_request_uses_selected_workspace_files(raw_input):
+        selected = _select_workspace_file_entries(entries, raw_input, source_path)
+        return selected[0] if selected else {}
+    files = _workspace_file_entry_files(entries, source_path)
     if not files:
         return {}
     selection = str(raw_input.get("selection") or raw_input.get("selection_hint") or "").casefold()
@@ -903,6 +999,38 @@ def _select_workspace_file_entry(
     if len(files) == 1:
         return files[0]
     return {}
+
+
+def _select_workspace_file_entries(
+    entries: list[dict[str, Any]],
+    raw_input: dict[str, Any],
+    source_path: str,
+) -> list[dict[str, Any]]:
+    files = _workspace_file_entry_files(entries, source_path)
+    if not files:
+        return []
+    selection = str(raw_input.get("selection") or raw_input.get("selection_hint") or "").casefold()
+    if any(token in selection for token in ("所有", "全部", "all", "every", "each")):
+        return files
+    if any(token in selection for token in ("多个", "多份", "multiple", "several", "比较", "对比", "compare")):
+        return files
+    return files if _tool_request_uses_selected_workspace_files(raw_input) else []
+
+
+def _workspace_file_entry_files(
+    entries: list[dict[str, Any]],
+    source_path: str,
+) -> list[dict[str, Any]]:
+    files = [
+        entry
+        for entry in entries
+        if _workspace_file_entry_path(entry, source_path)
+        and str(entry.get("type") or entry.get("kind") or "file").strip() not in {
+            "dir",
+            "directory",
+        }
+    ]
+    return files
 
 
 def _workspace_file_entry_mtime(entry: dict[str, Any]) -> float | None:
@@ -2647,7 +2775,7 @@ def _unresolved_discovered_app_skip_result(
 def _unresolved_workspace_file_skip_result(
     tool_name: str,
     raw_input: dict[str, Any],
-    file_resolution: dict[str, str],
+    file_resolution: dict[str, Any],
 ) -> dict[str, Any] | None:
     if file_resolution:
         return None

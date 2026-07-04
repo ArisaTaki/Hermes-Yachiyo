@@ -109,6 +109,111 @@ def analyze_data_file(
     }
 
 
+def analyze_data_files(
+    paths: list[Path],
+    *,
+    display_paths: list[str],
+    artifact_path: str,
+    artifact_paths: list[str] | None = None,
+    max_rows: int = 1000,
+    source_kind: str = "",
+) -> dict[str, Any]:
+    clean_max_rows = max(1, min(int(max_rows or 1000), 10000))
+    clean_artifact_paths = _artifact_paths(artifact_path, artifact_paths)
+    primary_artifact_path = clean_artifact_paths[0]
+    clean_paths = [path for path in paths if isinstance(path, Path)]
+    clean_display_paths = [
+        str(display_path or path).strip() or str(path)
+        for path, display_path in zip(clean_paths, display_paths, strict=False)
+    ]
+    if len(clean_display_paths) < len(clean_paths):
+        clean_display_paths.extend(str(path) for path in clean_paths[len(clean_display_paths) :])
+    if not clean_paths:
+        return _empty_structured_report(
+            display_path="selected workspace files",
+            source_kind=str(source_kind or "multi_file").strip() or "multi_file",
+            artifact_path=primary_artifact_path,
+            artifact_paths=clean_artifact_paths,
+            table={"columns": [], "rows": [], "row_count": 0},
+        )
+
+    tables: list[tuple[str, str, dict[str, Any]]] = []
+    observed_kinds: list[str] = []
+    try:
+        for path, display_path in zip(clean_paths, clean_display_paths, strict=False):
+            kind = str(source_kind or _source_kind_for_suffix(path.suffix.lower()) or "text").strip()
+            table, normalized_kind = _table_from_path(
+                path,
+                source_kind=kind,
+                max_rows=clean_max_rows,
+            )
+            observed_kinds.append(normalized_kind)
+            tables.append((display_path, normalized_kind, table))
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        csv.Error,
+        OSError,
+        zipfile.BadZipFile,
+        KeyError,
+        ElementTree.ParseError,
+    ) as exc:
+        return _parse_error_result(
+            _multi_file_display_path(clean_display_paths),
+            source_kind=str(source_kind or "multi_file").strip() or "multi_file",
+            error=exc,
+        )
+
+    table = _merged_tables_with_source_file(tables, max_rows=clean_max_rows)
+    analysis_source_kind = _multi_file_source_kind(observed_kinds, source_kind)
+    if not table["columns"]:
+        return _empty_structured_report(
+            display_path=_multi_file_display_path(clean_display_paths),
+            source_kind=analysis_source_kind,
+            artifact_path=primary_artifact_path,
+            artifact_paths=clean_artifact_paths,
+            table=table,
+        )
+
+    column_summaries = _column_summaries(table["rows"], table["columns"])
+    display_path = _multi_file_display_path(clean_display_paths)
+    content = _markdown_report(
+        display_path=display_path,
+        source_kind=analysis_source_kind,
+        artifact_path=primary_artifact_path,
+        table=table,
+        column_summaries=column_summaries,
+    )
+    content = _multi_file_intro(clean_display_paths) + content
+    extra_artifacts = _extra_table_artifacts(
+        clean_artifact_paths[1:],
+        display_path=display_path,
+        source_kind=analysis_source_kind,
+        table=table,
+        column_summaries=column_summaries,
+    )
+    return {
+        "ok": True,
+        "path": display_path,
+        "paths": clean_display_paths,
+        "source_files": clean_display_paths,
+        "source_file_count": len(clean_display_paths),
+        "source_kind": analysis_source_kind,
+        "rows": table["row_count"],
+        "analyzed_rows": len(table["rows"]),
+        "columns": table["columns"],
+        "column_summaries": column_summaries,
+        "artifact_path": primary_artifact_path,
+        "artifact_paths": clean_artifact_paths,
+        "artifact_content": content,
+        "extra_artifacts": extra_artifacts,
+        "summary": (
+            f"Analyzed {len(clean_display_paths)} files: {table['row_count']} rows, "
+            f"{len(table['columns'])} columns. Report: {primary_artifact_path}."
+        ),
+    }
+
+
 def analyze_data_text(
     text: str,
     *,
@@ -186,6 +291,92 @@ def analyze_data_text(
             f"{len(table['columns'])} columns. Report: {primary_artifact_path}."
         ),
     }
+
+
+def _table_from_path(
+    path: Path,
+    *,
+    source_kind: str,
+    max_rows: int,
+) -> tuple[dict[str, Any], str]:
+    suffix = path.suffix.lower()
+    kind = str(source_kind or _source_kind_for_suffix(suffix) or "text").strip()
+    if suffix == ".xlsx" or kind == "xlsx":
+        return _xlsx_table(path, max_rows=max_rows), "xlsx"
+    text = _read_text_file(path)
+    if suffix == ".json" or kind == "json":
+        return _json_table(text, max_rows=max_rows), "json"
+    if suffix == ".jsonl" or kind == "jsonl":
+        return _jsonl_table(text, max_rows=max_rows), "jsonl"
+    if suffix == ".tsv" or kind == "tsv":
+        return _delimited_table(text, delimiter="\t", max_rows=max_rows), "tsv"
+    if suffix == ".csv" or kind == "csv":
+        return _delimited_table(text, delimiter=",", max_rows=max_rows), "csv"
+    table = _text_table(text, max_rows=max_rows)
+    return table, "text_table" if table["columns"] else "text"
+
+
+def _merged_tables_with_source_file(
+    tables: list[tuple[str, str, dict[str, Any]]],
+    *,
+    max_rows: int,
+) -> dict[str, Any]:
+    columns = ["source_file"]
+    rows: list[dict[str, str]] = []
+    row_count = 0
+    for display_path, _source_kind, table in tables:
+        table_columns = [str(column) for column in table.get("columns") or []]
+        for column in table_columns:
+            if column not in columns:
+                columns.append(column)
+        table_rows = [
+            row for row in table.get("rows") or [] if isinstance(row, dict)
+        ]
+        row_count += int(table.get("row_count") or len(table_rows))
+        for row in table_rows:
+            if len(rows) >= max_rows:
+                continue
+            merged = {"source_file": display_path}
+            for column in table_columns:
+                merged[column] = _stringify(row.get(column))
+            rows.append(merged)
+    if len(columns) == 1 and not rows:
+        columns = []
+    return {"columns": columns, "rows": rows, "row_count": row_count}
+
+
+def _multi_file_source_kind(observed_kinds: list[str], source_kind: str) -> str:
+    clean_source_kind = str(source_kind or "").strip()
+    if clean_source_kind and clean_source_kind != "unknown":
+        return clean_source_kind
+    unique = []
+    for kind in observed_kinds:
+        clean = str(kind or "").strip()
+        if clean and clean not in unique:
+            unique.append(clean)
+    if len(unique) == 1:
+        return unique[0]
+    return "multi_file"
+
+
+def _multi_file_display_path(paths: list[str]) -> str:
+    if len(paths) == 1:
+        return paths[0]
+    return f"{len(paths)} workspace files"
+
+
+def _multi_file_intro(paths: list[str]) -> str:
+    lines = [
+        "# Multi-file Data Analysis",
+        "",
+        "## Source Files",
+        "",
+    ]
+    lines.extend(f"- `{path}`" for path in paths[:20])
+    if len(paths) > 20:
+        lines.append(f"- ... {len(paths) - 20} more")
+    lines.extend(["", ""])
+    return "\n".join(lines)
 
 
 def _plain_text_report(

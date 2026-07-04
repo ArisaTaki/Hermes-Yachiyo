@@ -510,10 +510,19 @@ class ToolDescriptor:
                 raise AgentRuntimeError("data.analyze 参数 content 必须是字符串")
             if "display_path" in payload and not isinstance(payload.get("display_path"), str):
                 raise AgentRuntimeError("data.analyze 参数 display_path 必须是字符串")
-            if not str(payload.get("path") or "").strip() and not str(
-                payload.get("content") or ""
-            ).strip():
-                raise AgentRuntimeError("data.analyze 参数 path 或 content 必须提供一个")
+            if "paths" in payload:
+                paths = payload.get("paths")
+                if not isinstance(paths, list) or len(paths) > 100:
+                    raise AgentRuntimeError("data.analyze 参数 paths 必须是不超过 100 项的字符串列表")
+                if any(not isinstance(path, str) or not path.strip() for path in paths):
+                    raise AgentRuntimeError("data.analyze 参数 paths 必须是不超过 100 项的字符串列表")
+            has_paths = isinstance(payload.get("paths"), list) and bool(payload.get("paths"))
+            if (
+                not str(payload.get("path") or "").strip()
+                and not str(payload.get("content") or "").strip()
+                and not has_paths
+            ):
+                raise AgentRuntimeError("data.analyze 参数 path、paths 或 content 必须提供一个")
             if "artifact_path" in payload and not isinstance(payload.get("artifact_path"), str):
                 raise AgentRuntimeError("data.analyze 参数 artifact_path 必须是字符串")
             if "artifact_paths" in payload:
@@ -1363,6 +1372,12 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "path": {
                 "type": "string",
                 "description": "Relative data file path. Provide this or content.",
+            },
+            "paths": {
+                "type": "array",
+                "items": {"type": "string"},
+                "maxItems": 100,
+                "description": "Relative data file paths for multi-file analysis. Provide this, path, or content.",
             },
             "content": {
                 "type": "string",

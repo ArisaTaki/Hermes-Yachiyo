@@ -11,7 +11,7 @@ from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.tools import browser, desktop
-from apps.shell.agent.tools.data_analysis import analyze_data_file, analyze_data_text
+from apps.shell.agent.tools.data_analysis import analyze_data_file, analyze_data_files, analyze_data_text
 from apps.shell.agent.tools.registry import dispatch_tool_call
 from apps.shell.agent.tools.terminal import (
     _TERMINAL_PROCESS_LOCK,
@@ -828,6 +828,7 @@ class ToolBroker:
         self,
         path: str,
         *,
+        paths: list[str] | None = None,
         content: str = "",
         display_path: str = "",
         artifact_path: str = "analysis-report.md",
@@ -848,6 +849,46 @@ class ToolBroker:
                 max_rows=max_rows,
                 source_kind=source_kind or "text_table",
             )
+        elif paths:
+            clean_paths = [str(item or "").strip() for item in paths if str(item or "").strip()]
+            if not clean_paths:
+                return {
+                    "ok": False,
+                    "path": display_source,
+                    "error": "未提供可分析的数据文件",
+                    "hint": "请先用 workspace.list 查看目录，确认要分析的文件相对路径。",
+                }
+            resolved_paths: list[Path] = []
+            for item in clean_paths:
+                target = self._resolve_workspace_path(item)
+                if not target.exists():
+                    return {
+                        "ok": False,
+                        "path": item,
+                        "paths": clean_paths,
+                        "error": "路径不存在",
+                        "hint": "请先用 workspace.list 查看父目录，确认要分析的文件相对路径。",
+                    }
+                if target.is_dir():
+                    return {
+                        "ok": False,
+                        "path": item,
+                        "paths": clean_paths,
+                        "error": "data.analyze 只能分析文件",
+                        "hint": "这是一个目录；请先用 workspace.list 选择目录中的数据文件。",
+                        "suggested_tool": "workspace.list",
+                    }
+                resolved_paths.append(target)
+            result = analyze_data_files(
+                resolved_paths,
+                display_paths=clean_paths,
+                artifact_path=artifact_path or "analysis-report.md",
+                artifact_paths=artifact_paths,
+                max_rows=max_rows,
+                source_kind=source_kind,
+            )
+            if not result.get("ok"):
+                return result
         else:
             target = self._resolve_workspace_path(path)
             display_source = path or "."

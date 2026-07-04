@@ -172,8 +172,10 @@ def _data_analyze(broker: Any, payload: dict[str, Any], _approved: bool) -> dict
     raw_artifact_paths = payload.get("artifact_paths")
     raw_requested_outputs = payload.get("requested_outputs")
     raw_artifact_manifest = payload.get("artifact_manifest")
+    raw_paths = payload.get("paths")
     return broker.data_analyze(
         str(payload.get("path") or ""),
+        paths=[str(path) for path in raw_paths] if isinstance(raw_paths, list) else None,
         content=str(payload.get("content") or ""),
         display_path=str(payload.get("display_path") or ""),
         artifact_path=str(payload.get("artifact_path") or "analysis-report.md"),

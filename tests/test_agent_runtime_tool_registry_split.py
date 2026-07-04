@@ -347,6 +347,37 @@ def test_tool_broker_call_analyzes_data_file_and_writes_artifact(tmp_path) -> No
     assert "| East | 10 |" in content
 
 
+def test_tool_broker_call_analyzes_multiple_data_files_and_writes_artifact(tmp_path) -> None:
+    (tmp_path / "east.csv").write_text("region,revenue\nEast,10\nEast,30\n", encoding="utf-8")
+    (tmp_path / "west.csv").write_text("region,revenue\nWest,20\n", encoding="utf-8")
+    broker = _broker(tmp_path)
+
+    result = broker.call(
+        "data.analyze",
+        {
+            "paths": ["east.csv", "west.csv"],
+            "source_kind": "csv",
+            "artifact_path": "reports/combined.md",
+        },
+    )
+
+    assert result["ok"] is True
+    assert result["paths"] == ["east.csv", "west.csv"]
+    assert result["source_file_count"] == 2
+    assert result["source_kind"] == "csv"
+    assert result["rows"] == 3
+    assert result["columns"] == ["source_file", "region", "revenue"]
+    assert result["artifact"]["path"] == "reports/combined.md"
+    content = (tmp_path / "artifacts" / "reports" / "combined.md").read_text(
+        encoding="utf-8"
+    )
+    assert "# Multi-file Data Analysis" in content
+    assert "`east.csv`" in content
+    assert "`west.csv`" in content
+    assert "mean=20.0" in content
+    assert "| east.csv | East | 10 |" in content
+
+
 def test_tool_broker_call_analyzes_gb18030_csv_file(tmp_path) -> None:
     (tmp_path / "sales-cn.csv").write_text(
         "地区,收入\n华东,10\n华西,20\n",
@@ -691,14 +722,23 @@ def test_data_analyze_schema_accepts_path_or_content() -> None:
     ToolDescriptorRegistry.validate_payload("data.analyze", {"path": "sales.csv"})
     ToolDescriptorRegistry.validate_payload(
         "data.analyze",
+        {"paths": ["east.csv", "west.csv"]},
+    )
+    ToolDescriptorRegistry.validate_payload(
+        "data.analyze",
         {
             "content": "region,revenue\nEast,10\n",
             "display_path": "captured:visible_text",
         },
     )
 
-    with pytest.raises(AgentRuntimeError, match="data.analyze 参数 path 或 content"):
+    with pytest.raises(AgentRuntimeError, match="data.analyze 参数 path、paths 或 content"):
         ToolDescriptorRegistry.validate_payload("data.analyze", {"artifact_path": "out.md"})
+    with pytest.raises(AgentRuntimeError, match="data.analyze 参数 paths"):
+        ToolDescriptorRegistry.validate_payload(
+            "data.analyze",
+            {"paths": ["east.csv", ""]},
+        )
     with pytest.raises(AgentRuntimeError, match="data.analyze 参数 content"):
         ToolDescriptorRegistry.validate_payload("data.analyze", {"content": 42})
     with pytest.raises(AgentRuntimeError, match="data.analyze 参数 display_path"):
