@@ -13,6 +13,7 @@ import {
   type RuntimeToolRecoveryAction,
 } from '../../runtime-shared/toolRecoveryActions';
 import type {
+  CapabilityPlanItemSnapshot,
   CapabilitySnapshot,
   PlannerTraceSummarySnapshot,
   PublicRunEvent,
@@ -149,23 +150,33 @@ export function PlannerTraceInspector({
   const intent = trace.intent || trace.plan?.intent || null;
   const toolPlan = trace.toolPlan || trace.plan?.tool_plan || null;
   const capabilities = trace.plan?.capabilities || [];
+  const capabilityPlanItems = trace.plan?.capability_plan?.items || [];
   const capabilityById = new Map(capabilities.map((capability) => [capability.capability_id, capability]));
+  const capabilityPlanById = new Map(capabilityPlanItems.map((item) => [item.capability_id, item]));
   const selectionPlanCapabilities = trace.selection?.planCapabilities || [];
   const selectionRequiredCapabilities = trace.selection?.requiredCapabilities || [];
+  const capabilityPlanRequiredCapabilities = uniqueStrings(trace.plan?.capability_plan?.required_capabilities || []);
+  const capabilityPlanPreferredCapabilities = uniqueStrings(trace.plan?.capability_plan?.preferred_capabilities || []);
   const toolPlanRequiredCapabilities = uniqueStrings(toolPlan?.required_capabilities || []);
   const intentRequiredCapabilities = uniqueStrings(intent?.required_capabilities || []);
   const requiredCapabilities = uniqueStrings([
+    ...capabilityPlanRequiredCapabilities,
     ...(toolPlanRequiredCapabilities.length ? toolPlanRequiredCapabilities : intentRequiredCapabilities),
     ...selectionRequiredCapabilities,
   ]);
-  const preferredCapabilities = uniqueStrings(intent?.preferred_capabilities || []);
+  const preferredCapabilities = uniqueStrings([
+    ...capabilityPlanPreferredCapabilities,
+    ...(intent?.preferred_capabilities || []),
+  ]);
   const visibleCapabilityIds = uniqueStrings([
     ...requiredCapabilities,
     ...preferredCapabilities,
     ...selectionPlanCapabilities,
+    ...capabilityPlanItems.map((item) => item.capability_id),
     ...capabilities.map((capability) => capability.capability_id),
   ]);
   const missingCapabilities = uniqueStrings([
+    ...(trace.plan?.capability_plan?.missing_capabilities || []),
     ...(toolPlan?.missing_capabilities || []),
     ...(trace.selection?.missingCapabilities || []),
   ]);
@@ -495,6 +506,7 @@ export function PlannerTraceInspector({
               {visibleCapabilityIds.map((capabilityId) => (
                 <PlannerCapabilityPill
                   capabilityById={capabilityById}
+                  capabilityPlanById={capabilityPlanById}
                   capabilityId={capabilityId}
                   key={capabilityId}
                   missing={missingCapabilities.includes(capabilityId)}
@@ -506,6 +518,7 @@ export function PlannerTraceInspector({
                 .map((capabilityId) => (
                   <PlannerCapabilityPill
                     capabilityById={capabilityById}
+                    capabilityPlanById={capabilityPlanById}
                     capabilityId={capabilityId}
                     key={capabilityId}
                     missing
@@ -571,18 +584,25 @@ export function PlannerTraceInspector({
 
 function PlannerCapabilityPill({
   capabilityById,
+  capabilityPlanById,
   capabilityId,
   missing,
   state,
 }: {
   capabilityById: Map<string, CapabilitySnapshot>;
+  capabilityPlanById: Map<string, CapabilityPlanItemSnapshot>;
   capabilityId: string;
   missing: boolean;
   state: string;
 }) {
   const capability = capabilityById.get(capabilityId);
-  const discoveryActions = uniqueStrings(capability?.discovery_actions || []);
-  const executionActions = uniqueStrings(capability?.execution_actions || []);
+  const capabilityPlan = capabilityPlanById.get(capabilityId);
+  const discoveryActions = uniqueStrings(capabilityPlan?.discovery_actions || capability?.discovery_actions || []);
+  const executionActions = uniqueStrings(capabilityPlan?.execution_actions || capability?.execution_actions || []);
+  const selectedTools = uniqueStrings(capabilityPlan?.selected_tools || []);
+  const plannedStepIds = uniqueStrings(capabilityPlan?.planned_step_ids || []);
+  const capabilityStatus = stringValue(capabilityPlan?.status) || (missing ? 'missing' : state);
+  const capabilityReason = stringValue(capabilityPlan?.reason);
   const actionSummary = capabilityActionSummary(discoveryActions, executionActions);
   return (
     <span
@@ -590,10 +610,13 @@ function PlannerCapabilityPill({
       data-capability-discovery-actions={discoveryActions.join(',')}
       data-capability-execution-actions={executionActions.join(',')}
       data-capability-id={capabilityId}
+      data-capability-planned-steps={plannedStepIds.join(',')}
+      data-capability-selected-tools={selectedTools.join(',')}
       data-capability-state={state}
-      title={actionSummary || undefined}
+      data-capability-status={capabilityStatus}
+      title={capabilityReason || actionSummary || undefined}
     >
-      {capabilityLabel(capabilityId, capabilityById)}
+      {capabilityLabel(capabilityId, capabilityById, capabilityPlan)}
       {actionSummary ? ` (${actionSummary})` : ''}
     </span>
   );
@@ -2589,8 +2612,9 @@ function capabilityState(
 function capabilityLabel(
   capabilityId: string,
   capabilityById: Map<string, CapabilitySnapshot>,
+  capabilityPlan?: CapabilityPlanItemSnapshot,
 ): string {
-  const title = capabilityById.get(capabilityId)?.title || '';
+  const title = capabilityPlan?.title || capabilityById.get(capabilityId)?.title || '';
   return title && title !== capabilityId ? `${title} · ${capabilityId}` : capabilityId;
 }
 

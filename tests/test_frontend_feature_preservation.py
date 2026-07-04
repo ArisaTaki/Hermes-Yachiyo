@@ -2726,6 +2726,8 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
         "apps/frontend/src/features/yachiyo-studio/types.ts",
         [
             "CapabilitySnapshot",
+            "CapabilityPlanItemSnapshot",
+            "CapabilityPlanSnapshot",
             "TaskIntentSnapshot",
             "ToolPlanStepSnapshot",
             "ToolPlanSnapshot",
@@ -2889,6 +2891,9 @@ def test_agent_studio_exposes_yachiyo_public_group_entrypoint() -> None:
             "export type SkillTraceSnapshot",
             "export type RunTimelineSnapshot",
             "export type PlannerTraceSummarySnapshot",
+            "export type CapabilityPlanItemSnapshot",
+            "export type CapabilityPlanSnapshot",
+            "capability_plan?: CapabilityPlanSnapshot | null;",
             "planner_summary?: PlannerTraceSummarySnapshot | null;",
             "runtime_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;",
             "task_progress?: TaskProgressSummarySnapshot | null;",

@@ -357,6 +357,43 @@ def test_runtime_planner_routes_data_analysis_to_file_terminal_artifact_plan() -
     }
 
 
+def test_runtime_planner_exposes_capability_plan_between_intent_and_tools() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告和图表",
+        allowed_tools=["workspace.read", "workspace.list", "terminal.run", "artifact.write"],
+    )
+
+    capability_plan = decision.plan.capability_plan
+    assert capability_plan is not None
+    assert capability_plan.intent_kind == "data_analysis"
+    assert capability_plan.required_capabilities == [
+        "file.workspace_read",
+        "data.analysis",
+        "artifact.write",
+    ]
+    items = {item.capability_id: item for item in capability_plan.items}
+    assert items["file.workspace_read"].required is True
+    assert items["file.workspace_read"].selected_tools == ["workspace.read"]
+    assert items["file.workspace_read"].planned_step_ids == ["inspect-data-source"]
+    assert items["data.analysis"].selected_tools == ["terminal.run"]
+    assert items["data.analysis"].status in {"available", "degraded"}
+    assert items["data.analysis"].approval_required is True
+    assert "report" in items["artifact.write"].output_kinds
+
+    metadata = runtime_planner_metadata(decision)
+    assert metadata["yachiyo_capability_plan"]["plan_id"] == capability_plan.plan_id
+    plan_created = [
+        event
+        for event in planner_timeline_events(decision)
+        if event["event"] == "agent.plan.created"
+    ][0]
+    assert plan_created["payload"]["capability_plan"]["plan_id"] == capability_plan.plan_id
+    assert (
+        plan_created["payload"]["plan"]["capability_plan"]["plan_id"]
+        == capability_plan.plan_id
+    )
+
+
 def test_runtime_planner_outputs_data_analysis_presentation_artifact() -> None:
     decision = RuntimePlanner().decision(
         "帮我分析桌面上的销售数据并做成 PPT",

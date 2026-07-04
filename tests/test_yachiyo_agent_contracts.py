@@ -44,6 +44,8 @@ from apps.shell.yachiyo_agent import (
     FutureTaskTriggerResultSnapshot,
     GroupRunSnapshot,
     InstallRestrictedToolPluginRequest,
+    CapabilityPlanItemSnapshot,
+    CapabilityPlanSnapshot,
     MemorySnapshot,
     MemoryTraceSnapshot,
     PlannerDecisionSnapshot,
@@ -247,6 +249,34 @@ def test_planner_public_snapshots_explain_intent_capabilities_and_tool_plan() ->
         execution_actions=["run_analysis"],
         output_kinds=["markdown", "chart"],
     )
+    capability_plan = CapabilityPlanSnapshot(
+        plan_id="capability-plan-1",
+        title="Analyze Capability Plan",
+        intent_kind="data_analysis",
+        items=[
+            CapabilityPlanItemSnapshot(
+                capability_id="data.analysis",
+                title="Analyze Data",
+                category="data",
+                status="degraded",
+                required=True,
+                reason="Selected because the tool plan has concrete steps for this capability.",
+                selected_tools=["data.analyze"],
+                available_tools=["data.analyze"],
+                missing_tools=["terminal.run"],
+                planned_step_ids=["run-analysis"],
+                execution_actions=["run_analysis"],
+                output_kinds=["markdown", "chart"],
+                risk_level="medium",
+                approval_required=True,
+            )
+        ],
+        required_capabilities=["workspace.file_read", "data.analysis", "artifact.output"],
+        preferred_capabilities=["desktop.app_discovery"],
+        available_capabilities=["data.analysis"],
+        missing_capabilities=[],
+        approvals_required=["data.analysis"],
+    )
     tool_plan = ToolPlanSnapshot(
         plan_id="tool-plan-1",
         title="Analyze and write report",
@@ -282,6 +312,7 @@ def test_planner_public_snapshots_explain_intent_capabilities_and_tool_plan() ->
         plan_id="runtime-plan-1",
         intent=intent,
         capabilities=[capability],
+        capability_plan=capability_plan,
         tool_plan=tool_plan,
         timeline_preview=[{"event_type": "agent.plan.created"}],
     )
@@ -312,6 +343,8 @@ def test_planner_public_snapshots_explain_intent_capabilities_and_tool_plan() ->
     ]
     assert payload["plan"]["capabilities"][0]["available_tools"] == ["data.analyze"]
     assert payload["plan"]["capabilities"][0]["missing_tools"] == ["terminal.run"]
+    assert payload["plan"]["capability_plan"]["items"][0]["capability_id"] == "data.analysis"
+    assert payload["plan"]["capability_plan"]["approvals_required"] == ["data.analysis"]
     assert payload["plan"]["tool_plan"]["approvals_required"] == ["run-analysis"]
     assert payload["plan"]["tool_plan"]["artifacts_expected"] == ["markdown_report", "chart"]
     assert payload["plan"]["tool_plan"]["steps"][1]["reason"] == (
@@ -1876,6 +1909,9 @@ def test_planner_plan_created_event_includes_execution_envelope_for_studio_debug
     )
 
     envelope = plan_event["payload"]["runtime_execution_envelope"]
+    assert plan_event["payload"]["capability_plan"]["plan_id"] == (
+        decision.plan.capability_plan.plan_id
+    )
     assert envelope["decision_id"] == decision.decision_id
     assert envelope["plan_id"] == decision.plan.plan_id
     assert envelope["intent_kind"] == "data_analysis"

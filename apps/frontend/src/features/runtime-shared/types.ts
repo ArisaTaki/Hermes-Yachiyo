@@ -121,6 +121,38 @@ export type CapabilitySnapshot = {
   source?: string;
 };
 
+export type CapabilityPlanItemSnapshot = {
+  capability_id: string;
+  title: string;
+  category?: CapabilityCategory | string;
+  status?: 'available' | 'degraded' | 'missing' | string;
+  required?: boolean;
+  preferred?: boolean;
+  reason?: string;
+  selected_tools?: string[];
+  available_tools?: string[];
+  missing_tools?: string[];
+  planned_step_ids?: string[];
+  discovery_actions?: string[];
+  execution_actions?: string[];
+  output_kinds?: string[];
+  risk_level?: DesktopExecutionRisk | string;
+  approval_required?: boolean;
+};
+
+export type CapabilityPlanSnapshot = {
+  plan_id: string;
+  title: string;
+  intent_kind?: TaskIntentKind | string;
+  items?: CapabilityPlanItemSnapshot[];
+  required_capabilities?: string[];
+  preferred_capabilities?: string[];
+  available_capabilities?: string[];
+  missing_capabilities?: string[];
+  approvals_required?: string[];
+  source?: string;
+};
+
 export type TaskIntentSnapshot = {
   intent_id: string;
   kind: TaskIntentKind | string;
@@ -360,6 +392,7 @@ export type RuntimePlanSnapshot = {
   plan_id: string;
   intent: TaskIntentSnapshot;
   capabilities?: CapabilitySnapshot[];
+  capability_plan?: CapabilityPlanSnapshot | null;
   tool_plan: ToolPlanSnapshot;
   task_core?: TaskCoreSnapshot | null;
   route_to_studio?: boolean;

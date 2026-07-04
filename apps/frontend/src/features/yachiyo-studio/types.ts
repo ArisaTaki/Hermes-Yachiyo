@@ -16,6 +16,8 @@ export type {
   ArtifactContentSnapshot,
   ArtifactSnapshot,
   CapabilityCategory,
+  CapabilityPlanItemSnapshot,
+  CapabilityPlanSnapshot,
   CapabilitySnapshot,
   DesktopExecutionCapabilitySnapshot,
   DesktopExecutionRisk,

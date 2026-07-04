@@ -25,6 +25,8 @@ from .capture_plan_hints import capture_note_hint, capture_tool_preview, context
 from .capability_registry import capability_snapshots
 from .clipboard_plan_hints import clipboard_operation_hint, clipboard_tool_preview
 from .contracts import (
+    CapabilityPlanItemSnapshot,
+    CapabilityPlanSnapshot,
     PlannerDecisionSnapshot,
     ReplanSignalSnapshot,
     RuntimePlanSnapshot,
@@ -2580,6 +2582,12 @@ class RuntimePlanner:
         ):
             if capability_id not in missing:
                 missing.append(capability_id)
+        capability_plan = _capability_plan_snapshot(
+            intent,
+            snapshots,
+            steps,
+            required_capabilities=required_capabilities,
+        )
         tool_plan = ToolPlanSnapshot(
             plan_id=_stable_id("tool-plan", intent.kind, intent.user_goal),
             title=f"{intent.title} Tool Plan",
@@ -2600,6 +2608,7 @@ class RuntimePlanner:
             plan_id=_stable_id("runtime-plan", intent.kind, intent.user_goal),
             intent=intent,
             capabilities=snapshots,
+            capability_plan=capability_plan,
             tool_plan=tool_plan,
             task_core=task_core,
             route_to_studio=_route_to_studio(intent, steps),
@@ -11909,6 +11918,159 @@ def _missing_capabilities(
         if tools and not available_tools:
             missing.append(capability_id)
     return [item for item in missing if item]
+
+
+def _capability_plan_snapshot(
+    intent: TaskIntentSnapshot,
+    snapshots: list[Any],
+    steps: list[ToolPlanStepSnapshot],
+    *,
+    required_capabilities: Iterable[str],
+) -> CapabilityPlanSnapshot:
+    required = _unique_capabilities(required_capabilities)
+    preferred = _unique_capabilities(intent.preferred_capabilities)
+    step_tools = _step_tools_by_capability(steps)
+    step_ids = _step_ids_by_capability(steps)
+    step_approvals = _step_approval_capabilities(steps)
+    items: list[CapabilityPlanItemSnapshot] = []
+    for snapshot in snapshots:
+        capability_id = str(getattr(snapshot, "capability_id", "") or "").strip()
+        if not capability_id:
+            continue
+        available_tools = _unique_capabilities(getattr(snapshot, "available_tools", None) or [])
+        missing_tools = _unique_capabilities(getattr(snapshot, "missing_tools", None) or [])
+        tools = _unique_capabilities(getattr(snapshot, "tools", None) or [])
+        selected_tools = step_tools.get(capability_id, [])
+        status = _capability_plan_item_status(
+            tools=tools,
+            available_tools=available_tools,
+            missing_tools=missing_tools,
+            selected_tools=selected_tools,
+        )
+        approval_required = bool(getattr(snapshot, "approval_required", False)) or (
+            capability_id in step_approvals
+        )
+        item = CapabilityPlanItemSnapshot(
+            capability_id=capability_id,
+            title=str(getattr(snapshot, "title", "") or capability_id).strip(),
+            category=str(getattr(snapshot, "category", "") or "general").strip(),
+            status=status,
+            required=capability_id in required,
+            preferred=capability_id in preferred,
+            reason=_capability_plan_reason(
+                intent,
+                capability_id,
+                required=capability_id in required,
+                preferred=capability_id in preferred,
+                status=status,
+                selected_tools=selected_tools,
+            ),
+            selected_tools=selected_tools,
+            available_tools=available_tools,
+            missing_tools=missing_tools,
+            planned_step_ids=step_ids.get(capability_id, []),
+            discovery_actions=_unique_capabilities(
+                getattr(snapshot, "discovery_actions", None) or []
+            ),
+            execution_actions=_unique_capabilities(
+                getattr(snapshot, "execution_actions", None) or []
+            ),
+            output_kinds=_unique_capabilities(getattr(snapshot, "output_kinds", None) or []),
+            risk_level=str(getattr(snapshot, "risk_level", "") or "low").strip(),
+            approval_required=approval_required,
+        )
+        items.append(item)
+    return CapabilityPlanSnapshot(
+        plan_id=_stable_id("capability-plan", intent.kind, intent.user_goal),
+        title=f"{intent.title} Capability Plan",
+        intent_kind=intent.kind,
+        items=items,
+        required_capabilities=required,
+        preferred_capabilities=preferred,
+        available_capabilities=[
+            item.capability_id for item in items if item.status != "missing"
+        ],
+        missing_capabilities=[
+            item.capability_id for item in items if item.status == "missing"
+        ],
+        approvals_required=[
+            item.capability_id for item in items if item.approval_required
+        ],
+    )
+
+
+def _step_tools_by_capability(
+    steps: Iterable[ToolPlanStepSnapshot],
+) -> dict[str, list[str]]:
+    tools: dict[str, list[str]] = {}
+    for step in steps:
+        capability_id = str(step.capability_id or "").strip()
+        tool_name = str(step.tool_name or "").strip()
+        if not capability_id or not tool_name:
+            continue
+        bucket = tools.setdefault(capability_id, [])
+        if tool_name not in bucket:
+            bucket.append(tool_name)
+    return tools
+
+
+def _step_ids_by_capability(
+    steps: Iterable[ToolPlanStepSnapshot],
+) -> dict[str, list[str]]:
+    step_ids: dict[str, list[str]] = {}
+    for step in steps:
+        capability_id = str(step.capability_id or "").strip()
+        step_id = str(step.step_id or "").strip()
+        if not capability_id or not step_id:
+            continue
+        bucket = step_ids.setdefault(capability_id, [])
+        if step_id not in bucket:
+            bucket.append(step_id)
+    return step_ids
+
+
+def _step_approval_capabilities(
+    steps: Iterable[ToolPlanStepSnapshot],
+) -> set[str]:
+    return {
+        str(step.capability_id or "").strip()
+        for step in steps
+        if bool(step.approval_required) and str(step.capability_id or "").strip()
+    }
+
+
+def _capability_plan_item_status(
+    *,
+    tools: list[str],
+    available_tools: list[str],
+    missing_tools: list[str],
+    selected_tools: list[str],
+) -> str:
+    if tools and not available_tools and not selected_tools:
+        return "missing"
+    if tools and missing_tools:
+        return "degraded"
+    return "available"
+
+
+def _capability_plan_reason(
+    intent: TaskIntentSnapshot,
+    capability_id: str,
+    *,
+    required: bool,
+    preferred: bool,
+    status: str,
+    selected_tools: list[str],
+) -> str:
+    if status == "missing":
+        return "Required by the selected task intent, but no matching runtime tools are available."
+    if selected_tools:
+        return "Selected because the tool plan has concrete steps for this capability."
+    if required:
+        return "Required by the selected task intent."
+    if preferred:
+        return "Preferred support capability for the selected task intent."
+    return f"Available support capability for {intent.kind}."
 
 
 def _unavailable_required_step_capabilities(

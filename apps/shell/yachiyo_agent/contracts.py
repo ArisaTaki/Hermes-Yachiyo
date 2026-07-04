@@ -205,6 +205,38 @@ class CapabilitySnapshot(_PublicSnapshot):
     source: str = "capability_registry"
 
 
+class CapabilityPlanItemSnapshot(_PublicSnapshot):
+    capability_id: str
+    title: str
+    category: CapabilityCategory | str = "general"
+    status: Literal["available", "degraded", "missing"] | str = "available"
+    required: bool = False
+    preferred: bool = False
+    reason: str = ""
+    selected_tools: list[str] = Field(default_factory=list)
+    available_tools: list[str] = Field(default_factory=list)
+    missing_tools: list[str] = Field(default_factory=list)
+    planned_step_ids: list[str] = Field(default_factory=list)
+    discovery_actions: list[str] = Field(default_factory=list)
+    execution_actions: list[str] = Field(default_factory=list)
+    output_kinds: list[str] = Field(default_factory=list)
+    risk_level: DesktopExecutionRisk | str = "low"
+    approval_required: bool = False
+
+
+class CapabilityPlanSnapshot(_PublicSnapshot):
+    plan_id: str
+    title: str
+    intent_kind: TaskIntentKind | str = "general"
+    items: list[CapabilityPlanItemSnapshot] = Field(default_factory=list)
+    required_capabilities: list[str] = Field(default_factory=list)
+    preferred_capabilities: list[str] = Field(default_factory=list)
+    available_capabilities: list[str] = Field(default_factory=list)
+    missing_capabilities: list[str] = Field(default_factory=list)
+    approvals_required: list[str] = Field(default_factory=list)
+    source: str = "runtime_planner"
+
+
 class TaskIntentSnapshot(_PublicSnapshot):
     intent_id: str
     kind: TaskIntentKind | str
@@ -470,6 +502,7 @@ class RuntimePlanSnapshot(_PublicSnapshot):
     plan_id: str
     intent: TaskIntentSnapshot
     capabilities: list[CapabilitySnapshot] = Field(default_factory=list)
+    capability_plan: CapabilityPlanSnapshot | None = None
     tool_plan: ToolPlanSnapshot
     task_core: TaskCoreSnapshot | None = None
     route_to_studio: bool = False

@@ -66,6 +66,7 @@ def runtime_planner_metadata(
         "yachiyo_route_to_studio": decision.plan.route_to_studio,
         "yachiyo_plan_tools": tool_names,
         "yachiyo_plan_capabilities": _plan_capability_ids(decision),
+        "yachiyo_capability_plan": _capability_plan_payload(decision),
         "yachiyo_plan_approvals_required": list(tool_plan.approvals_required),
         "yachiyo_plan_artifacts_expected": list(tool_plan.artifacts_expected),
         "yachiyo_plan_open_questions": list(tool_plan.open_questions),
@@ -1371,6 +1372,7 @@ def planner_run_event_payloads(
                 "source": decision.source,
                 "decision_id": decision.decision_id,
                 "plan": decision.plan.model_dump(mode="json"),
+                "capability_plan": _capability_plan_payload(decision),
                 "runtime_execution_envelope": execution_envelope,
                 "execution_request_count": len(
                     execution_envelope.get("requests")
@@ -1529,11 +1531,30 @@ def _plan_tool_names(decision: Any | None) -> list[str]:
 
 def _plan_capability_ids(decision: Any | None) -> list[str]:
     plan = getattr(decision, "plan", None)
+    capability_plan = getattr(plan, "capability_plan", None)
+    plan_items = getattr(capability_plan, "items", None)
+    if plan_items:
+        return _unique_strings(
+            str(getattr(item, "capability_id", "") or "").strip()
+            for item in plan_items
+        )
     capabilities = getattr(plan, "capabilities", None)
     return _unique_strings(
         str(getattr(capability, "capability_id", "") or "").strip()
         for capability in capabilities or []
     )
+
+
+def _capability_plan_payload(decision: Any | None) -> dict[str, Any]:
+    plan = getattr(decision, "plan", None)
+    capability_plan = getattr(plan, "capability_plan", None)
+    if capability_plan is None:
+        return {}
+    if hasattr(capability_plan, "model_dump"):
+        return capability_plan.model_dump(mode="json")
+    if isinstance(capability_plan, Mapping):
+        return dict(capability_plan)
+    return {}
 
 
 def _required_capability_ids(decision: Any | None) -> list[str]:
