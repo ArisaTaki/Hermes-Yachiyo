@@ -1164,6 +1164,103 @@ def test_runtime_tool_request_runner_synthesizes_observation_retry_recovery_acti
     assert run_replan_event["metadata"]["recovery_actions"] == payload["metadata"]["recovery_actions"]
 
 
+def test_runtime_tool_request_runner_records_explicit_desktop_verification_target() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    seen_requests: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        seen_requests.append(tool_request)
+        return {
+            "ok": False,
+            "verification_failed": True,
+            "error": "foreground_focus_unverified",
+            "blocking_condition": "foreground_focus_unverified",
+            "blocking_conditions": ["foreground_focus_unverified"],
+            "summary": "Chrome is active",
+            "expected_app_name": "PixelForge",
+            "active_app_name": "Chrome",
+            "data": {
+                "app_name": "Chrome",
+                "title": "Search",
+                "expected_app_name": "PixelForge",
+                "active_app_name": "Chrome",
+                "focus_verified": False,
+            },
+        }
+
+    runner = _runner(
+        call_agent_tool=call_agent_tool,
+        run_events=run_events,
+    )
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.active_window",
+                "input": {},
+                "source": "runtime_verification",
+                "planning_reason": "runtime_desktop_app_foreground_verification",
+                "capability_id": "desktop.visual_verification",
+                "runtime_doctrine": "discover_operate_verify",
+                "runtime_stage": "verify",
+                "runtime_role": "verify_result",
+                "requires_observation": True,
+                "replan_triggers": ["verification_failed"],
+                "target_app_name": "PixelForge",
+                "verification_target": {"app_name": "PixelForge"},
+            }
+        ],
+        ["desktop.active_window"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "open PixelForge"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-explicit-desktop-verification-target",
+        budget=FakeBudget(),
+    )
+
+    assert seen_requests[0]["verification_target"] == {"app_name": "PixelForge"}
+    replan_event = next(event for event in timeline if event["event"] == "agent.replan.requested")
+    payload = replan_event["payload"]
+    assert payload["trigger"] == "verification_failed"
+    assert payload["source_tool_name"] == "desktop.active_window"
+    assert payload["target_app_name"] == "PixelForge"
+    assert payload["metadata"]["target_app_name"] == "PixelForge"
+    assert payload["verification_targets"] == [
+        {
+            "kind": "desktop_verification_target",
+            "tool_name": "desktop.active_window",
+            "app_name": "PixelForge",
+            "target_app_name": "PixelForge",
+        }
+    ]
+    assert payload["action_target"] == {
+        "kind": "desktop_verification_target",
+        "action": "verify_after_action",
+        "verification_tool": "desktop.active_window",
+        "tool_name": "desktop.active_window",
+        "app_name": "PixelForge",
+    }
+    assert payload["metadata"]["recovery_actions"][0]["tool"] == "desktop.active_window"
+    assert (
+        payload["metadata"]["recovery_actions"][0]["action_target"]
+        == payload["action_target"]
+    )
+    run_replan_event = next(
+        payload
+        for _run_id, event_type, payload in run_events
+        if event_type == "agent.replan.requested"
+    )
+    assert run_replan_event["target_app_name"] == "PixelForge"
+    assert run_replan_event["metadata"]["target_app_name"] == "PixelForge"
+
+
 def test_runtime_tool_request_runner_synthesizes_default_desktop_failure_replan() -> None:
     calls: list[str] = []
     run_events: list[tuple[str, str, dict[str, Any]]] = []

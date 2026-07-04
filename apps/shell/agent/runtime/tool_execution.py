@@ -2575,6 +2575,11 @@ def _runtime_replan_enrich_recovery_context(
         if label:
             payload.setdefault("recovery_action_label", label)
             metadata.setdefault("recovery_action_label", label)
+        for key in ("target_app_name", "target_app_query", "target_search_text"):
+            value = str(verification_context.get(key) or "").strip()
+            if value:
+                payload.setdefault(key, value)
+                metadata.setdefault(key, value)
         recovery_actions.extend(_mapping_list(verification_context.get("recovery_actions")))
 
     recovery_actions = _dedupe_runtime_replan_recovery_actions(recovery_actions)
@@ -2594,8 +2599,9 @@ def _runtime_replan_verification_failure_context(
     verification_targets = _runtime_replan_verification_targets(tool_request)
     if not verification_targets:
         return {}
+    target = verification_targets[0]
     action_target = _runtime_replan_verification_action_target(
-        verification_targets[0],
+        target,
         source_step_id=source_step_id,
         source_tool_name=source_tool_name,
         input_preview=input_preview,
@@ -2628,6 +2634,24 @@ def _runtime_replan_verification_failure_context(
             "observation_retry": observation_retry,
         }
         recovery_actions.append(recovery_action)
+    target_app_name = _runtime_replan_first_text(
+        ("target_app_name", "app_name", "expected_app_name"),
+        target,
+        action_target,
+        input_preview,
+    )
+    target_app_query = _runtime_replan_first_text(
+        ("target_app_query", "app_query", "query"),
+        target,
+        action_target,
+        input_preview,
+    )
+    target_search_text = _runtime_replan_first_text(
+        ("target_search_text", "target", "selector", "text", "value"),
+        target,
+        action_target,
+        input_preview,
+    )
     return {
         "verification_targets": verification_targets,
         "action_target": action_target,
@@ -2635,6 +2659,9 @@ def _runtime_replan_verification_failure_context(
         "observation_retry": observation_retry,
         "recovery_action_label": "Re-observe failed verification target",
         "recovery_actions": recovery_actions,
+        **({"target_app_name": target_app_name} if target_app_name else {}),
+        **({"target_app_query": target_app_query} if target_app_query else {}),
+        **({"target_search_text": target_search_text} if target_search_text else {}),
     }
 
 
@@ -2674,7 +2701,71 @@ def _runtime_replan_verification_targets(
             snapshot["checkpoint_titles"] = checkpoint_titles
         if snapshot:
             targets.append(snapshot)
+    explicit_target = _runtime_replan_explicit_verification_target(tool_request)
+    if explicit_target:
+        targets.append(explicit_target)
     return targets
+
+
+def _runtime_replan_explicit_verification_target(
+    tool_request: Mapping[str, Any],
+) -> dict[str, Any]:
+    verification_target = (
+        tool_request.get("verification_target")
+        if isinstance(tool_request.get("verification_target"), Mapping)
+        else {}
+    )
+    input_preview = (
+        tool_request.get("input")
+        if isinstance(tool_request.get("input"), Mapping)
+        else {}
+    )
+    if not verification_target and not any(
+        str(tool_request.get(key) or "").strip()
+        for key in ("target_app_name", "target_app_query", "target_search_text")
+    ):
+        return {}
+    app_name = _runtime_replan_first_text(
+        ("app_name", "target_app_name", "expected_app_name"),
+        verification_target,
+        tool_request,
+        input_preview,
+    )
+    app_query = _runtime_replan_first_text(
+        ("target_app_query", "app_query", "query"),
+        verification_target,
+        tool_request,
+        input_preview,
+    )
+    search_text = _runtime_replan_first_text(
+        ("target_search_text", "target", "selector", "text", "value"),
+        verification_target,
+        tool_request,
+        input_preview,
+    )
+    if not any((app_name, app_query, search_text)):
+        return {}
+    snapshot: dict[str, Any] = {"kind": "desktop_verification_target"}
+    step_id = str(
+        tool_request.get("step_id") or tool_request.get("planner_step_id") or ""
+    ).strip()
+    if step_id:
+        snapshot["step_id"] = step_id
+    tool_name = str(tool_request.get("tool") or tool_request.get("tool_name") or "").strip()
+    if tool_name:
+        snapshot["tool_name"] = tool_name
+    if app_name:
+        snapshot["app_name"] = app_name
+        snapshot["target_app_name"] = app_name
+    if app_query:
+        snapshot["app_query"] = app_query
+        snapshot["target_app_query"] = app_query
+    if search_text:
+        snapshot["target_search_text"] = search_text
+    source_tool = str(verification_target.get("source_tool") or "").strip()
+    if source_tool:
+        snapshot["source_tool"] = source_tool
+    return snapshot
 
 
 def _runtime_replan_verification_action_target(
@@ -2685,7 +2776,7 @@ def _runtime_replan_verification_action_target(
     input_preview: Mapping[str, Any],
 ) -> dict[str, Any]:
     action_target: dict[str, Any] = {
-        "kind": "task_verification_target",
+        "kind": str(target.get("kind") or "task_verification_target").strip(),
         "action": "verify_after_action",
         "verified_by_step_id": source_step_id,
         "verification_tool": source_tool_name,
@@ -2708,10 +2799,24 @@ def _runtime_replan_verification_action_target(
         ("text", "text"),
         ("value", "text"),
     ):
-        value = str(input_preview.get(source_key) or "").strip()
+        value = str(target.get(source_key) or input_preview.get(source_key) or "").strip()
         if value and not str(action_target.get(target_key) or "").strip():
             action_target[target_key] = value
     return {key: value for key, value in action_target.items() if value not in ("", [], {})}
+
+
+def _runtime_replan_first_text(
+    keys: tuple[str, ...],
+    *sources: Mapping[str, Any],
+) -> str:
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        for key in keys:
+            value = str(source.get(key) or "").strip()
+            if value:
+                return value
+    return ""
 
 
 def _runtime_replan_recovery_actions(
