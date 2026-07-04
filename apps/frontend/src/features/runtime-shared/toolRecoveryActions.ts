@@ -405,6 +405,7 @@ function runtimeToolRecoveryExecutableLabel(tool: string, input: Record<string, 
   if (tool === 'clipboard.write' && typeof input.text === 'string') return `复制${input.text}到剪贴板`;
   if (tool === 'screen.capture') return '截图当前屏幕';
   if (tool === 'desktop.permissions') return '检查桌面权限';
+  if (tool === 'desktop.inspect_app') return appName ? `检查${appName}界面` : '检查应用界面';
   if (tool === 'desktop.active_window') return '查看当前窗口';
   if (tool === 'desktop.list_apps') return '发现已安装应用';
   if (tool === 'desktop.running_apps') return '查看正在运行的应用';
@@ -450,6 +451,7 @@ function isLowRiskExecutableRecoveryTool(tool: string): boolean {
     || tool === 'desktop.open_path'
     || tool === 'desktop.open_path_with_app'
     || tool === 'desktop.permissions'
+    || tool === 'desktop.inspect_app'
     || tool === 'desktop.list_apps'
     || tool === 'desktop.running_apps'
     || tool === 'desktop.safe_click'
@@ -504,6 +506,7 @@ function runtimeToolRecoveryRetryPrompt(tool: string, input: Record<string, unkn
   if (tool === 'desktop.running_apps') return '查看正在运行的应用';
   if (tool === 'desktop.windows') return appName ? `查看${appName}窗口` : '查看桌面窗口';
   if (tool === 'desktop.permissions') return '检查桌面权限';
+  if (tool === 'desktop.inspect_app') return appName ? `检查${appName}界面` : '检查应用界面';
   if (tool === 'desktop.open_path' && path) return `打开 ${path}`;
   if (tool === 'desktop.open_path_with_app' && appName && path) return `用${appName}打开 ${path}`;
   if (tool === 'desktop.safe_shortcut') return desktopSafeShortcutPrompt(action);

@@ -6,6 +6,7 @@ import { runtimeTimelineEventLabel } from '../../runtime-shared/components/Runti
 import { taskPermissionRecoveryFromTaskFacts, type TaskPermissionRecoveryAction } from './AgentTaskCard';
 import {
   yachiyoTaskPrimaryReplanRecoveryAction,
+  yachiyoTaskRuntimeExecutionRetryActions,
   type YachiyoTaskReplanRecoverySnapshot,
 } from '../taskRecoveryActions';
 import { yachiyoTaskStudioTarget, yachiyoTaskStudioUrl } from '../taskSnapshots';
@@ -303,18 +304,28 @@ export function LauncherAgentTaskLight({
     currentTask.tool_calls,
   );
   const replanRecoveryAction = yachiyoTaskPrimaryReplanRecoveryAction(currentTask);
-  const needsAction = Boolean(lightTask.needs_user_action || approval || permissionRecovery || replanRecoveryAction);
+  const runtimeRetryAction = yachiyoTaskRuntimeExecutionRetryActions(currentTask, 1)[0] || null;
+  const needsAction = Boolean(
+    lightTask.needs_user_action
+    || approval
+    || permissionRecovery
+    || replanRecoveryAction
+    || runtimeRetryAction
+  );
   const detail = permissionRecovery
     ? `${permissionRecovery.kind === 'permission' ? '需要权限' : '需要处理'} · ${permissionRecovery.labels.join('、')}`
     : replanRecoveryAction
       ? `恢复计划 · ${launcherReplanRecoveryLabel(replanRecoveryAction.recovery)}`
+    : runtimeRetryAction
+      ? `运行重试 · ${runtimeRetryAction.tool}`
     : lightTask.detail || launcherAgentTaskDetail(currentTask);
   const canHandleApproval = Boolean(approval && (onApproveApproval || onRejectApproval));
   const canCancel = Boolean(onCancelTask && launcherAgentTaskCanCancel(currentTask));
   const testIds = launcherAgentTaskTestIds(mode, testIdPrefix);
   const permissionRecoveryAction = permissionRecovery?.actions[0] || null;
   const primaryReplanRecoveryAction = permissionRecoveryAction ? null : replanRecoveryAction;
-  const primaryRecoveryAction = permissionRecoveryAction || primaryReplanRecoveryAction?.action || null;
+  const primaryRuntimeRetryAction = permissionRecoveryAction || primaryReplanRecoveryAction ? null : runtimeRetryAction;
+  const primaryRecoveryAction = permissionRecoveryAction || primaryReplanRecoveryAction?.action || primaryRuntimeRetryAction || null;
   const progressChips = launcherAgentTaskProgressChips(
     currentTask,
     mode === 'bubble' ? 2 : variant === 'panel' ? 5 : 4,
@@ -434,6 +445,8 @@ export function LauncherAgentTaskLight({
           data-replan-recovery-request-id={primaryReplanRecoveryAction?.recovery.request_id || ''}
           data-replan-recovery-status={primaryReplanRecoveryAction?.recovery.status || ''}
           data-recovery-tool={primaryRecoveryAction.tool}
+          data-runtime-retry-action-id={primaryRuntimeRetryAction?.action_id || ''}
+          data-runtime-retry-input-source={primaryRuntimeRetryAction?.retry_input_source || ''}
           data-testid={testIds.recovery}
           disabled={Boolean(taskAction) || !onRunRecoveryAction}
           onClick={(event) => {
@@ -443,7 +456,7 @@ export function LauncherAgentTaskLight({
           }}
           title={primaryRecoveryAction.prompt}
         >
-          {permissionRecovery?.kind === 'blocking_condition' ? '重试' : '恢复'}
+          {permissionRecovery?.kind === 'blocking_condition' || primaryRuntimeRetryAction ? '重试' : '恢复'}
         </button>
       ) : null}
       {canHandleApproval || canCancel ? (

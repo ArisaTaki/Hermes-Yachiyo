@@ -59,6 +59,24 @@ export function yachiyoTaskPrimaryReplanRecoveryAction(
   return yachiyoTaskReplanRecoveryActionItems(task, 1)[0] || null;
 }
 
+export function yachiyoTaskRuntimeExecutionRetryActions(
+  task: AgentTaskSnapshot,
+  limit = 3,
+): RuntimeToolRecoveryAction[] {
+  const envelope = task.runtime_execution_envelope;
+  const requests = envelope?.requests || [];
+  if (!requests.length) return [];
+  const allowPlannedRetries = (
+    task.task_progress?.needs_replan === true
+    || Number(task.task_progress?.failed_verification_count || 0) > 0
+  );
+  const actions = requests
+    .map((request) => runtimeExecutionRequestRetryAction(request, allowPlannedRetries))
+    .filter((action): action is RuntimeToolRecoveryAction => Boolean(action));
+  const deduped = dedupeRuntimeRecoveryActions(actions);
+  return Number.isFinite(limit) && limit >= 0 ? deduped.slice(0, limit) : deduped;
+}
+
 export async function startYachiyoTaskRecoveryAction({
   action,
   conversationId,
@@ -123,8 +141,109 @@ export async function startYachiyoTaskRecoveryAction({
   };
 }
 
+type RuntimeExecutionRequestForRecovery = NonNullable<
+  NonNullable<AgentTaskSnapshot['runtime_execution_envelope']>['requests']
+>[number];
+
+function runtimeExecutionRequestRetryAction(
+  request: RuntimeExecutionRequestForRecovery,
+  allowPlannedRetry: boolean,
+): RuntimeToolRecoveryAction | null {
+  const retry = objectValue(request.observation_retry);
+  if (!Object.keys(retry).length) return null;
+  const evidence = objectValue(request.observation_evidence);
+  if (!allowPlannedRetry && !runtimeExecutionEvidenceNeedsRetry(evidence)) return null;
+
+  const input = objectValue(retry.input);
+  const tool = String(retry.tool || retry.from_tool || request.tool_name || '').trim();
+  if (!tool) return null;
+  const reason = String(retry.reason || '').trim();
+  const target = String(
+    retry.target
+    || retry.label
+    || input.app_name
+    || input.query
+    || '',
+  ).trim();
+  const blocker = runtimeExecutionEvidenceBlocker(evidence);
+  const permissionTarget = runtimeExecutionPermissionTarget(blocker);
+  const label = runtimeExecutionRetryActionLabel(tool, reason, target);
+  return {
+    action_kind: 'retry_original',
+    approval_required: request.approval_required === true,
+    input,
+    label,
+    permission_target: permissionTarget,
+    prompt: label,
+    recommended_tools: [tool],
+    required_retry_fields: [],
+    risk_level: request.approval_required === true ? 'medium' : 'low',
+    retry_input: input,
+    retry_input_source: 'runtime_execution_envelope',
+    retry_prompt: label,
+    retry_tool: tool,
+    tool,
+    verification_targets: recordList(request.task_verification_targets),
+  };
+}
+
+function runtimeExecutionEvidenceNeedsRetry(evidence: Record<string, unknown>): boolean {
+  if (runtimeExecutionEvidenceBlocker(evidence)) return true;
+  if (evidence.verification_failed === true) return true;
+  if (evidence.foreground_required === true && evidence.foreground_ready === false) return true;
+  return false;
+}
+
+function runtimeExecutionEvidenceBlocker(evidence: Record<string, unknown>): string {
+  const blocker = String(evidence.blocking_condition || '').trim();
+  if (blocker) return blocker;
+  const conditions = evidence.blocking_conditions;
+  if (Array.isArray(conditions)) {
+    return String(conditions.find((condition) => String(condition || '').trim()) || '').trim();
+  }
+  return '';
+}
+
+function runtimeExecutionPermissionTarget(blocker: string): string {
+  if (blocker === 'foreground_focus_unavailable') return 'foreground_focus';
+  if (blocker === 'desktop_session_locked') return 'desktop_session_unlocked';
+  if (blocker === 'screen_capture_blank') return 'desktop_screen_visible';
+  return blocker || 'runtime_observation_retry';
+}
+
+function runtimeExecutionRetryActionLabel(tool: string, reason: string, target: string): string {
+  return [
+    '重试',
+    tool,
+    reason,
+    target,
+  ].filter(Boolean).join(' · ');
+}
+
+function dedupeRuntimeRecoveryActions(actions: RuntimeToolRecoveryAction[]): RuntimeToolRecoveryAction[] {
+  const byKey = new Map<string, RuntimeToolRecoveryAction>();
+  actions.forEach((action) => {
+    const key = `${action.tool}:${JSON.stringify(action.input)}:${action.permission_target}`;
+    if (!byKey.has(key)) byKey.set(key, action);
+  });
+  return Array.from(byKey.values());
+}
+
+function recordList(value: unknown): Array<Record<string, unknown>> {
+  if (!Array.isArray(value)) return [];
+  return value.filter((item): item is Record<string, unknown> => (
+    Boolean(item) && typeof item === 'object' && !Array.isArray(item)
+  ));
+}
+
 function agentTaskSnapshotOrNull(value: unknown): AgentTaskSnapshot | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   const task = value as AgentTaskSnapshot;
   return task.task_id ? task : null;
+}
+
+function objectValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
 }

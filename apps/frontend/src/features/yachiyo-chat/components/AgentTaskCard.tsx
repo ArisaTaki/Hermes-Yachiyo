@@ -14,7 +14,10 @@ import {
   type RuntimeToolRecoveryAction,
 } from '../../runtime-shared/toolRecoveryActions';
 import { runtimeToolRecoveryHintsFromRecords } from '../../runtime-shared/toolRecoveryHints';
-import { yachiyoTaskReplanRecoveryActions } from '../taskRecoveryActions';
+import {
+  yachiyoTaskReplanRecoveryActions,
+  yachiyoTaskRuntimeExecutionRetryActions,
+} from '../taskRecoveryActions';
 import { useYachiyoTaskEventReplay } from '../hooks/useYachiyoTaskEventReplay';
 import {
   yachiyoTaskApprovalStudioTarget,
@@ -69,6 +72,7 @@ export function AgentTaskCard({
   const canCancel = onCancelTask && ['queued', 'running', 'waiting_approval'].includes(status);
   const hasHeaderActions = Boolean((studioRunId && studioUrl && onOpenStudio) || canCancel);
   const permissionRecovery = taskPermissionRecoveryFromTaskFacts(timelineEvents, toolCallFacts);
+  const runtimeExecutionRetryActions = yachiyoTaskRuntimeExecutionRetryActions(task);
   const taskRecoveryCoordinate = recoveryCoordinate?.task_id === task.task_id ? recoveryCoordinate : null;
   const recoveryScreenPointContract = taskRecoveryScreenPointContract(permissionRecovery);
   const plannerSummary = plannerSummaryFromTask(task);
@@ -130,6 +134,14 @@ export function AgentTaskCard({
           leading={<UiIcon name="activity" title="Runtime Execution" />}
           testId="yachiyo-agent-task-runtime-execution"
           variant="chat"
+        />
+      ) : null}
+      {runtimeExecutionRetryActions.length ? (
+        <TaskRuntimeExecutionRetryActions
+          actions={runtimeExecutionRetryActions}
+          busy={busy}
+          onRunRecoveryAction={onRunRecoveryAction}
+          task={task}
         />
       ) : null}
       {task.replan_recoveries?.length ? (
@@ -636,6 +648,64 @@ function TaskReplanRecoverySummary({
               >
                 <UiIcon name="retry" />
                 <span>执行 · {action.label || action.tool}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function TaskRuntimeExecutionRetryActions({
+  actions,
+  busy = false,
+  onRunRecoveryAction,
+  task,
+}: {
+  actions: TaskPermissionRecoveryAction[];
+  busy?: boolean;
+  onRunRecoveryAction?: (task: AgentTaskSnapshot, action: TaskPermissionRecoveryAction) => void | Promise<void>;
+  task: AgentTaskSnapshot;
+}) {
+  return (
+    <div
+      className="yachiyo-agent-task-planner yachiyo-agent-task-runtime-retry"
+      data-runtime-retry-action-count={actions.length}
+      data-testid="yachiyo-agent-task-runtime-retry-actions"
+    >
+      <UiIcon name="retry" title="Runtime retry" />
+      <div className="yachiyo-agent-task-planner-body">
+        <div className="yachiyo-agent-task-planner-head">
+          <strong>Runtime retry</strong>
+          <span>{actions.length} 个可重试观察/验证动作</span>
+        </div>
+        <div className="yachiyo-agent-task-planner-chips">
+          {actions.map((action, index) => {
+            const inputPreview = taskRecoveryValuePreview(action.input);
+            return (
+              <button
+                type="button"
+                className="yachiyo-agent-task-planner-chip yachiyo-agent-task-runtime-retry-action"
+                data-runtime-retry-action-id={action.action_id || ''}
+                data-runtime-retry-input={inputPreview}
+                data-runtime-retry-input-source={action.retry_input_source || ''}
+                data-runtime-retry-label={action.label || action.prompt || action.tool}
+                data-runtime-retry-permission-target={action.permission_target || ''}
+                data-runtime-retry-risk={action.risk_level || ''}
+                data-runtime-retry-tool={action.tool}
+                data-runtime-retry-tool-index={index}
+                data-testid="yachiyo-agent-task-run-runtime-retry-action"
+                disabled={busy || !onRunRecoveryAction || !action.tool}
+                key={`${action.action_id || action.tool}:${index}`}
+                onClick={() => void onRunRecoveryAction?.(task, action)}
+                title={[
+                  action.prompt,
+                  inputPreview ? `input: ${inputPreview}` : '',
+                ].filter(Boolean).join(' · ')}
+              >
+                <UiIcon name="retry" />
+                <span>重试 · {action.tool}</span>
               </button>
             );
           })}
