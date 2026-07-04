@@ -871,7 +871,7 @@ def _apply_recovery_action_metadata(
     selected_tool: str = "",
 ) -> None:
     for action in _recovery_action_records(payload):
-        _append_unique_mapping(record.recovery_actions, action)
+        _merge_recovery_action_record(record.recovery_actions, action)
 
     selected_action = _selected_recovery_action(
         record.recovery_actions,
@@ -1027,6 +1027,107 @@ def _recovery_action_signature(tool: str, action_input: Mapping[str, Any]) -> st
     except Exception:
         input_signature = repr(action_input)
     return f"{clean_tool}:{input_signature}"
+
+
+def _merge_recovery_action_record(
+    target: list[dict[str, Any]],
+    value: Mapping[str, Any],
+) -> None:
+    incoming = _mapping(value)
+    if not incoming:
+        return
+    match_index = _matching_recovery_action_record_index(target, incoming)
+    if match_index < 0:
+        target.append(incoming)
+        return
+    target[match_index] = _merged_recovery_action_record(target[match_index], incoming)
+
+
+def _matching_recovery_action_record_index(
+    target: list[dict[str, Any]],
+    incoming: Mapping[str, Any],
+) -> int:
+    incoming_action_id = _first_text(incoming.get("action_id"), incoming.get("id"))
+    incoming_signature = _raw_recovery_action_signature(incoming)
+    for index, current in enumerate(target):
+        current_action_id = _first_text(current.get("action_id"), current.get("id"))
+        if incoming_action_id and current_action_id == incoming_action_id:
+            return index
+        if incoming_signature and _raw_recovery_action_signature(current) == incoming_signature:
+            return index
+    return -1
+
+
+def _raw_recovery_action_signature(action: Mapping[str, Any]) -> str:
+    tool = _first_text(action.get("tool"), action.get("tool_name"), action.get("recovery_tool"))
+    action_input = _mapping(action.get("input") or action.get("recovery_input"))
+    return _recovery_action_signature(tool, action_input)
+
+
+def _merged_recovery_action_record(
+    current: Mapping[str, Any],
+    incoming: Mapping[str, Any],
+) -> dict[str, Any]:
+    merged = dict(current)
+    for key in (
+        "action_id",
+        "id",
+        "label",
+        "title",
+        "prompt",
+        "tool",
+        "tool_name",
+        "recovery_tool",
+        "planning_reason",
+        "reason",
+        "permission_target",
+        "permission",
+        "risk_level",
+        "approval_id",
+        "deferred_tool",
+        "status",
+    ):
+        value = incoming.get(key)
+        if value not in (None, "", [], {}):
+            merged[key] = value
+    for key in (
+        "input",
+        "recovery_input",
+        "metadata",
+        "deferred_input",
+        "deferred_context",
+        "action_target",
+        "observation_evidence",
+        "observation_retry",
+    ):
+        merged_mapping = _mapping(merged.get(key))
+        incoming_mapping = _mapping(incoming.get(key))
+        if incoming_mapping:
+            merged[key] = {**merged_mapping, **incoming_mapping}
+    for key in ("verification_targets", "deferred_continuation"):
+        merged_items = _mapping_list(merged.get(key))
+        _extend_unique_mappings(merged_items, incoming.get(key))
+        if merged_items:
+            merged[key] = merged_items
+    recommended_tools = _merged_string_lists(
+        _string_list(merged.get("recommended_tools")),
+        _string_list(incoming.get("recommended_tools")),
+    )
+    if recommended_tools:
+        merged["recommended_tools"] = recommended_tools
+    if bool(current.get("selected")) or bool(incoming.get("selected")):
+        merged["selected"] = True
+    if bool(current.get("approval_required")) or bool(incoming.get("approval_required")):
+        merged["approval_required"] = True
+    if bool(current.get("requires_approval")) or bool(incoming.get("requires_approval")):
+        merged["requires_approval"] = True
+    approval_status = _stronger_approval_status(
+        _approval_status_value(current.get("approval_status") or current.get("status")),
+        _approval_status_value(incoming.get("approval_status") or incoming.get("status")),
+    )
+    if approval_status:
+        merged["approval_status"] = approval_status
+    return merged
 
 
 def _apply_observed_action_metadata(

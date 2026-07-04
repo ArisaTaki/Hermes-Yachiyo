@@ -1304,6 +1304,86 @@ def test_agent_task_snapshot_links_deferred_approval_to_replan_recovery() -> Non
     assert "deferred_tool" not in tool_call.input_preview
 
 
+def test_agent_task_snapshot_merges_replan_recovery_action_execution_update() -> None:
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-1",
+            "run_id": "run-1",
+            "status": "running",
+            "events": [
+                {
+                    "event_type": "agent.replan.requested",
+                    "sequence": 1,
+                    "run_id": "run-1",
+                    "payload": {
+                        "request_id": "replan-1",
+                        "trigger": "tool_failure",
+                        "source_step_id": "open-app",
+                        "source_tool_name": "desktop.open_app",
+                        "target_capability_id": "desktop.app_discovery",
+                        "metadata": {
+                            "recovery_actions": [
+                                {
+                                    "action_id": "replan-1:action:1:desktop.list_apps",
+                                    "label": "Find Apple Music",
+                                    "tool": "desktop.list_apps",
+                                    "input": {"query": "Apple Music"},
+                                    "permission_target": "app_discovery",
+                                    "risk_level": "low",
+                                }
+                            ]
+                        },
+                    },
+                },
+                {
+                    "event_type": "agent.replan.recovery.updated",
+                    "sequence": 2,
+                    "run_id": "run-1",
+                    "payload": {
+                        "request_id": "replan-1",
+                        "replan_request_id": "replan-1",
+                        "trigger": "tool_failure",
+                        "replan_trigger": "tool_failure",
+                        "status": "completed",
+                        "selected_tool_name": "desktop.list_apps",
+                        "replan_recovery_action_id": "replan-1:action:1:desktop.list_apps",
+                        "replan_signal_ids": ["signal-1"],
+                        "verification_targets": [{"step_id": "open-app"}],
+                        "recovery_actions": [
+                            {
+                                "action_id": "replan-1:action:1:desktop.list_apps",
+                                "tool": "desktop.list_apps",
+                                "input": {"query": "Apple Music"},
+                                "selected": True,
+                                "metadata": {
+                                    "replan_signal_ids": ["signal-1"],
+                                    "runtime_stage": "verify",
+                                    "verification_target_step_ids": ["open-app"],
+                                },
+                                "verification_targets": [{"step_id": "open-app"}],
+                            }
+                        ],
+                    },
+                },
+            ],
+        }
+    )
+
+    recovery = task.replan_recoveries[0]
+    assert recovery.status == "completed"
+    assert recovery.tool_status == "completed"
+    assert len(recovery.recovery_actions) == 1
+    action = recovery.recovery_actions[0]
+    assert action.action_id == "replan-1:action:1:desktop.list_apps"
+    assert action.label == "Find Apple Music"
+    assert action.risk_level == "low"
+    assert action.selected is True
+    assert action.metadata["replan_signal_ids"] == ["signal-1"]
+    assert action.metadata["runtime_stage"] == "verify"
+    assert action.metadata["verification_target_step_ids"] == ["open-app"]
+    assert action.verification_targets == [{"step_id": "open-app"}]
+
+
 def test_agent_studio_service_projects_scoped_group_runtime_tool_result_events() -> None:
     service = AgentStudioService(_FakeStudioExecutionPort())
     decision = service.plan_task(

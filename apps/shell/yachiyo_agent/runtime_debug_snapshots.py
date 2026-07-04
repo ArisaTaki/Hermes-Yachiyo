@@ -46,7 +46,7 @@ def runtime_debug_summary_from_runtime_objects(
         item for item in approval_items if _text(_field(item, "status")) == "pending"
     ]
     latest_event = event_items[-1] if event_items else None
-    latest_tool = tool_items[-1] if tool_items else None
+    latest_tool = _latest_tool_context(tool_items)
     latest_approval = pending_approvals[-1] if pending_approvals else (
         approval_items[-1] if approval_items else None
     )
@@ -220,6 +220,20 @@ def runtime_debug_summary_from_runtime_objects(
         ),
         debug_surfaces=debug_surfaces,
     )
+
+
+def _latest_tool_context(tool_items: list[Any]) -> Any | None:
+    for item in reversed(tool_items):
+        if (
+            _text(_field(item, "runtime_stage"))
+            or _text(_field(item, "runtime_role"))
+            or _text(_field(item, "runtime_doctrine"))
+        ) and _text(_field(item, "status")) not in {"waiting_approval", "approval_required"}:
+            return item
+    for item in reversed(tool_items):
+        if _text(_field(item, "status")) not in {"waiting_approval", "approval_required"}:
+            return item
+    return tool_items[-1] if tool_items else None
 
 
 def _approval_items(approvals: Iterable[Any] | None, pending_approval: Any | None) -> list[Any]:
