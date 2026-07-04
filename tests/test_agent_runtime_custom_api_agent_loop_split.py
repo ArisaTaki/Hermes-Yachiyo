@@ -10294,6 +10294,64 @@ def test_model_followup_pending_plan_auto_dispatches_discovered_app_hotkeys() ->
     ]
 
 
+def test_model_followup_pending_plan_resolves_discovered_app_for_foreground_text() -> None:
+    requests = custom_api_agent_module._model_followup_pending_plan_requests(
+        {
+            "planning_reason": "planner_discovered_app_followup",
+            "content_snapshots": [
+                {
+                    "source_tool": "desktop.list_apps",
+                    "ok": True,
+                    "query": "markdown",
+                    "apps": [
+                        {
+                            "name": "Obsidian",
+                            "path": "/Applications/Obsidian.app",
+                            "match_score": 91,
+                        }
+                    ],
+                }
+            ],
+            "pending_plan_steps": [
+                {
+                    "step_id": "type-selected-discovered-app",
+                    "tool_name": "app.focus_and_safe_type_text",
+                    "capability_id": "desktop.ui_operation",
+                    "input_preview": {
+                        "app_name": "<selected app from desktop.list_apps>",
+                        "selection_source": "desktop.list_apps",
+                        "query": "markdown",
+                        "text": "hello",
+                    },
+                }
+            ],
+        },
+        ["app.focus_and_safe_type_text"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.focus_and_safe_type_text",
+            "input": {"text": "hello", "app_name": "Obsidian"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_discovered_app_followup",
+            "step_id": "type-selected-discovered-app",
+            "capability_id": "desktop.ui_operation",
+            "input_resolution": {
+                "tool": "app.focus_and_safe_type_text",
+                "field": "app_name",
+                "requested_app_name": "markdown",
+                "resolved_app_name": "Obsidian",
+                "source_tool": "desktop.list_apps",
+                "resolved_app_path": "/Applications/Obsidian.app",
+                "app_resolution_score": "91",
+            },
+            "planner_step_id": "type-selected-discovered-app",
+        }
+    ]
+
+
 def test_model_followup_pending_plan_dispatches_short_multi_step_workflow() -> None:
     pending_steps = [
         {

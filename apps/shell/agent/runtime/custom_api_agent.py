@@ -5998,7 +5998,13 @@ def _matching_execution_envelope_request_index(
         if step_id and candidate_step_id == step_id:
             return index
     request_tool = str(request.get("tool") or request.get("tool_name") or "").strip()
-    request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    request_input = (
+        request.get("input")
+        if isinstance(request.get("input"), Mapping)
+        else request.get("input_preview")
+        if isinstance(request.get("input_preview"), Mapping)
+        else {}
+    )
     for index, candidate in enumerate(envelope_requests):
         candidate_tool = str(
             candidate.get("tool_name") or candidate.get("tool") or ""
@@ -15985,7 +15991,7 @@ def _model_followup_pending_plan_request(
         if not input_payload:
             return {}
     elif tool_name in _MODEL_FOLLOWUP_TEXT_ENTRY_TOOLS:
-        input_payload = _model_followup_text_entry_pending_input(
+        input_payload, input_resolution = _model_followup_text_entry_pending_input(
             tool_name,
             raw_input,
             generated_content,
@@ -16004,6 +16010,12 @@ def _model_followup_pending_plan_request(
         }:
             return {}
         input_payload = dict(raw_input)
+        input_payload, input_resolution = _model_followup_resolved_app_input(
+            tool_name,
+            input_payload,
+            raw_input,
+            followup_context or {},
+        )
     request = _request_like(
         tool_name,
         input_payload,
@@ -16017,6 +16029,7 @@ def _model_followup_pending_plan_request(
     if capability_id:
         request["capability_id"] = capability_id
     if input_resolution:
+        input_resolution["tool"] = tool_name
         request["input_resolution"] = input_resolution
     return request
 
@@ -16086,7 +16099,7 @@ def _model_followup_text_entry_pending_input(
     raw_input: Mapping[str, Any],
     generated_content: str,
     followup_context: Mapping[str, Any],
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(raw_input, Mapping):
         raw_input = {}
     content = _model_followup_resolved_body_content(
@@ -16095,14 +16108,48 @@ def _model_followup_text_entry_pending_input(
         followup_context,
     )
     if not content:
-        return {}
+        return {}, {}
     payload: dict[str, Any] = {"text": content}
+    input_resolution: dict[str, Any] = {}
     if tool_name in {"app.focus_and_safe_type_text", "app.open_and_safe_type_text"}:
         app_name = str(raw_input.get("app_name") or "").strip()
         if not app_name or _pending_plan_placeholder_value(app_name, "desktop.list_apps"):
-            return {}
+            payload, input_resolution = _model_followup_resolved_app_input(
+                tool_name,
+                payload,
+                raw_input,
+                followup_context,
+            )
+            app_name = str(payload.get("app_name") or "").strip()
+        if not app_name or _pending_plan_placeholder_value(app_name, "desktop.list_apps"):
+            return {}, {}
         payload["app_name"] = app_name
-    return payload
+    return payload, input_resolution
+
+
+def _model_followup_resolved_app_input(
+    tool_name: str,
+    input_payload: Mapping[str, Any],
+    raw_input: Mapping[str, Any],
+    followup_context: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    payload = dict(input_payload) if isinstance(input_payload, Mapping) else {}
+    source = dict(raw_input) if isinstance(raw_input, Mapping) else {}
+    if "app_name" not in payload and "app_name" not in source:
+        return payload, {}
+    app_name = str(payload.get("app_name") or source.get("app_name") or "").strip()
+    if not _pending_plan_placeholder_value(app_name, "desktop.list_apps"):
+        return payload, {}
+    resolved_app_name, input_resolution = _resolved_followup_desktop_app_name(
+        followup_context,
+        {**source, **payload},
+    )
+    if not resolved_app_name:
+        return payload, {}
+    payload["app_name"] = resolved_app_name
+    if input_resolution:
+        input_resolution["tool"] = str(tool_name or "").strip()
+    return payload, input_resolution
 
 
 def _model_followup_resolved_body_content(
@@ -16518,11 +16565,23 @@ def _resolve_dynamic_pending_plan_request_input(
     step: Mapping[str, Any],
     followup_context: Mapping[str, Any],
 ) -> dict[str, Any]:
-    if str(request.get("tool") or "").strip() not in _OPEN_PATH_WITH_APP_TOOLS:
-        return request
+    tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
     request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     step_input = step.get("input_preview") if isinstance(step.get("input_preview"), Mapping) else {}
     merged_input = {**dict(step_input), **dict(request_input)}
+    if tool_name not in _OPEN_PATH_WITH_APP_TOOLS:
+        resolved_input, input_resolution = _model_followup_resolved_app_input(
+            tool_name,
+            request_input,
+            merged_input,
+            followup_context,
+        )
+        if not input_resolution:
+            return request
+        resolved_request = {**request, "input": resolved_input}
+        if not isinstance(resolved_request.get("input_resolution"), Mapping):
+            resolved_request["input_resolution"] = input_resolution
+        return resolved_request
     resolved_input, input_resolution = _model_followup_open_path_with_app_pending_input(
         merged_input,
         followup_context,
