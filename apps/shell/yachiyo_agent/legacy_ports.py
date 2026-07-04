@@ -725,12 +725,14 @@ class LegacyChatTaskStarter:
             planner_decision = selection.decision
             selection_requests = selection.requests
             selected_source = selection.selected_source
-            legacy_override_requests = _legacy_direct_execution_override_requests(
-                prompt or execution_prompt,
-                metadata,
-                allowed_entrypoint_tools,
-                selection_requests,
-            )
+            legacy_override_requests: list[dict[str, Any]] = []
+            if selected_source != "runtime_planner":
+                legacy_override_requests = _legacy_direct_execution_override_requests(
+                    prompt or execution_prompt,
+                    metadata,
+                    allowed_entrypoint_tools,
+                    selection_requests,
+                )
             if legacy_override_requests:
                 selection_requests = legacy_override_requests
                 selected_source = "daily_desktop_intent"
