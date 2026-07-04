@@ -231,6 +231,75 @@ def test_legacy_group_run_inherits_builtin_desktop_policy_for_member_runs(
     ]
 
 
+def test_legacy_group_run_forwards_execution_envelope_to_first_member_run(
+    monkeypatch,
+) -> None:
+    store = _FakeChatStore()
+    runtime = _FakeRuntime()
+    monkeypatch.setattr("apps.core.chat_store.get_chat_store", lambda: store)
+    port = LegacyStudioPort(runtime)
+
+    group = port.save_group(
+        {
+            "name": "Desktop Operators",
+            "tool_policy_id": "desktop_execution",
+            "members": [
+                {"agent_id": "agent-writer", "role": "operator", "sort_order": 0},
+                {"agent_id": "agent-reviewer", "role": "reviewer", "sort_order": 1},
+            ],
+        }
+    )
+    port.start_group_run(
+        {
+            "group_id": group["group_id"],
+            "objective": "Open Music and confirm it is available",
+            "runtime_execution_envelope": {
+                "decision_id": "decision-group",
+                "plan_id": "plan-group",
+                "requests": [
+                    {
+                        "request_id": "request-open-music",
+                        "tool": "app.open",
+                        "input": {"app_name": "Music"},
+                        "planning_reason": "Open the requested desktop app.",
+                    },
+                    {
+                        "request_id": "request-terminal",
+                        "tool": "terminal.run",
+                        "input": {"command": "echo unsafe"},
+                    },
+                ],
+            },
+        }
+    )
+    create_calls = [
+        call[1]
+        for call in runtime.calls
+        if call[0] == "create_run_for_runnable_async"
+    ]
+
+    assert [call["runnable_id"] for call in create_calls] == [
+        "agent-writer",
+        "agent-reviewer",
+    ]
+    assert [request["tool"] for request in create_calls[0]["direct_tool_requests"]] == [
+        "app.open",
+    ]
+    direct_request = create_calls[0]["direct_tool_requests"][0]
+    assert direct_request["request_id"] == "request-open-music"
+    assert direct_request["input"] == {"app_name": "Music"}
+    assert direct_request["group_id"] == group["group_id"]
+    assert direct_request["agent_id"] == "agent-writer"
+    assert direct_request["group_member_index"] == 0
+    assert "direct_tool_requests" not in create_calls[1]
+    assert create_calls[0]["daily_desktop_planning_context"] == (
+        "Open Music and confirm it is available"
+    )
+    assert create_calls[1]["daily_desktop_planning_context"] == (
+        "Open Music and confirm it is available"
+    )
+
+
 def test_group_media_policy_defaults_to_generic_music_app_tools() -> None:
     allowed_tools = group_tool_policy_for_id("media_control")["allowed_tools"]
 

@@ -222,6 +222,8 @@ class RuntimeRunnableRunCoordinator:
         agent_override: dict[str, Any] | None = None,
         daily_desktop_policy_overlay: bool = False,
         runtime_planner_entrypoint: bool = False,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
+        daily_desktop_planning_context: str | None = None,
     ) -> dict[str, Any]:
         runnable = self._required_runnable(runnable_id=runnable_id, name=name, message="未找到指定 Agent 或 Workflow")
         request_id = client_run_id or client_request_id
@@ -240,6 +242,10 @@ class RuntimeRunnableRunCoordinator:
                 payload["daily_desktop_policy_overlay"] = True
             if runtime_planner_entrypoint:
                 payload["runtime_planner_entrypoint"] = True
+            if direct_tool_requests is not None:
+                payload["direct_tool_requests"] = direct_tool_requests
+            if daily_desktop_planning_context is not None:
+                payload["daily_desktop_planning_context"] = daily_desktop_planning_context
             run = self._create_agent_run(payload)
             run["agent_run_id"] = run["run_id"]
             run["runnable"] = runnable
@@ -266,6 +272,8 @@ class RuntimeRunnableRunCoordinator:
         agent_override: dict[str, Any] | None = None,
         daily_desktop_policy_overlay: bool = False,
         runtime_planner_entrypoint: bool = False,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
+        daily_desktop_planning_context: str | None = None,
         on_complete: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         runnable = self._required_runnable(runnable_id=runnable_id, name=name, message="未找到指定 Agent 或 Workflow")
@@ -283,6 +291,10 @@ class RuntimeRunnableRunCoordinator:
                 payload["daily_desktop_policy_overlay"] = True
             if runtime_planner_entrypoint:
                 payload["runtime_planner_entrypoint"] = True
+            if direct_tool_requests is not None:
+                payload["direct_tool_requests"] = direct_tool_requests
+            if daily_desktop_planning_context is not None:
+                payload["daily_desktop_planning_context"] = daily_desktop_planning_context
             run = self._create_agent_run_async(
                 payload,
                 on_complete=on_complete,

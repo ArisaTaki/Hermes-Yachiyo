@@ -70,6 +70,29 @@ def test_create_runnable_run_passes_daily_desktop_overlay_to_async_runtime() -> 
     assert captured["payload"]["runtime_planner_entrypoint"] is True
 
 
+def test_create_runnable_run_passes_direct_execution_plan_to_async_runtime() -> None:
+    captured: dict[str, Any] = {}
+    direct_requests = [{"tool": "app.open", "input": {"app_name": "Music"}}]
+
+    class Runtime:
+        def create_run_for_runnable_async(self, **payload: Any) -> dict[str, Any]:
+            captured["payload"] = payload
+            return {"run_id": "run-agent", "status": "processing"}
+
+    run = create_runnable_run(
+        Runtime(),
+        runnable_id="agent-desktop",
+        user_goal="打开 Music",
+        runtime_planner_entrypoint=True,
+        direct_tool_requests=direct_requests,
+        daily_desktop_planning_context="打开 Music",
+    )
+
+    assert run["run_id"] == "run-agent"
+    assert captured["payload"]["direct_tool_requests"] == direct_requests
+    assert captured["payload"]["daily_desktop_planning_context"] == "打开 Music"
+
+
 def test_agent_run_async_uses_agent_override_without_persisted_lookup() -> None:
     captured: dict[str, Any] = {}
     override = {

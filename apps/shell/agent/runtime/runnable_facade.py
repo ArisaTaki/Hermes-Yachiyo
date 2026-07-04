@@ -47,6 +47,8 @@ class RuntimeRunnableFacadeMixin:
         agent_override: dict[str, Any] | None = None,
         daily_desktop_policy_overlay: bool = False,
         runtime_planner_entrypoint: bool = False,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
+        daily_desktop_planning_context: str | None = None,
     ) -> dict[str, Any]:
         return self.runnable_run_coordinator.create_run(
             runnable_id=runnable_id,
@@ -59,6 +61,8 @@ class RuntimeRunnableFacadeMixin:
             agent_override=agent_override,
             daily_desktop_policy_overlay=daily_desktop_policy_overlay,
             runtime_planner_entrypoint=runtime_planner_entrypoint,
+            direct_tool_requests=direct_tool_requests,
+            daily_desktop_planning_context=daily_desktop_planning_context,
         )
 
     def create_run_for_runnable_async(
@@ -72,6 +76,8 @@ class RuntimeRunnableFacadeMixin:
         agent_override: dict[str, Any] | None = None,
         daily_desktop_policy_overlay: bool = False,
         runtime_planner_entrypoint: bool = False,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
+        daily_desktop_planning_context: str | None = None,
         on_complete: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         """创建 Run 并立即返回，异步执行实际任务。"""
@@ -84,6 +90,8 @@ class RuntimeRunnableFacadeMixin:
             agent_override=agent_override,
             daily_desktop_policy_overlay=daily_desktop_policy_overlay,
             runtime_planner_entrypoint=runtime_planner_entrypoint,
+            direct_tool_requests=direct_tool_requests,
+            daily_desktop_planning_context=daily_desktop_planning_context,
             on_complete=on_complete,
         )
 

@@ -27,6 +27,8 @@ from .legacy_group_orchestration import (
 from .legacy_runs import LegacyRunPayloadProjector
 from .planner_projection import planner_run_event_payloads, runtime_planner_decision
 from .runtime_execution import runtime_execution_envelope_payload_with_request_context
+from .runtime_execution import runtime_execution_requests_from_envelope_payload
+from .runtime_execution import runtime_execution_requests_from_metadata
 
 
 def start_legacy_group_run(
@@ -93,6 +95,11 @@ def start_legacy_group_run(
                 ),
             )
 
+        member_direct_tool_requests = (
+            _member_runtime_execution_requests(request, member, index)
+            if index == 0
+            else []
+        )
         child_run = create_runnable_run(
             runtime,
             runnable_id=agent_id,
@@ -103,6 +110,10 @@ def start_legacy_group_run(
             agent_override=group_member_agent_override(runtime, member, group),
             daily_desktop_policy_overlay=True,
             runtime_planner_entrypoint=True,
+            direct_tool_requests=(
+                member_direct_tool_requests if member_direct_tool_requests else None
+            ),
+            daily_desktop_planning_context=_group_planning_context(request, objective),
         )
         if not run_group_id:
             run_group_id = str(child_run.get("run_group_id") or "")
@@ -420,6 +431,72 @@ def _member_allowed_tools(member: dict[str, Any]) -> list[str] | None:
         for tool in allowed_tools
         if str(tool or "").strip()
     ]
+
+
+def _member_runtime_execution_requests(
+    request: Mapping[str, Any],
+    member: dict[str, Any],
+    member_index: int,
+) -> list[dict[str, Any]]:
+    for requests in _runtime_execution_request_candidates(request, member):
+        if not requests:
+            continue
+        return [
+            _runtime_execution_request_with_group_context(
+                tool_request,
+                request,
+                member,
+                member_index,
+            )
+            for tool_request in requests
+        ]
+    return []
+
+
+def _runtime_execution_request_candidates(
+    request: Mapping[str, Any],
+    member: dict[str, Any],
+) -> list[list[dict[str, Any]]]:
+    allowed_tools = _member_allowed_tools(member)
+    metadata = request.get("metadata") if isinstance(request.get("metadata"), Mapping) else {}
+    candidates: list[list[dict[str, Any]]] = []
+    top_level_requests = runtime_execution_requests_from_envelope_payload(
+        request.get("runtime_execution_envelope"),
+        allowed_tools=allowed_tools,
+    )
+    if top_level_requests:
+        candidates.append(top_level_requests)
+    metadata_requests = runtime_execution_requests_from_metadata(
+        metadata,
+        allowed_tools=allowed_tools,
+    )
+    if metadata_requests:
+        candidates.append(metadata_requests)
+    return candidates
+
+
+def _runtime_execution_request_with_group_context(
+    tool_request: dict[str, Any],
+    request: Mapping[str, Any],
+    member: Mapping[str, Any],
+    member_index: int,
+) -> dict[str, Any]:
+    enriched = dict(tool_request)
+    for key, value in {
+        "group_id": request.get("group_id"),
+        "agent_id": member.get("agent_id"),
+        "group_member_index": member_index,
+    }.items():
+        if value is None:
+            continue
+        if not str(value).strip():
+            continue
+        enriched.setdefault(key, value)
+    return enriched
+
+
+def _group_planning_context(request: Mapping[str, Any], objective: str) -> str:
+    return str(request.get("daily_desktop_planning_context") or objective or "").strip()
 
 
 def group_orchestration_plan(
