@@ -1048,6 +1048,77 @@ def test_runtime_tool_request_runner_synthesizes_observation_retry_recovery_acti
     assert run_replan_event["metadata"]["recovery_actions"] == payload["metadata"]["recovery_actions"]
 
 
+def test_runtime_tool_request_runner_synthesizes_default_desktop_failure_replan() -> None:
+    calls: list[str] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        *_args: Any,
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        calls.append(str(tool_request.get("tool") or ""))
+        return {
+            "ok": False,
+            "error": "foreground input failed",
+        }
+
+    runner = _runner(
+        call_agent_tool=call_agent_tool,
+        run_events=run_events,
+    )
+    messages = [{"role": "user", "content": "type into the current app"}]
+
+    runner.run(
+        [
+            {
+                "tool": "desktop.safe_type_text",
+                "input": {"text": "hello"},
+            },
+            {
+                "tool": "desktop.safe_key",
+                "input": {"action": "return"},
+            },
+        ],
+        ["desktop.safe_type_text", "desktop.safe_key"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-default-desktop-replan",
+        budget=FakeBudget(),
+    )
+
+    replan_event = next(event for event in timeline if event["event"] == "agent.replan.requested")
+    payload = replan_event["payload"]
+
+    assert payload["trigger"] == "tool_failure"
+    assert payload["source_tool_name"] == "desktop.safe_type_text"
+    assert payload["fallback_tools"] == [
+        "desktop.active_window",
+        "desktop.ui_elements",
+        "screen.capture",
+    ]
+    assert [
+        action["tool"] for action in payload["metadata"]["recovery_actions"]
+    ] == [
+        "desktop.active_window",
+        "desktop.ui_elements",
+        "screen.capture",
+    ]
+    assert calls == ["desktop.safe_type_text"]
+    assert len([event for event in timeline if event["event"] == "agent.replan.requested"]) == 1
+    run_replan_event = next(
+        payload
+        for _run_id, event_type, payload in run_events
+        if event_type == "agent.replan.requested"
+    )
+    assert run_replan_event["fallback_tools"] == payload["fallback_tools"]
+    assert "recovery_actions" in messages[-1]["content"]
+
+
 def test_runtime_tool_call_executor_denies_unallowed_tools_before_broker_call() -> None:
     events = FakeToolCallEvents()
     executor = _executor(tool_call_events=events)

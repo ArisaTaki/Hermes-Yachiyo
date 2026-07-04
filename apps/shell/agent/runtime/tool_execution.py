@@ -249,6 +249,54 @@ def _tool_result_requests_user_recovery(result: dict[str, Any]) -> bool:
     )
 
 
+def _tool_result_with_runtime_recovery_defaults(
+    tool_name: str,
+    tool_request: Mapping[str, Any],
+    raw_input: dict[str, Any],
+    tool_result: dict[str, Any],
+) -> dict[str, Any]:
+    if not isinstance(tool_result, dict):
+        return tool_result
+    if tool_result.get("approval_required"):
+        return tool_result
+    if _tool_request_has_runtime_recovery_metadata(tool_request):
+        return tool_result
+    if tool_result.get("ok") is not False and tool_result.get("verification_failed") is not True:
+        return tool_result
+    fallback_tools = _runtime_default_replan_fallback_tools(tool_name)
+    recovery_actions = _runtime_default_replan_recovery_actions(
+        tool_name,
+        raw_input,
+        fallback_tools,
+    )
+    if not fallback_tools and not recovery_actions:
+        return tool_result
+    enriched = dict(tool_result)
+    if fallback_tools:
+        enriched["recommended_tools"] = _string_list([
+            *_string_list(enriched.get("recommended_tools")),
+            *fallback_tools,
+        ])
+    if recovery_actions:
+        enriched["recovery_actions"] = _dedupe_runtime_replan_recovery_actions([
+            *_mapping_list(enriched.get("recovery_actions")),
+            *recovery_actions,
+        ])
+    return enriched
+
+
+def _tool_request_has_runtime_recovery_metadata(tool_request: Mapping[str, Any]) -> bool:
+    return bool(
+        _string_list(tool_request.get("replan_signal_ids"))
+        or _string_list(tool_request.get("replan_triggers"))
+        or _string_list(tool_request.get("fallback_tools"))
+        or _mapping_list(tool_request.get("recovery_actions"))
+        or _first_mapping(tool_request.get("observation_retry"))
+        or bool(tool_request.get("requires_observation"))
+        or bool(tool_request.get("requires_post_action_verification"))
+    )
+
+
 def _normalized_app_lookup(value: Any) -> str:
     return " ".join(str(value or "").strip().casefold().split())
 
@@ -1937,6 +1985,12 @@ class RuntimeToolRequestRunner:
                     if value:
                         pending_approval[key] = value
                 raise AgentApprovalRequired(pending_approval)
+            tool_result = _tool_result_with_runtime_recovery_defaults(
+                tool_name,
+                tool_request,
+                raw_input,
+                tool_result,
+            )
             fatal_failure = self._tool_loop_projection.fatal_failure_detail(
                 tool_name,
                 tool_request,
@@ -2260,6 +2314,9 @@ def _runtime_replan_fallback_tools(
     result: Mapping[str, Any],
 ) -> list[str]:
     data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    tool_name = str(
+        tool_request.get("tool") or tool_request.get("tool_name") or ""
+    ).strip()
     tools = [
         *_string_list(tool_request.get("fallback_tools")),
         *_string_list(result.get("suggested_tool")),
@@ -2279,7 +2336,143 @@ def _runtime_replan_fallback_tools(
         for action in recovery_actions:
             if isinstance(action, Mapping):
                 tools.extend(_string_list(action.get("tool")))
+    if not _string_list(tools):
+        tools.extend(_runtime_default_replan_fallback_tools(tool_name))
     return _string_list(tools)
+
+
+def _runtime_default_replan_fallback_tools(tool_name: str) -> list[str]:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool in {
+        "app.open",
+        "desktop.open_app",
+        "media.music_app_open_and_play",
+        "media.apple_music_open_and_play",
+    }:
+        return ["desktop.list_apps", "app.open", "desktop.active_window"]
+    if clean_tool in {
+        "app.focus",
+        "desktop.focus_app",
+        "app.focus_window",
+        "app.show",
+        "media.music_app_control",
+        "media.system_control",
+    }:
+        return [
+            "desktop.running_apps",
+            "app.open",
+            "desktop.active_window",
+            "screen.capture",
+        ]
+    if clean_tool in {
+        "desktop.active_window",
+        "desktop.running_apps",
+        "desktop.windows",
+        "desktop.list_windows",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.verify",
+        "screen.capture",
+    }:
+        return ["desktop.permissions", "screen.capture"]
+    if clean_tool.startswith(("app.open_and_", "app.focus_and_")):
+        return ["desktop.active_window", "desktop.ui_elements", "screen.capture"]
+    if clean_tool in _FOREGROUND_READINESS_GATED_TOOLS:
+        return ["desktop.active_window", "desktop.ui_elements", "screen.capture"]
+    return []
+
+
+def _runtime_default_replan_recovery_actions(
+    tool_name: str,
+    raw_input: Mapping[str, Any],
+    fallback_tools: list[str],
+) -> list[dict[str, Any]]:
+    actions: list[dict[str, Any]] = []
+    app_name = str(
+        raw_input.get("app_name") or raw_input.get("target_app_name") or ""
+    ).strip()
+    query = str(raw_input.get("query") or raw_input.get("app_query") or app_name).strip()
+    for fallback_tool in fallback_tools:
+        action_input = _runtime_default_recovery_input(
+            fallback_tool,
+            raw_input,
+            app_name=app_name,
+            query=query,
+        )
+        if action_input is None:
+            continue
+        actions.append(
+            {
+                "label": _runtime_default_recovery_label(fallback_tool),
+                "tool": fallback_tool,
+                "input": action_input,
+                "permission_target": _runtime_default_recovery_permission_target(
+                    fallback_tool
+                ),
+                "risk_level": "low",
+                "observation_retry": {
+                    "tool": fallback_tool,
+                    "input": action_input,
+                    "reason": "tool_failure",
+                    "source_tool": tool_name,
+                },
+            }
+        )
+    return actions
+
+
+def _runtime_default_recovery_input(
+    fallback_tool: str,
+    raw_input: Mapping[str, Any],
+    *,
+    app_name: str,
+    query: str,
+) -> dict[str, Any] | None:
+    if fallback_tool == "desktop.list_apps":
+        return {"query": query, "limit": 20} if query else {"limit": 20}
+    if fallback_tool == "desktop.running_apps":
+        return {}
+    if fallback_tool in {"app.open", "desktop.open_app"}:
+        return {"app_name": app_name} if app_name else None
+    if fallback_tool == "desktop.active_window":
+        return {}
+    if fallback_tool in {"desktop.ui_elements", "desktop.read_ui"}:
+        payload: dict[str, Any] = {"limit": raw_input.get("limit", 80)}
+        if app_name:
+            payload["app_name"] = app_name
+        role_filter = str(raw_input.get("role_filter") or "").strip()
+        if role_filter:
+            payload["role_filter"] = role_filter
+        return payload
+    if fallback_tool == "screen.capture":
+        return {"reason": "recover failed desktop tool"}
+    if fallback_tool == "desktop.permissions":
+        return {}
+    return {}
+
+
+def _runtime_default_recovery_label(tool_name: str) -> str:
+    return {
+        "desktop.list_apps": "Discover installed apps",
+        "desktop.running_apps": "Inspect running apps",
+        "app.open": "Open target app",
+        "desktop.open_app": "Open target app",
+        "desktop.active_window": "Observe active window",
+        "desktop.ui_elements": "Inspect foreground UI",
+        "desktop.read_ui": "Inspect foreground UI",
+        "screen.capture": "Capture screen",
+        "desktop.permissions": "Check desktop permissions",
+    }.get(tool_name, "Run recovery tool")
+
+
+def _runtime_default_recovery_permission_target(tool_name: str) -> str:
+    if tool_name == "desktop.list_apps":
+        return "app_discovery"
+    if tool_name == "desktop.permissions":
+        return "desktop_permissions"
+    if tool_name == "app.open":
+        return "app_launch"
+    return "runtime_observation"
 
 
 def _runtime_replan_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
