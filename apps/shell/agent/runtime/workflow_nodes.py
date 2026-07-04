@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 from typing import Any
 
@@ -12,6 +13,10 @@ from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broke
 from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_tool_selection,
+)
+from apps.shell.yachiyo_agent.runtime_execution import (
+    runtime_execution_requests_from_envelope_payload,
+    runtime_execution_requests_from_metadata,
 )
 
 
@@ -161,6 +166,157 @@ def _unique_tools(tools: list[str]) -> list[str]:
     return result
 
 
+def _workflow_node_direct_tool_requests(
+    handoff: "WorkflowAgentNodeHandoff",
+    agent: dict[str, Any],
+    *,
+    runtime_execution_envelope: Any | None,
+    runtime_execution_metadata: Mapping[str, Any] | None,
+    direct_tool_requests: list[dict[str, Any]] | None,
+    workflow_run_id: str,
+    direct_request_fallback_node_id: str,
+) -> list[dict[str, Any]]:
+    allowed_tools = _agent_allowed_tools(agent)
+    for requests in _workflow_node_direct_tool_request_candidates(
+        runtime_execution_envelope=runtime_execution_envelope,
+        runtime_execution_metadata=runtime_execution_metadata,
+        direct_tool_requests=direct_tool_requests,
+        allowed_tools=allowed_tools,
+    ):
+        projected = [
+            _workflow_node_direct_tool_request_with_context(
+                request,
+                handoff,
+                workflow_run_id=workflow_run_id,
+            )
+            for request in requests
+            if _workflow_node_request_matches(
+                request,
+                handoff,
+                direct_request_fallback_node_id=direct_request_fallback_node_id,
+            )
+        ]
+        if projected:
+            return projected
+    return []
+
+
+def _workflow_node_direct_tool_request_candidates(
+    *,
+    runtime_execution_envelope: Any | None,
+    runtime_execution_metadata: Mapping[str, Any] | None,
+    direct_tool_requests: list[dict[str, Any]] | None,
+    allowed_tools: list[str] | None,
+) -> list[list[dict[str, Any]]]:
+    candidates: list[list[dict[str, Any]]] = []
+    top_level_requests = runtime_execution_requests_from_envelope_payload(
+        runtime_execution_envelope,
+        allowed_tools=allowed_tools,
+    )
+    if top_level_requests:
+        candidates.append(top_level_requests)
+    metadata_requests = runtime_execution_requests_from_metadata(
+        runtime_execution_metadata,
+        allowed_tools=allowed_tools,
+    )
+    if metadata_requests:
+        candidates.append(metadata_requests)
+    direct_requests = _allowed_direct_tool_requests(
+        direct_tool_requests,
+        allowed_tools=allowed_tools,
+    )
+    if direct_requests:
+        candidates.append(direct_requests)
+    return candidates
+
+
+def _allowed_direct_tool_requests(
+    direct_tool_requests: list[dict[str, Any]] | None,
+    *,
+    allowed_tools: list[str] | None,
+) -> list[dict[str, Any]]:
+    allowed = {
+        str(tool or "").strip()
+        for tool in allowed_tools or []
+        if str(tool or "").strip()
+    }
+    requests: list[dict[str, Any]] = []
+    for request in direct_tool_requests or []:
+        if not isinstance(request, Mapping):
+            continue
+        tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+        if not tool_name:
+            continue
+        if allowed and tool_name not in allowed:
+            continue
+        copied = dict(request)
+        copied["tool"] = tool_name
+        requests.append(copied)
+    return requests
+
+
+def _workflow_node_request_matches(
+    request: dict[str, Any],
+    handoff: "WorkflowAgentNodeHandoff",
+    *,
+    direct_request_fallback_node_id: str,
+) -> bool:
+    explicit = False
+    for key, expected in (
+        ("workflow_node_id", handoff.node_id),
+        ("workflow_node_kind", handoff.node_kind),
+        ("workflow_node_label", handoff.node_label),
+        ("agent_id", handoff.agent_id),
+    ):
+        value = str(request.get(key) or "").strip()
+        if not value:
+            continue
+        explicit = True
+        if not _workflow_node_value_matches(value, expected):
+            return False
+    if explicit:
+        return True
+    return bool(
+        direct_request_fallback_node_id
+        and handoff.node_id
+        and handoff.node_id == direct_request_fallback_node_id
+    )
+
+
+def _workflow_node_value_matches(value: str, expected: str) -> bool:
+    clean_value = str(value or "").strip()
+    clean_expected = str(expected or "").strip()
+    return bool(clean_value and clean_expected and clean_value.lower() == clean_expected.lower())
+
+
+def _workflow_node_direct_tool_request_with_context(
+    request: dict[str, Any],
+    handoff: "WorkflowAgentNodeHandoff",
+    *,
+    workflow_run_id: str,
+) -> dict[str, Any]:
+    enriched = dict(request)
+    for key, value in {
+        "workflow_run_id": workflow_run_id,
+        "workflow_node_id": handoff.node_id,
+        "workflow_node_kind": handoff.node_kind,
+        "workflow_node_label": handoff.node_label,
+        "agent_id": handoff.agent_id,
+    }.items():
+        clean = str(value or "").strip()
+        if clean:
+            enriched.setdefault(key, clean)
+    return enriched
+
+
+def _agent_allowed_tools(agent: dict[str, Any]) -> list[str] | None:
+    policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
+    allowed_tools = policy.get("allowed_tools") if isinstance(policy, dict) else None
+    if not isinstance(allowed_tools, list):
+        return None
+    return [str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()]
+
+
 @dataclass(frozen=True)
 class WorkflowAgentNodeHandoff:
     """Child Agent run payload derived from a Workflow agent node."""
@@ -308,6 +464,11 @@ class WorkflowAgentNodeExecution:
         *,
         run_group_id: str,
         workflow_run_id: str = "",
+        runtime_execution_envelope: Any | None = None,
+        runtime_execution_metadata: Mapping[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
+        daily_desktop_planning_context: str | None = None,
+        direct_request_fallback_node_id: str = "",
         prepare_child_run: Any | None = None,
         ports: WorkflowNodePortBundle | None = None,
     ) -> "WorkflowAgentNodeExecution":
@@ -331,16 +492,36 @@ class WorkflowAgentNodeExecution:
             run_group_id=run_group_id,
         )
         execute_kwargs = {"upstream": handoff.upstream}
+        planning_context = str(
+            daily_desktop_planning_context or handoff.step_task or handoff.child_goal
+        ).strip()
+        execution_agent = _agent_with_runtime_planner_entrypoint(
+            handoff.agent,
+            planning_context=planning_context,
+        )
+        node_direct_tool_requests = _workflow_node_direct_tool_requests(
+            handoff,
+            execution_agent,
+            runtime_execution_envelope=runtime_execution_envelope,
+            runtime_execution_metadata=runtime_execution_metadata,
+            direct_tool_requests=direct_tool_requests,
+            workflow_run_id=workflow_run_id,
+            direct_request_fallback_node_id=direct_request_fallback_node_id,
+        )
         if supports_keyword(execute_agent_run, "run_group_id"):
             execute_kwargs["run_group_id"] = run_group_id
         if workflow_run_id and supports_keyword(execute_agent_run, "workflow_run_id"):
             execute_kwargs["workflow_run_id"] = workflow_run_id
+        if node_direct_tool_requests and supports_keyword(execute_agent_run, "direct_tool_requests"):
+            execute_kwargs["direct_tool_requests"] = node_direct_tool_requests
+        if (
+            planning_context
+            and supports_keyword(execute_agent_run, "daily_desktop_planning_context")
+        ):
+            execute_kwargs["daily_desktop_planning_context"] = planning_context
         child = execute_agent_run(
             child["run_id"],
-            _agent_with_runtime_planner_entrypoint(
-                handoff.agent,
-                planning_context=handoff.step_task or handoff.child_goal,
-            ),
+            execution_agent,
             handoff.child_goal,
             **execute_kwargs,
         )

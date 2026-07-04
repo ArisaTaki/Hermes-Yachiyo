@@ -95,6 +95,10 @@ class RuntimeWorkflowFacadeMixin:
         start_index: int,
         root_group: bool,
         start_node_id: str = "",
+        runtime_execution_envelope: Any | None = None,
+        runtime_execution_metadata: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
+        daily_desktop_planning_context: str | None = None,
     ) -> dict[str, Any]:
         return self.workflow_continuation.continue_run(
             run,
@@ -105,6 +109,10 @@ class RuntimeWorkflowFacadeMixin:
             start_index=start_index,
             root_group=root_group,
             start_node_id=start_node_id,
+            runtime_execution_envelope=runtime_execution_envelope,
+            runtime_execution_metadata=runtime_execution_metadata,
+            direct_tool_requests=direct_tool_requests,
+            daily_desktop_planning_context=daily_desktop_planning_context,
         )
 
     def _workflow_path(self, workflow: dict[str, Any]) -> list[dict[str, Any]]:

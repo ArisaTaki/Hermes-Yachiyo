@@ -262,6 +262,83 @@ def test_workflow_run_coordinator_continues_from_requested_start_node() -> None:
     )
 
 
+def test_workflow_run_coordinator_forwards_execution_payload_to_continuation() -> None:
+    calls: list[tuple[str, Any]] = []
+    workflow = {
+        "workflow_id": "workflow-1",
+        "name": "Flow",
+        "enabled": True,
+        "nodes": [{"id": "start", "type": "start"}, {"id": "agent", "type": "agent"}],
+        "edges": [{"source": "start", "target": "agent"}],
+    }
+    envelope = {
+        "decision_id": "decision-workflow",
+        "plan_id": "plan-workflow",
+        "requests": [{"request_id": "request-open", "tool": "app.open"}],
+    }
+
+    class _Starter:
+        def start_sync(
+            self,
+            payload: dict[str, Any],
+            *,
+            workflow: dict[str, Any],
+            workflow_id: str,
+            lock: Any,
+        ) -> WorkflowRunStart:
+            return WorkflowRunStart({"run_id": "run-1"}, root_group=True)
+
+    class _Projector:
+        @staticmethod
+        def started_projection(
+            workflow_id: str,
+            workflow: dict[str, Any],
+        ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+            return [{"event": "workflow.run.started"}], {"workflow_id": workflow_id}
+
+    coordinator = RuntimeWorkflowRunCoordinator(
+        get_workflow=lambda _workflow_id: workflow,
+        validate_workflow=lambda _nodes, _edges: {"ok": True},
+        validate_workflow_agent_nodes=lambda _nodes: None,
+        validate_workflow_subworkflow_nodes=lambda _nodes, **_kwargs: None,
+        validate_workflow_runnable_steps=lambda _nodes: None,
+        validate_workflow_agent_run_readiness=lambda _nodes: None,
+        starter=_Starter(),  # type: ignore[arg-type]
+        start_projector=_Projector(),
+        append_run_event=lambda *_args, **_kwargs: None,
+        continue_workflow_run=lambda run, workflow, **kwargs: calls.append(
+            ("continue", run["run_id"], kwargs)
+        )
+        or {"run_id": run["run_id"], "status": "completed"},
+        lock=object(),
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = coordinator.create_sync(
+        {
+            "workflow_id": "workflow-1",
+            "user_goal": "Open Music",
+            "runtime_execution_envelope": envelope,
+            "metadata": {"yachiyo_execution_envelope": envelope},
+            "direct_tool_requests": [{"tool": "app.open", "input": {"app_name": "Music"}}],
+            "daily_desktop_planning_context": "Open Music from workflow plan",
+        }
+    )
+
+    continue_kwargs = calls[0][2]
+    assert result == {"run_id": "run-1", "status": "completed"}
+    assert continue_kwargs["runtime_execution_envelope"] is envelope
+    assert continue_kwargs["runtime_execution_metadata"] == {
+        "yachiyo_execution_envelope": envelope,
+    }
+    assert continue_kwargs["direct_tool_requests"] == [
+        {"tool": "app.open", "input": {"app_name": "Music"}},
+    ]
+    assert continue_kwargs["daily_desktop_planning_context"] == (
+        "Open Music from workflow plan"
+    )
+
+
 def test_workflow_run_coordinator_rejects_unknown_requested_start_node() -> None:
     workflow = {
         "workflow_id": "workflow-1",

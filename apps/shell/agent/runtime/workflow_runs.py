@@ -178,6 +178,7 @@ class RuntimeWorkflowRunCoordinator:
             start_index=0,
             root_group=start.root_group,
             start_node_id=start_node_id,
+            **_workflow_execution_kwargs(payload, user_goal=user_goal),
         )
 
 
@@ -278,6 +279,7 @@ class RuntimeWorkflowRunAsyncCoordinator:
                     artifacts=[],
                     start_index=0,
                     root_group=start.root_group,
+                    **_workflow_execution_kwargs(payload, user_goal=user_goal),
                 )
                 if on_complete:
                     on_complete(exec_result)
@@ -299,3 +301,29 @@ class RuntimeWorkflowRunAsyncCoordinator:
         )
         thread.start()
         return result
+
+
+def _workflow_execution_kwargs(
+    payload: dict[str, Any],
+    *,
+    user_goal: str,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
+    if payload.get("runtime_execution_envelope") is not None:
+        kwargs["runtime_execution_envelope"] = payload.get("runtime_execution_envelope")
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), dict) else {}
+    if metadata:
+        kwargs["runtime_execution_metadata"] = dict(metadata)
+    direct_tool_requests = payload.get("direct_tool_requests")
+    if isinstance(direct_tool_requests, list):
+        kwargs["direct_tool_requests"] = [
+            dict(request)
+            for request in direct_tool_requests
+            if isinstance(request, dict)
+        ]
+    planning_context = str(payload.get("daily_desktop_planning_context") or "").strip()
+    if planning_context:
+        kwargs["daily_desktop_planning_context"] = planning_context
+    elif kwargs:
+        kwargs["daily_desktop_planning_context"] = user_goal
+    return kwargs

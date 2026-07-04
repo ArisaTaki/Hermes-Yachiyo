@@ -3362,6 +3362,114 @@ def test_workflow_agent_node_execution_runs_child_and_builds_replay_payloads():
     ]
 
 
+def test_workflow_agent_node_execution_forwards_scoped_direct_requests():
+    calls: list[tuple[str, dict[str, object]]] = []
+    agent = {
+        "agent_id": "agent_research",
+        "name": "Research Agent",
+        "tool_policy": {
+            "allowed_tools": ["app.open"],
+            "approval_required": {},
+        },
+    }
+    handoff = WorkflowAgentNodeHandoff(
+        agent=agent,
+        agent_id="agent_research",
+        node_id="research",
+        node_kind="agent",
+        node_label="Research",
+        step_task="Open Music",
+        child_goal="Open Music from workflow",
+        upstream="",
+    )
+
+    class FakeEngine:
+        def _insert_run(self, **kwargs):
+            return {"run_id": "child_run"}
+
+        def _execute_agent_run(
+            self,
+            run_id,
+            received_agent,
+            user_goal,
+            *,
+            upstream,
+            run_group_id="",
+            workflow_run_id="",
+            direct_tool_requests=None,
+            daily_desktop_planning_context=None,
+        ):
+            calls.append(
+                (
+                    "execute_agent_run",
+                    {
+                        "run_id": run_id,
+                        "agent": received_agent,
+                        "user_goal": user_goal,
+                        "upstream": upstream,
+                        "run_group_id": run_group_id,
+                        "workflow_run_id": workflow_run_id,
+                        "direct_tool_requests": direct_tool_requests,
+                        "daily_desktop_planning_context": daily_desktop_planning_context,
+                    },
+                )
+            )
+            return {
+                "run_id": run_id,
+                "kind": "agent_run",
+                "status": "completed",
+                "result": "opened",
+                "artifacts": [],
+            }
+
+        def _workflow_child_artifact_refs(self, _child_run, _label):
+            return []
+
+    WorkflowAgentNodeExecution.from_handoff(
+        FakeEngine(),
+        handoff,
+        run_group_id="workflow_group",
+        workflow_run_id="workflow_run",
+        runtime_execution_envelope={
+            "decision_id": "decision-workflow",
+            "plan_id": "plan-workflow",
+            "requests": [
+                {
+                    "request_id": "request-open",
+                    "tool": "app.open",
+                    "input": {"app_name": "Music"},
+                    "workflow_node_id": "research",
+                },
+                {
+                    "request_id": "request-other",
+                    "tool": "app.open",
+                    "input": {"app_name": "Notes"},
+                    "workflow_node_id": "other",
+                },
+                {
+                    "request_id": "request-terminal",
+                    "tool": "terminal.run",
+                    "input": {"command": "echo no"},
+                    "workflow_node_id": "research",
+                },
+            ],
+        },
+        direct_request_fallback_node_id="research",
+    )
+
+    execute_payload = calls[0][1]
+    direct_requests = execute_payload["direct_tool_requests"]
+    assert [request["request_id"] for request in direct_requests] == ["request-open"]
+    direct_request = direct_requests[0]
+    assert direct_request["tool"] == "app.open"
+    assert direct_request["input"] == {"app_name": "Music"}
+    assert direct_request["workflow_run_id"] == "workflow_run"
+    assert direct_request["workflow_node_id"] == "research"
+    assert direct_request["workflow_node_label"] == "Research"
+    assert direct_request["agent_id"] == "agent_research"
+    assert execute_payload["daily_desktop_planning_context"] == "Open Music"
+
+
 def test_workflow_approval_pause_projection_builds_private_and_public_payloads():
     timeline: list[dict[str, object]] = []
     artifacts: list[dict[str, object]] = [{"kind": "workflow_artifact", "path": "notes.md"}]

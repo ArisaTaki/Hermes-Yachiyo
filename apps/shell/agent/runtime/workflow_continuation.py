@@ -597,6 +597,10 @@ class WorkflowContinuationCoordinator:
         start_index: int,
         root_group: bool,
         start_node_id: str = "",
+        runtime_execution_envelope: Any | None = None,
+        runtime_execution_metadata: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
+        daily_desktop_planning_context: str | None = None,
     ) -> dict[str, Any]:
         engine = self._engine
         run_group_id = str(run.get("run_group_id") or "")
@@ -623,6 +627,18 @@ class WorkflowContinuationCoordinator:
             node = cursor.node
             current_node_id = cursor.current_node_id
             has_agent_upstream = cursor.has_agent_upstream
+            direct_request_fallback_node_id = (
+                self._direct_request_fallback_node_id(
+                    path,
+                    current_node_id=current_node_id,
+                )
+                if (
+                    runtime_execution_envelope is not None
+                    or runtime_execution_metadata
+                    or direct_tool_requests
+                )
+                else ""
+            )
             loop_iterations = self._workflow_loop_iterations_from_timeline(timeline)
             max_step_count = self._workflow_loop_step_limit(workflow, nodes_by_id)
             budget = self._workflow_budget(run, timeline)
@@ -666,6 +682,11 @@ class WorkflowContinuationCoordinator:
                         timeline=timeline,
                         artifacts=artifacts,
                         root_group=root_group,
+                        runtime_execution_envelope=runtime_execution_envelope,
+                        runtime_execution_metadata=runtime_execution_metadata,
+                        direct_tool_requests=direct_tool_requests,
+                        daily_desktop_planning_context=daily_desktop_planning_context,
+                        direct_request_fallback_node_id=direct_request_fallback_node_id,
                     )
                     if result.get("done"):
                         return result["run"]
@@ -903,6 +924,23 @@ class WorkflowContinuationCoordinator:
             branch_node_id=branch_node_id,
         )
 
+    def _direct_request_fallback_node_id(
+        self,
+        path: list[dict[str, Any]],
+        *,
+        current_node_id: str,
+    ) -> str:
+        cursor_reached = not current_node_id
+        for node in path:
+            node_id = str(node.get("id") or "").strip()
+            if current_node_id and not cursor_reached:
+                cursor_reached = node_id == current_node_id
+                if not cursor_reached:
+                    continue
+            if self._node_kind(node) == "agent":
+                return node_id
+        return ""
+
     def _run_agent_node(
         self,
         run: dict[str, Any],
@@ -918,6 +956,11 @@ class WorkflowContinuationCoordinator:
         artifacts: list[dict[str, Any]],
         root_group: bool,
         node_info_extra: dict[str, str] | None = None,
+        runtime_execution_envelope: Any | None = None,
+        runtime_execution_metadata: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
+        daily_desktop_planning_context: str | None = None,
+        direct_request_fallback_node_id: str = "",
     ) -> dict[str, Any]:
         agent = self._workflow_agent_for_node(node)
         step_task = self._workflow_node_task(node)
@@ -937,6 +980,11 @@ class WorkflowContinuationCoordinator:
             handoff,
             run_group_id=run_group_id,
             workflow_run_id=str(run["run_id"]),
+            runtime_execution_envelope=runtime_execution_envelope,
+            runtime_execution_metadata=runtime_execution_metadata,
+            direct_tool_requests=direct_tool_requests,
+            daily_desktop_planning_context=daily_desktop_planning_context,
+            direct_request_fallback_node_id=direct_request_fallback_node_id,
             prepare_child_run=lambda child: self._project_workflow_child_pending_context(
                 child,
                 run,

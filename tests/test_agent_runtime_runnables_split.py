@@ -276,6 +276,34 @@ def test_runnable_run_coordinator_forwards_direct_agent_execution_plan() -> None
     ]
 
 
+def test_runnable_run_coordinator_forwards_direct_workflow_execution_plan() -> None:
+    calls: list[tuple[str, dict[str, object]]] = []
+    coordinator = _run_coordinator(calls)
+    direct_requests = [{"tool": "app.open", "input": {"app_name": "Music"}}]
+
+    run = coordinator.create_run_async(
+        runnable_id="workflow-1",
+        user_goal="Open Music",
+        direct_tool_requests=direct_requests,
+        daily_desktop_planning_context="Open Music from workflow plan",
+    )
+
+    assert run["workflow_run_id"] == "workflow-run-1"
+    assert calls == [
+        (
+            "workflow_async",
+            {
+                "workflow_id": "workflow-1",
+                "user_goal": "Open Music",
+                "source": "workflow",
+                "run_group_id": "",
+                "direct_tool_requests": direct_requests,
+                "daily_desktop_planning_context": "Open Music from workflow plan",
+            },
+        )
+    ]
+
+
 def test_runnable_run_coordinator_dispatches_workflow_run_async() -> None:
     calls: list[tuple[str, dict[str, object]]] = []
     completions: list[dict[str, object]] = []

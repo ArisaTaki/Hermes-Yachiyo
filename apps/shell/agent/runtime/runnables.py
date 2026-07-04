@@ -250,13 +250,18 @@ class RuntimeRunnableRunCoordinator:
             run["agent_run_id"] = run["run_id"]
             run["runnable"] = runnable
             return run
-        run = self._create_workflow_run({
+        workflow_payload = {
             "workflow_id": runnable["id"],
             "user_goal": user_goal,
             "source": "workflow",
             "run_group_id": run_group_id,
             "client_run_id": request_id,
-        })
+        }
+        if direct_tool_requests is not None:
+            workflow_payload["direct_tool_requests"] = direct_tool_requests
+        if daily_desktop_planning_context is not None:
+            workflow_payload["daily_desktop_planning_context"] = daily_desktop_planning_context
+        run = self._create_workflow_run(workflow_payload)
         run["workflow_run_id"] = run["run_id"]
         run["runnable"] = runnable
         return run
@@ -303,15 +308,17 @@ class RuntimeRunnableRunCoordinator:
             run["runnable"] = runnable
             return run
 
-        run = self._create_workflow_run_async(
-            {
-                "workflow_id": runnable["id"],
-                "user_goal": user_goal,
-                "source": "workflow",
-                "run_group_id": run_group_id,
-            },
-            on_complete=on_complete,
-        )
+        workflow_payload = {
+            "workflow_id": runnable["id"],
+            "user_goal": user_goal,
+            "source": "workflow",
+            "run_group_id": run_group_id,
+        }
+        if direct_tool_requests is not None:
+            workflow_payload["direct_tool_requests"] = direct_tool_requests
+        if daily_desktop_planning_context is not None:
+            workflow_payload["daily_desktop_planning_context"] = daily_desktop_planning_context
+        run = self._create_workflow_run_async(workflow_payload, on_complete=on_complete)
         run["workflow_run_id"] = run["run_id"]
         run["runnable"] = runnable
         return run

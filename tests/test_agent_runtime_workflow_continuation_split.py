@@ -906,7 +906,11 @@ def test_workflow_continuation_uses_injected_agent_handoff_inputs() -> None:
     assert executed == [
         {
             "run_id": "child_run",
-            "agent": agent,
+            "agent": {
+                **agent,
+                "_runtime_planner_entrypoint": True,
+                "_runtime_planner_entrypoint_context": "Summarize launch risk.",
+            },
             "user_goal": "Ship release candidate\n\nStep: Summarize launch risk.",
             "upstream": "",
             "run_group_id": "workflow_group",
