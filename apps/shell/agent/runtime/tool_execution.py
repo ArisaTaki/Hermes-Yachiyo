@@ -254,6 +254,13 @@ def _normalized_app_lookup(value: Any) -> str:
 
 
 _SELECTED_DESKTOP_APP_NAME = "<selected app from desktop.list_apps>"
+_SELECTED_RUNNING_DESKTOP_APP_NAME = "<selected app from desktop.running_apps>"
+_DESKTOP_APP_SELECTION_SOURCE = "desktop.list_apps"
+_DESKTOP_RUNNING_APP_SELECTION_SOURCE = "desktop.running_apps"
+_DESKTOP_APP_SELECTION_SOURCES = {
+    _DESKTOP_APP_SELECTION_SOURCE,
+    _DESKTOP_RUNNING_APP_SELECTION_SOURCE,
+}
 _SELECTED_WORKSPACE_FILE_PATH = "<selected file from workspace.list>"
 
 
@@ -282,6 +289,22 @@ def _apps_from_list_apps_result(result: dict[str, Any]) -> list[Any]:
         if isinstance(matches, list):
             return matches
     return []
+
+
+def _desktop_app_selection_source(value: Any) -> str:
+    clean = str(value or "").strip()
+    if clean in _DESKTOP_APP_SELECTION_SOURCES:
+        return clean
+    return ""
+
+
+def _selected_desktop_app_placeholder_source(app_name: Any) -> str:
+    clean = str(app_name or "").strip()
+    if clean == _SELECTED_RUNNING_DESKTOP_APP_NAME:
+        return _DESKTOP_RUNNING_APP_SELECTION_SOURCE
+    if clean == _SELECTED_DESKTOP_APP_NAME:
+        return _DESKTOP_APP_SELECTION_SOURCE
+    return ""
 
 
 def _app_match_score(app: dict[str, Any]) -> int | None:
@@ -349,19 +372,30 @@ def _best_match_from_list_apps_result(result: dict[str, Any]) -> dict[str, Any] 
 def _discovered_app_name_for_query(
     timeline: list[dict[str, Any]],
     query: str,
+    *,
+    source_tool: str = _DESKTOP_APP_SELECTION_SOURCE,
 ) -> str:
     clean_query = _normalized_app_lookup(query)
     if not clean_query:
         return ""
+    clean_source_tool = _desktop_app_selection_source(source_tool) or _DESKTOP_APP_SELECTION_SOURCE
     for event in reversed(timeline):
         if event.get("event") != "agent.tool.call":
             continue
-        if str(event.get("detail") or "") != "desktop.list_apps":
+        if str(event.get("detail") or "") != clean_source_tool:
             continue
         input_preview = event.get("input_preview") if isinstance(event.get("input_preview"), dict) else {}
-        if not _app_lookups_related(input_preview.get("query"), clean_query):
+        if (
+            clean_source_tool == _DESKTOP_APP_SELECTION_SOURCE
+            and not _app_lookups_related(input_preview.get("query"), clean_query)
+        ):
             continue
         result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        if clean_source_tool == _DESKTOP_RUNNING_APP_SELECTION_SOURCE:
+            running_match = _best_running_app_match_for_query(result, query)
+            if running_match:
+                return _app_candidate_name(running_match)
+            continue
         best_match = _best_match_from_list_apps_result(result)
         if best_match is not None and _app_match_is_high_confidence(best_match, query):
             app_name = str(best_match.get("name") or "").strip()
@@ -387,6 +421,51 @@ def _discovered_app_name_for_query(
             if score is not None and score >= 80 and _app_match_is_high_confidence(app, query):
                 return _app_candidate_name(app)
     return ""
+
+
+def _best_running_app_match_for_query(
+    result: dict[str, Any],
+    query: str,
+) -> dict[str, Any]:
+    running_apps = [
+        app
+        for app in _apps_from_list_apps_result(result)
+        if isinstance(app, dict) and _app_candidate_name(app)
+    ]
+    if not running_apps:
+        return {}
+    clean_query = _normalized_app_lookup(query)
+    for app in running_apps:
+        app_name = _app_candidate_name(app)
+        if _normalized_app_lookup(app_name) == clean_query:
+            return {**app, "match_score": app.get("match_score", 100)}
+    installed_candidates = _installed_app_candidates_for_query(query)
+    for candidate in installed_candidates:
+        if not isinstance(candidate, Mapping):
+            continue
+        candidate_name = _app_candidate_name(candidate)
+        if not candidate_name or not _app_match_is_high_confidence(dict(candidate), query):
+            continue
+        for app in running_apps:
+            if _app_lookups_related(_app_candidate_name(app), candidate_name):
+                return {**dict(candidate), **dict(app), "name": _app_candidate_name(app)}
+    for app in running_apps:
+        app_name = _app_candidate_name(app)
+        if _app_lookups_related(app_name, clean_query):
+            return {**app, "match_score": app.get("match_score", 80)}
+    return {}
+
+
+def _installed_app_candidates_for_query(query: str) -> list[dict[str, Any]]:
+    try:
+        from apps.shell.agent.tools import desktop
+
+        candidates = desktop._installed_app_match_candidates(query)  # type: ignore[attr-defined]
+    except Exception:
+        return []
+    if not isinstance(candidates, list):
+        return []
+    return [candidate for candidate in candidates if isinstance(candidate, dict)]
 
 
 def _tool_request_with_discovered_app_name(
@@ -415,8 +494,8 @@ def _tool_request_with_app_name_resolution(
         "app_name": str(resolution.get("resolved_app_name") or "").strip(),
     }
     if (
-        str(raw_input.get("app_name") or "").strip() == _SELECTED_DESKTOP_APP_NAME
-        or str(raw_input.get("selection_source") or "").strip() == "desktop.list_apps"
+        _selected_desktop_app_placeholder_source(raw_input.get("app_name"))
+        or _desktop_app_selection_source(raw_input.get("selection_source"))
     ):
         resolved_input.pop("selection_source", None)
         resolved_input.pop("query", None)
@@ -888,9 +967,9 @@ def _tool_request_with_open_path_app_input(
         return tool_request
     raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
     app_name = str(raw_input.get("app_name") or "").strip()
-    if not app_name or app_name == _SELECTED_DESKTOP_APP_NAME:
+    if not app_name or _selected_desktop_app_placeholder_source(app_name):
         return tool_request
-    if str(raw_input.get("selection_source") or "").strip() == "desktop.list_apps":
+    if _desktop_app_selection_source(raw_input.get("selection_source")):
         return tool_request
     path = str(raw_input.get("path") or raw_input.get("target_path") or "").strip()
     if not path or (path.startswith("<") and path.endswith(">")):
@@ -950,7 +1029,7 @@ def _tool_request_with_foreground_app_context(
     raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
     if str(raw_input.get("app_name") or "").strip():
         return tool_request
-    if str(raw_input.get("selection_source") or "").strip() == "desktop.list_apps":
+    if _desktop_app_selection_source(raw_input.get("selection_source")):
         return tool_request
     app_name = str(target.get("app_name") or "").strip()
     if not app_name:
@@ -967,18 +1046,24 @@ def _tool_request_app_name_resolution(
 ) -> dict[str, str]:
     raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
     raw_app_name = str(raw_input.get("app_name") or "").strip()
-    selection_source = str(raw_input.get("selection_source") or "").strip()
+    selection_source = _desktop_app_selection_source(raw_input.get("selection_source"))
     selected_app_query = str(raw_input.get("query") or "").strip()
+    placeholder_source = _selected_desktop_app_placeholder_source(raw_app_name)
+    source_tool = selection_source or placeholder_source or _DESKTOP_APP_SELECTION_SOURCE
     uses_selected_app_placeholder = (
-        raw_app_name == _SELECTED_DESKTOP_APP_NAME
-        or selection_source == "desktop.list_apps"
+        bool(placeholder_source)
+        or bool(selection_source)
     )
     requested_app_name = (
         selected_app_query
         if uses_selected_app_placeholder and selected_app_query
         else raw_app_name
     )
-    discovered_app_name = _discovered_app_name_for_query(timeline, requested_app_name)
+    discovered_app_name = _discovered_app_name_for_query(
+        timeline,
+        requested_app_name,
+        source_tool=source_tool,
+    )
     if not discovered_app_name:
         return {}
     if (
@@ -993,8 +1078,13 @@ def _tool_request_app_name_resolution(
         "field": "app_name",
         "requested_app_name": requested_app_name,
         "resolved_app_name": discovered_app_name,
-        "source_tool": "desktop.list_apps",
-        **_discovered_app_resolution_evidence(timeline, requested_app_name, discovered_app_name),
+        "source_tool": source_tool,
+        **_discovered_app_resolution_evidence(
+            timeline,
+            requested_app_name,
+            discovered_app_name,
+            source_tool=source_tool,
+        ),
     }
 
 
@@ -1002,20 +1092,34 @@ def _discovered_app_resolution_evidence(
     timeline: list[dict[str, Any]],
     requested_app_name: str,
     resolved_app_name: str,
+    *,
+    source_tool: str = _DESKTOP_APP_SELECTION_SOURCE,
 ) -> dict[str, str]:
     clean_requested = _normalized_app_lookup(requested_app_name)
     clean_resolved = _normalized_app_lookup(resolved_app_name)
     if not clean_requested or not clean_resolved:
         return {}
+    clean_source_tool = _desktop_app_selection_source(source_tool) or _DESKTOP_APP_SELECTION_SOURCE
     for event in reversed(timeline):
         if event.get("event") != "agent.tool.call":
             continue
-        if str(event.get("detail") or "") != "desktop.list_apps":
+        if str(event.get("detail") or "") != clean_source_tool:
             continue
         input_preview = event.get("input_preview") if isinstance(event.get("input_preview"), dict) else {}
-        if not _app_lookups_related(input_preview.get("query"), clean_requested):
+        if (
+            clean_source_tool == _DESKTOP_APP_SELECTION_SOURCE
+            and not _app_lookups_related(input_preview.get("query"), clean_requested)
+        ):
             continue
         result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        if clean_source_tool == _DESKTOP_RUNNING_APP_SELECTION_SOURCE:
+            running_match = _best_running_app_match_for_query(result, requested_app_name)
+            if (
+                isinstance(running_match, dict)
+                and _normalized_app_lookup(_app_candidate_name(running_match)) == clean_resolved
+            ):
+                return _discovered_app_best_match_evidence(running_match)
+            continue
         best_match = _best_match_from_list_apps_result(result)
         if (
             isinstance(best_match, dict)
@@ -1027,7 +1131,7 @@ def _discovered_app_resolution_evidence(
                 continue
             if _normalized_app_lookup(_app_candidate_name(app)) != clean_resolved:
                 continue
-            return {}
+            return _discovered_app_best_match_evidence(app)
     return {}
 
 
@@ -2490,6 +2594,21 @@ def _unresolved_discovered_app_skip_result(
     requested_app = _selected_discovered_app_requested_name(raw_input)
     if not requested_app:
         return None
+    selection_source = (
+        _desktop_app_selection_source(raw_input.get("selection_source"))
+        or _selected_desktop_app_placeholder_source(raw_input.get("app_name"))
+        or _DESKTOP_APP_SELECTION_SOURCE
+    )
+    source_label = (
+        "running app"
+        if selection_source == _DESKTOP_RUNNING_APP_SELECTION_SOURCE
+        else "installed app"
+    )
+    recovery_input = (
+        {}
+        if selection_source == _DESKTOP_RUNNING_APP_SELECTION_SOURCE
+        else {"query": requested_app, "limit": 20}
+    )
     result: dict[str, Any] = {
         "ok": False,
         "skipped": True,
@@ -2499,24 +2618,24 @@ def _unresolved_discovered_app_skip_result(
         "error": "app_resolution_failed",
         "blocking_condition": "app_resolution_failed",
         "blocking_conditions": ["app_resolution_failed"],
-        "source_tool": "desktop.list_apps",
-        "source_summary": f"No installed app was selected for {requested_app}.",
+        "source_tool": selection_source,
+        "source_summary": f"No {source_label} was selected for {requested_app}.",
         "hint": (
-            "desktop.list_apps did not return a high-confidence app match. "
+            f"{selection_source} did not return a high-confidence app match. "
             "Discover the app again or ask the user to choose a candidate before executing."
         ),
         "data": {
             "requested_app_name": requested_app,
-            "selection_source": "desktop.list_apps",
+            "selection_source": selection_source,
             "skipped_tool": tool_name,
             "skipped_input": raw_input,
         },
-        "recommended_tools": ["desktop.list_apps"],
+        "recommended_tools": [selection_source],
         "recovery_actions": [
             {
                 "label": "重新发现应用",
-                "tool": "desktop.list_apps",
-                "input": {"query": requested_app, "limit": 20},
+                "tool": selection_source,
+                "input": recovery_input,
                 "permission_target": "app_discovery",
                 "risk_level": "low",
             }
@@ -2586,8 +2705,8 @@ def _unresolved_workspace_file_skip_result(
 
 def _selected_discovered_app_requested_name(raw_input: dict[str, Any]) -> str:
     raw_app_name = str(raw_input.get("app_name") or "").strip()
-    selection_source = str(raw_input.get("selection_source") or "").strip()
-    if raw_app_name != _SELECTED_DESKTOP_APP_NAME and selection_source != "desktop.list_apps":
+    selection_source = _desktop_app_selection_source(raw_input.get("selection_source"))
+    if not _selected_desktop_app_placeholder_source(raw_app_name) and not selection_source:
         return ""
     return str(raw_input.get("query") or raw_app_name or "").strip()
 

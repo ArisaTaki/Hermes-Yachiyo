@@ -2468,6 +2468,111 @@ def test_runtime_tool_request_runner_resolves_selected_discovered_app_placeholde
     assert ("run-selected-app", "agent.tool.input_resolved", resolution_payload) in run_events
 
 
+def test_runtime_tool_request_runner_resolves_selected_running_app_placeholder(monkeypatch) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop._installed_app_match_candidates",
+        lambda query: [
+            {
+                "name": "Numbers",
+                "path": "/System/Applications/Numbers.app",
+                "match_score": 92,
+                "match_confidence": "high",
+                "match_reason": f"capability_{query}",
+            }
+        ],
+    )
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        ToolDescriptorRegistry.validate_payload(tool_name, payload)
+        calls.append((tool_name, payload))
+        if tool_name == "desktop.running_apps":
+            result = {
+                "ok": True,
+                "action": "desktop.running_apps",
+                "data": {
+                    "apps": [
+                        {"name": "Finder", "frontmost": False},
+                        {"name": "Numbers", "frontmost": True},
+                    ],
+                    "frontmost": "Numbers",
+                },
+            }
+        else:
+            result = {
+                "ok": True,
+                "action": tool_name,
+                "data": {"app_name": payload["app_name"]},
+            }
+        timeline_arg.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+    messages = [{"role": "user", "content": "在当前打开的表格应用里粘贴结果"}]
+
+    runner.run(
+        [
+            {"tool": "desktop.running_apps", "input": {}},
+            {
+                "tool": "app.focus_and_safe_shortcut",
+                "input": {
+                    "app_name": "<selected app from desktop.running_apps>",
+                    "selection_source": "desktop.running_apps",
+                    "query": "spreadsheet",
+                    "action": "paste",
+                },
+            },
+        ],
+        ["desktop.running_apps", "app.focus_and_safe_shortcut"],
+        FakeBroker({"ok": True}),
+        messages,
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-selected-running-app",
+        budget=FakeBudget(),
+    )
+
+    assert calls == [
+        ("desktop.running_apps", {}),
+        ("app.focus_and_safe_shortcut", {"app_name": "Numbers", "action": "paste"}),
+    ]
+    resolution_payload = {
+        "tool": "app.focus_and_safe_shortcut",
+        "field": "app_name",
+        "requested_app_name": "spreadsheet",
+        "resolved_app_name": "Numbers",
+        "source_tool": "desktop.running_apps",
+        "resolved_app_path": "/System/Applications/Numbers.app",
+        "app_resolution_score": "92",
+        "app_resolution_confidence": "high",
+        "app_resolution_reason": "capability_spreadsheet",
+    }
+    assert [
+        event for event in timeline if event["event"] == "agent.tool.input_resolved"
+    ] == [
+        {
+            "event": "agent.tool.input_resolved",
+            "detail": "app.focus_and_safe_shortcut",
+            **resolution_payload,
+        }
+    ]
+    assert ("run-selected-running-app", "agent.tool.input_resolved", resolution_payload) in run_events
+
+
 def test_runtime_tool_request_runner_resolves_top_level_app_candidates() -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
     run_events: list[tuple[str, str, dict[str, Any]]] = []

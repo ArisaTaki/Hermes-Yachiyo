@@ -3528,6 +3528,14 @@ class RuntimePlanner:
         ):
             action = str(desktop_discovery.get("action") or "").strip()
             tool_name, input_preview = _desktop_discovery_tool_preview(action, desktop_discovery)
+            discovery_query = str(input_preview.get("query") or "").strip()
+            tool_name, input_preview = _running_app_discovery_tool_preview(
+                intent,
+                allowed,
+                tool_name,
+                input_preview,
+                app_capability=app_capability,
+            )
             steps = [
                 _step(
                     intent,
@@ -3560,10 +3568,11 @@ class RuntimePlanner:
                     if selected_app_tool in {"app.open", "desktop.open_app"}
                     else "desktop.ui_operation"
                 )
+                selection_source = _selected_app_selection_source(tool_name)
                 selected_app_input_preview = {
-                    "app_name": "<selected app from desktop.list_apps>",
-                    "selection_source": "desktop.list_apps",
-                    "query": str(input_preview.get("query") or "").strip(),
+                    "app_name": _selected_app_placeholder(selection_source),
+                    "selection_source": selection_source,
+                    "query": discovery_query,
                     **_selected_discovered_app_operation_preview(
                         selected_app_tool,
                         safe_shortcut=safe_shortcut,
@@ -3593,7 +3602,7 @@ class RuntimePlanner:
                         ],
                         action=selected_app_action,
                         reason=(
-                            "After desktop.list_apps returns candidates, runtime resolves the "
+                            f"After {selection_source} returns candidates, runtime resolves the "
                             "best matching app before opening it or continuing with the target file."
                         ),
                     )
@@ -3685,6 +3694,14 @@ class RuntimePlanner:
         if desktop_discovery and not app_name and app_search:
             action = str(desktop_discovery.get("action") or "").strip()
             tool_name, input_preview = _desktop_discovery_tool_preview(action, desktop_discovery)
+            discovery_query = str(input_preview.get("query") or "").strip()
+            tool_name, input_preview = _running_app_discovery_tool_preview(
+                intent,
+                allowed,
+                tool_name,
+                input_preview,
+                app_capability=app_capability,
+            )
             desktop_discovery_step_id = (
                 f"{action}-desktop-state" if action else "discover-desktop-state"
             )
@@ -3725,10 +3742,11 @@ class RuntimePlanner:
                 selected_app_target_path = str(
                     intent.inputs.get("selected_app_target_path_hint") or ""
                 ).strip()
+                selection_source = _selected_app_selection_source(tool_name)
                 selected_app_input_preview = {
-                    "app_name": "<selected app from desktop.list_apps>",
-                    "selection_source": "desktop.list_apps",
-                    "query": str(input_preview.get("query") or "").strip(),
+                    "app_name": _selected_app_placeholder(selection_source),
+                    "selection_source": selection_source,
+                    "query": discovery_query,
                     **_selected_discovered_app_operation_preview(
                         selected_app_tool,
                         safe_shortcut=safe_shortcut,
@@ -3749,7 +3767,7 @@ class RuntimePlanner:
                         depends_on=[desktop_discovery_step_id],
                         action=selected_app_action,
                         reason=(
-                            "After desktop.list_apps returns candidates, runtime resolves the "
+                            f"After {selection_source} returns candidates, runtime resolves the "
                             "best matching app before continuing with the in-app operation."
                         ),
                     )
@@ -26580,6 +26598,75 @@ def _desktop_discovery_tool_preview(
             {"query": query, "limit": 20} if query else {},
         )
     return None, {}
+
+
+def _running_app_discovery_tool_preview(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    tool_name: str | None,
+    input_preview: Mapping[str, Any],
+    *,
+    app_capability: Mapping[str, Any],
+) -> tuple[str | None, dict[str, Any]]:
+    if tool_name != "desktop.list_apps":
+        return tool_name, dict(input_preview)
+    if not _running_app_capability_scope_requested(intent, app_capability):
+        return tool_name, dict(input_preview)
+    running_tool = _first_allowed(("desktop.running_apps",), allowed)
+    if not running_tool:
+        return tool_name, dict(input_preview)
+    return running_tool, {}
+
+
+def _running_app_capability_scope_requested(
+    intent: TaskIntentSnapshot,
+    app_capability: Mapping[str, Any],
+) -> bool:
+    if not isinstance(app_capability, Mapping):
+        return False
+    value = " ".join(
+        item
+        for item in (
+            _clean_prompt(intent.user_goal),
+            str(app_capability.get("description") or "").strip(),
+        )
+        if item
+    )
+    if not value:
+        return False
+    return _contains_any(
+        value,
+        (
+            "当前打开",
+            "已打开",
+            "打开的",
+            "正在运行",
+            "运行中",
+            "开着",
+            "已开启",
+            "当前已打开",
+            "currently open",
+            "already open",
+            "opened app",
+            "open app",
+            "running app",
+            "running application",
+            "running browser",
+            "running window",
+        ),
+    )
+
+
+def _selected_app_selection_source(tool_name: str | None) -> str:
+    if str(tool_name or "").strip() == "desktop.running_apps":
+        return "desktop.running_apps"
+    return "desktop.list_apps"
+
+
+def _selected_app_placeholder(selection_source: str) -> str:
+    if str(selection_source or "").strip() == "desktop.running_apps":
+        return "<selected app from desktop.running_apps>"
+    return "<selected app from desktop.list_apps>"
 
 
 def _looks_like_desktop_permissions_request(value: str, lowered: str) -> bool:

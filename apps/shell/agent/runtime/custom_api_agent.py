@@ -80,6 +80,16 @@ _DAILY_DESKTOP_DISCOVERY_PREFIX_TOOLS = {
     "desktop.permissions",
 }
 
+_DISCOVERED_APP_SELECTION_SOURCES = {
+    "desktop.list_apps",
+    "desktop.running_apps",
+}
+
+_DISCOVERED_APP_PLACEHOLDERS = {
+    "desktop.list_apps": "<selected app from desktop.list_apps>",
+    "desktop.running_apps": "<selected app from desktop.running_apps>",
+}
+
 _DAILY_DESKTOP_VERIFY_TOOLS = {
     "desktop.active_window",
     "desktop.list_windows",
@@ -8081,7 +8091,10 @@ def _runtime_planner_completed_discovered_app_direct_action(
     ]
     if not followup_requests:
         return False
-    if any(str(request.get("tool") or "").strip() != "desktop.list_apps" for request in followup_requests):
+    if any(
+        str(request.get("tool") or "").strip() not in _DISCOVERED_APP_SELECTION_SOURCES
+        for request in followup_requests
+    ):
         return False
 
     indexed_action_requests = [
@@ -8148,6 +8161,21 @@ def _discovered_app_target_requires_model_followup(target: Mapping[str, Any]) ->
     return str(target.get("body_source") or "").strip() == "model_generated_content"
 
 
+def _discovered_app_selection_source(value: Any) -> str:
+    clean = str(value or "").strip()
+    if clean in _DISCOVERED_APP_SELECTION_SOURCES:
+        return clean
+    return ""
+
+
+def _discovered_app_placeholder_source(value: Any) -> str:
+    clean = str(value or "").strip()
+    for source, placeholder in _DISCOVERED_APP_PLACEHOLDERS.items():
+        if clean == placeholder:
+            return source
+    return ""
+
+
 def _request_uses_discovered_app_resolution(request: Mapping[str, Any]) -> bool:
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     resolution = (
@@ -8156,9 +8184,9 @@ def _request_uses_discovered_app_resolution(request: Mapping[str, Any]) -> bool:
         else {}
     )
     return (
-        str(payload.get("app_name") or "").strip() == "<selected app from desktop.list_apps>"
-        or str(payload.get("selection_source") or "").strip() == "desktop.list_apps"
-        or str(resolution.get("source_tool") or "").strip() == "desktop.list_apps"
+        bool(_discovered_app_placeholder_source(payload.get("app_name")))
+        or bool(_discovered_app_selection_source(payload.get("selection_source")))
+        or bool(_discovered_app_selection_source(resolution.get("source_tool")))
     )
 
 
@@ -8198,13 +8226,20 @@ def _expected_app_name_for_discovered_app_direct_action(
     if resolved_app:
         return resolved_app
     raw_app = str(payload.get("app_name") or "").strip()
-    selection_source = str(payload.get("selection_source") or "").strip()
+    selection_source = (
+        _discovered_app_selection_source(payload.get("selection_source"))
+        or _discovered_app_placeholder_source(raw_app)
+    )
     query = str(payload.get("query") or "").strip()
-    if selection_source == "desktop.list_apps" and query:
-        discovered = _discovered_app_name_for_query(timeline[tool_timeline_start:], query)
+    if selection_source and query:
+        discovered = _discovered_app_name_for_query(
+            timeline[tool_timeline_start:],
+            query,
+            source_tool=selection_source,
+        )
         if discovered:
             return discovered
-    if raw_app and raw_app != "<selected app from desktop.list_apps>":
+    if raw_app and not _discovered_app_placeholder_source(raw_app):
         return raw_app
     tool_name = str(request.get("tool") or "").strip()
     for event in timeline[tool_timeline_start:]:
@@ -8516,7 +8551,7 @@ def _runtime_planner_event_app_name_candidates(event: Mapping[str, Any]) -> list
         result,
     )
     detail = str(event.get("detail") or "").strip()
-    if detail == "desktop.list_apps":
+    if detail in {"desktop.list_apps", "desktop.running_apps"}:
         candidates.extend(_runtime_planner_list_apps_result_candidates(result, data))
     return candidates
 
@@ -11295,10 +11330,14 @@ def _discovered_app_resolution_probe_requests(
         return requests
     discovery_index = -1
     for index, request in enumerate(requests):
-        if str(request.get("tool") or "").strip() != "desktop.list_apps":
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name not in _DISCOVERED_APP_SELECTION_SOURCES:
             continue
         payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
-        if str(payload.get("query") or "").strip() == app_query:
+        if (
+            tool_name == "desktop.running_apps"
+            or str(payload.get("query") or "").strip() == app_query
+        ):
             discovery_index = index
             break
     if discovery_index < 0:
@@ -11318,18 +11357,15 @@ def _request_uses_selected_desktop_app_result(
     app_query: str,
 ) -> bool:
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
-    if (
-        str(
-            payload.get("selection_source")
-            or payload.get("app_selection_source")
-            or ""
-        ).strip()
-        != "desktop.list_apps"
-    ):
+    selection_source = _discovered_app_selection_source(
+        payload.get("selection_source")
+        or payload.get("app_selection_source")
+    )
+    if not selection_source:
         return False
     if str(payload.get("query") or "").strip() != str(app_query or "").strip():
         return False
-    return str(payload.get("app_name") or "").strip() == "<selected app from desktop.list_apps>"
+    return _discovered_app_placeholder_source(payload.get("app_name")) == selection_source
 
 
 def _tool_requests_without_model_followup(

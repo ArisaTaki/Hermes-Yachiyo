@@ -483,7 +483,13 @@ def _tool_request_from_execution_request(
 
 
 _SELECTED_DESKTOP_APP_NAME = "<selected app from desktop.list_apps>"
+_SELECTED_RUNNING_DESKTOP_APP_NAME = "<selected app from desktop.running_apps>"
 _DESKTOP_APP_SELECTION_SOURCE = "desktop.list_apps"
+_DESKTOP_RUNNING_APP_SELECTION_SOURCE = "desktop.running_apps"
+_DESKTOP_APP_SELECTION_SOURCES = {
+    _DESKTOP_APP_SELECTION_SOURCE,
+    _DESKTOP_RUNNING_APP_SELECTION_SOURCE,
+}
 
 
 def _desktop_execution_request_contract(
@@ -526,7 +532,7 @@ def _desktop_execution_request_contract(
 
     observation_evidence = {
         "source_tool": (
-            _DESKTOP_APP_SELECTION_SOURCE
+            scope.get("selection_source")
             if runtime_stage != "verify"
             else (tool_name or "runtime_verification")
         ),
@@ -569,16 +575,18 @@ def _desktop_app_selection_scope(
         request_input.get("query")
         or input_resolution.get("requested_app_name")
         or input_resolution.get("query")
-        or ("" if app_name == _SELECTED_DESKTOP_APP_NAME else app_name)
+        or ("" if _desktop_app_placeholder_selection_source(app_name) else app_name)
     ).strip()
-    if (
-        selection_source != _DESKTOP_APP_SELECTION_SOURCE
-        and resolution_source != _DESKTOP_APP_SELECTION_SOURCE
-        and app_name != _SELECTED_DESKTOP_APP_NAME
-    ):
+    if selection_source not in _DESKTOP_APP_SELECTION_SOURCES:
+        selection_source = ""
+    if resolution_source not in _DESKTOP_APP_SELECTION_SOURCES:
+        resolution_source = ""
+    placeholder_source = _desktop_app_placeholder_selection_source(app_name)
+    source = selection_source or resolution_source or placeholder_source
+    if not source:
         return {}
     scope: dict[str, Any] = {
-        "selection_source": _DESKTOP_APP_SELECTION_SOURCE,
+        "selection_source": source,
     }
     if app_name:
         scope["app_name"] = app_name
@@ -685,17 +693,31 @@ def _desktop_observation_retry(
             }
         )
     query = str(scope.get("query") or scope.get("app_name") or "").strip()
-    retry_input: dict[str, Any] = {"limit": 20}
-    if query:
+    selection_source = str(scope.get("selection_source") or _DESKTOP_APP_SELECTION_SOURCE).strip()
+    retry_input: dict[str, Any] = (
+        {}
+        if selection_source == _DESKTOP_RUNNING_APP_SELECTION_SOURCE
+        else {"limit": 20}
+    )
+    if query and selection_source != _DESKTOP_RUNNING_APP_SELECTION_SOURCE:
         retry_input["query"] = query
     return _non_empty_mapping(
         {
-            "from_tool": _DESKTOP_APP_SELECTION_SOURCE,
-            "tool": _DESKTOP_APP_SELECTION_SOURCE,
+            "from_tool": selection_source,
+            "tool": selection_source,
             "input": retry_input,
             "reason": "resolve_desktop_app",
         }
     )
+
+
+def _desktop_app_placeholder_selection_source(app_name: str) -> str:
+    clean_name = str(app_name or "").strip()
+    if clean_name == _SELECTED_RUNNING_DESKTOP_APP_NAME:
+        return _DESKTOP_RUNNING_APP_SELECTION_SOURCE
+    if clean_name == _SELECTED_DESKTOP_APP_NAME:
+        return _DESKTOP_APP_SELECTION_SOURCE
+    return ""
 
 
 def _non_empty_mapping(value: Mapping[str, Any]) -> dict[str, Any]:

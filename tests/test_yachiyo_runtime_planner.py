@@ -14426,6 +14426,7 @@ def test_runtime_planner_routes_focus_window_to_focus_window_tool() -> None:
 
 def test_runtime_planner_focuses_generic_browser_window_through_discovery() -> None:
     allowed_tools = [
+        "desktop.running_apps",
         "desktop.list_apps",
         "app.open",
         "app.focus",
@@ -14449,12 +14450,15 @@ def test_runtime_planner_focuses_generic_browser_window_through_discovery() -> N
             "open-selected-discovered-app",
             "verify-desktop-result",
         ]
+        assert _step_by_id(decision, "discover_apps-desktop-state").tool_name == (
+            "desktop.running_apps"
+        )
         assert _step_by_id(decision, "open-selected-discovered-app").tool_name == (
             "app.focus"
         )
         assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
-            "app_name": "<selected app from desktop.list_apps>",
-            "selection_source": "desktop.list_apps",
+            "app_name": "<selected app from desktop.running_apps>",
+            "selection_source": "desktop.running_apps",
             "query": "browser",
         }
         assert _step_by_id(decision, "verify-desktop-result").tool_name == (
@@ -34322,11 +34326,20 @@ def test_runtime_planner_projects_current_app_paste_as_focus_safe_shortcut() -> 
     envelope = runtime_execution_envelope_from_decision(decision, full_plan=True)
 
     assert decision.selected_intent.kind == "desktop_operation"
+    assert _step_by_id(decision, "discover_apps-desktop-state").tool_name == (
+        "desktop.running_apps"
+    )
     assert _step_by_id(decision, "open-selected-discovered-app").tool_name == (
         "app.focus_and_safe_shortcut"
     )
-    assert _step_by_id(decision, "open-selected-discovered-app").input_preview["action"] == "paste"
+    assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "spreadsheet",
+        "action": "paste",
+    }
     assert envelope is not None
+    assert envelope.requests[0].tool_name == "desktop.running_apps"
     assert [request.tool_name for request in envelope.requests].count(
         "app.focus_and_safe_shortcut"
     ) == 1
@@ -34337,4 +34350,5 @@ def test_runtime_planner_projects_current_app_paste_as_focus_safe_shortcut() -> 
     )
     assert paste_request.runtime_stage == "operate"
     assert paste_request.runtime_role == "shortcut_ui"
+    assert paste_request.input["selection_source"] == "desktop.running_apps"
     assert paste_request.task_todo["metadata"]["runtime_role"] == "shortcut_ui"
