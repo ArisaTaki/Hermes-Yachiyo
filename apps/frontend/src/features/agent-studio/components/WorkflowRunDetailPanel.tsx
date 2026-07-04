@@ -104,11 +104,13 @@ export function WorkflowRunDetailPanel({
           {childSnapshots.map((child) => {
             const plannerSummary = publicChildPlannerSummary(child);
             const rawPlannerSummary = child.planner_summary;
+            const taskProgressSummary = publicChildTaskProgressSummary(child);
             return (
               <button
                 type="button"
                 data-group-run-id={child.group_run_id || child.run_group_id || ''}
                 data-has-planner-summary={String(Boolean(plannerSummary))}
+                data-has-task-progress={String(Boolean(taskProgressSummary))}
                 data-planner-approvals-required={plannerSummaryValues(rawPlannerSummary?.approvals_required)}
                 data-planner-artifacts-expected={plannerSummaryValues(rawPlannerSummary?.artifacts_expected)}
                 data-planner-capabilities={plannerSummaryValues(rawPlannerSummary?.plan_capabilities)}
@@ -122,6 +124,7 @@ export function WorkflowRunDetailPanel({
                 data-planner-tools={plannerSummaryValues(rawPlannerSummary?.plan_tools)}
                 data-run-id={child.run_id}
                 data-selected-tools={plannerSummaryValues(rawPlannerSummary?.selected_tools)}
+                data-task-progress-status={child.task_progress?.status || ''}
                 data-testid="agent-run-detail-public-child-run"
                 data-workflow-node-id={child.workflow_node_id || ''}
                 key={child.run_id}
@@ -135,6 +138,14 @@ export function WorkflowRunDetailPanel({
                     data-testid="agent-run-detail-public-child-planner-summary"
                   >
                     Planner trace · {plannerSummary}
+                  </small>
+                ) : null}
+                {taskProgressSummary ? (
+                  <small
+                    className="group-run-child-task-progress"
+                    data-testid="agent-run-detail-public-child-task-progress"
+                  >
+                    Task progress · {taskProgressSummary}
                   </small>
                 ) : null}
               </button>
@@ -197,6 +208,21 @@ function publicChildPlannerToolSummary(summary: PlannerTraceSummarySnapshot | nu
   if (selectedTools) return `selected ${selectedTools}`;
   const planTools = plannerSummaryValues(summary?.plan_tools, ', ');
   return planTools ? `tools ${planTools}` : '';
+}
+
+function publicChildTaskProgressSummary(child: RunTimelineChildSnapshot): string {
+  const progress = child.task_progress || null;
+  if (!progress) return '';
+  return [
+    progress.progress_text || progress.status || '',
+    typeof progress.completed_todos === 'number' || typeof progress.total_todos === 'number'
+      ? `todo ${progress.completed_todos ?? 0}/${progress.total_todos ?? 0}`
+      : '',
+    progress.needs_replan ? 'replan' : '',
+    progress.failed_verification_count ? `verify failed ${progress.failed_verification_count}` : '',
+    progress.pending_verification_count ? `verify pending ${progress.pending_verification_count}` : '',
+    progress.needs_user_action ? 'user action' : '',
+  ].filter(Boolean).join(' · ');
 }
 
 function plannerSummaryValues(values: string[] | null | undefined, separator = ','): string {

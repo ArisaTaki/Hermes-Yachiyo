@@ -846,6 +846,7 @@ class RunTimelineChildSnapshot(_PublicSnapshot):
     agent_id: str | None = None
     workflow_id: str | None = None
     planner_summary: PlannerTraceSummarySnapshot | None = None
+    task_progress: TaskProgressSummarySnapshot | None = None
 
 
 class RecoveryRunProvenanceSnapshot(_PublicSnapshot):

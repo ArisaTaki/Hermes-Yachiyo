@@ -994,6 +994,95 @@ def test_run_timeline_child_snapshot_projects_planner_summary_from_child_events(
     }
 
 
+def test_run_timeline_child_snapshot_projects_task_progress_from_payload() -> None:
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-1",
+            "kind": "workflow_run",
+            "status": "running",
+            "children": [
+                {
+                    "run_id": "child-run-1",
+                    "status": "running",
+                    "kind": "agent_run",
+                    "workflow_node_id": "analyze",
+                    "task_progress": {
+                        "core_id": "task-core-1",
+                        "workspace_id": "workspace-1",
+                        "status": "running",
+                        "completed_todos": 1,
+                        "total_todos": 2,
+                        "pending_verification_count": 1,
+                        "progress_text": "1/2 todos completed",
+                    },
+                }
+            ],
+        }
+    )
+
+    child = snapshot.children[0]
+    assert child.task_progress is not None
+    assert child.task_progress.core_id == "task-core-1"
+    assert child.task_progress.status == "running"
+    assert child.task_progress.completed_todos == 1
+    payload = _json(snapshot)
+    assert payload["children"][0]["task_progress"]["progress_text"] == "1/2 todos completed"
+
+
+def test_run_timeline_child_snapshot_projects_task_progress_from_task_core() -> None:
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-1",
+            "kind": "workflow_run",
+            "status": "running",
+            "children": [
+                {
+                    "run_id": "child-run-1",
+                    "status": "running",
+                    "kind": "agent_run",
+                    "workflow_node_id": "analyze",
+                    "task_core": {
+                        "core_id": "task-core-1",
+                        "workspace": {"workspace_id": "workspace-1", "title": "Analyze workspace"},
+                        "todos": [
+                            {
+                                "todo_id": "todo-inspect-data",
+                                "step_id": "inspect-data",
+                                "title": "Inspect data",
+                                "status": "completed",
+                            },
+                            {
+                                "todo_id": "todo-run-analysis",
+                                "step_id": "run-analysis",
+                                "title": "Run analysis",
+                                "status": "in_progress",
+                            },
+                        ],
+                        "checkpoints": [
+                            {
+                                "checkpoint_id": "verify-analysis",
+                                "after_step_id": "run-analysis",
+                                "title": "Check analysis output",
+                                "status": "pending",
+                                "payload": {"verification_status": "pending_verification"},
+                            }
+                        ],
+                    },
+                }
+            ],
+        }
+    )
+
+    child = snapshot.children[0]
+    assert child.task_progress is not None
+    assert child.task_progress.core_id == "task-core-1"
+    assert child.task_progress.workspace_id == "workspace-1"
+    assert child.task_progress.status == "running"
+    assert child.task_progress.completed_todos == 1
+    assert child.task_progress.total_todos == 2
+    assert child.task_progress.pending_verification_count == 1
+
+
 def test_run_timeline_snapshot_projects_planner_summary_from_events() -> None:
     snapshot = run_timeline_snapshot_from_payload(
         {
@@ -3490,6 +3579,8 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
         "intent_kind",
         "replan_request_id",
         "replan_trigger",
+        "task_workspace_items",
+        "task_verification_targets",
         "title",
         "description",
         "status",
@@ -5356,6 +5447,8 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
         "capability_id",
         "replan_request_id",
         "replan_trigger",
+        "task_workspace_items",
+        "task_verification_targets",
         "tool_name",
         "status",
         "risk_level",

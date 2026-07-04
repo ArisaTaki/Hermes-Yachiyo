@@ -12,7 +12,11 @@ from .contracts import (
     PublicRunEvent,
     RecoveryRunProvenanceSnapshot,
     RunTimelineChildSnapshot,
+    TaskProgressSummarySnapshot,
 )
+from .events import public_run_event_from_payload
+from .task_core_snapshots import task_core_snapshot_from_payload
+from .task_progress_snapshots import task_progress_summary_from_task_core
 
 _PLANNER_INTENT_EVENTS = {
     "agent.intent.selected",
@@ -87,6 +91,7 @@ def timeline_child_snapshot_from_payload(payload: Mapping[str, Any]) -> RunTimel
             or (runnable_id if kind == "workflow_run" else "")
         ),
         planner_summary=planner_trace_summary_from_payload(payload),
+        task_progress=task_progress_summary_from_payload(payload),
     )
 
 
@@ -298,6 +303,43 @@ def planner_trace_summary_from_payload(
         step_count=max(step_count, len(step_ids)),
         event_count=event_count,
     )
+
+
+def task_progress_summary_from_payload(
+    payload: Mapping[str, Any],
+) -> TaskProgressSummarySnapshot | None:
+    explicit = payload.get("task_progress")
+    if isinstance(explicit, TaskProgressSummarySnapshot):
+        return explicit
+    if isinstance(explicit, Mapping):
+        try:
+            return TaskProgressSummarySnapshot.model_validate(explicit)
+        except ValueError:
+            pass
+
+    run_id = _text(payload.get("run_id"))
+    events = _public_events_from_payload(payload, run_id=run_id)
+    task_core = task_core_snapshot_from_payload(payload, events=events)
+    return task_progress_summary_from_task_core(task_core, events=events)
+
+
+def _public_events_from_payload(
+    payload: Mapping[str, Any],
+    *,
+    run_id: str,
+) -> list[PublicRunEvent]:
+    events: list[PublicRunEvent] = []
+    sequence = 0
+    for key in ("events", "run_events", "timeline"):
+        value = payload.get(key)
+        if not isinstance(value, list):
+            continue
+        for item in value:
+            if not isinstance(item, (Mapping, PublicRunEvent)):
+                continue
+            sequence += 1
+            events.append(public_run_event_from_payload(item, run_id=run_id, sequence=sequence))
+    return events
 
 
 def _unique_children(children: list[RunTimelineChildSnapshot]) -> list[RunTimelineChildSnapshot]:

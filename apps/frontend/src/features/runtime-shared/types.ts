@@ -802,6 +802,7 @@ export type RunTimelineChildSnapshot = {
   agent_id?: string | null;
   workflow_id?: string | null;
   planner_summary?: PlannerTraceSummarySnapshot | null;
+  task_progress?: TaskProgressSummarySnapshot | null;
 };
 
 export type RecoveryRunProvenanceSnapshot = {
