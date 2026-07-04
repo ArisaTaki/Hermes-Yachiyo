@@ -1254,6 +1254,8 @@ _FOREGROUND_APP_CONTEXT_TOOLS = {
     "desktop.inspect_app",
     "desktop.list_windows",
     "desktop.windows",
+    "desktop.read_ui",
+    "desktop.ui_elements",
     "desktop.verify",
 }
 

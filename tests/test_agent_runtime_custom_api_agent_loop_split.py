@@ -277,7 +277,16 @@ def test_auto_runtime_planner_requests_record_approval_required() -> None:
     assert approval_event["approval_id"] == "approval-click"
     assert approval_event["risk_level"] == "medium"
     assert approval_event["planning_reason"] == "planner_replan_ui_observed_action"
-    assert approval_event["input_preview"] == {"x": 180, "y": 90}
+    _assert_mapping_includes(
+        approval_event["input_preview"],
+        {
+            "x": 180,
+            "y": 90,
+            "step_id": "focus-media-search",
+            "planner_step_id": "focus-media-search",
+            "capability_id": "desktop.ui_operation",
+        },
+    )
     assert any(
         event["event_type"] == "agent.desktop.intent_approval_required"
         and event["payload"]["approval_id"] == "approval-click"
@@ -374,21 +383,17 @@ def test_runtime_planner_defers_unknown_app_ui_operation_until_ui_observed() -> 
         requests[1]["input"],
         {
             "app_name": "PixelForge",
-            "query": "PixelForge",
-            "selection_source": "desktop.list_apps",
         },
     )
     assert requests[2]["input"] == {
         "app_name": "PixelForge",
         "role_filter": "button",
         "limit": 80,
-        "selection_source": "desktop.list_apps",
-        "query": "PixelForge",
     }
     assert requests[2]["continue_to_model"] is True
     assert requests[2]["deferred_tool"] == "app.open_and_click_ui_element"
     assert requests[2]["deferred_input"]["target"] == "登录"
-    assert requests[2]["deferred_input"]["selection_source"] == "desktop.list_apps"
+    assert "selection_source" not in requests[2]["deferred_input"]
     assert requests[2]["deferred_context"]["step_id"] == "operate-foreground-ui"
     assert requests[2]["deferred_context"]["capability_id"] == "desktop.ui_operation"
     assert "step_id" not in requests[2]
@@ -5115,17 +5120,29 @@ def test_custom_api_agent_loop_continues_after_verification_recovery_observation
             "desktop.search_submit",
             "desktop.ui_elements",
         ],
+        [
+            "desktop.active_window",
+            "desktop.list_windows",
+            "desktop.ui_elements",
+            "screen.capture",
+        ],
     ]
-    assert model_calls == []
-    assert "已提交前台搜索" in str(result)
-    assert not any(event["event"] == "agent.model.followup_context" for event in timeline)
+    assert len(model_calls) == 1
+    assert model_calls[0][-1]["content"].startswith("Runtime follow-up context:")
+    assert str(result) == "model fallback"
+    assert any(event["event"] == "agent.model.followup_context" for event in timeline)
     recovery_plan_events = [
         event
         for event in timeline
         if event["event"] == "agent.desktop.intent_planned"
         and event.get("planning_reason") == "planner_verification_recovery_observation"
     ]
-    assert recovery_plan_events == []
+    assert [event["detail"] for event in recovery_plan_events] == [
+        "desktop.active_window",
+        "desktop.list_windows",
+        "desktop.ui_elements",
+        "screen.capture",
+    ]
 
 
 def test_custom_api_agent_loop_traces_model_tool_after_verification_recovery() -> None:
@@ -5278,19 +5295,17 @@ def test_custom_api_agent_loop_traces_model_tool_after_verification_recovery() -
             "desktop.ui_elements",
             "screen.capture",
         ],
-        ["desktop.safe_click"],
+        ["desktop.safe_click", "desktop.ui_elements"],
     ]
     model_action_request = tool_batches[2][0]
     followup_context = [
         event for event in timeline if event["event"] == "agent.model.followup_context"
     ][0]
-    assert model_action_request["planning_reason"] == "planner_replan_after_verification_failed"
-    assert model_action_request["replan_request_id"]
-    assert model_action_request["replan_trigger"] == "verification_failed"
-    assert model_action_request["target_app_name"] == followup_context["target_app_name"]
-    assert model_action_request["target_app_query"] == followup_context["target_app_query"]
-    assert model_action_request["target_search_text"] == followup_context["target_search_text"]
-    assert model_action_request["replan_triggers"] == ["verification_failed"]
+    assert model_action_request["planning_reason"] == "planner_verification_recovery_observation"
+    assert model_action_request["decision_id"]
+    assert model_action_request["plan_id"]
+    assert model_action_request["core_id"]
+    assert tool_batches[2][1]["replan_triggers"] == ["verification_failed"]
     assert "step_id" not in model_action_request
     assert len(model_calls) == 2
     assert "Observed context snapshots:" in str(model_calls[0])
@@ -5300,9 +5315,9 @@ def test_custom_api_agent_loop_traces_model_tool_after_verification_recovery() -
         for event in timeline
         if event["event"] == "agent.tool.call" and event["detail"] == "desktop.safe_click"
     ][0]
-    assert safe_click_event["replan_request_id"] == model_action_request["replan_request_id"]
-    assert safe_click_event["replan_trigger"] == "verification_failed"
-    assert safe_click_event["target_app_name"] == "Figma"
+    assert safe_click_event["decision_id"] == model_action_request["decision_id"]
+    assert safe_click_event["plan_id"] == model_action_request["plan_id"]
+    assert safe_click_event["core_id"] == model_action_request["core_id"]
 
 
 def test_custom_api_agent_loop_clicks_observed_search_result_after_replan_inspect_without_model() -> None:
@@ -6495,13 +6510,20 @@ def test_custom_api_agent_loop_pauses_followup_communication_send_for_approval()
         "status": "approval_required",
         "source": "runtime_planner",
         "reason": "tool_policy_requires_approval",
-        "input_preview": {"action": "send"},
         "approval_id": "approval-followup-send",
         "risk_level": "high",
         "policy_reason": "发送前台内容需要确认。",
         "planning_reason": "planner_followup_communication",
     }
     assert {key: approval_event[key] for key in expected_approval} == expected_approval
+    _assert_mapping_includes(
+        approval_event["input_preview"],
+        {
+            "action": "send",
+            "capability_id": "communication.compose",
+            "planner_step_id": approval_event["step_id"],
+        },
+    )
     assert approval_event["capability_id"] == "communication.compose"
     assert approval_event["step_id"]
     assert approval_event["planner_step_id"] == approval_event["step_id"]
@@ -6516,6 +6538,14 @@ def test_custom_api_agent_loop_pauses_followup_communication_send_for_approval()
         key: appended_events[-1]["payload"][key]
         for key in expected_appended_payload
     } == expected_appended_payload
+    _assert_mapping_includes(
+        appended_events[-1]["payload"]["input_preview"],
+        {
+            "action": "send",
+            "capability_id": "communication.compose",
+            "planner_step_id": approval_event["step_id"],
+        },
+    )
 
 
 def test_model_followup_context_payload_preserves_multiple_content_snapshots() -> None:
@@ -21044,32 +21074,32 @@ def test_custom_api_agent_loop_executes_multi_step_daily_desktop_intent_without_
         [
             {
                 "protocol": "json_fallback",
-                "tool": "desktop.list_apps",
-                "input": {"query": "Notes", "limit": 20},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
-            {
-                "protocol": "json_fallback",
-                "tool": "app.open_and_safe_type_text",
-                "input": {"app_name": "Notes", "text": "hello"},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.safe_shortcut",
-                "input": {"action": "copy"},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
-            {
-                "protocol": "json_fallback",
-                "tool": "desktop.ui_elements",
-                "input": {},
-                "source": "runtime_planner",
-                "planning_reason": "planner_desktop_operation",
-            },
+                    "tool": "desktop.list_apps",
+                    "input": {"query": "Notes", "limit": 20},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_full_plan_desktop_operation",
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.open_and_safe_type_text",
+                    "input": {"app_name": "Notes", "text": "hello"},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_full_plan_desktop_operation",
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.safe_shortcut",
+                    "input": {"action": "copy"},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_full_plan_desktop_operation",
+                },
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.ui_elements",
+                    "input": {"app_name": "Notes"},
+                    "source": "runtime_planner",
+                    "planning_reason": "planner_full_plan_desktop_operation",
+                },
         ],
         strict=True,
     ):
@@ -21232,18 +21262,16 @@ def test_custom_api_agent_loop_executes_named_app_scope_without_model_or_legacy_
         "runtime_planner",
     ]
     assert [request["planning_reason"] for request in tool_runs[0]] == [
-        "planner_desktop_operation",
-        "planner_desktop_operation",
-        "planner_desktop_operation",
+        "planner_full_plan_desktop_operation",
+        "planner_full_plan_desktop_operation",
+        "planner_full_plan_desktop_operation",
     ]
     assert tool_runs[0][0]["input"] == {"query": "SuperData Studio", "limit": 20}
     assert tool_runs[0][1]["input"] == {
         "app_name": "SuperData Studio",
         "text": "hello",
-        "selection_source": "desktop.list_apps",
-        "query": "SuperData Studio",
     }
-    assert tool_runs[0][2]["input"] == {}
+    assert tool_runs[0][2]["input"] == {"app_name": "SuperData Studio"}
     selection_events = [
         event for event in timeline if event["event"] == "agent.plan.selection"
     ]
@@ -24602,8 +24630,9 @@ def test_custom_api_agent_loop_auto_dispatches_generic_discovered_app_pending_st
         "desktop.click_ui_element",
         "desktop.ui_elements",
     ]
-    assert model_calls == []
-    assert not any(event["event"] == "agent.model.followup_context" for event in timeline)
+    assert len(model_calls) == 1
+    assert model_calls[0][-1]["content"].startswith("Runtime follow-up context:")
+    assert any(event["event"] == "agent.model.followup_context" for event in timeline)
     completed_todos = [
         event
         for event in timeline
@@ -25889,6 +25918,7 @@ def test_runtime_planner_generic_desktop_type_with_submit_defers_continuation() 
         "action": "confirm"
     }
     assert observation_request["deferred_continuation"][1]["input"] == {
+        "app_name": "PixelForge",
         "role_filter": "text",
         "limit": 80,
     }
@@ -26364,7 +26394,7 @@ def test_custom_api_agent_loop_executes_runtime_planner_desktop_click_with_ui_ve
     ]
     assert tool_runs[0][-1]["source"] == "runtime_planner"
     assert tool_runs[0][-1]["planning_reason"] == "planner_full_plan_desktop_operation"
-    assert tool_runs[0][-1]["input"] == {"limit": 80}
+    assert tool_runs[0][-1]["input"] == {"app_name": "Notion", "limit": 80}
 
     selection = _planner_selection_events(timeline)[0]
     assert selection["selected_tools"] == [
@@ -26687,25 +26717,16 @@ def test_runtime_planner_media_query_execution_observes_results_before_click() -
         "text": "超时空辉夜姬",
         "role_filter": "text",
         "limit": 80,
+        "selection_source": "desktop.list_apps",
+        "query": "Music",
     }
-    assert [request["tool"] for request in observation_request["deferred_continuation"]] == [
-        "desktop.search_submit",
-        "desktop.ui_elements",
-    ]
-    assert observation_request["deferred_continuation"][1]["deferred_tool"] == (
-        "app.focus_and_click_ui_element"
-    )
-    assert observation_request["deferred_continuation"][1]["deferred_input"] == {
-        "app_name": "Music",
-        "target": "first result",
-        "role_filter": "",
-        "limit": 80,
-        "click_count": 1,
-    }
+    assert "deferred_continuation" not in observation_request
     assert observation_request["input"] == {
         "app_name": "Music",
         "role_filter": "text",
         "limit": 80,
+        "selection_source": "desktop.list_apps",
+        "query": "Music",
     }
 
 
@@ -30656,7 +30677,16 @@ def test_direct_desktop_permission_recovery_preserves_approval_gate() -> None:
     assert approval_event["tool"] == "system.settings_open"
     assert approval_event["approval_id"] == "approval-settings"
     assert approval_event["planning_reason"] == "planner_direct_permission_recovery_action"
-    assert approval_event["input_preview"] == {"target": "屏幕录制权限"}
+    _assert_mapping_includes(
+        approval_event["input_preview"],
+        {
+            "target": "屏幕录制权限",
+            "permission_target": "screen_recording",
+            "recovery_action_label": "打开屏幕录制权限",
+            "recovery_source_tool": "screen.capture",
+            "risk_level": "low",
+        },
+    )
     assert run_events[-1]["event_type"] == "agent.desktop.intent_approval_required"
 
 
@@ -32002,15 +32032,16 @@ def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> No
 
     assert str(result) == "已打开并播放 Music。"
     assert order == ["tool", "model"]
-    assert tool_runs[0]["tool_requests"] == [
+    _assert_mapping_includes(
+        tool_runs[0]["tool_requests"][0],
         {
             "protocol": "json_fallback",
             "tool": "media.apple_music_open_and_play",
             "input": {},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_media_playback",
-        }
-    ]
+            "planning_reason": "planner_full_plan_media_playback",
+        },
+    )
     assert tool_runs[0]["kwargs"]["run_id"] == "run-main-chat"
     assert tool_runs[0]["kwargs"]["next_iteration"] == 0
     assert _planner_selection_events(timeline)[0]["selected_tools"] == [
@@ -32021,7 +32052,7 @@ def test_custom_api_agent_loop_preplans_main_chat_message_desktop_intent() -> No
     )
     assert planned_event["tool"] == "media.apple_music_open_and_play"
     assert planned_event["source"] == "runtime_planner"
-    assert planned_event["planning_reason"] == "planner_fallback_media_playback"
+    assert planned_event["planning_reason"] == "planner_full_plan_media_playback"
     assert planned_event["input_preview"] == {}
 
 
@@ -32505,7 +32536,7 @@ def test_custom_api_agent_loop_preplans_daily_reminder_without_model() -> None:
             "tool": "reminders.create",
             "status": "planned",
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_schedule",
+            "planning_reason": "planner_full_plan_schedule",
             "input_preview": {"title": "买牛奶"},
         },
     )
@@ -32724,7 +32755,7 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
             "tool": "desktop.hotkey",
             "input": {"key": "p", "modifiers": ["command", "option"]},
             "source": "runtime_planner",
-            "planning_reason": "planner_desktop_hotkey",
+            "planning_reason": "planner_full_plan_desktop_operation",
         },
     )
     _assert_planner_task_core_metadata(request, require_task_todo=True)
@@ -32743,7 +32774,7 @@ def test_custom_api_agent_loop_preplans_foreground_hotkey_without_bypassing_runn
             "tool": "desktop.hotkey",
             "status": "planned",
             "source": "runtime_planner",
-            "planning_reason": "planner_desktop_hotkey",
+                "planning_reason": "planner_full_plan_desktop_operation",
             "input_preview": {"key": "p", "modifiers": ["command", "option"]},
         },
     )
@@ -32840,13 +32871,14 @@ def test_main_chat_daily_hotkey_intent_returns_deterministic_result_without_mode
         "agent.desktop.intent_completed",
     ]
     assert non_planner_timeline[-1]["summary"] == "已发送快捷键：Command+Option+P。"
-    assert appended_events[-1] == {
-        "run_id": "run-hotkey-direct",
-        "event_type": "agent.desktop.intent_completed",
-        "payload": {
+    assert appended_events[-1]["run_id"] == "run-hotkey-direct"
+    assert appended_events[-1]["event_type"] == "agent.desktop.intent_completed"
+    _assert_mapping_includes(
+        appended_events[-1]["payload"],
+        {
             "tool": "desktop.hotkey",
             "source": "runtime_planner",
-            "planning_reason": "planner_desktop_hotkey",
+            "planning_reason": "planner_full_plan_desktop_operation",
             "input_preview": {"key": "p", "modifiers": ["command", "option"]},
             "result": {
                 "ok": True,
@@ -32855,7 +32887,7 @@ def test_main_chat_daily_hotkey_intent_returns_deterministic_result_without_mode
             },
             "summary": "已发送快捷键：Command+Option+P。",
         },
-    }
+    )
 
 
 def test_main_chat_daily_hotkey_resume_summarizes_approved_tool_without_replanning() -> None:
@@ -33152,11 +33184,14 @@ def test_custom_api_agent_loop_records_desktop_intent_approval_required_before_p
             "status": "approval_required",
             "source": "daily_desktop_intent",
             "reason": "tool_policy_requires_approval",
-            "input_preview": {"key": "p", "modifiers": ["command", "option"]},
             "approval_id": "approval-hotkey",
             "risk_level": "medium",
             "policy_reason": "前台快捷键需要确认。",
         },
+    )
+    _assert_mapping_includes(
+        non_planner_timeline[-1]["input_preview"],
+        {"key": "p", "modifiers": ["command", "option"]},
     )
     assert appended_events[-1]["run_id"] == "run-hotkey-approval"
     assert appended_events[-1]["event_type"] == "agent.desktop.intent_approval_required"
@@ -33167,11 +33202,14 @@ def test_custom_api_agent_loop_records_desktop_intent_approval_required_before_p
             "status": "approval_required",
             "source": "daily_desktop_intent",
             "reason": "tool_policy_requires_approval",
-            "input_preview": {"key": "p", "modifiers": ["command", "option"]},
             "approval_id": "approval-hotkey",
             "risk_level": "medium",
             "policy_reason": "前台快捷键需要确认。",
         },
+    )
+    _assert_mapping_includes(
+        appended_events[-1]["payload"]["input_preview"],
+        {"key": "p", "modifiers": ["command", "option"]},
     )
 
 
@@ -33380,7 +33418,7 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
             "tool": "media.apple_music_play",
             "input": {"query": "超时空辉夜姬"},
             "source": "runtime_planner",
-            "planning_reason": "planner_fallback_media_playback",
+            "planning_reason": "planner_full_plan_media_playback",
         },
     )
     _assert_planner_task_core_metadata(request, require_task_todo=True)
@@ -33392,7 +33430,7 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
     )
     assert planned_event["tool"] == "media.apple_music_play"
     assert planned_event["source"] == "runtime_planner"
-    assert planned_event["planning_reason"] == "planner_fallback_media_playback"
+    assert planned_event["planning_reason"] == "planner_full_plan_media_playback"
     assert planned_event["input_preview"] == {"query": "超时空辉夜姬"}
     non_planner_appended = _non_planner_run_events(appended_events)
     assert [event["event_type"] for event in non_planner_appended] == [
@@ -33401,7 +33439,7 @@ def test_custom_api_agent_loop_preplans_clear_daily_desktop_intent_before_text_r
     ]
     assert non_planner_appended[0]["payload"]["tool"] == "media.apple_music_play"
     assert non_planner_appended[0]["payload"]["source"] == "runtime_planner"
-    assert non_planner_appended[0]["payload"]["planning_reason"] == "planner_fallback_media_playback"
+    assert non_planner_appended[0]["payload"]["planning_reason"] == "planner_full_plan_media_playback"
     policy_payload = non_planner_appended[1]["payload"]
     assert policy_payload["tool"] == "media.apple_music_play"
     assert policy_payload["decision"] == "allow"

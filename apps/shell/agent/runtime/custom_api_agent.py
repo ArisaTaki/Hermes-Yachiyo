@@ -217,6 +217,8 @@ class RuntimeCustomApiAgentLoop:
         self._check_context_budget(budget, messages)
         start_iteration = self._normalize_tool_iteration(start_iteration)
         runtime_planner_decision = None
+        planned_tool_requests: list[dict[str, Any]] = []
+        direct_tool_selection_payload: dict[str, Any] = {}
         if not default_messages:
             resumed_result = self._direct_existing_daily_desktop_result(
                 agent,
@@ -253,7 +255,6 @@ class RuntimeCustomApiAgentLoop:
                 direct_tool_requests,
                 allowed_tools,
             )
-            direct_tool_selection_payload: dict[str, Any] = {}
             planner_replan_only = False
             if direct_planned_tool_requests:
                 planned_tool_requests = direct_planned_tool_requests
@@ -547,6 +548,9 @@ class RuntimeCustomApiAgentLoop:
                 if (
                     explicit_model_followup
                     and not replan_payloads
+                    and not _selection_payload_has_model_followup_target(
+                        direct_tool_selection_payload
+                    )
                     and _runtime_planner_completed_discovered_app_direct_action(
                         execution_tool_requests,
                         direct_tool_selection_payload,
@@ -1036,7 +1040,12 @@ class RuntimeCustomApiAgentLoop:
                             )
                             if direct_result:
                                 return direct_result
-                    if replan_payloads:
+                    if replan_payloads and not _auto_deferred_observed_ui_can_complete_without_model(
+                        planned_tool_requests,
+                        allowed_tools,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    ):
                         self._append_replan_followup_context(
                             replan_payloads,
                             allowed_tools=allowed_tools,
@@ -1618,6 +1627,27 @@ class RuntimeCustomApiAgentLoop:
                         tool_timeline_start=tool_timeline_start,
                         run_id=run_id,
                     )
+                if (
+                    not direct_result
+                    and _tool_requests_have_unresolved_discovered_app(
+                        execution_tool_requests
+                    )
+                    and not _timeline_has_model_followup_context(
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    )
+                ):
+                    self._append_model_followup_context(
+                        planned_tool_requests,
+                        _selection_payload_with_timeline_fallback(
+                            direct_tool_selection_payload,
+                            timeline,
+                        ),
+                        allowed_tools=allowed_tools,
+                        messages=messages,
+                        timeline=timeline,
+                        run_id=run_id,
+                    )
                 if direct_result:
                     return direct_result
             elif not planner_replan_only:
@@ -1638,6 +1668,22 @@ class RuntimeCustomApiAgentLoop:
                     )
                     if unavailable_summary:
                         return unavailable_summary
+        if (
+            planned_tool_requests
+            and _tool_requests_have_unresolved_discovered_app(planned_tool_requests)
+            and not _latest_message_is_model_followup_context(messages)
+        ):
+            self._append_model_followup_context(
+                planned_tool_requests,
+                _selection_payload_with_timeline_fallback(
+                    direct_tool_selection_payload,
+                    timeline,
+                ),
+                allowed_tools=allowed_tools,
+                messages=messages,
+                timeline=timeline,
+                run_id=run_id,
+            )
         model_config = self._agent_model_config_private(agent)
         base_url = str(model_config.get("base_url") or "").rstrip("/")
         model = str(model_config.get("model") or "").strip()
@@ -1814,6 +1860,7 @@ class RuntimeCustomApiAgentLoop:
                         followup_context,
                         allowed_tools,
                         generated_content=content,
+                        timeline=timeline,
                     )
                     if auto_pending_plan_requests:
                         messages.append({"role": "assistant", "content": content})
@@ -2210,7 +2257,13 @@ class RuntimeCustomApiAgentLoop:
             fallback_request.get("input") if isinstance(fallback_request, dict) else None,
         ):
             if isinstance(candidate, dict):
-                return dict(candidate)
+                preview = dict(candidate)
+                if isinstance(planned_request, Mapping):
+                    for key, value in _request_observability_metadata(
+                        planned_request
+                    ).items():
+                        preview.setdefault(key, value)
+                return preview
         return {}
 
     @staticmethod
@@ -2316,6 +2369,9 @@ class RuntimeCustomApiAgentLoop:
                 execution_requests = _discovered_app_resolution_probe_requests(
                     execution_requests,
                     selection.event_payload,
+                )
+                execution_requests = _dedupe_runtime_planner_full_plan_requests(
+                    execution_requests
                 )
                 has_approval_plan_tool = self._has_approval_plan_tool(execution_requests)
                 if execution_requests and (
@@ -3637,6 +3693,12 @@ class RuntimeCustomApiAgentLoop:
                 if isinstance(tool_event.get("input_preview"), dict)
                 else planned_input
             )
+            if _daily_desktop_step_has_placeholder_app(
+                planned_input,
+                executed_input,
+                result,
+            ):
+                return ""
             presentation = str(planned_tool_request.get("presentation") or "").strip()
             summary = self._daily_desktop_summary(
                 planned_tool,
@@ -5872,7 +5934,17 @@ def _model_followup_context_payload(
         and bool(request.get("continue_to_model"))
     ]
     if not content_requests:
+        content_requests = _model_followup_context_requests_from_selection_target(
+            planned_tool_requests,
+            selection_payload,
+        )
+    if not content_requests:
         return {}
+    context_only_followup = any(
+        bool(request.get("_context_only_followup"))
+        for request in content_requests
+        if isinstance(request, Mapping)
+    )
     observation_content_requests = [
         request
         for request in content_requests
@@ -5920,19 +5992,29 @@ def _model_followup_context_payload(
         payload["followup_target"] = followup_target
     if artifacts_expected:
         payload["artifacts_expected"] = artifacts_expected
-    pending_plan_steps = _model_followup_pending_plan_steps(
-        selection_payload,
-        observation_content_requests,
+    pending_plan_steps = (
+        []
+        if context_only_followup
+        else _model_followup_pending_plan_steps(
+            selection_payload,
+            observation_content_requests,
+        )
     )
     if pending_plan_steps:
         payload["pending_plan_steps"] = pending_plan_steps
-    pending_execution_requests = _model_followup_pending_execution_requests(
-        selection_payload,
-        observation_content_requests,
-        allowed,
+    pending_execution_requests = (
+        []
+        if context_only_followup
+        else _model_followup_pending_execution_requests(
+            selection_payload,
+            observation_content_requests,
+            allowed,
+        )
     )
     materialization_execution_requests = (
-        _model_followup_materialization_execution_requests(
+        []
+        if context_only_followup
+        else _model_followup_materialization_execution_requests(
             selection_payload,
             materialization_content_requests,
             allowed,
@@ -5943,9 +6025,13 @@ def _model_followup_context_payload(
             pending_execution_requests,
             materialization_execution_requests,
         )
-    deferred_execution_requests = _model_followup_deferred_execution_requests(
-        content_requests,
-        allowed,
+    deferred_execution_requests = (
+        []
+        if context_only_followup
+        else _model_followup_deferred_execution_requests(
+            content_requests,
+            allowed,
+        )
     )
     if deferred_execution_requests:
         pending_execution_requests = _merged_pending_execution_requests(
@@ -5968,6 +6054,40 @@ def _model_followup_context_payload(
         if value:
             payload[key] = value
     return payload
+
+
+def _model_followup_context_requests_from_selection_target(
+    planned_tool_requests: list[dict[str, Any]],
+    selection_payload: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    if not _selection_payload_has_model_followup_target(selection_payload):
+        return []
+    target = (
+        selection_payload.get("followup_target")
+        if isinstance(selection_payload.get("followup_target"), Mapping)
+        else {}
+    )
+    post_action_observation = (
+        target.get("post_action_observation")
+        if isinstance(target.get("post_action_observation"), Mapping)
+        else {}
+    )
+    preferred_tools = _ordered_text_list(
+        [
+            str(post_action_observation.get("tool") or "").strip(),
+            "desktop.ui_elements",
+            "desktop.read_ui",
+            "screen.capture",
+        ]
+    )
+    for request in reversed(planned_tool_requests):
+        if not isinstance(request, dict):
+            continue
+        tool_name = str(request.get("tool") or "").strip()
+        if preferred_tools and tool_name not in preferred_tools:
+            continue
+        return [{**request, "continue_to_model": True, "_context_only_followup": True}]
+    return []
 
 
 def _model_followup_task_core_payload(selection_payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -6203,6 +6323,11 @@ def _auto_deferred_observed_ui_followup_requests(
         target = _deferred_observed_ui_target_from_request(request)
         if not target:
             continue
+        target = _deferred_observed_ui_target_with_timeline_context(
+            target,
+            request,
+            timeline,
+        )
         tool_name = str(request.get("deferred_tool") or "").strip()
         scoped_allowed = _deferred_observed_ui_scoped_allowed_tools(
             tool_name,
@@ -6234,10 +6359,7 @@ def _auto_deferred_observed_ui_followup_requests(
             {"followup_target": target},
             scoped_allowed,
             timeline,
-            planning_reason=str(
-                request.get("planning_reason") or "planner_followup_deferred_ui_action"
-            ).strip()
-            or "planner_followup_deferred_ui_action",
+            planning_reason=_deferred_observed_ui_planning_reason(request),
         )
         if requests:
             annotated = _annotate_deferred_observed_ui_followup_requests(
@@ -6247,8 +6369,45 @@ def _auto_deferred_observed_ui_followup_requests(
                 index=index,
             )
             continuation = _deferred_observed_ui_continuation_requests(request, allowed)
+            if not continuation:
+                continuation = _deferred_media_playback_continuation_requests(
+                    request,
+                    target,
+                    allowed,
+                    planning_reason=_deferred_observed_ui_planning_reason(request),
+                )
             return [*annotated, *continuation]
     return []
+
+
+def _auto_deferred_observed_ui_can_complete_without_model(
+    planned_tool_requests: Iterable[Mapping[str, Any]],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    requests = _auto_deferred_observed_ui_followup_requests(
+        planned_tool_requests,
+        allowed_tools,
+        timeline,
+    )
+    requests = _drop_completed_auto_followup_prefix(
+        requests,
+        timeline,
+        tool_timeline_start=tool_timeline_start,
+    )
+    return bool(requests) and not _replan_recovery_requests_need_model_followup(requests)
+
+
+def _deferred_observed_ui_planning_reason(request: Mapping[str, Any]) -> str:
+    if _string_list(request.get("replan_triggers")) or _string_list(
+        request.get("replan_signal_ids")
+    ):
+        return "planner_replan_app_search_observed_result"
+    return str(
+        request.get("planning_reason") or "planner_followup_deferred_ui_action"
+    ).strip() or "planner_followup_deferred_ui_action"
 
 
 def _deferred_observed_ui_scoped_allowed_tools(
@@ -6350,6 +6509,46 @@ def _deferred_observed_ui_continuation_requests(
             continue
         continuation.append(next_request)
     return continuation
+
+
+def _deferred_media_playback_continuation_requests(
+    request: Mapping[str, Any],
+    target: Mapping[str, Any],
+    allowed: set[str],
+    *,
+    planning_reason: str,
+) -> list[dict[str, Any]]:
+    if str(request.get("intent_kind") or "").strip() != "media_playback":
+        return []
+    if str(target.get("target_action") or "").strip() != "type_text":
+        return []
+    app_name = _observed_action_app_name(target)
+    if not app_name:
+        return []
+    source = str(request.get("source") or "runtime_planner").strip() or "runtime_planner"
+    submit_request = _media_search_submit_request(
+        allowed,
+        source=source,
+        planning_reason=planning_reason,
+    )
+    if not submit_request:
+        return []
+    result_selection = {
+        "target": "first result",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+    result_observation = _discovered_media_result_observation_request(
+        app_name,
+        {"result_selection": result_selection},
+        allowed,
+        source=source,
+        planning_reason=planning_reason,
+    )
+    if not result_observation:
+        return [submit_request]
+    return [submit_request, result_observation]
 
 
 def _deferred_observed_ui_observation_retry_request(
@@ -6478,6 +6677,40 @@ def _deferred_observed_ui_target_from_request(
         if submit_action:
             target["submit_action"] = submit_action
     return {key: value for key, value in target.items() if value not in ("", None, [], {})}
+
+
+def _deferred_observed_ui_target_with_timeline_context(
+    target: Mapping[str, Any],
+    request: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+) -> dict[str, Any]:
+    resolved = dict(target)
+    deferred_input = (
+        request.get("deferred_input")
+        if isinstance(request.get("deferred_input"), Mapping)
+        else {}
+    )
+    app_query = str(
+        resolved.get("app_query")
+        or resolved.get("target_app_query")
+        or deferred_input.get("query")
+        or deferred_input.get("app_query")
+        or request.get("target_app_query")
+        or ""
+    ).strip()
+    if app_query:
+        resolved["app_query"] = app_query
+        resolved["target_app_query"] = app_query
+    app_name = str(resolved.get("app_name") or resolved.get("target_app_name") or "").strip()
+    if app_name and not _runtime_planner_placeholder_app_name(app_name):
+        return resolved
+    discovered = _discovered_app_name_for_query(timeline, app_query) if app_query else ""
+    if not discovered:
+        discovered = _latest_replan_context_app_name(timeline, request_id="")
+    if discovered and not _runtime_planner_placeholder_app_name(discovered):
+        resolved["app_name"] = discovered
+        resolved["target_app_name"] = discovered
+    return resolved
 
 
 def _annotate_deferred_observed_ui_followup_requests(
@@ -7996,6 +8229,8 @@ def _runtime_planner_completed_direct_requests_with_verification_replan(
     payloads = [payload for payload in replan_payloads if isinstance(payload, Mapping)]
     if not payloads:
         return False
+    if any(_runtime_replan_payload_requires_continuation(payload) for payload in payloads):
+        return False
     requests = [request for request in planned_tool_requests if isinstance(request, Mapping)]
     if any(bool(request.get("continue_to_model")) for request in requests):
         return False
@@ -8035,6 +8270,33 @@ def _runtime_planner_completed_direct_requests_with_verification_replan(
             trailing_verification_tools,
         )
         for payload in payloads
+    )
+
+
+def _runtime_replan_payload_requires_continuation(payload: Mapping[str, Any]) -> bool:
+    if _replan_payload_is_focus_mismatch(payload):
+        return True
+    if _replan_ui_observed_action_target(payload):
+        return True
+    if isinstance(payload.get("followup_target"), Mapping):
+        return True
+    if isinstance(payload.get("action_target"), Mapping):
+        return True
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    trigger = str(payload.get("trigger") or metadata.get("signal_trigger") or "").strip()
+    if trigger == "verification_failed" and any(
+        str(payload.get(key) or metadata.get(key) or "").strip()
+        for key in (
+            "target_app_name",
+            "target_app_query",
+            "target_search_text",
+            "recovery_observation_goal",
+        )
+    ):
+        return True
+    return isinstance(metadata.get("followup_target"), Mapping) or isinstance(
+        metadata.get("action_target"),
+        Mapping,
     )
 
 
@@ -9721,6 +9983,17 @@ def _selection_payload_has_model_followup_target(
     return False
 
 
+def _selection_payload_has_discovered_media_playback_target(
+    selection_payload: Mapping[str, Any],
+) -> bool:
+    target = (
+        selection_payload.get("followup_target")
+        if isinstance(selection_payload.get("followup_target"), Mapping)
+        else {}
+    )
+    return str(target.get("kind") or "").strip() == "desktop_discovered_media_playback"
+
+
 def _auto_discovered_followup_requests(
     selection_payload: Mapping[str, Any],
     allowed_tools: Iterable[str],
@@ -11223,6 +11496,8 @@ def _runtime_planner_full_plan_tool_requests(
     decision: Any | None,
     allowed_tools: Iterable[str],
 ) -> list[dict[str, Any]]:
+    if _runtime_planner_full_plan_should_defer_to_context_prefetch(decision):
+        return []
     intent_kind = str(
         getattr(getattr(decision, "selected_intent", None), "kind", "") or ""
     ).strip()
@@ -11235,10 +11510,131 @@ def _runtime_planner_full_plan_tool_requests(
     )
     if not envelope:
         return []
-    return runtime_execution_requests_from_envelope_payload(
-        envelope,
-        allowed_tools=allowed_tools,
+    return _dedupe_runtime_planner_full_plan_requests(
+        runtime_execution_requests_from_envelope_payload(
+            envelope,
+            allowed_tools=allowed_tools,
+        )
     )
+
+
+def _runtime_planner_full_plan_should_defer_to_context_prefetch(
+    decision: Any | None,
+) -> bool:
+    selected_intent = getattr(decision, "selected_intent", None)
+    if str(getattr(selected_intent, "kind", "") or "").strip() != "communication":
+        return False
+    inputs = getattr(selected_intent, "inputs", None)
+    if not isinstance(inputs, Mapping):
+        return False
+    direct_hint = (
+        inputs.get("direct_message_hint")
+        if isinstance(inputs.get("direct_message_hint"), Mapping)
+        else {}
+    )
+    body_source = str(
+        direct_hint.get("body_source") or inputs.get("context_source") or ""
+    ).strip()
+    transform = str(
+        direct_hint.get("content_transform_hint")
+        or inputs.get("content_transform_hint")
+        or ""
+    ).strip()
+    if transform and body_source:
+        return True
+    return body_source in {
+        "app_search_result",
+        "current_page_content",
+        "file",
+        "screen_capture",
+        "selection",
+        "visible_text",
+    }
+
+
+def _dedupe_runtime_planner_full_plan_requests(
+    requests: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, Any]] = set()
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        item = dict(request)
+        item = _runtime_planner_request_without_resolved_selection_hints(item)
+        key = (
+            str(item.get("tool") or item.get("tool_name") or "").strip(),
+            _freeze_request_value(item.get("input")),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        deduped.append(item)
+    return deduped
+
+
+def _runtime_planner_request_without_resolved_selection_hints(
+    request: dict[str, Any],
+) -> dict[str, Any]:
+    tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+    if tool_name in _DISCOVERED_APP_SELECTION_SOURCES:
+        return request
+    changed = False
+    resolved = dict(request)
+    for key in ("input", "deferred_input"):
+        cleaned = _runtime_planner_input_without_resolved_selection_hints(
+            resolved.get(key),
+        )
+        if cleaned is not None:
+            resolved[key] = cleaned
+            changed = True
+    continuation = resolved.get("deferred_continuation")
+    if isinstance(continuation, list):
+        cleaned_items: list[Any] = []
+        for item in continuation:
+            if not isinstance(item, Mapping):
+                cleaned_items.append(item)
+                continue
+            next_item = dict(item)
+            cleaned = _runtime_planner_input_without_resolved_selection_hints(
+                next_item.get("input"),
+            )
+            if cleaned is not None:
+                next_item["input"] = cleaned
+                changed = True
+            cleaned_items.append(next_item)
+        if changed:
+            resolved["deferred_continuation"] = cleaned_items
+    return resolved if changed else request
+
+
+def _runtime_planner_input_without_resolved_selection_hints(
+    value: Any,
+) -> dict[str, Any] | None:
+    if not isinstance(value, Mapping):
+        return None
+    payload = dict(value)
+    app_name = str(payload.get("app_name") or "").strip()
+    if not app_name or _runtime_planner_placeholder_app_name(app_name):
+        return None
+    cleaned = dict(payload)
+    for key in ("selection_source", "app_selection_source", "query"):
+        cleaned.pop(key, None)
+    return cleaned if cleaned != payload else None
+
+
+def _freeze_request_value(value: Any) -> Any:
+    if isinstance(value, Mapping):
+        return tuple(
+            sorted((str(key), _freeze_request_value(item)) for key, item in value.items())
+        )
+    if isinstance(value, list):
+        return tuple(_freeze_request_value(item) for item in value)
+    if isinstance(value, tuple):
+        return tuple(_freeze_request_value(item) for item in value)
+    if isinstance(value, set):
+        return tuple(sorted(_freeze_request_value(item) for item in value))
+    return value
 
 
 _CHAT_FULL_PLAN_EXECUTION_INTENTS = frozenset(
@@ -11310,6 +11706,50 @@ def _tool_requests_include_model_followup(requests: Iterable[Mapping[str, Any]])
         for request in requests
         if isinstance(request, Mapping)
     )
+
+
+def _tool_requests_have_unresolved_discovered_app(
+    requests: Iterable[Mapping[str, Any]],
+) -> bool:
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        app_name = str(payload.get("app_name") or "").strip()
+        if app_name and _runtime_planner_placeholder_app_name(app_name):
+            return True
+        if _discovered_app_selection_source(payload.get("selection_source")):
+            return True
+        resolution = (
+            request.get("input_resolution")
+            if isinstance(request.get("input_resolution"), Mapping)
+            else {}
+        )
+        if (
+            _discovered_app_selection_source(resolution.get("source_tool"))
+            and not str(resolution.get("resolved_app_name") or "").strip()
+        ):
+            return True
+    return False
+
+
+def _timeline_has_model_followup_context(
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    return any(
+        str(event.get("event") or "").strip() == "agent.model.followup_context"
+        for event in timeline[tool_timeline_start:]
+        if isinstance(event, Mapping)
+    )
+
+
+def _latest_message_is_model_followup_context(messages: list[dict[str, Any]]) -> bool:
+    if not messages:
+        return False
+    content = str(messages[-1].get("content") or "")
+    return content.startswith("Runtime follow-up context:")
 
 
 def _discovered_app_resolution_probe_requests(
@@ -11800,6 +12240,12 @@ def _auto_followup_request_completed(
     *,
     tool_timeline_start: int,
 ) -> bool:
+    if (
+        request.get("deferred_tool")
+        or request.get("deferred_input")
+        or request.get("deferred_continuation")
+    ):
+        return False
     tool_name = str(request.get("tool") or "").strip()
     if not tool_name:
         return False
@@ -11950,6 +12396,11 @@ def _auto_replan_ui_observed_action_requests(
         target = _replan_ui_observed_action_target(payload)
         if not target:
             continue
+        target = _replan_ui_observed_action_target_with_timeline_context(
+            target,
+            payload,
+            timeline,
+        )
         target_label = str(target.get("target") or "").strip()
         role_filter = str(target.get("role_filter") or "").strip()
         if not _latest_desktop_observation_has_target_match(
@@ -12123,6 +12574,73 @@ def _replan_ui_observed_action_target(payload: Mapping[str, Any]) -> dict[str, A
     return {key: value for key, value in target.items() if value not in ("", None, [], {})}
 
 
+def _replan_ui_observed_action_target_with_timeline_context(
+    target: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+) -> dict[str, Any]:
+    resolved = dict(target)
+    app_query = str(
+        resolved.get("app_query")
+        or resolved.get("target_app_query")
+        or _replan_recovery_target(payload).get("target_app_query")
+        or ""
+    ).strip()
+    if app_query:
+        resolved["app_query"] = app_query
+        resolved["target_app_query"] = app_query
+
+    app_name = str(resolved.get("app_name") or resolved.get("target_app_name") or "").strip()
+    if app_name and not _runtime_planner_placeholder_app_name(app_name):
+        return resolved
+
+    discovered = _discovered_app_context_app_name(
+        resolved,
+        timeline,
+        replan_payloads=[payload],
+    )
+    if not discovered:
+        request_id = str(payload.get("request_id") or "").strip()
+        discovered = _latest_replan_context_app_name(timeline, request_id=request_id)
+    if discovered and not _runtime_planner_placeholder_app_name(discovered):
+        resolved["app_name"] = discovered
+        resolved["target_app_name"] = discovered
+    return resolved
+
+
+def _latest_replan_context_app_name(
+    timeline: list[dict[str, Any]],
+    *,
+    request_id: str,
+) -> str:
+    for event in reversed(timeline):
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        event_request_id = str(event.get("replan_request_id") or "").strip()
+        if request_id and event_request_id and event_request_id != request_id:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+        input_preview = (
+            event.get("input_preview")
+            if isinstance(event.get("input_preview"), Mapping)
+            else {}
+        )
+        for source in (event, data, result, input_preview):
+            for key in (
+                "target_app_name",
+                "app_name",
+                "active_app_name",
+                "frontmost_app",
+                "resolved_app_name",
+                "discovered_app_name",
+            ):
+                app_name = str(source.get(key) or "").strip()
+                if app_name and not _runtime_planner_placeholder_app_name(app_name):
+                    return app_name
+    return ""
+
+
 def _replan_source_tool_name(payload: Mapping[str, Any]) -> str:
     metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
     return str(
@@ -12245,6 +12763,7 @@ def _auto_replan_ui_continuation_requests(
             planned[source_index + 1 :],
             payload,
             allowed,
+            timeline,
             planning_reason=planning_reason,
         )
         continuation = _drop_completed_auto_followup_prefix(
@@ -12293,6 +12812,7 @@ def _auto_replan_verification_continuation_requests(
             planned[source_index + 1 :],
             payload,
             allowed,
+            timeline,
             planning_reason=planning_reason,
         )
         continuation = _drop_completed_auto_followup_prefix(
@@ -12441,6 +12961,7 @@ def _replan_ui_continuation_slice(
     planned_tool_requests: Iterable[Mapping[str, Any]],
     payload: Mapping[str, Any],
     allowed: set[str],
+    timeline: list[dict[str, Any]],
     *,
     planning_reason: str,
 ) -> list[dict[str, Any]]:
@@ -12465,6 +12986,11 @@ def _replan_ui_continuation_slice(
         if request_id:
             item["replan_request_id"] = request_id
         _attach_replan_payload_trace_metadata(item, payload)
+        item = _replan_continuation_request_with_resolved_app(
+            item,
+            payload,
+            timeline,
+        )
         requests.append(item)
         if tool_name == "desktop.search_submit" and _replan_ui_next_result_click_request(
             planned[index + 1 :]
@@ -12481,6 +13007,70 @@ def _replan_ui_continuation_slice(
         if len(requests) >= _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS:
             break
     return requests
+
+
+def _replan_continuation_request_with_resolved_app(
+    request: dict[str, Any],
+    payload: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+) -> dict[str, Any]:
+    tool_name = str(request.get("tool") or "").strip()
+    request_input = (
+        dict(request.get("input"))
+        if isinstance(request.get("input"), Mapping)
+        else {}
+    )
+    raw_app_name = str(
+        request_input.get("app_name") or request.get("target_app_name") or ""
+    ).strip()
+    if raw_app_name and not _runtime_planner_placeholder_app_name(raw_app_name):
+        return request
+
+    recovery_target = _replan_recovery_target(payload)
+    app_query = str(
+        request_input.get("query")
+        or request_input.get("app_query")
+        or request.get("target_app_query")
+        or recovery_target.get("target_app_query")
+        or ""
+    ).strip()
+    discovered = _discovered_app_name_for_query(timeline, app_query) if app_query else ""
+    if not discovered:
+        discovered = _latest_replan_context_app_name(
+            timeline,
+            request_id=str(payload.get("request_id") or "").strip(),
+        )
+    if not discovered or _runtime_planner_placeholder_app_name(discovered):
+        return request
+
+    resolved = dict(request)
+    if tool_name.startswith("app.") or raw_app_name:
+        request_input["app_name"] = discovered
+    for key in ("selection_source", "app_selection_source", "query", "app_query"):
+        request_input.pop(key, None)
+    resolved["input"] = request_input
+    resolved["target_app_name"] = discovered
+    if app_query:
+        resolved["target_app_query"] = app_query
+    for key in ("followup_target", "action_target"):
+        nested = resolved.get(key) if isinstance(resolved.get(key), Mapping) else {}
+        if not nested:
+            continue
+        item = dict(nested)
+        nested_app_name = str(item.get("app_name") or item.get("target_app_name") or "").strip()
+        if not nested_app_name or _runtime_planner_placeholder_app_name(nested_app_name):
+            item["app_name"] = discovered
+            if "target_app_name" in item:
+                item["target_app_name"] = discovered
+        if app_query:
+            if key == "followup_target" or "app_query" in item:
+                item["app_query"] = app_query
+            if "target_app_query" in item:
+                item["target_app_query"] = app_query
+        resolved[key] = item
+    if app_query and (tool_name.startswith("app.") or raw_app_name):
+        resolved = _with_discovered_app_resolution(resolved, app_query, discovered)
+    return resolved
 
 
 def _auto_replan_ui_search_observed_result_requests(
@@ -12522,6 +13112,11 @@ def _auto_replan_ui_search_observed_result_requests(
         )
         if not observed_target:
             continue
+        observed_target = _replan_ui_observed_action_target_with_timeline_context(
+            observed_target,
+            payload,
+            timeline,
+        )
         observation_source = _latest_desktop_observation_tool(timeline)
         if observation_source:
             observed_target["observation_source"] = observation_source
@@ -14581,6 +15176,11 @@ def _discovered_media_result_observation_request(
     request["continue_to_model"] = True
     request["deferred_tool"] = click_tool
     request["deferred_input"] = result_input
+    request["deferred_context"] = {
+        "step_id": "play-media-search-result",
+        "planner_step_id": "play-media-search-result",
+        "capability_id": "media.playback",
+    }
     return request
 
 
@@ -14981,6 +15581,8 @@ def _discovered_app_search_result_click_request(
         else {}
     )
     input_payload = dict(raw_input)
+    for key in ("selection_source", "app_selection_source", "query"):
+        input_payload.pop(key, None)
     if not tool_name:
         tool_name = (
             "app.focus_and_click_ui_element"
@@ -15385,8 +15987,23 @@ def _with_discovered_app_resolution(
     app_name: str,
 ) -> dict[str, Any]:
     tool_name = str(request.get("tool") or "").strip()
+    payload = dict(request)
+    request_input = (
+        dict(payload.get("input"))
+        if isinstance(payload.get("input"), Mapping)
+        else {}
+    )
+    raw_app_name = str(request_input.get("app_name") or "").strip()
+    if app_name and (
+        not raw_app_name
+        or _runtime_planner_placeholder_app_name(raw_app_name)
+        or raw_app_name == app_query
+    ) and (tool_name.startswith("app.") or raw_app_name):
+        request_input["app_name"] = app_name
+        payload["input"] = request_input
     return {
         **request,
+        **payload,
         "input_resolution": {
             "tool": tool_name,
             "field": "app_name",
@@ -16083,6 +16700,7 @@ def _model_followup_pending_plan_requests(
     allowed_tools: Iterable[str],
     *,
     generated_content: str = "",
+    timeline: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     if not isinstance(followup_context, Mapping):
         return []
@@ -16110,6 +16728,12 @@ def _model_followup_pending_plan_requests(
             request,
             raw_step,
             followup_context,
+        )
+        request = _pending_plan_request_with_timeline_resolved_app(
+            request,
+            raw_step,
+            followup_context,
+            timeline or [],
         )
         requests.append(request)
         if len(requests) >= _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS:
@@ -16178,6 +16802,84 @@ def _attach_model_followup_pending_plan_trace_metadata(
             request[key] = dict(value)
         elif isinstance(value, list) and value:
             request[key] = [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _pending_plan_request_with_timeline_resolved_app(
+    request: dict[str, Any],
+    step: Mapping[str, Any],
+    followup_context: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+) -> dict[str, Any]:
+    request_input = (
+        dict(request.get("input"))
+        if isinstance(request.get("input"), Mapping)
+        else {}
+    )
+    step_input = step.get("input_preview") if isinstance(step.get("input_preview"), Mapping) else {}
+    raw_app_name = str(
+        request_input.get("app_name")
+        or step_input.get("app_name")
+        or request.get("target_app_name")
+        or ""
+    ).strip()
+    if raw_app_name and not _runtime_planner_placeholder_app_name(raw_app_name):
+        return request
+    if not raw_app_name and "app_name" not in request_input and "app_name" not in step_input:
+        return request
+
+    followup_target = (
+        followup_context.get("followup_target")
+        if isinstance(followup_context.get("followup_target"), Mapping)
+        else {}
+    )
+    app_query = str(
+        request_input.get("query")
+        or request_input.get("app_query")
+        or step_input.get("query")
+        or step_input.get("app_query")
+        or request.get("target_app_query")
+        or followup_target.get("app_query")
+        or followup_target.get("target_app_query")
+        or ""
+    ).strip()
+    discovered = _discovered_app_name_for_query(timeline, app_query) if app_query else ""
+    if not discovered:
+        discovered = _latest_replan_context_app_name(
+            timeline,
+            request_id=str(request.get("replan_request_id") or "").strip(),
+        )
+    if not discovered or _runtime_planner_placeholder_app_name(discovered):
+        return request
+
+    resolved = dict(request)
+    tool_name = str(resolved.get("tool") or resolved.get("tool_name") or "").strip()
+    if tool_name.startswith("app.") or raw_app_name:
+        request_input["app_name"] = discovered
+    for key in ("selection_source", "app_selection_source", "query", "app_query"):
+        request_input.pop(key, None)
+    resolved["input"] = request_input
+    resolved["target_app_name"] = discovered
+    if app_query:
+        resolved["target_app_query"] = app_query
+    for key in ("followup_target", "action_target"):
+        nested = resolved.get(key) if isinstance(resolved.get(key), Mapping) else {}
+        if not nested:
+            continue
+        item = dict(nested)
+        nested_app_name = str(item.get("app_name") or item.get("target_app_name") or "").strip()
+        if not nested_app_name or _runtime_planner_placeholder_app_name(nested_app_name):
+            item["app_name"] = discovered
+            if "target_app_name" in item:
+                item["target_app_name"] = discovered
+        if app_query:
+            if key == "followup_target" or "app_query" in item:
+                item["app_query"] = app_query
+            if "target_app_query" in item:
+                item["target_app_query"] = app_query
+        resolved[key] = item
+    if app_query and (tool_name.startswith("app.") or raw_app_name):
+        resolved = _with_discovered_app_resolution(resolved, app_query, discovered)
+    return resolved
 
 
 def _model_followup_requests_with_pending_plan_metadata(
@@ -18024,6 +18726,23 @@ def _visible_daily_desktop_completed_steps(
             continue
         visible_steps.append(step)
     return visible_steps or completed_steps
+
+
+def _daily_desktop_step_has_placeholder_app(
+    planned_input: Mapping[str, Any],
+    executed_input: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> bool:
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    for source in (executed_input, data):
+        value = str(source.get("app_name") or source.get("discovered_app_name") or "").strip()
+        if value and not _runtime_planner_placeholder_app_name(value):
+            return False
+    for source in (planned_input, executed_input, data):
+        value = str(source.get("app_name") or source.get("discovered_app_name") or "").strip()
+        if value and _runtime_planner_placeholder_app_name(value):
+            return True
+    return False
 
 
 def _is_deferred_observed_ui_request(step: Mapping[str, Any]) -> bool:

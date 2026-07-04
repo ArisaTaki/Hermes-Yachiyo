@@ -323,7 +323,8 @@ def _defer_unknown_app_ui_element_operations_to_observation(
         if not prepare_request:
             normalized.append(request)
             continue
-        normalized.append(prepare_request)
+        if not _last_request_matches_tool_and_input(normalized, prepare_request):
+            normalized.append(prepare_request)
         normalized.append(
             _unknown_app_ui_observation_request(
                 request,
@@ -841,7 +842,38 @@ def _last_request_matches_tool_and_input(
         return False
     previous_input = previous.get("input") if isinstance(previous.get("input"), Mapping) else {}
     request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
-    return dict(previous_input) == dict(request_input)
+    if dict(previous_input) == dict(request_input):
+        return True
+    if str(request.get("tool") or "").strip() in {
+        "app.open",
+        "app.focus",
+        "desktop.open_app",
+        "desktop.focus_app",
+    }:
+        return _app_prepare_inputs_match(previous_input, request_input)
+    return False
+
+
+def _app_prepare_inputs_match(
+    previous_input: Mapping[str, Any],
+    request_input: Mapping[str, Any],
+) -> bool:
+    previous_app = str(previous_input.get("app_name") or "").strip()
+    request_app = str(request_input.get("app_name") or "").strip()
+    if not previous_app or previous_app != request_app:
+        return False
+    ignored_keys = {"selection_source", "app_selection_source", "query"}
+    previous_payload = {
+        key: value
+        for key, value in dict(previous_input).items()
+        if key not in ignored_keys
+    }
+    request_payload = {
+        key: value
+        for key, value in dict(request_input).items()
+        if key not in ignored_keys
+    }
+    return previous_payload == request_payload
 
 
 def _deferred_request_context(source: Mapping[str, Any]) -> dict[str, Any]:
