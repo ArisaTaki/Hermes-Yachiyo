@@ -519,6 +519,15 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
         ],
     )
     _assert_contains(
+        "apps/frontend/src/features/yachiyo-chat/taskSnapshots.ts",
+        [
+            "runtime_debug: messageRuntimeDebug(message)",
+            "runtime_execution_envelope: runtimeExecutionEnvelope",
+            "function messageRuntimeDebug",
+            "function messageRuntimeExecutionEnvelope",
+        ],
+    )
+    _assert_contains(
         "apps/frontend/src/features/yachiyo-chat/components/AgentTaskCard.tsx",
         [
             "ApprovalCard",

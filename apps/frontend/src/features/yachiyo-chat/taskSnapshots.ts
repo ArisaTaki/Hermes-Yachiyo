@@ -3,6 +3,8 @@ import type {
   ApprovalCardSnapshot,
   ArtifactSnapshot,
   PlannerTraceSummarySnapshot,
+  RuntimeDebugSummarySnapshot,
+  RuntimeExecutionEnvelopeSnapshot,
   TaskStatus,
 } from './types';
 import {
@@ -60,6 +62,11 @@ type YachiyoTaskChatMetadata = {
     requested_at?: string;
   };
   planner_summary?: PlannerTraceSummarySnapshot | null;
+  runtime_debug?: RuntimeDebugSummarySnapshot | null;
+  yachiyo_runtime_debug?: RuntimeDebugSummarySnapshot | null;
+  runtime_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
+  yachiyo_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
+  execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
 };
 
 export type YachiyoTaskChatMessage = {
@@ -96,6 +103,7 @@ export function agentTaskSnapshotFromMessage(
   );
   const pendingApprovals = messageTaskApprovals(message, runId, groupRunId) || [];
   const status = taskStatusFromRunStatus(messageRunStatus(message) || message.status || '');
+  const runtimeExecutionEnvelope = messageRuntimeExecutionEnvelope(message);
   return {
     task_id: String(message.task_id || metadata.delegated_run_source_task_id || runId),
     conversation_id: null,
@@ -110,6 +118,8 @@ export function agentTaskSnapshotFromMessage(
     artifacts: messageTaskArtifacts(message, runId),
     metadata: { ...metadata },
     planner_summary: messagePlannerSummary(message),
+    runtime_debug: messageRuntimeDebug(message),
+    runtime_execution_envelope: runtimeExecutionEnvelope,
     open_in_studio_url: studioRunUrl(runId, { groupRunId }),
     created_at: message.created_at || '',
     updated_at: message.created_at || '',
@@ -371,6 +381,36 @@ function messagePlannerSummary(message?: YachiyoTaskChatMessage | null): Planner
   const value = message?.metadata?.planner_summary;
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
   return value;
+}
+
+function messageRuntimeDebug(message?: YachiyoTaskChatMessage | null): RuntimeDebugSummarySnapshot | null {
+  return messageObjectMetadataValue<RuntimeDebugSummarySnapshot>(
+    message,
+    ['runtime_debug', 'yachiyo_runtime_debug'],
+  );
+}
+
+function messageRuntimeExecutionEnvelope(
+  message?: YachiyoTaskChatMessage | null,
+): RuntimeExecutionEnvelopeSnapshot | null {
+  return messageObjectMetadataValue<RuntimeExecutionEnvelopeSnapshot>(
+    message,
+    ['runtime_execution_envelope', 'yachiyo_execution_envelope', 'execution_envelope'],
+  );
+}
+
+function messageObjectMetadataValue<T>(
+  message: YachiyoTaskChatMessage | null | undefined,
+  keys: string[],
+): T | null {
+  const metadata = message?.metadata;
+  if (!metadata) return null;
+  const record = metadata as Record<string, unknown>;
+  for (const key of keys) {
+    const value = record[key];
+    if (value && typeof value === 'object' && !Array.isArray(value)) return value as T;
+  }
+  return null;
 }
 
 function participantDisplayName(participant?: YachiyoTaskChatParticipant | null) {
