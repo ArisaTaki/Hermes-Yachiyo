@@ -576,6 +576,8 @@ class LegacyRuntimePort:
         return self._run_action_payload(run_id, completed)
 
     def _has_daily_desktop_intent_completed(self, payload: dict[str, Any]) -> bool:
+        if _has_runtime_planner_desktop_tool_completion(payload):
+            return True
         for event in payload.get("timeline") or []:
             if not isinstance(event, dict):
                 continue
@@ -597,3 +599,54 @@ class LegacyRuntimePort:
             return int(event.get("sequence"))
         except (TypeError, ValueError):
             return index + 1
+
+
+def _has_runtime_planner_desktop_tool_completion(payload: dict[str, Any]) -> bool:
+    for event in payload.get("timeline") or []:
+        if not isinstance(event, dict):
+            continue
+        event_type = str(event.get("event_type") or event.get("event") or "").strip()
+        if event_type != "agent.tool.call":
+            continue
+        event_payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        source = str(event.get("source") or event_payload.get("source") or "").strip()
+        if source not in {"runtime_planner", "daily_desktop_intent", "daily_desktop_metadata"}:
+            continue
+        tool_name = str(
+            event.get("tool")
+            or event.get("detail")
+            or event_payload.get("tool")
+            or ""
+        ).strip()
+        if not _runtime_planner_desktop_completion_tool(tool_name):
+            continue
+        result = event.get("result")
+        if not isinstance(result, dict):
+            result = event_payload.get("result") if isinstance(event_payload.get("result"), dict) else {}
+        if result.get("ok") is True and not result.get("approval_required"):
+            return True
+    return False
+
+
+def _runtime_planner_desktop_completion_tool(tool_name: str) -> bool:
+    clean = str(tool_name or "").strip()
+    if clean in {
+        "desktop.hotkey",
+        "desktop.shortcut",
+        "desktop.type_text",
+        "desktop.type",
+        "desktop.click",
+        "desktop.safe_shortcut",
+        "desktop.safe_key",
+        "desktop.safe_type_text",
+        "desktop.safe_click",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
+        "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
+    }:
+        return True
+    return clean.startswith("app.") and (
+        "_and_" in clean
+        or clean in {"app.open", "app.focus", "app.show", "app.hide", "app.minimize"}
+    )

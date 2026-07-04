@@ -1522,7 +1522,11 @@ def planner_direct_decision_and_tool_requests(
         allowed_tools=allowed,
         metadata=metadata,
     )
-    requests = _direct_tool_requests_for_decision(decision, allowed)
+    requests = _direct_tool_requests_for_decision(
+        decision,
+        allowed,
+        metadata=metadata,
+    )
     requests = _annotated_tool_requests_for_decision(
         requests,
         decision,
@@ -1634,7 +1638,12 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
     return _desktop_tool_requests(decision, allowed)
 
 
-def _direct_tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+def _direct_tool_requests_for_decision(
+    decision: Any,
+    allowed: set[str],
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
     if decision.selected_intent.kind == "schedule":
         direct_requests = _direct_schedule_context_app_item_tool_requests(decision, allowed)
         if direct_requests:
@@ -1642,7 +1651,11 @@ def _direct_tool_requests_for_decision(decision: Any, allowed: set[str]) -> list
         return _tool_requests_for_decision(decision, allowed)
     if decision.selected_intent.kind != "desktop_operation":
         return _tool_requests_for_decision(decision, allowed)
-    return _direct_desktop_tool_requests(decision, allowed)
+    return _direct_desktop_tool_requests(
+        decision,
+        allowed,
+        allow_readiness_blocked=_request_execution_context_enabled(metadata),
+    )
 
 
 def planner_desktop_tool_requests(
@@ -2429,7 +2442,11 @@ def _discovered_app_plan_needs_model_reasoning(
     return False
 
 
-def _has_unavailable_required_desktop_step(decision: Any) -> bool:
+def _has_unavailable_required_desktop_step(
+    decision: Any,
+    *,
+    allow_readiness_blocked: bool = False,
+) -> bool:
     plan = getattr(decision, "plan", None)
     tool_plan = getattr(plan, "tool_plan", None)
     steps = getattr(tool_plan, "steps", None)
@@ -2439,6 +2456,8 @@ def _has_unavailable_required_desktop_step(decision: Any) -> bool:
     for index, step in enumerate(steps):
         status = str(getattr(step, "status", "") or "").strip()
         if status != "unavailable":
+            continue
+        if allow_readiness_blocked and _unavailable_step_has_runtime_tool(step):
             continue
         step_id = str(getattr(step, "step_id", "") or "").strip()
         capability_id = str(getattr(step, "capability_id", "") or "").strip()
@@ -3029,16 +3048,28 @@ def _same_app_control_request(request: dict[str, Any], tool_name: str, app_name:
     return str(input_preview.get("app_name") or "").strip() == app_name
 
 
-def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+def _direct_desktop_tool_requests(
+    decision: Any,
+    allowed: set[str],
+    *,
+    allow_readiness_blocked: bool = False,
+) -> list[dict[str, Any]]:
     coordinate_resolution_requests = _coordinate_click_resolution_requests(
         decision,
         allowed,
     )
     if coordinate_resolution_requests:
         return coordinate_resolution_requests
-    if _has_unavailable_required_desktop_step(decision):
+    if _has_unavailable_required_desktop_step(
+        decision,
+        allow_readiness_blocked=allow_readiness_blocked,
+    ):
         return []
-    observe_before_action_requests = _observe_before_action_direct_requests(decision, allowed)
+    observe_before_action_requests = _observe_before_action_direct_requests(
+        decision,
+        allowed,
+        allow_readiness_blocked=allow_readiness_blocked,
+    )
     if observe_before_action_requests:
         return observe_before_action_requests
     requests: list[dict[str, Any]] = []
@@ -3047,7 +3078,10 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
     selected_communication_query = _selected_communication_app_query(steps_by_id)
     model_selected_step_ids = _model_selected_desktop_step_ids(steps)
     for step in steps:
-        if not _step_available(step):
+        if not _direct_step_available(
+            step,
+            allow_readiness_blocked=allow_readiness_blocked,
+        ):
             continue
         step_id = str(getattr(step, "step_id", "") or "").strip()
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
@@ -3082,7 +3116,12 @@ def _direct_desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict
     return requests
 
 
-def _observe_before_action_direct_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+def _observe_before_action_direct_requests(
+    decision: Any,
+    allowed: set[str],
+    *,
+    allow_readiness_blocked: bool = False,
+) -> list[dict[str, Any]]:
     prompt = str(getattr(getattr(decision, "selected_intent", None), "user_goal", "") or "")
     if not _explicit_ui_observation_before_action_requested(prompt):
         return []
@@ -3100,7 +3139,10 @@ def _observe_before_action_direct_requests(decision: Any, allowed: set[str]) -> 
         return []
     for step in steps[:operation_index]:
         step_id = str(getattr(step, "step_id", "") or "").strip()
-        if step_id != "read-foreground-ui" or not _step_available(step):
+        if step_id != "read-foreground-ui" or not _direct_step_available(
+            step,
+            allow_readiness_blocked=allow_readiness_blocked,
+        ):
             continue
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
         if tool_name not in {"desktop.ui_elements", "desktop.read_ui"} or tool_name not in allowed:
@@ -3119,6 +3161,28 @@ def _observe_before_action_direct_requests(decision: Any, allowed: set[str]) -> 
 
 def _step_available(step: Any) -> bool:
     return str(getattr(step, "status", "") or "").strip() != "unavailable"
+
+
+def _direct_step_available(
+    step: Any,
+    *,
+    allow_readiness_blocked: bool = False,
+) -> bool:
+    if _step_available(step):
+        return True
+    if not allow_readiness_blocked:
+        return False
+    return _unavailable_step_has_runtime_tool(step)
+
+
+def _unavailable_step_has_runtime_tool(step: Any) -> bool:
+    if str(getattr(step, "status", "") or "").strip() != "unavailable":
+        return False
+    if not str(getattr(step, "tool_name", "") or "").strip():
+        return False
+    input_preview = getattr(step, "input_preview", None)
+    payload = input_preview if isinstance(input_preview, Mapping) else {}
+    return bool(payload.get("blocking_conditions") or payload.get("missing_permissions"))
 
 
 def _weak_desktop_discovery_plan(decision: Any, requests: list[dict[str, Any]]) -> bool:
@@ -3623,6 +3687,7 @@ def _desktop_discovery_step_needs_model_followup(
 
 
 def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[str, Any]:
+    payload = _drop_readiness_payload_fields(payload)
     if tool_name.startswith("app.") or tool_name in {
         "desktop.open_app",
         "desktop.focus_app",
@@ -3678,6 +3743,14 @@ def _desktop_request_payload(tool_name: str, payload: dict[str, Any]) -> dict[st
         app_name = str(payload.get("app_name") or "").strip()
         return {"app_name": _canonical_app_name(app_name)} if app_name else {}
     return payload
+
+
+def _drop_readiness_payload_fields(payload: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in dict(payload).items()
+        if key not in {"blocking_conditions", "missing_permissions"}
+    }
 
 
 def _copy_app_selection_metadata(

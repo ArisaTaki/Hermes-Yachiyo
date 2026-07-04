@@ -32915,6 +32915,53 @@ def test_runtime_planner_marks_foreground_blocked_desktop_steps_unavailable() ->
     assert _step_by_id(flat_metadata_decision, "operate-foreground-ui").status == "unavailable"
 
 
+def test_runtime_planner_execution_context_keeps_blocked_desktop_direct_requests() -> None:
+    prompt = "打开 Chrome 并在搜索框输入 yachiyo 并搜索"
+    allowed = [
+        "desktop.list_apps",
+        "desktop.inspect_app",
+        "desktop.ui_elements",
+        "app.focus_and_type_into_ui_element",
+        "app.open_and_type_into_ui_element",
+        "desktop.hotkey",
+    ]
+    metadata = {
+        "runtime_planner_execution_context": True,
+        "desktop_blocking_conditions_by_capability": {
+            "foreground_activation": ["desktop_session_locked"],
+            "foreground_input": ["desktop_session_locked"],
+        },
+    }
+
+    requests = planner_direct_tool_requests(prompt, allowed, metadata=metadata)
+    selection = planner_first_direct_tool_selection(
+        prompt,
+        allowed,
+        metadata=metadata,
+        legacy_tool_requests=lambda _prompt, _tools: [],
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.inspect_app",
+        "app.open_and_type_into_ui_element",
+        "desktop.hotkey",
+        "desktop.ui_elements",
+    ]
+    assert all("blocking_conditions" not in request.get("input", {}) for request in requests)
+    assert selection.selected_source == "runtime_planner"
+    selected_tools = [request["tool"] for request in selection.requests]
+    assert selected_tools[0:2] == ["desktop.list_apps", "desktop.inspect_app"]
+    assert "app.open_and_type_into_ui_element" in selected_tools or any(
+        request.get("deferred_tool") == "app.open_and_type_into_ui_element"
+        for request in selection.requests
+    )
+    assert "desktop.hotkey" in selected_tools or any(
+        any(item.get("tool") == "desktop.hotkey" for item in request.get("deferred_continuation") or [])
+        for request in selection.requests
+    )
+    assert all("blocking_conditions" not in request.get("input", {}) for request in selection.requests)
+
+
 def test_planner_first_owns_direct_context_communication_send_sequence() -> None:
     def legacy_requests(_prompt: str, _allowed_tools: list[str]) -> list[dict[str, Any]]:
         return [

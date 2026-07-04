@@ -1735,6 +1735,12 @@ def _safe_runtime_planner_tool_requests(
     selected_requests: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, Any]]:
     selected_requests = selected_requests or []
+    deferred_approval_sequence = _runtime_planner_deferred_ui_approval_sequence_requests(
+        selected_requests,
+        allowed_tools,
+    )
+    if deferred_approval_sequence:
+        return deferred_approval_sequence
     if _has_approval_plan_tool(selected_requests):
         requests = planner_tool_requests(
             prompt,
@@ -1836,6 +1842,52 @@ def _runtime_planner_direct_approval_sequence_requests(
         for request in execution_requests
         if not _runtime_planner_model_followup_verification_request(request)
     ]
+
+
+def _runtime_planner_deferred_ui_approval_sequence_requests(
+    selected_requests: list[dict[str, Any]],
+    allowed_tools: list[str],
+) -> list[dict[str, Any]]:
+    if not selected_requests:
+        return []
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    deferred_approval_tools = {
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "desktop.click_ui_element",
+        "desktop.type_into_ui_element",
+    }
+    has_deferred_approval = False
+    for request in selected_requests:
+        if not isinstance(request, dict):
+            return []
+        tool_name = str(request.get("tool") or "").strip()
+        if not tool_name or (allowed and tool_name not in allowed):
+            return []
+        deferred_tool = str(request.get("deferred_tool") or "").strip()
+        if deferred_tool:
+            if deferred_tool not in deferred_approval_tools:
+                return []
+            if allowed and deferred_tool not in allowed:
+                return []
+            if not isinstance(request.get("deferred_input"), dict):
+                return []
+            if not bool(request.get("continue_to_model")):
+                return []
+            has_deferred_approval = True
+        continuation = request.get("deferred_continuation")
+        if isinstance(continuation, list):
+            for item in continuation:
+                if not isinstance(item, dict):
+                    return []
+                continuation_tool = str(item.get("tool") or "").strip()
+                if not continuation_tool or (allowed and continuation_tool not in allowed):
+                    return []
+    if not has_deferred_approval:
+        return []
+    return [dict(request) for request in selected_requests if isinstance(request, dict)]
 
 
 def _runtime_planner_communication_send_plan(

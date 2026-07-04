@@ -153,6 +153,9 @@ class ApprovalResumeCoordinator:
                 "Approval resume coordinator is missing custom API continuation"
             )
         handoff = self.continuation_handoff_after_approved_tool(agent, context)
+        direct_result = _daily_desktop_resume_result_after_remaining_tools(context)
+        if direct_result:
+            return direct_result
         request = ToolApprovalCustomApiContinuationRequest.from_handoff(handoff)
         return request.execute(self._continue_custom_api_agent)
 
@@ -373,6 +376,89 @@ def _approval_resume_remaining_requests_after_tool(
         allowed_tools=context.allowed_tools,
     )
     return [verification] if verification else []
+
+
+def _daily_desktop_resume_result_after_remaining_tools(
+    context: ToolApprovalResumeContext,
+) -> str:
+    if not _daily_desktop_resume_context(context):
+        return ""
+    phrases: list[str] = []
+    seen: set[str] = set()
+    for event in context.timeline:
+        if not isinstance(event, Mapping):
+            continue
+        if str(event.get("event") or event.get("event_type") or "").strip() != "agent.tool.call":
+            continue
+        result = event.get("result")
+        if not isinstance(result, Mapping) or result.get("ok") is not True:
+            continue
+        tool_name = str(event.get("detail") or result.get("tool") or "").strip()
+        phrase = _daily_desktop_tool_result_phrase(tool_name, result)
+        if not phrase or phrase in seen:
+            continue
+        seen.add(phrase)
+        phrases.append(phrase)
+    return " ".join(phrases).strip()
+
+
+def _daily_desktop_resume_context(context: ToolApprovalResumeContext) -> bool:
+    if not context.remaining_requests:
+        return False
+    source = str(context.tool_request.get("source") or "").strip()
+    if source not in {"daily_desktop_intent", "runtime_planner", "daily_desktop_metadata"}:
+        return False
+    return _daily_desktop_tool_name(context.tool_name)
+
+
+def _daily_desktop_tool_name(tool_name: str) -> bool:
+    clean = str(tool_name or "").strip()
+    return bool(
+        clean.startswith("app.")
+        or clean.startswith("desktop.")
+        or clean.startswith("media.")
+        or clean.startswith("browser.")
+    )
+
+
+def _daily_desktop_tool_result_phrase(tool_name: str, result: Mapping[str, Any]) -> str:
+    clean_tool = str(tool_name or result.get("action") or "").strip()
+    action = str(result.get("action") or clean_tool).strip()
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    if clean_tool in {
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "desktop.type_into_ui_element",
+    } or action in {
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+        "desktop.type_into_ui_element",
+    }:
+        app_name = str(
+            data.get("app_name")
+            or data.get("expected_app_name")
+            or result.get("app_name")
+            or ""
+        ).strip()
+        label = str(data.get("matched_label") or data.get("target") or "").strip()
+        character_count = data.get("character_count")
+        location = f"{app_name} 的 {label}" if app_name and label else app_name or label or "前台控件"
+        count_text = ""
+        if isinstance(character_count, int) and character_count >= 0:
+            count_text = f"（{character_count} 个字符）"
+        return f"已在 {location} 输入文字{count_text}。"
+    if clean_tool in {"desktop.hotkey", "desktop.shortcut"} or action == "desktop.hotkey":
+        key = str(data.get("key") or result.get("key") or "").strip()
+        modifiers = data.get("modifiers") if isinstance(data.get("modifiers"), list) else []
+        combo = "+".join([*(str(item).strip() for item in modifiers if str(item).strip()), key])
+        return f"已发送快捷键：{combo or key}。"
+    if clean_tool in {"app.open", "desktop.open_app"} or action in {"app.open", "desktop.open_app"}:
+        app_name = str(data.get("app_name") or result.get("app_name") or "").strip()
+        return f"已打开 {app_name}。" if app_name else "已打开应用。"
+    if clean_tool in {"app.focus", "desktop.focus_app"} or action in {"app.focus", "desktop.focus_app"}:
+        app_name = str(data.get("app_name") or result.get("app_name") or "").strip()
+        return f"已聚焦 {app_name}。" if app_name else ""
+    return ""
 
 
 def _approved_workspace_patch_step(
