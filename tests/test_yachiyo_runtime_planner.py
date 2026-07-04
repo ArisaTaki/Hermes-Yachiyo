@@ -15002,57 +15002,71 @@ def test_runtime_planner_focuses_generic_browser_window_through_discovery() -> N
 
 
 def test_runtime_planner_searches_running_browser_window_by_capability() -> None:
-    decision = RuntimePlanner().decision("在一个正在运行的浏览器窗口里搜索 OpenAI")
-    envelope = runtime_execution_envelope_from_decision(decision, full_plan=True)
+    cases = (
+        ("在一个正在运行的浏览器窗口里搜索 OpenAI", "OpenAI", "浏览器"),
+        ("在当前打开的浏览器里搜索 yachiyo", "yachiyo", "浏览器"),
+        ("在前台浏览器里搜索 yachiyo", "yachiyo", "浏览器"),
+        ("在当前浏览器里搜索 yachiyo", "yachiyo", "浏览器"),
+        ("in the currently open browser search yachiyo", "yachiyo", "browser"),
+        ("in the foreground browser search yachiyo", "yachiyo", "browser"),
+    )
 
-    assert decision.selected_intent.kind == "desktop_operation"
-    assert decision.selected_intent.inputs["app_name_hint"] == ""
-    assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
-        "action": "discover_apps",
-        "query": "browser",
-    }
-    assert decision.selected_intent.inputs["app_capability_hint"] == {
-        "query": "browser",
-        "description": "浏览器",
-    }
-    assert _step_by_id(decision, "discover_apps-desktop-state").tool_name == (
-        "desktop.running_apps"
-    )
-    open_step = _step_by_id(decision, "open-selected-discovered-app")
-    assert open_step.tool_name == "app.focus"
-    assert open_step.input_preview == {
-        "app_name": "<selected app from desktop.running_apps>",
-        "selection_source": "desktop.running_apps",
-        "query": "browser",
-    }
-    assert _step_by_id(decision, "focus-app-search-field").tool_name == (
-        "app.focus_and_safe_shortcut"
-    )
-    assert _step_by_id(decision, "focus-app-search-field").input_preview == {
-        "app_name": "<selected app from desktop.running_apps>",
-        "selection_source": "desktop.running_apps",
-        "query": "browser",
-        "action": "find",
-    }
-    assert _step_by_id(decision, "type-app-search-query").tool_name == (
-        "app.focus_and_safe_type_text"
-    )
-    assert _step_by_id(decision, "type-app-search-query").input_preview == {
-        "app_name": "<selected app from desktop.running_apps>",
-        "selection_source": "desktop.running_apps",
-        "query": "browser",
-        "text": "OpenAI",
-    }
-    assert envelope is not None
-    assert envelope.requests[0].tool_name == "desktop.running_apps"
-    assert envelope.requests[1].input["selection_source"] == "desktop.running_apps"
-    assert envelope.requests[2].action_target["selection_source"] == "desktop.running_apps"
-    assert envelope.requests[3].action_target["selection_source"] == "desktop.running_apps"
-    assert envelope.requests[4].tool_name == "desktop.search_submit"
-    assert envelope.requests[4].action_target["action"] == "submit_ui"
-    assert envelope.requests[4].action_target["selection_source"] == (
-        "desktop.running_apps"
-    )
+    for prompt, query, description in cases:
+        decision = RuntimePlanner().decision(prompt)
+        envelope = runtime_execution_envelope_from_decision(decision, full_plan=True)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert decision.selected_intent.inputs["app_name_hint"] == ""
+        assert decision.selected_intent.inputs["desktop_discovery_hint"] == {
+            "action": "discover_apps",
+            "query": "browser",
+        }
+        assert decision.selected_intent.inputs["app_capability_hint"] == {
+            "query": "browser",
+            "description": description,
+        }
+        assert _step_by_id(decision, "discover_apps-desktop-state").tool_name == (
+            "desktop.running_apps"
+        )
+        open_step = _step_by_id(decision, "open-selected-discovered-app")
+        assert open_step.tool_name == "app.focus"
+        assert open_step.input_preview == {
+            "app_name": "<selected app from desktop.running_apps>",
+            "selection_source": "desktop.running_apps",
+            "query": "browser",
+        }
+        assert _step_by_id(decision, "focus-app-search-field").tool_name == (
+            "app.focus_and_safe_shortcut"
+        )
+        assert _step_by_id(decision, "focus-app-search-field").input_preview == {
+            "app_name": "<selected app from desktop.running_apps>",
+            "selection_source": "desktop.running_apps",
+            "query": "browser",
+            "action": "find",
+        }
+        assert _step_by_id(decision, "type-app-search-query").tool_name == (
+            "app.focus_and_safe_type_text"
+        )
+        assert _step_by_id(decision, "type-app-search-query").input_preview == {
+            "app_name": "<selected app from desktop.running_apps>",
+            "selection_source": "desktop.running_apps",
+            "query": "browser",
+            "text": query,
+        }
+        assert envelope is not None
+        assert envelope.requests[0].tool_name == "desktop.running_apps"
+        assert envelope.requests[1].input["selection_source"] == "desktop.running_apps"
+        assert envelope.requests[2].action_target["selection_source"] == (
+            "desktop.running_apps"
+        )
+        assert envelope.requests[3].action_target["selection_source"] == (
+            "desktop.running_apps"
+        )
+        assert envelope.requests[4].tool_name == "desktop.search_submit"
+        assert envelope.requests[4].action_target["action"] == "submit_ui"
+        assert envelope.requests[4].action_target["selection_source"] == (
+            "desktop.running_apps"
+        )
 
 
 def test_runtime_planner_clicks_running_browser_window_by_desktop_capability() -> None:

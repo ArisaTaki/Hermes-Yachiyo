@@ -26491,6 +26491,9 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         flags=re.IGNORECASE,
     ):
         return {}
+    running_scope_hint = _running_scoped_app_capability_hint(value)
+    if running_scope_hint:
+        return running_scope_hint
     generic_prefix = (
         r"(?:(?:一个|一款|任意|任何|默认|可用|合适|适合|推荐|能用|可使用|已安装|"
         r"当前打开|当前已打开|已打开|正在运行|运行中|开着|已开启|前台|当前|"
@@ -26582,6 +26585,64 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
         rf"{required_generic_prefix_en}"
         r"(?P<generic_prefixed_capability_en>[\w\s-]{2,40}?)\s*"
         r"(?:app|application|client|tool|program|editor|window)\b",
+    )
+    for pattern in patterns:
+        match = re.search(pattern, value, flags=re.IGNORECASE)
+        if not match:
+            continue
+        raw = next(
+            (
+                item
+                for item in match.groupdict().values()
+                if item is not None and str(item).strip()
+            ),
+            "",
+        )
+        query = _app_capability_discovery_query(raw)
+        if query:
+            return {
+                "query": query,
+                "description": _clean_app_capability_description(raw),
+            }
+    return {}
+
+
+def _running_scoped_app_capability_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value:
+        return {}
+    cn_scope = (
+        r"(?:当前打开|当前已打开|已打开|打开的|正在运行|运行中|当前运行|"
+        r"开着|已开启|前台|当前)"
+    )
+    cn_capability = (
+        r"markdown|代码|编程|开发|文本|文档|文章|表格|电子表格|"
+        r"图片|图像|照片|看图|绘图|画图|设计|视频|视频剪辑|视频编辑|"
+        r"音频|音频编辑|压缩|解压|归档|白板|数据库|截图|截屏|"
+        r"流程图|思维导图|脑图|pdf|PDF|演示|幻灯片|笔记|备忘录|"
+        r"邮件|电子邮件|邮箱|聊天|通讯|通信|消息|即时通讯|日历|"
+        r"项目管理|任务管理|工单|看板|issue|ticket|浏览器|终端|命令行"
+    )
+    en_scope = r"(?:currently\s+open|already\s+open|running|current|foreground)"
+    en_capability = (
+        r"markdown|code|image|photo|design|video|audio|archive|zip|"
+        r"whiteboard|database|screenshot|diagram|mind\s*map|mindmap|"
+        r"document|text|spreadsheet|sheet|presentation|slide|note|mail|"
+        r"email|chat|messaging|message|messenger|calendar|project|task|"
+        r"issue|ticket|kanban|browser|web\s+browser|terminal|command\s+line"
+    )
+    patterns = (
+        rf"(?:^|[\s，,。])(?:在|用|通过)?\s*(?:一个|一款|任意|任何)?\s*"
+        rf"{cn_scope}(?:的)?\s*(?P<capability_cn>{cn_capability})"
+        r"(?:应用(?:程序)?|app|软件|客户端|工具|程序|编辑器|阅读器|查看器|窗口)?"
+        r"\s*(?:里|中|上|内|里面|窗口)?"
+        r"(?=\s*(?:打开|启动|点击|点按|按|输入|搜索|查找|检索|找|播放|"
+        r"创建|新建|写|发送|分析|操作|查看|看看|$))",
+        rf"\b(?:in|inside|within|using|with)?\s*(?:the\s+)?{en_scope}\s+"
+        rf"(?P<capability_en>{en_capability})"
+        r"(?:\s+(?:app|application|client|tool|program|software|editor|viewer|window))?"
+        r"(?=\s*(?:to|and|then|click|press|tap|type|enter|search|find|"
+        r"open|create|write|send|analy[sz]e|view|inspect|$))",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
