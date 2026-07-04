@@ -1,4 +1,5 @@
 import {
+  runtimeToolRecoveryActionsFromRecords,
   runtimeToolRecoveryActionRunStartRequest,
   runtimeToolRecoveryActionTaskStart,
   type RuntimeToolRecoveryAction,
@@ -6,6 +7,14 @@ import {
 } from '../runtime-shared/toolRecoveryActions';
 import { startYachiyoTaskReplanRecoveryAction } from './api';
 import type { AgentTaskSnapshot } from './types';
+
+export type YachiyoTaskReplanRecoverySnapshot = NonNullable<AgentTaskSnapshot['replan_recoveries']>[number];
+
+export type YachiyoTaskReplanRecoveryActionItem = {
+  action: RuntimeToolRecoveryAction;
+  index: number;
+  recovery: YachiyoTaskReplanRecoverySnapshot;
+};
 
 export type YachiyoTaskRecoveryActionStartResult = {
   fallbackResult?: unknown;
@@ -24,6 +33,31 @@ export type StartYachiyoTaskRecoveryActionOptions = {
   startFallbackTask: (start: RuntimeToolRecoveryActionTaskStart) => Promise<unknown>;
   task: AgentTaskSnapshot;
 };
+
+export function yachiyoTaskReplanRecoveryActions(
+  recovery: YachiyoTaskReplanRecoverySnapshot,
+): RuntimeToolRecoveryAction[] {
+  return runtimeToolRecoveryActionsFromRecords([
+    recovery as unknown as Record<string, unknown>,
+  ]);
+}
+
+export function yachiyoTaskReplanRecoveryActionItems(
+  task: AgentTaskSnapshot,
+  limit = 5,
+): YachiyoTaskReplanRecoveryActionItem[] {
+  const items = (task.replan_recoveries || []).flatMap((recovery) => (
+    yachiyoTaskReplanRecoveryActions(recovery)
+      .map((action, index) => ({ action, index, recovery }))
+  ));
+  return Number.isFinite(limit) && limit >= 0 ? items.slice(0, limit) : items;
+}
+
+export function yachiyoTaskPrimaryReplanRecoveryAction(
+  task: AgentTaskSnapshot,
+): YachiyoTaskReplanRecoveryActionItem | null {
+  return yachiyoTaskReplanRecoveryActionItems(task, 1)[0] || null;
+}
 
 export async function startYachiyoTaskRecoveryAction({
   action,

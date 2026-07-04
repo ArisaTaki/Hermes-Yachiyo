@@ -13,6 +13,7 @@ import {
   type RuntimeToolRecoveryAction,
 } from '../../runtime-shared/toolRecoveryActions';
 import { runtimeToolRecoveryHintsFromRecords } from '../../runtime-shared/toolRecoveryHints';
+import { yachiyoTaskReplanRecoveryActions } from '../taskRecoveryActions';
 import { useYachiyoTaskEventReplay } from '../hooks/useYachiyoTaskEventReplay';
 import {
   yachiyoTaskApprovalStudioTarget,
@@ -633,9 +634,7 @@ function TaskReplanRecoverySummary({
 }
 
 function taskReplanRecoveryActions(recovery: TaskReplanRecoverySnapshot): TaskPermissionRecoveryAction[] {
-  return runtimeToolRecoveryActionsFromRecords([
-    recovery as unknown as Record<string, unknown>,
-  ]);
+  return yachiyoTaskReplanRecoveryActions(recovery);
 }
 
 function taskReplanRecoveryDetail(rows: TaskReplanRecoveryRow[]): string {

@@ -4,6 +4,10 @@ import { openAppView } from '../../../lib/bridge';
 import { runtimeToolDisplayLabelOrName } from '../../runtime-shared/approval';
 import { runtimeTimelineEventLabel } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import { taskPermissionRecoveryFromTaskFacts, type TaskPermissionRecoveryAction } from './AgentTaskCard';
+import {
+  yachiyoTaskPrimaryReplanRecoveryAction,
+  type YachiyoTaskReplanRecoverySnapshot,
+} from '../taskRecoveryActions';
 import { yachiyoTaskStudioTarget, yachiyoTaskStudioUrl } from '../taskSnapshots';
 import type { AgentTaskLightSnapshot, AgentTaskSnapshot, ApprovalCardSnapshot, PublicRunEvent } from '../types';
 
@@ -284,14 +288,19 @@ export function LauncherAgentTaskLight({
     currentTask.recent_events,
     currentTask.tool_calls,
   );
-  const needsAction = Boolean(lightTask.needs_user_action || approval || permissionRecovery);
+  const replanRecoveryAction = yachiyoTaskPrimaryReplanRecoveryAction(currentTask);
+  const needsAction = Boolean(lightTask.needs_user_action || approval || permissionRecovery || replanRecoveryAction);
   const detail = permissionRecovery
     ? `${permissionRecovery.kind === 'permission' ? '需要权限' : '需要处理'} · ${permissionRecovery.labels.join('、')}`
+    : replanRecoveryAction
+      ? `恢复计划 · ${launcherReplanRecoveryLabel(replanRecoveryAction.recovery)}`
     : lightTask.detail || launcherAgentTaskDetail(currentTask);
   const canHandleApproval = Boolean(approval && (onApproveApproval || onRejectApproval));
   const canCancel = Boolean(onCancelTask && launcherAgentTaskCanCancel(currentTask));
   const testIds = launcherAgentTaskTestIds(mode, testIdPrefix);
-  const primaryRecoveryAction = permissionRecovery?.actions[0] || null;
+  const permissionRecoveryAction = permissionRecovery?.actions[0] || null;
+  const primaryReplanRecoveryAction = permissionRecoveryAction ? null : replanRecoveryAction;
+  const primaryRecoveryAction = permissionRecoveryAction || primaryReplanRecoveryAction?.action || null;
   const progressChips = launcherAgentTaskProgressChips(
     currentTask,
     mode === 'bubble' ? 2 : variant === 'panel' ? 5 : 4,
@@ -407,6 +416,9 @@ export function LauncherAgentTaskLight({
           type="button"
           className="launcher-agent-task-recovery"
           data-permission-target={primaryRecoveryAction.permission_target}
+          data-replan-recovery-action-id={primaryReplanRecoveryAction?.action.action_id || ''}
+          data-replan-recovery-request-id={primaryReplanRecoveryAction?.recovery.request_id || ''}
+          data-replan-recovery-status={primaryReplanRecoveryAction?.recovery.status || ''}
           data-recovery-tool={primaryRecoveryAction.tool}
           data-testid={testIds.recovery}
           disabled={Boolean(taskAction) || !onRunRecoveryAction}
@@ -474,6 +486,18 @@ export function LauncherAgentTaskLight({
       ) : null}
     </div>
   );
+}
+
+function launcherReplanRecoveryLabel(recovery: YachiyoTaskReplanRecoverySnapshot): string {
+  return String(
+    recovery.recovery_action_label
+    || recovery.selected_tool_name
+    || recovery.target_capability_id
+    || recovery.source_tool_name
+    || recovery.trigger
+    || recovery.request_id
+    || 'recovery',
+  ).trim();
 }
 
 function launcherAgentTaskPendingApproval(task: AgentTaskSnapshot): ApprovalCardSnapshot | null {
