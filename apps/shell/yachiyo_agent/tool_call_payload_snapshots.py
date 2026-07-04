@@ -28,6 +28,11 @@ _PLANNER_TRACE_KEYS = (
     "replan_request_id",
     "replan_trigger",
 )
+_RUNTIME_TRACE_KEYS = (
+    "runtime_doctrine",
+    "runtime_stage",
+    "runtime_role",
+)
 _TOOL_METADATA_KEYS = (
     "followup_target",
     "action_target",
@@ -109,6 +114,33 @@ def tool_call_snapshot_from_payload(
             key: _optional_text(payload.get(key) or input_preview.get(key))
             for key in _PLANNER_TRACE_KEYS
         },
+        replan_triggers=_string_list(
+            payload.get("replan_triggers") or input_preview.get("replan_triggers")
+        ),
+        replan_signal_ids=_string_list(
+            payload.get("replan_signal_ids") or input_preview.get("replan_signal_ids")
+        ),
+        **{
+            key: _optional_text(payload.get(key) or input_preview.get(key))
+            for key in _RUNTIME_TRACE_KEYS
+        },
+        requires_observation=_value_is_true(
+            payload.get("requires_observation") or input_preview.get("requires_observation")
+        ),
+        requires_post_action_verification=_value_is_true(
+            payload.get("requires_post_action_verification")
+            or input_preview.get("requires_post_action_verification")
+        ),
+        deferred_tool=_optional_text(
+            payload.get("deferred_tool") or input_preview.get("deferred_tool")
+        ),
+        deferred_input=_mapping(payload.get("deferred_input") or input_preview.get("deferred_input")),
+        deferred_context=_mapping(
+            payload.get("deferred_context") or input_preview.get("deferred_context")
+        ),
+        deferred_continuation=_record_list(
+            payload.get("deferred_continuation") or input_preview.get("deferred_continuation")
+        ),
         task_workspace_items=_record_list(
             payload.get("task_workspace_items")
             or input_preview.get("task_workspace_items")
@@ -251,6 +283,20 @@ def _redacted_tool_call_snapshot(snapshot: ToolCallSnapshot) -> ToolCallSnapshot
                 key: _optional_text(getattr(snapshot, key))
                 for key in _PLANNER_TRACE_KEYS
             },
+            "replan_triggers": _string_list(snapshot.replan_triggers),
+            "replan_signal_ids": _string_list(snapshot.replan_signal_ids),
+            **{
+                key: _optional_text(getattr(snapshot, key))
+                for key in _RUNTIME_TRACE_KEYS
+            },
+            "requires_observation": bool(snapshot.requires_observation),
+            "requires_post_action_verification": bool(
+                snapshot.requires_post_action_verification
+            ),
+            "deferred_tool": _optional_text(snapshot.deferred_tool),
+            "deferred_input": _mapping(snapshot.deferred_input),
+            "deferred_context": _mapping(snapshot.deferred_context),
+            "deferred_continuation": _record_list(snapshot.deferred_continuation),
             "task_workspace_items": _record_list(snapshot.task_workspace_items),
             "task_verification_targets": _record_list(snapshot.task_verification_targets),
             "tool_name": _text(snapshot.tool_name),
@@ -289,6 +335,17 @@ def _record_list(value: Any) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         return []
     return [_mapping(item) for item in value if isinstance(item, Mapping)]
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = _text(item)
+        if text and text not in result:
+            result.append(text)
+    return result
 
 
 def _restore_stable_scalar_types(source: Any, target: Any) -> dict[str, Any]:
@@ -334,6 +391,9 @@ def _restore_known_preview_types(value: dict[str, Any]) -> dict[str, Any]:
         "task_verification_targets",
         "workspace_items",
         "verification_targets",
+        "replan_triggers",
+        "replan_signal_ids",
+        "deferred_continuation",
     ):
         item = result.get(key)
         if isinstance(item, str):

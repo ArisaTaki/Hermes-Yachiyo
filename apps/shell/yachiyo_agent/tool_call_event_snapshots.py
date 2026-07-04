@@ -36,6 +36,19 @@ _PLANNER_TRACE_KEYS = (
     "replan_request_id",
     "replan_trigger",
 )
+_RUNTIME_TRACE_KEYS = (
+    "replan_triggers",
+    "replan_signal_ids",
+    "runtime_doctrine",
+    "runtime_stage",
+    "runtime_role",
+    "requires_observation",
+    "requires_post_action_verification",
+    "deferred_tool",
+    "deferred_input",
+    "deferred_context",
+    "deferred_continuation",
+)
 
 
 def tool_call_snapshots_from_events(events: list[PublicRunEvent]) -> list[ToolCallSnapshot]:
@@ -139,7 +152,7 @@ def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         "workspace_id": payload.get("workspace_id"),
         "task_id": payload.get("task_id"),
     }
-    for key in _PLANNER_TRACE_KEYS:
+    for key in (*_PLANNER_TRACE_KEYS, *_RUNTIME_TRACE_KEYS):
         if key == "source" and is_daily_desktop_intent_tool_event(event.event_type):
             continue
         trace_context[key] = payload.get(key)
@@ -201,6 +214,7 @@ def daily_desktop_intent_step_payloads(event: PublicRunEvent) -> list[dict[str, 
                 "risk_level",
                 "risk",
                 *_PLANNER_TRACE_KEYS,
+                *_RUNTIME_TRACE_KEYS,
             }
         }
         step_payload.update(
@@ -243,6 +257,7 @@ def merge_tool_trace_context(source: dict[str, Any], payload: dict[str, Any]) ->
         "workspace_items",
         "verification_targets",
         *_PLANNER_TRACE_KEYS,
+        *_RUNTIME_TRACE_KEYS,
     ):
         if payload.get(key):
             source.setdefault(key, payload.get(key))
@@ -314,6 +329,31 @@ def merge_tool_call_snapshots(
         capability_id=current.capability_id or next_call.capability_id,
         replan_request_id=current.replan_request_id or next_call.replan_request_id,
         replan_trigger=current.replan_trigger or next_call.replan_trigger,
+        replan_triggers=_merge_string_lists(
+            current.replan_triggers,
+            next_call.replan_triggers,
+        ),
+        replan_signal_ids=_merge_string_lists(
+            current.replan_signal_ids,
+            next_call.replan_signal_ids,
+        ),
+        runtime_doctrine=current.runtime_doctrine or next_call.runtime_doctrine,
+        runtime_stage=current.runtime_stage or next_call.runtime_stage,
+        runtime_role=current.runtime_role or next_call.runtime_role,
+        requires_observation=(
+            current.requires_observation or next_call.requires_observation
+        ),
+        requires_post_action_verification=(
+            current.requires_post_action_verification
+            or next_call.requires_post_action_verification
+        ),
+        deferred_tool=current.deferred_tool or next_call.deferred_tool,
+        deferred_input={**next_call.deferred_input, **current.deferred_input},
+        deferred_context={**next_call.deferred_context, **current.deferred_context},
+        deferred_continuation=_merge_record_lists(
+            current.deferred_continuation,
+            next_call.deferred_continuation,
+        ),
         task_workspace_items=_merge_record_lists(
             current.task_workspace_items,
             next_call.task_workspace_items,
@@ -615,6 +655,7 @@ def _tool_call_correlation_preview(preview: Mapping[str, Any]) -> dict[str, Any]
         "workflow_run_id",
         "workflow_step_label",
         *_PLANNER_TRACE_KEYS,
+        *_RUNTIME_TRACE_KEYS,
     }
     return {
         key: _canonical_preview_value(value)
@@ -665,6 +706,15 @@ def _merge_record_lists(
             continue
         seen.add(key)
         merged.append(record)
+    return merged
+
+
+def _merge_string_lists(current: list[str], next_items: list[str]) -> list[str]:
+    merged: list[str] = []
+    for item in [*current, *next_items]:
+        text = _text(item)
+        if text and text not in merged:
+            merged.append(text)
     return merged
 
 

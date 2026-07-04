@@ -709,6 +709,10 @@ export type ToolCallSnapshot = {
   runtime_role?: string | null;
   requires_observation?: boolean | null;
   requires_post_action_verification?: boolean | null;
+  deferred_tool?: string | null;
+  deferred_input?: Record<string, unknown>;
+  deferred_context?: Record<string, unknown>;
+  deferred_continuation?: Array<Record<string, unknown>>;
   tool_name: string;
   status: string;
   risk_level?: string | null;

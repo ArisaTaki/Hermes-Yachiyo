@@ -35,6 +35,10 @@ const RUNTIME_TRACE_KEYS = [
   'runtime_role',
   'requires_observation',
   'requires_post_action_verification',
+  'deferred_tool',
+  'deferred_input',
+  'deferred_context',
+  'deferred_continuation',
 ];
 const TASK_CONTEXT_KEYS = [
   'core_id',
@@ -393,6 +397,13 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
     runtime_role: plannerTraceString(payload, inputPreview, 'runtime_role'),
     requires_observation: plannerTraceBool(payload, inputPreview, 'requires_observation'),
     requires_post_action_verification: plannerTraceBool(payload, inputPreview, 'requires_post_action_verification'),
+    deferred_tool: plannerTraceString(payload, inputPreview, 'deferred_tool'),
+    deferred_input: objectPreview(payload.deferred_input) || objectPreview(inputPreview.deferred_input) || {},
+    deferred_context: objectPreview(payload.deferred_context) || objectPreview(inputPreview.deferred_context) || {},
+    deferred_continuation: mergeRecordLists(
+      recordList(payload.deferred_continuation),
+      recordList(inputPreview.deferred_continuation),
+    ),
     task_workspace_items: toolCallTaskWorkspaceItems(payload, inputPreview),
     task_verification_targets: toolCallTaskVerificationTargets(payload, inputPreview),
     tool_name: toolName,
@@ -620,6 +631,19 @@ function mergeToolCallTrace(current: ToolCallSnapshot, incoming: ToolCallSnapsho
     runtime_role: current.runtime_role || incoming.runtime_role || null,
     requires_observation: current.requires_observation ?? incoming.requires_observation ?? null,
     requires_post_action_verification: current.requires_post_action_verification ?? incoming.requires_post_action_verification ?? null,
+    deferred_tool: current.deferred_tool || incoming.deferred_tool || null,
+    deferred_input: {
+      ...(incoming.deferred_input || {}),
+      ...(current.deferred_input || {}),
+    },
+    deferred_context: {
+      ...(incoming.deferred_context || {}),
+      ...(current.deferred_context || {}),
+    },
+    deferred_continuation: mergeRecordLists(
+      current.deferred_continuation,
+      incoming.deferred_continuation,
+    ),
     task_workspace_items: mergeRecordLists(current.task_workspace_items, incoming.task_workspace_items),
     task_verification_targets: mergeRecordLists(
       current.task_verification_targets,
@@ -669,6 +693,19 @@ function mergeToolCallReplayTrace(current: ToolCallSnapshot, incoming: ToolCallS
     runtime_role: current.runtime_role || incoming.runtime_role || null,
     requires_observation: current.requires_observation ?? incoming.requires_observation ?? null,
     requires_post_action_verification: current.requires_post_action_verification ?? incoming.requires_post_action_verification ?? null,
+    deferred_tool: current.deferred_tool || incoming.deferred_tool || null,
+    deferred_input: {
+      ...(incoming.deferred_input || {}),
+      ...(current.deferred_input || {}),
+    },
+    deferred_context: {
+      ...(incoming.deferred_context || {}),
+      ...(current.deferred_context || {}),
+    },
+    deferred_continuation: mergeRecordLists(
+      current.deferred_continuation,
+      incoming.deferred_continuation,
+    ),
     task_workspace_items: mergeRecordLists(current.task_workspace_items, incoming.task_workspace_items),
     task_verification_targets: mergeRecordLists(
       current.task_verification_targets,

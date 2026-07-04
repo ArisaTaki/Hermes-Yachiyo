@@ -47,6 +47,10 @@ export type RuntimeToolCallCardSnapshot = {
   runtime_role?: string | null;
   requires_observation?: boolean | null;
   requires_post_action_verification?: boolean | null;
+  deferred_tool?: string | null;
+  deferred_input?: Record<string, unknown>;
+  deferred_context?: Record<string, unknown>;
+  deferred_continuation?: Array<Record<string, unknown>>;
   tool_name: string;
   status: string;
   risk_level?: string | null;
@@ -102,12 +106,15 @@ export function RuntimeToolCallCard({
   const observedCenter = observedActionCenterSummary(observedMetadata.observationEvidence);
   const taskWorkspaceItems = runtimeToolTaskWorkspaceItems(toolCall);
   const taskVerificationTargets = runtimeToolTaskVerificationTargets(toolCall);
+  const deferredContinuation = runtimeToolTraceRecordList(toolCall, 'deferred_continuation');
   const metadata = toolCallMetadataItems(toolCall);
   return (
     <div
       className={className}
       data-approval-id={toolCall.approval_id || ''}
       data-blocking-conditions={blockingConditions.join(',')}
+      data-deferred-continuation-count={deferredContinuation.length}
+      data-deferred-tool={runtimeToolTraceString(toolCall, 'deferred_tool')}
       data-group-id={toolCall.group_id || ''}
       data-group-run-id={toolCall.group_run_id || ''}
       data-observed-action-evidence={observedActionEvidence}
@@ -117,6 +124,7 @@ export function RuntimeToolCallCard({
       data-risk-level={toolCall.risk_level || ''}
       data-run-id={toolCall.run_id || ''}
       data-runtime-capability-id={runtimeToolTraceString(toolCall, 'capability_id')}
+      data-runtime-deferred-tool={runtimeToolTraceString(toolCall, 'deferred_tool')}
       data-runtime-doctrine={runtimeToolTraceString(toolCall, 'runtime_doctrine')}
       data-runtime-replan-request-id={runtimeToolTraceString(toolCall, 'replan_request_id')}
       data-runtime-replan-signal-ids={runtimeToolTraceStringList(toolCall, 'replan_signal_ids').join(',')}
@@ -279,6 +287,9 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
   const replanTriggers = runtimeToolTraceStringList(toolCall, 'replan_triggers');
   const taskWorkspaceItems = runtimeToolTaskWorkspaceItems(toolCall);
   const taskVerificationTargets = runtimeToolTaskVerificationTargets(toolCall);
+  const deferredInput = runtimeToolTraceRecord(toolCall, 'deferred_input');
+  const deferredContext = runtimeToolTraceRecord(toolCall, 'deferred_context');
+  const deferredContinuation = runtimeToolTraceRecordList(toolCall, 'deferred_continuation');
   return [
     { label: 'run', value: toolCall.run_id || '' },
     { label: 'source', value: toolCall.source_run_id || '' },
@@ -297,6 +308,10 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
     { label: 'targets', value: runtimeToolRecoveryVerificationTargetsSummary(taskVerificationTargets) },
     { label: 'replan', value: runtimeToolTraceString(toolCall, 'replan_request_id') || replanTrigger || replanTriggers.join(', ') },
     { label: 'signals', value: runtimeToolTraceStringList(toolCall, 'replan_signal_ids').join(', ') },
+    { label: 'deferred', value: runtimeToolTraceString(toolCall, 'deferred_tool') },
+    { label: 'deferred input', value: runtimeToolObjectSummary(deferredInput) },
+    { label: 'deferred context', value: runtimeToolObjectSummary(deferredContext) },
+    { label: 'continuation', value: runtimeToolDeferredContinuationSummary(deferredContinuation) },
     { label: 'action', value: observedActionTargetSummary(observedMetadata.actionTarget) },
     { label: 'observed', value: observedActionEvidenceSummary(observedMetadata.observationEvidence) },
     { label: 'retry', value: observedActionRetrySummary(observedMetadata.observationRetry) },
@@ -355,6 +370,26 @@ function runtimeToolTraceBoolLabel(
     if (value === 'true' || value === 'required') return 'required';
   }
   return '';
+}
+
+function runtimeToolTraceRecord(
+  toolCall: RuntimeToolCallCardSnapshot,
+  key: string,
+): Record<string, unknown> {
+  for (const record of runtimeToolTraceRecords(toolCall)) {
+    const value = approvalPreviewRecord(record[key]);
+    if (Object.keys(value).length) return value;
+  }
+  return {};
+}
+
+function runtimeToolTraceRecordList(
+  toolCall: RuntimeToolCallCardSnapshot,
+  key: string,
+): Array<Record<string, unknown>> {
+  return uniqueRecords(
+    runtimeToolTraceRecords(toolCall).flatMap((record) => recordList(record[key])),
+  );
 }
 
 function runtimeToolTraceRecords(toolCall: RuntimeToolCallCardSnapshot): Record<string, unknown>[] {
@@ -449,6 +484,36 @@ function runtimeToolRecoveryVerificationTargetsSummary(
   if (!parts.length) return '';
   const suffix = targets.length > parts.length ? ` +${targets.length - parts.length}` : '';
   return `${parts.join(' | ')}${suffix}`;
+}
+
+function runtimeToolObjectSummary(record: Record<string, unknown>): string {
+  if (!Object.keys(record).length) return '';
+  const primary = (
+    stringValue(record.tool)
+    || stringValue(record.target)
+    || stringValue(record.label)
+    || stringValue(record.query)
+    || stringValue(record.step_id)
+  );
+  const keys = Object.keys(record).filter((key) => (
+    record[key] !== undefined && record[key] !== null
+  ));
+  return primary ? `${primary} (${keys.length} fields)` : `${keys.length} fields`;
+}
+
+function runtimeToolDeferredContinuationSummary(records: Array<Record<string, unknown>>): string {
+  if (!records.length) return '';
+  const labels = records
+    .slice(0, 3)
+    .map((record) => (
+      stringValue(record.tool)
+      || stringValue(record.step_id)
+      || stringValue(record.label)
+      || stringValue(record.target)
+    ))
+    .filter(Boolean);
+  const suffix = records.length > labels.length ? ` +${records.length - labels.length}` : '';
+  return labels.length ? `${labels.join(', ')}${suffix}` : `${records.length} steps`;
 }
 
 function runtimeToolTaskWorkspaceItems(toolCall: RuntimeToolCallCardSnapshot): Array<Record<string, unknown>> {

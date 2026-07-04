@@ -5730,6 +5730,17 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
         workflow_node_label="Read Files",
         group_id="group-1",
         group_run_id="group-run-1",
+        replan_triggers=["verification_failed"],
+        replan_signal_ids=["signal-1"],
+        runtime_doctrine="discover_operate_verify",
+        runtime_stage="operate",
+        runtime_role="desktop_ui_action",
+        requires_observation=True,
+        requires_post_action_verification=True,
+        deferred_tool="desktop.click_ui_element",
+        deferred_input={"target": "Export", "limit": 80},
+        deferred_context={"step_id": "operate-foreground-ui"},
+        deferred_continuation=[{"tool": "desktop.ui_elements", "step_id": "verify"}],
         tool_name="workspace.read",
         status="completed",
         risk_level="low",
@@ -5768,6 +5779,17 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
         "capability_id",
         "replan_request_id",
         "replan_trigger",
+        "replan_triggers",
+        "replan_signal_ids",
+        "runtime_doctrine",
+        "runtime_stage",
+        "runtime_role",
+        "requires_observation",
+        "requires_post_action_verification",
+        "deferred_tool",
+        "deferred_input",
+        "deferred_context",
+        "deferred_continuation",
         "task_workspace_items",
         "task_verification_targets",
         "tool_name",
@@ -5787,6 +5809,10 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["source_runnable_name"] == "Planner"
     assert payload["workflow_node_id"] == "read"
     assert payload["group_run_id"] == "group-run-1"
+    assert payload["runtime_stage"] == "operate"
+    assert payload["requires_post_action_verification"] is True
+    assert payload["deferred_tool"] == "desktop.click_ui_element"
+    assert payload["deferred_input"] == {"target": "Export", "limit": 80}
 
 
 def test_memory_trace_snapshot_keeps_runtime_trace_fields() -> None:

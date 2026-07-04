@@ -111,6 +111,10 @@ _CHAT_TOOL_INPUT_TRACE_KEYS = {
     "runtime_doctrine",
     "runtime_role",
     "runtime_stage",
+    "deferred_tool",
+    "deferred_input",
+    "deferred_context",
+    "deferred_continuation",
 }
 
 

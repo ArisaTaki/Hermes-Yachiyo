@@ -1210,6 +1210,24 @@ def test_agent_task_snapshot_links_deferred_approval_to_replan_recovery() -> Non
                         "step_id": "operate-foreground-ui",
                         "replan_request_id": "replan-1",
                         "approval_id": "approval-1",
+                        "runtime_doctrine": "discover_operate_verify",
+                        "runtime_stage": "operate",
+                        "runtime_role": "desktop_ui_action",
+                        "requires_observation": True,
+                        "requires_post_action_verification": True,
+                        "replan_triggers": ["verification_failed"],
+                        "replan_signal_ids": ["signal-1"],
+                        "deferred_tool": "desktop.click_ui_element",
+                        "deferred_input": {
+                            "target": "Export",
+                            "role_filter": "",
+                            "click_count": 1,
+                            "limit": 80,
+                        },
+                        "deferred_context": {"step_id": "operate-foreground-ui"},
+                        "deferred_continuation": [
+                            {"tool": "desktop.ui_elements", "step_id": "verify-desktop-result"}
+                        ],
                         "input_preview": {"target": "Export", "limit": 80},
                         "result": {"ok": True, "summary": "Clicked Export"},
                     },
@@ -1234,6 +1252,25 @@ def test_agent_task_snapshot_links_deferred_approval_to_replan_recovery() -> Non
     assert recovery.recovery_actions[0].approval_id == "approval-1"
     assert recovery.recovery_actions[0].approval_status == "approved"
     assert recovery.recovery_actions[0].deferred_tool == "desktop.click_ui_element"
+    tool_call = next(
+        call
+        for call in task.tool_calls
+        if call.tool_name == "desktop.click_ui_element"
+        and call.status == "completed"
+    )
+    assert tool_call.runtime_stage == "operate"
+    assert tool_call.runtime_role == "desktop_ui_action"
+    assert tool_call.requires_observation is True
+    assert tool_call.requires_post_action_verification is True
+    assert tool_call.replan_triggers == ["verification_failed"]
+    assert tool_call.replan_signal_ids == ["signal-1"]
+    assert tool_call.deferred_tool == "desktop.click_ui_element"
+    assert tool_call.deferred_input["target"] == "Export"
+    assert tool_call.deferred_context == {"step_id": "operate-foreground-ui"}
+    assert tool_call.deferred_continuation == [
+        {"tool": "desktop.ui_elements", "step_id": "verify-desktop-result"}
+    ]
+    assert "deferred_tool" not in tool_call.input_preview
 
 
 def test_agent_studio_service_projects_scoped_group_runtime_tool_result_events() -> None:
