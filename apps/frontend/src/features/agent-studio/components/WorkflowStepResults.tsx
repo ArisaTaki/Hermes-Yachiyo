@@ -1,4 +1,5 @@
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
+import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
 import type { RecoveryRunProvenanceSnapshot, RerunRunRequest } from '../../yachiyo-studio/types';
 import type { RunSpec } from '../types';
 import type { RunDetailWorkflowStepRef } from './runDetailTypes';
@@ -175,6 +176,13 @@ export function WorkflowStepResults({
                 content={step.childRunId && !childRun ? 'Loading child run...' : summary}
                 label="展开完整节点结果"
                 defaultOpen={childStatus === 'failed' || childStatus === 'cancelled' || childStatus === 'approval_required'}
+              />
+              <RuntimeDebugSummary
+                className="workflow-step-runtime-debug"
+                compact
+                sourceLabel={step.childRunId ? `Child run ${step.childRunId}` : 'Workflow step'}
+                summary={childRun?.runtime_debug}
+                testId="agent-run-detail-workflow-step-runtime-debug"
               />
               {childRun && childArtifacts.length ? (
                 <div className="run-artifacts compact">

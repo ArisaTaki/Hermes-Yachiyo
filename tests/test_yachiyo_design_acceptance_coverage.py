@@ -1532,6 +1532,15 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "return planTools ? `tools ${planTools}` : '';",
         ],
     )
+    _assert_contains(
+        "apps/frontend/src/features/agent-studio/components/WorkflowStepResults.tsx",
+        [
+            "RuntimeDebugSummary",
+            'testId="agent-run-detail-workflow-step-runtime-debug"',
+            'className="workflow-step-runtime-debug"',
+            "summary={childRun?.runtime_debug}",
+        ],
+    )
     _assert_smoke_script(
         "scripts/smoke_agent_studio_groups_ui.mjs",
         [

@@ -19930,6 +19930,10 @@ button.studio-tool-permission:disabled {
   background: oklch(255 0 0 / 0.02);
 }
 
+.workflow-step-runtime-debug.runtime-debug-summary {
+  background: oklch(255 0 0 / 0.018);
+}
+
 .workflow-step-result.start {
   border-color: oklch(66% 0.12 188 / 0.2);
 }
