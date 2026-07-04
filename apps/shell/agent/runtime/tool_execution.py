@@ -428,6 +428,71 @@ def _discovered_app_name_for_query(
     return ""
 
 
+def _latest_selected_app_candidate(
+    timeline: list[dict[str, Any]],
+    *,
+    source_tool: str = _DESKTOP_APP_SELECTION_SOURCE,
+) -> dict[str, Any]:
+    clean_source_tool = (
+        _desktop_app_selection_source(source_tool) or _DESKTOP_APP_SELECTION_SOURCE
+    )
+    for event in reversed(timeline):
+        if event.get("event") != "agent.tool.call":
+            continue
+        if str(event.get("detail") or "") != clean_source_tool:
+            continue
+        result = event.get("result") if isinstance(event.get("result"), dict) else {}
+        candidate = _selected_app_candidate_from_result(
+            result,
+            source_tool=clean_source_tool,
+        )
+        if candidate:
+            return candidate
+    return {}
+
+
+def _selected_app_candidate_from_result(
+    result: dict[str, Any],
+    *,
+    source_tool: str,
+) -> dict[str, Any]:
+    best_match = _best_match_from_list_apps_result(result)
+    if isinstance(best_match, dict) and _app_candidate_name(best_match):
+        return best_match
+    apps = [
+        app
+        for app in _apps_from_list_apps_result(result)
+        if isinstance(app, dict) and _app_candidate_name(app)
+    ]
+    if source_tool == _DESKTOP_RUNNING_APP_SELECTION_SOURCE:
+        data = result.get("data") if isinstance(result.get("data"), dict) else {}
+        frontmost_name = str(
+            data.get("frontmost") or result.get("frontmost") or ""
+        ).strip()
+        if frontmost_name:
+            for app in apps:
+                if _normalized_app_lookup(
+                    _app_candidate_name(app)
+                ) == _normalized_app_lookup(frontmost_name):
+                    return {
+                        **app,
+                        "match_reason": (
+                            app.get("match_reason") or "frontmost_running_app"
+                        ),
+                    }
+        for app in apps:
+            if bool(app.get("frontmost")):
+                return {
+                    **app,
+                    "match_reason": (
+                        app.get("match_reason") or "frontmost_running_app"
+                    ),
+                }
+    if len(apps) == 1:
+        return apps[0]
+    return {}
+
+
 def _best_running_app_match_for_query(
     result: dict[str, Any],
     query: str,
@@ -1187,11 +1252,19 @@ def _tool_request_app_name_resolution(
         if uses_selected_app_placeholder and selected_app_query
         else raw_app_name
     )
-    discovered_app_name = _discovered_app_name_for_query(
-        timeline,
-        requested_app_name,
-        source_tool=source_tool,
-    )
+    selected_candidate: dict[str, Any] = {}
+    if uses_selected_app_placeholder and not selected_app_query:
+        selected_candidate = _latest_selected_app_candidate(
+            timeline,
+            source_tool=source_tool,
+        )
+        discovered_app_name = _app_candidate_name(selected_candidate)
+    else:
+        discovered_app_name = _discovered_app_name_for_query(
+            timeline,
+            requested_app_name,
+            source_tool=source_tool,
+        )
     if not discovered_app_name:
         return {}
     if (
@@ -1201,18 +1274,25 @@ def _tool_request_app_name_resolution(
         )
     ):
         return {}
+    evidence = (
+        _discovered_app_best_match_evidence(selected_candidate)
+        if selected_candidate
+        else _discovered_app_resolution_evidence(
+            timeline,
+            requested_app_name,
+            discovered_app_name,
+            source_tool=source_tool,
+        )
+    )
+    if selected_candidate and "app_resolution_reason" not in evidence:
+        evidence["app_resolution_reason"] = f"latest_{source_tool}_selection"
     return {
         "tool": str(tool_request.get("tool") or "").strip(),
         "field": "app_name",
         "requested_app_name": requested_app_name,
         "resolved_app_name": discovered_app_name,
         "source_tool": source_tool,
-        **_discovered_app_resolution_evidence(
-            timeline,
-            requested_app_name,
-            discovered_app_name,
-            source_tool=source_tool,
-        ),
+        **evidence,
     }
 
 
