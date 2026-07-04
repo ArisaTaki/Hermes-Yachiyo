@@ -504,6 +504,7 @@ class LegacyChatTaskStarter:
                     ),
                 },
                 conversation_id=conversation_id,
+                runtime=self._runtime,
             )
 
         link_task_run = getattr(self._runtime, "link_task_run", None)
@@ -522,6 +523,7 @@ class LegacyChatTaskStarter:
         return self._projector.chat_task_payload(
             {**run, "task_id": task_id, "session_id": conversation_id},
             conversation_id=conversation_id,
+            runtime=self._runtime,
         )
 
     def execute_existing_main_chat_task(
@@ -797,6 +799,7 @@ class LegacyChatTaskStarter:
                 return self._projector.chat_task_payload(
                     {**run, "task_id": task_id, "session_id": conversation_id},
                     conversation_id=conversation_id,
+                    runtime=self._runtime,
                 )
             if status in {"failed", "cancelled"}:
                 self._sync_app_task_failed(task_id, result_text or f"Native Run {status}")
@@ -810,6 +813,7 @@ class LegacyChatTaskStarter:
                 return self._projector.chat_task_payload(
                     {**run, "task_id": task_id, "session_id": conversation_id},
                     conversation_id=conversation_id,
+                    runtime=self._runtime,
                 )
             complete_main_chat_run = getattr(self._runtime, "complete_main_chat_run", None)
             if callable(complete_main_chat_run) and result_text:
@@ -825,6 +829,7 @@ class LegacyChatTaskStarter:
             return self._projector.chat_task_payload(
                 {**run, "task_id": task_id, "session_id": conversation_id},
                 conversation_id=conversation_id,
+                runtime=self._runtime,
             )
         except Exception as exc:
             if run_id:

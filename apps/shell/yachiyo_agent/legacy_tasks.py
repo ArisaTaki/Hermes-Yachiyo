@@ -168,7 +168,11 @@ class LegacyRuntimePort:
                 run = self._run_with_task_link(task_id, run, link)
             else:
                 run = {**run, "task_id": task_id, "session_id": conversation_id}
-        return self._projector.chat_task_payload(run, conversation_id=conversation_id)
+        return self._projector.chat_task_payload(
+            run,
+            conversation_id=conversation_id,
+            runtime=self._runtime,
+        )
 
     def _append_planner_run_events(self, run_id: str, planner_decision: Any | None) -> None:
         append_run_event = getattr(self._runtime, "append_run_event", None)
@@ -186,7 +190,8 @@ class LegacyRuntimePort:
         if not payload.get("task_id"):
             payload = {**payload, "task_id": task_id}
         return self._projector.chat_task_payload(
-            payload
+            payload,
+            runtime=self._runtime,
         )
 
     def get_task_timeline(self, task_id: str) -> dict[str, Any]:
@@ -194,6 +199,9 @@ class LegacyRuntimePort:
         payload = self._payload_with_task_link(task_id, self._runtime.get_run(run_id))
         if not payload.get("task_id"):
             payload = {**payload, "task_id": task_id}
+        events = self._projector.chat_events_for_run(payload, self._runtime)
+        if events:
+            payload = {**payload, "events": events}
         return payload
 
     def get_task_event_stream(self, task_id: str) -> dict[str, Any]:
@@ -286,6 +294,7 @@ class LegacyRuntimePort:
             self._projector.chat_task_payload(
                 run,
                 conversation_id=conversation_id or "",
+                runtime=self._runtime,
             )
             for run in runs
         ]
@@ -299,7 +308,8 @@ class LegacyRuntimePort:
             self._payload_with_task_link(
                 task_id,
                 approved,
-            )
+            ),
+            runtime=self._runtime,
         )
 
     def reject(self, task_id: str, decision: dict[str, Any] | str | None = None) -> dict[str, Any]:
@@ -313,7 +323,8 @@ class LegacyRuntimePort:
                     run_id,
                     self._runtime.reject_run_approval(run_id, reason),
                 ),
-            )
+            ),
+            runtime=self._runtime,
         )
 
     def cancel(self, task_id: str) -> dict[str, Any]:
@@ -322,7 +333,8 @@ class LegacyRuntimePort:
             self._payload_with_task_link(
                 task_id,
                 self._run_action_payload(run_id, self._runtime.cancel_run(run_id)),
-            )
+            ),
+            runtime=self._runtime,
         )
 
     def _assert_task_approval(

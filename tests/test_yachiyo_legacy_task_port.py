@@ -55,6 +55,7 @@ def test_legacy_runtime_port_starts_and_links_chat_task() -> None:
         ),
         ("link_task_run", {"task_id": "task-1", "run_id": "run-1", "session_id": "chat-1"}),
         ("get_run", "run-1"),
+        ("list_run_events", "run-1"),
     ]
 
 
@@ -2719,6 +2720,55 @@ def test_legacy_runtime_port_resolves_task_link_for_timeline() -> None:
     assert ("get_task_run_link", "task-1") in runtime.calls
 
 
+def test_legacy_runtime_port_merges_runtime_event_store_into_task_payloads() -> None:
+    runtime = _EventStoreFakeRuntime()
+    port = LegacyRuntimePort(runtime)
+    port.start_chat_task(
+        {
+            "prompt": "分析 sales.csv 并输出报告",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-1",
+        }
+    )
+    task_core_event = next(
+        event
+        for event in runtime.event_store["run-1"]
+        if event["event_type"] == "agent.task_core.created"
+    )
+    task_core = task_core_event["payload"]["task_core"]
+    todo = task_core["todos"][0]
+    runtime.append_run_event(
+        "run-1",
+        "agent.task.todo.updated",
+        {
+            "todo_id": todo["todo_id"],
+            "step_id": todo["step_id"],
+            "status": "completed",
+            "todo": {**todo, "status": "completed"},
+        },
+    )
+
+    task = port.get_task_snapshot("task-1")
+    timeline = port.get_task_timeline("task-1")
+
+    assert [event.get("event") or event.get("event_type") for event in task["recent_events"]] == [
+        "run.started",
+        "agent.intent.selected",
+        "agent.plan.created",
+        "agent.task_core.created",
+        "agent.plan.step",
+        "agent.task.todo.updated",
+    ]
+    assert [event.get("event") or event.get("event_type") for event in timeline["events"]] == [
+        "run.started",
+        "agent.intent.selected",
+        "agent.plan.created",
+        "agent.task_core.created",
+        "agent.plan.step",
+        "agent.task.todo.updated",
+    ]
+
+
 def test_legacy_runtime_port_resolves_task_link_for_event_stream() -> None:
     runtime = _FakeRuntime()
     port = LegacyRuntimePort(runtime)
@@ -2773,6 +2823,7 @@ def test_legacy_runtime_port_prefers_runtime_event_page_for_task_events() -> Non
             "client_task_id": "task-1",
         }
     )
+    runtime.calls.clear()
 
     page = port.get_task_event_page("task-1", after_sequence=-2, limit=999)
 
@@ -2945,6 +2996,46 @@ class _FakeRuntime:
             "run_id": run_id,
             "user_goal": "Patch README",
             "status": "failed",
+        }
+
+
+class _EventStoreFakeRuntime(_FakeRuntime):
+    def __init__(self) -> None:
+        super().__init__()
+        self.event_store: dict[str, list[dict[str, Any]]] = {}
+
+    def append_run_event(
+        self,
+        run_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+    ) -> None:
+        self.calls.append(
+            (
+                "append_run_event",
+                {
+                    "run_id": run_id,
+                    "event_type": event_type,
+                    "payload": payload,
+                },
+            )
+        )
+        events = self.event_store.setdefault(run_id, [])
+        events.append(
+            {
+                "event_type": event_type,
+                "sequence": len(events) + 2,
+                "payload": dict(payload),
+            }
+        )
+
+    def list_run_events(self, run_id: str) -> dict[str, Any]:
+        self.calls.append(("list_run_events", run_id))
+        return {
+            "events": [
+                *list(self.runs[run_id]["timeline"]),
+                *list(self.event_store.get(run_id, [])),
+            ]
         }
 
 
