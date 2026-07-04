@@ -1068,7 +1068,7 @@ async def test_yachiyo_task_approve_continues_main_chat_daily_desktop_sequence(
             ("active_window",),
             ("hotkey", "l", ["command"]),
             ("shortcut", "copy"),
-            ("ui_elements", "", 80, ""),
+            ("ui_elements", "", 80, "Notes"),
         ]
         assert completed_task is not None
         assert completed_task.status == TaskStatus.COMPLETED
@@ -1312,13 +1312,13 @@ async def test_yachiyo_task_approve_continues_type_into_ui_element_then_return_s
             },
         }
 
-    def fake_desktop_hotkey(key: str, *, modifiers: list[str] | None = None) -> dict[str, Any]:
-        calls.append(("hotkey", key, list(modifiers or [])))
+    def fake_desktop_submit_foreground(action: str = "submit") -> dict[str, Any]:
+        calls.append(("submit", action))
         return {
             "ok": True,
-            "action": "desktop.hotkey",
-            "summary": "Sent hotkey",
-            "data": {"key": key, "modifiers": list(modifiers or [])},
+            "action": "desktop.submit_foreground",
+            "summary": "Submitted foreground",
+            "data": {"action": action},
         }
 
     def fake_ui_elements(
@@ -1348,7 +1348,10 @@ async def test_yachiyo_task_approve_continues_type_into_ui_element_then_return_s
         "apps.shell.agent.tools.desktop.type_into_ui_element",
         fake_type_into_ui_element,
     )
-    monkeypatch.setattr("apps.shell.agent.tools.desktop.desktop_hotkey", fake_desktop_hotkey)
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_submit_foreground",
+        fake_desktop_submit_foreground,
+    )
     monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
     try:
         sent = ChatAPI(app_runtime).send_message("在搜索框输入 yachiyo 并回车")
@@ -1369,19 +1372,22 @@ async def test_yachiyo_task_approve_continues_type_into_ui_element_then_return_s
             "role_filter": "text",
             "limit": 80,
         }
-        assert calls == []
+        assert calls == [("ui_elements", "text", 80, "")]
 
         after_first = await yachiyo.approve_task(sent["task_id"], None, request)
         first_waiting_run = service.get_run(sent["run_id"])
 
         assert after_first["status"] == "waiting_approval"
         assert first_waiting_run["status"] == "approval_required"
-        assert first_waiting_run["pending_approval"]["tool"] == "desktop.hotkey"
+        assert first_waiting_run["pending_approval"]["tool"] == "desktop.submit_foreground"
         assert first_waiting_run["pending_approval"]["input_preview"] == {
-            "key": "return",
-            "modifiers": [],
+            "action": "confirm",
         }
-        assert calls == [("type_into", "搜索", "yachiyo", "text", 80)]
+        assert calls == [
+            ("ui_elements", "text", 80, ""),
+            ("type_into", "搜索", "yachiyo", "text", 80),
+            ("ui_elements", "text", 80, ""),
+        ]
 
         after_second = await yachiyo.approve_task(sent["task_id"], None, request)
         completed_task = state.get_task(sent["task_id"])
@@ -1396,11 +1402,13 @@ async def test_yachiyo_task_approve_continues_type_into_ui_element_then_return_s
         assert after_second["status"] == "completed"
         assert (
             after_second["summary"]
-            == "已在前台控件 Search 输入文字（7 个字符）。 已发送快捷键：return。"
+            == "已在前台控件 Search 输入文字（7 个字符）。 Read foreground UI。 已确认前台操作。"
         )
         assert calls == [
+            ("ui_elements", "text", 80, ""),
             ("type_into", "搜索", "yachiyo", "text", 80),
-            ("hotkey", "return", []),
+            ("ui_elements", "text", 80, ""),
+            ("submit", "confirm"),
             ("ui_elements", "text", 80, ""),
         ]
         assert completed_task is not None
@@ -1414,7 +1422,8 @@ async def test_yachiyo_task_approve_continues_type_into_ui_element_then_return_s
         assert completed_run["pending_approval"] == {}
         assert completed_events[-1]["tools"] == [
             "desktop.type_into_ui_element",
-            "desktop.hotkey",
+            "desktop.read_ui",
+            "desktop.submit_foreground",
             "desktop.ui_elements",
         ]
     finally:

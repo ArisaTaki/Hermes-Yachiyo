@@ -12005,7 +12005,10 @@ def _latest_desktop_observation_has_target_match(
                 for key in ("role", "subrole", "name", "description", "value", "label")
             )
         )
-        if normalized_filter and normalized_filter not in searchable:
+        if normalized_filter and not _observed_desktop_text_matches(
+            searchable,
+            normalized_filter,
+        ):
             continue
         if _observed_desktop_element_match_score(element, target_text, role_filter) > 0:
             return True
@@ -12098,7 +12101,7 @@ def _ordinal_observed_desktop_elements(
             )
         )
         if normalized_filter:
-            if normalized_filter not in searchable:
+            if not _observed_desktop_text_matches(searchable, normalized_filter):
                 continue
         elif not _observed_desktop_element_looks_actionable_result(element, searchable):
             continue
@@ -12192,18 +12195,19 @@ def _observed_desktop_element_match_score(
     if not searchable:
         return 0
     score = 0
-    if normalized_target in label_texts:
-        score = 100
-    elif any(normalized_target in text for text in label_texts):
-        score = 85
-    elif any(text in normalized_target for text in label_texts if len(text) >= 2):
-        score = 70
-    elif normalized_target in searchable:
-        score = 55
+    for target in _observed_desktop_text_candidates(normalized_target):
+        if target in label_texts:
+            score = max(score, 100)
+        elif any(target in text for text in label_texts):
+            score = max(score, 85)
+        elif any(text in target for text in label_texts if len(text) >= 2):
+            score = max(score, 70)
+        elif target in searchable:
+            score = max(score, 55)
     if not score:
         return 0
     normalized_filter = _normalize_observed_desktop_text(role_filter)
-    if normalized_filter and normalized_filter in searchable:
+    if normalized_filter and _observed_desktop_text_matches(searchable, normalized_filter):
         score += 10
     if str(element.get("role") or "").strip():
         score += 2
@@ -12216,6 +12220,44 @@ def _normalize_observed_desktop_text(value: Any) -> str:
     text = re.sub(r"\baxbutton\b", "button", text)
     text = re.sub(r"\baxlink\b", "link", text)
     return re.sub(r"\s+", " ", text)
+
+
+_OBSERVED_DESKTOP_TEXT_EQUIVALENTS: tuple[tuple[tuple[str, ...], tuple[str, ...]], ...] = (
+    (("搜索框", "搜尋框", "查找框", "搜索栏", "搜尋欄"), ("search", "search field", "search box")),
+    (("搜索", "搜尋", "查找", "查詢", "查询"), ("search", "find")),
+    (("输入框", "輸入框", "文本框", "文字框"), ("text field", "input", "input field", "text input")),
+    (("输入", "輸入", "填写", "填寫"), ("type", "input")),
+    (("按钮", "按鈕"), ("button",)),
+    (("链接", "連結", "联结"), ("link",)),
+)
+
+
+def _observed_desktop_text_candidates(normalized_text: str) -> list[str]:
+    clean_text = _normalize_observed_desktop_text(normalized_text)
+    if not clean_text:
+        return []
+    candidates = [clean_text]
+    for sources, aliases in _OBSERVED_DESKTOP_TEXT_EQUIVALENTS:
+        for source in sources:
+            if source not in clean_text:
+                continue
+            for alias in aliases:
+                clean_alias = _normalize_observed_desktop_text(alias)
+                if not clean_alias:
+                    continue
+                candidates.append(clean_alias)
+                candidates.append(clean_text.replace(source, clean_alias))
+    return _ordered_text_list(candidates)
+
+
+def _observed_desktop_text_matches(searchable: str, normalized_query: str) -> bool:
+    clean_searchable = _normalize_observed_desktop_text(searchable)
+    if not clean_searchable:
+        return False
+    return any(
+        candidate and candidate in clean_searchable
+        for candidate in _observed_desktop_text_candidates(normalized_query)
+    )
 
 
 def _drop_completed_auto_followup_prefix(
