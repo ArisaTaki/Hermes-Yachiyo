@@ -10,6 +10,7 @@ from apps.shell.yachiyo_agent import (
     StartChatTaskRequest,
     YachiyoAgentService,
 )
+from apps.shell.yachiyo_agent.runtime_execution import runtime_execution_envelope_from_decision
 from apps.shell.yachiyo_agent.task_cards import agent_task_snapshot_from_payload
 
 
@@ -1347,6 +1348,72 @@ def test_yachiyo_agent_service_projects_replan_recovery_actions_from_fallback_to
     assert recovery.recovery_actions[0].tool == "desktop.list_apps"
     assert recovery.recovery_actions[0].input == {"query": "pdf", "limit": 20}
     assert recovery.recovery_actions[0].approval_required is False
+
+
+def test_yachiyo_agent_service_projects_desktop_loop_auto_retry_recovery_action() -> None:
+    service = YachiyoAgentService(_FakeRuntimePort())
+    allowed_tools = ["desktop.list_apps", "app.open", "desktop.active_window"]
+    decision = service.plan_chat_task("打开 PixelForge", allowed_tools=allowed_tools)
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+    assert envelope is not None
+    request = envelope.requests[0].model_dump(mode="json")
+
+    events = service.project_tool_result_events(
+        decision,
+        tool_request={
+            **request,
+            "task_id": "task-1",
+            "run_id": "run-1",
+        },
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "desktop.list_apps",
+            "result": {"ok": False, "error": "desktop_observation_failed"},
+        },
+        run_id="run-1",
+        task_id="task-1",
+        after_sequence=20,
+    )
+
+    replan_event = events[-1]
+    assert replan_event.event_type == "agent.replan.requested"
+    assert replan_event.payload["source_step_id"] == "discover-desktop-state"
+    assert replan_event.payload["fallback_tools"] == ["desktop.list_apps"]
+    assert replan_event.payload["metadata"]["desktop_loop"]["can_auto_retry"] is True
+    recovery_actions = replan_event.payload["metadata"]["recovery_actions"]
+    assert len(recovery_actions) == 1
+    action = recovery_actions[0]
+    assert action["tool"] == "desktop.list_apps"
+    assert action["input"] == {"limit": 20, "query": "PixelForge"}
+    assert action["planning_reason"] == "planner_desktop_loop_auto_retry"
+    assert action["approval_required"] is False
+    assert action["observation_retry"] == {
+        "from_tool": "desktop.list_apps",
+        "tool": "desktop.list_apps",
+        "input": {"limit": 20, "query": "PixelForge"},
+        "reason": "resolve_desktop_app",
+    }
+    assert action["metadata"]["desktop_loop_retry_reason"] == "resolve_desktop_app"
+    assert action["metadata"]["runtime_stage"] == "discover"
+    assert action["metadata"]["replan_signal_ids"] == request["replan_signal_ids"]
+
+    task = agent_task_snapshot_from_payload(
+        {
+            "task_id": "task-1",
+            "run_id": "run-1",
+            "status": "running",
+            "events": [event.model_dump(mode="json") for event in events],
+        }
+    )
+    recovery = task.replan_recoveries[0]
+    assert recovery.recovery_actions[0].tool == "desktop.list_apps"
+    assert recovery.recovery_actions[0].planning_reason == (
+        "planner_desktop_loop_auto_retry"
+    )
+    assert recovery.recovery_actions[0].metadata["desktop_loop"]["can_auto_retry"] is True
 
 
 def test_agent_task_snapshot_links_deferred_approval_to_replan_recovery() -> None:

@@ -286,6 +286,15 @@ def _failure_payload_from_tool_result(
         value = tool_request.get(key)
         if value not in (None, "", [], {}):
             failure[key] = value
+    for key in (
+        "desktop_loop",
+        "action_target",
+        "observation_evidence",
+        "observation_retry",
+    ):
+        value = _mapping(tool_request.get(key))
+        if value:
+            failure[key] = value
     for key in ("replan_triggers", "replan_signal_ids"):
         values = _string_list(tool_request.get(key))
         if values:
@@ -304,6 +313,9 @@ def _replan_failure_metadata(
     replan_triggers = _string_list(tool_request.get("replan_triggers"))
     if replan_triggers:
         metadata["replan_triggers"] = replan_triggers
+    desktop_loop = _mapping(tool_request.get("desktop_loop") or failure.get("desktop_loop"))
+    if desktop_loop:
+        metadata["desktop_loop"] = desktop_loop
     parent_replan_request_id = _text(tool_request.get("replan_request_id"))
     if not parent_replan_request_id:
         return metadata
@@ -401,6 +413,12 @@ def _string_list(value: Any) -> list[str]:
     if not isinstance(value, list):
         return []
     return [_text(item) for item in value if _text(item)]
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {key: item for key, item in value.items() if item not in (None, "", [], {})}
 
 
 def _mapping_list(value: Any) -> list[dict[str, Any]]:

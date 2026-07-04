@@ -89,13 +89,26 @@ def task_replan_request_from_failure(
             step,
             failure_payload,
         )
-    recovery_actions = _fallback_recovery_actions(
-        fallback_tools,
-        step,
-        failure_payload,
-        source_step_id=source_step,
-        target_capability_id=target_capability,
-        task_context=task_context,
+    desktop_loop_retry_tool = _desktop_loop_retry_tool(failure_payload)
+    if desktop_loop_retry_tool and desktop_loop_retry_tool not in fallback_tools:
+        fallback_tools = [desktop_loop_retry_tool, *fallback_tools]
+    recovery_actions = _dedupe_recovery_actions(
+        [
+            *_desktop_loop_recovery_actions(
+                failure_payload,
+                source_step_id=source_step,
+                target_capability_id=target_capability,
+                task_context=task_context,
+            ),
+            *_fallback_recovery_actions(
+                fallback_tools,
+                step,
+                failure_payload,
+                source_step_id=source_step,
+                target_capability_id=target_capability,
+                task_context=task_context,
+            ),
+        ]
     )
     request_metadata = {
         **dict(metadata or {}),
@@ -504,6 +517,12 @@ def _compact_mapping(value: Mapping[str, Any]) -> dict[str, Any]:
     return {key: item for key, item in value.items() if item not in ("", [], {})}
 
 
+def _mapping(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {key: item for key, item in value.items() if item not in (None, "", [], {})}
+
+
 def _default_recovery_tools(
     target_capability: str,
     step: ToolPlanStepSnapshot | None,
@@ -558,6 +577,66 @@ def _fallback_recovery_actions(
         seen.add(signature)
         actions.append(action)
     return actions
+
+
+def _desktop_loop_retry_tool(failure: Mapping[str, Any]) -> str:
+    desktop_loop = _mapping(failure.get("desktop_loop"))
+    if not desktop_loop or desktop_loop.get("can_auto_retry") is not True:
+        return ""
+    tool_name = _text(desktop_loop.get("retry_tool"))
+    if not tool_name or not _fallback_recovery_tool_metadata(tool_name):
+        return ""
+    return tool_name
+
+
+def _desktop_loop_recovery_actions(
+    failure: Mapping[str, Any],
+    *,
+    source_step_id: str,
+    target_capability_id: str,
+    task_context: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    desktop_loop = _mapping(failure.get("desktop_loop"))
+    tool_name = _desktop_loop_retry_tool(failure)
+    if not desktop_loop or not tool_name:
+        return []
+    metadata = _fallback_recovery_tool_metadata(tool_name)
+    action = {
+        "label": metadata["label"],
+        "tool": tool_name,
+        "input": _mapping(desktop_loop.get("retry_input")),
+        "planning_reason": "planner_desktop_loop_auto_retry",
+        "permission_target": metadata["permission_target"],
+        "risk_level": metadata["risk_level"],
+        "approval_required": metadata["approval_required"],
+        "source_step_id": _text(source_step_id),
+        "target_capability_id": _text(target_capability_id),
+        "action_target": _mapping(failure.get("action_target")),
+        "observation_evidence": _mapping(failure.get("observation_evidence")),
+        "observation_retry": (
+            _mapping(failure.get("observation_retry"))
+            or _desktop_loop_observation_retry(desktop_loop)
+        ),
+        "metadata": _desktop_loop_recovery_metadata(failure, desktop_loop),
+    }
+    verification_targets = _task_context_verification_targets(task_context)
+    if verification_targets:
+        action["verification_targets"] = verification_targets
+        action["task_verification_targets"] = verification_targets
+    return [_compact_mapping(action)]
+
+
+def _dedupe_recovery_actions(actions: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for action in actions:
+        action_input = action.get("input") if isinstance(action.get("input"), Mapping) else {}
+        signature = (_text(action.get("tool")), repr(sorted(dict(action_input).items())))
+        if not signature[0] or signature in seen:
+            continue
+        seen.add(signature)
+        result.append(action)
+    return result
 
 
 def _fallback_recovery_action(
@@ -631,6 +710,8 @@ def _fallback_recovery_tool_input(
         return {"reason": reason} if reason else {}
     if tool_name in {"desktop.active_window", "browser.current_page"}:
         return {}
+    if tool_name == "desktop.running_apps":
+        return {}
     if tool_name in {"workspace.read", "file.read", "fs.read_file"}:
         path = _first_text(
             request_input.get("path"),
@@ -663,6 +744,12 @@ def _fallback_recovery_tool_metadata(tool_name: str) -> dict[str, Any]:
     return {
         "desktop.list_apps": {
             "label": "重新发现应用",
+            "permission_target": "app_discovery",
+            "risk_level": "low",
+            "approval_required": False,
+        },
+        "desktop.running_apps": {
+            "label": "重新检查运行中应用",
             "permission_target": "app_discovery",
             "risk_level": "low",
             "approval_required": False,
@@ -758,6 +845,40 @@ def _fallback_recovery_tool_metadata(tool_name: str) -> dict[str, Any]:
             "approval_required": True,
         },
     }.get(tool_name, {})
+
+
+def _desktop_loop_observation_retry(desktop_loop: Mapping[str, Any]) -> dict[str, Any]:
+    retry = {
+        "tool": _text(desktop_loop.get("retry_tool")),
+        "input": _mapping(desktop_loop.get("retry_input")),
+        "reason": _text(desktop_loop.get("retry_reason")),
+    }
+    return _mapping(retry)
+
+
+def _desktop_loop_recovery_metadata(
+    failure: Mapping[str, Any],
+    desktop_loop: Mapping[str, Any],
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "source": "desktop_execution_loop",
+        "desktop_loop": dict(desktop_loop),
+        "desktop_loop_retry_reason": _text(desktop_loop.get("retry_reason")),
+        "runtime_stage": _text(desktop_loop.get("stage") or failure.get("runtime_stage")),
+        "runtime_role": _text(desktop_loop.get("role") or failure.get("runtime_role")),
+        "source_tool": _text(desktop_loop.get("source_tool")),
+    }
+    for key in ("replan_triggers", "replan_signal_ids"):
+        values = _text_list(failure.get(key), limit=8)
+        if values:
+            metadata[key] = values
+    verification_ids = _text_list(
+        desktop_loop.get("verification_target_step_ids"),
+        limit=8,
+    )
+    if verification_ids:
+        metadata["verification_target_step_ids"] = verification_ids
+    return _compact_mapping(metadata)
 
 
 def _failure_tool_input(failure: Mapping[str, Any]) -> dict[str, Any]:
