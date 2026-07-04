@@ -3669,7 +3669,11 @@ def _data_analysis_tool_requests(decision: Any, allowed: set[str]) -> list[dict[
         payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
         path_value = str(payload.get("path") or "").strip()
         uses_workspace_file_selection = (
-            path_value == "<selected file from workspace.list>"
+            path_value
+            in {
+                "<selected file from workspace.list>",
+                "<selected files from workspace.list>",
+            }
             and str(payload.get("selection_source") or "").strip() == "workspace.list"
         )
         if (

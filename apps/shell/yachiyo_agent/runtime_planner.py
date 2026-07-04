@@ -13713,8 +13713,13 @@ def _discovered_data_analysis_input_preview(
         pattern = _named_data_source_pattern(clean_name, pattern)
     elif clean_name:
         pattern = f"*{clean_name}*"
+    selected_path = (
+        "<selected files from workspace.list>"
+        if selection_hint in {"all", "multiple"}
+        else "<selected file from workspace.list>"
+    )
     preview: dict[str, Any] = {
-        "path": "<selected file from workspace.list>",
+        "path": selected_path,
         "selection_source": "workspace.list",
         "artifact_path": artifact_paths[0] if artifact_paths else "analysis-report.md",
         "source_kind": source_kind,
@@ -27266,7 +27271,45 @@ def _file_open_selection_hint(text: str) -> str:
         flags=re.IGNORECASE,
     ):
         return "latest"
+    if not _looks_like_file_collection_selection_context(value):
+        return ""
+    if re.search(
+        r"(?:所有|全部|每个|每一[份个张条]?|全量|\ball\b|\bevery\b|\beach\b)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "all"
+    if re.search(
+        r"(?:多个|多份|若干|一批|几份|几张|几条|\bmultiple\b|\bseveral\b)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "multiple"
+    if re.search(r"(?:比较|对比|\bcompare\b)", value, flags=re.IGNORECASE):
+        return "multiple"
+    if re.search(r"(?:合并|\bmerge\b)", value, flags=re.IGNORECASE) and re.search(
+        r"(?:downloads?|desktop|documents?|folder|directory|下载|桌面|文档|文件夹|目录|里|里的|中|中的|内)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "all"
     return ""
+
+
+def _looks_like_file_collection_selection_context(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"(?:文件|数据|数据集|表格|电子表格|图片|图像|照片|文档|"
+            r"\bfiles?\b|\bdata(?:sets?)?\b|\btables?\b|\bspreadsheets?\b|"
+            r"\bimages?\b|\bphotos?\b|\bpictures?\b|\bdocuments?\b|"
+            r"\b(?:csv|tsv|xlsx|xls|json|jsonl|txt|md|markdown|pdf)s?\b)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
 
 
 def _looks_like_dynamic_file_open_target(text: str) -> bool:

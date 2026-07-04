@@ -568,6 +568,88 @@ def test_runtime_planner_plans_builtin_analysis_after_scoped_data_discovery() ->
     ]
 
 
+def test_runtime_planner_preserves_multi_file_analysis_selection() -> None:
+    prompt = "合并 Downloads 里的所有 CSV 并输出图表报告"
+    allowed_tools = [
+        "workspace.list",
+        "data.analyze",
+        "artifact.write",
+        "terminal.run",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["data_source_kind"] == "csv"
+    assert decision.selected_intent.inputs["data_source_scope_hint"] == "Downloads"
+    assert decision.selected_intent.inputs["data_source_selection_hint"] == "all"
+    assert _step_by_id(decision, "inspect-data-source").input_preview == {
+        "path": "Downloads",
+        "pattern": "*.csv",
+        "file_type": "csv",
+        "selection": "all",
+    }
+    analyze_step = _step_by_id(decision, "analyze-discovered-data")
+    assert analyze_step.input_preview["path"] == "<selected files from workspace.list>"
+    assert analyze_step.input_preview["selection_source"] == "workspace.list"
+    assert analyze_step.input_preview["source_scope"] == "Downloads"
+    assert analyze_step.input_preview["pattern"] == "*.csv"
+    assert analyze_step.input_preview["selection"] == "all"
+
+    assert planner_tool_requests(prompt, allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "workspace.list",
+            "input": {
+                "path": "Downloads",
+                "pattern": "*.csv",
+                "file_type": "csv",
+                "selection": "all",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_data_source",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "data.analyze",
+            "input": {
+                "path": "<selected files from workspace.list>",
+                "artifact_path": "analysis-report.md",
+                "source_kind": "csv",
+                "requested_outputs": ["chart", "report"],
+                "artifact_manifest": [
+                    {"path": "analysis-report.md", "kind": "markdown"},
+                    {"path": "analysis-chart.png", "kind": "chart"},
+                ],
+                "artifact_paths": [
+                    "analysis-report.md",
+                    "analysis-chart.png",
+                ],
+                "selection_source": "workspace.list",
+                "source_scope": "Downloads",
+                "pattern": "*.csv",
+                "selection": "all",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_builtin_data_analysis",
+        },
+    ]
+
+    compare_decision = RuntimePlanner().decision(
+        "比较 Downloads 里的多个 csv 文件并输出报告",
+        allowed_tools=allowed_tools,
+    )
+    assert compare_decision.selected_intent.inputs["data_source_selection_hint"] == "multiple"
+    assert _step_by_id(compare_decision, "inspect-data-source").input_preview == {
+        "path": "Downloads",
+        "pattern": "*.csv",
+        "file_type": "csv",
+        "selection": "multiple",
+    }
+    compare_analyze = _step_by_id(compare_decision, "analyze-discovered-data")
+    assert compare_analyze.input_preview["path"] == "<selected files from workspace.list>"
+    assert compare_analyze.input_preview["selection"] == "multiple"
+
+
 def test_runtime_planner_prefers_builtin_data_analysis_for_simple_reports() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",
