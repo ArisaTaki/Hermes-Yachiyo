@@ -5413,6 +5413,134 @@ def test_run_timeline_snapshot_projects_recovery_source_metadata() -> None:
     assert snapshot.recovery_source.source_task_id == "task-1"
 
 
+def test_run_timeline_snapshot_projects_runtime_envelope_retry_recovery() -> None:
+    snapshot = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "runtime-run-1",
+            "agent_id": "agent-1",
+            "task_id": "task-1",
+            "status": "failed",
+            "runtime_execution_envelope": {
+                "envelope_id": "runtime-envelope-1",
+                "decision_id": "decision-runtime-1",
+                "plan_id": "runtime-plan-1",
+                "intent_kind": "desktop_operation",
+                "requests": [
+                    {
+                        "request_id": "runtime-request-open-app",
+                        "step_id": "open-app",
+                        "capability_id": "desktop.app_control",
+                        "decision_id": "decision-runtime-1",
+                        "plan_id": "runtime-plan-1",
+                        "core_id": "task-core-1",
+                        "tool_name": "desktop.open_app",
+                        "input": {"app_name": "Apple Music"},
+                        "status": "blocked",
+                        "observation_evidence": {
+                            "blocking_condition": "foreground_focus_unavailable",
+                            "foreground_required": True,
+                            "foreground_ready": False,
+                        },
+                        "observation_retry": {
+                            "tool": "desktop.open_app",
+                            "input": {"app_name": "Music"},
+                            "reason": "foreground_focus_unavailable",
+                        },
+                        "task_verification_targets": [
+                            {
+                                "step_id": "open-app",
+                                "todo_id": "todo-open-app",
+                            }
+                        ],
+                    }
+                ],
+                "runtime_stage_counts": {"operate": 1},
+                "replan_signal_count": 1,
+            },
+        }
+    )
+
+    assert len(snapshot.replan_recoveries) == 1
+    recovery = snapshot.replan_recoveries[0]
+    assert recovery.request_id == "runtime-retry:runtime-request-open-app"
+    assert recovery.run_id == "runtime-run-1"
+    assert recovery.task_id == "task-1"
+    assert recovery.source_step_id == "open-app"
+    assert recovery.source_tool_name == "desktop.open_app"
+    assert recovery.permission_target == "foreground_focus"
+    assert recovery.planning_reason == "runtime_execution_observation_retry"
+    assert recovery.observation_evidence["blocking_condition"] == (
+        "foreground_focus_unavailable"
+    )
+    assert recovery.recovery_actions[0].action_id == (
+        "runtime-retry:runtime-request-open-app:action:1:desktop.open_app"
+    )
+    assert recovery.recovery_actions[0].input == {"app_name": "Music"}
+    assert recovery.recovery_actions[0].selected is True
+    assert recovery.recovery_actions[0].verification_targets == [
+        {
+            "step_id": "open-app",
+            "todo_id": "todo-open-app",
+        }
+    ]
+
+
+def test_group_run_snapshot_projects_runtime_envelope_retry_recovery() -> None:
+    snapshot = group_run_snapshot_from_payload(
+        {
+            "group_run_id": "runtime-group-run-1",
+            "group_id": "group-1",
+            "title": "Desktop group",
+            "status": "failed",
+            "task_id": "task-group-1",
+            "objective": "Open Apple Music",
+            "participants": [
+                {
+                    "agent_id": "agent-1",
+                    "name": "Operator",
+                    "role": "operator",
+                }
+            ],
+            "runtime_execution_envelope": {
+                "envelope_id": "runtime-group-envelope-1",
+                "decision_id": "decision-group-runtime-1",
+                "plan_id": "runtime-group-plan-1",
+                "intent_kind": "multi_agent",
+                "requests": [
+                    {
+                        "request_id": "runtime-group-request-open-app",
+                        "step_id": "open-app",
+                        "capability_id": "desktop.app_control",
+                        "group_run_id": "runtime-group-run-1",
+                        "tool_name": "desktop.open_app",
+                        "status": "blocked",
+                        "observation_evidence": {
+                            "blocking_condition": "desktop_session_locked",
+                        },
+                        "observation_retry": {
+                            "tool": "desktop.open_app",
+                            "input": {"app_name": "Music"},
+                            "reason": "desktop_session_locked",
+                        },
+                    }
+                ],
+                "runtime_stage_counts": {"operate": 1},
+                "replan_signal_count": 1,
+            },
+        }
+    )
+
+    assert len(snapshot.replan_recoveries) == 1
+    recovery = snapshot.replan_recoveries[0]
+    assert recovery.request_id == "runtime-retry:runtime-group-request-open-app"
+    assert recovery.run_id == "runtime-group-run-1"
+    assert recovery.group_run_id == "runtime-group-run-1"
+    assert recovery.task_id == "task-group-1"
+    assert recovery.permission_target == "desktop_session_unlocked"
+    assert recovery.recovery_actions[0].tool == "desktop.open_app"
+    assert recovery.recovery_actions[0].input == {"app_name": "Music"}
+
+
 def test_run_timeline_events_inherit_parent_task_core_context() -> None:
     snapshot = run_timeline_snapshot_from_payload(
         {

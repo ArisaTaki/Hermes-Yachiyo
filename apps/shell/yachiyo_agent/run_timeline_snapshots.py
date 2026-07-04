@@ -31,7 +31,11 @@ from .task_snapshots import (
 from .task_core_snapshots import task_core_snapshot_from_payload
 from .task_progress_snapshots import task_progress_summary_from_task_core
 from .replan_event_projection import run_events_with_replan_requests
-from .replan_recovery_snapshots import replan_recovery_snapshots_from_events
+from .replan_recovery_snapshots import (
+    merge_replan_recovery_snapshot_lists,
+    replan_recovery_snapshots_from_events,
+    replan_recovery_snapshots_from_runtime_execution_envelope,
+)
 from .runtime_debug_snapshots import runtime_debug_summary_from_runtime_objects
 from .timeline_metadata_snapshots import (
     merge_timeline_child_snapshots,
@@ -83,14 +87,30 @@ def run_timeline_snapshot_from_payload(
         events=events,
         needs_user_action=pending_approval is not None,
     )
-    replan_recoveries = replan_recovery_snapshots_from_events(
-        events,
-        run_id=run_id,
-        task_id=_text(payload.get("task_id")),
-        group_run_id=group_run_id or "",
-        workflow_run_id=workflow_run_id_from_payload(payload, run_id),
-    )
     workflow_run_id = workflow_run_id_from_payload(payload, run_id)
+    runtime_execution_envelope = runtime_execution_envelope_from_payload(
+        payload,
+        events=events,
+    )
+    replan_recoveries = merge_replan_recovery_snapshot_lists(
+        replan_recovery_snapshots_from_events(
+            events,
+            run_id=run_id,
+            task_id=_text(payload.get("task_id")),
+            group_run_id=group_run_id or "",
+            workflow_run_id=workflow_run_id,
+        ),
+        replan_recovery_snapshots_from_runtime_execution_envelope(
+            runtime_execution_envelope,
+            run_id=run_id,
+            task_id=_text(payload.get("task_id")),
+            group_run_id=group_run_id or "",
+            workflow_run_id=workflow_run_id,
+            task_progress=task_progress,
+            created_at=_text(payload.get("created_at")),
+            updated_at=_text(payload.get("updated_at")),
+        ),
+    )
     tool_calls = tool_call_snapshots_from_payloads(
         payload.get("tool_calls"),
         run_id=run_id,
@@ -152,10 +172,7 @@ def run_timeline_snapshot_from_payload(
             needs_user_action=pending_approval is not None,
             needs_replan=bool(task_progress and task_progress.needs_replan),
         ),
-        runtime_execution_envelope=runtime_execution_envelope_from_payload(
-            payload,
-            events=events,
-        ),
+        runtime_execution_envelope=runtime_execution_envelope,
         task_core=task_core,
         task_progress=task_progress,
         replan_recoveries=replan_recoveries,

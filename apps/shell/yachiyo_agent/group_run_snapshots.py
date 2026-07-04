@@ -23,6 +23,7 @@ from .replan_event_projection import run_events_with_replan_requests
 from .replan_recovery_snapshots import (
     merge_replan_recovery_snapshot_lists,
     replan_recovery_snapshots_from_events,
+    replan_recovery_snapshots_from_runtime_execution_envelope,
 )
 from .run_snapshots import RunSnapshotProjector
 from .runtime_debug_snapshots import runtime_debug_summary_from_runtime_objects
@@ -103,10 +104,19 @@ def group_run_snapshot_from_payload(
         events=events,
         needs_user_action=bool(pending_approvals),
     )
+    runtime_execution_envelope = runtime_execution_envelope_from_payload(
+        payload,
+        events=events,
+    )
     replan_recoveries = _group_run_replan_recoveries(
         runs,
         events,
+        runtime_execution_envelope=runtime_execution_envelope,
+        task_progress=task_progress,
         group_run_id=group_run_id,
+        task_id=_text(payload.get("task_id")),
+        created_at=_text(payload.get("created_at")),
+        updated_at=_text(payload.get("updated_at")),
     )
     memory_traces = _group_run_memory_traces(runs, events)
     skill_traces = _group_run_skill_traces(runs, events)
@@ -127,10 +137,7 @@ def group_run_snapshot_from_payload(
         active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
         task_core=task_core,
         task_progress=task_progress,
-        runtime_execution_envelope=runtime_execution_envelope_from_payload(
-            payload,
-            events=events,
-        ),
+        runtime_execution_envelope=runtime_execution_envelope,
         runtime_debug=runtime_debug_summary_from_runtime_objects(
             run_id=group_run_id,
             group_id=group_id,
@@ -368,19 +375,37 @@ def _group_run_replan_recoveries(
     runs: list[RunTimelineSnapshot],
     events: list[Any],
     *,
+    runtime_execution_envelope: Any,
+    task_progress: Any,
     group_run_id: str,
+    task_id: str = "",
+    created_at: str = "",
+    updated_at: str = "",
 ) -> list[ReplanRecoverySnapshot]:
     direct_recoveries = replan_recovery_snapshots_from_events(
         events,
         run_id=group_run_id,
         group_run_id=group_run_id,
     )
+    runtime_recoveries = replan_recovery_snapshots_from_runtime_execution_envelope(
+        runtime_execution_envelope,
+        run_id=group_run_id,
+        task_id=task_id,
+        group_run_id=group_run_id,
+        task_progress=task_progress,
+        created_at=created_at,
+        updated_at=updated_at,
+    )
     child_recoveries = [
         _group_context_replan_recovery(recovery, group_run_id=group_run_id)
         for run in runs
         for recovery in run.replan_recoveries
     ]
-    return merge_replan_recovery_snapshot_lists(direct_recoveries, child_recoveries)
+    return merge_replan_recovery_snapshot_lists(
+        direct_recoveries,
+        runtime_recoveries,
+        child_recoveries,
+    )
 
 
 def _group_context_replan_recovery(

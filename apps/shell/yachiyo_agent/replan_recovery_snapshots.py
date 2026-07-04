@@ -12,6 +12,9 @@ from .contracts import (
     PublicRunEvent,
     ReplanRecoveryActionSnapshot,
     ReplanRecoverySnapshot,
+    RuntimeExecutionEnvelopeSnapshot,
+    RuntimeExecutionRequestSnapshot,
+    TaskProgressSummarySnapshot,
     ToolCallSnapshot,
 )
 from .tool_call_event_snapshots import is_tool_event, tool_call_payloads_from_event
@@ -158,6 +161,54 @@ def replan_recovery_snapshots_from_events(
         )
         for record in (records[request_id] for request_id in order)
     ]
+
+
+def replan_recovery_snapshots_from_runtime_execution_envelope(
+    envelope: RuntimeExecutionEnvelopeSnapshot | None,
+    *,
+    run_id: str = "",
+    task_id: str = "",
+    group_run_id: str = "",
+    workflow_run_id: str = "",
+    task_progress: TaskProgressSummarySnapshot | None = None,
+    created_at: str = "",
+    updated_at: str = "",
+) -> list[ReplanRecoverySnapshot]:
+    """Project executable Studio recovery actions from runtime observation retries."""
+    if envelope is None:
+        return []
+
+    allow_planned_retry = _runtime_progress_allows_retry(
+        task_progress,
+        envelope.task_progress,
+    )
+    snapshots: list[ReplanRecoverySnapshot] = []
+    seen: set[str] = set()
+    for index, request in enumerate(envelope.requests or [], start=1):
+        snapshot = _runtime_execution_request_recovery_snapshot(
+            request,
+            envelope=envelope,
+            index=index,
+            run_id=run_id,
+            task_id=task_id,
+            group_run_id=group_run_id,
+            workflow_run_id=workflow_run_id,
+            allow_planned_retry=allow_planned_retry,
+            created_at=created_at,
+            updated_at=updated_at,
+        )
+        if snapshot is None:
+            continue
+        signature = _recovery_action_signature(
+            snapshot.selected_tool_name or "",
+            snapshot.recovery_actions[0].input if snapshot.recovery_actions else {},
+        )
+        key = f"{snapshot.request_id}:{signature}"
+        if key in seen:
+            continue
+        seen.add(key)
+        snapshots.append(snapshot)
+    return snapshots
 
 
 def merge_replan_recovery_snapshot_lists(
@@ -910,6 +961,234 @@ def _selected_recovery_action(
             if clean_tool in recommended_tools:
                 return action
     return actions[0]
+
+
+def _runtime_execution_request_recovery_snapshot(
+    request: RuntimeExecutionRequestSnapshot | Mapping[str, Any],
+    *,
+    envelope: RuntimeExecutionEnvelopeSnapshot,
+    index: int,
+    run_id: str,
+    task_id: str,
+    group_run_id: str,
+    workflow_run_id: str,
+    allow_planned_retry: bool,
+    created_at: str,
+    updated_at: str,
+) -> ReplanRecoverySnapshot | None:
+    retry = _mapping(_runtime_request_value(request, "observation_retry"))
+    if not retry:
+        return None
+    evidence = _mapping(_runtime_request_value(request, "observation_evidence"))
+    if not allow_planned_retry and not _runtime_execution_evidence_needs_retry(
+        evidence,
+        request,
+    ):
+        return None
+
+    retry_input = _mapping(retry.get("input"))
+    if not retry_input:
+        retry_input = _mapping(_runtime_request_value(request, "input"))
+    tool = _first_text(
+        retry.get("tool"),
+        retry.get("retry_tool"),
+        retry.get("from_tool"),
+        _runtime_request_value(request, "tool_name"),
+    )
+    if not tool:
+        return None
+
+    source_request_id = _first_text(
+        _runtime_request_value(request, "request_id"),
+        f"{envelope.plan_id}:request:{index}:{tool}",
+    )
+    request_id = f"runtime-retry:{source_request_id}"
+    blocker = _runtime_execution_evidence_blocker(evidence)
+    permission_target = _runtime_execution_permission_target(blocker)
+    reason = _first_text(retry.get("reason"), blocker, "observation_retry")
+    label = _runtime_execution_retry_action_label(
+        tool,
+        reason,
+        _runtime_execution_retry_target(retry, retry_input),
+    )
+    planning_reason = _first_text(
+        retry.get("planning_reason"),
+        "runtime_execution_observation_retry",
+    )
+    approval_required = bool(_runtime_request_value(request, "approval_required"))
+    risk_level = "medium" if approval_required else "low"
+    verification_targets = _runtime_execution_verification_targets(request, retry)
+    action_target = _runtime_execution_action_target(request, retry)
+    source_group_run_id = _first_text(
+        _runtime_request_value(request, "group_run_id"),
+        _runtime_request_value(request, "run_group_id"),
+        group_run_id,
+    )
+    source_workflow_run_id = _first_text(
+        _runtime_request_value(request, "workflow_run_id"),
+        workflow_run_id,
+    )
+    action = ReplanRecoveryActionSnapshot(
+        action_id=f"{request_id}:action:1:{tool}",
+        label=label,
+        tool=tool,
+        input=retry_input,
+        planning_reason=planning_reason,
+        permission_target=permission_target,
+        risk_level=risk_level,
+        approval_required=approval_required,
+        selected=True,
+        action_target=action_target,
+        observation_evidence=evidence,
+        observation_retry=retry,
+        verification_targets=verification_targets,
+        metadata={
+            "runtime_execution_envelope_id": envelope.envelope_id,
+            "runtime_execution_request_id": source_request_id,
+            "runtime_retry_source": "runtime_execution_envelope",
+        },
+    )
+    return ReplanRecoverySnapshot(
+        request_id=request_id,
+        trigger=reason,
+        status="requested",
+        run_id=run_id or None,
+        task_id=task_id or None,
+        group_run_id=source_group_run_id or None,
+        workflow_run_id=source_workflow_run_id or None,
+        decision_id=_first_text(_runtime_request_value(request, "decision_id"), envelope.decision_id)
+        or None,
+        plan_id=_first_text(_runtime_request_value(request, "plan_id"), envelope.plan_id) or None,
+        core_id=_first_text(_runtime_request_value(request, "core_id")) or None,
+        source_step_id=_first_text(_runtime_request_value(request, "step_id")) or None,
+        source_tool_name=_first_text(_runtime_request_value(request, "tool_name")) or None,
+        target_capability_id=_first_text(_runtime_request_value(request, "capability_id")),
+        fallback_tools=[tool],
+        verification_targets=verification_targets,
+        selected_tool_name=tool,
+        selected_step_id=_first_text(_runtime_request_value(request, "step_id")) or None,
+        planning_reason=planning_reason,
+        recovery_action_label=label,
+        recovery_actions=[action],
+        permission_target=permission_target,
+        risk_level=risk_level,
+        action_target=action_target,
+        observation_evidence=evidence,
+        observation_retry=retry,
+        failure_detail=_first_text(
+            evidence.get("failure_detail"),
+            evidence.get("message"),
+            blocker,
+            retry.get("reason"),
+        ),
+        created_at=created_at,
+        updated_at=updated_at or created_at,
+    )
+
+
+def _runtime_request_value(
+    request: RuntimeExecutionRequestSnapshot | Mapping[str, Any],
+    key: str,
+) -> Any:
+    if isinstance(request, Mapping):
+        return request.get(key)
+    return getattr(request, key, None)
+
+
+def _runtime_progress_allows_retry(
+    *progress_items: TaskProgressSummarySnapshot | None,
+) -> bool:
+    for progress in progress_items:
+        if progress is None:
+            continue
+        if bool(getattr(progress, "needs_replan", False)):
+            return True
+        failed_count = getattr(progress, "failed_verification_count", 0)
+        try:
+            if int(failed_count or 0) > 0:
+                return True
+        except (TypeError, ValueError):
+            continue
+    return False
+
+
+def _runtime_execution_evidence_needs_retry(
+    evidence: Mapping[str, Any],
+    request: RuntimeExecutionRequestSnapshot | Mapping[str, Any],
+) -> bool:
+    if _runtime_execution_evidence_blocker(evidence):
+        return True
+    if evidence.get("verification_failed") is True:
+        return True
+    if evidence.get("foreground_required") is True and evidence.get("foreground_ready") is False:
+        return True
+    return _text(_runtime_request_value(request, "status")).lower() in {
+        "blocked",
+        "failed",
+        "failure",
+        "error",
+        "unavailable",
+    }
+
+
+def _runtime_execution_evidence_blocker(evidence: Mapping[str, Any]) -> str:
+    blocker = _text(evidence.get("blocking_condition"))
+    if blocker:
+        return blocker
+    conditions = evidence.get("blocking_conditions")
+    if not isinstance(conditions, list):
+        return ""
+    return _first_text(*conditions)
+
+
+def _runtime_execution_permission_target(blocker: str) -> str:
+    if blocker == "foreground_focus_unavailable":
+        return "foreground_focus"
+    if blocker == "desktop_session_locked":
+        return "desktop_session_unlocked"
+    if blocker == "screen_capture_blank":
+        return "desktop_screen_visible"
+    return blocker or "runtime_observation_retry"
+
+
+def _runtime_execution_retry_target(
+    retry: Mapping[str, Any],
+    retry_input: Mapping[str, Any],
+) -> str:
+    return _first_text(
+        retry.get("target"),
+        retry.get("label"),
+        retry_input.get("app_name"),
+        retry_input.get("query"),
+    )
+
+
+def _runtime_execution_retry_action_label(tool: str, reason: str, target: str) -> str:
+    return " · ".join(
+        part for part in ("重试", _text(tool), _text(reason), _text(target)) if part
+    )
+
+
+def _runtime_execution_action_target(
+    request: RuntimeExecutionRequestSnapshot | Mapping[str, Any],
+    retry: Mapping[str, Any],
+) -> dict[str, Any]:
+    action_target = _mapping(_runtime_request_value(request, "action_target"))
+    retry_action_target = _mapping(retry.get("action_target"))
+    if retry_action_target:
+        action_target.update(retry_action_target)
+    return action_target
+
+
+def _runtime_execution_verification_targets(
+    request: RuntimeExecutionRequestSnapshot | Mapping[str, Any],
+    retry: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    targets: list[dict[str, Any]] = []
+    _extend_unique_mappings(targets, _runtime_request_value(request, "task_verification_targets"))
+    _extend_unique_mappings(targets, retry.get("verification_targets"))
+    _extend_unique_mappings(targets, retry.get("task_verification_targets"))
+    return targets
 
 
 def _payload(event: PublicRunEvent) -> Mapping[str, Any]:

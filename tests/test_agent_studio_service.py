@@ -468,6 +468,12 @@ class _FakeStudioPort:
 class _ReplanRecoveryActionPort(_FakeStudioPort):
     def get_run_timeline(self, run_id: str) -> dict[str, Any]:
         self.calls.append(("get_run_timeline", run_id))
+        if run_id == "runtime-run-1":
+            return _run_payload(run_id=run_id, user_goal="Open Apple Music") | {
+                "agent_id": "agent-1",
+                "events": [self._task_core_event()],
+                "runtime_execution_envelope": self._runtime_retry_envelope(),
+            }
         if run_id == "workflow-run-1":
             return _run_payload(
                 run_id=run_id,
@@ -618,6 +624,52 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
                     "replan_signals": [],
                 },
             },
+        }
+
+    @staticmethod
+    def _runtime_retry_envelope() -> dict[str, Any]:
+        return {
+            "envelope_id": "runtime-envelope-1",
+            "decision_id": "decision-runtime-1",
+            "plan_id": "runtime-plan-1",
+            "intent_kind": "desktop_operation",
+            "requests": [
+                {
+                    "request_id": "runtime-request-open-app",
+                    "step_id": "open-app",
+                    "capability_id": "desktop.app_control",
+                    "decision_id": "decision-runtime-1",
+                    "plan_id": "runtime-plan-1",
+                    "core_id": "task-core-1",
+                    "tool_name": "desktop.open_app",
+                    "input": {"app_name": "Apple Music"},
+                    "planning_reason": "planner_desktop_app_control",
+                    "runtime_stage": "operate",
+                    "status": "blocked",
+                    "action_target": {
+                        "action": "open_app",
+                        "app_name": "Apple Music",
+                    },
+                    "observation_evidence": {
+                        "blocking_condition": "foreground_focus_unavailable",
+                        "foreground_required": True,
+                        "foreground_ready": False,
+                    },
+                    "observation_retry": {
+                        "tool": "desktop.open_app",
+                        "input": {"app_name": "Music"},
+                        "reason": "foreground_focus_unavailable",
+                    },
+                    "task_verification_targets": [
+                        {
+                            "step_id": "open-app",
+                            "todo_id": "todo-open-app",
+                        }
+                    ],
+                }
+            ],
+            "runtime_stage_counts": {"operate": 1},
+            "replan_signal_count": 1,
         }
 
     @staticmethod
@@ -1665,6 +1717,42 @@ def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None
         direct_request["task_verification_targets"][0]["workspace_items"][0]["item_id"]
         == "workspace-open-app"
     )
+
+
+def test_agent_studio_service_starts_runtime_envelope_retry_action_direct_run() -> None:
+    port = _ReplanRecoveryActionPort()
+    service = AgentStudioService(port)
+
+    run = service.start_replan_recovery_action(
+        "runtime-run-1",
+        {
+            "request_id": "runtime-retry:runtime-request-open-app",
+            "action_id": "runtime-retry:runtime-request-open-app:action:1:desktop.open_app",
+        },
+    )
+
+    assert run.run_id == "recovery-run-1"
+    assert run.recovery_source is not None
+    assert run.recovery_source.kind == "replan"
+    assert run.recovery_source.source_run_id == "runtime-run-1"
+    assert run.recovery_source.replan_request_id == "runtime-retry:runtime-request-open-app"
+    assert run.recovery_source.recovery_tool == "desktop.open_app"
+    assert run.recovery_source.recovery_input_preview == {"app_name": "Music"}
+    request = _port_call_payload(port, "start_agent_run")
+    assert request["agent_id"] == "agent-1"
+    assert request["metadata"]["recovery_permission_target"] == "foreground_focus"
+    assert request["metadata"]["recovery_tool"] == "desktop.open_app"
+    direct_request = request["direct_tool_requests"][0]
+    assert direct_request["tool"] == "desktop.open_app"
+    assert direct_request["input"] == {"app_name": "Music"}
+    assert direct_request["planning_reason"] == "runtime_execution_observation_retry"
+    assert direct_request["permission_target"] == "foreground_focus"
+    assert direct_request["observation_evidence"]["blocking_condition"] == (
+        "foreground_focus_unavailable"
+    )
+    assert direct_request["observation_retry"]["reason"] == "foreground_focus_unavailable"
+    assert direct_request["task_todo"]["todo_id"] == "todo-open-app"
+    assert direct_request["task_verification_targets"][0]["step_id"] == "open-app"
 
 
 def test_agent_studio_service_starts_tool_recovery_action_direct_run() -> None:
