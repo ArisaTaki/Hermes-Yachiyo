@@ -445,6 +445,72 @@ def test_task_replan_payloads_scope_group_run_and_skip_success() -> None:
     assert success_events == []
 
 
+def test_task_replan_payloads_preserve_failed_recovery_action_context() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+    recovery_request = {
+        "tool": "terminal.run",
+        "input": {"cmd": "python analyze_sales.py"},
+        "source": "agent_studio_replan_recovery",
+        "step_id": "analyze-data-file",
+        "task_id": "task-1",
+        "workflow_run_id": "workflow-run-1",
+        "replan_request_id": "replan-parent-1",
+        "replan_recovery_action_id": "replan-parent-1:action:1:terminal.run",
+        "replan_trigger": "tool_failure",
+        "replan_triggers": ["tool_failure"],
+        "replan_signal_ids": ["signal-analyze"],
+        "recovery_action_label": "Run fallback analysis script",
+        "source_step_id": "analyze-data-file",
+        "source_tool_name": "data.analyze",
+        "target_capability_id": "data.analysis",
+        "task_verification_targets": [
+            {"step_id": "analyze-data-file", "todo_id": "todo-analyze"}
+        ],
+    }
+
+    events = task_replan_event_payloads_for_tool_result(
+        decision,
+        tool_request=recovery_request,
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "terminal.run",
+            "result": {"ok": False, "error": "script failed"},
+        },
+        event_scope="workflow.run",
+        run_id="workflow-run-1",
+        task_id="task-1",
+    )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event["event"] == "workflow.run.replan.requested"
+    assert event["planner_event_type"] == "agent.replan.requested"
+    assert event["payload"]["trigger"] == "tool_failure"
+    assert event["payload"]["source_step_id"] == "analyze-data-file"
+    assert event["payload"]["source_tool_name"] == "terminal.run"
+    assert event["payload"]["target_capability_id"] == "data.analysis"
+    metadata = event["payload"]["metadata"]
+    assert metadata["replan_recovery_failed"] is True
+    assert metadata["parent_replan_request_id"] == "replan-parent-1"
+    assert metadata["parent_replan_trigger"] == "tool_failure"
+    assert metadata["failed_recovery_action_id"] == (
+        "replan-parent-1:action:1:terminal.run"
+    )
+    assert metadata["failed_recovery_action_label"] == "Run fallback analysis script"
+    assert metadata["failed_recovery_tool"] == "terminal.run"
+    assert metadata["failed_recovery_input"] == {"cmd": "python analyze_sales.py"}
+    assert metadata["failed_recovery_source"] == "agent_studio_replan_recovery"
+    assert metadata["original_source_tool_name"] == "data.analyze"
+    assert metadata["replan_signal_ids"] == ["signal-analyze"]
+    assert metadata["failed_recovery_verification_targets"][0]["step_id"] == (
+        "analyze-data-file"
+    )
+    assert metadata["failed_recovery_result_preview"]["error"] == "script failed"
+
+
 def _tool_request() -> dict:
     return {
         "tool": "artifact.write",

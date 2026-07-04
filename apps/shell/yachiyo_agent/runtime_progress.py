@@ -149,6 +149,7 @@ def task_replan_event_payloads_for_tool_result(
             or failure.get("tool_name")
             or failure.get("tool")
         ),
+        metadata=_replan_failure_metadata(tool_request, failure),
     )
     if request is None:
         return []
@@ -264,7 +265,7 @@ def _failure_payload_from_tool_result(
 ) -> dict[str, Any]:
     result = tool_event.get("result") if isinstance(tool_event.get("result"), Mapping) else {}
     request_input = tool_request.get("input") if isinstance(tool_request.get("input"), Mapping) else {}
-    return {
+    failure = {
         **dict(tool_event),
         "event_type": _text(tool_event.get("event_type") or tool_event.get("event")),
         "step_id": _text(tool_request.get("step_id") or tool_request.get("planner_step_id")),
@@ -272,6 +273,102 @@ def _failure_payload_from_tool_result(
         "tool_input": dict(request_input),
         "result": dict(result),
     }
+    for key in (
+        "replan_request_id",
+        "replan_recovery_action_id",
+        "action_id",
+        "replan_trigger",
+        "source_step_id",
+        "source_tool_name",
+        "target_capability_id",
+        "capability_id",
+    ):
+        value = tool_request.get(key)
+        if value not in (None, "", [], {}):
+            failure[key] = value
+    for key in ("replan_triggers", "replan_signal_ids"):
+        values = _string_list(tool_request.get(key))
+        if values:
+            failure[key] = values
+    return failure
+
+
+def _replan_failure_metadata(
+    tool_request: Mapping[str, Any],
+    failure: Mapping[str, Any],
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {}
+    replan_signal_ids = _string_list(tool_request.get("replan_signal_ids"))
+    if replan_signal_ids:
+        metadata["replan_signal_ids"] = replan_signal_ids
+    replan_triggers = _string_list(tool_request.get("replan_triggers"))
+    if replan_triggers:
+        metadata["replan_triggers"] = replan_triggers
+    parent_replan_request_id = _text(tool_request.get("replan_request_id"))
+    if not parent_replan_request_id:
+        return metadata
+
+    result = failure.get("result") if isinstance(failure.get("result"), Mapping) else {}
+    request_input = tool_request.get("input") if isinstance(tool_request.get("input"), Mapping) else {}
+    action_id = _text(
+        tool_request.get("replan_recovery_action_id") or tool_request.get("action_id")
+    )
+    metadata.update(
+        {
+            "replan_recovery_failed": True,
+            "parent_replan_request_id": parent_replan_request_id,
+            "failed_recovery_tool": _text(
+                tool_request.get("tool") or tool_request.get("tool_name")
+            ),
+            "failed_recovery_input": dict(request_input),
+        }
+    )
+    for key, value in (
+        ("parent_replan_trigger", tool_request.get("replan_trigger")),
+        ("failed_recovery_action_id", action_id),
+        ("failed_recovery_action_label", tool_request.get("recovery_action_label")),
+        (
+            "failed_recovery_step_id",
+            tool_request.get("step_id") or tool_request.get("planner_step_id"),
+        ),
+        ("failed_recovery_source", tool_request.get("source")),
+        (
+            "failed_recovery_target_capability_id",
+            tool_request.get("target_capability_id") or tool_request.get("capability_id"),
+        ),
+        ("original_source_step_id", tool_request.get("source_step_id")),
+        ("original_source_tool_name", tool_request.get("source_tool_name")),
+    ):
+        clean = _text(value)
+        if clean:
+            metadata[key] = clean
+    verification_targets = _mapping_list(
+        tool_request.get("verification_targets")
+        or tool_request.get("task_verification_targets")
+    )
+    if verification_targets:
+        metadata["failed_recovery_verification_targets"] = verification_targets
+    result_preview = _failure_result_preview(result)
+    if result_preview:
+        metadata["failed_recovery_result_preview"] = result_preview
+    return {key: value for key, value in metadata.items() if value not in ("", [], {})}
+
+
+def _failure_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
+    preview: dict[str, Any] = {}
+    for key in (
+        "ok",
+        "status",
+        "error",
+        "hint",
+        "summary",
+        "returncode",
+        "exit_code",
+        "verification_failed",
+    ):
+        if key in result:
+            preview[key] = result.get(key)
+    return preview
 
 
 def _failure_trigger(failure: Mapping[str, Any]) -> str:
@@ -298,3 +395,15 @@ def _failure_trigger(failure: Mapping[str, Any]) -> str:
 
 def _text(value: Any) -> str:
     return str(value or "").strip()
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [_text(item) for item in value if _text(item)]
+
+
+def _mapping_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
