@@ -1944,7 +1944,7 @@ def _safe_selected_entrypoint_tool_requests(
     if not selected_requests:
         return []
     if _has_approval_plan_tool(selected_requests):
-        return selected_requests
+        return []
     if _has_explicit_hotkey_safe_shortcut(prompt, selected_requests, allowed_tools):
         return []
     requests = planner_execution_tool_requests(selected_requests, allowed_tools) or selected_requests

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
@@ -13,6 +14,10 @@ from .desktop_permissions import (
 from .legacy_runs import LegacyRunPayloadProjector
 from .planner_projection import planner_run_event_payloads, runtime_planner_decision
 from .policy import desktop_execution_capability_snapshots
+from .runtime_execution import (
+    runtime_execution_requests_from_envelope_payload,
+    runtime_execution_requests_from_metadata,
+)
 
 MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
 
@@ -68,6 +73,129 @@ def _planner_metadata_with_desktop_readiness(metadata: dict[str, Any]) -> dict[s
         if blocking_conditions:
             enriched["desktop_blocking_conditions_by_capability"] = blocking_conditions
     return enriched
+
+
+def _chat_runtime_execution_kwargs(
+    request: dict[str, Any],
+    *,
+    metadata: dict[str, Any],
+    prompt: str,
+) -> dict[str, Any]:
+    kwargs: dict[str, Any] = {}
+    envelope = request.get("runtime_execution_envelope")
+    if envelope is not None:
+        kwargs["runtime_execution_envelope"] = envelope
+    if metadata and (
+        metadata.get("yachiyo_runtime_planner") is True
+        or isinstance(metadata.get("yachiyo_execution_envelope"), dict)
+    ):
+        kwargs["metadata"] = dict(metadata)
+
+    direct_requests = _request_direct_tool_requests(request)
+    if not direct_requests:
+        direct_requests = runtime_execution_requests_from_envelope_payload(
+            envelope,
+            allowed_tools=_request_allowed_tools(request),
+        )
+    if not direct_requests:
+        direct_requests = runtime_execution_requests_from_metadata(
+            metadata,
+            allowed_tools=_request_allowed_tools(request),
+        )
+    if direct_requests:
+        kwargs["direct_tool_requests"] = direct_requests
+
+    if kwargs or metadata.get("yachiyo_runtime_planner") is True:
+        kwargs["runtime_planner_entrypoint"] = True
+        planning_context = str(
+            request.get("daily_desktop_planning_context") or prompt or ""
+        ).strip()
+        if planning_context:
+            kwargs["daily_desktop_planning_context"] = planning_context
+    if _should_apply_daily_desktop_overlay(metadata, direct_requests):
+        kwargs["daily_desktop_policy_overlay"] = True
+    return kwargs
+
+
+def _runnable_chat_execution_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
+    return {
+        key: value
+        for key, value in kwargs.items()
+        if key not in {"runtime_execution_envelope", "metadata"}
+    }
+
+
+def _request_direct_tool_requests(request: dict[str, Any]) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    direct_tool_request = request.get("direct_tool_request")
+    if isinstance(direct_tool_request, dict):
+        requests.append(dict(direct_tool_request))
+    direct_tool_requests = request.get("direct_tool_requests")
+    if isinstance(direct_tool_requests, list):
+        requests.extend(
+            dict(item)
+            for item in direct_tool_requests
+            if isinstance(item, dict)
+        )
+    return [
+        {**item, "tool": str(item.get("tool") or item.get("tool_name") or "").strip()}
+        for item in requests
+        if str(item.get("tool") or item.get("tool_name") or "").strip()
+    ]
+
+
+def _request_allowed_tools(request: dict[str, Any]) -> list[str] | None:
+    allowed_tools = request.get("allowed_tools")
+    if not isinstance(allowed_tools, list):
+        return None
+    tools = [
+        str(tool or "").strip()
+        for tool in allowed_tools
+        if str(tool or "").strip()
+    ]
+    return tools or None
+
+
+def _should_apply_daily_desktop_overlay(
+    metadata: dict[str, Any],
+    direct_requests: list[dict[str, Any]],
+) -> bool:
+    intent_kind = str(metadata.get("yachiyo_intent_kind") or "").strip()
+    if intent_kind in {
+        "desktop_operation",
+        "media_playback",
+        "system_control",
+        "clipboard_operation",
+        "web_research",
+        "information_capture",
+        "communication",
+        "schedule",
+    }:
+        return True
+    return any(
+        str(request.get("tool") or "").strip().startswith(
+            ("app.", "desktop.", "media.", "browser.")
+        )
+        for request in direct_requests
+    )
+
+
+def _call_with_supported_kwargs(callable_obj: Any, payload: dict[str, Any]) -> dict[str, Any]:
+    try:
+        callable_signature = inspect.signature(callable_obj)
+    except (TypeError, ValueError):
+        return callable_obj(**payload)
+    if any(
+        parameter.kind == inspect.Parameter.VAR_KEYWORD
+        for parameter in callable_signature.parameters.values()
+    ):
+        return callable_obj(**payload)
+    supported_payload = {
+        key: value
+        for key, value in payload.items()
+        if key in callable_signature.parameters
+    }
+    return callable_obj(**supported_payload)
 
 
 class LegacyRuntimePort:
@@ -126,6 +254,11 @@ class LegacyRuntimePort:
         metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
         planner_metadata = _planner_metadata_with_desktop_readiness(metadata)
         planner_decision = runtime_planner_decision(prompt, metadata=planner_metadata)
+        execution_kwargs = _chat_runtime_execution_kwargs(
+            request,
+            metadata=metadata,
+            prompt=prompt,
+        )
         requested_task_id = str(
             request.get("task_id")
             or request.get("client_task_id")
@@ -140,19 +273,22 @@ class LegacyRuntimePort:
                     "user_goal": prompt,
                     "source": "yachiyo_chat",
                     "client_run_id": request.get("client_run_id") or requested_task_id or None,
+                    **execution_kwargs,
                 }
             )
         else:
             create_run = getattr(self._runtime, "create_run_for_runnable_async", None)
+            run_payload = {
+                "runnable_id": runnable_id,
+                "user_goal": prompt,
+                **_runnable_chat_execution_kwargs(execution_kwargs),
+            }
             if callable(create_run):
-                run = create_run(
-                    runnable_id=runnable_id,
-                    user_goal=prompt,
-                )
+                run = _call_with_supported_kwargs(create_run, run_payload)
             else:
-                run = self._runtime.create_run_for_runnable(
-                    runnable_id=runnable_id,
-                    user_goal=prompt,
+                run = _call_with_supported_kwargs(
+                    self._runtime.create_run_for_runnable,
+                    run_payload,
                 )
         run_id = str(run.get("run_id") or "").strip()
         self._append_planner_run_events(run_id, planner_decision)

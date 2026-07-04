@@ -59,6 +59,41 @@ def test_legacy_runtime_port_starts_and_links_chat_task() -> None:
     ]
 
 
+def test_legacy_runtime_port_forwards_runtime_execution_plan_to_runnable_run() -> None:
+    runtime = _FakeRuntime()
+    request = planner_enriched_chat_request(
+        {
+            "prompt": "请分析 data/sales.csv 并输出报告",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-1",
+        }
+    )
+
+    task = LegacyRuntimePort(runtime).start_chat_task(request)
+
+    create_call = next(
+        payload
+        for call_name, payload in runtime.calls
+        if call_name == "create_run_for_runnable_async"
+    )
+    direct_requests = create_call["direct_tool_requests"]
+    assert task["task_id"] == "task-1"
+    assert create_call["runtime_planner_entrypoint"] is True
+    assert create_call["daily_desktop_planning_context"] == "请分析 data/sales.csv 并输出报告"
+    assert [request["tool"] for request in direct_requests] == [
+        "workspace.read",
+        "python.run",
+        "artifact.write",
+    ]
+    assert direct_requests[0]["step_id"] == "inspect-data-source"
+    assert direct_requests[1]["step_id"] == "run-analysis"
+    assert direct_requests[2]["step_id"] == "write-analysis-artifact"
+    assert direct_requests[1]["approval_required"] is True
+    assert "runtime_execution_envelope" not in create_call
+    assert "metadata" not in create_call
+    assert "daily_desktop_policy_overlay" not in create_call
+
+
 def test_legacy_runtime_port_appends_runtime_planner_events_when_available() -> None:
     runtime = _PlannerEventFakeRuntime()
 
@@ -712,7 +747,7 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
         ),
         (
             "Chrome 点登录",
-            ["desktop.list_apps", "app.focus", "desktop.ui_elements"],
+            ["desktop.list_apps", "desktop.list_apps", "app.focus", "desktop.ui_elements"],
         ),
     )
 
@@ -1128,7 +1163,11 @@ def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None
         {
             "protocol": "json_fallback",
             "tool": "app.open",
-            "input": {"app_name": "WeChat"},
+            "input": {
+                "app_name": "WeChat",
+                "selection_source": "desktop.list_apps",
+                "query": "WeChat",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         }
@@ -1146,7 +1185,11 @@ def test_planner_first_direct_selection_owns_app_launch_without_legacy() -> None
         {
             "protocol": "json_fallback",
             "tool": "app.focus",
-            "input": {"app_name": "Slack"},
+            "input": {
+                "app_name": "Slack",
+                "selection_source": "desktop.list_apps",
+                "query": "Slack",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         }
@@ -1595,7 +1638,12 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
         {
             "protocol": "json_fallback",
             "tool": "app.open_and_safe_shortcut",
-            "input": {"app_name": "WeChat", "action": "select_all"},
+            "input": {
+                "app_name": "WeChat",
+                "action": "select_all",
+                "selection_source": "desktop.list_apps",
+                "query": "WeChat",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -1675,7 +1723,12 @@ def test_planner_first_direct_selection_owns_foreground_shortcuts_before_legacy(
         {
             "protocol": "json_fallback",
             "tool": "app.focus_and_safe_shortcut",
-            "input": {"app_name": "Finder", "action": "new_folder"},
+            "input": {
+                "app_name": "Finder",
+                "action": "new_folder",
+                "selection_source": "desktop.list_apps",
+                "query": "Finder",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         }
@@ -2198,6 +2251,7 @@ def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_pla
     ][0]
     assert model_loop_call[1]["direct_tool_request"] is None
     assert [request["tool"] for request in model_loop_call[1]["direct_tool_requests"]] == [
+        "desktop.list_apps",
         "app.open_and_safe_shortcut",
         "desktop.safe_shortcut",
     ]
@@ -2252,6 +2306,7 @@ def test_legacy_chat_task_starter_keeps_migrated_context_prefetch_on_runtime_pla
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     assert [request["tool"] for request in model_loop_call[1]["direct_tool_requests"]] == [
+        "desktop.list_apps",
         "app.open_and_safe_shortcut",
         "desktop.safe_shortcut",
         "desktop.search_submit",
@@ -2606,6 +2661,41 @@ def test_legacy_runtime_port_starts_and_links_chat_workflow_task() -> None:
         "link_task_run",
         {"task_id": "task-workflow-1", "run_id": "workflow-run-1", "session_id": "chat-1"},
     ) in runtime.calls
+
+
+def test_legacy_runtime_port_forwards_runtime_execution_plan_to_workflow_run() -> None:
+    runtime = _FakeRuntime()
+    request = planner_enriched_chat_request(
+        {
+            "prompt": "请分析 data/sales.csv 并输出报告",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-workflow-1",
+            "workflow_id": "workflow-1",
+        }
+    )
+
+    task = LegacyRuntimePort(runtime).start_chat_task(request)
+
+    create_call = next(
+        payload
+        for call_name, payload in runtime.calls
+        if call_name == "create_workflow_run"
+    )
+    direct_requests = create_call["direct_tool_requests"]
+    assert task["task_id"] == "task-workflow-1"
+    assert create_call["runtime_planner_entrypoint"] is True
+    assert create_call["daily_desktop_planning_context"] == "请分析 data/sales.csv 并输出报告"
+    assert create_call["runtime_execution_envelope"] == request["runtime_execution_envelope"]
+    assert create_call["metadata"]["yachiyo_runtime_planner"] is True
+    assert create_call["metadata"]["yachiyo_execution_envelope"] == (
+        request["metadata"]["yachiyo_execution_envelope"]
+    )
+    assert [request["tool"] for request in direct_requests] == [
+        "workspace.read",
+        "python.run",
+        "artifact.write",
+    ]
+    assert direct_requests[1]["approval_required"] is True
 
 
 def test_legacy_runtime_port_preserves_workflow_identity_after_task_approval() -> None:
