@@ -2350,6 +2350,102 @@ def test_runtime_tool_request_runner_resolves_selected_discovered_app_placeholde
     assert ("run-selected-app", "agent.tool.input_resolved", resolution_payload) in run_events
 
 
+def test_runtime_tool_request_runner_resolves_top_level_app_candidates() -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    def call_agent_tool(
+        tool_request: dict[str, Any],
+        _allowed_tools: list[str],
+        _broker: Any,
+        timeline_arg: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> dict[str, Any]:
+        tool_name = str(tool_request.get("tool") or "")
+        payload = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
+        ToolDescriptorRegistry.validate_payload(tool_name, payload)
+        calls.append((tool_name, payload))
+        if tool_name == "desktop.list_apps":
+            result = {
+                "ok": True,
+                "action": "desktop.list_apps",
+                "apps": [
+                    {
+                        "name": "Typora",
+                        "path": "/Applications/Typora.app",
+                        "score": 88,
+                        "confidence": "high",
+                        "reason": "document:markdown",
+                    }
+                ],
+            }
+        else:
+            result = {
+                "ok": True,
+                "action": "app.open",
+                "data": {"app_name": payload["app_name"], "launch_verified": True},
+            }
+        timeline_arg.append(
+            _timeline("agent.tool.call", tool_name, input_preview=payload, result=result)
+        )
+        return result
+
+    runner = _runner(call_agent_tool=call_agent_tool, run_events=run_events)
+
+    runner.run(
+        [
+            {"tool": "desktop.list_apps", "input": {"query": "markdown", "limit": 20}},
+            {
+                "tool": "app.open",
+                "input": {
+                    "app_name": "<selected app from desktop.list_apps>",
+                    "selection_source": "desktop.list_apps",
+                    "query": "markdown",
+                },
+            },
+        ],
+        ["desktop.list_apps", "app.open"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "打开一个能写 markdown 的应用"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-top-level-app-candidates",
+        budget=FakeBudget(),
+    )
+
+    assert calls == [
+        ("desktop.list_apps", {"query": "markdown", "limit": 20}),
+        ("app.open", {"app_name": "Typora"}),
+    ]
+    resolution_payload = {
+        "tool": "app.open",
+        "field": "app_name",
+        "requested_app_name": "markdown",
+        "resolved_app_name": "Typora",
+        "source_tool": "desktop.list_apps",
+        "resolved_app_path": "/Applications/Typora.app",
+        "app_resolution_score": "88",
+        "app_resolution_confidence": "high",
+        "app_resolution_reason": "document:markdown",
+    }
+    assert [
+        event for event in timeline if event["event"] == "agent.tool.input_resolved"
+    ] == [
+        {
+            "event": "agent.tool.input_resolved",
+            "detail": "app.open",
+            **resolution_payload,
+        }
+    ]
+    assert (
+        "run-top-level-app-candidates",
+        "agent.tool.input_resolved",
+        resolution_payload,
+    ) in run_events
+
+
 def test_runtime_tool_request_runner_resolves_selected_app_for_desktop_windows() -> None:
     calls: list[tuple[str, dict[str, Any]]] = []
     run_events: list[tuple[str, str, dict[str, Any]]] = []

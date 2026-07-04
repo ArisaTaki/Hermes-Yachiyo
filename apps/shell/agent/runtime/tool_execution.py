@@ -288,21 +288,37 @@ def _app_lookups_related(left: Any, right: Any) -> bool:
 
 def _apps_from_list_apps_result(result: dict[str, Any]) -> list[Any]:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
-    apps = data.get("apps")
-    if isinstance(apps, list):
-        return apps
-    matches = data.get("matches")
-    if isinstance(matches, list):
-        return matches
+    for container in (data, result):
+        apps = container.get("apps")
+        if isinstance(apps, list):
+            return apps
+        matches = container.get("matches")
+        if isinstance(matches, list):
+            return matches
     return []
 
 
 def _app_match_score(app: dict[str, Any]) -> int | None:
-    value = app.get("match_score")
-    try:
-        return int(value)
-    except (TypeError, ValueError):
-        return None
+    for key in ("match_score", "score", "app_resolution_score"):
+        value = app.get(key)
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _app_candidate_name(app: Mapping[str, Any]) -> str:
+    return str(
+        app.get("name")
+        or app.get("app_name")
+        or app.get("resolved_app_name")
+        or ""
+    ).strip()
+
+
+def _app_candidate_path(app: Mapping[str, Any]) -> str:
+    return str(app.get("path") or app.get("resolved_app_path") or "").strip()
 
 
 def _contains_non_ascii(value: Any) -> bool:
@@ -314,7 +330,7 @@ def _app_match_is_high_confidence(app: dict[str, Any], query: str) -> bool:
     if score is not None and score < 80:
         return False
     clean_query = _normalized_app_lookup(query)
-    clean_name = _normalized_app_lookup(app.get("name"))
+    clean_name = _normalized_app_lookup(_app_candidate_name(app))
     if (
         clean_query
         and clean_name
@@ -328,8 +344,20 @@ def _app_match_is_high_confidence(app: dict[str, Any], query: str) -> bool:
 
 def _best_match_from_list_apps_result(result: dict[str, Any]) -> dict[str, Any] | None:
     data = result.get("data") if isinstance(result.get("data"), dict) else {}
-    best_match = data.get("best_match")
-    return best_match if isinstance(best_match, dict) else None
+    for container in (data, result):
+        best_match = container.get("best_match")
+        if isinstance(best_match, dict):
+            return best_match
+        resolution = container.get("resolution")
+        if isinstance(resolution, dict) and _app_candidate_name(resolution):
+            return {
+                "name": _app_candidate_name(resolution),
+                "path": _app_candidate_path(resolution),
+                "match_score": resolution.get("app_resolution_score"),
+                "match_confidence": resolution.get("app_resolution_confidence"),
+                "match_reason": resolution.get("app_resolution_reason"),
+            }
+    return None
 
 
 def _discovered_app_name_for_query(
@@ -356,22 +384,22 @@ def _discovered_app_name_for_query(
         discovered_apps = [
             app
             for app in _apps_from_list_apps_result(result)
-            if isinstance(app, dict) and str(app.get("name") or "").strip()
+            if isinstance(app, dict) and _app_candidate_name(app)
         ]
         for app in discovered_apps:
-            app_name = str(app.get("name") or "").strip()
+            app_name = _app_candidate_name(app)
             if _normalized_app_lookup(app_name) == clean_query:
                 return app_name
         for app in discovered_apps:
             if not _app_match_is_high_confidence(app, query):
                 continue
-            app_name = str(app.get("name") or "").strip()
+            app_name = _app_candidate_name(app)
             if _app_lookups_related(app_name, clean_query):
                 return app_name
         for app in discovered_apps:
             score = _app_match_score(app)
             if score is not None and score >= 80 and _app_match_is_high_confidence(app, query):
-                return str(app.get("name") or "").strip()
+                return _app_candidate_name(app)
     return ""
 
 
@@ -1012,19 +1040,29 @@ def _discovered_app_resolution_evidence(
             app for app in _apps_from_list_apps_result(result) if isinstance(app, dict)
         )
         for app in candidates:
-            if _normalized_app_lookup(app.get("name")) != clean_resolved:
+            if _normalized_app_lookup(_app_candidate_name(app)) != clean_resolved:
                 continue
             evidence: dict[str, str] = {}
             score = _app_match_score(app)
             if score is not None:
                 evidence["app_resolution_score"] = str(score)
-            confidence = str(app.get("match_confidence") or "").strip()
+            confidence = str(
+                app.get("match_confidence")
+                or app.get("confidence")
+                or app.get("app_resolution_confidence")
+                or ""
+            ).strip()
             if confidence:
                 evidence["app_resolution_confidence"] = confidence
-            reason = str(app.get("match_reason") or "").strip()
+            reason = str(
+                app.get("match_reason")
+                or app.get("reason")
+                or app.get("app_resolution_reason")
+                or ""
+            ).strip()
             if reason:
                 evidence["app_resolution_reason"] = reason
-            path = str(app.get("path") or "").strip()
+            path = _app_candidate_path(app)
             if path:
                 evidence["resolved_app_path"] = path
             return evidence
