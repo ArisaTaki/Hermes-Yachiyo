@@ -18,7 +18,10 @@ from .replans import (
     task_replan_timeline_event,
 )
 from .runtime_planner import RuntimePlanner
-from .runtime_execution import runtime_execution_envelope_payload
+from .runtime_execution import (
+    runtime_execution_envelope_payload,
+    runtime_execution_requests_from_envelope_payload,
+)
 
 _MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
 
@@ -147,6 +150,13 @@ def planner_enriched_chat_request(
     }
     if runtime_execution_envelope:
         payload["runtime_execution_envelope"] = runtime_execution_envelope
+        if "direct_tool_requests" not in payload:
+            direct_tool_requests = runtime_execution_requests_from_envelope_payload(
+                runtime_execution_envelope,
+                allowed_tools=execution_allowed_tools,
+            )
+            if direct_tool_requests:
+                payload["direct_tool_requests"] = direct_tool_requests
     return payload
 
 

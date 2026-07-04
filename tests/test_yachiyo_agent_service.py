@@ -866,6 +866,22 @@ def test_yachiyo_agent_service_surfaces_desktop_execution_request_previews() -> 
         }
     )
 
+    request = port.calls[0][1]
+    assert [item["tool"] for item in request["direct_tool_requests"]] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert request["direct_tool_requests"][0]["input"] == {
+        "query": "PixelForge",
+        "limit": 20,
+    }
+    assert request["direct_tool_requests"][0]["desktop_loop"]["can_auto_retry"] is True
+    assert request["direct_tool_requests"][1]["desktop_loop"]["retry_tool"] == (
+        "desktop.list_apps"
+    )
+    assert request["direct_tool_requests"][2]["runtime_stage"] == "verify"
+    assert request["direct_tool_requests"][2]["desktop_loop"]["stage"] == "verify"
     metadata = port.calls[0][1]["metadata"]
     assert metadata["yachiyo_execution_requests"] == [
         "desktop.list_apps",
