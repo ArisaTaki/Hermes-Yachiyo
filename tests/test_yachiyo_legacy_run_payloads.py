@@ -10,6 +10,7 @@ from apps.shell.yachiyo_agent.legacy_ports import (
     _group_artifacts,
     _group_run_from_legacy_run_group,
 )
+from apps.shell.yachiyo_agent.groups import group_run_snapshot_from_payload
 
 
 def test_legacy_run_projector_preserves_chat_task_payload_shape() -> None:
@@ -142,6 +143,82 @@ def test_legacy_group_run_merges_child_run_task_links() -> None:
     assert child_run["task_run_link_last_event_sequence"] == 7
 
 
+def test_legacy_group_run_child_runs_merge_runtime_event_store() -> None:
+    core_payload = {
+        "core_id": "task-core-1",
+        "workspace": {
+            "workspace_id": "task-workspace-1",
+            "title": "Analysis Workspace",
+        },
+        "todos": [
+            {
+                "todo_id": "todo-1",
+                "title": "Analyze data",
+                "step_id": "analyze-data",
+                "tool_name": "data.analyze",
+                "status": "pending",
+            }
+        ],
+        "checkpoints": [],
+        "replan_signals": [],
+    }
+    runtime = _FakeRuntime(
+        {
+            "run-1": {
+                "run_id": "run-1",
+                "status": "running",
+                "timeline": [{"event_type": "run.started"}],
+            },
+        },
+        run_events={
+            "run-1": [
+                {
+                    "event_id": "event-1",
+                    "sequence": 1,
+                    "event_type": "agent.task_core.created",
+                    "payload": {
+                        "core_id": "task-core-1",
+                        "task_core": core_payload,
+                    },
+                },
+                {
+                    "event_id": "event-2",
+                    "sequence": 2,
+                    "event_type": "agent.task.todo.updated",
+                    "payload": {
+                        "todo_id": "todo-1",
+                        "status": "completed",
+                        "todo": {
+                            "todo_id": "todo-1",
+                            "title": "Analyze data",
+                            "step_id": "analyze-data",
+                            "tool_name": "data.analyze",
+                            "status": "completed",
+                        },
+                    },
+                },
+            ],
+        },
+    )
+
+    payload = LegacyRunPayloadProjector().group_run_from_legacy_run_group(
+        {"run_group_id": "group-run-1", "child_run_ids": ["run-1"]},
+        runtime,
+    )
+    child_run = payload["runs"][0]
+
+    assert [event["event_type"] for event in child_run["events"]] == [
+        "run.started",
+        "agent.task_core.created",
+        "agent.task.todo.updated",
+    ]
+    snapshot = group_run_snapshot_from_payload(payload)
+    child_snapshot = snapshot.runs[0]
+    assert child_snapshot.task_progress is not None
+    assert child_snapshot.task_progress.completed_todos == 1
+    assert child_snapshot.task_progress.progress_text == "1/1 todos completed"
+
+
 def test_legacy_group_artifacts_ignores_non_dict_artifacts() -> None:
     runs = [
         {
@@ -165,15 +242,20 @@ class _FakeRuntime:
         runs: dict[str, dict[str, Any]],
         *,
         task_links: dict[str, dict[str, Any]] | None = None,
+        run_events: dict[str, list[dict[str, Any]]] | None = None,
     ) -> None:
         self._runs = runs
         self.task_run_links = _FakeTaskRunLinks(task_links or {})
+        self._run_events = run_events or {}
 
     def get_run(self, run_id: str) -> dict[str, Any]:
         try:
             return self._runs[run_id]
         except KeyError:
             raise KeyError(run_id) from None
+
+    def list_run_events(self, run_id: str) -> dict[str, Any]:
+        return {"events": self._run_events.get(run_id, [])}
 
 
 class _FakeTaskRunLinks:

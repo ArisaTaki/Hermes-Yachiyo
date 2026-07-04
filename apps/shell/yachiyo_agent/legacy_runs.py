@@ -72,6 +72,26 @@ class LegacyRunPayloadProjector:
             "task_run_link_last_event_sequence": link.get("last_event_sequence") or 0,
         }
 
+    def run_with_runtime_events(
+        self,
+        run: dict[str, Any],
+        runtime: Any | None = None,
+    ) -> dict[str, Any]:
+        events = self.chat_events_for_run(run, runtime)
+        if not events:
+            return run
+        return {
+            **run,
+            "events": events,
+            "recent_events": events,
+        }
+
+    def child_run_payload(self, run: dict[str, Any], runtime: Any) -> dict[str, Any]:
+        return self.run_with_runtime_events(
+            self.run_with_task_link(run, runtime),
+            runtime,
+        )
+
     def task_link_for_run(self, run: dict[str, Any], runtime: Any) -> dict[str, Any] | None:
         run_id = str(run.get("run_id") or "").strip()
         if not run_id:
@@ -171,7 +191,7 @@ class LegacyRunPayloadProjector:
         child_runs = []
         for run_id in run_group.get("child_run_ids") or []:
             try:
-                child_runs.append(self.run_with_task_link(runtime.get_run(str(run_id)), runtime))
+                child_runs.append(self.child_run_payload(runtime.get_run(str(run_id)), runtime))
             except KeyError:
                 continue
         return child_runs

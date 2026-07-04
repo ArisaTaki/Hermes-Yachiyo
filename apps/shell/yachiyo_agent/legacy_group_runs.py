@@ -246,6 +246,10 @@ def start_legacy_group_run(
             )
 
     run_group = runtime.get_run_group(run_group_id) if run_group_id else {}
+    projected_child_runs = [
+        run_projector.child_run_payload(run, runtime)
+        for run in child_runs
+    ]
     return {
         "run_group_id": run_group_id,
         "group_run_id": run_group_id,
@@ -261,16 +265,16 @@ def start_legacy_group_run(
         "participants": members,
         "active_speaker_agent_id": active_speaker_agent_id(
             orchestration_plan,
-            child_runs,
+            projected_child_runs,
         ),
-        "runs": child_runs,
+        "runs": projected_child_runs,
         "child_run_ids": run_group.get("child_run_ids")
-        or [run.get("run_id") for run in child_runs if run.get("run_id")],
-        "events": run_projector.group_events_from_child_runs(child_runs, runtime),
-        "shared_artifacts": run_projector.group_artifacts(child_runs),
+        or [run.get("run_id") for run in projected_child_runs if run.get("run_id")],
+        "events": run_projector.group_events_from_child_runs(projected_child_runs, runtime),
+        "shared_artifacts": run_projector.group_artifacts(projected_child_runs),
         "pending_approvals": [
             run.get("pending_approval")
-            for run in child_runs
+            for run in projected_child_runs
             if run.get("pending_approval")
         ],
         "final_answer": run_group.get("summary") or "",
