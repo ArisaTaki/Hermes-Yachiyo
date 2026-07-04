@@ -460,6 +460,8 @@ class ReplanContinuationSnapshot(_PublicSnapshot):
     daily_desktop_planning_context: str = ""
     approval_required: bool = False
     auto_start_eligible: bool = False
+    auto_start_reason: str = ""
+    auto_start_blockers: list[str] = Field(default_factory=list)
     risk_level: str = ""
     source: str = "replan_continuation"
 

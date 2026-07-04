@@ -737,6 +737,30 @@ class AgentStudioService:
         source_run = self.get_run_timeline(run_id)
         return self._plan_replan_recovery_action_from_snapshot(source_run, payload)
 
+    def start_next_replan_continuation(
+        self,
+        run_id: str,
+        request: Mapping[str, Any] | None = None,
+    ) -> RunTimelineSnapshot | None:
+        continuation = self.plan_next_replan_continuation(run_id, request or {})
+        if continuation is None:
+            return None
+        return self.start_agent_run(_agent_start_payload_from_replan_continuation(continuation))
+
+    def plan_next_replan_continuation(
+        self,
+        run_id: str,
+        request: Mapping[str, Any] | None = None,
+    ) -> ReplanContinuationSnapshot | None:
+        payload = _request_payload(request or {})
+        source_run = self.get_run_timeline(run_id)
+        return _next_replan_recovery_action_continuation(
+            source_run,
+            payload,
+            source="agent_studio_replan_auto_continuation",
+            client_run_id=str(payload.get("client_run_id") or "").strip(),
+        )
+
     def _start_replan_recovery_action_from_snapshot(
         self,
         source_run: Any,
@@ -1452,6 +1476,84 @@ def _replan_recovery_action_objective(action: ReplanRecoveryActionSnapshot) -> s
     return f"执行恢复动作：{tool}"
 
 
+_AUTO_CONTINUATION_SAFE_TOOLS = {
+    "app.focus",
+    "app.open",
+    "browser.current_page",
+    "browser.screenshot",
+    "desktop.active_window",
+    "desktop.focus_app",
+    "desktop.list_apps",
+    "desktop.open_app",
+    "desktop.read_ui",
+    "desktop.running_apps",
+    "desktop.ui_elements",
+    "file.read",
+    "fs.read_file",
+    "screen.capture",
+    "workspace.read",
+}
+
+
+def _next_replan_recovery_action_continuation(
+    source_run: Any,
+    payload: Mapping[str, Any],
+    *,
+    source: str,
+    conversation_id: str = "",
+    client_run_id: str = "",
+) -> ReplanContinuationSnapshot | None:
+    request_id_filter = str(payload.get("request_id") or "").strip()
+    action_id_filter = str(payload.get("action_id") or "").strip()
+    for recovery in reversed(list(getattr(source_run, "replan_recoveries", []) or [])):
+        if request_id_filter and str(recovery.request_id or "").strip() != request_id_filter:
+            continue
+        if _replan_recovery_is_resolved(recovery):
+            continue
+        for action in _ordered_replan_recovery_actions(recovery):
+            if action_id_filter and str(action.action_id or "").strip() != action_id_filter:
+                continue
+            task_context = _replan_recovery_task_context(source_run, recovery, action)
+            agent_id = ""
+            if source.startswith("agent_studio"):
+                agent_id = _replan_recovery_action_agent_id(payload, source_run, recovery)
+                if not agent_id:
+                    continue
+            continuation = _replan_recovery_action_continuation(
+                source_run,
+                recovery,
+                action,
+                task_context=task_context,
+                continue_to_model=bool(payload.get("continue_to_model", True)),
+                source=source,
+                title=str(payload.get("title") or action.label or "").strip(),
+                agent_id=agent_id,
+                conversation_id=conversation_id,
+                client_run_id=client_run_id,
+                extra_metadata=payload.get("metadata")
+                if isinstance(payload.get("metadata"), Mapping)
+                else {},
+            )
+            if continuation.auto_start_eligible:
+                return continuation
+    return None
+
+
+def _ordered_replan_recovery_actions(
+    recovery: ReplanRecoverySnapshot,
+) -> list[ReplanRecoveryActionSnapshot]:
+    actions = list(recovery.recovery_actions or [])
+    return [
+        *[action for action in actions if action.selected],
+        *[action for action in actions if not action.selected],
+    ]
+
+
+def _replan_recovery_is_resolved(recovery: ReplanRecoverySnapshot) -> bool:
+    status = str(recovery.status or "").strip().lower()
+    return status in {"completed", "resolved", "cancelled", "canceled"}
+
+
 def _replan_recovery_action_continuation(
     source_run: Any,
     recovery: ReplanRecoverySnapshot,
@@ -1487,14 +1589,18 @@ def _replan_recovery_action_continuation(
         source=source,
     )
     risk_level = str(action.risk_level or recovery.risk_level or "").strip()
-    approval_required = bool(action.approval_required or direct_request.get("approval_required"))
-    auto_start_eligible = (
-        not approval_required
-        and risk_level.lower() not in {"high", "critical"}
-        and bool(str(action.tool or "").strip())
+    auto_start = _replan_continuation_auto_start_context(
+        action,
+        direct_request=direct_request,
+        risk_level=risk_level,
     )
+    approval_required = bool(auto_start["approval_required"])
+    auto_start_eligible = not auto_start["blockers"]
     metadata["replan_continuation_id"] = continuation_id
     metadata["replan_auto_start_eligible"] = auto_start_eligible
+    metadata["replan_auto_start_reason"] = auto_start["reason"]
+    if auto_start["blockers"]:
+        metadata["replan_auto_start_blockers"] = auto_start["blockers"]
     return ReplanContinuationSnapshot(
         continuation_id=continuation_id,
         request_id=str(recovery.request_id or ""),
@@ -1522,9 +1628,49 @@ def _replan_recovery_action_continuation(
         daily_desktop_planning_context=objective,
         approval_required=approval_required,
         auto_start_eligible=auto_start_eligible,
+        auto_start_reason=str(auto_start["reason"]),
+        auto_start_blockers=list(auto_start["blockers"]),
         risk_level=risk_level,
         source=str(source or "replan_continuation").strip(),
     )
+
+
+def _replan_continuation_auto_start_context(
+    action: ReplanRecoveryActionSnapshot,
+    *,
+    direct_request: Mapping[str, Any],
+    risk_level: str,
+) -> dict[str, Any]:
+    blockers: list[str] = []
+    tool_name = str(action.tool or direct_request.get("tool") or "").strip()
+    approval_required = bool(
+        action.approval_required
+        or direct_request.get("approval_required")
+        or str(action.approval_status or "").strip().lower() in {
+            "pending",
+            "required",
+            "approval_required",
+            "waiting_approval",
+        }
+    )
+    clean_risk = str(risk_level or "").strip().lower()
+    if not tool_name:
+        blockers.append("missing_tool")
+    if approval_required:
+        blockers.append("approval_required")
+    if clean_risk in {"high", "critical"}:
+        blockers.append("high_risk")
+    if tool_name and tool_name not in _AUTO_CONTINUATION_SAFE_TOOLS:
+        blockers.append("tool_not_auto_safe")
+    return {
+        "approval_required": approval_required,
+        "blockers": blockers,
+        "reason": (
+            "safe_low_risk_replan_continuation"
+            if not blockers
+            else "manual_replan_continuation_required"
+        ),
+    }
 
 
 def _agent_start_payload_from_replan_continuation(

@@ -193,6 +193,38 @@ class YachiyoAgentService:
             _chat_start_payload_from_replan_continuation(continuation)
         )
 
+    def start_next_replan_continuation(
+        self,
+        task_id: str,
+        request: Mapping[str, Any] | None = None,
+    ) -> AgentTaskSnapshot | None:
+        continuation = self.plan_next_replan_continuation(task_id, request or {})
+        if continuation is None:
+            return None
+        from .studio_service import _chat_start_payload_from_replan_continuation
+
+        return self.start_chat_task(
+            _chat_start_payload_from_replan_continuation(continuation)
+        )
+
+    def plan_next_replan_continuation(
+        self,
+        task_id: str,
+        request: Mapping[str, Any] | None = None,
+    ) -> ReplanContinuationSnapshot | None:
+        payload = _request_payload(request or {})
+        source_task = self.get_task_timeline(task_id)
+        from .studio_service import _next_replan_recovery_action_continuation
+
+        return _next_replan_recovery_action_continuation(
+            source_task,
+            payload,
+            source="yachiyo_chat_replan_auto_continuation",
+            conversation_id=str(
+                payload.get("conversation_id") or source_task.task_id or task_id
+            ).strip(),
+        )
+
     def plan_replan_recovery_action(
         self,
         task_id: str,

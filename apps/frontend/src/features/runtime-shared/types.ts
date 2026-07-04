@@ -397,6 +397,8 @@ export type ReplanContinuationSnapshot = {
   daily_desktop_planning_context?: string;
   approval_required?: boolean;
   auto_start_eligible?: boolean;
+  auto_start_reason?: string;
+  auto_start_blockers?: string[];
   risk_level?: string;
   source?: string;
 };

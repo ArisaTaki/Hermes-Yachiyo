@@ -625,13 +625,54 @@ def test_yachiyo_agent_service_plans_replan_continuation_without_bypassing_appro
     assert continuation.conversation_id == "chat-1"
     assert continuation.approval_required is True
     assert continuation.auto_start_eligible is False
+    assert continuation.auto_start_reason == "manual_replan_continuation_required"
+    assert continuation.auto_start_blockers == ["approval_required"]
     assert continuation.metadata["recovery_action_approval_required"] is True
     assert continuation.metadata["replan_auto_start_eligible"] is False
+    assert continuation.metadata["replan_auto_start_blockers"] == ["approval_required"]
     assert continuation.direct_tool_requests[0]["approval_required"] is True
     assert continuation.direct_tool_requests[0]["replan_recovery_action_id"] == (
         "replan-1:action:1:desktop.list_apps"
     )
     assert continuation.task_context["task_todo"]["todo_id"] == "todo-open-app"
+
+
+def test_yachiyo_agent_service_auto_starts_next_safe_replan_continuation() -> None:
+    port = _ReplanRecoveryTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_next_replan_continuation(
+        "task-1",
+        {"conversation_id": "chat-1"},
+    )
+
+    assert task is not None
+    assert task.task_id == "recovery-task-1"
+    assert [name for name, _payload in port.calls] == [
+        "get_task_timeline",
+        "start_chat_task",
+    ]
+    request = port.calls[1][1]
+    assert request["metadata"]["source"] == "yachiyo_chat_replan_auto_continuation"
+    assert request["metadata"]["replan_auto_start_eligible"] is True
+    assert request["metadata"]["replan_auto_start_reason"] == (
+        "safe_low_risk_replan_continuation"
+    )
+    assert request["direct_tool_requests"][0]["tool"] == "desktop.list_apps"
+    assert request["direct_tool_requests"][0]["approval_required"] is False
+
+
+def test_yachiyo_agent_service_does_not_auto_start_approval_replan_continuation() -> None:
+    port = _ApprovalReplanRecoveryTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_next_replan_continuation(
+        "task-1",
+        {"conversation_id": "chat-1"},
+    )
+
+    assert task is None
+    assert [name for name, _payload in port.calls] == ["get_task_timeline"]
 
 
 def test_agent_studio_service_plans_and_starts_replan_continuation() -> None:
@@ -675,6 +716,30 @@ def test_agent_studio_service_plans_and_starts_replan_continuation() -> None:
         "replan-continuation:replan-1:replan-1:action:1:desktop.list_apps"
     )
     assert request["direct_tool_requests"][0]["approval_required"] is False
+
+
+def test_agent_studio_service_auto_starts_next_safe_replan_continuation() -> None:
+    port = _ReplanRecoveryStudioPort()
+    service = AgentStudioService(port)
+
+    timeline = service.start_next_replan_continuation(
+        "run-1",
+        {"agent_id": "agent-1", "client_run_id": "client-auto-1"},
+    )
+
+    assert timeline is not None
+    assert timeline.run_id == "studio-recovery-run"
+    assert [name for name, _payload in port.calls] == [
+        "get_run_timeline",
+        "start_agent_run",
+    ]
+    request = port.calls[-1][1]
+    assert request["metadata"]["source"] == "agent_studio_replan_auto_continuation"
+    assert request["metadata"]["replan_auto_start_eligible"] is True
+    assert request["metadata"]["replan_auto_start_reason"] == (
+        "safe_low_risk_replan_continuation"
+    )
+    assert request["direct_tool_requests"][0]["tool"] == "desktop.list_apps"
 
 
 def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task() -> None:

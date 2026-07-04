@@ -450,6 +450,8 @@ def test_replan_continuation_snapshot_is_public_contract() -> None:
         daily_desktop_planning_context="执行恢复动作：Find target app",
         approval_required=True,
         auto_start_eligible=False,
+        auto_start_reason="manual_replan_continuation_required",
+        auto_start_blockers=["approval_required"],
         risk_level="medium",
     )
 
@@ -475,11 +477,14 @@ def test_replan_continuation_snapshot_is_public_contract() -> None:
         "daily_desktop_planning_context",
         "approval_required",
         "auto_start_eligible",
+        "auto_start_reason",
+        "auto_start_blockers",
         "risk_level",
         "source",
     ]
     assert payload["direct_tool_requests"][0]["approval_required"] is True
     assert payload["auto_start_eligible"] is False
+    assert payload["auto_start_blockers"] == ["approval_required"]
 
 
 def test_task_core_public_snapshot_exposes_workspace_todo_checkpoint_and_replan() -> None:
