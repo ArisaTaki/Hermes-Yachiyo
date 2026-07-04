@@ -26,8 +26,13 @@ def start_payload_with_planner_events(
     *,
     plan_task: StartPayloadPlanner,
     metadata_source: str,
+    event_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    payload = _payload_with_request_metadata(raw_payload, request_payload)
+    payload = _payload_with_request_metadata(
+        raw_payload,
+        request_payload,
+        event_context=event_context,
+    )
     if _payload_has_planner_events(payload):
         return payload
 
@@ -44,6 +49,7 @@ def start_payload_with_planner_events(
         decision,
         run_id=_started_run_id(payload),
         after_sequence=_max_event_sequence(payload),
+        event_context=event_context,
     )
     if not planner_events:
         return payload
@@ -58,8 +64,17 @@ def start_payload_with_planner_decision_events(
     decision: PlannerDecisionSnapshot | None,
     *,
     event_context: Mapping[str, Any] | None = None,
+    request_payload: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    payload = dict(raw_payload)
+    payload = (
+        _payload_with_request_metadata(
+            raw_payload,
+            request_payload,
+            event_context=event_context,
+        )
+        if isinstance(request_payload, Mapping)
+        else dict(raw_payload)
+    )
     if decision is None or _payload_has_planner_events(payload):
         return payload
 
@@ -115,8 +130,10 @@ def _start_metadata(request_payload: Mapping[str, Any], *, source: str) -> dict[
 def _payload_with_request_metadata(
     raw_payload: Mapping[str, Any],
     request_payload: Mapping[str, Any],
+    *,
+    event_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    payload = dict(raw_payload)
+    payload = _payload_envelopes_with_event_context(dict(raw_payload), event_context)
     request_metadata = (
         dict(request_payload.get("metadata"))
         if isinstance(request_payload.get("metadata"), Mapping)
@@ -126,14 +143,57 @@ def _payload_with_request_metadata(
         response_metadata = (
             dict(payload.get("metadata")) if isinstance(payload.get("metadata"), Mapping) else {}
         )
-        payload["metadata"] = {**request_metadata, **response_metadata}
+        payload["metadata"] = _metadata_with_event_context(
+            {**request_metadata, **response_metadata},
+            event_context,
+        )
     request_envelope = request_payload.get("runtime_execution_envelope")
     if (
         isinstance(request_envelope, Mapping)
         and not isinstance(payload.get("runtime_execution_envelope"), Mapping)
     ):
-        payload["runtime_execution_envelope"] = dict(request_envelope)
+        payload["runtime_execution_envelope"] = (
+            runtime_execution_envelope_payload_with_request_context(
+                request_envelope,
+                event_context,
+            )
+        )
     return payload
+
+
+def _payload_envelopes_with_event_context(
+    payload: dict[str, Any],
+    event_context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not isinstance(event_context, Mapping):
+        return payload
+    for key in (
+        "runtime_execution_envelope",
+        "yachiyo_execution_envelope",
+        "execution_envelope",
+    ):
+        envelope = payload.get(key)
+        if isinstance(envelope, Mapping):
+            payload[key] = runtime_execution_envelope_payload_with_request_context(
+                envelope,
+                event_context,
+            )
+    return payload
+
+
+def _metadata_with_event_context(
+    metadata: dict[str, Any],
+    event_context: Mapping[str, Any] | None,
+) -> dict[str, Any]:
+    if not metadata or not isinstance(event_context, Mapping):
+        return metadata
+    envelope = metadata.get("yachiyo_execution_envelope")
+    if isinstance(envelope, Mapping):
+        metadata = dict(metadata)
+        metadata["yachiyo_execution_envelope"] = (
+            runtime_execution_envelope_payload_with_request_context(envelope, event_context)
+        )
+    return metadata
 
 
 def _planner_public_events_for_start_payload(

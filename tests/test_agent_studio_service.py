@@ -1543,14 +1543,14 @@ def test_agent_studio_service_maps_group_run_workflow_run_timeline_and_events() 
     assert event_page.has_more is True
     assert event_page.events[0].sequence == 2
     assert event_page.events[0].event_type == "agent.tool.call"
-    assert (
-        "start_group_run",
-        {
-            "group_id": "group-1",
-            "objective": "Compare designs",
-            "client_run_id": "client-group-1",
-        },
-    ) in port.calls
+    group_request = _port_call_payload(port, "start_group_run")
+    assert group_request["group_id"] == "group-1"
+    assert group_request["objective"] == "Compare designs"
+    assert group_request["client_run_id"] == "client-group-1"
+    assert group_request["metadata"]["runtime_planner_entrypoint"] is True
+    assert group_request["metadata"]["yachiyo_runtime_planner"] is True
+    group_envelope = group_request["metadata"]["yachiyo_execution_envelope"]
+    assert group_envelope["intent_kind"]
     assert ("list_group_runs", 5) in port.calls
     assert ("list_run_timelines", 10) in port.calls
 

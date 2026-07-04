@@ -845,10 +845,29 @@ class AgentStudioService:
         request: StartGroupRunRequest | Mapping[str, Any],
     ) -> GroupRunSnapshot:
         payload = _request_payload(request)
+        decision = self._start_planner_decision(payload)
+        start_payload = _planner_enriched_start_payload(
+            payload,
+            decision,
+            allowed_tools=_planner_start_allowed_tools(payload),
+            metadata_source="agent_studio_service_start",
+            execution_context=_planner_orchestration_execution_context(
+                kind="group_run",
+                target_id=str(payload.get("group_id") or "").strip(),
+            ),
+        )
+        raw_group_run = self._studio_port.start_group_run(start_payload)
+        event_context = _planner_orchestration_execution_context(
+            kind="group_run",
+            target_id=str(start_payload.get("group_id") or "").strip(),
+            run_payload=raw_group_run,
+        )
         return group_run_snapshot_from_payload(
-            self._start_payload_with_planner_events(
-                self._studio_port.start_group_run(payload),
-                payload,
+            start_payload_with_planner_decision_events(
+                raw_group_run,
+                decision,
+                event_context=event_context,
+                request_payload=start_payload,
             )
         )
 
@@ -984,10 +1003,29 @@ class AgentStudioService:
         request: StartWorkflowRunRequest | Mapping[str, Any],
     ) -> WorkflowRunSnapshot:
         payload = _request_payload(request)
+        decision = self._start_planner_decision(payload)
+        start_payload = _planner_enriched_start_payload(
+            payload,
+            decision,
+            allowed_tools=_planner_start_allowed_tools(payload),
+            metadata_source="agent_studio_service_start",
+            execution_context=_planner_orchestration_execution_context(
+                kind="workflow",
+                target_id=str(payload.get("workflow_id") or "").strip(),
+            ),
+        )
+        raw_workflow_run = self._studio_port.start_workflow_run(start_payload)
+        event_context = _planner_orchestration_execution_context(
+            kind="workflow",
+            target_id=str(start_payload.get("workflow_id") or "").strip(),
+            run_payload=raw_workflow_run,
+        )
         return workflow_run_snapshot_from_payload(
-            self._start_payload_with_planner_events(
-                self._studio_port.start_workflow_run(payload),
-                payload,
+            start_payload_with_planner_decision_events(
+                raw_workflow_run,
+                decision,
+                event_context=event_context,
+                request_payload=start_payload,
             )
         )
 
@@ -995,13 +1033,35 @@ class AgentStudioService:
         self,
         raw_payload: Mapping[str, Any],
         request_payload: Mapping[str, Any],
+        *,
+        event_context: Mapping[str, Any] | None = None,
     ) -> dict[str, Any]:
         return start_payload_with_planner_events(
             raw_payload,
             request_payload,
             plan_task=self.plan_task,
             metadata_source="agent_studio_service_start",
+            event_context=event_context,
         )
+
+    def _start_planner_decision(
+        self,
+        payload: Mapping[str, Any],
+    ) -> PlannerDecisionSnapshot | None:
+        prompt = _planner_start_prompt(payload)
+        if not prompt:
+            return None
+        try:
+            return self.plan_task(
+                prompt,
+                allowed_tools=_planner_start_allowed_tools(payload),
+                metadata=_planner_start_metadata(
+                    payload,
+                    source="agent_studio_service_start",
+                ),
+            )
+        except Exception:
+            return None
 
     def list_run_timelines(self, limit: int = 50) -> list[RunTimelineSnapshot]:
         return [
@@ -1290,6 +1350,65 @@ def _request_payload(request: Any) -> dict[str, Any]:
     if hasattr(request, "model_dump"):
         return request.model_dump(exclude_none=True, by_alias=True)
     return dict(request)
+
+
+def _planner_start_prompt(payload: Mapping[str, Any]) -> str:
+    return str(
+        payload.get("prompt")
+        or payload.get("objective")
+        or payload.get("goal")
+        or payload.get("title")
+        or ""
+    ).strip()
+
+
+def _planner_start_allowed_tools(payload: Mapping[str, Any]) -> list[str] | None:
+    values = _string_list(payload.get("allowed_tools"), fallback=[])
+    return values or None
+
+
+def _planner_start_metadata(
+    payload: Mapping[str, Any],
+    *,
+    source: str,
+) -> dict[str, Any]:
+    metadata = (
+        dict(payload.get("metadata"))
+        if isinstance(payload.get("metadata"), Mapping)
+        else {}
+    )
+    metadata.setdefault("source", source)
+    metadata["runtime_planner_entrypoint"] = True
+    return metadata
+
+
+def _planner_enriched_start_payload(
+    payload: Mapping[str, Any],
+    decision: PlannerDecisionSnapshot | None,
+    *,
+    allowed_tools: Iterable[str] | None,
+    metadata_source: str,
+    execution_context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    start_payload = dict(payload)
+    if decision is None:
+        return start_payload
+    metadata = _planner_start_metadata(start_payload, source=metadata_source)
+    metadata.update(runtime_planner_metadata(decision, allowed_tools=allowed_tools))
+    envelope = metadata.get("yachiyo_execution_envelope")
+    if isinstance(envelope, Mapping):
+        metadata["yachiyo_execution_envelope"] = (
+            runtime_execution_envelope_payload_with_request_context(
+                envelope,
+                execution_context,
+            )
+        )
+        start_payload.setdefault(
+            "runtime_execution_envelope",
+            dict(metadata["yachiyo_execution_envelope"]),
+        )
+    start_payload["metadata"] = metadata
+    return start_payload
 
 
 def _find_replan_recovery_action(
