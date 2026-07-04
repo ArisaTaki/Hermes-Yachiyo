@@ -162,7 +162,6 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
         "group.run.plan.created",
         "group.run.task_core.created",
         "group.run.plan.step",
-        "group.run.plan.step",
         "group.member.started",
         "group.member.started",
     ]
@@ -202,7 +201,7 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
         for event in group_run["events"]
         if event["event_type"] == "group.run.plan.step"
     ]
-    assert group_step_tools == ["workspace.list", "artifact.write"]
+    assert group_step_tools == ["workspace.list"]
 
 
 def test_legacy_studio_group_run_scopes_planner_execution_envelope_to_group_run() -> None:
@@ -243,16 +242,15 @@ def test_legacy_studio_group_run_records_member_failed_and_cancelled_events() ->
     )
 
     event_types = [event["event_type"] for event in group_run["events"]]
-    assert event_types[:7] == [
+    assert event_types[:6] == [
         "group.run.started",
         "group.run.plan",
         "group.run.intent.selected",
         "group.run.plan.created",
         "group.run.task_core.created",
         "group.run.plan.step",
-        "group.run.plan.step",
     ]
-    assert event_types[7:] == [
+    assert event_types[6:] == [
         "group.member.started",
         "group.member.failed",
         "group.member.started",

@@ -8,7 +8,8 @@ from apps.shell.yachiyo_agent import AgentStudioService
 
 
 def test_studio_start_agent_run_enriches_bare_port_payload_with_planner_events() -> None:
-    run = AgentStudioService(_BareStartPort()).start_agent_run(
+    port = _BareStartPort()
+    run = AgentStudioService(port).start_agent_run(
         {
             "agent_id": "agent-1",
             "objective": "请分析 data/sales.csv 并输出报告",
@@ -25,6 +26,12 @@ def test_studio_start_agent_run_enriches_bare_port_payload_with_planner_events()
     assert run.task_core is not None
     assert run.task_core.todos
     assert run.events[0].payload["intent"]["kind"] == "data_analysis"
+    start_payload = port.agent_run_payloads[0]
+    assert "runtime_execution_envelope" in start_payload
+    assert [request["tool"] for request in start_payload["direct_tool_requests"]] == [
+        "data.analyze",
+    ]
+    assert start_payload["direct_tool_requests"][0]["step_id"] == "analyze-data-file"
 
 
 def test_studio_start_group_run_enriches_bare_port_payload_with_group_scoped_events() -> None:
@@ -96,10 +103,12 @@ def test_studio_start_agent_run_does_not_duplicate_existing_planner_events() -> 
 class _BareStartPort:
     def __init__(self, *, existing_planner_events: bool = False) -> None:
         self.existing_planner_events = existing_planner_events
+        self.agent_run_payloads: list[dict[str, Any]] = []
         self.group_run_payloads: list[dict[str, Any]] = []
         self.workflow_run_payloads: list[dict[str, Any]] = []
 
     def start_agent_run(self, payload: dict[str, Any]) -> dict[str, Any]:
+        self.agent_run_payloads.append(payload)
         events = []
         if self.existing_planner_events:
             events.append(

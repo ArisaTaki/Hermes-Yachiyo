@@ -71,6 +71,7 @@ from .planner_projection import runtime_planner_metadata
 from .runtime_execution import (
     runtime_execution_envelope_from_decision,
     runtime_execution_envelope_payload_with_request_context,
+    runtime_execution_requests_from_envelope_payload,
 )
 from .runtime_planner import RuntimePlanner
 from .runtime_progress import ProgressEventScope, public_runtime_tool_result_events
@@ -712,10 +713,18 @@ class AgentStudioService:
         request: StartAgentRunRequest | Mapping[str, Any],
     ) -> RunTimelineSnapshot:
         payload = _request_payload(request)
+        decision = self._start_planner_decision(payload)
+        start_payload = _planner_enriched_start_payload(
+            payload,
+            decision,
+            allowed_tools=_planner_start_allowed_tools(payload),
+            metadata_source="agent_studio_service_start",
+        )
         return run_timeline_snapshot_from_payload(
-            self._start_payload_with_planner_events(
-                self._studio_port.start_agent_run(payload),
-                payload,
+            start_payload_with_planner_decision_events(
+                self._studio_port.start_agent_run(start_payload),
+                decision,
+                request_payload=start_payload,
             )
         )
 
@@ -1437,6 +1446,13 @@ def _planner_enriched_start_payload(
             "runtime_execution_envelope",
             dict(metadata["yachiyo_execution_envelope"]),
         )
+        if "direct_tool_requests" not in start_payload:
+            direct_tool_requests = runtime_execution_requests_from_envelope_payload(
+                metadata["yachiyo_execution_envelope"],
+                allowed_tools=allowed_tools,
+            )
+            if direct_tool_requests:
+                start_payload["direct_tool_requests"] = direct_tool_requests
     start_payload["metadata"] = metadata
     return start_payload
 
