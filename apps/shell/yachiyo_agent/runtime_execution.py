@@ -290,16 +290,29 @@ def _execution_request_snapshot(
     previous_requests: Iterable[RuntimeExecutionRequestSnapshot] = (),
 ) -> RuntimeExecutionRequestSnapshot:
     tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
-    step_id = str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+    deferred_context = _mapping(request.get("deferred_context"))
+    step_id = str(
+        request.get("step_id")
+        or request.get("planner_step_id")
+        or deferred_context.get("step_id")
+        or deferred_context.get("planner_step_id")
+        or ""
+    ).strip()
     step = steps.get(step_id)
     capability_id = str(
         request.get("capability_id")
+        or deferred_context.get("capability_id")
         or (step.capability_id if step is not None else "")
         or ""
     ).strip()
     request_input = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     runtime_metadata = _execution_request_runtime_metadata(request, step, decision)
-    replan_metadata = _execution_request_replan_metadata(step_id, step, decision)
+    replan_metadata = _execution_request_replan_metadata(
+        step_id,
+        step,
+        decision,
+        request=request,
+    )
     depends_on = list(step.depends_on) if step is not None else []
     task_context = _execution_request_task_context(
         decision,
@@ -352,6 +365,12 @@ def _execution_request_snapshot(
             or (step.approval_required if step is not None else False)
         ),
         continue_to_model=bool(request.get("continue_to_model")),
+        deferred_tool=_optional_text(request.get("deferred_tool")),
+        deferred_input=_mapping(request.get("deferred_input")),
+        deferred_context=deferred_context,
+        deferred_continuation=[
+            dict(item) for item in _mapping_list(request.get("deferred_continuation"))
+        ],
         depends_on=depends_on,
         fallback_tools=list(step.fallback_tools) if step is not None else [],
         status=str(request.get("status") or (step.status if step is not None else "planned")),
@@ -377,10 +396,25 @@ def _execution_request_snapshot(
             _mapping(request.get("observation_retry"))
             or desktop_contract["observation_retry"]
         ),
-        task_todo=task_context["task_todo"],
-        task_checkpoints=task_context["task_checkpoints"],
-        task_workspace_items=task_context["task_workspace_items"],
-        task_verification_targets=task_context["task_verification_targets"],
+        task_todo=task_context["task_todo"] or _mapping(deferred_context.get("task_todo")),
+        task_checkpoints=(
+            task_context["task_checkpoints"]
+            or [dict(item) for item in _mapping_list(deferred_context.get("task_checkpoints"))]
+        ),
+        task_workspace_items=(
+            task_context["task_workspace_items"]
+            or [
+                dict(item)
+                for item in _mapping_list(deferred_context.get("task_workspace_items"))
+            ]
+        ),
+        task_verification_targets=(
+            task_context["task_verification_targets"]
+            or [
+                dict(item)
+                for item in _mapping_list(deferred_context.get("task_verification_targets"))
+            ]
+        ),
         source=str(request.get("source") or "runtime_planner"),
     )
 
@@ -418,6 +452,10 @@ def _tool_request_from_execution_request(
         "workflow_node_kind",
         "approval_required",
         "continue_to_model",
+        "deferred_tool",
+        "deferred_input",
+        "deferred_context",
+        "deferred_continuation",
         "depends_on",
         "fallback_tools",
         "status",
@@ -837,6 +875,13 @@ def _string_list(value: Any) -> list[str]:
     return [str(item or "").strip() for item in value if str(item or "").strip()]
 
 
+def _string_values(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return _string_list(value)
+    text = _text(value)
+    return [text] if text else []
+
+
 def _mapping(value: Any) -> dict[str, Any]:
     return dict(value) if isinstance(value, Mapping) else {}
 
@@ -901,22 +946,30 @@ def _execution_request_replan_metadata(
     step_id: str,
     step: ToolPlanStepSnapshot | None,
     decision: PlannerDecisionSnapshot,
+    *,
+    request: Mapping[str, Any] | None = None,
 ) -> dict[str, list[str]]:
     clean_step_id = _text(step_id or (step.step_id if step is not None else ""))
     signal_ids: list[str] = []
     triggers: list[str] = []
+    if request is not None:
+        triggers.extend(_string_values(request.get("replan_triggers")))
+        triggers.extend(_string_values(request.get("replan_trigger")))
+        signal_ids.extend(_string_values(request.get("replan_signal_ids")))
+        signal_ids.extend(_string_values(request.get("replan_signal_id")))
+        signal_ids.extend(_string_values(request.get("replan_request_id")))
     for signal in _task_replan_signals(decision):
         if _text(signal.source_step_id) != clean_step_id:
             continue
         signal_id = _text(signal.signal_id)
         trigger = _text(signal.trigger)
-        if signal_id and signal_id not in signal_ids:
+        if signal_id:
             signal_ids.append(signal_id)
-        if trigger and trigger not in triggers:
+        if trigger:
             triggers.append(trigger)
     return {
-        "replan_triggers": triggers,
-        "replan_signal_ids": signal_ids,
+        "replan_triggers": _dedupe(triggers),
+        "replan_signal_ids": _dedupe(signal_ids),
     }
 
 

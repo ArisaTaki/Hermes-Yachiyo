@@ -473,6 +473,10 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     planning_reason: str = ""
     approval_required: bool = False
     continue_to_model: bool = False
+    deferred_tool: str | None = None
+    deferred_input: dict[str, Any] = Field(default_factory=dict)
+    deferred_context: dict[str, Any] = Field(default_factory=dict)
+    deferred_continuation: list[dict[str, Any]] = Field(default_factory=list)
     depends_on: list[str] = Field(default_factory=list)
     fallback_tools: list[str] = Field(default_factory=list)
     status: str = "planned"

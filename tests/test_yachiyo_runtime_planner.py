@@ -6,6 +6,7 @@ from collections.abc import Callable, Iterable, Mapping
 from datetime import date, datetime, timedelta
 from typing import Any
 
+import apps.shell.yachiyo_agent.runtime_execution as runtime_execution_module
 from apps.shell.yachiyo_agent import (
     AgentStudioService,
     PlannerDecisionSnapshot,
@@ -33166,6 +33167,119 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     assert scoped_projected_requests[1]["workflow_node_id"] == "node-export"
     assert scoped_projected_requests[1]["workflow_node_label"] == "Export"
     assert scoped_projected_requests[1]["workflow_node_kind"] == "agent"
+
+
+def test_runtime_execution_envelope_preserves_deferred_ui_observation_context() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge 并点击 Export",
+        allowed_tools=allowed_tools,
+    )
+
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+
+    assert envelope is not None
+    assert [request.tool_name for request in envelope.requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+    ]
+    observation = envelope.requests[-1]
+    assert observation.continue_to_model is True
+    assert observation.deferred_tool == "desktop.click_ui_element"
+    assert observation.deferred_input == {
+        "target": "Export",
+        "role_filter": "",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert observation.deferred_context["step_id"] == "operate-foreground-ui"
+    assert observation.step_id == "operate-foreground-ui"
+    assert observation.capability_id == "desktop.ui_operation"
+    assert observation.runtime_stage == "operate"
+    assert observation.runtime_role == "click_ui"
+    assert observation.approval_required is True
+    assert observation.task_todo["step_id"] == "operate-foreground-ui"
+    assert observation.replan_triggers == ["verification_failed"]
+
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    assert projected_requests[-1]["continue_to_model"] is True
+    assert projected_requests[-1]["deferred_tool"] == "desktop.click_ui_element"
+    assert projected_requests[-1]["deferred_input"] == observation.deferred_input
+    assert projected_requests[-1]["step_id"] == "operate-foreground-ui"
+    assert projected_requests[-1]["runtime_stage"] == "operate"
+    assert projected_requests[-1]["replan_triggers"] == ["verification_failed"]
+
+
+def test_runtime_execution_envelope_preserves_request_level_replan_metadata(
+    monkeypatch: Any,
+) -> None:
+    allowed_tools = ["desktop.active_window"]
+
+    def fake_planner_tool_requests_for_decision(
+        decision: PlannerDecisionSnapshot,
+        allowed_tools: Iterable[str] | None = None,
+        *,
+        direct: bool = False,
+        execution_normalized: bool = False,
+    ) -> list[dict[str, Any]]:
+        assert execution_normalized is True
+        return [
+            {
+                "request_id": "runtime-generated-verify-request",
+                "tool": "desktop.active_window",
+                "input": {"app_name": "PixelForge"},
+                "step_id": "runtime-generated-verify",
+                "runtime_stage": "verify",
+                "runtime_role": "verify_result",
+                "requires_observation": True,
+                "replan_triggers": ["verification_failed"],
+                "replan_signal_ids": ["runtime-replan-signal"],
+                "replan_request_id": "runtime-replan-request",
+                "planning_reason": "runtime_generated_verification",
+            }
+        ]
+
+    monkeypatch.setattr(
+        runtime_execution_module,
+        "planner_tool_requests_for_decision",
+        fake_planner_tool_requests_for_decision,
+    )
+    decision = RuntimePlanner().decision("打开 PixelForge", allowed_tools=allowed_tools)
+
+    envelope = runtime_execution_module.runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+
+    assert envelope is not None
+    assert envelope.requests[0].step_id == "runtime-generated-verify"
+    assert envelope.requests[0].runtime_stage == "verify"
+    assert envelope.requests[0].replan_triggers == ["verification_failed"]
+    assert envelope.requests[0].replan_signal_ids == [
+        "runtime-replan-signal",
+        "runtime-replan-request",
+    ]
+    projected_requests = runtime_execution_requests_from_envelope_payload(
+        envelope.model_dump(mode="json"),
+        allowed_tools=allowed_tools,
+    )
+    assert projected_requests[0]["replan_triggers"] == ["verification_failed"]
+    assert projected_requests[0]["replan_signal_ids"] == [
+        "runtime-replan-signal",
+        "runtime-replan-request",
+    ]
 
 
 def test_runtime_execution_envelope_preserves_app_search_prepare_chain() -> None:
