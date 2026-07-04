@@ -36,11 +36,21 @@ export function WorkflowRunDetailPanel({
   const publicSnapshotName = workflowRunSnapshotActive ? 'WorkflowRunSnapshot' : 'RunTimelineSnapshot';
   const childSnapshots = selectedPublicRunTimeline.children || [];
   const recoverySource = selectedPublicRunTimeline.recovery_source || null;
+  const runtimeEnvelope = selectedPublicRunTimeline.runtime_execution_envelope || null;
+  const runtimeRequests = runtimeEnvelope?.requests || [];
+  const runtimeTools = publicRuntimeTools(runtimeRequests);
+  const runtimeBlockers = publicRuntimeBlockers(runtimeRequests);
+  const replanRecoveries = selectedPublicRunTimeline.replan_recoveries || [];
+  const replanRecoveryTools = publicReplanRecoveryTools(replanRecoveries);
 
   return (
     <section
       className="run-detail-block run-public-contract-block"
       data-public-snapshot-kind={publicSnapshotName}
+      data-runtime-blockers={runtimeBlockers.join(',')}
+      data-runtime-recovery-tools={replanRecoveryTools.join(',')}
+      data-runtime-request-count={runtimeRequests.length}
+      data-runtime-replan-recovery-count={replanRecoveries.length}
       data-workflow-id={selectedPublicRunTimeline.workflow_id || ''}
       data-testid="agent-run-detail-public-timeline"
     >
@@ -88,6 +98,12 @@ export function WorkflowRunDetailPanel({
         ) : null}
         {recoverySource?.recovery_tool ? <span>recovery tool {recoverySource.recovery_tool}</span> : null}
         {recoverySource?.source_tool_call_id ? <code>tool call {recoverySource.source_tool_call_id}</code> : null}
+        {runtimeEnvelope ? <code>runtime {runtimeEnvelope.envelope_id || runtimeEnvelope.plan_id}</code> : null}
+        {runtimeRequests.length ? <span>runtime requests {runtimeRequests.length}</span> : null}
+        {runtimeTools.length ? <span>runtime tools {runtimeTools.join(', ')}</span> : null}
+        {runtimeBlockers.length ? <span>runtime blockers {runtimeBlockers.join(', ')}</span> : null}
+        {replanRecoveries.length ? <span>replan recoveries {replanRecoveries.length}</span> : null}
+        {replanRecoveryTools.length ? <span>recovery tools {replanRecoveryTools.join(', ')}</span> : null}
         <span>events {selectedPublicRunTimeline.events?.length || 0}</span>
         <span>approvals {selectedPublicRunTimeline.approvals?.length || 0}</span>
         <span>artifacts {selectedPublicRunTimeline.artifacts?.length || 0}</span>
@@ -223,6 +239,56 @@ function publicChildTaskProgressSummary(child: RunTimelineChildSnapshot): string
     progress.pending_verification_count ? `verify pending ${progress.pending_verification_count}` : '',
     progress.needs_user_action ? 'user action' : '',
   ].filter(Boolean).join(' · ');
+}
+
+function publicRuntimeTools(
+  requests: NonNullable<YachiyoRunTimelineSnapshot['runtime_execution_envelope']>['requests'],
+): string[] {
+  return uniqueRuntimeStrings((requests || []).map((request) => request.tool_name));
+}
+
+function publicRuntimeBlockers(
+  requests: NonNullable<YachiyoRunTimelineSnapshot['runtime_execution_envelope']>['requests'],
+): string[] {
+  const blockers: string[] = [];
+  (requests || []).forEach((request) => {
+    const evidence = recordValue(request.observation_evidence);
+    addRuntimeString(blockers, evidence.blocking_condition);
+    const conditions = evidence.blocking_conditions;
+    if (Array.isArray(conditions)) {
+      conditions.forEach((condition) => addRuntimeString(blockers, condition));
+    }
+  });
+  return blockers;
+}
+
+function publicReplanRecoveryTools(
+  recoveries: NonNullable<YachiyoRunTimelineSnapshot['replan_recoveries']>,
+): string[] {
+  const tools: string[] = [];
+  (recoveries || []).forEach((recovery) => {
+    addRuntimeString(tools, recovery.selected_tool_name);
+    addRuntimeString(tools, recovery.source_tool_name);
+    (recovery.recovery_actions || []).forEach((action) => addRuntimeString(tools, action.tool));
+  });
+  return tools;
+}
+
+function recordValue(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function addRuntimeString(values: string[], value: unknown): void {
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (text && !values.includes(text)) values.push(text);
+}
+
+function uniqueRuntimeStrings(values: unknown[]): string[] {
+  const result: string[] = [];
+  values.forEach((value) => addRuntimeString(result, value));
+  return result;
 }
 
 function plannerSummaryValues(values: string[] | null | undefined, separator = ','): string {

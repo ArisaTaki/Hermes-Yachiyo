@@ -5541,6 +5541,62 @@ def test_group_run_snapshot_projects_runtime_envelope_retry_recovery() -> None:
     assert recovery.recovery_actions[0].input == {"app_name": "Music"}
 
 
+def test_workflow_run_snapshot_projects_runtime_envelope_retry_recovery() -> None:
+    snapshot = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "runtime-workflow-run-1",
+            "workflow_run_id": "runtime-workflow-run-1",
+            "workflow_id": "workflow-1",
+            "kind": "workflow_run",
+            "status": "failed",
+            "task_id": "task-workflow-1",
+            "objective": "Open Apple Music from workflow",
+            "runtime_execution_envelope": {
+                "envelope_id": "runtime-workflow-envelope-1",
+                "decision_id": "decision-workflow-runtime-1",
+                "plan_id": "runtime-workflow-plan-1",
+                "intent_kind": "workflow_orchestration",
+                "requests": [
+                    {
+                        "request_id": "runtime-workflow-request-open-app",
+                        "step_id": "workflow-open-app",
+                        "capability_id": "desktop.app_control",
+                        "workflow_run_id": "runtime-workflow-run-1",
+                        "workflow_id": "workflow-1",
+                        "workflow_node_id": "open-music",
+                        "workflow_node_label": "Open Music",
+                        "tool_name": "desktop.open_app",
+                        "status": "blocked",
+                        "observation_evidence": {
+                            "blocking_condition": "screen_capture_blank",
+                        },
+                        "observation_retry": {
+                            "tool": "screen.capture",
+                            "input": {"reason": "verify Music window"},
+                            "reason": "screen_capture_blank",
+                        },
+                    }
+                ],
+                "runtime_stage_counts": {"verify": 1},
+                "replan_signal_count": 1,
+            },
+        }
+    )
+
+    assert snapshot.runtime_execution_envelope is not None
+    assert snapshot.runtime_execution_envelope.intent_kind == "workflow_orchestration"
+    assert len(snapshot.replan_recoveries) == 1
+    recovery = snapshot.replan_recoveries[0]
+    assert recovery.request_id == "runtime-retry:runtime-workflow-request-open-app"
+    assert recovery.run_id == "runtime-workflow-run-1"
+    assert recovery.workflow_run_id == "runtime-workflow-run-1"
+    assert recovery.task_id == "task-workflow-1"
+    assert recovery.permission_target == "desktop_screen_visible"
+    assert recovery.source_step_id == "workflow-open-app"
+    assert recovery.recovery_actions[0].tool == "screen.capture"
+    assert recovery.recovery_actions[0].input == {"reason": "verify Music window"}
+
+
 def test_run_timeline_events_inherit_parent_task_core_context() -> None:
     snapshot = run_timeline_snapshot_from_payload(
         {
