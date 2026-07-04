@@ -126,6 +126,14 @@ export function AgentTaskCard({
       {task.runtime_execution_envelope ? (
         <TaskRuntimeExecutionSummary envelope={task.runtime_execution_envelope} />
       ) : null}
+      {task.replan_recoveries?.length ? (
+        <TaskReplanRecoverySummary
+          busy={busy}
+          onRunRecoveryAction={onRunRecoveryAction}
+          recoveries={task.replan_recoveries}
+          task={task}
+        />
+      ) : null}
       <TaskCoreProgress task={task} />
       <RuntimeDebugSummary
         className="yachiyo-agent-task-runtime-debug"
@@ -356,6 +364,11 @@ type TaskPlannerSummarySnapshot = {
 };
 
 type TaskCoreTodo = NonNullable<NonNullable<AgentTaskSnapshot['task_core']>['todos']>[number];
+type TaskReplanRecoverySnapshot = NonNullable<AgentTaskSnapshot['replan_recoveries']>[number];
+type TaskReplanRecoveryRow = {
+  actions: TaskPermissionRecoveryAction[];
+  recovery: TaskReplanRecoverySnapshot;
+};
 
 function TaskCoreProgress({ task }: { task: AgentTaskSnapshot }) {
   const progress = task.task_progress;
@@ -521,6 +534,155 @@ function TaskRuntimeExecutionSummary({ envelope }: { envelope: RuntimeExecutionE
       </div>
     </div>
   );
+}
+
+function TaskReplanRecoverySummary({
+  busy = false,
+  onRunRecoveryAction,
+  recoveries,
+  task,
+}: {
+  busy?: boolean;
+  onRunRecoveryAction?: (task: AgentTaskSnapshot, action: TaskPermissionRecoveryAction) => void | Promise<void>;
+  recoveries: TaskReplanRecoverySnapshot[];
+  task: AgentTaskSnapshot;
+}) {
+  const rows = recoveries.map((recovery) => ({
+    actions: taskReplanRecoveryActions(recovery),
+    recovery,
+  }));
+  const visibleRows = rows.slice(0, 4);
+  const actionItems = rows
+    .flatMap((row) => row.actions.map((action, index) => ({ action, index, recovery: row.recovery })))
+    .slice(0, 5);
+  const actionCount = rows.reduce((count, row) => count + row.actions.length, 0);
+  const latest = rows[0]?.recovery || null;
+  return (
+    <div
+      className="yachiyo-agent-task-planner yachiyo-agent-task-replan-recovery"
+      data-latest-replan-request-id={latest?.request_id || ''}
+      data-latest-replan-status={latest?.status || ''}
+      data-replan-recovery-action-count={actionCount}
+      data-replan-recovery-count={rows.length}
+      data-testid="yachiyo-agent-task-replan-recovery"
+    >
+      <UiIcon name="retry" title="Replan recovery" />
+      <div className="yachiyo-agent-task-planner-body">
+        <div className="yachiyo-agent-task-planner-head">
+          <strong>Recovery plan</strong>
+          <span>{taskReplanRecoveryDetail(rows)}</span>
+        </div>
+        <div className="yachiyo-agent-task-planner-chips">
+          {visibleRows.map((row) => (
+            <span
+              className={`yachiyo-agent-task-planner-chip ${row.recovery.status === 'completed' ? '' : 'missing'}`}
+              data-replan-recovery-action-count={row.actions.length}
+              data-replan-recovery-id={row.recovery.request_id}
+              data-replan-recovery-planning-reason={row.recovery.planning_reason || ''}
+              data-replan-recovery-request-id={row.recovery.request_id}
+              data-replan-recovery-status={row.recovery.status || 'requested'}
+              data-replan-recovery-tool={row.recovery.selected_tool_name || row.recovery.source_tool_name || ''}
+              key={`replan:${row.recovery.request_id}`}
+              title={taskReplanRecoveryTitle(row)}
+            >
+              replan · {taskReplanRecoveryLabel(row.recovery)} · {row.recovery.status || 'requested'}
+            </span>
+          ))}
+          {recoveries.length > visibleRows.length ? (
+            <span className="yachiyo-agent-task-planner-chip more">
+              更多 · {recoveries.length - visibleRows.length}
+            </span>
+          ) : null}
+          {actionItems.map(({ action, index, recovery }) => {
+            const inputPreview = taskRecoveryValuePreview(action.input);
+            const verificationTargetsPreview = taskRecoveryValuePreview(action.verification_targets || []);
+            return (
+              <button
+                type="button"
+                className={`yachiyo-agent-task-planner-chip yachiyo-agent-task-replan-action ${action.approval_required ? 'approval' : ''}`}
+                data-replan-recovery-action-approval-required={String(action.approval_required === true)}
+                data-replan-recovery-action-id={action.action_id || ''}
+                data-replan-recovery-input={inputPreview}
+                data-replan-recovery-label={action.label || action.prompt || action.tool}
+                data-replan-recovery-permission-target={action.permission_target || ''}
+                data-replan-recovery-request-id={recovery.request_id}
+                data-replan-recovery-risk={action.risk_level || ''}
+                data-replan-recovery-selected={String(action.selected === true)}
+                data-replan-recovery-tool={action.tool}
+                data-replan-recovery-tool-index={index}
+                data-replan-recovery-verification-targets={verificationTargetsPreview}
+                data-testid="yachiyo-agent-task-run-replan-recovery-action"
+                disabled={busy || !onRunRecoveryAction || !action.tool}
+                key={`${recovery.request_id}:action:${action.action_id || action.tool}:${index}`}
+                onClick={() => void onRunRecoveryAction?.(task, action)}
+                title={[
+                  action.prompt,
+                  inputPreview ? `input: ${inputPreview}` : '',
+                  verificationTargetsPreview ? `verification: ${verificationTargetsPreview}` : '',
+                ].filter(Boolean).join(' · ')}
+              >
+                <UiIcon name="retry" />
+                <span>执行 · {action.label || action.tool}</span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function taskReplanRecoveryActions(recovery: TaskReplanRecoverySnapshot): TaskPermissionRecoveryAction[] {
+  return runtimeToolRecoveryActionsFromRecords([
+    recovery as unknown as Record<string, unknown>,
+  ]);
+}
+
+function taskReplanRecoveryDetail(rows: TaskReplanRecoveryRow[]): string {
+  const actionCount = rows.reduce((count, row) => count + row.actions.length, 0);
+  const pendingCount = rows.filter((row) => (row.recovery.status || 'requested') !== 'completed').length;
+  return [
+    `${rows.length} 个恢复请求`,
+    actionCount ? `${actionCount} 个可执行动作` : '',
+    pendingCount ? `${pendingCount} 个待处理` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function taskReplanRecoveryLabel(recovery: TaskReplanRecoverySnapshot): string {
+  return String(
+    recovery.recovery_action_label
+    || recovery.selected_tool_name
+    || recovery.target_capability_id
+    || recovery.source_tool_name
+    || recovery.trigger
+    || recovery.request_id
+    || 'recovery',
+  ).trim();
+}
+
+function taskReplanRecoveryTitle(row: TaskReplanRecoveryRow): string {
+  return [
+    row.recovery.failure_detail,
+    row.recovery.planning_reason ? `reason: ${row.recovery.planning_reason}` : '',
+    row.recovery.permission_target ? `permission: ${row.recovery.permission_target}` : '',
+    row.recovery.risk_level ? `risk: ${row.recovery.risk_level}` : '',
+    row.actions.length ? `actions: ${row.actions.map((action) => action.tool).join(', ')}` : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function taskRecoveryValuePreview(value: unknown): string {
+  if (value === undefined || value === null) return '';
+  if (typeof value === 'string') return truncateTaskRecoveryPreview(value);
+  try {
+    return truncateTaskRecoveryPreview(JSON.stringify(value));
+  } catch {
+    return truncateTaskRecoveryPreview(String(value));
+  }
+}
+
+function truncateTaskRecoveryPreview(value: string): string {
+  const text = value.trim();
+  return text.length > 140 ? `${text.slice(0, 137)}...` : text;
 }
 
 function plannerSummaryFromTask(task: AgentTaskSnapshot): TaskPlannerSummarySnapshot | null {

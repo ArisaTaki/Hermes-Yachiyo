@@ -48,9 +48,12 @@ export type RuntimeToolRecoveryActionTaskMetadata = {
   desktop_permission_recovery: true;
   desktop_permission_retry?: true;
   recovery_action_kind?: RuntimeToolRecoveryAction['action_kind'];
+  recovery_action_id?: string;
   recovery_input: Record<string, unknown>;
   recovery_permission_target: string;
   recovery_risk_level?: string;
+  replan_recovery_action_id?: string;
+  replan_request_id?: string;
   recovery_retry_input?: Record<string, unknown>;
   recovery_retry_input_schema?: Record<string, unknown>;
   recovery_retry_input_source?: string;
@@ -105,10 +108,13 @@ export const RUNTIME_TOOL_RECOVERY_TASK_METADATA_KEYS = [
   'desktop_permission_recovery',
   'desktop_permission_retry',
   'recovery_action_kind',
+  'recovery_action_id',
   'recovery_tool',
   'recovery_input',
   'recovery_permission_target',
   'recovery_risk_level',
+  'replan_recovery_action_id',
+  'replan_request_id',
   'recovery_retry_tool',
   'recovery_retry_input',
   'recovery_retry_input_schema',
@@ -150,10 +156,15 @@ export function runtimeToolRecoveryActionTaskMetadata(
     ...(action.action_kind === 'retry_original' ? { desktop_permission_retry: true } : {}),
     desktop_permission_recovery: true,
     ...(action.action_kind ? { recovery_action_kind: action.action_kind } : {}),
+    ...(action.action_id ? {
+      recovery_action_id: action.action_id,
+      replan_recovery_action_id: action.action_id,
+    } : {}),
     recovery_input: action.input,
     recovery_permission_target: action.permission_target,
     recovery_risk_level: riskLevel,
     recovery_tool: action.tool,
+    ...(action.replan_request_id ? { replan_request_id: action.replan_request_id } : {}),
     ...(action.retry_tool ? { recovery_retry_tool: action.retry_tool } : {}),
     ...(action.retry_tool || action.retry_input ? { recovery_retry_input: action.retry_input || {} } : {}),
     ...(action.retry_input_schema ? { recovery_retry_input_schema: action.retry_input_schema } : {}),

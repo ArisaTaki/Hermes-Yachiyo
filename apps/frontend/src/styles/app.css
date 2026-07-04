@@ -9550,6 +9550,32 @@ body.electron-window .hy-traffic {
   white-space: nowrap;
 }
 
+.hy-content .open-chat-shell button.yachiyo-agent-task-planner-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.hy-content .open-chat-shell button.yachiyo-agent-task-planner-chip:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.hy-content .open-chat-shell button.yachiyo-agent-task-planner-chip .ui-icon {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+}
+
+.hy-content .open-chat-shell button.yachiyo-agent-task-planner-chip span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .hy-content .open-chat-shell .yachiyo-agent-task-planner-chip.approval,
 .hy-content .open-chat-shell .yachiyo-agent-task-planner-chip.missing,
 .hy-content .open-chat-shell .yachiyo-agent-task-planner-chip.question {
