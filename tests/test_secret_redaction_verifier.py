@@ -39,6 +39,20 @@ def test_verify_secret_redaction_scans_binary_sqlite_like_files(tmp_path):
     assert findings[0].path == db_path
 
 
+def test_verify_secret_redaction_skips_large_non_text_runtime_assets(tmp_path):
+    asset_dir = tmp_path / ".oha-yachiyo" / "assets" / "tts" / "voice"
+    asset_dir.mkdir(parents=True)
+    (asset_dir / "voice.ckpt").write_bytes(b"\x00" * 1024)
+    (asset_dir / "voice.pth").write_bytes(b"\x00" * 1024)
+
+    findings = verifier.verify_secret_redaction(
+        paths=[asset_dir],
+        max_file_bytes=128,
+    )
+
+    assert findings == []
+
+
 def test_verify_secret_redaction_uses_default_runtime_home(monkeypatch, tmp_path):
     runtime_home = tmp_path / ".oha-yachiyo"
     runtime_home.mkdir()

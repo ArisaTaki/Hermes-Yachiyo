@@ -115,13 +115,13 @@ def _scan_file(path: Path, *, max_file_bytes: int) -> list[SecretFinding]:
         return [SecretFinding(path, "scan target is missing")]
     if not path.is_file():
         return []
+    if path.suffix.lower() not in _TEXT_SUFFIXES:
+        return []
     try:
         if path.stat().st_size > max_file_bytes:
             return [SecretFinding(path, f"file exceeds max scan size {max_file_bytes} bytes")]
     except OSError as exc:
         return [SecretFinding(path, f"could not stat file: {exc.__class__.__name__}")]
-    if path.suffix.lower() not in _TEXT_SUFFIXES:
-        return []
     try:
         data = path.read_bytes()
     except OSError as exc:
