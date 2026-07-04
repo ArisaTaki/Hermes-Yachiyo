@@ -189,7 +189,7 @@ def _request_needs_app_discovery_first(
     )
     if str(input_resolution.get("source_tool") or "").strip() == "desktop.list_apps":
         return False
-    return not is_legacy_app_name_hint(app_name)
+    return True
 
 
 def _request_with_desktop_app_selection_source(

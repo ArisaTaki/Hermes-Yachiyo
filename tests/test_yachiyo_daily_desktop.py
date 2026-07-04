@@ -167,6 +167,26 @@ def test_planner_first_daily_desktop_entrypoint_requests_can_be_execution_normal
     assert requests[2]["input"] == {}
 
 
+def test_planner_first_daily_desktop_entrypoint_discovers_known_app_names_when_normalized() -> None:
+    requests = planner_first_daily_desktop_entrypoint_requests(
+        "Slack 切到",
+        allowed_tools=["desktop.list_apps", "app.focus", "desktop.active_window"],
+        execution_normalized=True,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.focus",
+        "desktop.active_window",
+    ]
+    assert requests[0]["input"] == {"query": "Slack", "limit": 20}
+    assert requests[1]["input"] == {
+        "app_name": "Slack",
+        "selection_source": "desktop.list_apps",
+        "query": "Slack",
+    }
+
+
 def test_planner_first_daily_desktop_entrypoint_discovers_apps_by_capability() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(
         "打开一个能写 markdown 的应用，新建文档标题为周报",
@@ -206,7 +226,7 @@ def test_planner_first_daily_desktop_entrypoint_discovers_apps_by_capability() -
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {"limit": 80},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -788,7 +808,7 @@ def test_planner_first_daily_desktop_entrypoint_requests_open_spreadsheet_data_f
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",
-            "input": {"path": "Downloads"},
+            "input": {"path": "Downloads", "selection": "latest"},
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_data_source",
             "continue_to_model": True,
@@ -1594,7 +1614,12 @@ def test_planner_first_daily_desktop_entrypoint_requests_scope_english_app_disco
         {
             "protocol": "json_fallback",
             "tool": "workspace.list",
-            "input": {"path": "Downloads", "pattern": "*.pdf", "file_type": "pdf"},
+            "input": {
+                "path": "Downloads",
+                "pattern": "*.pdf",
+                "file_type": "pdf",
+                "selection": "latest",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_communication_context",
             "continue_to_model": True,
