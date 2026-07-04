@@ -5220,8 +5220,11 @@ def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypa
         "desktop.active_window",
         "desktop.running_apps",
         "desktop.windows",
+        "desktop.list_windows",
         "desktop.ui_elements",
+        "desktop.read_ui",
         "desktop.inspect_app",
+        "desktop.verify",
         "desktop.click_ui_element",
         "desktop.type_into_ui_element",
         "media.system_control",
@@ -5270,6 +5273,29 @@ def test_desktop_permissions_reports_missing_targets_and_affected_tools(monkeypa
     assert any("Screen Recording permission" in hint for hint in result["recovery_hints"])
 
 
+def test_desktop_permissions_reports_generic_desktop_aliases_as_affected_tools(monkeypatch) -> None:
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.desktop_permissions.desktop_permission_missing_by_capability",
+        lambda use_cache=True: {
+            "app_control": ["automation"],
+            "foreground_input": ["accessibility"],
+        },
+    )
+
+    result = desktop_mod.permissions()
+
+    assert result["ok"] is True
+    assert result["permission_error"] is True
+    for tool in (
+        "desktop.open_app",
+        "desktop.focus_app",
+        "desktop.shortcut",
+        "desktop.type",
+    ):
+        assert tool in result["affected_tools"]
+        assert tool in result["data"]["affected_tools"]
+
+
 def test_desktop_permissions_reports_runtime_blockers(monkeypatch) -> None:
     monkeypatch.setattr(
         "apps.shell.yachiyo_agent.desktop_permissions.desktop_permission_missing_by_capability",
@@ -5292,6 +5318,7 @@ def test_desktop_permissions_reports_runtime_blockers(monkeypatch) -> None:
         "foreground_activation": ["desktop_session_locked"]
     }
     assert result["affected_tools"][:2] == ["app.focus", "desktop.inspect_app"]
+    assert "desktop.focus_app" in result["affected_tools"]
     assert result["summary"].startswith("Desktop runtime blockers: desktop_session_locked")
     assert result["recovery_hints"] == [
         (
