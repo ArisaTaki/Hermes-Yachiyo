@@ -698,16 +698,12 @@ class LegacyChatTaskStarter:
                 allowed_entrypoint_tools,
                 selected_requests,
             )
-            envelope_tool_requests = (
-                _safe_runtime_execution_envelope_requests(
-                    prompt or execution_prompt,
-                    metadata,
-                    allowed_entrypoint_tools,
-                    runtime_execution_envelope=runtime_execution_envelope,
-                    selected_requests=selected_requests,
-                )
-                if selected_source in {"runtime_planner", "none", ""}
-                else []
+            envelope_tool_requests = _safe_runtime_execution_envelope_requests(
+                prompt or execution_prompt,
+                metadata,
+                allowed_entrypoint_tools,
+                runtime_execution_envelope=runtime_execution_envelope,
+                selected_requests=selected_requests,
             )
             if envelope_tool_requests:
                 direct_tool_requests = envelope_tool_requests

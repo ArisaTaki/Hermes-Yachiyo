@@ -392,9 +392,12 @@ class WorkflowContinuationCoordinator:
         upstream: str,
         run_group_id: str = "",
         workflow_run_id: str = "",
+        direct_tool_request: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
+        daily_desktop_planning_context: str | None = None,
     ) -> dict[str, Any]:
         if self._execute_agent_run_callback is not None:
-            kwargs: dict[str, str] = {"upstream": upstream}
+            kwargs: dict[str, Any] = {"upstream": upstream}
             if supports_keyword(self._execute_agent_run_callback, "run_group_id"):
                 kwargs["run_group_id"] = run_group_id
             if workflow_run_id and supports_keyword(
@@ -402,6 +405,24 @@ class WorkflowContinuationCoordinator:
                 "workflow_run_id",
             ):
                 kwargs["workflow_run_id"] = workflow_run_id
+            if (
+                direct_tool_request is not None
+                and supports_keyword(self._execute_agent_run_callback, "direct_tool_request")
+            ):
+                kwargs["direct_tool_request"] = direct_tool_request
+            if (
+                direct_tool_requests is not None
+                and supports_keyword(self._execute_agent_run_callback, "direct_tool_requests")
+            ):
+                kwargs["direct_tool_requests"] = direct_tool_requests
+            if (
+                daily_desktop_planning_context is not None
+                and supports_keyword(
+                    self._execute_agent_run_callback,
+                    "daily_desktop_planning_context",
+                )
+            ):
+                kwargs["daily_desktop_planning_context"] = daily_desktop_planning_context
             return self._execute_agent_run_callback(
                 run_id,
                 agent,
@@ -415,6 +436,9 @@ class WorkflowContinuationCoordinator:
             upstream=upstream,
             run_group_id=run_group_id,
             workflow_run_id=workflow_run_id,
+            direct_tool_request=direct_tool_request,
+            direct_tool_requests=direct_tool_requests,
+            daily_desktop_planning_context=daily_desktop_planning_context,
         )
 
     def _workflow_child_artifact_refs(

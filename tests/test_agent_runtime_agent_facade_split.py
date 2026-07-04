@@ -156,6 +156,9 @@ def test_native_runtime_keeps_agent_facade_methods_available_after_split(tmp_pat
                 artifacts,
                 {
                     "messages": [{"role": "user", "content": "hi"}],
+                    "direct_tool_request": None,
+                    "direct_tool_requests": None,
+                    "daily_desktop_planning_context": None,
                     "start_iteration": 2,
                     "run_id": "run-1",
                     "budget": "budget",
@@ -165,3 +168,68 @@ def test_native_runtime_keeps_agent_facade_methods_available_after_split(tmp_pat
         ]
     finally:
         service.close()
+
+
+def test_agent_facade_forwards_direct_tool_execution_options() -> None:
+    captured: dict[str, Any] = {}
+
+    class _RunExecutor:
+        @staticmethod
+        def execute(
+            run_id: str,
+            agent: dict[str, Any],
+            user_goal: str,
+            upstream: str,
+            *,
+            run_group_id: str = "",
+            workflow_run_id: str = "",
+            direct_tool_request: dict[str, Any] | None = None,
+            direct_tool_requests: list[dict[str, Any]] | None = None,
+            daily_desktop_planning_context: str | None = None,
+        ) -> dict[str, Any]:
+            captured.update(
+                {
+                    "run_id": run_id,
+                    "agent_id": agent["agent_id"],
+                    "user_goal": user_goal,
+                    "upstream": upstream,
+                    "run_group_id": run_group_id,
+                    "workflow_run_id": workflow_run_id,
+                    "direct_tool_request": direct_tool_request,
+                    "direct_tool_requests": direct_tool_requests,
+                    "daily_desktop_planning_context": daily_desktop_planning_context,
+                }
+            )
+            return {"run_id": run_id, "status": "completed"}
+
+    class _Service(RuntimeAgentFacadeMixin):
+        agent_run_executor = _RunExecutor()
+
+    result = _Service()._execute_agent_run(
+        "run-1",
+        {"agent_id": "agent-1"},
+        "打开 Apple Music",
+        "upstream context",
+        run_group_id="group-run-1",
+        workflow_run_id="workflow-run-1",
+        direct_tool_request={"tool": "desktop.list_apps", "input": {"query": "Music"}},
+        direct_tool_requests=[
+            {"tool": "app.open", "input": {"app_name": "Music"}},
+        ],
+        daily_desktop_planning_context="打开 Apple Music",
+    )
+
+    assert result == {"run_id": "run-1", "status": "completed"}
+    assert captured == {
+        "run_id": "run-1",
+        "agent_id": "agent-1",
+        "user_goal": "打开 Apple Music",
+        "upstream": "upstream context",
+        "run_group_id": "group-run-1",
+        "workflow_run_id": "workflow-run-1",
+        "direct_tool_request": {"tool": "desktop.list_apps", "input": {"query": "Music"}},
+        "direct_tool_requests": [
+            {"tool": "app.open", "input": {"app_name": "Music"}},
+        ],
+        "daily_desktop_planning_context": "打开 Apple Music",
+    }

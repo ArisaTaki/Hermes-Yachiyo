@@ -140,7 +140,12 @@ def test_agent_run_executor_projects_completed_agent_run() -> None:
             "prepared-broker",
             prepared.timeline,
             prepared.artifacts,
-            {"run_id": "run-1"},
+            {
+                "daily_desktop_planning_context": "",
+                "direct_tool_request": None,
+                "direct_tool_requests": None,
+                "run_id": "run-1",
+            },
         ),
         ("completed", "run-1", "Done", prepared.timeline, prepared.artifacts),
     ]

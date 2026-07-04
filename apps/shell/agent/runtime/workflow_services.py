@@ -139,6 +139,30 @@ def build_runtime_workflow_execution_services(
     ) = None,
     workflow_artifact_write: Callable[[dict[str, Any], str, str], dict[str, Any]] | None = None,
 ) -> RuntimeWorkflowExecutionServiceBundle:
+    def execute_agent_run(
+        run_id: str,
+        agent: dict[str, Any],
+        user_goal: str,
+        *,
+        upstream: str,
+        run_group_id: str = "",
+        workflow_run_id: str = "",
+        direct_tool_request: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
+        daily_desktop_planning_context: str | None = None,
+    ) -> dict[str, Any]:
+        return engine._execute_agent_run(
+            run_id,
+            agent,
+            user_goal,
+            upstream=upstream,
+            run_group_id=run_group_id,
+            workflow_run_id=workflow_run_id,
+            direct_tool_request=direct_tool_request,
+            direct_tool_requests=direct_tool_requests,
+            daily_desktop_planning_context=daily_desktop_planning_context,
+        )
+
     continuation_ports = WorkflowContinuationPortBundle(
         iso_epoch=iso_epoch,
         workflow_path=workflow_path or (lambda workflow: engine._workflow_path(workflow)),
@@ -196,15 +220,7 @@ def build_runtime_workflow_execution_services(
             engine._workflow_child_goal(workflow_goal, step_task)
         ),
         insert_run=lambda **kwargs: engine._insert_run(**kwargs),
-        execute_agent_run=lambda run_id, agent, user_goal, *, upstream, run_group_id="": (
-            engine._execute_agent_run(
-                run_id,
-                agent,
-                user_goal,
-                upstream=upstream,
-                run_group_id=run_group_id,
-            )
-        ),
+        execute_agent_run=execute_agent_run,
         workflow_child_artifact_refs=lambda child_run, label: (
             engine._workflow_child_artifact_refs(child_run, label)
         ),
