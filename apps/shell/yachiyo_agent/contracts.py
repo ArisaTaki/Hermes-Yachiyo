@@ -673,6 +673,17 @@ class ApprovalCardSnapshot(_PublicSnapshot):
     intent_kind: str | None = None
     replan_request_id: str | None = None
     replan_trigger: str | None = None
+    replan_triggers: list[str] = Field(default_factory=list)
+    replan_signal_ids: list[str] = Field(default_factory=list)
+    runtime_doctrine: str | None = None
+    runtime_stage: str | None = None
+    runtime_role: str | None = None
+    requires_observation: bool = False
+    requires_post_action_verification: bool = False
+    deferred_tool: str | None = None
+    deferred_input: dict[str, Any] = Field(default_factory=dict)
+    deferred_context: dict[str, Any] = Field(default_factory=dict)
+    deferred_continuation: list[dict[str, Any]] = Field(default_factory=list)
     task_workspace_items: list[dict[str, Any]] = Field(default_factory=list)
     task_verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     title: str

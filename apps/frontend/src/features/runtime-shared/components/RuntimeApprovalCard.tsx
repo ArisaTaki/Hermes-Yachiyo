@@ -14,6 +14,10 @@ export type RuntimeApprovalCardSnapshot = Pick<
   | 'capability_id'
   | 'description'
   | 'decision_id'
+  | 'deferred_context'
+  | 'deferred_continuation'
+  | 'deferred_input'
+  | 'deferred_tool'
   | 'group_id'
   | 'group_run_id'
   | 'input_preview'
@@ -78,6 +82,7 @@ export function RuntimeApprovalCard({
   const displayTool = variant === 'compact' ? runtimeToolDisplayLabel(toolName) : toolName;
   const taskWorkspaceItems = recordList(approval.task_workspace_items);
   const taskVerificationTargets = recordList(approval.task_verification_targets);
+  const deferredContinuation = recordList(approval.deferred_continuation);
   const title = variant === 'compact'
     ? compactApprovalTitle(approval.title, toolName, displayTool)
     : approval.title || toolName;
@@ -89,6 +94,8 @@ export function RuntimeApprovalCard({
       data-approval-id={approval.approval_id}
       data-approval-capability-id={approval.capability_id || ''}
       data-approval-decision-id={approval.decision_id || ''}
+      data-approval-deferred-continuation-count={deferredContinuation.length}
+      data-approval-deferred-tool={approval.deferred_tool || ''}
       data-approval-group-id={approval.group_id || ''}
       data-approval-group-run-id={approval.group_run_id || ''}
       data-approval-intent-kind={approval.intent_kind || ''}
@@ -153,6 +160,9 @@ function compactApprovalTitle(title: string | null | undefined, toolName: string
 function approvalMetadataItems(approval: RuntimeApprovalCardSnapshot, toolName: string) {
   const taskWorkspaceItems = recordList(approval.task_workspace_items);
   const taskVerificationTargets = recordList(approval.task_verification_targets);
+  const deferredInput = approvalPreviewRecord(approval.deferred_input);
+  const deferredContext = approvalPreviewRecord(approval.deferred_context);
+  const deferredContinuation = recordList(approval.deferred_continuation);
   const items = [
     { label: 'approval', value: approval.approval_id },
     { label: 'run', value: approval.run_id || '' },
@@ -175,12 +185,41 @@ function approvalMetadataItems(approval: RuntimeApprovalCardSnapshot, toolName: 
     { label: 'intent', value: approval.intent_kind || '' },
     { label: 'replan', value: approval.replan_request_id || approval.replan_trigger || approval.replan_triggers?.join(', ') || '' },
     { label: 'signals', value: approval.replan_signal_ids?.join(', ') || '' },
+    { label: 'deferred', value: approval.deferred_tool || '' },
+    { label: 'deferred input', value: approvalObjectSummary(deferredInput) },
+    { label: 'deferred context', value: approvalObjectSummary(deferredContext) },
+    { label: 'continuation', value: approvalDeferredContinuationSummary(deferredContinuation) },
     { label: 'risk', value: approval.risk_level || '' },
     { label: 'requested', value: approval.requested_at || '' },
     { label: 'resolved', value: approval.resolved_at || '' },
     { label: 'policy', value: approval.policy_reason || '' },
   ];
   return items.filter((item) => String(item.value || '').trim());
+}
+
+function approvalObjectSummary(record: Record<string, unknown>): string {
+  const entries = Object.entries(record)
+    .map(([key, value]) => {
+      const text = stringValue(value);
+      return text ? `${key}: ${text}` : '';
+    })
+    .filter(Boolean);
+  if (!entries.length) return '';
+  const visible = entries.slice(0, 3).join(', ');
+  const suffix = entries.length > 3 ? ` +${entries.length - 3}` : '';
+  return `${visible}${suffix}`;
+}
+
+function approvalDeferredContinuationSummary(items: Array<Record<string, unknown>>): string {
+  const parts = items.slice(0, 3).map((item) => (
+    stringValue(item.tool)
+    || stringValue(item.deferred_tool)
+    || stringValue(item.step_id)
+    || stringValue(item.capability_id)
+  )).filter(Boolean);
+  if (!parts.length) return '';
+  const suffix = items.length > parts.length ? ` +${items.length - parts.length}` : '';
+  return `${parts.join(' -> ')}${suffix}`;
 }
 
 function approvalWorkspaceSummary(items: Array<Record<string, unknown>>): string {

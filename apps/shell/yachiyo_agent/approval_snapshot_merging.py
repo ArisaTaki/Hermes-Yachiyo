@@ -39,6 +39,31 @@ def merge_approval_snapshots(
         intent_kind=current.intent_kind or next_approval.intent_kind,
         replan_request_id=current.replan_request_id or next_approval.replan_request_id,
         replan_trigger=current.replan_trigger or next_approval.replan_trigger,
+        replan_triggers=_merge_string_lists(
+            current.replan_triggers,
+            next_approval.replan_triggers,
+        ),
+        replan_signal_ids=_merge_string_lists(
+            current.replan_signal_ids,
+            next_approval.replan_signal_ids,
+        ),
+        runtime_doctrine=current.runtime_doctrine or next_approval.runtime_doctrine,
+        runtime_stage=current.runtime_stage or next_approval.runtime_stage,
+        runtime_role=current.runtime_role or next_approval.runtime_role,
+        requires_observation=(
+            current.requires_observation or next_approval.requires_observation
+        ),
+        requires_post_action_verification=(
+            current.requires_post_action_verification
+            or next_approval.requires_post_action_verification
+        ),
+        deferred_tool=current.deferred_tool or next_approval.deferred_tool,
+        deferred_input={**next_approval.deferred_input, **current.deferred_input},
+        deferred_context={**next_approval.deferred_context, **current.deferred_context},
+        deferred_continuation=_merge_record_lists(
+            current.deferred_continuation,
+            next_approval.deferred_continuation,
+        ),
         task_workspace_items=_merge_record_lists(
             current.task_workspace_items,
             next_approval.task_workspace_items,
@@ -97,3 +122,12 @@ def _merge_record_lists(
         seen.add(key)
         merged.append(record)
     return merged
+
+
+def _merge_string_lists(current: list[str], next_items: list[str]) -> list[str]:
+    result: list[str] = []
+    for item in [*current, *next_items]:
+        text = str(item or "").strip()
+        if text and text not in result:
+            result.append(text)
+    return result

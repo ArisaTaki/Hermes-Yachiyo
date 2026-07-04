@@ -1167,6 +1167,13 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
                         "tool": "terminal.run",
                         "input_preview": {"command": "npm test"},
                         "status": "waiting_approval",
+                        "runtime_doctrine": "discover_operate_verify",
+                        "runtime_stage": "operate",
+                        "runtime_role": "terminal_execution",
+                        "requires_post_action_verification": True,
+                        "replan_triggers": ["tool_failure"],
+                        "deferred_tool": "terminal.run",
+                        "deferred_input": {"command": "npm test"},
                     },
                     "created_at": "2026-06-15T00:00:00Z",
                 },
@@ -1181,6 +1188,16 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
                         "workflow_run_id": "run-events-only",
                         "workflow_node_id": "review",
                         "workflow_node_label": "Review Gate",
+                        "runtime_doctrine": "discover_operate_verify",
+                        "runtime_stage": "approve",
+                        "runtime_role": "manual_checkpoint",
+                        "requires_observation": True,
+                        "replan_signal_ids": ["signal-approval"],
+                        "deferred_tool": "screen.capture",
+                        "deferred_context": {"step_id": "review"},
+                        "deferred_continuation": [
+                            {"tool": "workflow.resume", "step_id": "continue"}
+                        ],
                         "pending_approval": {
                             "approval_id": "approval-workflow",
                             "tool": "workflow.approval",
@@ -1224,7 +1241,21 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
         "workflow.approval",
     ]
     assert timeline.approvals[0].approval_id == "run-events-only:tool.approval_required:1"
-    assert timeline.approvals[0].input_preview == {"command": "npm test"}
+    assert timeline.approvals[0].input_preview == {
+        "command": "npm test",
+        "deferred_input": {"command": "npm test"},
+        "deferred_tool": "terminal.run",
+        "replan_triggers": ["tool_failure"],
+        "requires_post_action_verification": True,
+        "runtime_doctrine": "discover_operate_verify",
+        "runtime_role": "terminal_execution",
+        "runtime_stage": "operate",
+    }
+    assert timeline.approvals[0].runtime_stage == "operate"
+    assert timeline.approvals[0].requires_post_action_verification is True
+    assert timeline.approvals[0].replan_triggers == ["tool_failure"]
+    assert timeline.approvals[0].deferred_tool == "terminal.run"
+    assert timeline.approvals[0].deferred_input == {"command": "npm test"}
     assert timeline.approvals[1].approval_id == "approval-workflow"
     assert timeline.approvals[1].source_runnable_id == "agent-reviewer"
     assert timeline.approvals[1].source_runnable_name == "Reviewer"
@@ -1234,12 +1265,32 @@ def test_run_timeline_derives_approvals_and_artifacts_from_events() -> None:
     assert timeline.approvals[1].workflow_node_label == "Review Gate"
     assert timeline.approvals[1].group_id == "group-1"
     assert timeline.approvals[1].group_run_id == "group-run-1"
+    assert timeline.approvals[1].runtime_doctrine == "discover_operate_verify"
+    assert timeline.approvals[1].runtime_stage == "approve"
+    assert timeline.approvals[1].runtime_role == "manual_checkpoint"
+    assert timeline.approvals[1].requires_observation is True
+    assert timeline.approvals[1].replan_signal_ids == ["signal-approval"]
+    assert timeline.approvals[1].deferred_tool == "screen.capture"
+    assert timeline.approvals[1].deferred_context == {"step_id": "review"}
+    assert timeline.approvals[1].deferred_continuation == [
+        {"tool": "workflow.resume", "step_id": "continue"}
+    ]
     assert timeline.approvals[1].input_preview == {
         "checkpoint": "Review Gate",
+        "deferred_context": {"step_id": "review"},
+        "deferred_continuation": [
+            {"tool": "workflow.resume", "step_id": "continue"}
+        ],
+        "deferred_tool": "screen.capture",
         "group_id": "group-1",
         "group_run_id": "group-run-1",
         "member_agent_id": "agent-reviewer",
         "member_agent_name": "Reviewer",
+        "replan_signal_ids": ["signal-approval"],
+        "requires_observation": True,
+        "runtime_doctrine": "discover_operate_verify",
+        "runtime_role": "manual_checkpoint",
+        "runtime_stage": "approve",
         "run_group_id": "group-run-1",
         "source_runnable_id": "agent-reviewer",
         "source_runnable_name": "Reviewer",

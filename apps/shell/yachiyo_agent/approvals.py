@@ -10,6 +10,12 @@ from apps.shell.agent.runtime.events import redact_run_event_payload, redact_sec
 from .contracts import ApprovalCardSnapshot
 from .links import studio_run_url
 
+_RUNTIME_TRACE_KEYS = (
+    "runtime_doctrine",
+    "runtime_stage",
+    "runtime_role",
+)
+
 
 def approval_card_from_payload(
     payload: Mapping[str, Any] | ApprovalCardSnapshot,
@@ -98,6 +104,32 @@ def approval_card_from_payload(
         intent_kind=_trace_text(payload, input_preview, "intent_kind", "task_intent_kind"),
         replan_request_id=_trace_text(payload, input_preview, "replan_request_id"),
         replan_trigger=_trace_text(payload, input_preview, "replan_trigger"),
+        replan_triggers=_string_list(
+            payload.get("replan_triggers") or input_preview.get("replan_triggers")
+        ),
+        replan_signal_ids=_string_list(
+            payload.get("replan_signal_ids") or input_preview.get("replan_signal_ids")
+        ),
+        **{
+            key: _trace_text(payload, input_preview, key)
+            for key in _RUNTIME_TRACE_KEYS
+        },
+        requires_observation=_trace_bool(payload, input_preview, "requires_observation"),
+        requires_post_action_verification=_trace_bool(
+            payload,
+            input_preview,
+            "requires_post_action_verification",
+        ),
+        deferred_tool=_trace_text(payload, input_preview, "deferred_tool"),
+        deferred_input=_mapping(
+            payload.get("deferred_input") or input_preview.get("deferred_input")
+        ),
+        deferred_context=_mapping(
+            payload.get("deferred_context") or input_preview.get("deferred_context")
+        ),
+        deferred_continuation=_record_list(
+            payload.get("deferred_continuation") or input_preview.get("deferred_continuation")
+        ),
         task_workspace_items=_record_list(
             payload.get("task_workspace_items")
             or input_preview.get("task_workspace_items")
@@ -161,6 +193,17 @@ def _record_list(value: Any) -> list[dict[str, Any]]:
     return [_mapping(item) for item in value if isinstance(item, Mapping)]
 
 
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    result: list[str] = []
+    for item in value:
+        text = _text(item)
+        if text and text not in result:
+            result.append(text)
+    return result
+
+
 def _studio_url(run_id: str | None, group_run_id: str | None = None) -> str | None:
     return studio_run_url(run_id, group_run_id=group_run_id)
 
@@ -187,3 +230,19 @@ def _trace_text(
         if text:
             return text
     return None
+
+
+def _trace_bool(
+    payload: Mapping[str, Any],
+    input_preview: Mapping[str, Any],
+    key: str,
+) -> bool:
+    return _value_is_true(payload.get(key)) or _value_is_true(input_preview.get(key))
+
+
+def _value_is_true(value: Any) -> bool:
+    if value is True:
+        return True
+    if not isinstance(value, str):
+        return False
+    return value.strip().lower() in {"true", "required"}

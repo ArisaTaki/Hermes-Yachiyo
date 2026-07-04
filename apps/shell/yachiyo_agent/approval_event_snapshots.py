@@ -32,6 +32,19 @@ _PLANNER_TRACE_KEYS = (
     "replan_request_id",
     "replan_trigger",
 )
+_RUNTIME_TRACE_KEYS = (
+    "replan_triggers",
+    "replan_signal_ids",
+    "runtime_doctrine",
+    "runtime_stage",
+    "runtime_role",
+    "requires_observation",
+    "requires_post_action_verification",
+    "deferred_tool",
+    "deferred_input",
+    "deferred_context",
+    "deferred_continuation",
+)
 
 
 def approval_snapshots_from_events(
@@ -161,6 +174,7 @@ def merge_trace_context_into_approval(
             "workspace_id",
             "task_id",
             *_PLANNER_TRACE_KEYS,
+            *_RUNTIME_TRACE_KEYS,
         )
         if payload.get(key)
     }

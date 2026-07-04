@@ -3659,6 +3659,17 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
         intent_kind="workflow_orchestration",
         replan_request_id="replan-1",
         replan_trigger="approval_retry",
+        replan_triggers=["approval_retry"],
+        replan_signal_ids=["signal-1"],
+        runtime_doctrine="discover_operate_verify",
+        runtime_stage="approve",
+        runtime_role="manual_checkpoint",
+        requires_observation=True,
+        requires_post_action_verification=True,
+        deferred_tool="desktop.click_ui_element",
+        deferred_input={"target": "Review"},
+        deferred_context={"step_id": "review-step"},
+        deferred_continuation=[{"tool": "screen.capture", "step_id": "verify"}],
         title="Approve Review Gate",
         description="Needs review",
         status="pending",
@@ -3699,6 +3710,17 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
         "intent_kind",
         "replan_request_id",
         "replan_trigger",
+        "replan_triggers",
+        "replan_signal_ids",
+        "runtime_doctrine",
+        "runtime_stage",
+        "runtime_role",
+        "requires_observation",
+        "requires_post_action_verification",
+        "deferred_tool",
+        "deferred_input",
+        "deferred_context",
+        "deferred_continuation",
         "task_workspace_items",
         "task_verification_targets",
         "title",
@@ -3721,6 +3743,11 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["step_id"] == "review-step"
     assert payload["capability_id"] == "workflow.approval"
     assert payload["plan_id"] == "runtime-plan-1"
+    assert payload["replan_triggers"] == ["approval_retry"]
+    assert payload["runtime_stage"] == "approve"
+    assert payload["requires_post_action_verification"] is True
+    assert payload["deferred_tool"] == "desktop.click_ui_element"
+    assert payload["deferred_context"] == {"step_id": "review-step"}
 
 
 def test_public_pending_approval_projects_runtime_planner_trace_fields() -> None:
@@ -3813,6 +3840,17 @@ def test_approval_card_from_payload_maps_runtime_planner_trace_fields() -> None:
                 "planner_step_id": "save-discovered-app-creative-result",
                 "target_capability_id": "desktop.ui_operation",
                 "runtime_plan_id": "runtime-plan-1",
+                "runtime_doctrine": "discover_operate_verify",
+                "runtime_stage": "operate",
+                "runtime_role": "click_ui",
+                "requires_observation": True,
+                "requires_post_action_verification": True,
+                "replan_triggers": ["ui_not_found"],
+                "deferred_input": {"label": "Save"},
+                "deferred_context": {"step_id": "save-discovered-app-creative-result"},
+                "deferred_continuation": [
+                    {"tool": "screen.capture", "step_id": "verify"}
+                ],
                 "task_workspace_items": [
                     {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
                 ],
@@ -3829,6 +3867,8 @@ def test_approval_card_from_payload_maps_runtime_planner_trace_fields() -> None:
             "decision_id": "decision-1",
             "tool_plan_id": "tool-plan-1",
             "intent_kind": "desktop_operation",
+            "replan_signal_ids": ["signal-1"],
+            "deferred_tool": "desktop.click_ui_element",
         }
     )
 
@@ -3838,6 +3878,19 @@ def test_approval_card_from_payload_maps_runtime_planner_trace_fields() -> None:
     assert snapshot.plan_id == "runtime-plan-1"
     assert snapshot.tool_plan_id == "tool-plan-1"
     assert snapshot.intent_kind == "desktop_operation"
+    assert snapshot.replan_triggers == ["ui_not_found"]
+    assert snapshot.replan_signal_ids == ["signal-1"]
+    assert snapshot.runtime_doctrine == "discover_operate_verify"
+    assert snapshot.runtime_stage == "operate"
+    assert snapshot.runtime_role == "click_ui"
+    assert snapshot.requires_observation is True
+    assert snapshot.requires_post_action_verification is True
+    assert snapshot.deferred_tool == "desktop.click_ui_element"
+    assert snapshot.deferred_input == {"label": "Save"}
+    assert snapshot.deferred_context == {"step_id": "save-discovered-app-creative-result"}
+    assert snapshot.deferred_continuation == [
+        {"tool": "screen.capture", "step_id": "verify"}
+    ]
     assert snapshot.task_workspace_items == [
         {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
     ]
