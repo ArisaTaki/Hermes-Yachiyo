@@ -203,6 +203,7 @@ class TaskIntentRouter:
         visible_context = _looks_like_visible_data_context_source(text)
         desktop_visible_context = _looks_like_desktop_visible_data_context_source(text)
         app_search_result_source = _data_analysis_app_search_result_source_hint(text)
+        running_spreadsheet_app_hint = _running_spreadsheet_app_context_hint(text)
         if desktop_visible_context:
             context_source = "visible_text"
             if source_scope == "Desktop" and not source_hint:
@@ -211,6 +212,8 @@ class TaskIntentRouter:
             context_source = "app_search_result"
         elif not context_source and current_page_context:
             context_source = "current_page_content"
+        elif running_spreadsheet_app_hint and not source_hint and not context_source:
+            context_source = "visible_text"
         elif (
             visible_context
             and not current_page_context
@@ -281,6 +284,8 @@ class TaskIntentRouter:
         }
         if spreadsheet_app_hint and spreadsheet_app_hint != result_open_app_hint:
             inputs["spreadsheet_app_hint"] = spreadsheet_app_hint
+        if running_spreadsheet_app_hint and context_source == "visible_text" and not source_hint:
+            inputs["running_spreadsheet_app_hint"] = running_spreadsheet_app_hint
         if result_open_app_hint:
             inputs["analysis_result_open_app_hint"] = result_open_app_hint
         if source_name and not source_hint:
@@ -322,6 +327,11 @@ class TaskIntentRouter:
         preferred_capabilities = [
             "data.analysis",
             *(["desktop.app_control"] if spreadsheet_app_hint else []),
+            *(
+                ["desktop.app_discovery", "desktop.app_control", "desktop.ui_operation"]
+                if running_spreadsheet_app_hint
+                else []
+            ),
             *(["clipboard.read_write"] if output_target == "clipboard" else []),
         ]
         app_write_target_capability = isinstance(
@@ -2632,22 +2642,31 @@ class RuntimePlanner:
             depends_on=[spreadsheet_app_step.step_id] if spreadsheet_app_step is not None else [],
         )
         if context_source and not source_hint:
-            spreadsheet_first_steps = (
-                [spreadsheet_app_step]
-                if spreadsheet_app_step is not None and context_source == "visible_text"
-                else []
+            running_spreadsheet_context_steps = _running_spreadsheet_data_context_steps(
+                intent,
+                allowed,
+                context_source,
             )
-            context_step_dependencies = [step.step_id for step in spreadsheet_first_steps]
-            context_steps = [
-                _with_step_dependencies(step, context_step_dependencies)
-                if context_step_dependencies
-                else step
-                for step in _data_analysis_context_source_steps(
-                    intent,
-                    allowed,
-                    context_source,
+            if running_spreadsheet_context_steps:
+                spreadsheet_first_steps: list[ToolPlanStepSnapshot] = []
+                context_steps = running_spreadsheet_context_steps
+            else:
+                spreadsheet_first_steps = (
+                    [spreadsheet_app_step]
+                    if spreadsheet_app_step is not None and context_source == "visible_text"
+                    else []
                 )
-            ]
+                context_step_dependencies = [step.step_id for step in spreadsheet_first_steps]
+                context_steps = [
+                    _with_step_dependencies(step, context_step_dependencies)
+                    if context_step_dependencies
+                    else step
+                    for step in _data_analysis_context_source_steps(
+                        intent,
+                        allowed,
+                        context_source,
+                    )
+                ]
             context_depends_on = [step.step_id for step in context_steps]
             spreadsheet_steps = (
                 [_with_step_dependencies(spreadsheet_app_step, context_depends_on)]
@@ -7384,6 +7403,90 @@ def _spreadsheet_app_open_step(
             "analysis on reproducible local data tools."
         ),
     )
+
+
+def _running_spreadsheet_data_context_steps(
+    intent: TaskIntentSnapshot,
+    allowed: set[str] | None,
+    context_source: str,
+) -> list[ToolPlanStepSnapshot]:
+    if context_source != "visible_text":
+        return []
+    hint = intent.inputs.get("running_spreadsheet_app_hint")
+    if not isinstance(hint, Mapping):
+        return []
+    query = str(hint.get("query") or "").strip()
+    if not query:
+        return []
+    discover_tool = _first_allowed(("desktop.running_apps",), allowed)
+    focus_tool = _first_allowed(("app.focus", "desktop.focus_app"), allowed)
+    read_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui", "screen.capture"), allowed)
+    if not discover_tool or not read_tool:
+        return []
+    selected_app = _selected_app_placeholder("desktop.running_apps")
+    selected_app_payload = {
+        "app_name": selected_app,
+        "selection_source": "desktop.running_apps",
+        "query": query,
+    }
+    steps = [
+        _step(
+            intent,
+            "discover-running-spreadsheet-app",
+            "Discover running spreadsheet app",
+            "desktop.app_discovery",
+            discover_tool,
+            input_preview={},
+            action="list_apps",
+            reason=(
+                "The user asked to analyze data in an already open spreadsheet app; "
+                "inspect running apps before selecting the target."
+            ),
+        )
+    ]
+    read_depends_on = ["discover-running-spreadsheet-app"]
+    if focus_tool:
+        steps.append(
+            _step(
+                intent,
+                "focus-running-spreadsheet-app",
+                "Focus running spreadsheet app",
+                "desktop.app_control",
+                focus_tool,
+                input_preview=selected_app_payload,
+                depends_on=["discover-running-spreadsheet-app"],
+                action="focus_app",
+                reason=(
+                    "Focus the runtime-selected spreadsheet app before reading its visible table."
+                ),
+            )
+        )
+        read_depends_on = ["focus-running-spreadsheet-app"]
+    read_input = (
+        {
+            **selected_app_payload,
+            "role_filter": "text",
+            "limit": 120,
+        }
+        if read_tool in {"desktop.ui_elements", "desktop.read_ui"}
+        else {"reason": "read visible data from the running spreadsheet app"}
+    )
+    steps.append(
+        _step(
+            intent,
+            "read-data-context",
+            "Read spreadsheet context",
+            "desktop.ui_operation",
+            read_tool,
+            input_preview=read_input,
+            depends_on=read_depends_on,
+            action="read_ui",
+            reason=(
+                "Read the visible spreadsheet data after discovering and focusing the running app."
+            ),
+        )
+    )
+    return steps
 
 
 def _data_file_open_step(
@@ -16791,6 +16894,38 @@ def _spreadsheet_ui_app_hint(text: str) -> str:
             continue
         return _canonical_spreadsheet_app_hint(match.group("app"))
     return ""
+
+
+def _running_spreadsheet_app_context_hint(text: str) -> dict[str, str]:
+    value = _clean_prompt(text)
+    if not value:
+        return {}
+    running_marker = re.search(
+        r"(?:当前打开|已打开|已经打开|打开着|正在运行|运行中|already\s+open|currently\s+open|open\s+spreadsheet|running)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not running_marker:
+        return {}
+    app_pattern = r"(?P<app>Microsoft\s+Excel|Apple\s+Numbers|Excel|Numbers)"
+    named_app = re.search(app_pattern, value, flags=re.IGNORECASE)
+    if named_app:
+        app_name = _canonical_spreadsheet_app_hint(named_app.group("app"))
+        if app_name:
+            return {"query": app_name, "description": "spreadsheet"}
+    if _contains_any(
+        value,
+        (
+            "spreadsheet",
+            "worksheet",
+            "sheet",
+            "电子表格",
+            "表格应用",
+            "表格软件",
+        ),
+    ):
+        return {"query": "spreadsheet", "description": "spreadsheet"}
+    return {}
 
 
 def _analysis_result_open_app_hint(text: str) -> str:

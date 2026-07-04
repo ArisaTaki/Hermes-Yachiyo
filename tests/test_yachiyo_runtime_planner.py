@@ -1646,6 +1646,101 @@ def test_runtime_planner_opens_spreadsheet_app_before_reading_visible_table() ->
     ]
 
 
+def test_runtime_planner_focuses_running_spreadsheet_app_before_analysis() -> None:
+    allowed_tools = [
+        "desktop.running_apps",
+        "app.focus",
+        "desktop.ui_elements",
+        "data.analyze",
+        "artifact.write",
+    ]
+    decision = RuntimePlanner().decision(
+        "帮我分析当前打开的 Excel 表格，并输出一份数据分析报告",
+        allowed_tools=allowed_tools,
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.missing_inputs == []
+    assert decision.selected_intent.inputs == {
+        "data_source_hint": "",
+        "data_source_kind": "text_table",
+        "running_spreadsheet_app_hint": {
+            "query": "Excel",
+            "description": "spreadsheet",
+        },
+        "context_source": "visible_text",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-running-spreadsheet-app",
+        "focus-running-spreadsheet-app",
+        "read-data-context",
+        "analyze-data-context",
+    ]
+    assert _step_by_id(decision, "focus-running-spreadsheet-app").input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "Excel",
+    }
+    assert _step_by_id(decision, "read-data-context").input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "Excel",
+        "role_filter": "text",
+        "limit": 120,
+    }
+    assert _step_by_id(decision, "analyze-data-context").depends_on == [
+        "discover-running-spreadsheet-app",
+        "focus-running-spreadsheet-app",
+        "read-data-context",
+    ]
+
+    assert envelope is not None
+    assert [request.tool_name for request in envelope.requests] == [
+        "desktop.running_apps",
+        "app.focus",
+        "desktop.ui_elements",
+        "data.analyze",
+    ]
+    assert envelope.requests[1].action_target == {
+        "kind": "desktop_app",
+        "action": "focus_app",
+        "selection_source": "desktop.running_apps",
+        "app_name": "<selected app from desktop.running_apps>",
+        "query": "Excel",
+        "step_id": "focus-running-spreadsheet-app",
+    }
+    assert envelope.requests[2].action_target == {
+        "kind": "desktop_app",
+        "action": "read_ui",
+        "selection_source": "desktop.running_apps",
+        "app_name": "<selected app from desktop.running_apps>",
+        "query": "Excel",
+        "step_id": "read-data-context",
+    }
+    assert envelope.requests[2].observation_retry == {
+        "from_tool": "desktop.running_apps",
+        "tool": "desktop.running_apps",
+        "reason": "resolve_desktop_app",
+    }
+
+    generic = RuntimePlanner().decision(
+        "分析正在运行的表格应用里的数据，输出报告",
+        allowed_tools=allowed_tools,
+    )
+    assert generic.selected_intent.inputs["running_spreadsheet_app_hint"] == {
+        "query": "spreadsheet",
+        "description": "spreadsheet",
+    }
+    assert _step_by_id(generic, "focus-running-spreadsheet-app").input_preview[
+        "query"
+    ] == "spreadsheet"
+
+
 def test_runtime_planner_routes_data_analysis_artifact_to_communication() -> None:
     allowed_tools = [
         "data.analyze",
