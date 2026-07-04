@@ -21,6 +21,18 @@ from apps.shell.agent.runtime.desktop_tool_labels import (
     DAILY_DESKTOP_TOOL_LABELS as _DAILY_DESKTOP_TOOL_LABELS,
 )
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_event_payload as _runtime_task_progress_event_payload,
+    runtime_planner_base_event_type as _runtime_planner_base_event_type,
+    runtime_planner_event_payload as _runtime_planner_event_payload,
+    runtime_planner_event_type as _runtime_planner_event_type,
+    runtime_planner_timeline_event as _runtime_planner_timeline_event,
+    runtime_progress_base_event_type as _runtime_progress_base_event_type,
+    runtime_progress_event_payload as _runtime_progress_event_payload,
+    runtime_progress_event_type as _runtime_progress_event_type,
+    runtime_replan_base_event_type as _runtime_replan_event_type,
+    runtime_scope_context as _runtime_planner_scope_context,
+)
 from apps.shell.agent.runtime.followup_content_snapshot import (
     followup_content_snapshot_for_tool_call,
     followup_content_snapshots,
@@ -7287,17 +7299,6 @@ def _pending_runtime_replan_payloads(
     return payloads
 
 
-def _runtime_replan_event_type(event_type: str) -> str:
-    clean = str(event_type or "").strip()
-    if clean in {
-        "group.run.replan.requested",
-        "workflow.replan.requested",
-        "workflow.run.replan.requested",
-    }:
-        return "agent.replan.requested"
-    return clean
-
-
 def _handled_runtime_replan_request_identities(
     timeline: list[dict[str, Any]],
 ) -> set[str]:
@@ -9351,63 +9352,6 @@ def _append_runtime_task_progress_event(
         append_run_event(run_id, scoped_event_type, event_payload)
 
 
-_RUNTIME_PROGRESS_GROUP_EVENT_TYPES = {
-    "agent.task.workspace_item.updated": "group.run.task.workspace_item.updated",
-    "agent.task.todo.updated": "group.run.task.todo.updated",
-    "agent.task.checkpoint.updated": "group.run.task.checkpoint.updated",
-}
-
-_RUNTIME_PROGRESS_WORKFLOW_EVENT_TYPES = {
-    "agent.task.workspace_item.updated": "workflow.run.task.workspace_item.updated",
-    "agent.task.todo.updated": "workflow.run.task.todo.updated",
-    "agent.task.checkpoint.updated": "workflow.run.task.checkpoint.updated",
-}
-
-_RUNTIME_PROGRESS_BASE_EVENT_TYPES = {
-    **{value: key for key, value in _RUNTIME_PROGRESS_GROUP_EVENT_TYPES.items()},
-    **{value: key for key, value in _RUNTIME_PROGRESS_WORKFLOW_EVENT_TYPES.items()},
-    "workflow.task.workspace_item.updated": "agent.task.workspace_item.updated",
-    "workflow.task.todo.updated": "agent.task.todo.updated",
-    "workflow.task.checkpoint.updated": "agent.task.checkpoint.updated",
-}
-
-
-def _runtime_progress_event_type(event_type: str, payload: Mapping[str, Any]) -> str:
-    clean_event_type = str(event_type or "").strip()
-    if str(payload.get("workflow_run_id") or "").strip():
-        return _RUNTIME_PROGRESS_WORKFLOW_EVENT_TYPES.get(clean_event_type, clean_event_type)
-    if str(payload.get("group_run_id") or payload.get("run_group_id") or "").strip():
-        return _RUNTIME_PROGRESS_GROUP_EVENT_TYPES.get(clean_event_type, clean_event_type)
-    return clean_event_type
-
-
-def _runtime_progress_event_payload(
-    payload: Mapping[str, Any],
-    base_event_type: str,
-    scoped_event_type: str,
-) -> dict[str, Any]:
-    event_payload = dict(payload)
-    if scoped_event_type == base_event_type:
-        return event_payload
-    event_payload.setdefault("planner_event_type", base_event_type)
-    event_payload.setdefault("planner_scope", _runtime_progress_event_scope(scoped_event_type))
-    return event_payload
-
-
-def _runtime_progress_event_scope(event_type: str) -> str:
-    clean_event_type = str(event_type or "").strip()
-    if clean_event_type.startswith("workflow.run."):
-        return "workflow.run"
-    if clean_event_type.startswith("group.run."):
-        return "group.run"
-    return "agent"
-
-
-def _runtime_progress_base_event_type(event_type: str) -> str:
-    clean_event_type = str(event_type or "").strip()
-    return _RUNTIME_PROGRESS_BASE_EVENT_TYPES.get(clean_event_type, clean_event_type)
-
-
 def _runtime_task_progress_scope_context(
     timeline: list[dict[str, Any]],
     tool_event: Mapping[str, Any],
@@ -9461,11 +9405,6 @@ def _runtime_task_progress_context_from_mapping(value: Mapping[str, Any]) -> dic
         if clean_value:
             context[key] = clean_value
     return context
-
-
-def _runtime_task_progress_event_payload(value: Mapping[str, Any]) -> dict[str, Any]:
-    payload = value.get("payload") if isinstance(value.get("payload"), Mapping) else {}
-    return {**dict(value), **dict(payload)}
 
 
 def _runtime_task_update_exists(
@@ -9530,146 +9469,6 @@ def _runtime_task_update_exists(
         )
         for event in timeline
     )
-
-
-_RUNTIME_PLANNER_GROUP_EVENT_TYPES = {
-    "agent.intent.selected": "group.run.intent.selected",
-    "agent.plan.created": "group.run.plan.created",
-    "agent.plan.step": "group.run.plan.step",
-    "agent.task_core.created": "group.run.task_core.created",
-    "agent.plan.selection": "group.run.plan.selection",
-}
-
-_RUNTIME_PLANNER_WORKFLOW_EVENT_TYPES = {
-    "agent.intent.selected": "workflow.run.intent.selected",
-    "agent.plan.created": "workflow.run.plan.created",
-    "agent.plan.step": "workflow.run.plan.step",
-    "agent.task_core.created": "workflow.run.task_core.created",
-    "agent.plan.selection": "workflow.run.plan.selection",
-}
-
-_RUNTIME_PLANNER_BASE_EVENT_TYPES = {
-    **{value: key for key, value in _RUNTIME_PLANNER_GROUP_EVENT_TYPES.items()},
-    **{value: key for key, value in _RUNTIME_PLANNER_WORKFLOW_EVENT_TYPES.items()},
-    "workflow.intent.selected": "agent.intent.selected",
-    "workflow.plan.created": "agent.plan.created",
-    "workflow.plan.step": "agent.plan.step",
-    "workflow.task_core.created": "agent.task_core.created",
-    "workflow.plan.selection": "agent.plan.selection",
-}
-
-
-def _runtime_planner_timeline_event(
-    event: Mapping[str, Any],
-    scope_context: Mapping[str, Any] | None,
-) -> dict[str, Any]:
-    event_type = str(event.get("event") or event.get("event_type") or "").strip()
-    scoped_event_type = _runtime_planner_event_type(event_type, scope_context)
-    event_payload = (
-        event.get("payload")
-        if isinstance(event.get("payload"), Mapping)
-        else {}
-    )
-    scoped_payload = _runtime_planner_event_payload(
-        event_payload,
-        event_type,
-        scoped_event_type,
-        scope_context,
-    )
-    result = dict(event)
-    result["event"] = scoped_event_type
-    result.update({key: value for key, value in dict(scope_context or {}).items() if value})
-    result["payload"] = scoped_payload
-    return result
-
-
-def _runtime_planner_event_type(
-    event_type: str,
-    scope_context: Mapping[str, Any] | None,
-) -> str:
-    clean_event_type = str(event_type or "").strip()
-    context = _runtime_planner_context_from_mapping(scope_context or {})
-    if str(context.get("workflow_run_id") or "").strip():
-        return _RUNTIME_PLANNER_WORKFLOW_EVENT_TYPES.get(clean_event_type, clean_event_type)
-    if str(context.get("group_run_id") or context.get("run_group_id") or "").strip():
-        return _RUNTIME_PLANNER_GROUP_EVENT_TYPES.get(clean_event_type, clean_event_type)
-    return clean_event_type
-
-
-def _runtime_planner_event_payload(
-    payload: Mapping[str, Any],
-    base_event_type: str,
-    scoped_event_type: str,
-    scope_context: Mapping[str, Any] | None,
-) -> dict[str, Any]:
-    event_payload = {**dict(scope_context or {}), **dict(payload)}
-    if scoped_event_type == base_event_type:
-        return event_payload
-    event_payload.setdefault("planner_event_type", base_event_type)
-    event_payload.setdefault("planner_scope", _runtime_planner_event_scope(scoped_event_type))
-    return event_payload
-
-
-def _runtime_planner_event_scope(event_type: str) -> str:
-    clean_event_type = str(event_type or "").strip()
-    if clean_event_type.startswith("workflow.run."):
-        return "workflow.run"
-    if clean_event_type.startswith("group.run."):
-        return "group.run"
-    return "agent"
-
-
-def _runtime_planner_base_event_type(event_type: str) -> str:
-    clean_event_type = str(event_type or "").strip()
-    return _RUNTIME_PLANNER_BASE_EVENT_TYPES.get(clean_event_type, clean_event_type)
-
-
-def _runtime_planner_scope_context(
-    *sources: Any,
-    timeline: list[dict[str, Any]] | None = None,
-) -> dict[str, str]:
-    for source in sources:
-        context = _runtime_planner_context_from_source(source)
-        if context:
-            return context
-    for event in reversed(timeline or []):
-        if not isinstance(event, Mapping):
-            continue
-        context = _runtime_planner_context_from_mapping(event)
-        if context:
-            return context
-    return {}
-
-
-def _runtime_planner_context_from_source(source: Any) -> dict[str, str]:
-    if isinstance(source, Mapping):
-        return _runtime_planner_context_from_mapping(source)
-    if isinstance(source, Iterable) and not isinstance(source, (str, bytes)):
-        for item in source:
-            context = _runtime_planner_context_from_source(item)
-            if context:
-                return context
-    return {}
-
-
-def _runtime_planner_context_from_mapping(source: Mapping[str, Any]) -> dict[str, str]:
-    payload = _runtime_task_progress_event_payload(source)
-    input_payload = payload.get("input") if isinstance(payload.get("input"), Mapping) else {}
-    context: dict[str, str] = {}
-    for key in (
-        "task_id",
-        "run_group_id",
-        "group_run_id",
-        "group_id",
-        "workflow_id",
-        "workflow_run_id",
-        "workflow_node_id",
-        "workflow_node_label",
-    ):
-        clean_value = str(payload.get(key) or input_payload.get(key) or "").strip()
-        if clean_value:
-            context[key] = clean_value
-    return context
 
 
 def _runtime_planner_step_has_status(

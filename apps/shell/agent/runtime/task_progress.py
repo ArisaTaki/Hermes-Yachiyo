@@ -5,6 +5,12 @@ from __future__ import annotations
 from collections.abc import Callable, Mapping
 from typing import Any
 
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_progress_base_event_type as _runtime_progress_base_event_type,
+    runtime_progress_event_payload as _runtime_progress_event_payload,
+    runtime_progress_event_type as _runtime_progress_event_type,
+)
+
 
 def append_task_progress_events_for_tool_result(
     *,
@@ -1040,63 +1046,3 @@ def _mapping_items(value: Any) -> list[Mapping[str, Any]]:
 def _event_payload(event: Mapping[str, Any]) -> Mapping[str, Any]:
     payload = event.get("payload")
     return payload if isinstance(payload, Mapping) else {}
-
-
-_RUNTIME_PROGRESS_GROUP_EVENT_TYPES = {
-    "agent.task.workspace_item.updated": "group.run.task.workspace_item.updated",
-    "agent.task.todo.updated": "group.run.task.todo.updated",
-    "agent.task.checkpoint.updated": "group.run.task.checkpoint.updated",
-    "agent.replan.recovery.updated": "group.run.replan.recovery.updated",
-}
-
-_RUNTIME_PROGRESS_WORKFLOW_EVENT_TYPES = {
-    "agent.task.workspace_item.updated": "workflow.run.task.workspace_item.updated",
-    "agent.task.todo.updated": "workflow.run.task.todo.updated",
-    "agent.task.checkpoint.updated": "workflow.run.task.checkpoint.updated",
-    "agent.replan.recovery.updated": "workflow.run.replan.recovery.updated",
-}
-
-_RUNTIME_PROGRESS_BASE_EVENT_TYPES = {
-    **{value: key for key, value in _RUNTIME_PROGRESS_GROUP_EVENT_TYPES.items()},
-    **{value: key for key, value in _RUNTIME_PROGRESS_WORKFLOW_EVENT_TYPES.items()},
-    "workflow.task.workspace_item.updated": "agent.task.workspace_item.updated",
-    "workflow.task.todo.updated": "agent.task.todo.updated",
-    "workflow.task.checkpoint.updated": "agent.task.checkpoint.updated",
-    "workflow.replan.recovery.updated": "agent.replan.recovery.updated",
-}
-
-
-def _runtime_progress_event_type(event_type: str, payload: Mapping[str, Any]) -> str:
-    clean_event_type = str(event_type or "").strip()
-    if str(payload.get("workflow_run_id") or "").strip():
-        return _RUNTIME_PROGRESS_WORKFLOW_EVENT_TYPES.get(clean_event_type, clean_event_type)
-    if str(payload.get("group_run_id") or payload.get("run_group_id") or "").strip():
-        return _RUNTIME_PROGRESS_GROUP_EVENT_TYPES.get(clean_event_type, clean_event_type)
-    return clean_event_type
-
-
-def _runtime_progress_event_payload(
-    payload: Mapping[str, Any],
-    base_event_type: str,
-    scoped_event_type: str,
-) -> dict[str, Any]:
-    event_payload = dict(payload)
-    if scoped_event_type == base_event_type:
-        return event_payload
-    event_payload.setdefault("planner_event_type", base_event_type)
-    event_payload.setdefault("planner_scope", _runtime_progress_event_scope(scoped_event_type))
-    return event_payload
-
-
-def _runtime_progress_event_scope(event_type: str) -> str:
-    clean_event_type = str(event_type or "").strip()
-    if clean_event_type.startswith("workflow.run."):
-        return "workflow.run"
-    if clean_event_type.startswith("group.run."):
-        return "group.run"
-    return "agent"
-
-
-def _runtime_progress_base_event_type(event_type: str) -> str:
-    clean_event_type = str(event_type or "").strip()
-    return _RUNTIME_PROGRESS_BASE_EVENT_TYPES.get(clean_event_type, clean_event_type)

@@ -7,6 +7,11 @@ from pathlib import Path
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentApprovalRequired, AgentRuntimeError
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_replan_base_event_type as _runtime_replan_base_event_type,
+    runtime_replan_request_event_payload as _runtime_replan_event_payload,
+    runtime_replan_request_event_type as _runtime_replan_event_type,
+)
 from apps.shell.agent.runtime.task_progress import append_task_progress_events_for_tool_result
 from packages.security import redact_api_error_text
 
@@ -2850,44 +2855,6 @@ def _runtime_replan_context_payload(payload: Mapping[str, Any]) -> dict[str, Any
         }
         and value not in (None, "", [], {})
     }
-
-
-def _runtime_replan_event_type(payload: Mapping[str, Any]) -> str:
-    if str(payload.get("workflow_run_id") or "").strip():
-        return "workflow.run.replan.requested"
-    if str(payload.get("group_run_id") or payload.get("run_group_id") or "").strip():
-        return "group.run.replan.requested"
-    return "agent.replan.requested"
-
-
-def _runtime_replan_event_payload(
-    payload: Mapping[str, Any],
-    event_type: str,
-) -> dict[str, Any]:
-    event_payload = dict(payload)
-    if event_type == "agent.replan.requested":
-        return event_payload
-    event_payload.setdefault("planner_event_type", "agent.replan.requested")
-    event_payload.setdefault("planner_scope", _runtime_replan_event_scope(event_type))
-    return event_payload
-
-
-def _runtime_replan_event_scope(event_type: str) -> str:
-    if event_type == "workflow.run.replan.requested":
-        return "workflow.run"
-    if event_type == "group.run.replan.requested":
-        return "group.run"
-    return "agent"
-
-
-def _runtime_replan_base_event_type(event_type: str) -> str:
-    if event_type in {
-        "group.run.replan.requested",
-        "workflow.replan.requested",
-        "workflow.run.replan.requested",
-    }:
-        return "agent.replan.requested"
-    return event_type
 
 
 def _runtime_replan_request_exists(
