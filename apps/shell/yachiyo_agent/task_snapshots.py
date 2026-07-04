@@ -200,6 +200,12 @@ def agent_task_snapshot_from_payload(
         run_id=run_id,
         events=recent_events,
     )
+    planner_summary = planner_trace_summary_from_payload(
+        {
+            "planner_summary": payload.get("planner_summary"),
+            "events": recent_events,
+        }
+    )
 
     return AgentTaskSnapshot(
         task_id=task_id,
@@ -215,12 +221,7 @@ def agent_task_snapshot_from_payload(
         tool_calls=tool_calls,
         artifacts=artifacts,
         metadata=_public_task_metadata(payload),
-        planner_summary=planner_trace_summary_from_payload(
-            {
-                "planner_summary": payload.get("planner_summary"),
-                "events": recent_events,
-            }
-        ),
+        planner_summary=planner_summary,
         runtime_debug=runtime_debug_summary_from_runtime_objects(
             run_id=run_id,
             task_id=task_id,
@@ -230,6 +231,10 @@ def agent_task_snapshot_from_payload(
             approvals=approvals,
             artifacts=artifacts,
             replan_recoveries=replan_recoveries,
+            planner_summary=planner_summary,
+            runtime_execution_envelope=runtime_execution_envelope,
+            task_core=task_core,
+            task_progress=task_progress,
             needs_user_action=needs_user_action,
             needs_replan=bool(task_progress and task_progress.needs_replan),
         ),

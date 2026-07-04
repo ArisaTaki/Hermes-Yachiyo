@@ -793,6 +793,18 @@ def test_yachiyo_agent_service_starts_chat_with_full_runtime_execution_envelope(
     ]
     assert task.runtime_execution_envelope.task_progress is not None
     assert task.runtime_execution_envelope.task_progress.total_todos == 3
+    assert task.runtime_debug is not None
+    assert task.runtime_debug.intent_kind == "data_analysis"
+    assert task.runtime_debug.total_todos == 3
+    assert task.runtime_debug.runtime_stage_counts == {
+        "discover": 1,
+        "operate": 1,
+        "produce": 1,
+    }
+    assert task.runtime_debug.plan_tools == ["data.analyze"]
+    assert task.runtime_debug.plan_capabilities == ["data.analysis"]
+    assert "planner" in task.runtime_debug.debug_surfaces
+    assert "task" in task.runtime_debug.debug_surfaces
 
 
 def test_yachiyo_agent_service_plans_shared_chat_execution_envelope() -> None:

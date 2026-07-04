@@ -154,6 +154,10 @@ def workflow_run_snapshot_from_payload(
         skill_traces=timeline_payload.get("skill_traces"),
         children=timeline_payload.get("children"),
         replan_recoveries=timeline_payload.get("replan_recoveries"),
+        planner_summary=timeline_payload.get("planner_summary"),
+        runtime_execution_envelope=timeline_payload.get("runtime_execution_envelope"),
+        task_core=timeline_payload.get("task_core"),
+        task_progress=task_progress,
         needs_user_action=timeline_payload.get("pending_approval") is not None,
         needs_replan=bool(
             task_progress.get("needs_replan")

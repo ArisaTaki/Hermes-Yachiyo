@@ -87,6 +87,7 @@ def run_timeline_snapshot_from_payload(
         events=events,
         needs_user_action=pending_approval is not None,
     )
+    planner_summary = planner_trace_summary_from_payload(payload)
     workflow_run_id = workflow_run_id_from_payload(payload, run_id)
     runtime_execution_envelope = runtime_execution_envelope_from_payload(
         payload,
@@ -154,7 +155,7 @@ def run_timeline_snapshot_from_payload(
         rerun_of_runnable_name=rerun_provenance.get("rerun_of_runnable_name"),
         rerun_original_created_at=rerun_provenance.get("rerun_original_created_at"),
         rerun_original_updated_at=rerun_provenance.get("rerun_original_updated_at"),
-        planner_summary=planner_trace_summary_from_payload(payload),
+        planner_summary=planner_summary,
         runtime_debug=runtime_debug_summary_from_runtime_objects(
             run_id=run_id,
             task_id=_text(payload.get("task_id")),
@@ -169,6 +170,10 @@ def run_timeline_snapshot_from_payload(
             skill_traces=skill_traces,
             children=children,
             replan_recoveries=replan_recoveries,
+            planner_summary=planner_summary,
+            runtime_execution_envelope=runtime_execution_envelope,
+            task_core=task_core,
+            task_progress=task_progress,
             needs_user_action=pending_approval is not None,
             needs_replan=bool(task_progress and task_progress.needs_replan),
         ),

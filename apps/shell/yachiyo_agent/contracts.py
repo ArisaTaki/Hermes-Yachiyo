@@ -552,6 +552,24 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     group_run_id: str | None = None
     workflow_id: str | None = None
     workflow_run_id: str | None = None
+    planner_decision_id: str | None = None
+    planner_plan_id: str | None = None
+    intent_kind: str | None = None
+    intent_title: str | None = None
+    route_to_studio: bool | None = None
+    task_status: str | None = None
+    current_step_id: str | None = None
+    current_step_title: str | None = None
+    current_tool_name: str | None = None
+    total_todos: int = 0
+    completed_todos: int = 0
+    blocked_todos: int = 0
+    total_checkpoints: int = 0
+    completed_checkpoints: int = 0
+    blocked_checkpoints: int = 0
+    runtime_stage_counts: dict[str, int] = Field(default_factory=dict)
+    plan_tools: list[str] = Field(default_factory=list)
+    plan_capabilities: list[str] = Field(default_factory=list)
     event_count: int = 0
     tool_call_count: int = 0
     completed_tool_call_count: int = 0

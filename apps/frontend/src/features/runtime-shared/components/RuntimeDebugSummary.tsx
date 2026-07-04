@@ -101,6 +101,14 @@ export function runtimeDebugSummaryHasContent(summary?: RuntimeDebugSummarySnaps
     || summary.group_run_id
     || summary.workflow_id
     || summary.workflow_run_id
+    || summary.planner_decision_id
+    || summary.planner_plan_id
+    || summary.intent_kind
+    || summary.intent_title
+    || summary.task_status
+    || summary.current_step_id
+    || summary.current_step_title
+    || summary.current_tool_name
     || summary.latest_event_type
     || summary.latest_tool_name
     || summary.latest_tool_status
@@ -120,11 +128,27 @@ function runtimeDebugMetrics(summary: RuntimeDebugSummarySnapshot): RuntimeDebug
   addMetric(metrics, 'waiting_tools', 'waiting', summary.waiting_tool_call_count, 'warning');
   addMetric(metrics, 'approvals', 'approvals', summary.approval_count);
   addMetric(metrics, 'pending_approvals', 'pending', summary.pending_approval_count, 'warning');
+  addProgressMetric(
+    metrics,
+    'todos',
+    'todos',
+    summary.completed_todos,
+    summary.total_todos,
+    summary.blocked_todos ? 'warning' : undefined,
+  );
+  addProgressMetric(
+    metrics,
+    'checkpoints',
+    'checks',
+    summary.completed_checkpoints,
+    summary.total_checkpoints,
+    summary.blocked_checkpoints ? 'warning' : undefined,
+  );
   addMetric(metrics, 'artifacts', 'artifacts', summary.artifact_count);
+  addMetric(metrics, 'replans', 'replans', summary.replan_recovery_count, 'warning');
+  addMetric(metrics, 'children', 'children', summary.child_run_count);
   addMetric(metrics, 'memory', 'memory', summary.memory_trace_count);
   addMetric(metrics, 'skills', 'skills', summary.skill_trace_count);
-  addMetric(metrics, 'children', 'children', summary.child_run_count);
-  addMetric(metrics, 'replans', 'replans', summary.replan_recovery_count, 'warning');
   return metrics.slice(0, 12);
 }
 
@@ -139,14 +163,39 @@ function addMetric(
   metrics.push({ key, label, tone, value });
 }
 
+function addProgressMetric(
+  metrics: RuntimeDebugMetric[],
+  key: string,
+  label: string,
+  completed: number | null | undefined,
+  total: number | null | undefined,
+  tone?: string,
+) {
+  if (typeof total !== 'number' || !Number.isFinite(total) || total <= 0) return;
+  const safeCompleted = typeof completed === 'number' && Number.isFinite(completed) ? completed : 0;
+  metrics.push({ key, label, tone, value: `${safeCompleted}/${total}` });
+}
+
 function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): string[] {
   if (!summary) return [];
+  const runtimeStages = runtimeDebugStageFacts(summary);
+  const planTools = (summary.plan_tools || []).filter(Boolean).slice(0, 3);
+  const planCapabilities = (summary.plan_capabilities || []).filter(Boolean).slice(0, 3);
   return [
+    summary.intent_kind ? `intent ${summary.intent_kind}` : '',
+    summary.intent_title ? `intent title ${summary.intent_title}` : '',
+    summary.task_status ? `task ${summary.task_status}` : '',
+    summary.current_step_title ? `step ${summary.current_step_title}` : '',
+    summary.current_tool_name ? `current tool ${summary.current_tool_name}` : '',
+    summary.route_to_studio ? 'route Studio' : '',
     summary.latest_event_type ? `event ${summary.latest_event_type}` : '',
     summary.latest_tool_name ? `tool ${summary.latest_tool_name}` : '',
     summary.latest_tool_status ? `tool status ${summary.latest_tool_status}` : '',
     summary.latest_approval_id ? `approval ${summary.latest_approval_id}` : '',
     summary.latest_artifact_path ? `artifact ${summary.latest_artifact_path}` : '',
+    planTools.length ? `plan tools ${planTools.join(', ')}` : '',
+    planCapabilities.length ? `capabilities ${planCapabilities.join(', ')}` : '',
+    ...runtimeStages,
   ].filter(Boolean);
 }
 
@@ -155,9 +204,19 @@ function runtimeDebugContextFacts(summary?: RuntimeDebugSummarySnapshot | null):
   return [
     summary.run_id ? `run ${summary.run_id}` : '',
     summary.task_id ? `task ${summary.task_id}` : '',
+    summary.planner_plan_id ? `plan ${summary.planner_plan_id}` : '',
+    summary.planner_decision_id ? `decision ${summary.planner_decision_id}` : '',
     summary.group_run_id ? `group run ${summary.group_run_id}` : '',
     summary.group_id ? `group ${summary.group_id}` : '',
     summary.workflow_run_id ? `workflow run ${summary.workflow_run_id}` : '',
     summary.workflow_id ? `workflow ${summary.workflow_id}` : '',
   ].filter(Boolean).slice(0, 4);
+}
+
+function runtimeDebugStageFacts(summary: RuntimeDebugSummarySnapshot): string[] {
+  const stageCounts = summary.runtime_stage_counts || {};
+  return Object.entries(stageCounts)
+    .filter(([, count]) => typeof count === 'number' && Number.isFinite(count) && count > 0)
+    .slice(0, 3)
+    .map(([stage, count]) => `${stage} ${count}`);
 }
