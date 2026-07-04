@@ -5604,6 +5604,53 @@ class RuntimePlanner:
                     input_preview["query"] = query
                 elif url:
                     input_preview["url"] = url
+            if browser_action == "open_url_screenshot" and url and not tool_name:
+                open_tool = _first_allowed(("browser.open_url", "browser.open"), allowed)
+                capture_tool = _first_allowed(("browser.screenshot", "screen.capture"), allowed)
+                if open_tool and capture_tool:
+                    open_url_step = _step(
+                        intent,
+                        "open-web-url",
+                        "Open web URL",
+                        "browser.research",
+                        open_tool,
+                        input_preview={"url": url},
+                        risk_level="low",
+                        approval_required=False,
+                        depends_on=[prepare_step_id] if prepare_step_id else [],
+                        reason="Open the explicit URL before capturing it.",
+                    )
+                    capture_preview = {"reason": reason} if reason else {}
+                    capture_step = _step(
+                        intent,
+                        "capture-opened-web-page",
+                        "Capture opened web page",
+                        (
+                            "browser.research"
+                            if capture_tool == "browser.screenshot"
+                            else "desktop.visual_verification"
+                        ),
+                        capture_tool,
+                        input_preview=capture_preview,
+                        risk_level="low",
+                        approval_required=False,
+                        depends_on=[open_url_step.step_id],
+                        action=(
+                            "capture_page"
+                            if capture_tool == "browser.screenshot"
+                            else "capture_screen"
+                        ),
+                        reason=(
+                            "Capture the opened URL after navigation because the combined "
+                            "browser screenshot tool is unavailable."
+                        ),
+                    )
+                    return [
+                        *([discover_step] if discover_step is not None else []),
+                        *([prepare_step] if prepare_step is not None else []),
+                        open_url_step,
+                        capture_step,
+                    ]
             main_step = _step(
                 intent,
                 {

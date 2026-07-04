@@ -5211,6 +5211,7 @@ def _web_open_followup_tool_requests(decision: Any, allowed: set[str]) -> list[d
         "click-opened-web-page",
         "key-opened-web-page",
         "scroll-opened-web-page",
+        "capture-opened-web-page",
         "verify-opened-web-page",
     ):
         step = _tool_plan_step(decision, step_id)

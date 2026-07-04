@@ -610,6 +610,50 @@ def test_planner_first_daily_desktop_entrypoint_routes_generic_browser_search() 
         ]
 
 
+def test_planner_first_daily_desktop_entrypoint_falls_back_to_open_url_then_screenshot() -> None:
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "在任意浏览器打开 apple.com 并截图",
+        allowed_tools=["browser.open_url", "screen.capture"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://apple.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "screen.capture",
+            "input": {"reason": "user asked to capture the browser page after opening a URL"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+    ]
+
+
+def test_planner_first_daily_desktop_entrypoint_prefers_browser_screenshot_fallback() -> None:
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "open apple.com in any browser and take a screenshot",
+        allowed_tools=["browser.open_url", "browser.screenshot", "screen.capture"],
+    ) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://apple.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.screenshot",
+            "input": {"reason": "user asked to capture the browser page after opening a URL"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        },
+    ]
+
+
 def test_planner_first_daily_desktop_entrypoint_reads_page_for_ambiguous_click() -> None:
     assert planner_first_daily_desktop_entrypoint_requests(
         "在当前网页点击最像登录的按钮",
