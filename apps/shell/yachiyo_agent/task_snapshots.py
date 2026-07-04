@@ -116,6 +116,11 @@ _CHAT_TOOL_INPUT_TRACE_KEYS = {
     "deferred_context",
     "deferred_continuation",
 }
+_CHAT_TASK_EVENT_PAYLOAD_TRACE_KEYS = {
+    "core_id",
+    "workspace_id",
+    "task_id",
+}
 
 
 def agent_task_snapshot_from_payload(
@@ -552,10 +557,23 @@ def task_status_from_value(value: Any) -> str:
 
 def _chat_visible_events(events: list[PublicRunEvent]) -> list[PublicRunEvent]:
     return [
-        event
+        _chat_sanitized_recent_event(event)
         for event in events
         if event.visibility == "user" and event.sensitivity == "public"
     ]
+
+
+def _chat_sanitized_recent_event(event: PublicRunEvent) -> PublicRunEvent:
+    if not event.event_type.startswith("task."):
+        return event
+    clean_payload = {
+        key: value
+        for key, value in event.payload.items()
+        if key not in _CHAT_TASK_EVENT_PAYLOAD_TRACE_KEYS
+    }
+    if clean_payload == event.payload:
+        return event
+    return event.model_copy(update={"payload": clean_payload})
 
 
 def _desktop_intent_progress_text(

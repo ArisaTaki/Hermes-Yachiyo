@@ -99,6 +99,7 @@ def tool_call_payloads_from_event(event: PublicRunEvent) -> list[dict[str, Any]]
 
 
 def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
+    explicit_payload = event.payload if isinstance(event.payload, Mapping) else {}
     payload = run_event_context_payload(event)
     if event.event_type == _TOOL_INPUT_RESOLUTION_EVENT_TYPE:
         payload = tool_input_resolution_payload(payload)
@@ -140,22 +141,23 @@ def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         "approval_id": approval_id,
         "risk_level": risk_level,
         "policy_reason": policy_reason,
-        "group_id": payload.get("group_id"),
-        "group_run_id": payload.get("group_run_id") or payload.get("run_group_id"),
-        "member_agent_id": payload.get("member_agent_id"),
-        "member_agent_name": payload.get("member_agent_name"),
-        "workflow_id": payload.get("workflow_id"),
-        "workflow_run_id": payload.get("workflow_run_id"),
-        "workflow_node_id": payload.get("workflow_node_id"),
-        "workflow_node_label": payload.get("workflow_node_label"),
-        "core_id": payload.get("core_id"),
-        "workspace_id": payload.get("workspace_id"),
-        "task_id": payload.get("task_id"),
+        "group_id": explicit_payload.get("group_id"),
+        "group_run_id": explicit_payload.get("group_run_id")
+        or explicit_payload.get("run_group_id"),
+        "member_agent_id": explicit_payload.get("member_agent_id"),
+        "member_agent_name": explicit_payload.get("member_agent_name"),
+        "workflow_id": explicit_payload.get("workflow_id"),
+        "workflow_run_id": explicit_payload.get("workflow_run_id"),
+        "workflow_node_id": explicit_payload.get("workflow_node_id"),
+        "workflow_node_label": explicit_payload.get("workflow_node_label"),
+        "core_id": explicit_payload.get("core_id"),
+        "workspace_id": explicit_payload.get("workspace_id"),
+        "task_id": _tool_call_preview_task_id(event, explicit_payload),
     }
     for key in (*_PLANNER_TRACE_KEYS, *_RUNTIME_TRACE_KEYS):
         if key == "source" and is_daily_desktop_intent_tool_event(event.event_type):
             continue
-        trace_context[key] = payload.get(key)
+        trace_context[key] = explicit_payload.get(key)
     merge_tool_trace_into_input_preview(
         normalized,
         trace_context,
@@ -290,6 +292,20 @@ def merge_tool_trace_into_input_preview(
     for key, value in clean_context.items():
         preview.setdefault(key, value)
     source["input_preview"] = preview
+
+
+def _tool_call_preview_task_id(
+    event: PublicRunEvent,
+    payload: Mapping[str, Any],
+) -> Any:
+    task_id = payload.get("task_id")
+    if not task_id:
+        return None
+    if is_daily_desktop_intent_tool_event(event.event_type):
+        return task_id
+    if payload.get("core_id") or payload.get("workspace_id"):
+        return task_id
+    return None
 
 
 def merge_tool_call_snapshots(

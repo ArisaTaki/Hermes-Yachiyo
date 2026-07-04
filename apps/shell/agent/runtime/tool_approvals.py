@@ -76,7 +76,7 @@ class ToolPendingApprovalBuilder:
     ) -> dict[str, Any]:
         raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
         context = _pending_approval_context(tool_request)
-        input_preview = _tool_input_preview(raw_input)
+        input_preview = _pending_approval_input_preview(_tool_input_preview(raw_input), context)
         return {
             "approval_id": str(self._approval_id_factory()),
             "tool": normalize_tool_name(tool_request.get("tool")),
@@ -213,11 +213,15 @@ def _pending_approval_resume_input_preview(
 ) -> dict[str, Any]:
     pending_preview = pending.get("input_preview")
     if isinstance(pending_preview, dict):
-        return deepcopy(pending_preview)
+        computed = deepcopy(pending_preview)
     else:
         raw_input = tool_request.get("input") if isinstance(tool_request.get("input"), dict) else {}
         computed = _tool_input_preview(raw_input)
-        return dict(computed) if isinstance(computed, dict) else {}
+    computed = _pending_approval_input_preview(
+        computed,
+        _pending_approval_context(tool_request),
+    )
+    return dict(computed) if isinstance(computed, dict) else {}
 
 
 @dataclass(frozen=True)

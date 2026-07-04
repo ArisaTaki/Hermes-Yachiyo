@@ -136,7 +136,12 @@ def _is_approval_resolution_event_type(event_type: str) -> bool:
     )
 
 
-def merge_trace_context_into_approval(source: dict[str, Any], payload: dict[str, Any]) -> None:
+def merge_trace_context_into_approval(
+    source: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    preview_payload: Mapping[str, Any] | None = None,
+) -> None:
     context = {
         key: payload.get(key)
         for key in (
@@ -163,9 +168,29 @@ def merge_trace_context_into_approval(source: dict[str, Any], payload: dict[str,
         return
     for key, value in context.items():
         source.setdefault(key, value)
+    preview_source = preview_payload if isinstance(preview_payload, Mapping) else payload
+    preview_context = {
+        key: preview_source.get(key)
+        for key in context
+        if preview_source.get(key)
+    }
+    if preview_source.get("member_agent_id") and not preview_context.get("source_runnable_id"):
+        preview_context["source_runnable_id"] = preview_source.get("member_agent_id")
+    if preview_source.get("member_agent_name") and not preview_context.get("source_runnable_name"):
+        preview_context["source_runnable_name"] = preview_source.get("member_agent_name")
+    if preview_source.get("group_run_id") and not preview_context.get("run_group_id"):
+        preview_context["run_group_id"] = preview_source.get("group_run_id")
+    if preview_source.get("run_group_id") and not preview_context.get("group_run_id"):
+        preview_context["group_run_id"] = preview_source.get("run_group_id")
+    if (
+        preview_context.get("task_id")
+        and not preview_context.get("core_id")
+        and not preview_context.get("workspace_id")
+    ):
+        preview_context.pop("task_id", None)
     input_preview = source.get("input_preview")
     preview = dict(input_preview) if isinstance(input_preview, Mapping) else {}
-    for key, value in context.items():
+    for key, value in preview_context.items():
         preview.setdefault(key, value)
     if preview:
         source["input_preview"] = preview
@@ -175,12 +200,12 @@ def _approval_required_payload_from_event(event: PublicRunEvent) -> dict[str, An
     raw_payload = dict(event.payload)
     payload = run_event_context_payload(event, raw_payload)
     pending = payload.get("pending_approval") or payload.get("approval")
-    source = dict(pending) if isinstance(pending, Mapping) else raw_payload
+    source = dict(pending) if isinstance(pending, Mapping) else dict(raw_payload)
     if not source and event.detail:
         source = {"tool": event.detail}
     if not source:
         return {}
-    _normalize_approval_payload_for_event(source, event, payload)
+    _normalize_approval_payload_for_event(source, event, payload, preview_payload=raw_payload)
     source.setdefault("approval_id", f"{event.run_id}:{event.event_type}:{event.sequence}")
     source.setdefault("status", "pending")
     source.setdefault("created_at", event.created_at)
@@ -192,12 +217,12 @@ def _approval_resolution_payload_from_event(event: PublicRunEvent) -> dict[str, 
     raw_payload = dict(event.payload)
     payload = run_event_context_payload(event, raw_payload)
     pending = payload.get("pending_approval") or payload.get("approval")
-    source = dict(pending) if isinstance(pending, Mapping) else raw_payload
+    source = dict(pending) if isinstance(pending, Mapping) else dict(raw_payload)
     if not source and event.detail:
         source = {"tool": event.detail}
     if not source:
         return {}
-    _normalize_approval_payload_for_event(source, event, payload)
+    _normalize_approval_payload_for_event(source, event, payload, preview_payload=raw_payload)
     source["status"] = _approval_status_from_event_type(event.event_type)
     source.setdefault("resolved_at", event.created_at)
     source.setdefault("run_id", event.run_id)
@@ -212,6 +237,8 @@ def _normalize_approval_payload_for_event(
     source: dict[str, Any],
     event: PublicRunEvent,
     payload: dict[str, Any],
+    *,
+    preview_payload: Mapping[str, Any] | None = None,
 ) -> None:
     if event.event_type.startswith("group.") and not source.get("tool"):
         source["tool"] = "group.approval"
@@ -229,7 +256,7 @@ def _normalize_approval_payload_for_event(
         source["title"] = f"Approve {payload['workflow_node_label']}"
     if not source.get("title") and payload.get("member_agent_name"):
         source["title"] = f"Approve {payload['member_agent_name']}"
-    merge_trace_context_into_approval(source, payload)
+    merge_trace_context_into_approval(source, payload, preview_payload=preview_payload)
 
 
 def _approval_status_from_event_type(event_type: str) -> str:
