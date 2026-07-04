@@ -1753,13 +1753,13 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     assert "yachiyo_runtime_planner" not in metadata
     assert metadata["daily_desktop_tool"] == "app.open"
     assert metadata["daily_desktop_tools"] == ["app.open"]
-    assert metadata["daily_desktop_source"] == "daily_desktop_intent"
-    assert metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
+    assert metadata["daily_desktop_source"] == "runtime_planner"
+    assert metadata["daily_desktop_planning_reason"] == "planner_desktop_operation"
     assert metadata["entrypoint_plan"] is True
-    assert metadata["entrypoint_plan_source"] == "daily_desktop_intent"
-    assert metadata["entrypoint_plan_reason"] == "clear_daily_desktop_intent"
+    assert metadata["entrypoint_plan_source"] == "runtime_planner"
+    assert metadata["entrypoint_plan_reason"] == "planner_desktop_operation"
     assert metadata["entrypoint_plan_tools"] == ["app.open"]
-    assert metadata["entrypoint_plan_legacy_fallback"] is True
+    assert metadata["entrypoint_plan_legacy_fallback"] is False
     planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
     planner_event_types = [event[1]["event_type"] for event in planner_events]
     assert planner_event_types[:3] == [
@@ -1772,13 +1772,13 @@ def test_legacy_chat_task_starter_records_runtime_planner_metadata_and_events() 
     selection_events = [
         event for event in planner_events if event[1]["event_type"] == "agent.plan.selection"
     ]
-    assert selection_events[0][1]["payload"]["selection_source"] == "daily_desktop_intent"
+    assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
     assert selection_events[0][1]["payload"]["selected_tools"] == [
         "desktop.list_apps",
         "app.open",
         "desktop.active_window",
     ]
-    assert selection_events[0][1]["payload"]["legacy_request_count"] == 1
+    assert selection_events[0][1]["payload"]["legacy_request_count"] == 0
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
@@ -2441,7 +2441,7 @@ def test_legacy_chat_task_starter_does_not_pass_full_plan_for_approval_tools() -
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
     assert "yachiyo_runtime_planner" not in metadata
     assert metadata["daily_desktop_tool"] == "app.quit"
-    assert metadata["daily_desktop_source"] == "daily_desktop_intent"
+    assert metadata["daily_desktop_source"] == "runtime_planner"
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
@@ -2474,7 +2474,7 @@ def test_legacy_chat_task_starter_does_not_pass_hotkey_safe_shortcut_full_plan()
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
     assert "yachiyo_runtime_planner" not in metadata
     assert metadata["daily_desktop_tool"] == "desktop.safe_shortcut"
-    assert metadata["daily_desktop_source"] == "daily_desktop_intent"
+    assert metadata["daily_desktop_source"] == "runtime_planner"
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
@@ -2484,7 +2484,7 @@ def test_legacy_chat_task_starter_does_not_pass_hotkey_safe_shortcut_full_plan()
         event for event in runtime.calls if event[0] == "append_run_event"
         and event[1]["event_type"] == "agent.plan.selection"
     ]
-    assert selection_events[0][1]["payload"]["selection_source"] == "daily_desktop_intent"
+    assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
     assert selection_events[0][1]["payload"]["selected_tools"] == ["desktop.safe_shortcut"]
 
 

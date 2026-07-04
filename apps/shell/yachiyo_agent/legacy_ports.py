@@ -438,26 +438,16 @@ def _legacy_daily_desktop_metadata_compat(
     return False
 
 
-def _legacy_daily_desktop_compatible_metadata(metadata: dict[str, Any]) -> dict[str, Any]:
-    if str(metadata.get("daily_desktop_source") or "").strip() != "runtime_planner":
-        return metadata
-    return {
-        **metadata,
-        "daily_desktop_source": "daily_desktop_intent",
-        "daily_desktop_planning_reason": "clear_daily_desktop_intent",
-        "entrypoint_plan_source": "daily_desktop_intent",
-        "entrypoint_plan_reason": "clear_daily_desktop_intent",
-        "entrypoint_plan_legacy_fallback": True,
-    }
-
-
 def _expose_runtime_planner_user_metadata(
     requests: list[dict[str, Any]],
     existing_user_metadata: dict[str, Any] | None,
 ) -> bool:
     if _prefer_execution_requests_for_metadata(existing_user_metadata):
         return True
-    if _legacy_daily_desktop_metadata_compat(requests, existing_user_metadata):
+    if _legacy_daily_desktop_metadata_compat(
+        requests,
+        existing_user_metadata,
+    ) and not _all_requests_from_runtime_planner(requests):
         return False
     tools = set(_tool_names_for_requests(requests))
     if not tools:
@@ -484,6 +474,16 @@ def _expose_runtime_planner_user_metadata(
         or reason.startswith("planner_prefetch_")
         or reason.startswith("planner_fallback_data_analysis")
         for reason in reasons
+    )
+
+
+def _all_requests_from_runtime_planner(requests: list[dict[str, Any]]) -> bool:
+    if not requests:
+        return False
+    return all(
+        str(request.get("source") or "").strip() == "runtime_planner"
+        for request in requests
+        if isinstance(request, dict)
     )
 
 
@@ -774,13 +774,6 @@ class LegacyChatTaskStarter:
                 direct_tool_selection_payload,
                 selected_requests,
             )
-            direct_tool_selection_payload = _legacy_daily_desktop_selection_payload(
-                direct_tool_selection_payload,
-                prompt or execution_prompt,
-                metadata,
-                allowed_entrypoint_tools,
-                selected_requests,
-            )
             envelope_tool_requests = _safe_runtime_execution_envelope_requests(
                 prompt or execution_prompt,
                 metadata,
@@ -961,8 +954,6 @@ class LegacyChatTaskStarter:
         visible_requests = _visible_daily_desktop_metadata_requests(desktop_requests)
         existing_user_metadata = _task_message_metadata(chat_session, task_id, role="user")
         entrypoint_metadata = entrypoint_plan_user_metadata(visible_requests)
-        if _legacy_daily_desktop_metadata_compat(visible_requests, existing_user_metadata):
-            entrypoint_metadata = _legacy_daily_desktop_compatible_metadata(entrypoint_metadata)
         planner_metadata = (
             runtime_planner_metadata(planner_decision)
             if _expose_runtime_planner_user_metadata(visible_requests, existing_user_metadata)
@@ -2624,40 +2615,6 @@ def _selection_payload_with_selected_source(
             }
         )
     return result
-
-
-def _legacy_daily_desktop_selection_payload(
-    payload: dict[str, Any],
-    prompt: str,
-    metadata: dict[str, Any] | None,
-    allowed_tools: list[str],
-    selected_requests: list[dict[str, Any]],
-) -> dict[str, Any]:
-    if str(payload.get("selection_source") or "").strip() != "runtime_planner":
-        return payload
-    visible_requests = _visible_daily_desktop_metadata_requests(selected_requests)
-    if not _legacy_daily_desktop_metadata_compat(visible_requests, metadata):
-        return payload
-    legacy_requests = daily_desktop_entrypoint_requests(
-        prompt,
-        metadata=metadata,
-        allowed_tools=allowed_tools,
-    )
-    legacy_tools = _tool_names_for_requests(legacy_requests) or _tool_names_for_requests(
-        visible_requests
-    )
-    selected_tools = _tool_names_for_requests(visible_requests)
-    return {
-        **payload,
-        "selection_source": "daily_desktop_intent",
-        "selection_role": "legacy_desktop_intent_fallback",
-        "selection_reason": "legacy_compatible_daily_desktop_entrypoint",
-        "legacy_fallback": True,
-        "legacy_tools": legacy_tools,
-        "legacy_request_count": len(legacy_tools),
-        "selected_tools": selected_tools,
-        "selected_request_count": len(selected_tools),
-    }
 
 
 def _annotate_legacy_selected_requests_with_planner_trace(
