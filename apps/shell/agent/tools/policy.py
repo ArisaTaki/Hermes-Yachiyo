@@ -630,6 +630,15 @@ class ToolDescriptor:
             raise AgentRuntimeError(f"{self.name} 参数 app_name 必须是非空字符串")
         if self.name == "app.focus_window" and not str(payload.get("title_contains") or "").strip():
             raise AgentRuntimeError("app.focus_window 参数 title_contains 必须是非空字符串")
+        if self.name in {
+            "app.open",
+            "app.focus",
+            "desktop.open_app",
+            "desktop.focus_app",
+        }:
+            for key in ("selection_source", "query", "app_resolution_reason"):
+                if key in payload and not isinstance(payload.get(key), str):
+                    raise AgentRuntimeError(f"{self.name} 参数 {key} 必须是字符串")
         if self.name == "media.apple_music_play" and not str(
             payload.get("query") or ""
         ).strip():
@@ -914,6 +923,22 @@ class ToolDescriptor:
         serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True)
         if _redact_secrets(serialized) != serialized:
             raise AgentRuntimeError(f"{self.name} 参数包含敏感凭据，已拒绝执行和持久化")
+
+
+_APP_SELECTION_METADATA_PROPERTIES = {
+    "selection_source": {
+        "type": "string",
+        "description": "Optional runtime discovery source, such as desktop.list_apps.",
+    },
+    "query": {
+        "type": "string",
+        "description": "Optional original app discovery query used to select the app.",
+    },
+    "app_resolution_reason": {
+        "type": "string",
+        "description": "Optional short reason for the selected app resolution.",
+    },
+}
 
 
 TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
@@ -1421,8 +1446,8 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
         name="desktop.list_apps",
         description=(
             "Discover installed macOS application bundles by name, optionally filtered "
-            "by a user-provided app query. Use before app.open when the exact app name "
-            "is uncertain."
+            "by a user-provided app query. Use before desktop.open_app/app.open when "
+            "the exact app name is uncertain."
         ),
         properties={
             "query": {
@@ -1441,7 +1466,10 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "Open a local desktop application by user-facing display name. This is the "
             "generic desktop operation alias for app.open."
         ),
-        properties={"app_name": {"type": "string", "description": "Application name."}},
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            **_APP_SELECTION_METADATA_PROPERTIES,
+        },
         required=("app_name",),
     ),
     "desktop.focus_app": ToolDescriptor(
@@ -1450,7 +1478,10 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
             "Bring a local desktop application to the foreground. This is the generic "
             "desktop operation alias for app.focus."
         ),
-        properties={"app_name": {"type": "string", "description": "Application name."}},
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            **_APP_SELECTION_METADATA_PROPERTIES,
+        },
         required=("app_name",),
     ),
     "desktop.list_windows": ToolDescriptor(
@@ -1682,13 +1713,19 @@ TOOL_DESCRIPTORS: dict[str, ToolDescriptor] = {
     "app.open": ToolDescriptor(
         name="app.open",
         description="Open a local desktop application by display name.",
-        properties={"app_name": {"type": "string", "description": "Application name."}},
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            **_APP_SELECTION_METADATA_PROPERTIES,
+        },
         required=("app_name",),
     ),
     "app.focus": ToolDescriptor(
         name="app.focus",
         description="Bring a local desktop application to the foreground.",
-        properties={"app_name": {"type": "string", "description": "Application name."}},
+        properties={
+            "app_name": {"type": "string", "description": "Application name."},
+            **_APP_SELECTION_METADATA_PROPERTIES,
+        },
         required=("app_name",),
     ),
     "app.focus_window": ToolDescriptor(

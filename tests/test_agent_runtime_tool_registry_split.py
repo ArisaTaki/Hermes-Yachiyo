@@ -1006,6 +1006,23 @@ def test_desktop_list_apps_schema_accepts_optional_query_and_limit() -> None:
         ToolDescriptorRegistry.validate_payload("desktop.list_apps", {"limit": 0})
 
 
+def test_desktop_app_open_focus_schemas_accept_discovery_metadata() -> None:
+    payload = {
+        "app_name": "PixelForge",
+        "selection_source": "desktop.list_apps",
+        "query": "image editor",
+        "app_resolution_reason": "best installed app match",
+    }
+    for tool_name in ("app.open", "app.focus", "desktop.open_app", "desktop.focus_app"):
+        ToolDescriptorRegistry.validate_payload(tool_name, payload)
+
+    with pytest.raises(AgentRuntimeError, match="desktop.open_app 参数 selection_source 必须是字符串"):
+        ToolDescriptorRegistry.validate_payload(
+            "desktop.open_app",
+            {"app_name": "PixelForge", "selection_source": {"tool": "desktop.list_apps"}},
+        )
+
+
 def test_browser_portable_alias_schemas_validate_payloads() -> None:
     ToolDescriptorRegistry.validate_payload("browser.search", {"query": "open hanako"})
     ToolDescriptorRegistry.validate_payload("browser.open", {"url": "https://example.com"})
