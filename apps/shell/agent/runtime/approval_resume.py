@@ -152,7 +152,12 @@ class ApprovalResumeCoordinator:
             raise AgentRuntimeError(
                 "Approval resume coordinator is missing custom API continuation"
             )
-        handoff = self.continuation_handoff_after_approved_tool(agent, context)
+        try:
+            handoff = self.continuation_handoff_after_approved_tool(agent, context)
+        except AgentRuntimeError:
+            if not _approval_resume_has_pending_replan_request(context):
+                raise
+            handoff = ToolApprovalContinuationHandoff.from_context(agent, context)
         direct_result = _daily_desktop_resume_result_after_remaining_tools(context)
         if direct_result:
             return direct_result
@@ -376,6 +381,20 @@ def _approval_resume_remaining_requests_after_tool(
         allowed_tools=context.allowed_tools,
     )
     return [verification] if verification else []
+
+
+def _approval_resume_has_pending_replan_request(context: ToolApprovalResumeContext) -> bool:
+    for event in reversed(context.timeline):
+        if not isinstance(event, Mapping):
+            continue
+        event_type = str(event.get("event") or event.get("event_type") or "").strip()
+        if event_type != "agent.replan.requested":
+            continue
+        payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+        status = str(event.get("status") or payload.get("status") or "requested").strip()
+        if status in {"", "requested", "pending"}:
+            return True
+    return False
 
 
 def _daily_desktop_resume_result_after_remaining_tools(

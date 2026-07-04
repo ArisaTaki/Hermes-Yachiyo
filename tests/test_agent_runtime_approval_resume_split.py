@@ -313,6 +313,115 @@ def test_approval_resume_records_replan_and_blocked_progress_for_failed_tool() -
     }
 
 
+def test_approval_resume_continues_runtime_replan_after_failed_approved_tool() -> None:
+    timeline = [
+        _timeline(
+            "agent.plan.created",
+            "plan",
+            decision_id="decision-1",
+            plan_id="plan-1",
+            plan={
+                "plan_id": "plan-1",
+                "tool_plan": {
+                    "steps": [
+                        {
+                            "step_id": "run-analysis",
+                            "tool_name": "terminal.run",
+                        }
+                    ]
+                },
+            },
+        )
+    ]
+    continued: list[dict[str, Any]] = []
+    context = ToolApprovalResumeContext(
+        run_id="run-approval",
+        timeline=timeline,
+        artifacts=[],
+        broker={"broker": True},
+        allowed_tools=["terminal.run", "python.run"],
+        budget={"events": 4},
+        messages=[{"role": "assistant", "content": "Need approval"}],
+        tool_request={
+            "tool": "terminal.run",
+            "input": {"command": "python analyze.py"},
+            "step_id": "run-analysis",
+            "capability_id": "terminal.execution",
+            "decision_id": "decision-1",
+            "plan_id": "plan-1",
+            "fallback_tools": ["python.run"],
+            "replan_triggers": ["tool_failure"],
+        },
+        tool_name="terminal.run",
+        input_preview={"command": "python analyze.py"},
+        remaining_requests=[],
+        next_iteration=3,
+    )
+
+    def continue_custom_api_agent(
+        agent: dict[str, Any],
+        user_goal: str,
+        broker: Any,
+        handoff_timeline: list[dict[str, Any]],
+        artifacts: list[dict[str, Any]],
+        *,
+        messages: list[dict[str, Any]],
+        start_iteration: int,
+        run_id: str,
+        budget: Any,
+    ) -> str:
+        replan_event = next(
+            event
+            for event in handoff_timeline
+            if event["event"] == "agent.replan.requested"
+        )
+        continued.append(
+            {
+                "agent": agent,
+                "user_goal": user_goal,
+                "broker": broker,
+                "artifacts": artifacts,
+                "messages": messages,
+                "start_iteration": start_iteration,
+                "run_id": run_id,
+                "budget": budget,
+                "replan": replan_event["payload"],
+            }
+        )
+        return "Recovered through runtime replan."
+
+    coordinator = ApprovalResumeCoordinator(
+        call_agent_tool=lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "script failed",
+        },
+        fatal_tool_failure_detail=lambda *_args: "terminal.run failed fatally",
+        append_tool_result_message=_append_tool_result_message,
+        run_tool_requests=_run_remaining_tool_requests,
+        timeline_factory=_timeline,
+        continue_custom_api_agent=continue_custom_api_agent,
+    )
+
+    result = coordinator.continue_and_project_after_approved_tool(
+        agent={"agent_id": "agent-1"},
+        context=context,
+        project_completed=lambda _context, text: {"status": "completed", "result": text},
+        project_required=lambda *_args: {"status": "approval_required"},
+        project_failed=lambda _context, error: {"status": "failed", "error": error},
+    )
+
+    assert result == {
+        "status": "completed",
+        "result": "Recovered through runtime replan.",
+    }
+    assert len(continued) == 1
+    assert continued[0]["start_iteration"] == 3
+    assert continued[0]["run_id"] == "run-approval"
+    assert continued[0]["replan"]["source_step_id"] == "run-analysis"
+    assert continued[0]["replan"]["source_tool_name"] == "terminal.run"
+    assert continued[0]["replan"]["fallback_tools"] == ["python.run"]
+
+
 def _approved_tool_call(
     tool_request: dict[str, Any],
     _allowed_tools: list[str],
