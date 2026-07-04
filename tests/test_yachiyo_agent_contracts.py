@@ -5516,6 +5516,9 @@ def test_run_timeline_snapshot_projects_runtime_envelope_retry_recovery() -> Non
                         "tool_name": "desktop.open_app",
                         "input": {"app_name": "Apple Music"},
                         "status": "blocked",
+                        "runtime_stage": "verify",
+                        "replan_triggers": ["verification_failed"],
+                        "replan_signal_ids": ["replan-open-app-verify"],
                         "observation_evidence": {
                             "blocking_condition": "foreground_focus_unavailable",
                             "foreground_required": True,
@@ -5562,6 +5565,16 @@ def test_run_timeline_snapshot_projects_runtime_envelope_retry_recovery() -> Non
             "step_id": "open-app",
             "todo_id": "todo-open-app",
         }
+    ]
+    assert recovery.recovery_actions[0].metadata["runtime_stage"] == "verify"
+    assert recovery.recovery_actions[0].metadata["replan_triggers"] == [
+        "verification_failed"
+    ]
+    assert recovery.recovery_actions[0].metadata["replan_signal_ids"] == [
+        "replan-open-app-verify"
+    ]
+    assert recovery.recovery_actions[0].metadata["verification_target_step_ids"] == [
+        "open-app"
     ]
 
 

@@ -1243,6 +1243,13 @@ def _runtime_execution_request_recovery_snapshot(
     risk_level = "medium" if approval_required else "low"
     verification_targets = _runtime_execution_verification_targets(request, retry)
     action_target = _runtime_execution_action_target(request, retry)
+    action_metadata = _runtime_execution_recovery_action_metadata(
+        request,
+        retry,
+        envelope=envelope,
+        source_request_id=source_request_id,
+        verification_targets=verification_targets,
+    )
     deferred_tool = _first_text(_runtime_request_value(request, "deferred_tool"))
     deferred_input = _mapping(_runtime_request_value(request, "deferred_input"))
     deferred_context = _mapping(_runtime_request_value(request, "deferred_context"))
@@ -1275,11 +1282,7 @@ def _runtime_execution_request_recovery_snapshot(
         observation_evidence=evidence,
         observation_retry=retry,
         verification_targets=verification_targets,
-        metadata={
-            "runtime_execution_envelope_id": envelope.envelope_id,
-            "runtime_execution_request_id": source_request_id,
-            "runtime_retry_source": "runtime_execution_envelope",
-        },
+        metadata=action_metadata,
     )
     return ReplanRecoverySnapshot(
         request_id=request_id,
@@ -1322,6 +1325,68 @@ def _runtime_execution_request_recovery_snapshot(
         created_at=created_at,
         updated_at=updated_at or created_at,
     )
+
+
+def _runtime_execution_recovery_action_metadata(
+    request: RuntimeExecutionRequestSnapshot | Mapping[str, Any],
+    retry: Mapping[str, Any],
+    *,
+    envelope: RuntimeExecutionEnvelopeSnapshot,
+    source_request_id: str,
+    verification_targets: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "runtime_execution_envelope_id": envelope.envelope_id,
+        "runtime_execution_request_id": source_request_id,
+        "runtime_retry_source": "runtime_execution_envelope",
+    }
+    source_step_id = _first_text(_runtime_request_value(request, "step_id"))
+    if source_step_id:
+        metadata["source_step_id"] = source_step_id
+    runtime_stage = _first_text(_runtime_request_value(request, "runtime_stage"))
+    if runtime_stage:
+        metadata["runtime_stage"] = runtime_stage
+    replan_signal_ids = _runtime_execution_recovery_string_list(
+        request,
+        retry,
+        "replan_signal_ids",
+    )
+    if replan_signal_ids:
+        metadata["replan_signal_ids"] = replan_signal_ids
+    replan_triggers = _runtime_execution_recovery_string_list(
+        request,
+        retry,
+        "replan_triggers",
+    )
+    if replan_triggers:
+        metadata["replan_triggers"] = replan_triggers
+    target_step_ids = _verification_target_step_ids(verification_targets)
+    if target_step_ids:
+        metadata["verification_target_step_ids"] = target_step_ids
+    return metadata
+
+
+def _runtime_execution_recovery_string_list(
+    request: RuntimeExecutionRequestSnapshot | Mapping[str, Any],
+    retry: Mapping[str, Any],
+    key: str,
+) -> list[str]:
+    values: list[str] = []
+    _extend_unique(values, _string_list(_runtime_request_value(request, key)))
+    _extend_unique(values, _string_list(retry.get(key)))
+    singular = key[:-1] if key.endswith("s") else key
+    _extend_unique(values, [_runtime_request_value(request, singular)])
+    _extend_unique(values, [retry.get(singular)])
+    return values
+
+
+def _verification_target_step_ids(
+    verification_targets: Iterable[Mapping[str, Any]],
+) -> list[str]:
+    step_ids: list[str] = []
+    for target in verification_targets:
+        _extend_unique(step_ids, [target.get("step_id")])
+    return step_ids
 
 
 def _runtime_request_value(
