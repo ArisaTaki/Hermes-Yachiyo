@@ -27732,6 +27732,33 @@ def test_planner_desktop_tool_requests_maps_named_music_query_to_app_search_plan
     ]
 
 
+def test_planner_desktop_tool_requests_maps_unknown_named_media_app_to_search_plan() -> None:
+    requests = planner_desktop_tool_requests(
+        "open VLC play test",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "media.music_app_open_and_play",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["input"] == {"query": "VLC", "limit": 20}
+    assert requests[1]["input"] == {"app_name": "VLC", "action": "find"}
+    assert requests[2]["input"] == {"text": "test"}
+    assert requests[4]["input"] == {"app_name": "VLC"}
+
+
 def test_planner_desktop_tool_requests_uses_generic_desktop_media_search() -> None:
     requests = planner_desktop_tool_requests(
         "打开 Spotify 播放晴天",

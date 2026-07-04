@@ -58,6 +58,7 @@ from .desktop_plan_hints import (
     hotkey_hint,
     media_app_prepare_plan,
     media_app_query_search_plan,
+    media_app_scope_hint,
     media_playback_hint,
     media_tool_preview,
     safe_click_hint,
@@ -26013,6 +26014,9 @@ def _explicit_media_playback_app_scope_requested(text: str) -> bool:
     value = _clean_prompt(text)
     if not value:
         return False
+    scoped_app_name = media_app_scope_hint(value)
+    if scoped_app_name and scoped_app_name != "Music":
+        return True
     return bool(
         re.search(
             r"(?:apple\s*music|苹果音乐|spotify|网易云(?:音乐)?|qq\s*音乐|qq\s*music|youtube\s*music)",
