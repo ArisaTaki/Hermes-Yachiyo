@@ -5160,6 +5160,180 @@ def test_agent_run_runtime_planner_entrypoint_surfaces_deferred_ui_context(
         service.close()
 
 
+def test_agent_run_runtime_planner_entrypoint_resumes_deferred_ui_approval_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    service = make_service(tmp_path)
+    desktop_calls: list[tuple[str, dict[str, Any]]] = []
+
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict[str, Any]:
+        desktop_calls.append(("desktop.list_apps", {"query": query, "limit": limit}))
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": f"Found PixelForge for {query}",
+            "data": {
+                "query": query,
+                "apps": [{"name": "PixelForge", "path": "/Applications/PixelForge.app"}],
+                "best_match": {
+                    "name": "PixelForge",
+                    "path": "/Applications/PixelForge.app",
+                    "match_score": 96,
+                    "match_confidence": "high",
+                },
+            },
+        }
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        desktop_calls.append(("app.open", {"app_name": app_name}))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        desktop_calls.append(
+            (
+                "desktop.ui_elements",
+                {"role_filter": role_filter, "limit": limit, "app_name": app_name},
+            )
+        )
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Read PixelForge export controls",
+            "data": {
+                "app_name": "PixelForge",
+                "elements": [{"role": "AXButton", "name": "Export"}],
+            },
+        }
+
+    def fake_click_ui_element(
+        target: str,
+        *,
+        role_filter: str = "",
+        limit: Any = 80,
+        click_count: Any = 1,
+        expected_app_name: str = "",
+    ) -> dict[str, Any]:
+        desktop_calls.append(
+            (
+                "desktop.click_ui_element",
+                {
+                    "target": target,
+                    "role_filter": role_filter,
+                    "limit": limit,
+                    "click_count": click_count,
+                    "expected_app_name": expected_app_name,
+                },
+            )
+        )
+        return {
+            "ok": True,
+            "action": "desktop.click_ui_element",
+            "summary": f"Clicked {target}",
+            "data": {"target": target, "matched_label": target, "click_count": click_count},
+        }
+
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.list_apps", fake_list_apps)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.app_open", fake_app_open)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.ui_elements", fake_ui_elements)
+    monkeypatch.setattr("apps.shell.agent.tools.desktop.click_ui_element", fake_click_ui_element)
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: pytest.fail(
+            "deferred desktop approval resume should complete without model"
+        ),
+    )
+    try:
+        agent = service.create_agent(
+            {
+                "name": "Deferred Desktop Approval Agent",
+                "model_mode": "custom_api",
+                "model_config": {
+                    "base_url": "https://api.example.test/v1",
+                    "model": "demo-model",
+                    "api_key": "sk-secret",
+                },
+                "tool_policy": {
+                    "allowed_tools": [
+                        "desktop.list_apps",
+                        "app.open",
+                        "desktop.click_ui_element",
+                        "desktop.ui_elements",
+                    ],
+                    "approval_required": {},
+                },
+            }
+        )
+
+        waiting = service.create_agent_run(
+            {
+                "agent_id": agent["agent_id"],
+                "user_goal": "打开 PixelForge 并点击 Export",
+                "runtime_planner_entrypoint": True,
+            }
+        )
+
+        assert waiting["status"] == "approval_required"
+        assert waiting["pending_approval"]["tool"] == "desktop.click_ui_element"
+
+        resumed = service.approve_run_approval(waiting["run_id"])
+        events = service.list_run_events(waiting["run_id"])["events"]
+        event_types = [event["event_type"] for event in events]
+        completed_event = next(
+            event
+            for event in events
+            if event["event_type"] == "agent.desktop.intent_completed"
+        )
+
+        assert resumed["status"] == "completed"
+        assert not resumed.get("pending_approval")
+        assert "已点击前台控件：Export。" in resumed["result"]
+        assert "desktop.open_path" not in resumed["result"]
+        assert desktop_calls == [
+            ("desktop.list_apps", {"query": "PixelForge", "limit": 20}),
+            ("app.open", {"app_name": "PixelForge"}),
+            (
+                "desktop.ui_elements",
+                {"role_filter": "", "limit": 80, "app_name": "PixelForge"},
+            ),
+            (
+                "desktop.click_ui_element",
+                {
+                    "target": "Export",
+                    "role_filter": "",
+                    "limit": 80,
+                    "click_count": 1,
+                    "expected_app_name": "",
+                },
+            ),
+            (
+                "desktop.ui_elements",
+                {"role_filter": "", "limit": 80, "app_name": ""},
+            ),
+        ]
+        assert "model.request.started" not in event_types
+        assert "model.requested" not in event_types
+        assert completed_event["payload"]["tool"] == "desktop.click_ui_element"
+        assert completed_event["payload"]["tools"] == [
+            "app.open",
+            "desktop.click_ui_element",
+            "desktop.ui_elements",
+        ]
+        assert completed_event["payload"]["step_id"] == "operate-foreground-ui"
+        assert completed_event["payload"]["runtime_stage"] == "operate"
+    finally:
+        service.close()
+
+
 def test_agent_runtime_planner_file_search_auto_analyzes_single_data_file(
     tmp_path,
     monkeypatch,
@@ -6380,7 +6554,7 @@ def test_main_chat_daily_desktop_approval_resumes_without_chat_model_profile(tmp
         assert quit_calls == 1
         assert "model.request.started" not in event_types
         assert "model.requested" not in event_types
-        assert completed_event["payload"]["tool"] == "desktop.active_window"
+        assert completed_event["payload"]["tool"] == "desktop.quit_app"
         assert completed_event["payload"]["tools"] == [
             "desktop.quit_app",
             "desktop.active_window",
@@ -6395,10 +6569,11 @@ def test_main_chat_daily_desktop_approval_resumes_without_chat_model_profile(tmp
             call for call in public_timeline.tool_calls if call.tool_name == "desktop.quit_app"
         ]
         assert quit_tool_calls[-1].status == "completed"
-        assert [event.event_type for event in public_timeline.events][-2:] == [
+        public_event_types = [event.event_type for event in public_timeline.events]
+        assert (
             "agent.desktop.intent_completed",
             "model.output.ready",
-        ]
+        ) in zip(public_event_types, public_event_types[1:])
     finally:
         service.close()
 

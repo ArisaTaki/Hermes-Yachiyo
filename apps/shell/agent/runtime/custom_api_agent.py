@@ -4170,6 +4170,7 @@ class RuntimeCustomApiAgentLoop:
         requests = _visible_daily_desktop_completed_steps(sequence["requests"])
         if not requests:
             requests = sequence["requests"]
+        requests = _drop_resolved_deferred_observation_requests(requests)
         return self._direct_daily_desktop_sequence_result(
             requests,
             timeline,
@@ -17942,6 +17943,70 @@ def _is_deferred_observed_ui_request(step: Mapping[str, Any]) -> bool:
         and str(step.get("deferred_tool") or "").strip()
         and isinstance(step.get("deferred_input"), Mapping)
     )
+
+
+def _drop_resolved_deferred_observation_requests(
+    requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    deferred_observations = {
+        (
+            str(request.get("deferred_tool") or "").strip(),
+            _daily_desktop_request_step_id(request),
+        )
+        for request in requests
+        if _is_deferred_observed_ui_request(request)
+    }
+    if not deferred_observations:
+        return requests
+
+    resolved_deferred_steps = {
+        (
+            str(request.get("tool") or "").strip(),
+            _daily_desktop_request_step_id(request),
+        )
+        for request in requests
+        if (
+            str(request.get("tool") or "").strip(),
+            _daily_desktop_request_step_id(request),
+        )
+        in deferred_observations
+    }
+    if not resolved_deferred_steps:
+        return requests
+
+    filtered = [
+        request
+        for request in requests
+        if not (
+            _is_deferred_observed_ui_request(request)
+            and (
+                str(request.get("deferred_tool") or "").strip(),
+                _daily_desktop_request_step_id(request),
+            )
+            in resolved_deferred_steps
+        )
+    ]
+    return filtered or requests
+
+
+def _daily_desktop_request_step_id(request: Mapping[str, Any]) -> str:
+    step_id = str(
+        request.get("step_id")
+        or request.get("planner_step_id")
+        or ""
+    ).strip()
+    if step_id:
+        return step_id
+    deferred_context = (
+        request.get("deferred_context")
+        if isinstance(request.get("deferred_context"), Mapping)
+        else {}
+    )
+    return str(
+        deferred_context.get("step_id")
+        or deferred_context.get("planner_step_id")
+        or ""
+    ).strip()
 
 
 def _is_daily_desktop_discovery_completed_step(step: dict[str, Any]) -> bool:
