@@ -95,6 +95,10 @@ def planner_execution_tool_requests(
         normalized_requests,
         allowed,
     )
+    normalized_requests = _append_foreground_submit_verification_requests(
+        normalized_requests,
+        allowed,
+    )
     normalized_requests = _drop_redundant_execution_verification_requests(
         normalized_requests
     )
@@ -965,6 +969,66 @@ def _has_later_foreground_operation_before_verification(
         if later_tool in _EXECUTION_MUTATION_TOOLS or _tool_continues_foreground_operation_chain(later_tool):
             return True
     return False
+
+
+def _append_foreground_submit_verification_requests(
+    requests: list[dict[str, Any]],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    verification_tool = _first_allowed(
+        (
+            "desktop.ui_elements",
+            "desktop.read_ui",
+            "desktop.active_window",
+            "screen.capture",
+        ),
+        allowed,
+    )
+    if not verification_tool:
+        return requests
+    normalized: list[dict[str, Any]] = []
+    for index, request in enumerate(requests):
+        normalized.append(request)
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name != "desktop.submit_foreground":
+            continue
+        if _has_later_execution_verification_before_mutation(requests, index):
+            continue
+        if _has_later_foreground_operation_before_verification(requests, index):
+            continue
+        verification = _foreground_submit_verification_request(request, verification_tool)
+        if not verification or _last_request_matches_tool_and_input(normalized, verification):
+            continue
+        normalized.append(verification)
+    return normalized
+
+
+def _foreground_submit_verification_request(
+    source_request: Mapping[str, Any],
+    verification_tool: str,
+) -> dict[str, Any]:
+    planning_reason = str(
+        source_request.get("planning_reason") or "planner_desktop_operation"
+    ).strip() or "planner_desktop_operation"
+    if verification_tool in {"desktop.ui_elements", "desktop.read_ui"}:
+        payload: dict[str, Any] = {"limit": 80}
+    elif verification_tool == "screen.capture":
+        payload = {"reason": "verify foreground submit"}
+    else:
+        payload = {}
+    request = _request(
+        verification_tool,
+        payload,
+        planning_reason=planning_reason,
+    )
+    request["source"] = "runtime_verification"
+    request["continue_to_model"] = True
+    request["requires_observation"] = True
+    request["runtime_stage"] = "verify"
+    request["runtime_role"] = "verify_result"
+    request["replan_triggers"] = ["verification_failed"]
+    _inherit_request_context_without_step(request, source_request)
+    return request
 
 
 def _unknown_app_execution_verification_request(
