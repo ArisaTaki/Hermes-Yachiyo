@@ -11719,8 +11719,11 @@ def _auto_replan_verification_recovery_requests(
     source = "runtime_planner"
     planning_reason = "planner_verification_recovery_observation"
     target = _replan_recovery_target(first)
+    explicit_recovery_tools = _runtime_recovery_action_tools_for_payload(first)
     requests: list[dict[str, Any]] = []
     for tool_name in _verification_recovery_tool_order(allowed):
+        if tool_name in explicit_recovery_tools:
+            continue
         request_input = _verification_recovery_tool_input(tool_name, target)
         if request_input is None:
             continue
@@ -11740,6 +11743,15 @@ def _auto_replan_verification_recovery_requests(
         _attach_replan_payload_trace_metadata(request, first)
         requests.append(request)
     return requests
+
+
+def _runtime_recovery_action_tools_for_payload(payload: Mapping[str, Any]) -> set[str]:
+    metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+    return {
+        str(action.get("tool") or "").strip()
+        for action in _mapping_list(metadata.get("recovery_actions"))
+        if str(action.get("tool") or "").strip()
+    }
 
 
 def _auto_replan_ui_observation_recovery_requests(
@@ -13478,6 +13490,7 @@ def _auto_replan_runtime_recovery_action_requests(
             label = str(action.get("label") or "").strip()
             if label:
                 request["recovery_action_label"] = label
+            request["recovery_action_tool"] = tool_name
             risk_level = str(action.get("risk_level") or "").strip()
             if risk_level:
                 request["risk_level"] = risk_level

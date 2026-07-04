@@ -22834,6 +22834,93 @@ def test_auto_replan_recovery_requests_carry_task_core_context() -> None:
     )
 
 
+def test_auto_replan_recovery_requests_materialize_observation_retry_action() -> None:
+    observation_retry = {
+        "from_tool": "desktop.active_window",
+        "tool": "desktop.active_window",
+        "input": {
+            "app_name": "PixelForge",
+            "query": "PixelForge",
+            "selection_source": "desktop.list_apps",
+        },
+        "reason": "verification_failed",
+    }
+    action_target = {
+        "kind": "desktop_app",
+        "action": "verify_after_action",
+        "app_name": "PixelForge",
+        "step_id": "verify-desktop-result",
+    }
+    observation_evidence = {
+        "source_tool": "desktop.active_window",
+        "app_name": "PixelForge",
+    }
+    replan_payloads = [
+        {
+            "request_id": "runtime-replan:desktop-active-window",
+            "trigger": "verification_failed",
+            "decision_id": "decision-1",
+            "plan_id": "plan-1",
+            "source_step_id": "verify-desktop-result",
+            "source_tool_name": "desktop.active_window",
+            "target_capability_id": "desktop.visual_verification",
+            "action_target": action_target,
+            "observation_evidence": observation_evidence,
+            "observation_retry": observation_retry,
+            "metadata": {
+                "recovery_actions": [
+                    {
+                        "label": "Re-run runtime observation",
+                        "tool": "desktop.active_window",
+                        "input": observation_retry["input"],
+                        "permission_target": "runtime_observation",
+                        "risk_level": "low",
+                        "action_target": action_target,
+                        "observation_evidence": observation_evidence,
+                        "observation_retry": observation_retry,
+                    }
+                ]
+            },
+        }
+    ]
+
+    recovery_requests = custom_api_agent_module._auto_replan_recovery_requests_with_task_context(
+        replan_payloads,
+        ["desktop.active_window"],
+        [],
+    )
+
+    assert recovery_requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {
+                "app_name": "PixelForge",
+                "query": "PixelForge",
+                "selection_source": "desktop.list_apps",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_replan_runtime_recovery_action",
+            "replan_request_id": "runtime-replan:desktop-active-window",
+            "replan_trigger": "verification_failed",
+            "replan_triggers": ["verification_failed"],
+            "step_id": "verify-desktop-result",
+            "capability_id": "desktop.visual_verification",
+            "recovery_action_label": "Re-run runtime observation",
+            "recovery_action_tool": "desktop.active_window",
+            "risk_level": "low",
+            "permission_target": "runtime_observation",
+            "action_target": action_target,
+            "observation_evidence": observation_evidence,
+            "observation_retry": observation_retry,
+            "continue_to_model": True,
+            "decision_id": "decision-1",
+            "plan_id": "plan-1",
+            "planner_step_id": "verify-desktop-result",
+        }
+    ]
+
+
 def test_auto_replan_terminal_data_analysis_command_writes_report(tmp_path) -> None:
     source = tmp_path / "sales.csv"
     source.write_text("month,revenue\nJan,10\nFeb,20\n", encoding="utf-8")
