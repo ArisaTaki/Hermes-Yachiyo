@@ -377,6 +377,21 @@ export type PlannerDecisionSnapshot = {
   source?: string;
 };
 
+export type RuntimeCheckpointPolicySnapshot = {
+  checkpoint_ids?: string[];
+  checkpoint_titles?: string[];
+  verifies?: string[];
+  replan_on_failure?: boolean;
+  replan_triggers?: string[];
+  replan_signal_ids?: string[];
+  fallback_tools?: string[];
+  verification_target_step_ids?: string[];
+  requires_approval?: boolean;
+  requires_observation?: boolean;
+  requires_post_action_verification?: boolean;
+  source?: string;
+};
+
 export type RuntimeExecutionRequestSnapshot = {
   request_id: string;
   decision_id?: string | null;
@@ -419,6 +434,7 @@ export type RuntimeExecutionRequestSnapshot = {
   task_checkpoints?: TaskCheckpointSnapshot[];
   task_workspace_items?: TaskWorkspaceItemSnapshot[];
   task_verification_targets?: Array<Record<string, unknown>>;
+  checkpoint_policy?: RuntimeCheckpointPolicySnapshot | null;
   source?: string;
 };
 

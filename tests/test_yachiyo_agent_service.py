@@ -853,6 +853,13 @@ def test_yachiyo_agent_service_plans_shared_chat_execution_envelope() -> None:
     assert request.workspace_id == envelope.task_core.workspace.workspace_id
     assert request.task_todo["step_id"] == "analyze-data-file"
     assert request.task_checkpoints[0]["after_step_id"] == "analyze-data-file"
+    assert request.checkpoint_policy is not None
+    assert request.checkpoint_policy.checkpoint_ids == [
+        checkpoint["checkpoint_id"] for checkpoint in request.task_checkpoints
+    ]
+    assert request.checkpoint_policy.replan_on_failure is True
+    assert request.checkpoint_policy.replan_signal_ids == request.replan_signal_ids
+    assert request.checkpoint_policy.fallback_tools == ["terminal.run"]
     assert envelope.runtime_stage_counts == {"operate": 1}
     assert request.runtime_stage == "operate"
     assert request.runtime_role == "analyze_data"
@@ -906,6 +913,11 @@ def test_agent_studio_service_plans_shared_execution_envelope() -> None:
     assert envelope.requests[0].task_checkpoints[0]["after_step_id"] == (
         "analyze-data-file"
     )
+    assert envelope.requests[0].checkpoint_policy is not None
+    assert envelope.requests[0].checkpoint_policy.replan_signal_ids == (
+        envelope.requests[0].replan_signal_ids
+    )
+    assert envelope.requests[0].checkpoint_policy.fallback_tools == ["terminal.run"]
     assert envelope.runtime_stage_counts == {"operate": 1}
     assert envelope.requests[0].runtime_stage == "operate"
     assert envelope.requests[0].runtime_role == "analyze_data"

@@ -7,6 +7,7 @@ from typing import Any
 
 from .contracts import (
     PlannerDecisionSnapshot,
+    RuntimeCheckpointPolicySnapshot,
     RuntimeExecutionEnvelopeSnapshot,
     RuntimeExecutionRequestSnapshot,
     ToolPlanStepSnapshot,
@@ -320,6 +321,12 @@ def _execution_request_snapshot(
         depends_on=depends_on,
         runtime_stage=runtime_metadata["runtime_stage"],
     )
+    checkpoint_policy = _execution_request_checkpoint_policy(
+        task_context,
+        replan_metadata,
+        step=step,
+        runtime_metadata=runtime_metadata,
+    )
     desktop_contract = _desktop_execution_request_contract(
         tool_name=tool_name,
         request_input=request_input,
@@ -415,6 +422,7 @@ def _execution_request_snapshot(
                 for item in _mapping_list(deferred_context.get("task_verification_targets"))
             ]
         ),
+        checkpoint_policy=checkpoint_policy,
         source=str(request.get("source") or "runtime_planner"),
     )
 
@@ -470,6 +478,7 @@ def _tool_request_from_execution_request(
         "task_checkpoints",
         "task_workspace_items",
         "task_verification_targets",
+        "checkpoint_policy",
         "action_target",
         "observation_evidence",
         "observation_retry",
@@ -1039,6 +1048,66 @@ def _execution_request_task_context(
             payload,
         ),
     }
+
+
+def _execution_request_checkpoint_policy(
+    task_context: Mapping[str, Any],
+    replan_metadata: Mapping[str, list[str]],
+    *,
+    step: ToolPlanStepSnapshot | None,
+    runtime_metadata: Mapping[str, Any],
+) -> RuntimeCheckpointPolicySnapshot | None:
+    checkpoints = _mapping_list(task_context.get("task_checkpoints"))
+    verification_targets = _mapping_list(task_context.get("task_verification_targets"))
+    fallback_tools = list(step.fallback_tools) if step is not None else []
+    replan_triggers = _string_list(replan_metadata.get("replan_triggers"))
+    replan_signal_ids = _string_list(replan_metadata.get("replan_signal_ids"))
+    if not any(
+        (
+            checkpoints,
+            verification_targets,
+            fallback_tools,
+            replan_triggers,
+            replan_signal_ids,
+        )
+    ):
+        return None
+    return RuntimeCheckpointPolicySnapshot(
+        checkpoint_ids=_dedupe(
+            str(checkpoint.get("checkpoint_id") or "").strip()
+            for checkpoint in checkpoints
+        ),
+        checkpoint_titles=_dedupe(
+            str(checkpoint.get("title") or "").strip()
+            for checkpoint in checkpoints
+        ),
+        verifies=_dedupe(
+            item
+            for checkpoint in checkpoints
+            for item in _string_list(checkpoint.get("verifies"))
+        ),
+        replan_on_failure=bool(
+            replan_triggers
+            or replan_signal_ids
+            or any(
+                checkpoint.get("replan_on_failure") is not False
+                for checkpoint in checkpoints
+            )
+        ),
+        replan_triggers=replan_triggers,
+        replan_signal_ids=replan_signal_ids,
+        fallback_tools=_dedupe(fallback_tools),
+        verification_target_step_ids=_dedupe(
+            str(target.get("step_id") or "").strip()
+            for target in verification_targets
+        ),
+        requires_approval=bool(step.approval_required if step is not None else False),
+        requires_observation=bool(runtime_metadata.get("requires_observation")),
+        requires_post_action_verification=bool(
+            runtime_metadata.get("requires_post_action_verification")
+            or verification_targets
+        ),
+    )
 
 
 def _task_core_payload_from_decision(

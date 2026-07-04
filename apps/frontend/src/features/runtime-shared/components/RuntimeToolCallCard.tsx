@@ -40,6 +40,7 @@ export type RuntimeToolCallCardSnapshot = {
   replan_trigger?: string | null;
   task_workspace_items?: Array<Record<string, unknown>>;
   task_verification_targets?: Array<Record<string, unknown>>;
+  checkpoint_policy?: Record<string, unknown>;
   replan_triggers?: string[];
   replan_signal_ids?: string[];
   runtime_doctrine?: string | null;
@@ -106,6 +107,7 @@ export function RuntimeToolCallCard({
   const observedCenter = observedActionCenterSummary(observedMetadata.observationEvidence);
   const taskWorkspaceItems = runtimeToolTaskWorkspaceItems(toolCall);
   const taskVerificationTargets = runtimeToolTaskVerificationTargets(toolCall);
+  const checkpointPolicy = runtimeToolTraceRecord(toolCall, 'checkpoint_policy');
   const deferredContinuation = runtimeToolTraceRecordList(toolCall, 'deferred_continuation');
   const metadata = toolCallMetadataItems(toolCall);
   return (
@@ -132,6 +134,7 @@ export function RuntimeToolCallCard({
       data-runtime-role={runtimeToolTraceString(toolCall, 'runtime_role')}
       data-runtime-stage={runtimeToolTraceString(toolCall, 'runtime_stage')}
       data-runtime-step-id={runtimeToolTraceString(toolCall, 'step_id', 'planner_step_id')}
+      data-runtime-checkpoint-policy={runtimeToolCheckpointPolicySummary(checkpointPolicy)}
       data-source-runnable-id={toolCall.source_runnable_id || ''}
       data-source-run-id={toolCall.source_run_id || ''}
       data-task-verification-target-count={taskVerificationTargets.length}
@@ -287,6 +290,7 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
   const replanTriggers = runtimeToolTraceStringList(toolCall, 'replan_triggers');
   const taskWorkspaceItems = runtimeToolTaskWorkspaceItems(toolCall);
   const taskVerificationTargets = runtimeToolTaskVerificationTargets(toolCall);
+  const checkpointPolicy = runtimeToolTraceRecord(toolCall, 'checkpoint_policy');
   const deferredInput = runtimeToolTraceRecord(toolCall, 'deferred_input');
   const deferredContext = runtimeToolTraceRecord(toolCall, 'deferred_context');
   const deferredContinuation = runtimeToolTraceRecordList(toolCall, 'deferred_continuation');
@@ -306,6 +310,7 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
     { label: 'verify', value: runtimeToolTraceBoolLabel(toolCall, 'requires_post_action_verification') },
     { label: 'workspace', value: runtimeToolTaskWorkspaceSummary(taskWorkspaceItems) },
     { label: 'targets', value: runtimeToolRecoveryVerificationTargetsSummary(taskVerificationTargets) },
+    { label: 'checkpoint policy', value: runtimeToolCheckpointPolicySummary(checkpointPolicy) },
     { label: 'replan', value: runtimeToolTraceString(toolCall, 'replan_request_id') || replanTrigger || replanTriggers.join(', ') },
     { label: 'signals', value: runtimeToolTraceStringList(toolCall, 'replan_signal_ids').join(', ') },
     { label: 'deferred', value: runtimeToolTraceString(toolCall, 'deferred_tool') },
@@ -484,6 +489,29 @@ function runtimeToolRecoveryVerificationTargetsSummary(
   if (!parts.length) return '';
   const suffix = targets.length > parts.length ? ` +${targets.length - parts.length}` : '';
   return `${parts.join(' | ')}${suffix}`;
+}
+
+function runtimeToolCheckpointPolicySummary(record: Record<string, unknown>): string {
+  if (!Object.keys(record).length) return '';
+  const checkpointIds = stringList(record.checkpoint_ids);
+  const titles = stringList(record.checkpoint_titles);
+  const triggers = stringList(record.replan_triggers);
+  const fallbacks = stringList(record.fallback_tools);
+  const targetSteps = stringList(record.verification_target_step_ids);
+  const flags = [
+    record.replan_on_failure === true ? 'replan' : '',
+    record.requires_approval === true ? 'approval' : '',
+    record.requires_observation === true ? 'observe' : '',
+    record.requires_post_action_verification === true ? 'verify' : '',
+  ].filter(Boolean);
+  const primary = titles[0] || checkpointIds[0] || targetSteps[0] || '';
+  return [
+    primary,
+    triggers.length ? `triggers ${triggers.join(', ')}` : '',
+    fallbacks.length ? `fallbacks ${fallbacks.join(', ')}` : '',
+    targetSteps.length ? `targets ${targetSteps.join(', ')}` : '',
+    flags.length ? flags.join(', ') : '',
+  ].filter(Boolean).join(' · ');
 }
 
 function runtimeToolObjectSummary(record: Record<string, unknown>): string {

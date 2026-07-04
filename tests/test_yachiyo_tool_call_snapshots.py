@@ -41,6 +41,12 @@ def test_tool_call_snapshots_from_events_merge_lifecycle_and_trace_context() -> 
                         ],
                     }
                 ],
+                "checkpoint_policy": {
+                    "checkpoint_ids": ["checkpoint-write-report"],
+                    "replan_on_failure": True,
+                    "replan_triggers": ["verification_failed"],
+                    "fallback_tools": ["artifact.write"],
+                },
             },
             created_at="2026-06-17T00:00:00Z",
         ),
@@ -125,6 +131,12 @@ def test_tool_call_snapshots_from_events_merge_lifecycle_and_trace_context() -> 
             ],
         }
     ]
+    assert call.metadata["checkpoint_policy"] == {
+        "checkpoint_ids": ["checkpoint-write-report"],
+        "replan_on_failure": True,
+        "replan_triggers": ["verification_failed"],
+        "fallback_tools": ["artifact.write"],
+    }
     assert call.input_preview == {
         "path": "README.md",
         "approval_id": "approval-write",

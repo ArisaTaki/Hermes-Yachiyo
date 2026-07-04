@@ -38,6 +38,7 @@ _TOOL_METADATA_KEYS = (
     "action_target",
     "observation_evidence",
     "observation_retry",
+    "checkpoint_policy",
 )
 
 

@@ -53,6 +53,7 @@ from apps.shell.yachiyo_agent import (
     RunEventPageSnapshot,
     RunTimelineChildSnapshot,
     RunTimelineSnapshot,
+    RuntimeCheckpointPolicySnapshot,
     RuntimeDebugSummarySnapshot,
     RuntimeExecutionEnvelopeSnapshot,
     RuntimeExecutionRequestSnapshot,
@@ -339,6 +340,18 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
             "from_tool": "desktop.ui_elements",
             "reason": "target_not_found",
         },
+        checkpoint_policy=RuntimeCheckpointPolicySnapshot(
+            checkpoint_ids=["checkpoint-open-app"],
+            checkpoint_titles=["Verify app opened"],
+            verifies=["discover-desktop-state", "desktop.app_discovery"],
+            replan_on_failure=True,
+            replan_triggers=["verification_failed"],
+            replan_signal_ids=["replan-1"],
+            fallback_tools=["desktop.ui_elements"],
+            verification_target_step_ids=["open-app"],
+            requires_observation=True,
+            requires_post_action_verification=True,
+        ),
     )
     envelope = RuntimeExecutionEnvelopeSnapshot(
         envelope_id="execution-envelope-runtime-plan-1",
@@ -390,6 +403,20 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     assert payload["requests"][0]["observation_retry"] == {
         "from_tool": "desktop.ui_elements",
         "reason": "target_not_found",
+    }
+    assert payload["requests"][0]["checkpoint_policy"] == {
+        "checkpoint_ids": ["checkpoint-open-app"],
+        "checkpoint_titles": ["Verify app opened"],
+        "verifies": ["discover-desktop-state", "desktop.app_discovery"],
+        "replan_on_failure": True,
+        "replan_triggers": ["verification_failed"],
+        "replan_signal_ids": ["replan-1"],
+        "fallback_tools": ["desktop.ui_elements"],
+        "verification_target_step_ids": ["open-app"],
+        "requires_approval": False,
+        "requires_observation": True,
+        "requires_post_action_verification": True,
+        "source": "runtime_checkpoint_policy",
     }
     assert payload["runtime_stage_counts"] == {"discover": 1}
     assert payload["replan_signal_count"] == 1

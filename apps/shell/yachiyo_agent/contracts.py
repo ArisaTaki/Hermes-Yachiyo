@@ -461,6 +461,21 @@ class PlannerDecisionSnapshot(_PublicSnapshot):
     source: str = "runtime_planner"
 
 
+class RuntimeCheckpointPolicySnapshot(_PublicSnapshot):
+    checkpoint_ids: list[str] = Field(default_factory=list)
+    checkpoint_titles: list[str] = Field(default_factory=list)
+    verifies: list[str] = Field(default_factory=list)
+    replan_on_failure: bool = False
+    replan_triggers: list[str] = Field(default_factory=list)
+    replan_signal_ids: list[str] = Field(default_factory=list)
+    fallback_tools: list[str] = Field(default_factory=list)
+    verification_target_step_ids: list[str] = Field(default_factory=list)
+    requires_approval: bool = False
+    requires_observation: bool = False
+    requires_post_action_verification: bool = False
+    source: str = "runtime_checkpoint_policy"
+
+
 class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     request_id: str
     step_id: str | None = None
@@ -507,6 +522,7 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     task_checkpoints: list[dict[str, Any]] = Field(default_factory=list)
     task_workspace_items: list[dict[str, Any]] = Field(default_factory=list)
     task_verification_targets: list[dict[str, Any]] = Field(default_factory=list)
+    checkpoint_policy: RuntimeCheckpointPolicySnapshot | None = None
     source: str = "runtime_planner"
 
 
