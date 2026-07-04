@@ -576,6 +576,12 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
                             "input": {"query": "Apple Music"},
                             "permission_target": "app_discovery",
                             "risk_level": "low",
+                            "metadata": {
+                                "replan_signal_ids": ["signal-1"],
+                                "replan_triggers": ["verification_failed"],
+                                "runtime_stage": "verify",
+                                "verification_target_step_ids": ["open-app"],
+                            },
                         }
                     ],
                 },
@@ -1689,6 +1695,11 @@ def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None
     assert request["metadata"]["recovery_tool"] == "desktop.list_apps"
     assert request["metadata"]["replan_request_id"] == "replan-1"
     assert request["metadata"]["source_run_id"] == "run-1"
+    assert request["metadata"]["source_step_id"] == "open-app"
+    assert request["metadata"]["source_tool_name"] == "desktop.open_app"
+    assert request["metadata"]["target_capability_id"] == "desktop.app_discovery"
+    assert request["metadata"]["replan_triggers"] == ["verification_failed", "tool_failure"]
+    assert request["metadata"]["replan_signal_ids"] == ["signal-1"]
     assert request["metadata"]["task_core_context"]["core_id"] == "task-core-1"
     assert request["metadata"]["task_core_context"]["workspace_id"] == "task-workspace-1"
     assert request["metadata"]["task_core_context"]["todos"][0]["todo_id"] == "todo-open-app"
@@ -1705,6 +1716,14 @@ def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None
     assert direct_request["planning_reason"] == "planner_replan_runtime_recovery_action"
     assert direct_request["continue_to_model"] is True
     assert direct_request["replan_request_id"] == "replan-1"
+    assert direct_request["replan_recovery_action_id"] == (
+        "replan-1:action:1:desktop.list_apps"
+    )
+    assert direct_request["source_step_id"] == "open-app"
+    assert direct_request["source_tool_name"] == "desktop.open_app"
+    assert direct_request["target_capability_id"] == "desktop.app_discovery"
+    assert direct_request["replan_triggers"] == ["verification_failed", "tool_failure"]
+    assert direct_request["replan_signal_ids"] == ["signal-1"]
     assert direct_request["core_id"] == "task-core-1"
     assert direct_request["workspace_id"] == "task-workspace-1"
     assert direct_request["task_todo"]["todo_id"] == "todo-open-app"

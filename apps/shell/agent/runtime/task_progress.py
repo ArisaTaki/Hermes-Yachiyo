@@ -559,6 +559,14 @@ def _append_replan_recovery_update_event(
         else {}
     )
     trigger = _replan_recovery_trigger(tool_request)
+    replan_triggers = _string_list(tool_request.get("replan_triggers"))
+    if trigger and trigger not in replan_triggers:
+        replan_triggers.append(trigger)
+    replan_signal_ids = _string_list(tool_request.get("replan_signal_ids"))
+    action_id = _first_text(
+        tool_request.get("replan_recovery_action_id"),
+        tool_request.get("action_id"),
+    )
     payload: dict[str, Any] = {
         **dict(base_payload),
         "request_id": request_id,
@@ -594,6 +602,12 @@ def _append_replan_recovery_update_event(
         "todo_status": todo_status,
         "checkpoint_status": checkpoint_status,
     }
+    if action_id:
+        payload["replan_recovery_action_id"] = action_id
+    if replan_triggers:
+        payload["replan_triggers"] = replan_triggers
+    if replan_signal_ids:
+        payload["replan_signal_ids"] = replan_signal_ids
     for key in ("task_id", "group_run_id", "workflow_run_id"):
         value = str(tool_request.get(key) or "").strip()
         if value:
@@ -624,6 +638,15 @@ def _append_replan_recovery_update_event(
             "verification_targets",
             [dict(target) for target in task_verification_targets],
         )
+    action_record = _replan_recovery_update_action_record(
+        tool_request,
+        payload,
+        action_id=action_id,
+        selected_tool=selected_tool,
+        verification_targets=verification_targets or task_verification_targets,
+    )
+    if action_record:
+        payload["recovery_actions"] = [action_record]
     _append_replan_progress_event(
         "agent.replan.recovery.updated",
         str(payload.get("recovery_action_label") or selected_tool or request_id),
@@ -633,6 +656,58 @@ def _append_replan_recovery_update_event(
         append_run_event=append_run_event,
         run_id=run_id,
     )
+
+
+def _replan_recovery_update_action_record(
+    tool_request: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    *,
+    action_id: str,
+    selected_tool: str,
+    verification_targets: list[Mapping[str, Any]],
+) -> dict[str, Any]:
+    if not selected_tool:
+        return {}
+    action_input = (
+        tool_request.get("input") if isinstance(tool_request.get("input"), Mapping) else {}
+    )
+    metadata: dict[str, Any] = {}
+    for key in (
+        "replan_request_id",
+        "replan_trigger",
+        "replan_triggers",
+        "replan_signal_ids",
+        "source_step_id",
+        "source_tool_name",
+        "runtime_stage",
+        "target_capability_id",
+        "replan_recovery_action_id",
+    ):
+        value = payload.get(key) or tool_request.get(key)
+        if value not in (None, "", [], {}):
+            metadata[key] = list(value) if isinstance(value, list) else value
+    target_step_ids: list[str] = []
+    for target in verification_targets:
+        step_id = str(target.get("step_id") or "").strip()
+        if step_id and step_id not in target_step_ids:
+            target_step_ids.append(step_id)
+    if target_step_ids:
+        metadata["verification_target_step_ids"] = target_step_ids
+    action: dict[str, Any] = {
+        "action_id": action_id or f"{payload.get('request_id')}:action:1:{selected_tool}",
+        "label": str(payload.get("recovery_action_label") or selected_tool).strip(),
+        "tool": selected_tool,
+        "input": dict(action_input),
+        "planning_reason": str(payload.get("planning_reason") or "").strip(),
+        "permission_target": str(payload.get("permission_target") or "").strip(),
+        "risk_level": str(payload.get("risk_level") or "").strip(),
+        "approval_required": bool(tool_request.get("approval_required")),
+        "selected": True,
+        "metadata": metadata,
+    }
+    if verification_targets:
+        action["verification_targets"] = [dict(target) for target in verification_targets]
+    return action
 
 
 def _replan_recovery_trigger(tool_request: Mapping[str, Any]) -> str:

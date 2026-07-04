@@ -1470,12 +1470,22 @@ def _replan_recovery_action_direct_request(
         "risk_level": str(action.risk_level or recovery.risk_level or ""),
         "selected": True,
     }
+    replan_triggers = _replan_recovery_action_triggers(recovery, action)
+    if replan_triggers:
+        request["replan_triggers"] = replan_triggers
+    replan_signal_ids = _replan_recovery_action_signal_ids(action)
+    if replan_signal_ids:
+        request["replan_signal_ids"] = replan_signal_ids
     if continue_to_model:
         request["continue_to_model"] = True
     for key, value in (
         ("step_id", recovery.source_step_id),
+        ("source_step_id", recovery.source_step_id),
+        ("source_tool_name", recovery.source_tool_name),
         ("capability_id", recovery.target_capability_id),
+        ("target_capability_id", recovery.target_capability_id),
         ("action_id", action.action_id),
+        ("replan_recovery_action_id", action.action_id),
     ):
         if value:
             request[key] = value
@@ -1488,6 +1498,36 @@ def _replan_recovery_action_direct_request(
         request["verification_targets"] = [dict(target) for target in verification_targets]
     _apply_replan_recovery_task_context(request, task_context)
     return request
+
+
+def _replan_recovery_action_triggers(
+    recovery: ReplanRecoverySnapshot,
+    action: ReplanRecoveryActionSnapshot,
+) -> list[str]:
+    triggers = _replan_recovery_action_metadata_list(action, "replan_triggers")
+    trigger = _first_text(action.metadata.get("replan_trigger"), recovery.trigger)
+    if trigger and trigger not in triggers:
+        triggers.append(trigger)
+    return triggers
+
+
+def _replan_recovery_action_signal_ids(
+    action: ReplanRecoveryActionSnapshot,
+) -> list[str]:
+    return _replan_recovery_action_metadata_list(action, "replan_signal_ids")
+
+
+def _replan_recovery_action_metadata_list(
+    action: ReplanRecoveryActionSnapshot,
+    key: str,
+) -> list[str]:
+    metadata = _mapping(action.metadata)
+    values = _string_list_from_any(metadata.get(key))
+    singular = key[:-1] if key.endswith("s") else key
+    single = _first_text(metadata.get(singular))
+    if single and single not in values:
+        values.append(single)
+    return values
 
 
 def _apply_replan_recovery_task_context(
@@ -1800,6 +1840,18 @@ def _replan_recovery_action_metadata(
             "source_run_id": source_id,
         }
     )
+    replan_triggers = _replan_recovery_action_triggers(recovery, action)
+    if replan_triggers:
+        metadata["replan_triggers"] = replan_triggers
+    replan_signal_ids = _replan_recovery_action_signal_ids(action)
+    if replan_signal_ids:
+        metadata["replan_signal_ids"] = replan_signal_ids
+    if recovery.source_step_id:
+        metadata["source_step_id"] = recovery.source_step_id
+    if recovery.source_tool_name:
+        metadata["source_tool_name"] = recovery.source_tool_name
+    if recovery.target_capability_id:
+        metadata["target_capability_id"] = recovery.target_capability_id
     group_run_id = str(getattr(source_run, "group_run_id", "") or recovery.group_run_id or "").strip()
     if group_run_id:
         metadata["source_group_run_id"] = group_run_id

@@ -212,7 +212,13 @@ def test_task_progress_payloads_scope_replan_recovery_from_trigger_list() -> Non
         "group_run_id": "",
         "workflow_run_id": "workflow-run-1",
         "replan_request_id": "replan-1",
+        "replan_recovery_action_id": "replan-1:action:1:artifact.write",
         "replan_triggers": ["verification_failed"],
+        "replan_signal_ids": ["signal-1"],
+        "recovery_action_label": "Write report artifact",
+        "source_step_id": "analyze-data",
+        "source_tool_name": "data.analyze",
+        "target_capability_id": "artifact.output",
     }
 
     events = task_progress_event_payloads_for_tool_result(
@@ -232,6 +238,20 @@ def test_task_progress_payloads_scope_replan_recovery_from_trigger_list() -> Non
     assert recovery_event["planner_scope"] == "workflow.run"
     assert recovery_event["trigger"] == "verification_failed"
     assert recovery_event["replan_trigger"] == "verification_failed"
+    assert recovery_event["replan_triggers"] == ["verification_failed"]
+    assert recovery_event["replan_signal_ids"] == ["signal-1"]
+    assert recovery_event["replan_recovery_action_id"] == (
+        "replan-1:action:1:artifact.write"
+    )
+    assert recovery_event["source_step_id"] == "analyze-data"
+    assert recovery_event["source_tool_name"] == "data.analyze"
+    assert recovery_event["target_capability_id"] == "artifact.output"
+    assert recovery_event["recovery_actions"][0]["action_id"] == (
+        "replan-1:action:1:artifact.write"
+    )
+    assert recovery_event["recovery_actions"][0]["metadata"]["replan_signal_ids"] == [
+        "signal-1"
+    ]
 
 
 def test_replan_recovery_without_step_id_updates_target_progress() -> None:
@@ -248,7 +268,12 @@ def test_replan_recovery_without_step_id_updates_target_progress() -> None:
         "replan_request_id": "replan-1",
         "action_id": "action-open-app",
         "replan_trigger": "tool_failure",
+        "replan_triggers": ["tool_failure"],
+        "replan_signal_ids": ["signal-1"],
         "recovery_action_label": "Open target app",
+        "source_step_id": "open-app",
+        "source_tool_name": "desktop.open_app",
+        "target_capability_id": "desktop.app_discovery",
         "task_verification_targets": [
             {
                 "step_id": "write-report",
@@ -288,6 +313,17 @@ def test_replan_recovery_without_step_id_updates_target_progress() -> None:
         "replan-recovery:replan-1:action-open-app"
     )
     assert recovery_event["task_verification_targets"][0]["step_id"] == "write-report"
+    assert recovery_event["replan_triggers"] == ["tool_failure"]
+    assert recovery_event["replan_signal_ids"] == ["signal-1"]
+    assert recovery_event["replan_recovery_action_id"] == "action-open-app"
+    assert recovery_event["source_step_id"] == "open-app"
+    assert recovery_event["source_tool_name"] == "desktop.open_app"
+    assert recovery_event["target_capability_id"] == "desktop.app_discovery"
+    action = recovery_event["recovery_actions"][0]
+    assert action["action_id"] == "action-open-app"
+    assert action["verification_targets"][0]["step_id"] == "write-report"
+    assert action["metadata"]["verification_target_step_ids"] == ["write-report"]
+    assert action["metadata"]["replan_signal_ids"] == ["signal-1"]
 
 
 def test_public_task_replan_events_project_failed_tool_result() -> None:
