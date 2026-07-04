@@ -1217,10 +1217,8 @@ def _unknown_app_execution_verification_request(
     request: Mapping[str, Any],
     allowed: set[str],
 ) -> dict[str, Any]:
-    planning_reason = str(
-        request.get("planning_reason") or "planner_desktop_operation"
-    ).strip() or "planner_desktop_operation"
-    if _tool_performs_foreground_ui_operation(tool_name):
+    is_operation = _tool_performs_foreground_ui_operation(tool_name)
+    if is_operation:
         verification_tool = _first_allowed(
             (
                 "desktop.ui_elements",
@@ -1244,25 +1242,46 @@ def _unknown_app_execution_verification_request(
         )
     if not verification_tool:
         return {}
+    planning_reason = (
+        "runtime_desktop_app_operation_verification"
+        if is_operation
+        else "runtime_desktop_app_foreground_verification"
+    )
     if verification_tool in {"desktop.ui_elements", "desktop.read_ui"}:
-        return _request(
+        verification = _request(
             verification_tool,
             _desktop_app_verification_payload(request),
             planning_reason=planning_reason,
         )
-    if verification_tool == "desktop.verify":
-        return _request(
+    elif verification_tool == "desktop.verify":
+        verification = _request(
             verification_tool,
             _desktop_app_verification_payload(request),
             planning_reason=planning_reason,
         )
-    if verification_tool == "screen.capture":
-        return _request(
+    elif verification_tool == "screen.capture":
+        verification = _request(
             "screen.capture",
             {"reason": "verify desktop app operation"},
             planning_reason=planning_reason,
         )
-    return _request(verification_tool, {}, planning_reason=planning_reason)
+    else:
+        verification = _request(verification_tool, {}, planning_reason=planning_reason)
+    _inherit_request_context_without_step(verification, request)
+    verification["source"] = "runtime_verification"
+    verification["runtime_doctrine"] = "discover_operate_verify"
+    verification["continue_to_model"] = True
+    verification["requires_observation"] = True
+    verification["runtime_stage"] = "verify"
+    verification["runtime_role"] = "verify_result"
+    verification["replan_triggers"] = ["verification_failed"]
+    app_scope = _desktop_verification_app_scope(request, ())
+    app_name = str(app_scope.get("app_name") or "").strip()
+    if app_name:
+        verification["target_app_name"] = app_name
+        if verification_tool == "desktop.active_window":
+            verification["verification_target"] = {"app_name": app_name}
+    return verification
 
 
 def _desktop_app_verification_payload(

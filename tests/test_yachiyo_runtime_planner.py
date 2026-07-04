@@ -29415,6 +29415,108 @@ def test_planner_tool_requests_maps_system_control_plan() -> None:
     ]
 
 
+def test_planner_execution_verifies_unknown_discovered_app_open() -> None:
+    requests = planner_execution_tool_requests(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open",
+                "input": {"app_name": "PixelForge"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            }
+        ],
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.list_apps",
+            "input": {"query": "PixelForge", "limit": 20},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "capability_id": "desktop.app_discovery",
+            "runtime_doctrine": "discover_operate_verify",
+            "runtime_stage": "discover",
+            "runtime_role": "find_target_app",
+            "requires_observation": True,
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open",
+            "input": {
+                "app_name": "PixelForge",
+                "selection_source": "desktop.list_apps",
+                "query": "PixelForge",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.active_window",
+            "input": {},
+            "source": "runtime_verification",
+            "planning_reason": "runtime_desktop_app_foreground_verification",
+            "runtime_doctrine": "discover_operate_verify",
+            "continue_to_model": True,
+            "requires_observation": True,
+            "runtime_stage": "verify",
+            "runtime_role": "verify_result",
+            "replan_triggers": ["verification_failed"],
+            "target_app_name": "PixelForge",
+            "verification_target": {"app_name": "PixelForge"},
+        },
+    ]
+
+
+def test_planner_execution_verifies_unknown_discovered_app_ui_operation() -> None:
+    requests = planner_execution_tool_requests(
+        [
+            {
+                "protocol": "json_fallback",
+                "tool": "app.open_and_click_ui_element",
+                "input": {"app_name": "PixelForge", "target": "Export"},
+                "source": "runtime_planner",
+                "planning_reason": "planner_desktop_operation",
+            }
+        ],
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open_and_click_ui_element",
+            "desktop.active_window",
+        ],
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open_and_click_ui_element",
+        "desktop.active_window",
+    ]
+    assert requests[1]["input"] == {
+        "app_name": "PixelForge",
+        "target": "Export",
+        "selection_source": "desktop.list_apps",
+        "query": "PixelForge",
+    }
+    assert requests[2] == {
+        "protocol": "json_fallback",
+        "tool": "desktop.active_window",
+        "input": {},
+        "source": "runtime_verification",
+        "planning_reason": "runtime_desktop_app_operation_verification",
+        "runtime_doctrine": "discover_operate_verify",
+        "continue_to_model": True,
+        "requires_observation": True,
+        "runtime_stage": "verify",
+        "runtime_role": "verify_result",
+        "replan_triggers": ["verification_failed"],
+        "target_app_name": "PixelForge",
+        "verification_target": {"app_name": "PixelForge"},
+    }
+
+
 def test_planner_tool_requests_prefetches_text_data_source_for_analysis() -> None:
     requests = planner_tool_requests(
         "请分析 data/sales.csv 并输出报告",
