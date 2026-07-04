@@ -22708,6 +22708,52 @@ def test_runtime_planner_replan_accepts_tool_failed_timeline_events() -> None:
     }
 
 
+def test_runtime_planner_task_progress_uses_workflow_scope_context() -> None:
+    decision = RuntimePlanner().decision(
+        "请分析 sales.csv 并输出一份数据分析报告",
+        allowed_tools=["workspace.read", "data.analyze", "terminal.run", "artifact.write"],
+    )
+    loop = _private_runtime_loop()
+    timeline = [
+        _timeline(
+            "workflow.run.task_core.created",
+            "task core",
+            decision_id=decision.decision_id,
+            plan_id=decision.plan.plan_id,
+            task_id="task-workflow-1",
+            workflow_run_id="workflow-run-1",
+        )
+    ]
+    tool_timeline_start = len(timeline)
+    timeline.append(
+        _timeline(
+            "agent.tool.failed",
+            "data.analyze",
+            input_preview={"path": "sales.csv"},
+            result={"ok": False, "error": "parser crashed"},
+            status="failed",
+        )
+    )
+
+    loop._record_runtime_planner_task_progress_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=tool_timeline_start,
+        run_id="workflow-run-1",
+    )
+
+    blocked_todo = next(
+        event
+        for event in timeline
+        if event["event"] == "workflow.run.task.todo.updated"
+        and event["step_id"] == "analyze-data-file"
+    )
+    assert blocked_todo["planner_event_type"] == "agent.task.todo.updated"
+    assert blocked_todo["planner_scope"] == "workflow.run"
+    assert blocked_todo["task_id"] == "task-workflow-1"
+    assert blocked_todo["workflow_run_id"] == "workflow-run-1"
+
+
 def test_auto_replan_fallback_recovery_reuses_safe_file_inputs() -> None:
     decision = RuntimePlanner().decision(
         "请分析 legacy-report.xls 并输出报告",

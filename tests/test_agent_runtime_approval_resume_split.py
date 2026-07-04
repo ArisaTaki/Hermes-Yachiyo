@@ -135,13 +135,13 @@ def test_approval_resume_records_runtime_task_progress_events() -> None:
     completed_todos = [
         event
         for event in context.timeline
-        if event["event"] == "agent.task.todo.updated"
+        if event["event"] == "workflow.run.task.todo.updated"
         and event.get("status") == "completed"
     ]
     completed_checkpoints = [
         event
         for event in context.timeline
-        if event["event"] == "agent.task.checkpoint.updated"
+        if event["event"] == "workflow.run.task.checkpoint.updated"
         and event.get("status") == "completed"
     ]
     assert {event["step_id"] for event in completed_todos} == {
@@ -167,12 +167,14 @@ def test_approval_resume_records_runtime_task_progress_events() -> None:
     assert click_todo["task_id"] == "task-approval"
     assert click_todo["group_run_id"] == "group-run-approval"
     assert click_todo["workflow_run_id"] == "workflow-run-approval"
+    assert click_todo["planner_event_type"] == "agent.task.todo.updated"
+    assert click_todo["planner_scope"] == "workflow.run"
     assert {
         (run_id, event_type)
         for run_id, event_type, _payload in run_events
     } >= {
-        ("run-approval", "agent.task.todo.updated"),
-        ("run-approval", "agent.task.checkpoint.updated"),
+        ("run-approval", "workflow.run.task.todo.updated"),
+        ("run-approval", "workflow.run.task.checkpoint.updated"),
     }
 
 
@@ -277,26 +279,30 @@ def test_approval_resume_records_replan_and_blocked_progress_for_failed_tool() -
     blocked_todo = next(
         event
         for event in context.timeline
-        if event["event"] == "agent.task.todo.updated"
+        if event["event"] == "workflow.run.task.todo.updated"
         and event.get("status") == "blocked"
     )
     blocked_checkpoint = next(
         event
         for event in context.timeline
-        if event["event"] == "agent.task.checkpoint.updated"
+        if event["event"] == "workflow.run.task.checkpoint.updated"
         and event.get("status") == "blocked"
     )
     replan_event = next(
         event
         for event in context.timeline
-        if event["event"] == "agent.replan.requested"
+        if event["event"] == "workflow.run.replan.requested"
     )
     replan_payload = replan_event["payload"]
 
     assert blocked_todo["task_id"] == "task-approval"
     assert blocked_todo["group_run_id"] == "group-run-approval"
     assert blocked_todo["workflow_run_id"] == "workflow-run-approval"
+    assert blocked_todo["planner_event_type"] == "agent.task.todo.updated"
+    assert blocked_todo["planner_scope"] == "workflow.run"
     assert blocked_checkpoint["task_id"] == "task-approval"
+    assert replan_payload["planner_event_type"] == "agent.replan.requested"
+    assert replan_payload["planner_scope"] == "workflow.run"
     assert replan_payload["source_step_id"] == "run-analysis"
     assert replan_payload["source_tool_name"] == "terminal.run"
     assert replan_payload["fallback_tools"] == ["python.run"]
@@ -307,9 +313,9 @@ def test_approval_resume_records_replan_and_blocked_progress_for_failed_tool() -
         (run_id, event_type)
         for run_id, event_type, _payload in run_events
     } >= {
-        ("run-approval", "agent.task.todo.updated"),
-        ("run-approval", "agent.task.checkpoint.updated"),
-        ("run-approval", "agent.replan.requested"),
+        ("run-approval", "workflow.run.task.todo.updated"),
+        ("run-approval", "workflow.run.task.checkpoint.updated"),
+        ("run-approval", "workflow.run.replan.requested"),
     }
 
 

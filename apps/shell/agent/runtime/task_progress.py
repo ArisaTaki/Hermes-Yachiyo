@@ -745,9 +745,11 @@ def _append_replan_progress_event(
 ) -> None:
     if _runtime_replan_recovery_update_exists(timeline, event_type, payload):
         return
-    timeline.append(timeline_factory(event_type, detail, **payload))
+    scoped_event_type = _runtime_progress_event_type(event_type, payload)
+    event_payload = _runtime_progress_event_payload(payload, event_type, scoped_event_type)
+    timeline.append(timeline_factory(scoped_event_type, detail, **event_payload))
     if run_id and append_run_event is not None:
-        append_run_event(run_id, event_type, payload)
+        append_run_event(run_id, scoped_event_type, event_payload)
 
 
 def _runtime_replan_recovery_update_exists(
@@ -760,7 +762,8 @@ def _runtime_replan_recovery_update_exists(
     selected_tool = str(payload.get("selected_tool_name") or payload.get("tool") or "").strip()
     return any(
         isinstance(event, Mapping)
-        and str(event.get("event") or "").strip() == event_type
+        and _runtime_progress_base_event_type(str(event.get("event") or "").strip())
+        == event_type
         and _first_text(
             event.get("request_id"),
             event.get("replan_request_id"),
@@ -813,9 +816,11 @@ def _append_task_progress_event(
 ) -> None:
     if _runtime_task_update_exists(timeline, event_type, payload):
         return
-    timeline.append(timeline_factory(event_type, detail, **payload))
+    scoped_event_type = _runtime_progress_event_type(event_type, payload)
+    event_payload = _runtime_progress_event_payload(payload, event_type, scoped_event_type)
+    timeline.append(timeline_factory(scoped_event_type, detail, **event_payload))
     if run_id and append_run_event is not None:
-        append_run_event(run_id, event_type, payload)
+        append_run_event(run_id, scoped_event_type, event_payload)
 
 
 def _task_todo_status_for_tool_result(
@@ -911,7 +916,8 @@ def _runtime_task_update_exists(
     decision_id = str(payload.get("decision_id") or "").strip()
     return any(
         isinstance(event, Mapping)
-        and str(event.get("event") or "").strip() == event_type
+        and _runtime_progress_base_event_type(str(event.get("event") or "").strip())
+        == event_type
         and (
             not decision_id
             or str(event.get("decision_id") or "").strip() == decision_id
@@ -974,7 +980,10 @@ def _runtime_planner_step_has_status(
         if not isinstance(event, Mapping):
             continue
         payload = _event_payload(event)
-        if str(event.get("event") or "").strip() != "agent.task.todo.updated":
+        if (
+            _runtime_progress_base_event_type(str(event.get("event") or "").strip())
+            != "agent.task.todo.updated"
+        ):
             continue
         event_step_id = str(event.get("step_id") or payload.get("step_id") or "").strip()
         if event_step_id != clean_step_id:
@@ -1005,7 +1014,7 @@ def _latest_task_update_status(
     for event in reversed(timeline):
         if not isinstance(event, Mapping):
             continue
-        if str(event.get("event") or "").strip() != event_type:
+        if _runtime_progress_base_event_type(str(event.get("event") or "").strip()) != event_type:
             continue
         payload = _event_payload(event)
         event_identity = str(
@@ -1031,3 +1040,63 @@ def _mapping_items(value: Any) -> list[Mapping[str, Any]]:
 def _event_payload(event: Mapping[str, Any]) -> Mapping[str, Any]:
     payload = event.get("payload")
     return payload if isinstance(payload, Mapping) else {}
+
+
+_RUNTIME_PROGRESS_GROUP_EVENT_TYPES = {
+    "agent.task.workspace_item.updated": "group.run.task.workspace_item.updated",
+    "agent.task.todo.updated": "group.run.task.todo.updated",
+    "agent.task.checkpoint.updated": "group.run.task.checkpoint.updated",
+    "agent.replan.recovery.updated": "group.run.replan.recovery.updated",
+}
+
+_RUNTIME_PROGRESS_WORKFLOW_EVENT_TYPES = {
+    "agent.task.workspace_item.updated": "workflow.run.task.workspace_item.updated",
+    "agent.task.todo.updated": "workflow.run.task.todo.updated",
+    "agent.task.checkpoint.updated": "workflow.run.task.checkpoint.updated",
+    "agent.replan.recovery.updated": "workflow.run.replan.recovery.updated",
+}
+
+_RUNTIME_PROGRESS_BASE_EVENT_TYPES = {
+    **{value: key for key, value in _RUNTIME_PROGRESS_GROUP_EVENT_TYPES.items()},
+    **{value: key for key, value in _RUNTIME_PROGRESS_WORKFLOW_EVENT_TYPES.items()},
+    "workflow.task.workspace_item.updated": "agent.task.workspace_item.updated",
+    "workflow.task.todo.updated": "agent.task.todo.updated",
+    "workflow.task.checkpoint.updated": "agent.task.checkpoint.updated",
+    "workflow.replan.recovery.updated": "agent.replan.recovery.updated",
+}
+
+
+def _runtime_progress_event_type(event_type: str, payload: Mapping[str, Any]) -> str:
+    clean_event_type = str(event_type or "").strip()
+    if str(payload.get("workflow_run_id") or "").strip():
+        return _RUNTIME_PROGRESS_WORKFLOW_EVENT_TYPES.get(clean_event_type, clean_event_type)
+    if str(payload.get("group_run_id") or payload.get("run_group_id") or "").strip():
+        return _RUNTIME_PROGRESS_GROUP_EVENT_TYPES.get(clean_event_type, clean_event_type)
+    return clean_event_type
+
+
+def _runtime_progress_event_payload(
+    payload: Mapping[str, Any],
+    base_event_type: str,
+    scoped_event_type: str,
+) -> dict[str, Any]:
+    event_payload = dict(payload)
+    if scoped_event_type == base_event_type:
+        return event_payload
+    event_payload.setdefault("planner_event_type", base_event_type)
+    event_payload.setdefault("planner_scope", _runtime_progress_event_scope(scoped_event_type))
+    return event_payload
+
+
+def _runtime_progress_event_scope(event_type: str) -> str:
+    clean_event_type = str(event_type or "").strip()
+    if clean_event_type.startswith("workflow.run."):
+        return "workflow.run"
+    if clean_event_type.startswith("group.run."):
+        return "group.run"
+    return "agent"
+
+
+def _runtime_progress_base_event_type(event_type: str) -> str:
+    clean_event_type = str(event_type or "").strip()
+    return _RUNTIME_PROGRESS_BASE_EVENT_TYPES.get(clean_event_type, clean_event_type)

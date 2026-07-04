@@ -388,24 +388,85 @@ def test_runtime_tool_request_runner_preserves_scope_on_task_progress_events() -
         budget=FakeBudget(),
     )
 
-    todo_event = next(event for event in timeline if event["event"] == "agent.task.todo.updated")
+    todo_event = next(
+        event for event in timeline if event["event"] == "workflow.run.task.todo.updated"
+    )
     checkpoint_event = next(
-        event for event in timeline if event["event"] == "agent.task.checkpoint.updated"
+        event for event in timeline if event["event"] == "workflow.run.task.checkpoint.updated"
     )
     for event in (todo_event, checkpoint_event):
         assert event["task_id"] == "task-1"
         assert event["group_run_id"] == "group-run-1"
         assert event["workflow_run_id"] == "workflow-run-1"
         assert event["status"] == "completed"
+        assert event["planner_scope"] == "workflow.run"
+    assert todo_event["planner_event_type"] == "agent.task.todo.updated"
+    assert checkpoint_event["planner_event_type"] == "agent.task.checkpoint.updated"
 
     run_todo_event = next(
         payload
         for _run_id, event_type, payload in run_events
-        if event_type == "agent.task.todo.updated"
+        if event_type == "workflow.run.task.todo.updated"
     )
     assert run_todo_event["task_id"] == "task-1"
     assert run_todo_event["group_run_id"] == "group-run-1"
     assert run_todo_event["workflow_run_id"] == "workflow-run-1"
+    assert run_todo_event["planner_event_type"] == "agent.task.todo.updated"
+
+
+def test_runtime_tool_request_runner_records_group_scoped_task_progress() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    runner = _runner(
+        call_agent_tool=lambda *_args, **_kwargs: {
+            "ok": True,
+            "action": "artifact.write",
+            "summary": "done",
+        },
+        run_events=run_events,
+    )
+
+    runner.run(
+        [
+            {
+                "tool": "artifact.write",
+                "input": {"path": "report.md"},
+                "source": "runtime_planner",
+                "step_id": "write-report",
+                "decision_id": "decision-1",
+                "plan_id": "plan-1",
+                "group_run_id": "group-run-1",
+                "task_todo": {
+                    "todo_id": "todo-write-report",
+                    "title": "Write report",
+                    "status": "pending",
+                    "step_id": "write-report",
+                    "tool_name": "artifact.write",
+                },
+            }
+        ],
+        ["artifact.write"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "write report"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="group-run-1",
+        budget=FakeBudget(),
+    )
+
+    todo_event = next(
+        event for event in timeline if event["event"] == "group.run.task.todo.updated"
+    )
+    assert todo_event["group_run_id"] == "group-run-1"
+    assert todo_event["planner_event_type"] == "agent.task.todo.updated"
+    assert todo_event["planner_scope"] == "group.run"
+    assert next(
+        event_type
+        for _run_id, event_type, _payload in run_events
+        if event_type == "group.run.task.todo.updated"
+    )
 
 
 def test_runtime_tool_request_runner_marks_operate_steps_ready_for_verification() -> None:

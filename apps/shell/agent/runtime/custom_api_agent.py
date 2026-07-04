@@ -3153,6 +3153,14 @@ class RuntimeCustomApiAgentLoop:
                 "source_event": source_event,
                 "result_preview": _task_progress_result_preview(result),
             }
+            base_payload.update(
+                _runtime_task_progress_scope_context(
+                    timeline,
+                    tool_event,
+                    decision_id=decision_id,
+                    plan_id=plan_id,
+                )
+            )
             for workspace_item in workspace_items_by_step.get(step_id, []):
                 item_payload = _snapshot_payload(workspace_item)
                 item_payload["status"] = todo_status
@@ -3167,19 +3175,15 @@ class RuntimeCustomApiAgentLoop:
                     ),
                     "workspace_item": item_payload,
                 }
-                timeline.append(
-                    self._timeline(
-                        "agent.task.workspace_item.updated",
-                        str(getattr(workspace_item, "title", "") or step_id),
-                        **payload,
-                    )
+                _append_runtime_task_progress_event(
+                    "agent.task.workspace_item.updated",
+                    str(getattr(workspace_item, "title", "") or step_id),
+                    payload,
+                    timeline=timeline,
+                    timeline_factory=self._timeline,
+                    append_run_event=self._append_run_event,
+                    run_id=run_id,
                 )
-                if run_id and self._append_run_event is not None:
-                    self._append_run_event(
-                        run_id,
-                        "agent.task.workspace_item.updated",
-                        payload,
-                    )
             todo = todo_by_step.get(step_id)
             if todo is not None:
                 todo_payload = _snapshot_payload(todo)
@@ -3191,15 +3195,15 @@ class RuntimeCustomApiAgentLoop:
                     "previous_status": str(getattr(todo, "status", "") or "pending"),
                     "todo": todo_payload,
                 }
-                timeline.append(
-                    self._timeline(
-                        "agent.task.todo.updated",
-                        str(getattr(todo, "title", "") or step_id),
-                        **payload,
-                    )
+                _append_runtime_task_progress_event(
+                    "agent.task.todo.updated",
+                    str(getattr(todo, "title", "") or step_id),
+                    payload,
+                    timeline=timeline,
+                    timeline_factory=self._timeline,
+                    append_run_event=self._append_run_event,
+                    run_id=run_id,
                 )
-                if run_id and self._append_run_event is not None:
-                    self._append_run_event(run_id, "agent.task.todo.updated", payload)
             for checkpoint in checkpoints_by_step.get(step_id, []):
                 checkpoint_payload = _snapshot_payload(checkpoint)
                 checkpoint_payload["status"] = checkpoint_status
@@ -3214,19 +3218,15 @@ class RuntimeCustomApiAgentLoop:
                     ),
                     "checkpoint": checkpoint_payload,
                 }
-                timeline.append(
-                    self._timeline(
-                        "agent.task.checkpoint.updated",
-                        str(getattr(checkpoint, "title", "") or step_id),
-                        **payload,
-                    )
+                _append_runtime_task_progress_event(
+                    "agent.task.checkpoint.updated",
+                    str(getattr(checkpoint, "title", "") or step_id),
+                    payload,
+                    timeline=timeline,
+                    timeline_factory=self._timeline,
+                    append_run_event=self._append_run_event,
+                    run_id=run_id,
                 )
-                if run_id and self._append_run_event is not None:
-                    self._append_run_event(
-                        run_id,
-                        "agent.task.checkpoint.updated",
-                        payload,
-                    )
 
     def _record_model_followup_pending_plan_progress_events(
         self,
@@ -3341,6 +3341,14 @@ class RuntimeCustomApiAgentLoop:
                 "source_event": source_event,
                 "result_preview": _task_progress_result_preview(result),
             }
+            base_payload.update(
+                _runtime_task_progress_scope_context(
+                    timeline,
+                    tool_event,
+                    decision_id=decision_id,
+                    plan_id=plan_id,
+                )
+            )
             for workspace_item in workspace_items_by_step.get(step_id, []):
                 item_payload = dict(workspace_item)
                 item_payload["status"] = todo_status
@@ -3357,19 +3365,15 @@ class RuntimeCustomApiAgentLoop:
                     payload,
                 ):
                     continue
-                timeline.append(
-                    self._timeline(
-                        "agent.task.workspace_item.updated",
-                        str(workspace_item.get("title") or step_id),
-                        **payload,
-                    )
+                _append_runtime_task_progress_event(
+                    "agent.task.workspace_item.updated",
+                    str(workspace_item.get("title") or step_id),
+                    payload,
+                    timeline=timeline,
+                    timeline_factory=self._timeline,
+                    append_run_event=self._append_run_event,
+                    run_id=run_id,
                 )
-                if run_id and self._append_run_event is not None:
-                    self._append_run_event(
-                        run_id,
-                        "agent.task.workspace_item.updated",
-                        payload,
-                    )
             todo = todos_by_step.get(step_id)
             if todo is not None:
                 todo_payload = dict(todo)
@@ -3386,15 +3390,15 @@ class RuntimeCustomApiAgentLoop:
                     "agent.task.todo.updated",
                     payload,
                 ):
-                    timeline.append(
-                        self._timeline(
-                            "agent.task.todo.updated",
-                            str(todo.get("title") or step_id),
-                            **payload,
-                        )
+                    _append_runtime_task_progress_event(
+                        "agent.task.todo.updated",
+                        str(todo.get("title") or step_id),
+                        payload,
+                        timeline=timeline,
+                        timeline_factory=self._timeline,
+                        append_run_event=self._append_run_event,
+                        run_id=run_id,
                     )
-                    if run_id and self._append_run_event is not None:
-                        self._append_run_event(run_id, "agent.task.todo.updated", payload)
             for checkpoint in checkpoints_by_step.get(step_id, []):
                 checkpoint_payload = dict(checkpoint)
                 checkpoint_payload["status"] = checkpoint_status
@@ -3411,19 +3415,15 @@ class RuntimeCustomApiAgentLoop:
                     payload,
                 ):
                     continue
-                timeline.append(
-                    self._timeline(
-                        "agent.task.checkpoint.updated",
-                        str(checkpoint.get("title") or step_id),
-                        **payload,
-                    )
+                _append_runtime_task_progress_event(
+                    "agent.task.checkpoint.updated",
+                    str(checkpoint.get("title") or step_id),
+                    payload,
+                    timeline=timeline,
+                    timeline_factory=self._timeline,
+                    append_run_event=self._append_run_event,
+                    run_id=run_id,
                 )
-                if run_id and self._append_run_event is not None:
-                    self._append_run_event(
-                        run_id,
-                        "agent.task.checkpoint.updated",
-                        payload,
-                    )
 
     def _record_unavailable_desktop_intent(
         self,
@@ -9281,6 +9281,142 @@ def _runtime_planner_initial_task_updates(
     return events
 
 
+def _append_runtime_task_progress_event(
+    event_type: str,
+    detail: str,
+    payload: dict[str, Any],
+    *,
+    timeline: list[dict[str, Any]],
+    timeline_factory: Callable[..., dict[str, Any]],
+    append_run_event: Callable[[str, str, dict[str, Any]], Any] | None,
+    run_id: str,
+) -> None:
+    if _runtime_task_update_exists(timeline, event_type, payload):
+        return
+    scoped_event_type = _runtime_progress_event_type(event_type, payload)
+    event_payload = _runtime_progress_event_payload(payload, event_type, scoped_event_type)
+    timeline.append(timeline_factory(scoped_event_type, detail, **event_payload))
+    if run_id and append_run_event is not None:
+        append_run_event(run_id, scoped_event_type, event_payload)
+
+
+_RUNTIME_PROGRESS_GROUP_EVENT_TYPES = {
+    "agent.task.workspace_item.updated": "group.run.task.workspace_item.updated",
+    "agent.task.todo.updated": "group.run.task.todo.updated",
+    "agent.task.checkpoint.updated": "group.run.task.checkpoint.updated",
+}
+
+_RUNTIME_PROGRESS_WORKFLOW_EVENT_TYPES = {
+    "agent.task.workspace_item.updated": "workflow.run.task.workspace_item.updated",
+    "agent.task.todo.updated": "workflow.run.task.todo.updated",
+    "agent.task.checkpoint.updated": "workflow.run.task.checkpoint.updated",
+}
+
+_RUNTIME_PROGRESS_BASE_EVENT_TYPES = {
+    **{value: key for key, value in _RUNTIME_PROGRESS_GROUP_EVENT_TYPES.items()},
+    **{value: key for key, value in _RUNTIME_PROGRESS_WORKFLOW_EVENT_TYPES.items()},
+    "workflow.task.workspace_item.updated": "agent.task.workspace_item.updated",
+    "workflow.task.todo.updated": "agent.task.todo.updated",
+    "workflow.task.checkpoint.updated": "agent.task.checkpoint.updated",
+}
+
+
+def _runtime_progress_event_type(event_type: str, payload: Mapping[str, Any]) -> str:
+    clean_event_type = str(event_type or "").strip()
+    if str(payload.get("workflow_run_id") or "").strip():
+        return _RUNTIME_PROGRESS_WORKFLOW_EVENT_TYPES.get(clean_event_type, clean_event_type)
+    if str(payload.get("group_run_id") or payload.get("run_group_id") or "").strip():
+        return _RUNTIME_PROGRESS_GROUP_EVENT_TYPES.get(clean_event_type, clean_event_type)
+    return clean_event_type
+
+
+def _runtime_progress_event_payload(
+    payload: Mapping[str, Any],
+    base_event_type: str,
+    scoped_event_type: str,
+) -> dict[str, Any]:
+    event_payload = dict(payload)
+    if scoped_event_type == base_event_type:
+        return event_payload
+    event_payload.setdefault("planner_event_type", base_event_type)
+    event_payload.setdefault("planner_scope", _runtime_progress_event_scope(scoped_event_type))
+    return event_payload
+
+
+def _runtime_progress_event_scope(event_type: str) -> str:
+    clean_event_type = str(event_type or "").strip()
+    if clean_event_type.startswith("workflow.run."):
+        return "workflow.run"
+    if clean_event_type.startswith("group.run."):
+        return "group.run"
+    return "agent"
+
+
+def _runtime_progress_base_event_type(event_type: str) -> str:
+    clean_event_type = str(event_type or "").strip()
+    return _RUNTIME_PROGRESS_BASE_EVENT_TYPES.get(clean_event_type, clean_event_type)
+
+
+def _runtime_task_progress_scope_context(
+    timeline: list[dict[str, Any]],
+    tool_event: Mapping[str, Any],
+    *,
+    decision_id: str,
+    plan_id: str,
+) -> dict[str, str]:
+    context = _runtime_task_progress_context_from_mapping(tool_event)
+    if context:
+        return context
+    clean_decision_id = str(decision_id or "").strip()
+    clean_plan_id = str(plan_id or "").strip()
+    for event in reversed(timeline):
+        if not isinstance(event, Mapping):
+            continue
+        event_type = str(event.get("event") or event.get("event_type") or "").strip()
+        if event_type not in {
+            "agent.task_core.created",
+            "group.run.task_core.created",
+            "workflow.task_core.created",
+            "workflow.run.task_core.created",
+        }:
+            continue
+        payload = _runtime_task_progress_event_payload(event)
+        event_decision_id = str(payload.get("decision_id") or "").strip()
+        event_plan_id = str(payload.get("plan_id") or "").strip()
+        if clean_decision_id and event_decision_id and event_decision_id != clean_decision_id:
+            continue
+        if clean_plan_id and event_plan_id and event_plan_id != clean_plan_id:
+            continue
+        context = _runtime_task_progress_context_from_mapping(payload)
+        if context:
+            return context
+    return {}
+
+
+def _runtime_task_progress_context_from_mapping(value: Mapping[str, Any]) -> dict[str, str]:
+    payload = _runtime_task_progress_event_payload(value)
+    context: dict[str, str] = {}
+    for key in (
+        "task_id",
+        "run_group_id",
+        "group_run_id",
+        "group_id",
+        "workflow_id",
+        "workflow_run_id",
+        "workflow_node_id",
+        "workflow_node_label",
+    ):
+        clean_value = str(payload.get(key) or "").strip()
+        if clean_value:
+            context[key] = clean_value
+    return context
+
+
+def _runtime_task_progress_event_payload(value: Mapping[str, Any]) -> dict[str, Any]:
+    payload = value.get("payload") if isinstance(value.get("payload"), Mapping) else {}
+    return {**dict(value), **dict(payload)}
+
+
 def _runtime_task_update_exists(
     timeline: list[dict[str, Any]],
     event_type: str,
@@ -9300,7 +9436,8 @@ def _runtime_task_update_exists(
     decision_id = str(payload.get("decision_id") or "").strip()
     return any(
         isinstance(event, dict)
-        and str(event.get("event") or "").strip() == event_type
+        and _runtime_progress_base_event_type(str(event.get("event") or "").strip())
+        == event_type
         and (
             not decision_id
             or str(event.get("decision_id") or "").strip() == decision_id
@@ -9365,7 +9502,10 @@ def _runtime_planner_step_has_status(
     for event in timeline:
         if not isinstance(event, Mapping):
             continue
-        if str(event.get("event") or "").strip() != "agent.task.todo.updated":
+        if (
+            _runtime_progress_base_event_type(str(event.get("event") or "").strip())
+            != "agent.task.todo.updated"
+        ):
             continue
         if str(event.get("step_id") or "").strip() != clean_step_id:
             continue
