@@ -3802,6 +3802,7 @@ def test_custom_api_agent_loop_replans_dynamic_file_open_focus_mismatch() -> Non
         "desktop.active_window",
     ]
     assert recovery_requests[0]["input"] == {"app_name": "Preview"}
+    assert recovery_requests[1]["verification_target"] == {"app_name": "Preview"}
     assert all(request["replan_trigger"] == "verification_failed" for request in recovery_requests)
     assert any(
         event["event_type"] == "agent.replan.requested"
@@ -3862,6 +3863,7 @@ def test_auto_replan_focus_recovery_refocuses_expected_app_without_model_followu
     }
     assert requests[0]["input"] == {"app_name": "PixelForge"}
     assert requests[1]["input"] == {}
+    assert requests[1]["verification_target"] == {"app_name": "PixelForge"}
     assert {request["target_app_name"] for request in requests} == {"PixelForge"}
     assert {request["replan_request_id"] for request in requests} == {"replan-focus"}
     assert {request["replan_trigger"] for request in requests} == {
@@ -3940,6 +3942,7 @@ def test_auto_replan_verification_recovery_inspects_target_app_when_available() 
         "focus": True,
         "limit": 80,
     }
+    assert recovery_requests[0]["verification_target"] == {"app_name": "Figma"}
     assert all(request["continue_to_model"] is True for request in recovery_requests)
     assert {request["target_app_name"] for request in recovery_requests} == {"Figma"}
     assert {request["replan_request_id"] for request in recovery_requests} == {

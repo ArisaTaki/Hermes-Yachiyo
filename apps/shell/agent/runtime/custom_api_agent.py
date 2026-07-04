@@ -12553,6 +12553,7 @@ def _auto_replan_verification_recovery_requests(
             if value:
                 request[key] = value
         _attach_replan_payload_trace_metadata(request, first)
+        _attach_replan_active_window_verification_target(request, target)
         requests.append(request)
     return requests
 
@@ -13618,6 +13619,7 @@ def _auto_replan_focus_recovery_requests(
                 if value:
                     request[key] = value
             _attach_replan_payload_trace_metadata(request, payload)
+            _attach_replan_active_window_verification_target(request, target)
             requests.append(request)
     return _dedupe_replan_recovery_requests(requests)
 
@@ -13736,6 +13738,25 @@ def _verification_recovery_tool_input(
             reason = f"verify desktop after action involving {search_text}"
         return {"reason": reason}
     return {}
+
+
+def _attach_replan_active_window_verification_target(
+    request: dict[str, Any],
+    target: Mapping[str, Any],
+) -> None:
+    if str(request.get("tool") or "").strip() != "desktop.active_window":
+        return
+    if isinstance(request.get("verification_target"), Mapping):
+        return
+    app_name = str(
+        target.get("target_app_name")
+        or target.get("app_name")
+        or request.get("target_app_name")
+        or ""
+    ).strip()
+    if not app_name:
+        return
+    request["verification_target"] = {"app_name": app_name}
 
 
 def _first_replan_recovery_text(
