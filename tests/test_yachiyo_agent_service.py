@@ -419,6 +419,22 @@ class _CompletedDesktopIntentTaskRuntimePort(_FakeRuntimePort):
         )
 
 
+class _ReplanRecoveryTaskRuntimePort(_FakeRuntimePort):
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_timeline", task_id))
+        return _replan_recovery_task_payload(task_id=task_id)
+
+    def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("start_chat_task", request))
+        return _task_payload(
+            task_id="recovery-task-1",
+            run_id="recovery-run-1",
+            session_id=request.get("conversation_id") or "chat-1",
+            title=request.get("title") or "Recovery",
+            status="running",
+        )
+
+
 class _CompletedDesktopIntentSequenceTaskRuntimePort(_FakeRuntimePort):
     def get_task_timeline(self, task_id: str) -> dict[str, Any]:
         self.calls.append(("get_task_timeline", task_id))
@@ -491,6 +507,56 @@ def test_yachiyo_agent_service_maps_fake_runtime_to_task_snapshots() -> None:
     assert fetched.status == "completed"
     assert recent[0].task_id == "task-recent"
     assert port.calls[1][1]["prompt"] == "Patch README"
+
+
+def test_yachiyo_agent_service_starts_replan_recovery_action_from_chat_task() -> None:
+    port = _ReplanRecoveryTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_replan_recovery_action(
+        "task-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.list_apps",
+            "conversation_id": "chat-1",
+        },
+    )
+
+    assert task.task_id == "recovery-task-1"
+    assert task.metadata["source"] == "yachiyo_chat_replan_recovery"
+    assert task.metadata["replan_request_id"] == "replan-1"
+    assert [name for name, _payload in port.calls] == [
+        "get_task_timeline",
+        "start_chat_task",
+    ]
+    request = port.calls[1][1]
+    assert request["prompt"] == "执行恢复动作：Find Apple Music"
+    assert request["conversation_id"] == "chat-1"
+    assert request["metadata"]["desktop_permission_recovery"] is True
+    assert request["metadata"]["recovery_tool"] == "desktop.list_apps"
+    assert request["metadata"]["source"] == "yachiyo_chat_replan_recovery"
+    assert request["metadata"]["source_run_id"] == "run-1"
+    assert request["metadata"]["source_task_id"] == "task-1"
+    assert request["metadata"]["task_core_context"]["core_id"] == "task-core-1"
+    assert request["metadata"]["task_core_context"]["workspace_id"] == "task-workspace-1"
+    assert request["metadata"]["task_core_context"]["todos"][0]["todo_id"] == (
+        "todo-open-app"
+    )
+    assert (
+        request["metadata"]["task_core_context"]["task_verification_targets"][0][
+            "workspace_items"
+        ][0]["item_id"]
+        == "workspace-open-app"
+    )
+    direct_request = request["direct_tool_requests"][0]
+    assert direct_request["tool"] == "desktop.list_apps"
+    assert direct_request["input"] == {"query": "Apple Music"}
+    assert direct_request["source"] == "yachiyo_chat_replan_recovery"
+    assert direct_request["planning_reason"] == "planner_replan_runtime_recovery_action"
+    assert direct_request["continue_to_model"] is True
+    assert direct_request["replan_request_id"] == "replan-1"
+    assert direct_request["task_todo"]["todo_id"] == "todo-open-app"
+    assert direct_request["task_verification_targets"][0]["step_id"] == "open-app"
 
 
 def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task() -> None:
@@ -1625,6 +1691,99 @@ def _task_payload(**overrides: Any) -> dict[str, Any]:
     }
     payload.update(overrides)
     return payload
+
+
+def _replan_recovery_task_payload(**overrides: Any) -> dict[str, Any]:
+    task_id = str(overrides.get("task_id") or "task-1")
+    payload_overrides = dict(overrides)
+    payload_overrides.pop("task_id", None)
+    return _task_payload(
+        task_id=task_id,
+        run_id="run-1",
+        session_id="chat-1",
+        title="Open Apple Music",
+        status="running",
+        events=[
+            {
+                "event_type": "agent.task_core.created",
+                "payload": {
+                    "core_id": "task-core-1",
+                    "workspace_id": "task-workspace-1",
+                    "task_core": {
+                        "core_id": "task-core-1",
+                        "workspace": {
+                            "workspace_id": "task-workspace-1",
+                            "title": "Desktop Recovery Workspace",
+                            "items": [
+                                {
+                                    "item_id": "workspace-open-app",
+                                    "title": "Apple Music app target",
+                                    "kind": "scratch",
+                                    "source_step_id": "open-app",
+                                    "status": "blocked",
+                                }
+                            ],
+                        },
+                        "todos": [
+                            {
+                                "todo_id": "todo-open-app",
+                                "title": "Open Apple Music",
+                                "status": "blocked",
+                                "step_id": "open-app",
+                                "tool_name": "desktop.open_app",
+                            }
+                        ],
+                        "checkpoints": [
+                            {
+                                "checkpoint_id": "checkpoint:open-app",
+                                "title": "Verify Apple Music opened",
+                                "status": "blocked",
+                                "after_step_id": "open-app",
+                            }
+                        ],
+                        "replan_signals": [],
+                    },
+                },
+            },
+            {
+                "event_type": "agent.replan.requested",
+                "payload": {
+                    "request_id": "replan-1",
+                    "trigger": "tool_failure",
+                    "run_id": "run-1",
+                    "task_id": task_id,
+                    "core_id": "task-core-1",
+                    "source_step_id": "open-app",
+                    "source_tool_name": "desktop.open_app",
+                    "target_capability_id": "desktop.app_discovery",
+                    "planning_reason": "planner_replan_runtime_recovery_action",
+                    "verification_targets": [
+                        {
+                            "step_id": "open-app",
+                            "todo_id": "todo-open-app",
+                            "todo_title": "Open Apple Music",
+                            "tool_name": "desktop.open_app",
+                            "checkpoint_ids": ["checkpoint:open-app"],
+                            "checkpoint_titles": ["Verify Apple Music opened"],
+                        }
+                    ],
+                    "metadata": {
+                        "recovery_actions": [
+                            {
+                                "action_id": "replan-1:action:1:desktop.list_apps",
+                                "label": "Find Apple Music",
+                                "tool": "desktop.list_apps",
+                                "input": {"query": "Apple Music"},
+                                "permission_target": "app_discovery",
+                                "risk_level": "low",
+                            }
+                        ],
+                    },
+                },
+            },
+        ],
+        **payload_overrides,
+    )
 
 
 def _desktop_intent_task_payload(**overrides: Any) -> dict[str, Any]:

@@ -179,6 +179,56 @@ class YachiyoAgentService:
             metadata,
         )
 
+    def start_replan_recovery_action(
+        self,
+        task_id: str,
+        request: Mapping[str, Any],
+    ) -> AgentTaskSnapshot:
+        payload = _request_payload(request)
+        source_task = self.get_task_timeline(task_id)
+        from .studio_service import (
+            _find_replan_recovery_action,
+            _replan_recovery_action_direct_request,
+            _replan_recovery_action_metadata,
+            _replan_recovery_action_objective,
+            _replan_recovery_task_context,
+        )
+
+        request_id = str(payload.get("request_id") or "").strip()
+        recovery, action = _find_replan_recovery_action(
+            getattr(source_task, "replan_recoveries", []),
+            request_id=request_id,
+            action_id=str(payload.get("action_id") or "").strip(),
+        )
+        objective = _replan_recovery_action_objective(action)
+        task_context = _replan_recovery_task_context(source_task, recovery, action)
+        direct_request = _replan_recovery_action_direct_request(
+            recovery,
+            action,
+            task_context=task_context,
+            continue_to_model=bool(payload.get("continue_to_model", True)),
+            source="yachiyo_chat_replan_recovery",
+        )
+        start_payload: dict[str, Any] = {
+            "prompt": objective,
+            "title": str(payload.get("title") or action.label or objective).strip(),
+            "conversation_id": (
+                str(payload.get("conversation_id") or source_task.task_id or task_id).strip()
+                or None
+            ),
+            "metadata": _replan_recovery_action_metadata(
+                source_task,
+                recovery,
+                action,
+                task_context=task_context,
+                extra=payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {},
+                source="yachiyo_chat_replan_recovery",
+            ),
+            "direct_tool_requests": [direct_request],
+            "daily_desktop_planning_context": objective,
+        }
+        return self.start_chat_task(start_payload)
+
     def get_task_snapshot(self, task_id: str) -> AgentTaskSnapshot:
         return agent_task_snapshot_from_payload(self._runtime_port.get_task_snapshot(task_id))
 

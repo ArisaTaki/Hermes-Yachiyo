@@ -751,6 +751,7 @@ class AgentStudioService:
             action,
             task_context=task_context,
             continue_to_model=bool(payload.get("continue_to_model", True)),
+            source="agent_studio_replan_recovery",
         )
         start_payload: dict[str, Any] = {
             "agent_id": agent_id,
@@ -763,6 +764,7 @@ class AgentStudioService:
                 action,
                 task_context=task_context,
                 extra=payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {},
+                source="agent_studio_replan_recovery",
             ),
             "direct_tool_requests": [direct_request],
             "daily_desktop_planning_context": objective,
@@ -1331,11 +1333,12 @@ def _replan_recovery_action_direct_request(
     *,
     task_context: Mapping[str, Any],
     continue_to_model: bool,
+    source: str = "agent_studio_replan_recovery",
 ) -> dict[str, Any]:
     request = {
         "tool": str(action.tool or "").strip(),
         "input": dict(action.input or {}),
-        "source": "agent_studio_replan_recovery",
+        "source": str(source or "agent_studio_replan_recovery").strip(),
         "planning_reason": str(
             action.planning_reason
             or recovery.planning_reason
@@ -1657,6 +1660,7 @@ def _replan_recovery_action_metadata(
     *,
     task_context: Mapping[str, Any],
     extra: Mapping[str, Any],
+    source: str = "agent_studio_replan_recovery",
 ) -> dict[str, Any]:
     metadata = dict(extra)
     source_id = _replan_recovery_source_id(source_run)
@@ -1673,7 +1677,7 @@ def _replan_recovery_action_metadata(
             "replan_request_id": str(recovery.request_id or ""),
             "replan_recovery_action_id": str(action.action_id or ""),
             "replan_trigger": str(recovery.trigger or ""),
-            "source": "agent_studio_replan_recovery",
+            "source": str(source or "agent_studio_replan_recovery").strip(),
             "source_run_id": source_id,
         }
     )
