@@ -3889,6 +3889,61 @@ def test_release_candidate_verifier_manual_check_write_actions_print_remaining_s
     assert "manual release-candidate recommended commands:" in output
 
 
+def test_release_candidate_verifier_manual_check_merge_keeps_prior_evidence_when_later_draft_is_manual_required(
+    tmp_path,
+    monkeypatch,
+):
+    for env_name in rc.PROVIDER_SMOKE_ENV_VARS:
+        monkeypatch.delenv(env_name, raising=False)
+    monkeypatch.setattr(rc, "PROJECT_ROOT", tmp_path)
+    prior_statuses = rc._manual_release_candidate_check_report()
+    automated_evidence = {
+        "packaged_bridge_isolation": "Automated --run-dmg-app-smoke passed for release/Oha-Yachiyo.dmg",
+        "screen_recording_permission": "Automated --run-dmg-screen-smoke passed for release/Oha-Yachiyo.dmg",
+        "chat_native_file_upload": "Automated --run-dmg-chat-native-file-smoke passed for release/Oha-Yachiyo.dmg",
+        "packaged_ui_sampling": "Automated --run-dmg-ui-sampling-smoke passed for release/Oha-Yachiyo.dmg",
+    }
+    for check in prior_statuses:
+        evidence = automated_evidence.get(check["id"])
+        if evidence:
+            check["status"] = "passed"
+            check["evidence"] = evidence
+            check["evidence_source"] = "automated_rc_gate"
+
+    evidence_report_path = tmp_path / "tmp" / "rc-automated-evidence.json"
+    evidence_report_path.parent.mkdir(parents=True)
+    evidence_report_path.write_text(
+        json.dumps({"manual_release_candidate_check_statuses": prior_statuses}),
+        encoding="utf-8",
+    )
+    provider_draft_path = rc.write_manual_release_candidate_checks_draft(
+        tmp_path,
+        Path("tmp/provider-not-applicable.json"),
+        mark_provider_smoke_not_applicable_if_missing=True,
+    )
+
+    checks, findings = rc._load_manual_release_candidate_checks(
+        tmp_path,
+        (
+            Path("tmp/rc-automated-evidence.json"),
+            Path("tmp/provider-not-applicable.json"),
+        ),
+    )
+
+    assert findings == []
+    statuses = {check["id"]: check for check in checks}
+    for check_id in automated_evidence:
+        assert statuses[check_id]["status"] == "passed"
+        assert statuses[check_id]["evidence_source"] == "automated_rc_gate"
+    assert statuses["real_provider_smoke"]["status"] == "not_applicable"
+    assert statuses["real_provider_smoke"]["evidence_source"] == "credentials_unavailable"
+    assert provider_draft_path.exists()
+    assert rc._manual_release_candidate_check_summary(checks)["remaining_check_ids"] == [
+        "gatekeeper_first_launch",
+        "external_integrations_smoke",
+    ]
+
+
 def test_release_candidate_verifier_manual_check_status_action_prints_without_artifact_gate(
     tmp_path,
     monkeypatch,

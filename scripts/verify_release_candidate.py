@@ -3314,11 +3314,7 @@ def _load_manual_release_candidate_checks(
                     standalone_electron_ui_smoke,
                 )
                 continue
-            preserve_existing_when_manual_required = (
-                isinstance(raw_payload, dict)
-                and "manual_release_candidate_check_statuses" in raw_payload
-                and "checks" not in raw_payload
-            )
+            preserve_existing_when_manual_required = isinstance(raw_payload, dict)
             raw_checks = _manual_release_candidate_checks_from_payload(raw_payload)
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             findings.append(
