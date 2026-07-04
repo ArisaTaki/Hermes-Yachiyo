@@ -212,22 +212,112 @@ function RuntimeExecutionRequestRow({
   testId: string;
 }) {
   const stage = request.runtime_stage || request.runtime_role || request.capability_id || '';
+  const actionTargetPreview = requestActionTargetPreview(objectRecord(request.action_target));
+  const observationEvidencePreview = requestObservationEvidencePreview(objectRecord(request.observation_evidence));
+  const observationRetryPreview = requestObservationRetryPreview(objectRecord(request.observation_retry));
   return (
     <div
       className="studio-planner-step"
       data-approval-required={String(request.approval_required === true)}
       data-execution-request-id={request.request_id}
       data-execution-tool={request.tool_name}
+      data-observation-retry={observationRetryPreview}
+      data-request-action-target={actionTargetPreview}
+      data-request-observation-evidence={observationEvidencePreview}
       data-runtime-stage={request.runtime_stage || ''}
       data-testid={testId}
     >
       <div>
         <strong>{index + 1}. {request.tool_name || request.capability_id || 'runtime request'}</strong>
         <span>{request.step_id || request.capability_id || request.request_id}</span>
+        {actionTargetPreview ? <span>target: {actionTargetPreview}</span> : null}
+        {observationEvidencePreview ? <span>evidence: {observationEvidencePreview}</span> : null}
+        {observationRetryPreview ? <span>retry: {observationRetryPreview}</span> : null}
       </div>
       <small>{stage || 'operate'}{request.approval_required ? ' / approval' : ''}</small>
     </div>
   );
+}
+
+function requestActionTargetPreview(target: Record<string, unknown>): string {
+  if (!Object.keys(target).length) return '';
+  const label = (
+    stringValue(target.target)
+    || stringValue(target.label)
+    || stringValue(target.name)
+    || stringValue(target.title)
+    || stringValue(target.text)
+    || stringValue(target.role)
+  );
+  const app = (
+    stringValue(target.app_name)
+    || stringValue(target.resolved_app_name)
+    || stringValue(target.app)
+    || stringValue(target.bundle_id)
+  );
+  const query = stringValue(target.query) || stringValue(target.app_query);
+  return compactPreview([
+    stringValue(target.action),
+    label,
+    app,
+    query && query !== app ? `query ${query}` : '',
+  ]);
+}
+
+function requestObservationEvidencePreview(evidence: Record<string, unknown>): string {
+  if (!Object.keys(evidence).length) return '';
+  const source = (
+    stringValue(evidence.source_tool)
+    || stringValue(evidence.source)
+  );
+  const app = (
+    stringValue(evidence.app_name)
+    || stringValue(evidence.resolved_app_name)
+    || stringValue(evidence.app)
+  );
+  const query = stringValue(evidence.query) || stringValue(evidence.app_query);
+  return compactPreview([
+    source,
+    stringValue(evidence.strategy),
+    stringValue(evidence.reason),
+    app,
+    query && query !== app ? `query ${query}` : '',
+  ]);
+}
+
+function requestObservationRetryPreview(retry: Record<string, unknown>): string {
+  if (!Object.keys(retry).length) return '';
+  const retryInput = objectRecord(retry.input);
+  const retryTarget = (
+    stringValue(retry.target)
+    || stringValue(retry.label)
+    || stringValue(retry.target_label)
+    || stringValue(retryInput.app_name)
+    || stringValue(retryInput.query)
+  );
+  return compactPreview([
+    stringValue(retry.from_tool) || stringValue(retry.tool) || stringValue(retry.source_tool),
+    stringValue(retry.reason),
+    retryTarget,
+  ]);
+}
+
+function compactPreview(parts: string[]): string {
+  const text = parts
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .join(' · ');
+  return text.length > 120 ? `${text.slice(0, 117)}...` : text;
+}
+
+function objectRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? value as Record<string, unknown>
+    : {};
+}
+
+function stringValue(value: unknown): string {
+  return typeof value === 'string' ? value.trim() : '';
 }
 
 function uniqueStrings(values: Array<string | null | undefined>): string[] {
