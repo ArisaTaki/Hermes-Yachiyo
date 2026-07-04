@@ -15,6 +15,7 @@ def test_browser_planner_artifact_smoke_covers_browser_tool_plans():
         "explicit_url_report",
         "current_page_screenshot",
         "search_report",
+        "known_site_search_in_browser",
     }
     assert cases["current_page_report"]["requests"][0]["tool"] == "browser.extract_text"
     assert cases["explicit_url_report"]["requests"][0]["tool"] == (
@@ -22,6 +23,10 @@ def test_browser_planner_artifact_smoke_covers_browser_tool_plans():
     )
     assert cases["current_page_screenshot"]["requests"][0]["tool"] == "browser.screenshot"
     assert cases["search_report"]["requests"][0]["tool"] == "browser.open_url"
+    assert cases["known_site_search_in_browser"]["requests"][0]["tool"] == "browser.open_url"
+    assert cases["known_site_search_in_browser"]["requests"][0]["input"] == {
+        "url": "https://github.com/search?q=yachiyo"
+    }
     assert cases["current_page_screenshot"]["artifacts_expected"] == [
         "browser/current-page.png"
     ]
