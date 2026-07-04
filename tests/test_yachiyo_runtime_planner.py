@@ -34721,3 +34721,60 @@ def test_runtime_planner_reads_current_open_capability_app_by_running_scope() ->
             "query": query,
             "step_id": "observe-selected-discovered-app",
         }
+
+
+def test_runtime_planner_does_not_type_button_tail_after_click_target() -> None:
+    for prompt in (
+        "在当前打开的邮件应用里点击写信按钮",
+        "在一个运行中的邮件应用里点击写信按钮",
+    ):
+        decision = RuntimePlanner().decision(prompt)
+        envelope = runtime_execution_envelope_from_decision(decision, full_plan=True)
+
+        assert decision.selected_intent.kind == "desktop_operation"
+        assert "foreground_compose_text_hint" not in decision.selected_intent.inputs
+        assert "safe_type_text_hint" not in decision.selected_intent.inputs
+        assert decision.selected_intent.inputs["app_capability_hint"] == {
+            "query": "mail",
+            "description": "邮件",
+        }
+        assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+            "discover_apps-desktop-state",
+            "open-selected-discovered-app",
+            "operate-selected-discovered-app-ui",
+            "verify-selected-discovered-app-action",
+        ]
+        operation = _step_by_id(decision, "operate-selected-discovered-app-ui")
+        assert operation.tool_name == "app.focus_and_click_ui_element"
+        assert operation.input_preview == {
+            "app_name": "<selected app from desktop.running_apps>",
+            "selection_source": "desktop.running_apps",
+            "query": "mail",
+            "target": "写信",
+            "role_filter": "button",
+            "click_count": 1,
+            "limit": 80,
+        }
+
+        assert envelope is not None
+        assert all(
+            "type" not in str(request.step_id or "")
+            for request in envelope.requests
+        )
+        assert envelope.requests[2].action_target["action"] == "click_ui"
+        assert envelope.requests[2].action_target["selection_source"] == (
+            "desktop.running_apps"
+        )
+
+    foreground = RuntimePlanner().decision("在当前应用里点击写信按钮")
+    assert [step.step_id for step in foreground.plan.tool_plan.steps] == [
+        "discover-desktop-state",
+        "operate-foreground-ui",
+        "verify-desktop-result",
+    ]
+    assert _step_by_id(foreground, "operate-foreground-ui").input_preview == {
+        "target": "写信",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }

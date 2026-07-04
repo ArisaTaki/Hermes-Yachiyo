@@ -465,9 +465,9 @@ class TaskIntentRouter:
             and screen_capture is None
             and _ambiguous_visible_target_action_requested(text)
         ):
-            click_target = click_target_hint(text)
+            primary_click_target = click_target_hint(text)
             ui_inspection = {
-                "role_filter": str((click_target or {}).get("role_filter") or ""),
+                "role_filter": str((primary_click_target or {}).get("role_filter") or ""),
                 "limit": 80,
             }
         control_presence_inspection = ui_control_presence_hint(text)
@@ -520,7 +520,14 @@ class TaskIntentRouter:
         if safe_scroll is None and app_scoped_safe_operation.get("safe_scroll"):
             safe_scroll = app_scoped_safe_operation["safe_scroll"]
         safe_click = safe_click_hint(text)
+        primary_click_target = click_target_hint(text)
         foreground_compose_text = _foreground_compose_text_hint(text)
+        if _text_hint_is_ui_target_tail(
+            text,
+            foreground_compose_text,
+            primary_click_target,
+        ):
+            foreground_compose_text = ""
         if (
             app_capability
             and safe_shortcut
@@ -3314,6 +3321,12 @@ class RuntimePlanner:
                 or ""
             ).strip()
         )
+        if _text_hint_is_ui_target_tail(
+            intent.user_goal,
+            foreground_compose_text,
+            click_target,
+        ):
+            foreground_compose_text = ""
         if str((safe_shortcut or {}).get("action") or "").strip() == "new_message":
             foreground_compose_text = ""
         safe_shortcut_action = str((safe_shortcut or {}).get("action") or "").strip()
@@ -3333,6 +3346,8 @@ class RuntimePlanner:
             )
         )
         if _looks_like_discovered_app_capability_phrase(safe_type_text):
+            safe_type_text = ""
+        if _text_hint_is_ui_target_tail(intent.user_goal, safe_type_text, click_target):
             safe_type_text = ""
         foreground_submit_action = str(
             intent.inputs.get("foreground_submit_action_hint")
@@ -9923,6 +9938,8 @@ def _append_selected_discovered_generic_action_steps(
     ):
         safe_type_text = safe_type_text_hint(pending_action)
     if _looks_like_discovered_app_capability_phrase(safe_type_text):
+        safe_type_text = ""
+    if _text_hint_is_ui_target_tail(pending_action, safe_type_text, click_target):
         safe_type_text = ""
     safe_shortcut = (
         dict(raw_safe_shortcut)
@@ -18866,6 +18883,43 @@ def _generic_followup_compose_text_hint(text: str) -> str:
         if text_value:
             return text_value
     return ""
+
+
+def _text_hint_is_ui_target_tail(
+    prompt: str,
+    text_hint: str,
+    click_target: Mapping[str, Any] | None,
+) -> bool:
+    value = _clean_prompt(text_hint)
+    if not value or not isinstance(click_target, Mapping) or not click_target:
+        return False
+    prompt_value = _clean_prompt(prompt)
+    if not re.search(
+        r"(?:点击|点一下|点按|单击|双击|点|click|press|tap)",
+        prompt_value,
+        flags=re.IGNORECASE,
+    ):
+        return False
+    if _contains_any(
+        value,
+        (
+            "按钮",
+            "链接",
+            "菜单项",
+            "菜单",
+            "控件",
+            "元素",
+            "button",
+            "link",
+            "menu item",
+            "menu",
+            "control",
+            "element",
+        ),
+    ):
+        return True
+    target = _clean_prompt(str(click_target.get("target") or ""))
+    return bool(target and (value == target or value in target))
 
 
 def _generic_create_title_text_hint(text: str) -> str:
