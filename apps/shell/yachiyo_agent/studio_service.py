@@ -1754,6 +1754,14 @@ def _replan_recovery_action_direct_request(
         value = getattr(action, key) or getattr(recovery, key)
         if isinstance(value, Mapping) and value:
             request[key] = dict(value)
+    action_metadata = _mapping(action.metadata)
+    desktop_loop = _mapping(action_metadata.get("desktop_loop"))
+    if desktop_loop:
+        request["desktop_loop"] = desktop_loop
+    for key in ("runtime_stage", "runtime_role"):
+        value = _first_text(action_metadata.get(key))
+        if value:
+            request[key] = value
     verification_targets = action.verification_targets or recovery.verification_targets
     if verification_targets:
         request["verification_targets"] = [dict(target) for target in verification_targets]
@@ -2129,6 +2137,14 @@ def _replan_recovery_action_metadata(
         metadata["source_task_title"] = source_title
     if task_context:
         metadata["task_core_context"] = dict(task_context)
+    action_metadata = _mapping(action.metadata)
+    desktop_loop = _mapping(action_metadata.get("desktop_loop"))
+    if desktop_loop:
+        metadata["desktop_loop"] = desktop_loop
+    for key in ("runtime_stage", "runtime_role"):
+        value = _first_text(action_metadata.get(key))
+        if value:
+            metadata[key] = value
     if action.approval_required:
         metadata["recovery_action_approval_required"] = True
     return metadata

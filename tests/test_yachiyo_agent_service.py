@@ -464,6 +464,23 @@ class _ApprovalReplanRecoveryTaskRuntimePort(_ReplanRecoveryTaskRuntimePort):
         return payload
 
 
+class _DesktopLoopReplanRecoveryTaskRuntimePort(_ReplanRecoveryTaskRuntimePort):
+    def __init__(self, events: list[dict[str, Any]]) -> None:
+        super().__init__()
+        self._events = events
+
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_timeline", task_id))
+        return _task_payload(
+            task_id=task_id,
+            run_id="run-1",
+            session_id="chat-1",
+            title="Open PixelForge",
+            status="running",
+            events=list(self._events),
+        )
+
+
 class _CompletedDesktopIntentSequenceTaskRuntimePort(_FakeRuntimePort):
     def get_task_timeline(self, task_id: str) -> dict[str, Any]:
         self.calls.append(("get_task_timeline", task_id))
@@ -661,6 +678,61 @@ def test_yachiyo_agent_service_auto_starts_next_safe_replan_continuation() -> No
     )
     assert request["direct_tool_requests"][0]["tool"] == "desktop.list_apps"
     assert request["direct_tool_requests"][0]["approval_required"] is False
+
+
+def test_yachiyo_agent_service_auto_continuation_preserves_desktop_loop_context() -> None:
+    planner_service = YachiyoAgentService(_FakeRuntimePort())
+    allowed_tools = ["desktop.list_apps", "app.open", "desktop.active_window"]
+    decision = planner_service.plan_chat_task("打开 PixelForge", allowed_tools=allowed_tools)
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+    assert envelope is not None
+    request = envelope.requests[0].model_dump(mode="json")
+    events = planner_service.project_tool_result_events(
+        decision,
+        tool_request={
+            **request,
+            "task_id": "task-1",
+            "run_id": "run-1",
+        },
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "desktop.list_apps",
+            "result": {"ok": False, "error": "desktop_observation_failed"},
+        },
+        run_id="run-1",
+        task_id="task-1",
+        after_sequence=20,
+    )
+    port = _DesktopLoopReplanRecoveryTaskRuntimePort(
+        [event.model_dump(mode="json") for event in events]
+    )
+    service = YachiyoAgentService(port)
+
+    task = service.start_next_replan_continuation(
+        "task-1",
+        {"conversation_id": "chat-1"},
+    )
+
+    assert task is not None
+    assert [name for name, _payload in port.calls] == [
+        "get_task_timeline",
+        "start_chat_task",
+    ]
+    chat_request = port.calls[1][1]
+    assert chat_request["metadata"]["source"] == "yachiyo_chat_replan_auto_continuation"
+    assert chat_request["metadata"]["replan_auto_start_eligible"] is True
+    assert chat_request["metadata"]["desktop_loop"]["can_auto_retry"] is True
+    assert chat_request["metadata"]["runtime_stage"] == "discover"
+    direct_request = chat_request["direct_tool_requests"][0]
+    assert direct_request["tool"] == "desktop.list_apps"
+    assert direct_request["planning_reason"] == "planner_desktop_loop_auto_retry"
+    assert direct_request["approval_required"] is False
+    assert direct_request["desktop_loop"]["retry_tool"] == "desktop.list_apps"
+    assert direct_request["desktop_loop"]["can_auto_retry"] is True
+    assert direct_request["runtime_stage"] == "discover"
 
 
 def test_yachiyo_agent_service_does_not_auto_start_approval_replan_continuation() -> None:
