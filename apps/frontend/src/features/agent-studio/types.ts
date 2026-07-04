@@ -246,6 +246,7 @@ export type RunGroupSpec = {
   events?: PublicRunEvent[];
   pending_approvals?: ApprovalCardSnapshot[];
   shared_artifacts?: ArtifactSnapshot[];
+  runtime_debug?: RuntimeDebugSummarySnapshot | null;
   final_answer?: string;
   child_run_ids?: string[];
   created_at?: string;

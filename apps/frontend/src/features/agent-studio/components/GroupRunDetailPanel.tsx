@@ -123,6 +123,7 @@ export function GroupRunDetailPanel({
   const groupRunArtifacts = selectedGroupRunSnapshot?.shared_artifacts?.length
     ? selectedGroupRunSnapshot.shared_artifacts
     : selectedRunGroup?.shared_artifacts || [];
+  const groupRunRuntimeDebug = selectedGroupRunSnapshot?.runtime_debug || selectedRunGroup?.runtime_debug || null;
   const replayApprovals = replayEvents.length ? approvalsFromRunEventReplay(replayEvents) : [];
   const replayArtifacts = replayEvents.length ? artifactsFromRunEventReplay(replayEvents) : [];
   const replayToolCalls = replayEvents.length ? toolCallsFromRunEventReplay(replayEvents) : [];
@@ -205,7 +206,7 @@ export function GroupRunDetailPanel({
       <RuntimeDebugSummary
         className="group-run-runtime-debug"
         sourceLabel="GroupRunSnapshot"
-        summary={selectedGroupRunSnapshot?.runtime_debug}
+        summary={groupRunRuntimeDebug}
         testId="agent-run-detail-group-run-runtime-debug"
       />
       <RuntimeExecutionEnvelopeSummary

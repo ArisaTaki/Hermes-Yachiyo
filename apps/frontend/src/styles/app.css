@@ -15787,6 +15787,10 @@ button.studio-tool-permission:disabled {
   white-space: nowrap;
 }
 
+.group-run-latest-runtime-debug.runtime-debug-summary {
+  background: oklch(255 0 0 / 0.018);
+}
+
 .group-run-event-summary {
   display: grid;
   gap: 7px;

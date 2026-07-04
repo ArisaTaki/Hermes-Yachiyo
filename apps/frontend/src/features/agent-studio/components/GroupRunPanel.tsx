@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 
 import { RuntimeApprovalCard } from '../../runtime-shared/components/RuntimeApprovalCard';
 import { RuntimeArtifactList } from '../../runtime-shared/components/RuntimeArtifactList';
+import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import { listYachiyoGroupRunEvents } from '../../yachiyo-studio/api';
 import type { GroupRunSnapshot, RunEventPageSnapshot } from '../../yachiyo-studio/types';
@@ -104,13 +105,29 @@ export function GroupRunPanel({
         ) : null}
       </div>
       {latestAgentGroupRun ? (
-        <div className="group-run-latest" data-testid="agent-group-run-latest">
+        <div
+          className="group-run-latest"
+          data-runtime-capability-id={latestAgentGroupRun.runtime_debug?.current_capability_id || ''}
+          data-runtime-deferred-tool={latestAgentGroupRun.runtime_debug?.latest_deferred_tool || ''}
+          data-runtime-doctrine={latestAgentGroupRun.runtime_debug?.runtime_doctrine || ''}
+          data-runtime-replan-request-id={latestAgentGroupRun.runtime_debug?.latest_replan_request_id || ''}
+          data-runtime-role={latestAgentGroupRun.runtime_debug?.runtime_role || ''}
+          data-runtime-stage={latestAgentGroupRun.runtime_debug?.runtime_stage || ''}
+          data-testid="agent-group-run-latest"
+        >
           <div className="group-run-latest-head">
             <strong>{latestAgentGroupRun.title || latestAgentGroupRun.objective || 'Group Run'}</strong>
             <span className={`run-status-pill ${runStatusTone(latestStatus)}`}>
               {runStatusLabel(latestStatus)}
             </span>
           </div>
+          <RuntimeDebugSummary
+            className="group-run-latest-runtime-debug"
+            compact
+            sourceLabel="GroupRun latest"
+            summary={latestAgentGroupRun.runtime_debug}
+            testId="agent-group-run-runtime-debug"
+          />
           {latestEvents.length ? (
             <RuntimeTimelineSummary
               className="group-run-event-summary"

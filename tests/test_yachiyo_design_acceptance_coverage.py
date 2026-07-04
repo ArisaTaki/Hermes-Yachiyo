@@ -1479,6 +1479,7 @@ def test_group_and_workflow_acceptance_paths_are_guarded() -> None:
             "onRunAgentGroup",
             "onOpenArtifact={onOpenArtifact}",
             'data-testid="agent-group-run"',
+            'testId="agent-group-run-runtime-debug"',
             'itemTestId="agent-group-run-artifact-item"',
             "onOpenAgentGroupRunTimeline(latestAgentGroupRun)",
         ],

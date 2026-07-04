@@ -196,6 +196,7 @@ export function publicGroupRunToRunGroupSpec(
     events: snapshot.events || [],
     pending_approvals: snapshot.pending_approvals || [],
     shared_artifacts: snapshot.shared_artifacts || [],
+    runtime_debug: snapshot.runtime_debug || undefined,
     final_answer: snapshot.final_answer || undefined,
     child_run_ids: childRunIds,
     created_at: snapshot.created_at,
