@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 
+from collections.abc import Mapping
 from typing import Any
 
 from apps.shell.chat_api import ChatAPI
@@ -67,6 +68,10 @@ from .recovery_actions import (
 from .runtime_execution import (
     runtime_execution_requests_from_envelope_payload,
     runtime_execution_requests_from_metadata,
+)
+from .runtime_progress import (
+    task_progress_event_payloads_for_tool_result,
+    task_replan_event_payloads_for_tool_result,
 )
 from .groups import group_run_snapshot_from_payload
 from .tool_catalog import runtime_tool_catalog_snapshot
@@ -772,6 +777,14 @@ class LegacyChatTaskStarter:
                 direct_tool_request=direct_tool_request,
                 direct_tool_requests=direct_tool_requests,
             )
+            self._append_runtime_tool_progress_events(
+                run_id,
+                run,
+                direct_tool_request=direct_tool_request,
+                direct_tool_requests=direct_tool_requests,
+                planner_decision=planner_decision,
+                task_id=task_id,
+            )
             status = str(run.get("status") or "").strip()
             result_text = str(run.get("result") or "").strip()
             if status == "approval_required":
@@ -885,6 +898,74 @@ class LegacyChatTaskStarter:
             append_run_event(run_id, "agent.plan.selection", dict(payload))
         except Exception:
             return
+
+    def _append_runtime_tool_progress_events(
+        self,
+        run_id: str,
+        run_payload: dict[str, Any],
+        *,
+        direct_tool_request: dict[str, Any] | None,
+        direct_tool_requests: list[dict[str, Any]],
+        planner_decision: Any | None,
+        task_id: str,
+    ) -> None:
+        append_run_event = getattr(self._runtime, "append_run_event", None)
+        if not run_id or not callable(append_run_event):
+            return
+        requests = _direct_tool_request_sequence(
+            direct_tool_request,
+            direct_tool_requests,
+            run_id=run_id,
+            task_id=task_id,
+        )
+        if not requests:
+            return
+        timeline = _run_event_timeline_for_progress(
+            self._runtime,
+            run_id,
+            run_payload,
+        )
+        tool_events = _runtime_tool_events_for_progress(timeline)
+        if not tool_events:
+            return
+        used_event_indexes: set[int] = set()
+        for request in requests:
+            match = _matching_runtime_tool_event(
+                request,
+                tool_events,
+                used_event_indexes,
+            )
+            if match is None:
+                continue
+            event_index, tool_event = match
+            used_event_indexes.add(event_index)
+            for payload in task_progress_event_payloads_for_tool_result(
+                tool_request=request,
+                tool_event=tool_event,
+                existing_timeline=timeline,
+            ):
+                event_type = str(payload.get("event") or payload.get("event_type") or "").strip()
+                if not event_type:
+                    continue
+                append_run_event(run_id, event_type, _event_payload_for_append(payload))
+                timeline.append(dict(payload))
+            if planner_decision is None:
+                continue
+            for payload in task_replan_event_payloads_for_tool_result(
+                planner_decision,
+                tool_request=request,
+                tool_event=tool_event,
+                run_id=run_id,
+                task_id=task_id,
+            ):
+                event_type = str(payload.get("event") or payload.get("event_type") or "").strip()
+                if not event_type:
+                    continue
+                append_payload = _event_payload_for_append(payload)
+                if _runtime_replan_event_recorded(timeline, event_type, append_payload):
+                    continue
+                append_run_event(run_id, event_type, append_payload)
+                timeline.append(dict(payload))
 
     def _sync_app_task_running(self, task_id: str) -> None:
         self._sync_app_task_status(task_id, "running", progress_label="正在执行桌面操作")
@@ -1602,6 +1683,200 @@ def _runtime_execution_envelope_request_candidates(
     if metadata_requests:
         candidates.append(metadata_requests)
     return candidates
+
+
+def _direct_tool_request_sequence(
+    direct_tool_request: dict[str, Any] | None,
+    direct_tool_requests: list[dict[str, Any]] | None,
+    *,
+    run_id: str,
+    task_id: str,
+) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    if isinstance(direct_tool_request, dict):
+        requests.append(dict(direct_tool_request))
+    if isinstance(direct_tool_requests, list):
+        requests.extend(
+            dict(request)
+            for request in direct_tool_requests
+            if isinstance(request, dict)
+        )
+    for request in requests:
+        request.setdefault("run_id", run_id)
+        request.setdefault("task_id", task_id)
+    return requests
+
+
+def _run_event_timeline_for_progress(
+    runtime: Any,
+    run_id: str,
+    run_payload: dict[str, Any],
+) -> list[dict[str, Any]]:
+    timeline = _event_list_from_payload(run_payload)
+    list_run_events = getattr(runtime, "list_run_events", None)
+    if callable(list_run_events):
+        try:
+            listed = list_run_events(run_id, after_sequence=0, limit=1000)
+        except TypeError:
+            try:
+                listed = list_run_events(run_id)
+            except Exception:
+                listed = None
+        except Exception:
+            listed = None
+        if isinstance(listed, Mapping):
+            timeline.extend(_event_list_from_payload(dict(listed)))
+        elif isinstance(listed, list):
+            timeline.extend(item for item in listed if isinstance(item, dict))
+    return _dedupe_progress_timeline(timeline)
+
+
+def _event_list_from_payload(payload: dict[str, Any]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for key in ("timeline", "events", "run_events", "recent_events"):
+        value = payload.get(key)
+        if isinstance(value, list):
+            events.extend(item for item in value if isinstance(item, dict))
+    return events
+
+
+def _dedupe_progress_timeline(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    seen: set[tuple[str, str, str, str, str]] = set()
+    result: list[dict[str, Any]] = []
+    for event in events:
+        event_type = str(event.get("event") or event.get("event_type") or "").strip()
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        key = (
+            event_type,
+            str(event.get("sequence") or "").strip(),
+            str(payload.get("detail") or payload.get("tool") or event.get("detail") or event.get("tool") or "").strip(),
+            str(payload.get("step_id") or event.get("step_id") or "").strip(),
+            str(payload.get("todo_id") or event.get("todo_id") or "").strip(),
+        )
+        if key in seen:
+            continue
+        seen.add(key)
+        result.append(dict(event))
+    return result
+
+
+def _runtime_tool_events_for_progress(timeline: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    events: list[dict[str, Any]] = []
+    for event in timeline:
+        normalized = _normalized_runtime_tool_event(event)
+        if normalized is not None:
+            events.append(normalized)
+    return events
+
+
+def _normalized_runtime_tool_event(event: dict[str, Any]) -> dict[str, Any] | None:
+    event_type = str(event.get("event") or event.get("event_type") or "").strip()
+    payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+    if not event_type:
+        event_type = str(payload.get("event") or payload.get("event_type") or "").strip()
+    if event_type not in {"agent.tool.call", "agent.tool.completed", "agent.tool.failed", "agent.tool.skipped"}:
+        return None
+    tool_name = str(
+        event.get("detail")
+        or event.get("tool")
+        or event.get("tool_name")
+        or payload.get("detail")
+        or payload.get("tool")
+        or payload.get("tool_name")
+        or ""
+    ).strip()
+    result = _mapping_payload(event.get("result")) or _mapping_payload(payload.get("result"))
+    input_preview = (
+        _mapping_payload(event.get("input_preview"))
+        or _mapping_payload(payload.get("input_preview"))
+        or _mapping_payload(event.get("input"))
+        or _mapping_payload(payload.get("input"))
+    )
+    normalized = {
+        **dict(payload),
+        "event": event_type,
+        "detail": tool_name,
+        "result": result,
+        "input_preview": input_preview,
+    }
+    for key in (
+        "request_id",
+        "step_id",
+        "planner_step_id",
+        "status",
+        "approval_required",
+        "verification_failed",
+    ):
+        value = event.get(key, payload.get(key))
+        if value not in (None, "", [], {}):
+            normalized[key] = value
+    return normalized
+
+
+def _matching_runtime_tool_event(
+    request: dict[str, Any],
+    tool_events: list[dict[str, Any]],
+    used_event_indexes: set[int],
+) -> tuple[int, dict[str, Any]] | None:
+    request_step = str(request.get("step_id") or request.get("planner_step_id") or "").strip()
+    request_id = str(request.get("request_id") or "").strip()
+    request_tool = str(request.get("tool") or request.get("tool_name") or "").strip()
+    for index, event in enumerate(tool_events):
+        if index in used_event_indexes:
+            continue
+        event_request_id = str(event.get("request_id") or "").strip()
+        event_step = str(event.get("step_id") or event.get("planner_step_id") or "").strip()
+        event_tool = str(event.get("detail") or event.get("tool") or event.get("tool_name") or "").strip()
+        if request_id and event_request_id == request_id:
+            return index, event
+        if request_step and event_step == request_step:
+            return index, event
+        if request_tool and event_tool == request_tool:
+            return index, event
+    return None
+
+
+def _event_payload_for_append(payload: dict[str, Any]) -> dict[str, Any]:
+    event_type = str(payload.get("event") or payload.get("event_type") or "").strip()
+    nested_payload = payload.get("payload")
+    if event_type.endswith(".replan.requested") and isinstance(nested_payload, Mapping):
+        return dict(nested_payload)
+    return {
+        key: value
+        for key, value in payload.items()
+        if key not in {"event", "event_type", "detail"}
+    }
+
+
+def _runtime_replan_event_recorded(
+    timeline: list[dict[str, Any]],
+    event_type: str,
+    payload: dict[str, Any],
+) -> bool:
+    if not event_type.endswith(".replan.requested"):
+        return False
+    request_id = str(payload.get("request_id") or "").strip()
+    source_step_id = str(payload.get("source_step_id") or "").strip()
+    trigger = str(payload.get("trigger") or "").strip()
+    for event in timeline:
+        existing_type = str(event.get("event") or event.get("event_type") or "").strip()
+        if existing_type != event_type:
+            continue
+        existing = event.get("payload") if isinstance(event.get("payload"), dict) else event
+        existing_request_id = str(existing.get("request_id") or "").strip()
+        if request_id and existing_request_id == request_id:
+            return True
+        if (
+            source_step_id
+            and str(existing.get("source_step_id") or "").strip() == source_step_id
+            and str(existing.get("trigger") or "").strip() == trigger
+        ):
+            return True
+    return False
+
+
+def _mapping_payload(value: Any) -> dict[str, Any]:
+    return dict(value) if isinstance(value, Mapping) else {}
 
 
 def _drop_data_analysis_prepare_app_requests(

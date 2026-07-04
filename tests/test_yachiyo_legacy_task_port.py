@@ -1850,6 +1850,54 @@ def test_legacy_chat_task_starter_prefers_top_level_runtime_execution_envelope()
     assert direct_requests[0]["planning_reason"] == "planner_full_plan_desktop_operation"
 
 
+def test_legacy_chat_task_starter_appends_runtime_tool_progress_events() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatToolProgressRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+    request = planner_enriched_chat_request(
+        {
+            "prompt": "打开 PixelForge",
+            "metadata": {"source": "launcher", "launcher_mode": "bubble"},
+        }
+    )
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-main",
+        conversation_id="chat-1",
+        prompt=str(request["prompt"]),
+        metadata=request["metadata"],
+        runtime_execution_envelope=request["runtime_execution_envelope"],
+    )
+
+    assert task is not None
+    progress_events = [
+        call[1]
+        for call in runtime.calls
+        if call[0] == "append_run_event"
+        and call[1]["event_type"] in {
+            "agent.task.todo.updated",
+            "agent.task.checkpoint.updated",
+        }
+    ]
+    assert progress_events
+    todo_events = [
+        event for event in progress_events
+        if event["event_type"] == "agent.task.todo.updated"
+    ]
+    assert {event["payload"]["step_id"] for event in todo_events} >= {
+        "discover-desktop-state",
+        "open-or-focus-app",
+        "verify-desktop-result",
+    }
+    latest_status_by_step = {
+        event["payload"]["step_id"]: event["payload"]["status"]
+        for event in todo_events
+    }
+    assert latest_status_by_step["discover-desktop-state"] == "completed"
+    assert latest_status_by_step["open-or-focus-app"] == "completed"
+    assert latest_status_by_step["verify-desktop-result"] == "completed"
+
+
 def test_legacy_chat_task_starter_executes_metadata_envelope_without_selected_requests(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1999,6 +2047,56 @@ def test_legacy_chat_task_starter_does_not_direct_run_top_level_approval_require
     direct_requests = model_loop_call[1]["direct_tool_requests"]
     assert all(request["tool"] != "terminal.run" for request in direct_requests)
     assert all(request.get("approval_required") is not True for request in direct_requests)
+
+
+def test_legacy_chat_task_starter_appends_replan_for_failed_runtime_tool_result() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatToolProgressRuntime(
+        {
+            "event": "agent.tool.call",
+            "detail": "app.open",
+            "result": {
+                "ok": False,
+                "error": "PixelForge was not found",
+            },
+        }
+    )
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+    request = planner_enriched_chat_request(
+        {
+            "prompt": "打开 PixelForge",
+            "metadata": {"source": "launcher", "launcher_mode": "bubble"},
+        }
+    )
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-main",
+        conversation_id="chat-1",
+        prompt=str(request["prompt"]),
+        metadata=request["metadata"],
+        runtime_execution_envelope=request["runtime_execution_envelope"],
+    )
+
+    assert task is not None
+    appended = [
+        call[1]
+        for call in runtime.calls
+        if call[0] == "append_run_event"
+    ]
+    blocked_todos = [
+        event for event in appended
+        if event["event_type"] == "agent.task.todo.updated"
+        and event["payload"]["step_id"] == "open-or-focus-app"
+    ]
+    assert blocked_todos
+    assert blocked_todos[-1]["payload"]["status"] == "blocked"
+    replans = [
+        event for event in appended
+        if event["event_type"] == "agent.replan.requested"
+    ]
+    assert replans
+    assert replans[-1]["payload"]["source_step_id"] == "open-or-focus-app"
+    assert replans[-1]["payload"]["trigger"] == "tool_failure"
 
 
 def test_legacy_chat_task_starter_planned_timeline_keeps_runtime_planner_sequence() -> None:
@@ -3007,6 +3105,54 @@ class _MainChatPlannerEventRuntime:
     def complete_main_chat_run(self, run_id: str, result: str) -> dict[str, Any]:
         self.calls.append(("complete_main_chat_run", {"run_id": run_id, "result": result}))
         return {"run_id": run_id, "status": "completed", "result": result}
+
+
+class _MainChatToolProgressRuntime(_MainChatPlannerEventRuntime):
+    def __init__(self, *tool_events: dict[str, Any]) -> None:
+        super().__init__()
+        self.tool_events = list(tool_events) or [
+            {
+                "event": "agent.tool.call",
+                "detail": "desktop.list_apps",
+                "result": {"ok": True, "count": 1},
+            },
+            {
+                "event": "agent.tool.call",
+                "detail": "app.open",
+                "result": {"ok": True, "app_name": "PixelForge"},
+            },
+            {
+                "event": "agent.tool.call",
+                "detail": "desktop.active_window",
+                "result": {"ok": True, "app_name": "PixelForge"},
+            },
+        ]
+
+    def execute_main_chat_model_loop(
+        self,
+        run_id: str,
+        messages: list[dict[str, Any]],
+        *,
+        direct_tool_request: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        self.calls.append(
+            (
+                "execute_main_chat_model_loop",
+                {
+                    "run_id": run_id,
+                    "messages": messages,
+                    "direct_tool_request": direct_tool_request,
+                    "direct_tool_requests": direct_tool_requests,
+                },
+            )
+        )
+        return {
+            "run_id": run_id,
+            "status": "completed",
+            "result": "Done",
+            "timeline": [dict(event) for event in self.tool_events],
+        }
 
 
 class _MainChatDataAnalysisRuntime(_MainChatPlannerEventRuntime):
