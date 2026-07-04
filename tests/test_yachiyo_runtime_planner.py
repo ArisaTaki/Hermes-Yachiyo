@@ -13841,6 +13841,116 @@ def test_runtime_planner_discovers_generic_communication_app_before_composing() 
     ).selected_intent.kind == "communication"
 
 
+def test_runtime_planner_composes_in_selected_running_mail_app() -> None:
+    allowed_tools = [
+        "desktop.running_apps",
+        "app.focus_and_safe_shortcut",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+
+    decision = RuntimePlanner().decision(
+        "在当前打开的邮件应用里写一封邮件给张三，内容是明天会议改到三点",
+        allowed_tools=allowed_tools,
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert decision.selected_intent.kind == "desktop_operation"
+    assert decision.selected_intent.inputs["communication_compose_hint"] == {
+        "send_action": "draft",
+        "channel": "email",
+        "recipient": "张三",
+        "body": "明天会议改到三点",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "inspect-selected-communication-compose-ui",
+        "fill-selected-communication-recipient",
+        "submit-selected-communication-recipient",
+        "draft-selected-communication-message",
+    ]
+    assert _step_by_id(decision, "discover_apps-desktop-state").tool_name == (
+        "desktop.running_apps"
+    )
+    assert _step_by_id(decision, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "mail",
+        "action": "new_message",
+    }
+    assert _step_by_id(
+        decision,
+        "inspect-selected-communication-compose-ui",
+    ).input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "open_if_needed": False,
+        "focus": True,
+        "role_filter": "text",
+        "limit": 80,
+        "selection_source": "desktop.running_apps",
+        "query": "mail",
+    }
+    recipient = _step_by_id(decision, "fill-selected-communication-recipient")
+    assert recipient.input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "mail",
+        "target": "To",
+        "text": "张三",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert recipient.approval_required is True
+    body = _step_by_id(decision, "draft-selected-communication-message")
+    assert body.input_preview == {
+        "app_name": "<selected app from desktop.running_apps>",
+        "selection_source": "desktop.running_apps",
+        "query": "mail",
+        "target": "message body",
+        "text": "明天会议改到三点",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    assert body.approval_required is True
+    assert all(
+        step.step_id != "send-selected-communication-message"
+        for step in decision.plan.tool_plan.steps
+    )
+
+    assert envelope is not None
+    assert [request.tool_name for request in envelope.requests] == [
+        "desktop.running_apps",
+        "app.focus_and_safe_shortcut",
+        "desktop.inspect_app",
+        "app.focus_and_type_into_ui_element",
+        "desktop.search_submit",
+        "app.focus_and_type_into_ui_element",
+    ]
+    assert envelope.requests[3].action_target == {
+        "kind": "desktop_app",
+        "action": "type_ui",
+        "selection_source": "desktop.running_apps",
+        "app_name": "<selected app from desktop.running_apps>",
+        "query": "mail",
+        "step_id": "fill-selected-communication-recipient",
+    }
+    assert envelope.requests[5].action_target == {
+        "kind": "desktop_app",
+        "action": "type_ui",
+        "selection_source": "desktop.running_apps",
+        "app_name": "<selected app from desktop.running_apps>",
+        "query": "mail",
+        "step_id": "draft-selected-communication-message",
+    }
+
+
 def test_runtime_planner_preserves_selected_app_resolution_for_deferred_compose_body() -> None:
     allowed_tools = [
         "desktop.list_apps",

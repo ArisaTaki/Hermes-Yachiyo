@@ -10848,7 +10848,10 @@ def _append_selected_discovered_communication_compose_steps(
     selected_app_tool: str,
     depends_on: str,
 ) -> None:
-    if selected_app_tool != "app.open_and_safe_shortcut":
+    if selected_app_tool not in {
+        "app.open_and_safe_shortcut",
+        "app.focus_and_safe_shortcut",
+    }:
         return
     if str(query or "").strip().lower() not in {"mail", "messaging"}:
         return
@@ -10858,7 +10861,14 @@ def _append_selected_discovered_communication_compose_steps(
     compose_hint = intent.inputs.get("communication_compose_hint")
     if not isinstance(compose_hint, Mapping):
         compose_hint = {}
-    selected_app = "<selected app from desktop.list_apps>"
+    selected_app_context = _selected_discovered_app_input_context(intent)
+    selected_app = str(selected_app_context.get("app_name") or "").strip()
+    selected_app_source = str(selected_app_context.get("selection_source") or "").strip()
+    selected_app_operation_context = (
+        selected_app_context
+        if selected_app_source == "desktop.running_apps"
+        else {"app_name": selected_app}
+    )
     channel = str(compose_hint.get("channel") or "").strip()
     recipient = str(compose_hint.get("recipient") or "").strip()
     body = str(compose_hint.get("body") or "").strip()
@@ -10875,9 +10885,25 @@ def _append_selected_discovered_communication_compose_steps(
             "focus": True,
             "role_filter": "text",
             "limit": 80,
+            **(
+                {
+                    "selection_source": selected_app_source,
+                    "query": str(selected_app_context.get("query") or "").strip(),
+                }
+                if selected_app_source == "desktop.running_apps"
+                else {}
+            ),
         }
         if inspect_tool == "desktop.inspect_app"
-        else {"role_filter": "text", "limit": 80}
+        else {
+            **(
+                selected_app_context
+                if selected_app_source == "desktop.running_apps"
+                else {}
+            ),
+            "role_filter": "text",
+            "limit": 80,
+        }
     )
     steps.append(
         _step(
@@ -10910,7 +10936,7 @@ def _append_selected_discovered_communication_compose_steps(
             "limit": 80,
         }
         if str(recipient_tool or "").startswith("app."):
-            recipient_input = {"app_name": selected_app, **recipient_input}
+            recipient_input = {**selected_app_operation_context, **recipient_input}
         if not recipient_tool:
             recipient_tool, recipient_input = _safe_type_text_operation_preview(
                 app_name=selected_app,
@@ -10972,7 +10998,7 @@ def _append_selected_discovered_communication_compose_steps(
                 "limit": 80,
             }
             if str(body_tool or "").startswith("app."):
-                body_input = {"app_name": selected_app, **body_input}
+                body_input = {**selected_app_operation_context, **body_input}
             if not body_tool:
                 body_tool, body_input = _safe_type_text_operation_preview(
                     app_name=selected_app,
