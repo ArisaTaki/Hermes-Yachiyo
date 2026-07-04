@@ -14533,6 +14533,11 @@ def test_runtime_planner_searches_running_browser_window_by_capability() -> None
     assert envelope.requests[1].input["selection_source"] == "desktop.running_apps"
     assert envelope.requests[2].action_target["selection_source"] == "desktop.running_apps"
     assert envelope.requests[3].action_target["selection_source"] == "desktop.running_apps"
+    assert envelope.requests[4].tool_name == "desktop.search_submit"
+    assert envelope.requests[4].action_target["action"] == "submit_ui"
+    assert envelope.requests[4].action_target["selection_source"] == (
+        "desktop.running_apps"
+    )
 
 
 def test_runtime_planner_routes_current_ui_inspection_to_ui_elements() -> None:

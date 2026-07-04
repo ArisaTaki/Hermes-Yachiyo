@@ -637,6 +637,8 @@ def _desktop_request_action(tool_name: str, runtime_stage: str) -> str:
         return "open_app"
     if clean_tool in {"app.focus", "desktop.focus_app"}:
         return "focus_app"
+    if clean_tool in {"desktop.search_submit", "desktop.submit_foreground"}:
+        return "submit_ui"
     if "click" in clean_tool:
         return "click_ui"
     if "type" in clean_tool:
@@ -658,6 +660,8 @@ def _desktop_request_can_inherit_selection_scope(
         return True
     return str(tool_name or "").strip() in {
         "desktop.active_window",
+        "desktop.search_submit",
+        "desktop.submit_foreground",
         "desktop.verify",
         "desktop.ui_elements",
         "desktop.read_ui",
