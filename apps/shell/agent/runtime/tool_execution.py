@@ -1316,6 +1316,24 @@ def _tool_request_app_name_resolution(
             source_tool=source_tool,
         )
     if not discovered_app_name:
+        if (
+            selection_source == _DESKTOP_APP_SELECTION_SOURCE
+            and raw_app_name
+            and not placeholder_source
+            and (
+                not selected_app_query
+                or _app_lookups_related(raw_app_name, selected_app_query)
+            )
+        ):
+            return {
+                "tool": str(tool_request.get("tool") or "").strip(),
+                "field": "app_name",
+                "requested_app_name": requested_app_name or raw_app_name,
+                "resolved_app_name": raw_app_name,
+                "source_tool": selection_source,
+                "app_resolution_confidence": "explicit",
+                "app_resolution_reason": "explicit_app_name_without_selection_evidence",
+            }
         return {}
     if (
         not uses_selected_app_placeholder

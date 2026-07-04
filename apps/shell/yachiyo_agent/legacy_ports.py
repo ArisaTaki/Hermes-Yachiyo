@@ -2337,6 +2337,8 @@ def _safe_selected_entrypoint_tool_requests(
     if _has_approval_plan_tool(selected_requests):
         if _legacy_app_submit_approval_plan(selected_requests):
             return _split_redundant_app_safe_shortcut_requests(selected_requests)
+        if _legacy_app_ui_approval_plan(selected_requests):
+            return _split_redundant_app_safe_shortcut_requests(selected_requests)
         return []
     if _has_explicit_hotkey_safe_shortcut(prompt, selected_requests, allowed_tools):
         return []
@@ -2354,6 +2356,46 @@ def _legacy_app_submit_approval_plan(
     if not tools & app_shortcut_tools:
         return False
     return tools <= {*app_shortcut_tools, "desktop.submit_foreground"}
+
+
+def _legacy_app_ui_approval_plan(
+    requests: list[dict[str, Any]],
+) -> bool:
+    tools = set(_tool_names_for_requests(requests))
+    if not tools:
+        return False
+    app_ui_tools = {
+        "app.open_and_click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+    }
+    if not tools & app_ui_tools:
+        return False
+    allowed_tools = {
+        "desktop.inspect_app",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.active_window",
+        "desktop.hotkey",
+        "app.open",
+        "app.focus",
+        *app_ui_tools,
+    }
+    if not tools <= allowed_tools:
+        return False
+    for request in requests:
+        if not isinstance(request, dict):
+            return False
+        tool_name = str(request.get("tool") or "").strip()
+        if tool_name not in app_ui_tools:
+            continue
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        if not str(payload.get("app_name") or "").strip():
+            return False
+        if not str(payload.get("target") or "").strip():
+            return False
+    return True
 
 
 def _apply_legacy_file_transfer_app_alias(

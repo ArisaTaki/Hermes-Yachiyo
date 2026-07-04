@@ -10,6 +10,7 @@ import pytest
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.yachiyo_agent.daily_desktop import daily_desktop_allowed_tools
+from apps.shell.yachiyo_agent import legacy_ports as legacy_ports_module
 from apps.shell.yachiyo_agent.legacy_ports import (
     LegacyChatTaskStarter,
     LegacyRuntimePort as CompatLegacyRuntimePort,
@@ -1329,6 +1330,42 @@ def test_planner_first_direct_selection_owns_approved_low_level_foreground_click
         },
     ]
     assert legacy_calls == []
+
+
+def test_legacy_entrypoint_keeps_app_ui_approval_sequence() -> None:
+    requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_type_into_ui_element",
+            "input": {
+                "app_name": "Google Chrome",
+                "target": "搜索",
+                "text": "yachiyo",
+                "role_filter": "text",
+                "limit": 80,
+            },
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.hotkey",
+            "input": {"key": "return", "modifiers": []},
+        },
+    ]
+
+    safe_requests = legacy_ports_module._safe_selected_entrypoint_tool_requests(
+        "打开 Chrome 并在搜索框输入 yachiyo 并搜索",
+        requests,
+        [
+            "app.open_and_type_into_ui_element",
+            "desktop.hotkey",
+            "desktop.active_window",
+        ],
+    )
+
+    assert [request["tool"] for request in safe_requests] == [
+        "app.open_and_type_into_ui_element",
+        "desktop.hotkey",
+    ]
 
 
 def test_planner_first_direct_selection_owns_search_submit_and_spotlight_without_legacy() -> None:

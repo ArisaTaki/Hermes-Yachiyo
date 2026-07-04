@@ -4269,7 +4269,44 @@ class ChatAPI:
             metadata=metadata,
         ):
             return True
+        if self._can_direct_execute_deferred_observed_ui(requests):
+            return True
         return not any(bool(request.get("continue_to_model")) for request in requests)
+
+    @staticmethod
+    def _can_direct_execute_deferred_observed_ui(
+        requests: list[dict[str, Any]],
+    ) -> bool:
+        deferred_observations = [
+            request
+            for request in requests
+            if isinstance(request, dict) and bool(request.get("continue_to_model"))
+        ]
+        if not deferred_observations:
+            return False
+        for request in deferred_observations:
+            tool_name = str(request.get("tool") or "").strip()
+            if tool_name not in {"desktop.ui_elements", "desktop.read_ui"}:
+                return False
+            deferred_tool = str(request.get("deferred_tool") or "").strip()
+            if deferred_tool not in _DAILY_DESKTOP_APP_CONTEXT_TOOLS and deferred_tool not in {
+                "desktop.click_ui_element",
+                "desktop.type_into_ui_element",
+                "desktop.safe_click",
+                "desktop.safe_type_text",
+                "desktop.type_text",
+                "desktop.type",
+            }:
+                return False
+            if not isinstance(request.get("deferred_input"), dict):
+                return False
+            continuation = request.get("deferred_continuation")
+            if isinstance(continuation, list) and any(
+                isinstance(item, dict) and bool(item.get("continue_to_model"))
+                for item in continuation
+            ):
+                return False
+        return True
 
     def _can_direct_execute_discovered_app_followup(
         self,

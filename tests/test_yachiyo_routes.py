@@ -1994,12 +1994,12 @@ async def test_yachiyo_task_approve_continues_app_type_into_ui_element_then_sear
         assert waiting_run["pending_approval"]["tool"] == "app.open_and_type_into_ui_element"
         assert waiting_run["pending_approval"]["input_preview"] == {
             "app_name": "Google Chrome",
-            "target": "搜索框",
+            "target": "搜索",
             "text": "yachiyo",
             "role_filter": "text",
             "limit": 80,
         }
-        assert calls == [("inspect", "Google Chrome", True, True, "text", 80)]
+        assert calls == []
 
         after_first = await yachiyo.approve_task(sent["task_id"], None, request)
         first_waiting_run = service.get_run(sent["run_id"])
@@ -2012,11 +2012,10 @@ async def test_yachiyo_task_approve_continues_app_type_into_ui_element_then_sear
             "modifiers": [],
         }
         assert calls == [
-            ("inspect", "Google Chrome", True, True, "text", 80),
             ("open", "Google Chrome"),
             ("focus", "Google Chrome"),
             ("active_window",),
-            ("type_into_ui", "搜索框", "yachiyo", "text", 80, "Google Chrome"),
+            ("type_into_ui", "搜索", "yachiyo", "text", 80, "Google Chrome"),
         ]
 
         after_second = await yachiyo.approve_task(sent["task_id"], None, request)
@@ -2030,13 +2029,11 @@ async def test_yachiyo_task_approve_continues_app_type_into_ui_element_then_sear
             == "已打开 Google Chrome 并在前台控件 Search 输入文字（7 个字符）。 已发送快捷键：return。"
         )
         assert calls == [
-            ("inspect", "Google Chrome", True, True, "text", 80),
             ("open", "Google Chrome"),
             ("focus", "Google Chrome"),
             ("active_window",),
-            ("type_into_ui", "搜索框", "yachiyo", "text", 80, "Google Chrome"),
+            ("type_into_ui", "搜索", "yachiyo", "text", 80, "Google Chrome"),
             ("hotkey", "return", []),
-            ("ui_elements", "text", 80, ""),
         ]
         assert completed_task is not None
         assert completed_task.status == TaskStatus.COMPLETED

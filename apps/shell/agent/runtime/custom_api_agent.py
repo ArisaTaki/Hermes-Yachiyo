@@ -2804,11 +2804,39 @@ class RuntimeCustomApiAgentLoop:
             )
             recovery_requests.extend(observation_requests)
 
-        observed_action_requests = _auto_replan_ui_observed_action_requests(
+        continuation_requests = _auto_replan_ui_continuation_requests(
             replan_payloads,
+            planned_tool_requests,
             allowed_tools,
             timeline,
-            planning_reason="planner_replan_ui_observed_action",
+            tool_timeline_start=tool_timeline_start,
+            planning_reason="planner_replan_ui_continuation",
+        )
+        if continuation_requests:
+            self._run_auto_runtime_planner_requests(
+                continuation_requests,
+                allowed_tools,
+                broker,
+                messages,
+                timeline,
+                artifacts,
+                agent=agent,
+                runtime_planner_decision=runtime_planner_decision,
+                run_id=run_id,
+                budget=budget,
+                next_iteration=next_iteration,
+            )
+            recovery_requests.extend(continuation_requests)
+
+        observed_action_requests = (
+            []
+            if continuation_requests
+            else _auto_replan_ui_observed_action_requests(
+                replan_payloads,
+                allowed_tools,
+                timeline,
+                planning_reason="planner_replan_ui_observed_action",
+            )
         )
         if observed_action_requests:
             self._run_auto_runtime_planner_requests(
@@ -3673,7 +3701,11 @@ class RuntimeCustomApiAgentLoop:
             while event_index < len(tool_events):
                 candidate = tool_events[event_index]
                 event_index += 1
-                if str(candidate.get("detail") or "") == planned_tool:
+                candidate_tool = str(candidate.get("detail") or "")
+                if candidate_tool == planned_tool or _followup_plan_tools_match(
+                    candidate_tool,
+                    planned_tool,
+                ):
                     candidate_result = (
                         candidate.get("result") if isinstance(candidate.get("result"), dict) else {}
                     )
@@ -8471,7 +8503,11 @@ def _runtime_planner_tool_request_completed(
     for event in timeline[tool_timeline_start:]:
         if str(event.get("event") or "").strip() != "agent.tool.call":
             continue
-        if str(event.get("detail") or "").strip() != tool_name:
+        event_tool = str(event.get("detail") or "").strip()
+        if event_tool != tool_name and not _followup_plan_tools_match(
+            event_tool,
+            tool_name,
+        ):
             continue
         result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
         if result.get("ok") is True and not result.get("approval_required"):
@@ -12443,6 +12479,8 @@ def _auto_replan_ui_observed_action_requests(
             payload,
             timeline,
         )
+        if _replan_ui_observed_action_retry_succeeded(payload, timeline):
+            continue
         target_label = str(target.get("target") or "").strip()
         role_filter = str(target.get("role_filter") or "").strip()
         if not _latest_desktop_observation_has_target_match(
@@ -12949,9 +12987,12 @@ def _replan_ui_observed_action_retry_succeeded(
         tool_name = str(event.get("detail") or "").strip()
         event_request_id = str(event.get("replan_request_id") or "").strip()
         planning_reason = str(event.get("planning_reason") or "").strip()
-        if tool_name == source_tool and (
+        if (
+            (tool_name == source_tool or _followup_plan_tools_match(tool_name, source_tool))
+            and (
             (request_id and event_request_id == request_id)
             or planning_reason == "planner_replan_ui_observed_action"
+            )
         ):
             return True
         if not (request_id and event_request_id == request_id):

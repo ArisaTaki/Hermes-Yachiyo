@@ -309,7 +309,7 @@ def _defer_unknown_app_ui_element_operations_to_observation(
     if not requests or not {"desktop.ui_elements", "desktop.read_ui"}.intersection(allowed):
         return requests
     normalized: list[dict[str, Any]] = []
-    for request in requests:
+    for index, request in enumerate(requests):
         tool_name = str(request.get("tool") or "").strip()
         payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
         if not _should_defer_unknown_app_ui_element_operation(tool_name, payload, request):
@@ -329,6 +329,11 @@ def _defer_unknown_app_ui_element_operations_to_observation(
             _unknown_app_ui_observation_request(
                 request,
                 allowed,
+                deferred_continuation=_unknown_app_ui_deferred_continuation(
+                    requests,
+                    index,
+                    tool_name,
+                ),
             )
         )
         return normalized
@@ -394,6 +399,8 @@ def _unknown_app_ui_observation_prepare_request(
 def _unknown_app_ui_observation_request(
     request: Mapping[str, Any],
     allowed: set[str],
+    *,
+    deferred_continuation: Iterable[Mapping[str, Any]] = (),
 ) -> dict[str, Any]:
     payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
     observe_tool = _first_allowed(("desktop.ui_elements", "desktop.read_ui"), allowed)
@@ -418,8 +425,32 @@ def _unknown_app_ui_observation_request(
     observe["deferred_tool"] = str(request.get("tool") or "").strip()
     observe["deferred_input"] = dict(payload)
     observe["deferred_context"] = _deferred_request_context(request)
+    continuation = [
+        dict(item)
+        for item in deferred_continuation
+        if isinstance(item, Mapping)
+    ]
+    if continuation:
+        observe["deferred_continuation"] = continuation
     _inherit_request_context_without_step(observe, request)
     return observe
+
+
+def _unknown_app_ui_deferred_continuation(
+    requests: list[dict[str, Any]],
+    index: int,
+    tool_name: str,
+) -> list[dict[str, Any]]:
+    if tool_name not in {
+        "app.open_and_type_into_ui_element",
+        "app.focus_and_type_into_ui_element",
+    }:
+        return []
+    continuation, _continuation_indexes = _semantic_ui_type_deferred_continuation(
+        requests,
+        index,
+    )
+    return continuation
 
 
 def _defer_search_result_clicks_to_observation(
