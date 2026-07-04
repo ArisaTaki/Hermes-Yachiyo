@@ -80,7 +80,8 @@ _APP_STATUS_PATTERNS = (
     r"(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?(?:看看|查看|检查|确认)(?:一下|下)?\s*"
     r"(?P<app>[^。！？!?，,]+?)\s*(?:是否|有没有|是不是)?\s*"
     r"(?:开没开|开了没|开着没|打开没|打开了没|开着|打开着|打开了|在运行|正在运行|运行|运行着|启动了|启动着)",
-    r"(?:is|check if|whether|see if)\s+(?P<app>[^.!?]+?)\s+(?:is\s+)?(?:running|open)",
+    r"(?:is|check if|whether|see if|verify(?: that)?|confirm(?: that)?)\s+"
+    r"(?P<app>[^.!?]+?)\s+(?:is\s+)?(?:running|open)",
     r"(?:check|see)\s+whether\s+(?P<app>[^.!?]+?)\s+(?:is\s+)?(?:running|open)",
     r"(?P<app>[^.!?]+?)\s+(?:running|open)\?",
 )

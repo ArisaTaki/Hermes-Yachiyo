@@ -581,7 +581,8 @@ def app_management_hint(text: str) -> dict[str, str] | None:
         ),
         (
             "status",
-            r"(?:is|check\s+if|see\s+if)\s+(?P<app_status_en>[^.!?]+?)\s+"
+            r"(?:is|check\s+if|see\s+if|verify(?:\s+that)?|confirm(?:\s+that)?)\s+"
+            r"(?P<app_status_en>[^.!?]+?)\s+"
             r"(?:is\s+)?(?:running|open)(?:\s+please)?$",
         ),
         (
@@ -2599,9 +2600,14 @@ def _clean_management_app_name_hint(value: str) -> str:
         flags=re.IGNORECASE,
     )
     app = re.sub(r"\s*(?:并|然后|再|接着|之后|后|then)\s*$", "", app, flags=re.IGNORECASE)
-    app = re.sub(r"^(?:打开|启动|开启|运行|拉起|切到|聚焦)\s*", "", app)
     app = re.sub(
-        r"^(?:open|launch|start|focus|activate|bring)\s+|^switch\s+to\s+",
+        r"^(?:检查一下|检查|查看|看一下|看下|看看|确认|验证|核对|打开|启动|开启|运行|拉起|切到|聚焦)\s*",
+        "",
+        app,
+    )
+    app = re.sub(
+        r"^(?:(?:check|see)\s+(?:if|whether)\s+|verify\s+|confirm\s+|"
+        r"open|launch|start|focus|activate|bring)\s+|^switch\s+to\s+",
         "",
         app,
         flags=re.IGNORECASE,

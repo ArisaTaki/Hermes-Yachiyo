@@ -167,6 +167,28 @@ def test_planner_first_daily_desktop_entrypoint_requests_can_be_execution_normal
     assert requests[2]["input"] == {}
 
 
+def test_planner_first_daily_desktop_entrypoint_scopes_app_status_verification() -> None:
+    for prompt, app_name in (
+        ("验证 Slack 是否打开", "Slack"),
+        ("verify Slack is open", "Slack"),
+        ("confirm that PixelForge is running", "PixelForge"),
+    ):
+        requests = planner_first_daily_desktop_entrypoint_requests(
+            prompt,
+            allowed_tools=["desktop.list_apps", "app.status", "desktop.list_windows"],
+            execution_normalized=True,
+        )
+
+        assert [request["tool"] for request in requests] == [
+            "desktop.list_apps",
+            "app.status",
+            "desktop.list_windows",
+        ]
+        assert requests[0]["input"] == {"query": app_name, "limit": 20}
+        assert requests[1]["input"] == {"app_name": app_name}
+        assert requests[2]["input"] == {"app_name": app_name}
+
+
 def test_planner_first_daily_desktop_entrypoint_discovers_known_app_names_when_normalized() -> None:
     requests = planner_first_daily_desktop_entrypoint_requests(
         "Slack 切到",
@@ -2513,6 +2535,7 @@ def test_daily_desktop_entrypoint_routes_app_status_questions_to_desktop_tool() 
         ("看看 Slack 开没开", "Slack"),
         ("看看 PixelForge 是否打开", "PixelForge"),
         ("check whether PixelForge is open", "PixelForge"),
+        ("verify Slack is open", "Slack"),
         ("Finder 是否运行", "Finder"),
     )
 

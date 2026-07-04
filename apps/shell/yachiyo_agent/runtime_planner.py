@@ -4164,17 +4164,28 @@ class RuntimePlanner:
                     reason="Run the requested app management action through the desktop app-control policy gate.",
                 )
             )
+            verify_tool = _first_allowed(
+                (
+                    "desktop.running_apps",
+                    "desktop.active_window",
+                    "desktop.windows",
+                    "desktop.list_windows",
+                    "desktop.verify",
+                ),
+                allowed,
+            )
             steps.append(
                 _step(
                     intent,
                     "verify-desktop-result",
                     "Verify desktop result",
                     "desktop.app_discovery",
-                    _first_allowed(
-                        ("desktop.running_apps", "desktop.active_window", "desktop.windows"),
-                        allowed,
+                    verify_tool,
+                    input_preview=_desktop_verify_input_preview(
+                        verify_tool,
+                        app_name=app_name,
+                        operation_preview={},
                     ),
-                    input_preview={},
                     depends_on=["manage-app"],
                     reason="Observe desktop state after the app management action.",
                 )
