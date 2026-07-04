@@ -10,6 +10,7 @@ import { MemorySkillTraceInspector } from './MemorySkillTraceInspector';
 import { RuntimeApprovalCard } from '../../runtime-shared/components/RuntimeApprovalCard';
 import { RuntimeArtifactList } from '../../runtime-shared/components/RuntimeArtifactList';
 import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
+import { RuntimeExecutionEnvelopeSummary } from '../../runtime-shared/components/RuntimeExecutionEnvelopeSummary';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import type { RuntimeToolRecoveryAction } from '../../runtime-shared/toolRecoveryActions';
 import { ToolCallInspector } from './ToolCallInspector';
@@ -206,6 +207,19 @@ export function GroupRunDetailPanel({
         sourceLabel="GroupRunSnapshot"
         summary={selectedGroupRunSnapshot?.runtime_debug}
         testId="agent-run-detail-group-run-runtime-debug"
+      />
+      <RuntimeExecutionEnvelopeSummary
+        className="group-run-runtime-section group-run-runtime-execution-envelope"
+        debugPillsTestId="agent-run-detail-group-run-runtime-execution-debug-pills"
+        envelope={selectedGroupRunSnapshot?.runtime_execution_envelope}
+        requestLimit={8}
+        requestListTestId="agent-run-detail-group-run-runtime-execution-requests"
+        requestTestId="agent-run-detail-group-run-runtime-execution-request"
+        showRequests
+        sourceLabel="GroupRunSnapshot runtime execution envelope"
+        testId="agent-run-detail-group-run-runtime-execution-envelope"
+        title="GroupRun Runtime Execution"
+        variant="studio"
       />
       {groupRunHasTaskWorkspace ? (
         <section

@@ -2334,6 +2334,11 @@ def test_group_run_snapshot_synthesizes_scoped_replan_event() -> None:
     assert replan_event.payload["planner_event_type"] == "agent.replan.requested"
     assert replan_event.payload["planner_scope"] == "group_run"
     assert replan_event.payload["source_step_id"] == analysis_step.step_id
+    assert snapshot.runtime_execution_envelope is not None
+    assert snapshot.runtime_execution_envelope.intent_kind == decision.selected_intent.kind
+    assert snapshot.runtime_execution_envelope.requests
+    assert snapshot.runtime_execution_envelope.requests[0].group_run_id == "group-run-1"
+    assert snapshot.runtime_execution_envelope.requests[0].run_group_id == "group-run-1"
     assert snapshot.task_core is not None
     assert snapshot.task_progress is not None
     assert snapshot.task_progress.status == "replan_requested"
@@ -5992,6 +5997,20 @@ def test_group_run_and_workflow_snapshots_keep_group_and_workflow_fields() -> No
         status="running",
         objective="Find the safest option",
         participants=[member],
+        runtime_execution_envelope=RuntimeExecutionEnvelopeSnapshot(
+            envelope_id="group-envelope-1",
+            decision_id="decision-1",
+            plan_id="plan-1",
+            intent_kind="group_collaboration",
+            requests=[
+                RuntimeExecutionRequestSnapshot(
+                    request_id="group-request-1",
+                    tool_name="group.delegate",
+                    runtime_stage="orchestrate",
+                )
+            ],
+            runtime_stage_counts={"orchestrate": 1},
+        ),
         events=[
             PublicRunEvent(
                 run_id="group-run-1",
@@ -6057,6 +6076,8 @@ def test_group_run_and_workflow_snapshots_keep_group_and_workflow_fields() -> No
     assert _json(group)["mode"] == "debate"
     assert _json(group)["members"][0]["role"] == "planner"
     assert _json(group_run)["participants"][0]["agent_id"] == "agent-1"
+    assert _json(group_run)["runtime_execution_envelope"]["intent_kind"] == "group_collaboration"
+    assert _json(group_run)["runtime_execution_envelope"]["requests"][0]["runtime_stage"] == "orchestrate"
     assert _json(group_run)["events"][0]["event_type"] == "group.member.started"
     assert _json(group_run)["tool_calls"][0]["tool_name"] == "workspace.read"
     assert _json(group_run)["memory_traces"][0]["event_type"] == "memory.retrieved"

@@ -1033,6 +1033,7 @@ export type GroupRunSnapshot = {
   active_speaker_agent_id?: string | null;
   task_core?: TaskCoreSnapshot | null;
   task_progress?: TaskProgressSummarySnapshot | null;
+  runtime_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
   runtime_debug?: RuntimeDebugSummarySnapshot | null;
   replan_recoveries?: ReplanRecoverySnapshot[];
   events?: PublicRunEvent[];

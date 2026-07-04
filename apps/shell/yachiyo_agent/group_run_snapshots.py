@@ -26,6 +26,8 @@ from .replan_recovery_snapshots import (
 )
 from .run_snapshots import RunSnapshotProjector
 from .runtime_debug_snapshots import runtime_debug_summary_from_runtime_objects
+from .runtime_execution import runtime_execution_envelope_payload_with_request_context
+from .task_snapshots import runtime_execution_envelope_from_payload
 from .task_core_snapshots import task_core_snapshot_from_payload
 from .task_progress_snapshots import task_progress_summary_from_task_core
 
@@ -125,6 +127,10 @@ def group_run_snapshot_from_payload(
         active_speaker_agent_id=_optional_text(payload.get("active_speaker_agent_id")),
         task_core=task_core,
         task_progress=task_progress,
+        runtime_execution_envelope=runtime_execution_envelope_from_payload(
+            payload,
+            events=events,
+        ),
         runtime_debug=runtime_debug_summary_from_runtime_objects(
             run_id=group_run_id,
             group_id=group_id,
@@ -676,17 +682,31 @@ def _group_scoped_planner_events(events: list[dict[str, Any]]) -> list[dict[str,
             scoped_events.append(event)
             continue
         payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+        scoped_payload = {
+            **dict(payload),
+            "planner_event_type": str(
+                payload.get("planner_event_type") or event_type
+            ),
+            "planner_scope": str(payload.get("planner_scope") or "group_run"),
+        }
+        envelope = scoped_payload.get("runtime_execution_envelope")
+        if isinstance(envelope, Mapping):
+            group_run_id = _text(scoped_payload.get("group_run_id"))
+            scoped_payload["runtime_execution_envelope"] = (
+                runtime_execution_envelope_payload_with_request_context(
+                    envelope,
+                    {
+                        "group_run_id": group_run_id,
+                        "run_group_id": _text(scoped_payload.get("run_group_id")) or group_run_id,
+                        "group_id": _text(scoped_payload.get("group_id")),
+                    },
+                )
+            )
         scoped_events.append(
             {
                 **event,
                 "event_type": group_type,
-                "payload": {
-                    **dict(payload),
-                    "planner_event_type": str(
-                        payload.get("planner_event_type") or event_type
-                    ),
-                    "planner_scope": str(payload.get("planner_scope") or "group_run"),
-                },
+                "payload": scoped_payload,
             }
         )
     return scoped_events
