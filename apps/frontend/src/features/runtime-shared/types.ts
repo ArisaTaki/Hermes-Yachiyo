@@ -418,6 +418,25 @@ export type RuntimeCheckpointPolicySnapshot = {
   source?: string;
 };
 
+export type DesktopExecutionLoopSnapshot = {
+  stage?: string;
+  role?: string;
+  action?: string;
+  target_kind?: string;
+  selection_source?: string;
+  app_name?: string;
+  query?: string;
+  source_tool?: string;
+  retry_tool?: string;
+  retry_reason?: string;
+  retry_input?: Record<string, unknown>;
+  verification_target_step_ids?: string[];
+  requires_observation?: boolean;
+  requires_post_action_verification?: boolean;
+  can_auto_retry?: boolean;
+  source?: string;
+};
+
 export type RuntimeExecutionRequestSnapshot = {
   request_id: string;
   decision_id?: string | null;
@@ -461,6 +480,7 @@ export type RuntimeExecutionRequestSnapshot = {
   task_workspace_items?: TaskWorkspaceItemSnapshot[];
   task_verification_targets?: Array<Record<string, unknown>>;
   checkpoint_policy?: RuntimeCheckpointPolicySnapshot | null;
+  desktop_loop?: DesktopExecutionLoopSnapshot | null;
   source?: string;
 };
 

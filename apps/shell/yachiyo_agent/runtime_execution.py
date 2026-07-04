@@ -6,6 +6,7 @@ from collections.abc import Iterable, Mapping
 from typing import Any
 
 from .contracts import (
+    DesktopExecutionLoopSnapshot,
     PlannerDecisionSnapshot,
     RuntimeCheckpointPolicySnapshot,
     RuntimeExecutionEnvelopeSnapshot,
@@ -336,6 +337,11 @@ def _execution_request_snapshot(
         depends_on=depends_on,
         previous_requests=previous_requests,
     )
+    desktop_loop = _desktop_execution_loop_snapshot(
+        desktop_contract,
+        runtime_metadata=runtime_metadata,
+        task_context=task_context,
+    )
     tool_plan_id = str(getattr(decision.plan.tool_plan, "plan_id", "") or "").strip()
     return RuntimeExecutionRequestSnapshot(
         request_id=str(
@@ -423,6 +429,7 @@ def _execution_request_snapshot(
             ]
         ),
         checkpoint_policy=checkpoint_policy,
+        desktop_loop=desktop_loop,
         source=str(request.get("source") or "runtime_planner"),
     )
 
@@ -479,6 +486,7 @@ def _tool_request_from_execution_request(
         "task_workspace_items",
         "task_verification_targets",
         "checkpoint_policy",
+        "desktop_loop",
         "action_target",
         "observation_evidence",
         "observation_retry",
@@ -536,6 +544,13 @@ def _desktop_execution_request_contract(
         )
         target_kind = "desktop_foreground"
     if not scope:
+        scope = _desktop_discovery_scope(
+            tool_name=tool_name,
+            request_input=request_input,
+            runtime_stage=runtime_stage,
+        )
+        target_kind = "desktop_discovery"
+    if not scope:
         return {
             "action_target": {},
             "observation_evidence": {},
@@ -575,6 +590,74 @@ def _desktop_execution_request_contract(
         "observation_evidence": _non_empty_mapping(observation_evidence),
         "observation_retry": observation_retry,
     }
+
+
+_DESKTOP_LOOP_AUTO_RETRY_TOOLS = {
+    "browser.current_page",
+    "browser.screenshot",
+    "desktop.active_window",
+    "desktop.list_apps",
+    "desktop.read_ui",
+    "desktop.running_apps",
+    "desktop.ui_elements",
+    "screen.capture",
+}
+
+
+def _desktop_execution_loop_snapshot(
+    desktop_contract: Mapping[str, Mapping[str, Any]],
+    *,
+    runtime_metadata: Mapping[str, Any],
+    task_context: Mapping[str, Any],
+) -> DesktopExecutionLoopSnapshot | None:
+    action_target = _mapping(desktop_contract.get("action_target"))
+    observation_evidence = _mapping(desktop_contract.get("observation_evidence"))
+    observation_retry = _mapping(desktop_contract.get("observation_retry"))
+    if not any((action_target, observation_evidence, observation_retry)):
+        return None
+    retry_tool = _text(observation_retry.get("tool"))
+    retry_reason = _text(observation_retry.get("reason"))
+    retry_input = _mapping(observation_retry.get("input"))
+    verification_targets = _mapping_list(task_context.get("task_verification_targets"))
+    return DesktopExecutionLoopSnapshot(
+        stage=_text(runtime_metadata.get("runtime_stage")),
+        role=_text(runtime_metadata.get("runtime_role")),
+        action=_text(action_target.get("action")),
+        target_kind=_text(action_target.get("kind")),
+        selection_source=_text(
+            action_target.get("selection_source")
+            or observation_evidence.get("selection_source")
+        ),
+        app_name=_text(
+            action_target.get("resolved_app_name")
+            or action_target.get("app_name")
+            or observation_evidence.get("resolved_app_name")
+            or observation_evidence.get("app_name")
+        ),
+        query=_text(action_target.get("query") or observation_evidence.get("query")),
+        source_tool=_text(observation_evidence.get("source_tool")),
+        retry_tool=retry_tool,
+        retry_reason=retry_reason,
+        retry_input=retry_input,
+        verification_target_step_ids=_dedupe(
+            str(target.get("step_id") or "").strip()
+            for target in verification_targets
+        ),
+        requires_observation=bool(runtime_metadata.get("requires_observation")),
+        requires_post_action_verification=bool(
+            runtime_metadata.get("requires_post_action_verification")
+            or verification_targets
+        ),
+        can_auto_retry=bool(
+            retry_tool
+            and retry_tool in _DESKTOP_LOOP_AUTO_RETRY_TOOLS
+            and retry_reason in {
+                "resolve_desktop_app",
+                "observe_foreground_ui",
+                "verification_failed",
+            }
+        ),
+    )
 
 
 def _desktop_app_ui_element_action_scope(
@@ -667,6 +750,37 @@ def _desktop_app_selection_scope_from_previous_requests(
         if dependency_ids and previous_step_id in dependency_ids:
             return scope
     return fallback_scope
+
+
+def _desktop_discovery_scope(
+    *,
+    tool_name: str,
+    request_input: Mapping[str, Any],
+    runtime_stage: str,
+) -> dict[str, Any]:
+    clean_tool = str(tool_name or "").strip()
+    if str(runtime_stage or "").strip() != "discover":
+        return {}
+    if clean_tool not in {
+        "desktop.list_apps",
+        "desktop.running_apps",
+        "desktop.ui_elements",
+        "desktop.read_ui",
+        "desktop.active_window",
+        "screen.capture",
+    }:
+        return {}
+    return _non_empty_mapping(
+        {
+            "selection_source": clean_tool,
+            "query": request_input.get("query"),
+            "app_name": request_input.get("app_name"),
+            "role_filter": request_input.get("role_filter"),
+            "target": request_input.get("target"),
+            "selector": request_input.get("selector"),
+            "reason": request_input.get("reason"),
+        }
+    )
 
 
 def _desktop_foreground_scope(
@@ -762,6 +876,10 @@ def _desktop_request_action(tool_name: str, runtime_stage: str) -> str:
         return "read_active_window"
     if clean_tool in {"desktop.ui_elements", "desktop.read_ui"}:
         return "read_ui"
+    if clean_tool == "desktop.list_apps":
+        return "discover_apps"
+    if clean_tool == "desktop.running_apps":
+        return "list_running_apps"
     if clean_tool == "screen.capture":
         return "capture_screen"
     if clean_tool in {"desktop.search_submit", "desktop.submit_foreground"}:
@@ -854,6 +972,8 @@ def _desktop_observation_source_tool(
         return tool_name or "runtime_verification"
     if target_kind == "desktop_app":
         return str(scope.get("selection_source") or tool_name or "runtime_execution")
+    if target_kind == "desktop_discovery":
+        return str(scope.get("selection_source") or tool_name or "runtime_discovery")
     return tool_name or "desktop.foreground"
 
 

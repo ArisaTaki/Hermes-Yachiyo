@@ -36,6 +36,7 @@ from apps.shell.yachiyo_agent import (
     ChatRunnableCatalogSnapshot,
     ChatRunnableParticipantSnapshot,
     ChatRunnableSnapshot,
+    DesktopExecutionLoopSnapshot,
     DesktopActionRiskSnapshot,
     DesktopExecutionCapabilitySnapshot,
     DesktopRecoveryActionMetadataSnapshot,
@@ -353,6 +354,23 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
             requires_observation=True,
             requires_post_action_verification=True,
         ),
+        desktop_loop=DesktopExecutionLoopSnapshot(
+            stage="discover",
+            role="find_target_app",
+            action="open_app",
+            target_kind="desktop_app",
+            selection_source="desktop.list_apps",
+            app_name="PixelForge",
+            query="PixelForge",
+            source_tool="desktop.list_apps",
+            retry_tool="desktop.list_apps",
+            retry_reason="resolve_desktop_app",
+            retry_input={"query": "PixelForge", "limit": 20},
+            verification_target_step_ids=["open-app"],
+            requires_observation=True,
+            requires_post_action_verification=True,
+            can_auto_retry=True,
+        ),
     )
     envelope = RuntimeExecutionEnvelopeSnapshot(
         envelope_id="execution-envelope-runtime-plan-1",
@@ -418,6 +436,24 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
         "requires_observation": True,
         "requires_post_action_verification": True,
         "source": "runtime_checkpoint_policy",
+    }
+    assert payload["requests"][0]["desktop_loop"] == {
+        "stage": "discover",
+        "role": "find_target_app",
+        "action": "open_app",
+        "target_kind": "desktop_app",
+        "selection_source": "desktop.list_apps",
+        "app_name": "PixelForge",
+        "query": "PixelForge",
+        "source_tool": "desktop.list_apps",
+        "retry_tool": "desktop.list_apps",
+        "retry_reason": "resolve_desktop_app",
+        "retry_input": {"query": "PixelForge", "limit": 20},
+        "verification_target_step_ids": ["open-app"],
+        "requires_observation": True,
+        "requires_post_action_verification": True,
+        "can_auto_retry": True,
+        "source": "desktop_execution_loop",
     }
     assert payload["runtime_stage_counts"] == {"discover": 1}
     assert payload["replan_signal_count"] == 1

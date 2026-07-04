@@ -47,6 +47,12 @@ def test_tool_call_snapshots_from_events_merge_lifecycle_and_trace_context() -> 
                     "replan_triggers": ["verification_failed"],
                     "fallback_tools": ["artifact.write"],
                 },
+                "desktop_loop": {
+                    "stage": "operate",
+                    "action": "read_ui",
+                    "retry_tool": "desktop.ui_elements",
+                    "can_auto_retry": True,
+                },
             },
             created_at="2026-06-17T00:00:00Z",
         ),
@@ -136,6 +142,12 @@ def test_tool_call_snapshots_from_events_merge_lifecycle_and_trace_context() -> 
         "replan_on_failure": True,
         "replan_triggers": ["verification_failed"],
         "fallback_tools": ["artifact.write"],
+    }
+    assert call.metadata["desktop_loop"] == {
+        "stage": "operate",
+        "action": "read_ui",
+        "retry_tool": "desktop.ui_elements",
+        "can_auto_retry": True,
     }
     assert call.input_preview == {
         "path": "README.md",

@@ -41,6 +41,7 @@ export type RuntimeToolCallCardSnapshot = {
   task_workspace_items?: Array<Record<string, unknown>>;
   task_verification_targets?: Array<Record<string, unknown>>;
   checkpoint_policy?: Record<string, unknown>;
+  desktop_loop?: Record<string, unknown>;
   replan_triggers?: string[];
   replan_signal_ids?: string[];
   runtime_doctrine?: string | null;
@@ -108,6 +109,7 @@ export function RuntimeToolCallCard({
   const taskWorkspaceItems = runtimeToolTaskWorkspaceItems(toolCall);
   const taskVerificationTargets = runtimeToolTaskVerificationTargets(toolCall);
   const checkpointPolicy = runtimeToolTraceRecord(toolCall, 'checkpoint_policy');
+  const desktopLoop = runtimeToolTraceRecord(toolCall, 'desktop_loop');
   const deferredContinuation = runtimeToolTraceRecordList(toolCall, 'deferred_continuation');
   const metadata = toolCallMetadataItems(toolCall);
   return (
@@ -127,6 +129,7 @@ export function RuntimeToolCallCard({
       data-run-id={toolCall.run_id || ''}
       data-runtime-capability-id={runtimeToolTraceString(toolCall, 'capability_id')}
       data-runtime-deferred-tool={runtimeToolTraceString(toolCall, 'deferred_tool')}
+      data-runtime-desktop-loop={runtimeToolDesktopLoopSummary(desktopLoop)}
       data-runtime-doctrine={runtimeToolTraceString(toolCall, 'runtime_doctrine')}
       data-runtime-replan-request-id={runtimeToolTraceString(toolCall, 'replan_request_id')}
       data-runtime-replan-signal-ids={runtimeToolTraceStringList(toolCall, 'replan_signal_ids').join(',')}
@@ -291,6 +294,7 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
   const taskWorkspaceItems = runtimeToolTaskWorkspaceItems(toolCall);
   const taskVerificationTargets = runtimeToolTaskVerificationTargets(toolCall);
   const checkpointPolicy = runtimeToolTraceRecord(toolCall, 'checkpoint_policy');
+  const desktopLoop = runtimeToolTraceRecord(toolCall, 'desktop_loop');
   const deferredInput = runtimeToolTraceRecord(toolCall, 'deferred_input');
   const deferredContext = runtimeToolTraceRecord(toolCall, 'deferred_context');
   const deferredContinuation = runtimeToolTraceRecordList(toolCall, 'deferred_continuation');
@@ -311,6 +315,7 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
     { label: 'workspace', value: runtimeToolTaskWorkspaceSummary(taskWorkspaceItems) },
     { label: 'targets', value: runtimeToolRecoveryVerificationTargetsSummary(taskVerificationTargets) },
     { label: 'checkpoint policy', value: runtimeToolCheckpointPolicySummary(checkpointPolicy) },
+    { label: 'desktop loop', value: runtimeToolDesktopLoopSummary(desktopLoop) },
     { label: 'replan', value: runtimeToolTraceString(toolCall, 'replan_request_id') || replanTrigger || replanTriggers.join(', ') },
     { label: 'signals', value: runtimeToolTraceStringList(toolCall, 'replan_signal_ids').join(', ') },
     { label: 'deferred', value: runtimeToolTraceString(toolCall, 'deferred_tool') },
@@ -511,6 +516,24 @@ function runtimeToolCheckpointPolicySummary(record: Record<string, unknown>): st
     fallbacks.length ? `fallbacks ${fallbacks.join(', ')}` : '',
     targetSteps.length ? `targets ${targetSteps.join(', ')}` : '',
     flags.length ? flags.join(', ') : '',
+  ].filter(Boolean).join(' · ');
+}
+
+function runtimeToolDesktopLoopSummary(record: Record<string, unknown>): string {
+  if (!Object.keys(record).length) return '';
+  const stage = stringValue(record.stage);
+  const action = stringValue(record.action);
+  const app = stringValue(record.app_name) || stringValue(record.query);
+  const retryTool = stringValue(record.retry_tool);
+  const retryReason = stringValue(record.retry_reason);
+  const targetSteps = stringList(record.verification_target_step_ids);
+  return [
+    [stage, action].filter(Boolean).join(':'),
+    app,
+    retryTool ? `retry ${retryTool}` : '',
+    retryReason,
+    targetSteps.length ? `verifies ${targetSteps.join(', ')}` : '',
+    record.can_auto_retry === true ? 'auto retry' : '',
   ].filter(Boolean).join(' · ');
 }
 

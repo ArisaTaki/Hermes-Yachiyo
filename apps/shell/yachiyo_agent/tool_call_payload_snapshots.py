@@ -39,6 +39,7 @@ _TOOL_METADATA_KEYS = (
     "observation_evidence",
     "observation_retry",
     "checkpoint_policy",
+    "desktop_loop",
 )
 
 

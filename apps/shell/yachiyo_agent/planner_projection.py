@@ -219,6 +219,9 @@ def _execution_request_previews(
             value = request.get(key)
             if isinstance(value, list) and value:
                 preview[key] = list(value)
+        desktop_loop = request.get("desktop_loop")
+        if isinstance(desktop_loop, Mapping) and desktop_loop:
+            preview["desktop_loop"] = dict(desktop_loop)
         previews.append(preview)
     return previews
 

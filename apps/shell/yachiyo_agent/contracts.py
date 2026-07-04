@@ -502,6 +502,25 @@ class RuntimeCheckpointPolicySnapshot(_PublicSnapshot):
     source: str = "runtime_checkpoint_policy"
 
 
+class DesktopExecutionLoopSnapshot(_PublicSnapshot):
+    stage: str = ""
+    role: str = ""
+    action: str = ""
+    target_kind: str = ""
+    selection_source: str = ""
+    app_name: str = ""
+    query: str = ""
+    source_tool: str = ""
+    retry_tool: str = ""
+    retry_reason: str = ""
+    retry_input: dict[str, Any] = Field(default_factory=dict)
+    verification_target_step_ids: list[str] = Field(default_factory=list)
+    requires_observation: bool = False
+    requires_post_action_verification: bool = False
+    can_auto_retry: bool = False
+    source: str = "desktop_execution_loop"
+
+
 class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     request_id: str
     step_id: str | None = None
@@ -549,6 +568,7 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     task_workspace_items: list[dict[str, Any]] = Field(default_factory=list)
     task_verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     checkpoint_policy: RuntimeCheckpointPolicySnapshot | None = None
+    desktop_loop: DesktopExecutionLoopSnapshot | None = None
     source: str = "runtime_planner"
 
 

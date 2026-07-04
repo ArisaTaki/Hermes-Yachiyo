@@ -807,6 +807,24 @@ def test_yachiyo_agent_service_surfaces_desktop_execution_request_previews() -> 
     ]
     assert previews[0]["runtime_stage"] == "discover"
     assert previews[0]["input"] == {"query": "PixelForge", "limit": 20}
+    assert previews[0]["desktop_loop"] == {
+        "stage": "discover",
+        "role": "find_target_app",
+        "action": "discover_apps",
+        "target_kind": "desktop_discovery",
+        "selection_source": "desktop.list_apps",
+        "app_name": "",
+        "query": "PixelForge",
+        "source_tool": "desktop.list_apps",
+        "retry_tool": "desktop.list_apps",
+        "retry_reason": "resolve_desktop_app",
+        "retry_input": {"query": "PixelForge", "limit": 20},
+        "verification_target_step_ids": [],
+        "requires_observation": True,
+        "requires_post_action_verification": False,
+        "can_auto_retry": True,
+        "source": "desktop_execution_loop",
+    }
     assert previews[1]["runtime_stage"] == "operate"
     assert previews[1]["input"] == {
         "app_name": "PixelForge",
@@ -814,8 +832,13 @@ def test_yachiyo_agent_service_surfaces_desktop_execution_request_previews() -> 
         "query": "PixelForge",
     }
     assert previews[1]["requires_post_action_verification"] is True
+    assert previews[1]["desktop_loop"]["action"] == "open_app"
+    assert previews[1]["desktop_loop"]["retry_tool"] == "desktop.list_apps"
     assert previews[2]["runtime_stage"] == "verify"
     assert previews[2]["depends_on"] == ["open-or-focus-app"]
+    assert previews[2]["desktop_loop"]["verification_target_step_ids"] == [
+        "open-or-focus-app"
+    ]
 
 
 def test_yachiyo_agent_service_returns_runtime_planner_metadata_on_chat_task() -> None:
