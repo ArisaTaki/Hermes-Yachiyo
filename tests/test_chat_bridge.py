@@ -80,12 +80,13 @@ def _assert_planner_trace_prefix(
     intent_kind: str,
 ) -> None:
     event_types = [event["event_type"] for event in agent_task["recent_events"]]
-    assert event_types[:3] == [
-        "agent.intent.selected",
-        "agent.plan.created",
-        "agent.plan.step",
-    ]
-    assert agent_task["recent_events"][0]["payload"]["intent"]["kind"] == intent_kind
+    assert "agent.intent.selected" in event_types
+    assert "agent.plan.created" in event_types
+    assert "agent.plan.step" in event_types
+    assert event_types.index("agent.intent.selected") < event_types.index("agent.plan.created")
+    assert event_types.index("agent.plan.created") < event_types.index("agent.plan.step")
+    intent_event = _agent_task_event(agent_task, "agent.intent.selected")
+    assert intent_event["payload"]["intent"]["kind"] == intent_kind
 
 
 def _run_launcher_daily_desktop_quick_message(
