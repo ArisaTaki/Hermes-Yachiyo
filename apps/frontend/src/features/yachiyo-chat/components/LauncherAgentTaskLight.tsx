@@ -137,6 +137,7 @@ function launcherAgentTaskProgressChips(
   const progress = task.task_progress || null;
   const todos = task.task_core?.todos || [];
   const checkpoints = task.task_core?.checkpoints || [];
+  const workspaceItems = task.task_core?.workspace?.items || [];
   const totalTodos = progress?.total_todos ?? todos.length;
   const completedTodos = progress?.completed_todos
     ?? todos.filter((todo) => todo.status === 'completed').length;
@@ -147,6 +148,11 @@ function launcherAgentTaskProgressChips(
   const totalCheckpoints = progress?.total_checkpoints ?? checkpoints.length;
   const completedCheckpoints = progress?.completed_checkpoints
     ?? checkpoints.filter((checkpoint) => checkpoint.status === 'completed').length;
+  const totalWorkspaceItems = progress?.total_workspace_items ?? workspaceItems.length;
+  const completedWorkspaceItems = progress?.completed_workspace_items
+    ?? workspaceItems.filter((item) => item.status === 'completed').length;
+  const blockedWorkspaceItems = progress?.blocked_workspace_items
+    ?? workspaceItems.filter((item) => item.status === 'blocked').length;
   const failedVerificationCount = progress?.failed_verification_count ?? 0;
   const pendingVerificationCount = progress?.pending_verification_count ?? 0;
   const executionEnvelope = task.runtime_execution_envelope || null;
@@ -175,6 +181,14 @@ function launcherAgentTaskProgressChips(
       label: `check ${completedCheckpoints}/${totalCheckpoints}`,
       title: progress?.latest_verification_step_id || undefined,
       tone: failedVerificationCount > 0 ? 'warning' : completedCheckpoints >= totalCheckpoints ? 'ready' : 'muted',
+    });
+  }
+  if (totalWorkspaceItems > 0) {
+    chips.push({
+      kind: 'workspace',
+      label: `work ${completedWorkspaceItems}/${totalWorkspaceItems}`,
+      title: task.task_core?.workspace?.title || progress?.workspace_id || undefined,
+      tone: blockedWorkspaceItems > 0 ? 'warning' : completedWorkspaceItems >= totalWorkspaceItems ? 'ready' : 'muted',
     });
   }
   if (progress?.needs_replan || progress?.latest_replan_request_id) {

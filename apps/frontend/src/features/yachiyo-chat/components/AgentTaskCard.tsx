@@ -365,6 +365,8 @@ type TaskPlannerSummarySnapshot = {
 };
 
 type TaskCoreTodo = NonNullable<NonNullable<AgentTaskSnapshot['task_core']>['todos']>[number];
+type TaskCoreWorkspaceItem = NonNullable<NonNullable<NonNullable<AgentTaskSnapshot['task_core']>['workspace']>['items']>[number];
+type TaskCoreCheckpoint = NonNullable<NonNullable<AgentTaskSnapshot['task_core']>['checkpoints']>[number];
 type TaskReplanRecoverySnapshot = NonNullable<AgentTaskSnapshot['replan_recoveries']>[number];
 type TaskReplanRecoveryRow = {
   actions: TaskPermissionRecoveryAction[];
@@ -375,14 +377,27 @@ function TaskCoreProgress({ task }: { task: AgentTaskSnapshot }) {
   const progress = task.task_progress;
   const todos = (task.task_core?.todos || [])
     .filter((todo) => todo.todo_id || todo.title);
-  if (!todos.length && !progress) return null;
+  const workspaceItems = (task.task_core?.workspace?.items || [])
+    .filter((item) => item.item_id || item.title || item.path);
+  const checkpoints = (task.task_core?.checkpoints || [])
+    .filter((checkpoint) => checkpoint.checkpoint_id || checkpoint.title);
+  if (!todos.length && !workspaceItems.length && !checkpoints.length && !progress) return null;
 
   const visibleTodos = todos.slice(0, 4);
+  const visibleWorkspaceItems = workspaceItems.slice(0, 2);
+  const visibleCheckpoints = checkpoints.slice(0, 2);
   const totalCount = progress?.total_todos ?? todos.length;
   const completedCount = progress?.completed_todos ?? todos.filter((todo) => todo.status === 'completed').length;
   const blockedCount = progress?.blocked_todos ?? todos.filter((todo) => todo.status === 'blocked').length;
   const activeCount = progress?.active_todos ?? todos.filter((todo) => todo.status === 'in_progress').length;
   const checkpointCount = progress?.total_checkpoints ?? (task.task_core?.checkpoints || []).length;
+  const completedCheckpointCount = progress?.completed_checkpoints
+    ?? checkpoints.filter((checkpoint) => checkpoint.status === 'completed').length;
+  const workspaceItemCount = progress?.total_workspace_items ?? workspaceItems.length;
+  const completedWorkspaceItemCount = progress?.completed_workspace_items
+    ?? workspaceItems.filter((item) => item.status === 'completed').length;
+  const blockedWorkspaceItemCount = progress?.blocked_workspace_items
+    ?? workspaceItems.filter((item) => item.status === 'blocked').length;
   const pendingVerificationCount = progress?.pending_verification_count ?? 0;
   const failedVerificationCount = progress?.failed_verification_count ?? 0;
   const progressDetail = progress?.progress_text
@@ -397,7 +412,10 @@ function TaskCoreProgress({ task }: { task: AgentTaskSnapshot }) {
       data-active-count={activeCount}
       data-blocked-count={blockedCount}
       data-checkpoint-count={checkpointCount}
+      data-completed-checkpoint-count={completedCheckpointCount}
       data-completed-count={completedCount}
+      data-completed-workspace-count={completedWorkspaceItemCount}
+      data-blocked-workspace-count={blockedWorkspaceItemCount}
       data-latest-replan-request-id={progress?.latest_replan_request_id || ''}
       data-latest-verification-status={progress?.latest_verification_status || ''}
       data-needs-replan={String(progress?.needs_replan === true)}
@@ -406,6 +424,7 @@ function TaskCoreProgress({ task }: { task: AgentTaskSnapshot }) {
       data-progress-status={progress?.status || ''}
       data-testid="yachiyo-agent-task-core"
       data-todo-count={totalCount}
+      data-workspace-item-count={workspaceItemCount}
     >
       <UiIcon name="activity" title="Task Core" />
       <div className="yachiyo-agent-task-core-body">
@@ -432,6 +451,49 @@ function TaskCoreProgress({ task }: { task: AgentTaskSnapshot }) {
             ))}
             {todos.length > visibleTodos.length ? (
               <span className="yachiyo-agent-task-core-more">+{todos.length - visibleTodos.length}</span>
+            ) : null}
+          </div>
+        ) : null}
+        {visibleWorkspaceItems.length || visibleCheckpoints.length || workspaceItemCount || checkpointCount ? (
+          <div className="yachiyo-agent-task-core-milestones">
+            {visibleWorkspaceItems.map((item) => (
+              <span
+                className={`yachiyo-agent-task-core-chip workspace ${taskCoreMilestoneTone(item.status)}`}
+                data-task-workspace-item-id={item.item_id}
+                data-task-workspace-item-kind={item.kind || ''}
+                data-task-workspace-item-status={item.status || 'pending'}
+                key={`workspace:${item.item_id || item.path || item.title}`}
+                title={taskCoreWorkspaceItemTitle(item)}
+              >
+                workspace · {item.title || item.path || item.item_id || 'item'}
+              </span>
+            ))}
+            {workspaceItems.length > visibleWorkspaceItems.length ? (
+              <span
+                className={`yachiyo-agent-task-core-chip workspace ${blockedWorkspaceItemCount ? 'blocked' : ''}`}
+                data-task-workspace-item-more={workspaceItems.length - visibleWorkspaceItems.length}
+              >
+                workspace · {completedWorkspaceItemCount}/{workspaceItemCount}
+              </span>
+            ) : null}
+            {visibleCheckpoints.map((checkpoint) => (
+              <span
+                className={`yachiyo-agent-task-core-chip checkpoint ${taskCoreMilestoneTone(checkpoint.status)}`}
+                data-task-checkpoint-id={checkpoint.checkpoint_id}
+                data-task-checkpoint-status={checkpoint.status || 'planned'}
+                key={`checkpoint:${checkpoint.checkpoint_id || checkpoint.after_step_id || checkpoint.title}`}
+                title={taskCoreCheckpointTitle(checkpoint)}
+              >
+                check · {checkpoint.title || checkpoint.checkpoint_id || 'checkpoint'}
+              </span>
+            ))}
+            {checkpoints.length > visibleCheckpoints.length ? (
+              <span
+                className="yachiyo-agent-task-core-chip checkpoint"
+                data-task-checkpoint-more={checkpoints.length - visibleCheckpoints.length}
+              >
+                check · {completedCheckpointCount}/{checkpointCount}
+              </span>
             ) : null}
           </div>
         ) : null}
@@ -731,6 +793,32 @@ function taskCoreTodoTitle(todo: TaskCoreTodo): string {
     todo.capability_id,
     todo.reason,
   ].filter(Boolean).join(' · ');
+}
+
+function taskCoreWorkspaceItemTitle(item: TaskCoreWorkspaceItem): string {
+  return [
+    item.title,
+    item.kind,
+    item.path,
+    item.description,
+    item.source_step_id,
+  ].filter(Boolean).join(' · ');
+}
+
+function taskCoreCheckpointTitle(checkpoint: TaskCoreCheckpoint): string {
+  return [
+    checkpoint.title,
+    checkpoint.after_step_id,
+    ...(checkpoint.verifies || []),
+  ].filter(Boolean).join(' · ');
+}
+
+function taskCoreMilestoneTone(status: unknown): string {
+  const value = String(status || '').trim();
+  if (value === 'completed' || value === 'skipped') return value;
+  if (value === 'blocked' || value === 'waiting_approval') return 'blocked';
+  if (value === 'in_progress' || value === 'ready') return 'in_progress';
+  return 'pending';
 }
 
 function plannerSummaryFromTaskMetadata(value: unknown): TaskPlannerSummarySnapshot | null {
