@@ -572,6 +572,7 @@ class LegacyChatTaskStarter:
             allowed_tools=allowed_entrypoint_tools,
             metadata_allowed_tools=allowed_daily_desktop_tools,
             execution_normalized=True,
+            include_runtime_context=True,
         )
         if legacy_timeline_requests and not _planner_media_requests_cover_legacy_apple_music(
             legacy_timeline_requests,

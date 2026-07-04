@@ -167,6 +167,55 @@ def test_planner_first_daily_desktop_entrypoint_requests_can_be_execution_normal
     assert requests[2]["input"] == {}
 
 
+def test_planner_first_daily_desktop_entrypoint_can_include_runtime_context() -> None:
+    requests = planner_first_daily_desktop_entrypoint_requests(
+        "打开 PixelForge",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+        execution_normalized=True,
+        include_runtime_context=True,
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert {request["core_id"] for request in requests} == {requests[0]["core_id"]}
+    assert {request["workspace_id"] for request in requests} == {
+        requests[0]["workspace_id"]
+    }
+    assert requests[0]["runtime_stage"] == "discover"
+    assert requests[1]["step_id"] == "open-or-focus-app"
+    assert requests[1]["task_todo"]["step_id"] == "open-or-focus-app"
+    assert requests[1]["task_checkpoints"][0]["after_step_id"] == "open-or-focus-app"
+    assert requests[2]["runtime_stage"] == "verify"
+    assert requests[2]["task_verification_targets"][0]["step_id"] == "open-or-focus-app"
+
+
+def test_daily_desktop_planned_timeline_can_include_runtime_context() -> None:
+    timeline = daily_desktop_planned_timeline(
+        "打开 PixelForge",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+        include_runtime_context=True,
+    )
+
+    assert [event["tool"] for event in timeline] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert timeline[0]["core_id"].startswith("task-core-")
+    assert timeline[0]["workspace_id"].startswith("task-workspace-")
+    assert timeline[0]["runtime_doctrine"] == "discover_operate_verify"
+    assert timeline[1]["step_id"] == "open-or-focus-app"
+    assert timeline[1]["task_todo"]["tool_name"] == "app.open"
+    assert timeline[1]["task_checkpoints"][0]["after_step_id"] == "open-or-focus-app"
+    assert timeline[2]["runtime_stage"] == "verify"
+    assert timeline[2]["task_verification_targets"][0]["todo"]["step_id"] == (
+        "open-or-focus-app"
+    )
+
+
 def test_planner_first_daily_desktop_entrypoint_scopes_app_status_verification() -> None:
     for prompt, app_name in (
         ("验证 Slack 是否打开", "Slack"),

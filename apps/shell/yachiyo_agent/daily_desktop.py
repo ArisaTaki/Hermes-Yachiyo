@@ -27,6 +27,39 @@ _ENTRYPOINT_NON_PRIMARY_TOOLS = {
     "desktop.windows",
     "desktop.ui_elements",
 }
+_ENTRYPOINT_TIMELINE_CONTEXT_KEYS = (
+    "request_id",
+    "step_id",
+    "capability_id",
+    "decision_id",
+    "plan_id",
+    "tool_plan_id",
+    "intent_kind",
+    "core_id",
+    "workspace_id",
+    "group_run_id",
+    "run_group_id",
+    "group_id",
+    "workflow_run_id",
+    "workflow_id",
+    "workflow_node_id",
+    "workflow_node_label",
+    "workflow_node_kind",
+    "approval_required",
+    "depends_on",
+    "fallback_tools",
+    "runtime_doctrine",
+    "runtime_stage",
+    "runtime_role",
+    "requires_observation",
+    "requires_post_action_verification",
+    "replan_triggers",
+    "replan_signal_ids",
+    "task_todo",
+    "task_checkpoints",
+    "task_workspace_items",
+    "task_verification_targets",
+)
 
 
 def daily_desktop_allowed_tools(
@@ -74,6 +107,7 @@ def planner_first_daily_desktop_entrypoint_requests(
     allowed_tools: Sequence[str] | None = None,
     metadata_allowed_tools: Sequence[str] | None = None,
     execution_normalized: bool = False,
+    include_runtime_context: bool = False,
 ) -> list[dict[str, Any]]:
     """Return daily entrypoint requests with Runtime Planner as the default."""
 
@@ -86,6 +120,15 @@ def planner_first_daily_desktop_entrypoint_requests(
         return [direct_tool_request]
     try:
         from .planner_execution import planner_execution_tool_requests, planner_tool_requests
+
+        if execution_normalized and include_runtime_context:
+            runtime_requests = _runtime_execution_context_entrypoint_requests(
+                str(text or ""),
+                allowed,
+                metadata=metadata,
+            )
+            if runtime_requests:
+                return runtime_requests
 
         planner_requests = planner_tool_requests(
             str(text or ""),
@@ -212,6 +255,7 @@ def daily_desktop_planned_timeline(
     requests: Sequence[Mapping[str, Any]] | None = None,
     metadata: Mapping[str, Any] | None = None,
     allowed_tools: Sequence[str] | None = None,
+    include_runtime_context: bool = False,
 ) -> list[dict[str, Any]]:
     planned_requests = list(requests or ())
     if not planned_requests:
@@ -220,6 +264,7 @@ def daily_desktop_planned_timeline(
             metadata=metadata,
             allowed_tools=allowed_tools,
             execution_normalized=True,
+            include_runtime_context=include_runtime_context,
         )
     if not planned_requests:
         return []
@@ -242,8 +287,48 @@ def daily_desktop_planned_timeline(
         }
         if request.get("continue_to_model"):
             event["continue_to_model"] = True
+        for key in _ENTRYPOINT_TIMELINE_CONTEXT_KEYS:
+            value = request.get(key)
+            if _has_entrypoint_timeline_context_value(value):
+                event[key] = value
         timeline.append(event)
     return timeline
+
+
+def _has_entrypoint_timeline_context_value(value: Any) -> bool:
+    return value not in (None, "", [], {}) and value is not False
+
+
+def _runtime_execution_context_entrypoint_requests(
+    text: str,
+    allowed_tools: Sequence[str],
+    *,
+    metadata: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    try:
+        from .runtime_execution import (
+            runtime_execution_envelope_payload,
+            runtime_execution_requests_from_envelope_payload,
+        )
+        from .runtime_planner import RuntimePlanner
+
+        decision = RuntimePlanner().decision(
+            text,
+            allowed_tools=allowed_tools,
+            metadata=metadata,
+        )
+        envelope = runtime_execution_envelope_payload(
+            decision,
+            allowed_tools=allowed_tools,
+            full_plan=True,
+        )
+        return runtime_execution_requests_from_envelope_payload(
+            envelope,
+            allowed_tools=allowed_tools,
+        )
+    except Exception:
+        logger.debug("Runtime execution context entrypoint unavailable", exc_info=True)
+        return []
 
 
 def _runtime_main_chat_tool_policies(runtime: Any | None) -> list[Mapping[str, Any]]:
