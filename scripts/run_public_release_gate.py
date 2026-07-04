@@ -37,6 +37,7 @@ def public_release_gate_checks(
     include_real_desktop_open: bool = False,
     include_real_desktop_ui_inspection: bool = False,
     include_real_desktop_interaction: bool = False,
+    allow_existing_real_desktop_app: bool = False,
     include_provider_workflow: bool = False,
     include_ui: bool = False,
 ) -> list[GateCheck]:
@@ -99,6 +100,8 @@ def public_release_gate_checks(
             command.append("--include-real-desktop-ui-inspection")
         if include_real_desktop_interaction:
             command.append("--include-real-desktop-interaction")
+        if allow_existing_real_desktop_app:
+            command.append("--allow-existing-real-desktop-app")
         if include_provider_workflow:
             command.append("--include-provider-workflow")
         if include_ui:
@@ -127,6 +130,7 @@ def run_public_release_gate(
     include_real_desktop_open: bool = False,
     include_real_desktop_ui_inspection: bool = False,
     include_real_desktop_interaction: bool = False,
+    allow_existing_real_desktop_app: bool = False,
     include_provider_workflow: bool = False,
     include_ui: bool = False,
     require_release_ready: bool = False,
@@ -141,6 +145,7 @@ def run_public_release_gate(
         include_real_desktop_open=include_real_desktop_open,
         include_real_desktop_ui_inspection=include_real_desktop_ui_inspection,
         include_real_desktop_interaction=include_real_desktop_interaction,
+        allow_existing_real_desktop_app=allow_existing_real_desktop_app,
         include_provider_workflow=include_provider_workflow,
         include_ui=include_ui,
     )
@@ -1004,10 +1009,15 @@ def _public_demo_next_actions(check: Mapping[str, Any]) -> list[dict[str, Any]]:
         flags = grouped_flags.get(group)
         if not flags:
             continue
+        command_flags = list(flags)
+        if group == "real_desktop" and _has_app_already_running_blocker(
+            grouped_blockers.get(group, [])
+        ):
+            command_flags.append("--allow-existing-real-desktop-app")
         suffix = PUBLIC_DEMO_GROUP_OUTPUT_SLUGS.get(group, group)
         command = (
             "python scripts/run_public_demo_smokes.py "
-            + " ".join(flags)
+            + " ".join(command_flags)
             + f" --output-json tmp/public-demo-smokes-{suffix}-missing.json "
             + f"--output-markdown tmp/public-demo-smokes-{suffix}-missing.md"
         )
@@ -1025,6 +1035,21 @@ def _public_demo_next_actions(check: Mapping[str, Any]) -> list[dict[str, Any]]:
     return actions
 
 
+def _has_app_already_running_blocker(blockers: Sequence[Mapping[str, Any]]) -> bool:
+    for blocker in blockers:
+        if str(blocker.get("id") or "") != "real_desktop_interaction":
+            continue
+        summary = _dict(blocker.get("evidence_summary"))
+        values = [
+            str(blocker.get("reason") or ""),
+            str(summary.get("error") or ""),
+            str(summary.get("reason") or ""),
+        ]
+        if any(value.strip() == "app_already_running" for value in values):
+            return True
+    return False
+
+
 def _public_demo_next_command(check: Mapping[str, Any]) -> str:
     actions = _public_demo_next_actions(check)
     if not actions:
@@ -1035,7 +1060,9 @@ def _public_demo_next_command(check: Mapping[str, Any]) -> str:
     for action in actions:
         command = str(action.get("command") or "")
         for part in command.split():
-            if part.startswith("--include-") and part not in combined_flags:
+            if (
+                part.startswith("--include-") or part.startswith("--allow-")
+            ) and part not in combined_flags:
                 combined_flags.append(part)
     if not combined_flags:
         return str(actions[0].get("command") or "")
@@ -1253,6 +1280,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--include-real-desktop-open", action="store_true")
     parser.add_argument("--include-real-desktop-ui-inspection", action="store_true")
     parser.add_argument("--include-real-desktop-interaction", action="store_true")
+    parser.add_argument("--allow-existing-real-desktop-app", action="store_true")
     parser.add_argument("--include-provider-workflow", action="store_true")
     parser.add_argument("--include-ui", action="store_true")
     parser.add_argument("--require-release-ready", action="store_true")
@@ -1273,6 +1301,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         include_real_desktop_open=bool(args.include_real_desktop_open),
         include_real_desktop_ui_inspection=bool(args.include_real_desktop_ui_inspection),
         include_real_desktop_interaction=bool(args.include_real_desktop_interaction),
+        allow_existing_real_desktop_app=bool(args.allow_existing_real_desktop_app),
         include_provider_workflow=bool(args.include_provider_workflow),
         include_ui=bool(args.include_ui),
         require_release_ready=bool(args.require_release_ready),

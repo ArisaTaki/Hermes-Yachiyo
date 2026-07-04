@@ -30,7 +30,19 @@ class DemoFlow:
     opt_in_reason: str = ""
 
 
-def demo_flows(tmp_dir: Path) -> list[DemoFlow]:
+def demo_flows(
+    tmp_dir: Path,
+    *,
+    allow_existing_real_desktop_app: bool = False,
+) -> list[DemoFlow]:
+    real_desktop_interaction_command = [
+        sys.executable,
+        "scripts/smoke_real_desktop_interaction.py",
+        "--report-json",
+        str(tmp_dir / "real-desktop-interaction.json"),
+    ]
+    if allow_existing_real_desktop_app:
+        real_desktop_interaction_command.append("--allow-existing-app")
     return [
         DemoFlow(
             id="data_analysis_artifact",
@@ -198,12 +210,7 @@ def demo_flows(tmp_dir: Path) -> list[DemoFlow]:
             id="real_desktop_interaction",
             label="Real app type, click, and verify loop",
             category="real_desktop",
-            command=(
-                sys.executable,
-                "scripts/smoke_real_desktop_interaction.py",
-                "--report-json",
-                str(tmp_dir / "real-desktop-interaction.json"),
-            ),
+            command=tuple(real_desktop_interaction_command),
             report_json=tmp_dir / "real-desktop-interaction.json",
             opt_in_flag="--include-real-desktop-interaction",
             opt_in_reason="types and clicks in a real macOS application",
@@ -260,12 +267,16 @@ def run_public_demo_smokes(
     include_real_desktop_open: bool = False,
     include_real_desktop_ui_inspection: bool = False,
     include_real_desktop_interaction: bool = False,
+    allow_existing_real_desktop_app: bool = False,
     include_provider_workflow: bool = False,
     include_ui: bool = False,
     plan_only: bool = False,
 ) -> dict[str, Any]:
     resolved_tmp_dir = _resolve_path(Path(tmp_dir))
-    flows = demo_flows(resolved_tmp_dir)
+    flows = demo_flows(
+        resolved_tmp_dir,
+        allow_existing_real_desktop_app=allow_existing_real_desktop_app,
+    )
     selected_flags = {
         "--include-real-desktop-open": include_real_desktop or include_real_desktop_open,
         "--include-real-desktop-ui-inspection": (
@@ -459,14 +470,22 @@ def _next_actions(flows: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
         command = flow.get("command")
         if not isinstance(command, list):
             continue
+        command_parts = [str(part) for part in command]
+        reason = _flow_blocker_reason(flow)
+        if (
+            str(flow.get("id") or "") == "real_desktop_interaction"
+            and reason == "app_already_running"
+            and "--allow-existing-app" not in command_parts
+        ):
+            command_parts.append("--allow-existing-app")
         actions.append(
             {
                 "id": str(flow.get("id") or ""),
                 "status": status,
-                "command": " ".join(str(part) for part in command),
+                "command": " ".join(command_parts),
                 "opt_in_flag": str(flow.get("opt_in_flag") or ""),
                 "opt_in_reason": str(flow.get("opt_in_reason") or ""),
-                "reason": _flow_blocker_reason(flow),
+                "reason": reason,
                 "evidence_summary": _dict(flow.get("evidence_summary")),
             }
         )
@@ -657,6 +676,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--include-real-desktop-open", action="store_true")
     parser.add_argument("--include-real-desktop-ui-inspection", action="store_true")
     parser.add_argument("--include-real-desktop-interaction", action="store_true")
+    parser.add_argument("--allow-existing-real-desktop-app", action="store_true")
     parser.add_argument("--include-provider-workflow", action="store_true")
     parser.add_argument("--include-ui", action="store_true")
     parser.add_argument("--plan-only", action="store_true")
@@ -670,6 +690,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         include_real_desktop_open=bool(args.include_real_desktop_open),
         include_real_desktop_ui_inspection=bool(args.include_real_desktop_ui_inspection),
         include_real_desktop_interaction=bool(args.include_real_desktop_interaction),
+        allow_existing_real_desktop_app=bool(args.allow_existing_real_desktop_app),
         include_provider_workflow=bool(args.include_provider_workflow),
         include_ui=bool(args.include_ui),
         plan_only=bool(args.plan_only),

@@ -195,6 +195,83 @@ def test_public_demo_smokes_real_desktop_open_can_be_opted_in_separately(
     )
 
 
+def test_public_demo_smokes_can_allow_existing_real_desktop_app_for_interaction(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(demo, "ROOT", tmp_path)
+    commands: list[list[str]] = []
+
+    def fake_run(command):
+        command = list(command)
+        commands.append(command)
+        if "--report-json" in command:
+            report = tmp_path / command[command.index("--report-json") + 1]
+            if not report.is_absolute():
+                report = tmp_path / report
+            report.parent.mkdir(parents=True, exist_ok=True)
+            report.write_text(json.dumps({"ok": True}), encoding="utf-8")
+        return _fake_completed(command)
+
+    monkeypatch.setattr(demo, "_run_command", fake_run)
+
+    summary = demo.run_public_demo_smokes(
+        tmp_dir="tmp/demo",
+        include_real_desktop_interaction=True,
+        allow_existing_real_desktop_app=True,
+    )
+
+    interaction_command = next(
+        command
+        for command in commands
+        if "scripts/smoke_real_desktop_interaction.py" in command
+    )
+    assert "--allow-existing-app" in interaction_command
+    assert summary["ok"] is True
+
+
+def test_public_demo_smokes_next_action_suggests_allow_existing_app(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(demo, "ROOT", tmp_path)
+
+    def fake_run(command):
+        command = list(command)
+        if "--report-json" in command:
+            report = tmp_path / command[command.index("--report-json") + 1]
+            if not report.is_absolute():
+                report = tmp_path / report
+            report.parent.mkdir(parents=True, exist_ok=True)
+            payload = {"ok": True}
+            if report.name == "real-desktop-interaction.json":
+                payload = {
+                    "ok": False,
+                    "mode": "real_desktop_interaction_smoke",
+                    "error": "app_already_running",
+                    "reason": "refusing to modify an app that was already running",
+                    "checks": {"existing_app_allowed": False},
+            }
+            report.write_text(json.dumps(payload), encoding="utf-8")
+        return _fake_completed(
+            command,
+            returncode=1 if "real-desktop-interaction.json" in command else 0,
+        )
+
+    monkeypatch.setattr(demo, "_run_command", fake_run)
+
+    summary = demo.run_public_demo_smokes(
+        tmp_dir="tmp/demo",
+        include_real_desktop_interaction=True,
+    )
+
+    action = next(
+        item for item in summary["next_actions"] if item["id"] == "real_desktop_interaction"
+    )
+    assert action["reason"] == "app_already_running"
+    assert action["command"].endswith("--allow-existing-app")
+
+
 def test_public_demo_smokes_cli_accepts_granular_real_desktop_open_flag(
     tmp_path,
     monkeypatch,

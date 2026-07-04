@@ -133,6 +133,8 @@ python scripts/run_public_release_gate.py \
 
 本地增量收证时，`run_public_release_gate.py` 也可以直接透传 `--include-real-desktop-open`、`--include-real-desktop-ui-inspection`、`--include-real-desktop-interaction` 和 `--include-ui` 到 public-demo runner。这样可以先把已通过的真实 app open 或 Studio/Workflow UI evidence 归档到同一份 gate report，而不必一次运行所有真实桌面交互 smoke。当 public demo 仍是 partial 时，Next Actions 会按真实桌面、provider 和 UI 依赖拆分补证命令，并优先只包含缺失 flow flags；只有遇到未知未来 flow 时才回退到 full-demo 命令。已生成的分批 public-demo JSON 可以用重复的 `--public-demo-report` 合回 gate、`refresh_local_rc_signoff.py` 和 release-smoke summary；聚合时只承认 `status=passed` 的 flow，因此已通过的真实 app open 会被保留，仍被 Screen Recording、provider credentials 或 UI smoke 挡住的 flow 继续出现在 Next Actions。`--include-provider-workflow` 在缺少 `OHA_YACHIYO_SMOKE_*` 凭证时会写入 `skipped=true`、`provider_smoke_credentials_missing` 和缺失变量名作为 blocker evidence，发布仍未 ready，但本地补证命令不会因为环境未配置而伪装成产品失败。
 
+如果真实桌面 interaction smoke 因 `app_already_running` 阻塞，可以在明确接受修改该应用当前状态时追加 `--allow-existing-real-desktop-app`。默认不追加该参数，以避免发布预检误操作用户已经打开的应用窗口。
+
 如果要一次刷新当前 HEAD 的本地 RC evidence、Gatekeeper readiness diagnostics、Screen Recording attempt、provider-not-applicable 草稿和 final signoff preview，运行：
 
 ```bash

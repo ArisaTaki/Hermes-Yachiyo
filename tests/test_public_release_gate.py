@@ -762,6 +762,61 @@ def test_public_release_gate_passes_granular_real_desktop_demo_flags(
     assert summary["status"] == "needs_release_evidence"
 
 
+def test_public_release_gate_passes_allow_existing_real_desktop_app_flag(
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(gate, "ROOT", tmp_path)
+    commands: list[list[str]] = []
+
+    def fake_run(command):
+        command = list(command)
+        commands.append(command)
+        _write_public_demo_report(command, release_level="partial_demo_ready")
+        _write_diagnostics_bundle(command)
+        _write_release_smoke_report(command, ok=False)
+        return _completed(command)
+
+    monkeypatch.setattr(gate, "_run_command", fake_run)
+
+    gate.run_public_release_gate(
+        tmp_dir="tmp/gate",
+        include_real_desktop_interaction=True,
+        allow_existing_real_desktop_app=True,
+    )
+
+    public_demo_command = next(
+        command for command in commands if "scripts/run_public_demo_smokes.py" in command
+    )
+    assert "--include-real-desktop-interaction" in public_demo_command
+    assert "--allow-existing-real-desktop-app" in public_demo_command
+
+
+def test_public_release_gate_next_action_suggests_allow_existing_real_desktop_app():
+    actions = gate._public_demo_next_actions(
+        {
+            "status": "passed",
+            "release_level": "blocked",
+            "missing_required_flow_ids": ["real_desktop_interaction"],
+            "release_blockers": [
+                {
+                    "id": "real_desktop_interaction",
+                    "category": "real_desktop",
+                    "status": "failed",
+                    "opt_in_flag": "--include-real-desktop-interaction",
+                    "reason": "app_already_running",
+                    "evidence_summary": {"error": "app_already_running"},
+                }
+            ],
+        }
+    )
+
+    assert len(actions) == 1
+    assert actions[0]["id"] == "public_demo_real_desktop"
+    assert "--include-real-desktop-interaction" in actions[0]["command"]
+    assert "--allow-existing-real-desktop-app" in actions[0]["command"]
+
+
 def test_public_release_gate_public_demo_next_action_falls_back_for_unknown_flow():
     command = gate._public_demo_next_command(
         {

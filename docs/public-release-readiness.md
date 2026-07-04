@@ -86,6 +86,8 @@ Use `--include-real-desktop-open`, `--include-real-desktop-ui-inspection`, and
 `--include-real-desktop-interaction` to collect the real desktop evidence in
 smaller batches. `--include-real-desktop` remains the umbrella flag for all
 three. These real desktop flags open or operate macOS apps,
+and `--allow-existing-real-desktop-app` may be added when the interaction smoke
+must use an app that was already running before the smoke started.
 `--include-provider-workflow` requires live provider smoke credentials, and
 `--include-ui` starts Vite/Electron UI smokes. A default run can pass selected
 source demos while still reporting `complete=false` until opt-in flows pass.
