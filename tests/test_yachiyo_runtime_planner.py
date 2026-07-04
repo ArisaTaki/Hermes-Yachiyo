@@ -33297,6 +33297,95 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     assert scoped_projected_requests[1]["workflow_node_kind"] == "agent"
 
 
+def test_runtime_execution_envelope_targets_foreground_ui_actions() -> None:
+    allowed_tools = [
+        "desktop.running_apps",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "在当前应用里点击确认按钮",
+        allowed_tools=allowed_tools,
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert envelope is not None
+    assert [request.tool_name for request in envelope.requests] == [
+        "desktop.running_apps",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    operate = envelope.requests[1]
+    verify = envelope.requests[2]
+    assert operate.action_target == {
+        "kind": "desktop_foreground",
+        "action": "click_ui",
+        "target_scope": "foreground",
+        "target": "确认",
+        "role_filter": "button",
+        "step_id": "operate-foreground-ui",
+    }
+    assert operate.observation_retry == {
+        "from_tool": "desktop.ui_elements",
+        "tool": "desktop.ui_elements",
+        "input": {
+            "role_filter": "button",
+            "limit": 80,
+            "target": "确认",
+        },
+        "reason": "observe_foreground_ui",
+    }
+    assert verify.action_target == {
+        "kind": "desktop_foreground",
+        "action": "verify_after_action",
+        "target_scope": "foreground",
+        "target": "确认",
+        "role_filter": "button",
+        "step_id": "verify-desktop-result",
+        "verified_step_ids": ["operate-foreground-ui"],
+    }
+
+
+def test_runtime_execution_envelope_keeps_selected_app_scope_for_foreground_typing() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "media.music_app_open_and_play",
+        "desktop.ui_elements",
+    ]
+    decision = RuntimePlanner().decision(
+        "打开 Apple Music 播放超时空辉夜姬",
+        allowed_tools=allowed_tools,
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert envelope is not None
+    type_request = next(
+        request
+        for request in envelope.requests
+        if request.step_id == "type-media-search-query"
+    )
+    assert type_request.tool_name == "desktop.safe_type_text"
+    assert type_request.action_target == {
+        "kind": "desktop_app",
+        "action": "type_ui",
+        "selection_source": "desktop.list_apps",
+        "app_name": "Music",
+        "query": "Music",
+        "step_id": "type-media-search-query",
+    }
+
+
 def test_runtime_execution_envelope_preserves_deferred_ui_observation_context() -> None:
     allowed_tools = [
         "desktop.list_apps",

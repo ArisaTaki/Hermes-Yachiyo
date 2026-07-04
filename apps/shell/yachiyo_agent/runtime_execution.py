@@ -503,6 +503,7 @@ def _desktop_execution_request_contract(
     previous_requests: Iterable[RuntimeExecutionRequestSnapshot],
 ) -> dict[str, dict[str, Any]]:
     scope = _desktop_app_selection_scope(request_input, request)
+    target_kind = "desktop_app"
     runtime_stage = str(runtime_metadata.get("runtime_stage") or "").strip()
     if not scope and _desktop_request_can_inherit_selection_scope(
         tool_name,
@@ -513,6 +514,15 @@ def _desktop_execution_request_contract(
             previous_requests,
         )
     if not scope:
+        scope = _desktop_foreground_scope(
+            tool_name=tool_name,
+            request_input=request_input,
+            runtime_stage=runtime_stage,
+            depends_on=depends_on,
+            previous_requests=previous_requests,
+        )
+        target_kind = "desktop_foreground"
+    if not scope:
         return {
             "action_target": {},
             "observation_evidence": {},
@@ -521,7 +531,7 @@ def _desktop_execution_request_contract(
 
     action = _desktop_request_action(tool_name, runtime_stage)
     action_target = {
-        "kind": "desktop_app",
+        "kind": target_kind,
         "action": action,
         **scope,
     }
@@ -531,10 +541,11 @@ def _desktop_execution_request_contract(
         action_target["verified_step_ids"] = list(depends_on)
 
     observation_evidence = {
-        "source_tool": (
-            scope.get("selection_source")
-            if runtime_stage != "verify"
-            else (tool_name or "runtime_verification")
+        "source_tool": _desktop_observation_source_tool(
+            tool_name=tool_name,
+            runtime_stage=runtime_stage,
+            scope=scope,
+            target_kind=target_kind,
         ),
         **scope,
     }
@@ -543,6 +554,7 @@ def _desktop_execution_request_contract(
         request_input=request_input,
         runtime_stage=runtime_stage,
         scope=scope,
+        target_kind=target_kind,
     )
     return {
         "action_target": _non_empty_mapping(action_target),
@@ -629,6 +641,87 @@ def _desktop_app_selection_scope_from_previous_requests(
     return fallback_scope
 
 
+def _desktop_foreground_scope(
+    *,
+    tool_name: str,
+    request_input: Mapping[str, Any],
+    runtime_stage: str,
+    depends_on: list[str],
+    previous_requests: Iterable[RuntimeExecutionRequestSnapshot],
+) -> dict[str, Any]:
+    if not _desktop_request_supports_foreground_target(tool_name, runtime_stage):
+        return {}
+    inherited = _desktop_foreground_scope_from_previous_requests(
+        depends_on,
+        previous_requests,
+    )
+    scope = {
+        "target_scope": "foreground",
+        **inherited,
+        **_desktop_foreground_scope_from_input(request_input),
+    }
+    return _non_empty_mapping(scope)
+
+
+def _desktop_foreground_scope_from_input(
+    request_input: Mapping[str, Any],
+) -> dict[str, Any]:
+    scope: dict[str, Any] = {}
+    for key in (
+        "target",
+        "selector",
+        "role_filter",
+        "title_contains",
+        "label",
+        "query",
+        "action",
+        "key",
+        "direction",
+    ):
+        value = request_input.get(key)
+        if value not in (None, "", [], {}):
+            scope[key] = value
+    text = _text(request_input.get("text"))
+    if text:
+        scope["text_preview"] = text[:120]
+        scope["text_length"] = len(text)
+    return scope
+
+
+def _desktop_foreground_scope_from_previous_requests(
+    depends_on: list[str],
+    previous_requests: Iterable[RuntimeExecutionRequestSnapshot],
+) -> dict[str, Any]:
+    dependency_ids = {
+        str(value or "").strip()
+        for value in depends_on
+        if str(value or "").strip()
+    }
+    fallback_scope: dict[str, Any] = {}
+    for previous in reversed(list(previous_requests)):
+        target = (
+            previous.action_target
+            if isinstance(previous.action_target, Mapping)
+            else {}
+        )
+        if str(target.get("kind") or "").strip() != "desktop_foreground":
+            continue
+        scope = {
+            key: value
+            for key, value in target.items()
+            if key not in {"kind", "action", "step_id", "verified_step_ids"}
+            and value not in (None, "", [], {})
+        }
+        if not scope:
+            continue
+        if not fallback_scope:
+            fallback_scope = scope
+        previous_step_id = str(previous.step_id or "").strip()
+        if dependency_ids and previous_step_id in dependency_ids:
+            return scope
+    return fallback_scope
+
+
 def _desktop_request_action(tool_name: str, runtime_stage: str) -> str:
     clean_tool = str(tool_name or "").strip()
     if runtime_stage == "verify":
@@ -637,6 +730,12 @@ def _desktop_request_action(tool_name: str, runtime_stage: str) -> str:
         return "open_app"
     if clean_tool in {"app.focus", "desktop.focus_app"}:
         return "focus_app"
+    if clean_tool == "desktop.active_window":
+        return "read_active_window"
+    if clean_tool in {"desktop.ui_elements", "desktop.read_ui"}:
+        return "read_ui"
+    if clean_tool == "screen.capture":
+        return "capture_screen"
     if clean_tool in {"desktop.search_submit", "desktop.submit_foreground"}:
         return "submit_ui"
     if "click" in clean_tool:
@@ -660,13 +759,74 @@ def _desktop_request_can_inherit_selection_scope(
         return True
     return str(tool_name or "").strip() in {
         "desktop.active_window",
+        "desktop.click",
+        "desktop.click_ui_element",
+        "desktop.hotkey",
+        "desktop.key",
+        "desktop.safe_click",
+        "desktop.safe_key",
+        "desktop.safe_scroll",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
         "desktop.search_submit",
+        "desktop.shortcut",
         "desktop.submit_foreground",
+        "desktop.type",
+        "desktop.type_into_ui_element",
+        "desktop.type_text",
         "desktop.verify",
         "desktop.ui_elements",
         "desktop.read_ui",
         "screen.capture",
     }
+
+
+def _desktop_request_supports_foreground_target(
+    tool_name: str,
+    runtime_stage: str,
+) -> bool:
+    clean_tool = str(tool_name or "").strip()
+    if str(runtime_stage or "").strip() == "verify":
+        return (
+            clean_tool.startswith(("app.", "desktop."))
+            or clean_tool == "screen.capture"
+        )
+    return clean_tool in {
+        "desktop.active_window",
+        "desktop.click",
+        "desktop.click_ui_element",
+        "desktop.hotkey",
+        "desktop.key",
+        "desktop.read_ui",
+        "desktop.safe_click",
+        "desktop.safe_key",
+        "desktop.safe_scroll",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.shortcut",
+        "desktop.submit_foreground",
+        "desktop.type",
+        "desktop.type_into_ui_element",
+        "desktop.type_text",
+        "desktop.ui_elements",
+        "desktop.verify",
+        "screen.capture",
+    }
+
+
+def _desktop_observation_source_tool(
+    *,
+    tool_name: str,
+    runtime_stage: str,
+    scope: Mapping[str, Any],
+    target_kind: str,
+) -> str:
+    if str(runtime_stage or "").strip() == "verify":
+        return tool_name or "runtime_verification"
+    if target_kind == "desktop_app":
+        return str(scope.get("selection_source") or tool_name or "runtime_execution")
+    return tool_name or "desktop.foreground"
 
 
 def _desktop_observation_retry(
@@ -675,7 +835,15 @@ def _desktop_observation_retry(
     request_input: Mapping[str, Any],
     runtime_stage: str,
     scope: Mapping[str, Any],
+    target_kind: str = "desktop_app",
 ) -> dict[str, Any]:
+    if target_kind == "desktop_foreground":
+        return _desktop_foreground_observation_retry(
+            tool_name=tool_name,
+            request_input=request_input,
+            runtime_stage=runtime_stage,
+            scope=scope,
+        )
     if runtime_stage == "verify":
         retry_input = {
             key: request_input[key]
@@ -711,6 +879,55 @@ def _desktop_observation_retry(
             "tool": selection_source,
             "input": retry_input,
             "reason": "resolve_desktop_app",
+        }
+    )
+
+
+def _desktop_foreground_observation_retry(
+    *,
+    tool_name: str,
+    request_input: Mapping[str, Any],
+    runtime_stage: str,
+    scope: Mapping[str, Any],
+) -> dict[str, Any]:
+    if runtime_stage == "verify":
+        retry_input = {
+            key: request_input[key]
+            for key in ("role_filter", "limit", "reason")
+            if key in request_input and request_input[key] not in (None, "")
+        }
+        if not retry_input:
+            retry_input = {
+                key: scope[key]
+                for key in ("role_filter", "target", "selector", "query")
+                if key in scope and scope[key] not in (None, "")
+            }
+        return _non_empty_mapping(
+            {
+                "from_tool": tool_name,
+                "tool": tool_name,
+                "input": retry_input,
+                "reason": "verification_failed",
+            }
+        )
+
+    retry_input = {
+        key: request_input[key]
+        for key in ("role_filter", "limit", "target", "selector")
+        if key in request_input and request_input[key] not in (None, "")
+    }
+    if not retry_input:
+        retry_input = {
+            key: scope[key]
+            for key in ("role_filter", "target", "selector", "query")
+            if key in scope and scope[key] not in (None, "")
+        }
+    return _non_empty_mapping(
+        {
+            "from_tool": "desktop.ui_elements",
+            "tool": "desktop.ui_elements",
+            "input": retry_input,
+            "reason": "observe_foreground_ui",
         }
     )
 
