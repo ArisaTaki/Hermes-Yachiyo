@@ -15,6 +15,11 @@ export type RuntimeArtifactSnapshot = Pick<
   | 'plan_id'
   | 'planner_step_id'
   | 'planning_reason'
+  | 'capability_title'
+  | 'capability_status'
+  | 'capability_reason'
+  | 'capability_selected_tools'
+  | 'capability_planned_step_ids'
   | 'preview_text'
   | 'replan_request_id'
   | 'replan_signal_ids'
@@ -80,6 +85,7 @@ export function RuntimeArtifactPreview({
       data-artifact-path={artifact.path || ''}
       data-artifact-run-id={artifact.run_id || ''}
       data-artifact-runtime-capability-id={artifact.capability_id || ''}
+      data-artifact-runtime-capability-title={artifact.capability_title || ''}
       data-artifact-runtime-doctrine={artifact.runtime_doctrine || ''}
       data-artifact-runtime-role={artifact.runtime_role || ''}
       data-artifact-runtime-stage={artifact.runtime_stage || ''}
@@ -120,6 +126,7 @@ export function RuntimeArtifactPreview({
 }
 
 function artifactMetadataItems(artifact: RuntimeArtifactSnapshot) {
+  const capabilityTitle = artifact.capability_title || '';
   const items = [
     { label: 'artifact', value: artifact.artifact_id },
     { label: 'run', value: artifact.run_id || '' },
@@ -129,7 +136,12 @@ function artifactMetadataItems(artifact: RuntimeArtifactSnapshot) {
     { label: 'workflow', value: artifact.workflow_node_label || artifact.workflow_node_id || artifact.workflow_run_id || artifact.workflow_id || '' },
     { label: 'group', value: artifact.group_run_id || artifact.group_id || '' },
     { label: 'step', value: artifact.step_id || artifact.planner_step_id || '' },
-    { label: 'capability', value: artifact.capability_id || '' },
+    { label: 'capability', value: capabilityTitle || artifact.capability_id || '' },
+    { label: 'capability id', value: capabilityTitle ? artifact.capability_id || '' : '' },
+    { label: 'capability status', value: artifact.capability_status || '' },
+    { label: 'capability reason', value: artifact.capability_reason || '' },
+    { label: 'capability tools', value: artifact.capability_selected_tools?.join(', ') || '' },
+    { label: 'capability steps', value: artifact.capability_planned_step_ids?.join(', ') || '' },
     { label: 'stage', value: artifact.runtime_stage || '' },
     { label: 'role', value: artifact.runtime_role || '' },
     { label: 'doctrine', value: artifact.runtime_doctrine || '' },

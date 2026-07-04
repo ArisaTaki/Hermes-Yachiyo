@@ -100,6 +100,7 @@ export function RuntimeTimelineEventList({
               data-run-event-launcher-surface={plannerContext.launcherSurface}
               data-run-event-entrypoint-source={plannerContext.entrypointSource}
               data-run-event-runtime-capability-id={runtimeContext.capabilityId}
+              data-run-event-runtime-capability-title={runtimeContext.capabilityTitle}
               data-run-event-runtime-doctrine={runtimeContext.runtimeDoctrine}
               data-run-event-runtime-role={runtimeContext.runtimeRole}
               data-run-event-runtime-stage={runtimeContext.runtimeStage}
@@ -432,7 +433,12 @@ function runtimeEventMetadata(
         || runtimeContext.approvalRequired,
     },
     { label: 'step', value: runtimeContext.stepId },
-    { label: 'capability', value: runtimeContext.capabilityId },
+    { label: 'capability', value: runtimeContext.capabilityTitle || runtimeContext.capabilityId },
+    { label: 'capability id', value: runtimeContext.capabilityTitle ? runtimeContext.capabilityId : '' },
+    { label: 'capability status', value: runtimeContext.capabilityStatus },
+    { label: 'capability reason', value: runtimeContext.capabilityReason },
+    { label: 'capability tools', value: runtimeContext.capabilitySelectedTools.join(', ') },
+    { label: 'capability steps', value: runtimeContext.capabilityPlannedStepIds.join(', ') },
     { label: 'stage', value: runtimeContext.runtimeStage },
     { label: 'role', value: runtimeContext.runtimeRole },
     { label: 'doctrine', value: runtimeContext.runtimeDoctrine },
@@ -511,6 +517,11 @@ type RuntimeTimelinePlannerContext = {
 type RuntimeTimelineRuntimeContext = {
   approvalRequired: string;
   capabilityId: string;
+  capabilityTitle: string;
+  capabilityStatus: string;
+  capabilityReason: string;
+  capabilitySelectedTools: string[];
+  capabilityPlannedStepIds: string[];
   replanRequestId: string;
   replanSignalIds: string[];
   replanTrigger: string;
@@ -594,6 +605,11 @@ function runtimeEventRuntimeContext(
       'capability_id',
       'target_capability_id',
     ),
+    capabilityTitle: runtimeEventContextString(event, payload, 'capability_title'),
+    capabilityStatus: runtimeEventContextString(event, payload, 'capability_status'),
+    capabilityReason: runtimeEventContextString(event, payload, 'capability_reason'),
+    capabilitySelectedTools: runtimeEventContextStringList(event, payload, 'capability_selected_tools'),
+    capabilityPlannedStepIds: runtimeEventContextStringList(event, payload, 'capability_planned_step_ids'),
     replanRequestId: runtimeEventContextString(
       event,
       payload,

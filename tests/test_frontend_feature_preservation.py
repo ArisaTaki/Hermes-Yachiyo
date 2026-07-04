@@ -37,6 +37,14 @@ def _assert_occurs(relative_path: str, fragment: str, expected_count: int) -> No
     )
 
 
+def _assert_occurs_at_least(relative_path: str, fragment: str, minimum_count: int) -> None:
+    text = _read(relative_path)
+    actual = text.count(fragment)
+    assert actual >= minimum_count, (
+        f"{relative_path} expected {fragment!r} to occur at least {minimum_count} times, got {actual}"
+    )
+
+
 def _extract_async_function(text: str, name: str) -> str:
     match = re.search(rf"(?:export\s+)?async function {re.escape(name)}\b", text)
     assert match, f"missing async function {name}"
@@ -9376,5 +9384,80 @@ def test_desktop_bridge_token_is_generated_injected_and_sent_by_frontend() -> No
             "headers = await bridgeJsonHeaders()",
             "const result = await window.ohaDesktop.restartBackend({ bridgeUrl });",
             "cachedBridgeToken = null;",
+        ],
+    )
+
+
+def test_runtime_shared_debug_surfaces_capability_context() -> None:
+    _assert_occurs_at_least(
+        "apps/frontend/src/features/runtime-shared/types.ts",
+        "capability_title?: string | null;",
+        3,
+    )
+    _assert_occurs_at_least(
+        "apps/frontend/src/features/runtime-shared/types.ts",
+        "capability_selected_tools?: string[];",
+        4,
+    )
+    _assert_occurs_at_least(
+        "apps/frontend/src/features/runtime-shared/types.ts",
+        "capability_planned_step_ids?: string[];",
+        4,
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/runEventFacts.ts",
+        [
+            "'capability_title'",
+            "'capability_status'",
+            "'capability_reason'",
+            "'capability_selected_tools'",
+            "'capability_planned_step_ids'",
+            "capability_title: plannerTraceString(payload, inputPreview, 'capability_title')",
+            "capability_selected_tools: plannerTraceStringList(payload, inputPreview, 'capability_selected_tools')",
+            "capability_planned_step_ids: plannerTraceStringList(payload, inputPreview, 'capability_planned_step_ids')",
+            "capability_title: current.capability_title || incoming.capability_title || null",
+            "capability_selected_tools: mergeTraceStringLists(",
+            "capability_planned_step_ids: mergeTraceStringLists(",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeToolCallCard.tsx",
+        [
+            "capability_title?: string | null;",
+            "capability_selected_tools?: string[];",
+            "capability_planned_step_ids?: string[];",
+            "data-runtime-capability-title={runtimeToolTraceString(toolCall, 'capability_title')}",
+            "const capabilityTitle = runtimeToolTraceString(toolCall, 'capability_title');",
+            "{ label: 'capability', value: capabilityTitle || runtimeToolTraceString(toolCall, 'capability_id') }",
+            "{ label: 'capability status', value: runtimeToolTraceString(toolCall, 'capability_status') }",
+            "{ label: 'capability tools', value: runtimeToolTraceStringList(toolCall, 'capability_selected_tools').join(', ') }",
+            "{ label: 'capability steps', value: runtimeToolTraceStringList(toolCall, 'capability_planned_step_ids').join(', ') }",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeArtifactPreview.tsx",
+        [
+            "| 'capability_title'",
+            "| 'capability_selected_tools'",
+            "| 'capability_planned_step_ids'",
+            "data-artifact-runtime-capability-title={artifact.capability_title || ''}",
+            "const capabilityTitle = artifact.capability_title || '';",
+            "{ label: 'capability', value: capabilityTitle || artifact.capability_id || '' }",
+            "{ label: 'capability status', value: artifact.capability_status || '' }",
+            "{ label: 'capability tools', value: artifact.capability_selected_tools?.join(', ') || '' }",
+            "{ label: 'capability steps', value: artifact.capability_planned_step_ids?.join(', ') || '' }",
+        ],
+    )
+    _assert_contains(
+        "apps/frontend/src/features/runtime-shared/components/RuntimeTimelineEventList.tsx",
+        [
+            "data-run-event-runtime-capability-title={runtimeContext.capabilityTitle}",
+            "{ label: 'capability', value: runtimeContext.capabilityTitle || runtimeContext.capabilityId }",
+            "{ label: 'capability status', value: runtimeContext.capabilityStatus }",
+            "{ label: 'capability tools', value: runtimeContext.capabilitySelectedTools.join(', ') }",
+            "{ label: 'capability steps', value: runtimeContext.capabilityPlannedStepIds.join(', ') }",
+            "capabilityTitle: runtimeEventContextString(event, payload, 'capability_title')",
+            "capabilitySelectedTools: runtimeEventContextStringList(event, payload, 'capability_selected_tools')",
+            "capabilityPlannedStepIds: runtimeEventContextStringList(event, payload, 'capability_planned_step_ids')",
         ],
     )

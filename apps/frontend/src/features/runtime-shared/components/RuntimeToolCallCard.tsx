@@ -36,6 +36,11 @@ export type RuntimeToolCallCardSnapshot = {
   step_id?: string | null;
   planner_step_id?: string | null;
   capability_id?: string | null;
+  capability_title?: string | null;
+  capability_status?: string | null;
+  capability_reason?: string | null;
+  capability_selected_tools?: string[];
+  capability_planned_step_ids?: string[];
   replan_request_id?: string | null;
   replan_trigger?: string | null;
   task_workspace_items?: Array<Record<string, unknown>>;
@@ -128,6 +133,7 @@ export function RuntimeToolCallCard({
       data-risk-level={toolCall.risk_level || ''}
       data-run-id={toolCall.run_id || ''}
       data-runtime-capability-id={runtimeToolTraceString(toolCall, 'capability_id')}
+      data-runtime-capability-title={runtimeToolTraceString(toolCall, 'capability_title')}
       data-runtime-deferred-tool={runtimeToolTraceString(toolCall, 'deferred_tool')}
       data-runtime-desktop-loop={runtimeToolDesktopLoopSummary(desktopLoop)}
       data-runtime-doctrine={runtimeToolTraceString(toolCall, 'runtime_doctrine')}
@@ -298,6 +304,7 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
   const deferredInput = runtimeToolTraceRecord(toolCall, 'deferred_input');
   const deferredContext = runtimeToolTraceRecord(toolCall, 'deferred_context');
   const deferredContinuation = runtimeToolTraceRecordList(toolCall, 'deferred_continuation');
+  const capabilityTitle = runtimeToolTraceString(toolCall, 'capability_title');
   return [
     { label: 'run', value: toolCall.run_id || '' },
     { label: 'source', value: toolCall.source_run_id || '' },
@@ -305,7 +312,12 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
     { label: 'workflow', value: toolCall.workflow_node_label || toolCall.workflow_node_id || toolCall.workflow_run_id || toolCall.workflow_id || '' },
     { label: 'group', value: toolCall.group_run_id || toolCall.group_id || '' },
     { label: 'intent', value: toolCall.intent_kind || '' },
-    { label: 'capability', value: runtimeToolTraceString(toolCall, 'capability_id') },
+    { label: 'capability', value: capabilityTitle || runtimeToolTraceString(toolCall, 'capability_id') },
+    { label: 'capability id', value: capabilityTitle ? runtimeToolTraceString(toolCall, 'capability_id') : '' },
+    { label: 'capability status', value: runtimeToolTraceString(toolCall, 'capability_status') },
+    { label: 'capability reason', value: runtimeToolTraceString(toolCall, 'capability_reason') },
+    { label: 'capability tools', value: runtimeToolTraceStringList(toolCall, 'capability_selected_tools').join(', ') },
+    { label: 'capability steps', value: runtimeToolTraceStringList(toolCall, 'capability_planned_step_ids').join(', ') },
     { label: 'step', value: runtimeToolTraceString(toolCall, 'step_id', 'planner_step_id') },
     { label: 'stage', value: runtimeToolTraceString(toolCall, 'runtime_stage') },
     { label: 'role', value: runtimeToolTraceString(toolCall, 'runtime_role') },

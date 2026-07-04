@@ -707,6 +707,11 @@ export type ApprovalCardSnapshot = {
   step_id?: string | null;
   planner_step_id?: string | null;
   capability_id?: string | null;
+  capability_title?: string | null;
+  capability_status?: string | null;
+  capability_reason?: string | null;
+  capability_selected_tools?: string[];
+  capability_planned_step_ids?: string[];
   decision_id?: string | null;
   plan_id?: string | null;
   tool_plan_id?: string | null;
@@ -763,6 +768,11 @@ export type ArtifactSnapshot = {
   step_id?: string | null;
   planner_step_id?: string | null;
   capability_id?: string | null;
+  capability_title?: string | null;
+  capability_status?: string | null;
+  capability_reason?: string | null;
+  capability_selected_tools?: string[];
+  capability_planned_step_ids?: string[];
   replan_request_id?: string | null;
   replan_trigger?: string | null;
   replan_triggers?: string[];
@@ -820,6 +830,11 @@ export type ToolCallSnapshot = {
   step_id?: string | null;
   planner_step_id?: string | null;
   capability_id?: string | null;
+  capability_title?: string | null;
+  capability_status?: string | null;
+  capability_reason?: string | null;
+  capability_selected_tools?: string[];
+  capability_planned_step_ids?: string[];
   replan_request_id?: string | null;
   replan_trigger?: string | null;
   task_workspace_items?: Array<Record<string, unknown>>;
