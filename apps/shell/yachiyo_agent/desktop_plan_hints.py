@@ -263,6 +263,12 @@ def click_target_hint(text: str) -> dict[str, Any] | None:
 
 def type_into_ui_hint(text: str, *, app_name: str = "") -> dict[str, Any] | None:
     patterns = (
+        r"(?:把|将)?\s*(?:单元格|cell)?\s*(?P<cell>[A-Z]{1,3}\d{1,7})\s*"
+        r"(?:改成|改为|设为|设置为|填成|填为|写成|写为|更新为|置为|=)\s*"
+        r"(?P<cell_text>[^。！？!?，,]+)",
+        r"(?:set|change|update|fill|write)\s+(?:cell\s+)?"
+        r"(?P<cell_en>[A-Z]{1,3}\d{1,7})\s+(?:to|as|=)\s*"
+        r"(?P<cell_text_en>[^.!?,]+)",
         r"(?P<target>[^。！？!?，,]{1,40}?(?:搜索框|搜索栏|消息框|聊天框|地址栏|输入框|文本框|输入栏|"
         r"收件人|发件人|联系人|主题|标题|姓名|名称|邮箱|邮件地址|电话|用户名|账号|账户|密码))"
         r"\s*(?:输入|键入|填写|填入|写入|写)\s*(?P<text>[^。！？!?，,]+)",
@@ -275,6 +281,27 @@ def type_into_ui_hint(text: str, *, app_name: str = "") -> dict[str, Any] | None
         match = re.search(pattern, text, flags=re.IGNORECASE)
         if not match:
             continue
+        raw_target = (
+            match.groupdict().get("cell")
+            or match.groupdict().get("cell_en")
+            or ""
+        )
+        if raw_target:
+            raw_text = (
+                match.groupdict().get("cell_text")
+                or match.groupdict().get("cell_text_en")
+                or ""
+            )
+            target = clean_type_target(raw_target, app_name=app_name)
+            typed_text = clean_followup_text(raw_text)
+            if target and typed_text:
+                return {
+                    "target": target.upper(),
+                    "text": typed_text,
+                    "role_filter": "text",
+                }
+            continue
+
         raw_target = (
             match.groupdict().get("target")
             or match.groupdict().get("target_en")

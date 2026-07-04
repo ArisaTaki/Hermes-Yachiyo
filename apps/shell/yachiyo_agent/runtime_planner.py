@@ -155,6 +155,8 @@ class TaskIntentRouter:
     ) -> TaskIntentSnapshot:
         if scheduled_runnable_payload(text):
             return _empty_intent("data_analysis", text)
+        if _spreadsheet_cell_edit_ui_hint(text):
+            return _empty_intent("data_analysis", text)
         if _looks_like_current_page_link_artifact_request(text):
             return _empty_intent("data_analysis", text)
         if (
@@ -418,7 +420,8 @@ class TaskIntentRouter:
             return _empty_intent("desktop_operation", text)
         if named_data_source_hint(text) and _data_analysis_action_requested(text):
             return _empty_intent("desktop_operation", text)
-        if _looks_like_generic_data_source_analysis_request(text):
+        spreadsheet_cell_edit = _spreadsheet_cell_edit_ui_hint(text)
+        if _looks_like_generic_data_source_analysis_request(text) and not spreadsheet_cell_edit:
             return _empty_intent("desktop_operation", text)
         app_capability = _app_capability_discovery_hint(text)
         if not app_capability and _browser_window_desktop_ui_operation_requested(text):
@@ -454,6 +457,7 @@ class TaskIntentRouter:
         app_search_app_hint = "" if app_capability else _app_name_hint(text)
         if (
             _explicit_system_settings_request(text)
+            and not spreadsheet_cell_edit
             and not (app_search_app_hint and _app_search_hint(text, app_search_app_hint))
         ):
             return _empty_intent("desktop_operation", text)
@@ -675,6 +679,7 @@ class TaskIntentRouter:
         app_scoped_safe_shortcut_app = _app_scoped_safe_shortcut_app_name_hint(text, safe_shortcut)
         app_click_scope = _app_first_click_scope_hint(text)
         app_type_scope = _app_first_type_scope_hint(text)
+        ui_type_target = type_into_ui_hint(text)
         if app_type_scope or _target_first_foreground_type_hint(text):
             foreground_compose_text = ""
         if _standalone_hotkey_request(text):
@@ -781,6 +786,8 @@ class TaskIntentRouter:
             score = 0.18
         if score <= 0 and app_type_scope:
             score = 0.18
+        if score <= 0 and ui_type_target:
+            score = 0.18
         if (
             score <= 0
             and click_target_hint(text)
@@ -808,6 +815,7 @@ class TaskIntentRouter:
             and not foreground_search_submit
             and not foreground_submit_action
             and not foreground_app_search
+            and not ui_type_target
             and not command_palette
             and not browser_internal_page
             and not app_preferences
@@ -1174,6 +1182,8 @@ class TaskIntentRouter:
             inputs["safe_click_hint"] = safe_click
         if hotkey and operation_hint == "hotkey":
             inputs["hotkey_hint"] = hotkey
+        if ui_type_target:
+            inputs["type_into_ui_hint"] = ui_type_target
         if desktop_discovery is not None:
             inputs["desktop_discovery_hint"] = desktop_discovery
         if generic_browser_discovery:
@@ -1374,6 +1384,8 @@ class TaskIntentRouter:
         if _finder_special_location_hint(text):
             return _empty_intent("system_control", text)
         if _browser_internal_page_hint(text):
+            return _empty_intent("system_control", text)
+        if _spreadsheet_cell_edit_ui_hint(text):
             return _empty_intent("system_control", text)
         app_hint = _app_name_hint(text)
         app_search_hint = _app_search_hint(text, app_hint)
@@ -16488,6 +16500,32 @@ def _visible_data_marker_matches(value: str) -> bool:
     )
 
 
+def _spreadsheet_cell_edit_ui_hint(text: str) -> bool:
+    hint = type_into_ui_hint(text)
+    if not isinstance(hint, Mapping):
+        return False
+    target = str(hint.get("target") or "").strip()
+    if not re.fullmatch(r"[A-Z]{1,3}\d{1,7}", target, flags=re.IGNORECASE):
+        return False
+    value = _clean_prompt(text)
+    app_capability = _app_capability_discovery_hint(value)
+    return (
+        str(app_capability.get("query") or "").strip() == "spreadsheet"
+        or _contains_any(
+            value,
+            (
+                "表格",
+                "电子表格",
+                "spreadsheet",
+                "sheet",
+                "worksheet",
+                "excel",
+                "numbers",
+            ),
+        )
+    )
+
+
 def _deictic_visible_data_marker_matches(value: str) -> bool:
     return bool(
         re.search(
@@ -26637,12 +26675,13 @@ def _running_scoped_app_capability_hint(text: str) -> dict[str, str]:
         r"(?:应用(?:程序)?|app|软件|客户端|工具|程序|编辑器|阅读器|查看器|窗口)?"
         r"\s*(?:里|中|上|内|里面|窗口)?"
         r"(?=\s*(?:打开|启动|点击|点按|按|输入|搜索|查找|检索|找|播放|"
-        r"创建|新建|写|发送|分析|操作|查看|看看|$))",
+        r"创建|新建|写|发送|分析|操作|查看|看看|把|将|改|修改|"
+        r"改成|改为|设置|设为|设置为|填|填写|$))",
         rf"\b(?:in|inside|within|using|with)?\s*(?:the\s+)?{en_scope}\s+"
         rf"(?P<capability_en>{en_capability})"
         r"(?:\s+(?:app|application|client|tool|program|software|editor|viewer|window))?"
         r"(?=\s*(?:to|and|then|click|press|tap|type|enter|search|find|"
-        r"open|create|write|send|analy[sz]e|view|inspect|$))",
+        r"open|create|write|send|set|change|update|fill|analy[sz]e|view|inspect|$))",
     )
     for pattern in patterns:
         match = re.search(pattern, value, flags=re.IGNORECASE)
@@ -27479,6 +27518,8 @@ def _running_app_capability_scope_requested(
     )
     if not value:
         return False
+    if _running_scoped_app_capability_hint(value):
+        return True
     return _contains_any(
         value,
         (

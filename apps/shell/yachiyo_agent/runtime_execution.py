@@ -490,6 +490,10 @@ _DESKTOP_APP_SELECTION_SOURCES = {
     _DESKTOP_APP_SELECTION_SOURCE,
     _DESKTOP_RUNNING_APP_SELECTION_SOURCE,
 }
+_DESKTOP_APP_UI_ELEMENT_TYPE_TOOLS = {
+    "app.focus_and_type_into_ui_element",
+    "app.open_and_type_into_ui_element",
+}
 
 
 def _desktop_execution_request_contract(
@@ -534,6 +538,7 @@ def _desktop_execution_request_contract(
         "kind": target_kind,
         "action": action,
         **scope,
+        **_desktop_app_ui_element_action_scope(tool_name, request_input),
     }
     if step_id:
         action_target["step_id"] = step_id
@@ -561,6 +566,20 @@ def _desktop_execution_request_contract(
         "observation_evidence": _non_empty_mapping(observation_evidence),
         "observation_retry": observation_retry,
     }
+
+
+def _desktop_app_ui_element_action_scope(
+    tool_name: str,
+    request_input: Mapping[str, Any],
+) -> dict[str, Any]:
+    if str(tool_name or "").strip() not in _DESKTOP_APP_UI_ELEMENT_TYPE_TOOLS:
+        return {}
+    scope: dict[str, Any] = {}
+    for key in ("target", "selector", "role_filter", "label"):
+        value = request_input.get(key)
+        if value not in (None, "", [], {}):
+            scope[key] = value
+    return scope
 
 
 def _desktop_app_selection_scope(
