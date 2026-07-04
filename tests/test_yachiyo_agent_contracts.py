@@ -50,6 +50,7 @@ from apps.shell.yachiyo_agent import (
     PlannerTraceSummarySnapshot,
     PublicRunEvent,
     RecoveryRunProvenanceSnapshot,
+    ReplanContinuationSnapshot,
     RunEventPageSnapshot,
     RunTimelineChildSnapshot,
     RunTimelineSnapshot,
@@ -420,6 +421,65 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     }
     assert payload["runtime_stage_counts"] == {"discover": 1}
     assert payload["replan_signal_count"] == 1
+
+
+def test_replan_continuation_snapshot_is_public_contract() -> None:
+    continuation = ReplanContinuationSnapshot(
+        continuation_id="replan-continuation:replan-1:action-1",
+        request_id="replan-1",
+        action_id="action-1",
+        tool_name="desktop.list_apps",
+        prompt="执行恢复动作：Find target app",
+        title="Find target app",
+        source_run_id="run-1",
+        source_task_id="task-1",
+        source_group_run_id="group-run-1",
+        source_workflow_run_id="workflow-run-1",
+        agent_id="agent-1",
+        conversation_id="chat-1",
+        client_run_id="client-run-1",
+        direct_tool_requests=[
+            {
+                "tool": "desktop.list_apps",
+                "input": {"query": "Music"},
+                "approval_required": True,
+            }
+        ],
+        metadata={"replan_continuation_id": "replan-continuation:replan-1:action-1"},
+        task_context={"workspace_id": "task-workspace-1"},
+        daily_desktop_planning_context="执行恢复动作：Find target app",
+        approval_required=True,
+        auto_start_eligible=False,
+        risk_level="medium",
+    )
+
+    payload = _json(continuation)
+
+    assert list(payload) == [
+        "continuation_id",
+        "request_id",
+        "action_id",
+        "tool_name",
+        "prompt",
+        "title",
+        "source_run_id",
+        "source_task_id",
+        "source_group_run_id",
+        "source_workflow_run_id",
+        "agent_id",
+        "conversation_id",
+        "client_run_id",
+        "direct_tool_requests",
+        "metadata",
+        "task_context",
+        "daily_desktop_planning_context",
+        "approval_required",
+        "auto_start_eligible",
+        "risk_level",
+        "source",
+    ]
+    assert payload["direct_tool_requests"][0]["approval_required"] is True
+    assert payload["auto_start_eligible"] is False
 
 
 def test_task_core_public_snapshot_exposes_workspace_todo_checkpoint_and_replan() -> None:

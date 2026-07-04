@@ -440,6 +440,30 @@ class ReplanRecoverySnapshot(_PublicSnapshot):
     source: str = "replan_recovery_projection"
 
 
+class ReplanContinuationSnapshot(_PublicSnapshot):
+    continuation_id: str
+    request_id: str
+    action_id: str | None = None
+    tool_name: str
+    prompt: str
+    title: str = ""
+    source_run_id: str | None = None
+    source_task_id: str | None = None
+    source_group_run_id: str | None = None
+    source_workflow_run_id: str | None = None
+    agent_id: str | None = None
+    conversation_id: str | None = None
+    client_run_id: str | None = None
+    direct_tool_requests: list[dict[str, Any]] = Field(default_factory=list)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    task_context: dict[str, Any] = Field(default_factory=dict)
+    daily_desktop_planning_context: str = ""
+    approval_required: bool = False
+    auto_start_eligible: bool = False
+    risk_level: str = ""
+    source: str = "replan_continuation"
+
+
 class RuntimePlanSnapshot(_PublicSnapshot):
     plan_id: str
     intent: TaskIntentSnapshot

@@ -377,6 +377,30 @@ export type PlannerDecisionSnapshot = {
   source?: string;
 };
 
+export type ReplanContinuationSnapshot = {
+  continuation_id: string;
+  request_id: string;
+  action_id?: string | null;
+  tool_name: string;
+  prompt: string;
+  title?: string;
+  source_run_id?: string | null;
+  source_task_id?: string | null;
+  source_group_run_id?: string | null;
+  source_workflow_run_id?: string | null;
+  agent_id?: string | null;
+  conversation_id?: string | null;
+  client_run_id?: string | null;
+  direct_tool_requests?: Array<Record<string, unknown>>;
+  metadata?: Record<string, unknown>;
+  task_context?: Record<string, unknown>;
+  daily_desktop_planning_context?: string;
+  approval_required?: boolean;
+  auto_start_eligible?: boolean;
+  risk_level?: string;
+  source?: string;
+};
+
 export type RuntimeCheckpointPolicySnapshot = {
   checkpoint_ids?: string[];
   checkpoint_titles?: string[];

@@ -23,6 +23,7 @@ from .contracts import (
     PlannerDecisionSnapshot,
     PlannerOrchestrationStartSnapshot,
     PublicRunEvent,
+    ReplanContinuationSnapshot,
     ReplanRecoveryActionSnapshot,
     ReplanRecoverySnapshot,
     RerunRunRequest,
@@ -724,14 +725,31 @@ class AgentStudioService:
         request: Mapping[str, Any],
     ) -> RunTimelineSnapshot:
         payload = _request_payload(request)
+        continuation = self.plan_replan_recovery_action(run_id, payload)
+        return self.start_agent_run(_agent_start_payload_from_replan_continuation(continuation))
+
+    def plan_replan_recovery_action(
+        self,
+        run_id: str,
+        request: Mapping[str, Any],
+    ) -> ReplanContinuationSnapshot:
+        payload = _request_payload(request)
         source_run = self.get_run_timeline(run_id)
-        return self._start_replan_recovery_action_from_snapshot(source_run, payload)
+        return self._plan_replan_recovery_action_from_snapshot(source_run, payload)
 
     def _start_replan_recovery_action_from_snapshot(
         self,
         source_run: Any,
         payload: Mapping[str, Any],
     ) -> RunTimelineSnapshot:
+        continuation = self._plan_replan_recovery_action_from_snapshot(source_run, payload)
+        return self.start_agent_run(_agent_start_payload_from_replan_continuation(continuation))
+
+    def _plan_replan_recovery_action_from_snapshot(
+        self,
+        source_run: Any,
+        payload: Mapping[str, Any],
+    ) -> ReplanContinuationSnapshot:
         request_id = str(payload.get("request_id") or "").strip()
         if not request_id:
             raise AgentRuntimeError("Replan recovery request_id is required")
@@ -746,30 +764,18 @@ class AgentStudioService:
 
         objective = _replan_recovery_action_objective(action)
         task_context = _replan_recovery_task_context(source_run, recovery, action)
-        direct_request = _replan_recovery_action_direct_request(
+        return _replan_recovery_action_continuation(
+            source_run,
             recovery,
             action,
             task_context=task_context,
             continue_to_model=bool(payload.get("continue_to_model", True)),
             source="agent_studio_replan_recovery",
+            title=str(payload.get("title") or action.label or objective).strip(),
+            agent_id=agent_id,
+            client_run_id=str(payload.get("client_run_id") or "").strip(),
+            extra_metadata=payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {},
         )
-        start_payload: dict[str, Any] = {
-            "agent_id": agent_id,
-            "objective": objective,
-            "title": str(payload.get("title") or action.label or objective).strip(),
-            "client_run_id": str(payload.get("client_run_id") or "").strip() or None,
-            "metadata": _replan_recovery_action_metadata(
-                source_run,
-                recovery,
-                action,
-                task_context=task_context,
-                extra=payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {},
-                source="agent_studio_replan_recovery",
-            ),
-            "direct_tool_requests": [direct_request],
-            "daily_desktop_planning_context": objective,
-        }
-        return self.start_agent_run(start_payload)
 
     def start_tool_recovery_action(
         self,
@@ -1446,6 +1452,114 @@ def _replan_recovery_action_objective(action: ReplanRecoveryActionSnapshot) -> s
     return f"执行恢复动作：{tool}"
 
 
+def _replan_recovery_action_continuation(
+    source_run: Any,
+    recovery: ReplanRecoverySnapshot,
+    action: ReplanRecoveryActionSnapshot,
+    *,
+    task_context: Mapping[str, Any],
+    continue_to_model: bool,
+    source: str,
+    title: str = "",
+    agent_id: str = "",
+    conversation_id: str = "",
+    client_run_id: str = "",
+    extra_metadata: Mapping[str, Any] | None = None,
+) -> ReplanContinuationSnapshot:
+    objective = _replan_recovery_action_objective(action)
+    continuation_id = "replan-continuation:{}:{}".format(
+        str(recovery.request_id or "").strip(),
+        str(action.action_id or action.tool or "").strip(),
+    )
+    direct_request = _replan_recovery_action_direct_request(
+        recovery,
+        action,
+        task_context=task_context,
+        continue_to_model=continue_to_model,
+        source=source,
+    )
+    metadata = _replan_recovery_action_metadata(
+        source_run,
+        recovery,
+        action,
+        task_context=task_context,
+        extra=extra_metadata or {},
+        source=source,
+    )
+    risk_level = str(action.risk_level or recovery.risk_level or "").strip()
+    approval_required = bool(action.approval_required or direct_request.get("approval_required"))
+    auto_start_eligible = (
+        not approval_required
+        and risk_level.lower() not in {"high", "critical"}
+        and bool(str(action.tool or "").strip())
+    )
+    metadata["replan_continuation_id"] = continuation_id
+    metadata["replan_auto_start_eligible"] = auto_start_eligible
+    return ReplanContinuationSnapshot(
+        continuation_id=continuation_id,
+        request_id=str(recovery.request_id or ""),
+        action_id=str(action.action_id or "").strip() or None,
+        tool_name=str(action.tool or "").strip(),
+        prompt=objective,
+        title=str(title or action.label or objective).strip(),
+        source_run_id=_replan_recovery_source_id(source_run) or None,
+        source_task_id=_first_text(getattr(source_run, "task_id", ""), recovery.task_id) or None,
+        source_group_run_id=_first_text(
+            getattr(source_run, "group_run_id", ""),
+            getattr(source_run, "run_group_id", ""),
+            recovery.group_run_id,
+        ) or None,
+        source_workflow_run_id=_first_text(
+            getattr(source_run, "workflow_run_id", ""),
+            recovery.workflow_run_id,
+        ) or None,
+        agent_id=str(agent_id or "").strip() or None,
+        conversation_id=str(conversation_id or "").strip() or None,
+        client_run_id=str(client_run_id or "").strip() or None,
+        direct_tool_requests=[direct_request],
+        metadata=metadata,
+        task_context=dict(task_context),
+        daily_desktop_planning_context=objective,
+        approval_required=approval_required,
+        auto_start_eligible=auto_start_eligible,
+        risk_level=risk_level,
+        source=str(source or "replan_continuation").strip(),
+    )
+
+
+def _agent_start_payload_from_replan_continuation(
+    continuation: ReplanContinuationSnapshot,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "agent_id": continuation.agent_id,
+        "objective": continuation.prompt,
+        "title": continuation.title or continuation.prompt,
+        "client_run_id": continuation.client_run_id,
+        "metadata": dict(continuation.metadata),
+        "direct_tool_requests": [
+            dict(request) for request in continuation.direct_tool_requests
+        ],
+        "daily_desktop_planning_context": continuation.daily_desktop_planning_context,
+    }
+    return {key: value for key, value in payload.items() if value not in (None, "", [], {})}
+
+
+def _chat_start_payload_from_replan_continuation(
+    continuation: ReplanContinuationSnapshot,
+) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "prompt": continuation.prompt,
+        "title": continuation.title or continuation.prompt,
+        "conversation_id": continuation.conversation_id,
+        "metadata": dict(continuation.metadata),
+        "direct_tool_requests": [
+            dict(request) for request in continuation.direct_tool_requests
+        ],
+        "daily_desktop_planning_context": continuation.daily_desktop_planning_context,
+    }
+    return {key: value for key, value in payload.items() if value not in (None, "", [], {})}
+
+
 def _replan_recovery_action_direct_request(
     recovery: ReplanRecoverySnapshot,
     action: ReplanRecoveryActionSnapshot,
@@ -1468,6 +1582,7 @@ def _replan_recovery_action_direct_request(
         "recovery_action_label": str(action.label or recovery.recovery_action_label or ""),
         "permission_target": str(action.permission_target or recovery.permission_target or ""),
         "risk_level": str(action.risk_level or recovery.risk_level or ""),
+        "approval_required": bool(action.approval_required),
         "selected": True,
     }
     replan_triggers = _replan_recovery_action_triggers(recovery, action)

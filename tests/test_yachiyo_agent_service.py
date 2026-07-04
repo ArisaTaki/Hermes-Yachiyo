@@ -182,6 +182,24 @@ class _FakeStudioExecutionPort:
         }
 
 
+class _ReplanRecoveryStudioPort(_FakeStudioExecutionPort):
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, Any]] = []
+
+    def get_run_timeline(self, run_id: str) -> dict[str, Any]:
+        self.calls.append(("get_run_timeline", run_id))
+        return _replan_recovery_task_payload(task_id="task-1")
+
+    def start_agent_run(self, request: dict[str, Any]) -> dict[str, Any]:
+        self.calls.append(("start_agent_run", request))
+        return _task_payload(
+            task_id="studio-recovery-task",
+            run_id="studio-recovery-run",
+            title=request.get("title") or "Recovery",
+            status="running",
+        )
+
+
 class _PagedRuntimePort(_FakeRuntimePort):
     def get_task_event_page(
         self,
@@ -436,6 +454,15 @@ class _ReplanRecoveryTaskRuntimePort(_FakeRuntimePort):
         )
 
 
+class _ApprovalReplanRecoveryTaskRuntimePort(_ReplanRecoveryTaskRuntimePort):
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        payload = super().get_task_timeline(task_id)
+        action = payload["events"][1]["payload"]["metadata"]["recovery_actions"][0]
+        action["approval_required"] = True
+        action["risk_level"] = "medium"
+        return payload
+
+
 class _CompletedDesktopIntentSequenceTaskRuntimePort(_FakeRuntimePort):
     def get_task_timeline(self, task_id: str) -> dict[str, Any]:
         self.calls.append(("get_task_timeline", task_id))
@@ -571,6 +598,83 @@ def test_yachiyo_agent_service_starts_replan_recovery_action_from_chat_task() ->
     assert direct_request["replan_signal_ids"] == ["signal-1"]
     assert direct_request["task_todo"]["todo_id"] == "todo-open-app"
     assert direct_request["task_verification_targets"][0]["step_id"] == "open-app"
+    assert direct_request["approval_required"] is False
+    assert request["metadata"]["replan_continuation_id"] == (
+        "replan-continuation:replan-1:replan-1:action:1:desktop.list_apps"
+    )
+    assert request["metadata"]["replan_auto_start_eligible"] is True
+
+
+def test_yachiyo_agent_service_plans_replan_continuation_without_bypassing_approval() -> None:
+    port = _ApprovalReplanRecoveryTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    continuation = service.plan_replan_recovery_action(
+        "task-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.list_apps",
+            "conversation_id": "chat-1",
+        },
+    )
+
+    assert [name for name, _payload in port.calls] == ["get_task_timeline"]
+    assert continuation.request_id == "replan-1"
+    assert continuation.action_id == "replan-1:action:1:desktop.list_apps"
+    assert continuation.tool_name == "desktop.list_apps"
+    assert continuation.conversation_id == "chat-1"
+    assert continuation.approval_required is True
+    assert continuation.auto_start_eligible is False
+    assert continuation.metadata["recovery_action_approval_required"] is True
+    assert continuation.metadata["replan_auto_start_eligible"] is False
+    assert continuation.direct_tool_requests[0]["approval_required"] is True
+    assert continuation.direct_tool_requests[0]["replan_recovery_action_id"] == (
+        "replan-1:action:1:desktop.list_apps"
+    )
+    assert continuation.task_context["task_todo"]["todo_id"] == "todo-open-app"
+
+
+def test_agent_studio_service_plans_and_starts_replan_continuation() -> None:
+    port = _ReplanRecoveryStudioPort()
+    service = AgentStudioService(port)
+
+    continuation = service.plan_replan_recovery_action(
+        "run-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.list_apps",
+            "agent_id": "agent-1",
+            "client_run_id": "client-recovery-1",
+        },
+    )
+    timeline = service.start_replan_recovery_action(
+        "run-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.list_apps",
+            "agent_id": "agent-1",
+            "client_run_id": "client-recovery-2",
+        },
+    )
+
+    assert continuation.agent_id == "agent-1"
+    assert continuation.client_run_id == "client-recovery-1"
+    assert continuation.direct_tool_requests[0]["source"] == "agent_studio_replan_recovery"
+    assert continuation.auto_start_eligible is True
+    assert timeline.run_id == "studio-recovery-run"
+    assert [name for name, _payload in port.calls] == [
+        "get_run_timeline",
+        "get_run_timeline",
+        "start_agent_run",
+    ]
+    request = port.calls[-1][1]
+    assert request["agent_id"] == "agent-1"
+    assert request["objective"] == "执行恢复动作：Find Apple Music"
+    assert request["client_run_id"] == "client-recovery-2"
+    assert request["metadata"]["replan_continuation_id"] == (
+        "replan-continuation:replan-1:replan-1:action:1:desktop.list_apps"
+    )
+    assert request["direct_tool_requests"][0]["approval_required"] is False
 
 
 def test_yachiyo_agent_service_attaches_runtime_planner_metadata_to_chat_task() -> None:
