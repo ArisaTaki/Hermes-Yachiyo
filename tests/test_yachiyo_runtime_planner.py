@@ -34216,6 +34216,33 @@ def test_runtime_planner_execution_keeps_open_and_focus_verification_steps() -> 
         open_projected_requests[-1]["action_target"]
         == open_envelope.requests[-1].action_target
     )
+    resumable_open_envelope = open_envelope.model_copy(
+        update={
+            "requests": [
+                open_envelope.requests[0].model_copy(update={"status": "completed"}),
+                open_envelope.requests[1].model_copy(update={"status": "planned"}),
+                open_envelope.requests[2].model_copy(update={"status": "waiting_approval"}),
+                open_envelope.requests[2].model_copy(
+                    update={
+                        "request_id": "denied-verify",
+                        "status": "denied",
+                    }
+                ),
+            ]
+        }
+    )
+    resumable_projected_requests = runtime_execution_requests_from_envelope_payload(
+        resumable_open_envelope.model_dump(mode="json"),
+        allowed_tools=open_allowed_tools,
+    )
+    assert [request["tool"] for request in resumable_projected_requests] == [
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert [request["status"] for request in resumable_projected_requests] == [
+        "planned",
+        "waiting_approval",
+    ]
 
     focus_allowed_tools = [
         "desktop.list_apps",

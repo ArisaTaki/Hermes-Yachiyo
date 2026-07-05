@@ -19,6 +19,18 @@ from .planner_execution import (
 )
 from .task_progress_snapshots import task_progress_summary_from_task_core
 
+_NON_EXECUTABLE_REQUEST_STATUSES = {
+    "blocked",
+    "cancelled",
+    "canceled",
+    "completed",
+    "denied",
+    "expired",
+    "failed",
+    "rejected",
+    "skipped",
+}
+
 
 def runtime_execution_envelope_from_decision(
     decision: PlannerDecisionSnapshot | None,
@@ -353,6 +365,8 @@ def runtime_execution_requests_from_envelope_payload(
     for request in requests:
         if not isinstance(request, Mapping):
             continue
+        if _request_status_is_non_executable(request):
+            continue
         projected_request = _tool_request_from_execution_request(request, envelope=envelope)
         tool_name = str(projected_request.get("tool") or "").strip()
         if not tool_name:
@@ -361,6 +375,10 @@ def runtime_execution_requests_from_envelope_payload(
             continue
         projected.append(projected_request)
     return projected
+
+
+def _request_status_is_non_executable(request: Mapping[str, Any]) -> bool:
+    return str(request.get("status") or "").strip() in _NON_EXECUTABLE_REQUEST_STATUSES
 
 
 def _execution_request_capability_plan_item(
