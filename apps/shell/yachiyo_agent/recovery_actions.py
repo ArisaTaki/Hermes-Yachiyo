@@ -28,6 +28,11 @@ RECOVERY_ACTION_TASK_METADATA_KEYS = (
     "recovery_retry_prompt",
     "recovery_followup_tool",
     "recovery_followup_input",
+    "action_target",
+    "observation_evidence",
+    "observation_retry",
+    "verification_targets",
+    "task_verification_targets",
     "recovery_retry_source_event_type",
     "recovery_retry_source_tool_call_id",
     "source_task_id",
@@ -49,6 +54,9 @@ def recovery_action_metadata_snapshot(
     retry_input = metadata.get("recovery_retry_input")
     retry_input_schema = metadata.get("recovery_retry_input_schema")
     followup_input = metadata.get("recovery_followup_input")
+    action_target = metadata.get("action_target")
+    observation_evidence = metadata.get("observation_evidence")
+    observation_retry = metadata.get("observation_retry")
     payload = {
         "daily_desktop_intent": bool(metadata.get("daily_desktop_intent", True)),
         "desktop_permission_recovery": True,
@@ -62,6 +70,15 @@ def recovery_action_metadata_snapshot(
         "recovery_followup_input": (
             dict(followup_input) if isinstance(followup_input, Mapping) else {}
         ),
+        "action_target": dict(action_target) if isinstance(action_target, Mapping) else {},
+        "observation_evidence": (
+            dict(observation_evidence) if isinstance(observation_evidence, Mapping) else {}
+        ),
+        "observation_retry": (
+            dict(observation_retry) if isinstance(observation_retry, Mapping) else {}
+        ),
+        "verification_targets": _metadata_mapping_list(metadata, "verification_targets"),
+        "task_verification_targets": _metadata_mapping_list(metadata, "task_verification_targets"),
         "required_retry_fields": _metadata_text_list(metadata, "required_retry_fields"),
         "recommended_tools": _metadata_text_list(metadata, "recommended_tools"),
     }
@@ -130,6 +147,18 @@ def recovery_retry_context_payload(
     followup_input = payload.get("recovery_followup_input")
     if isinstance(followup_input, dict) and followup_input:
         context_payload["followup_input"] = dict(followup_input)
+    for key in ("action_target", "observation_evidence", "observation_retry"):
+        value = payload.get(key)
+        if isinstance(value, dict) and value:
+            context_payload[key] = dict(value)
+    for key in ("verification_targets", "task_verification_targets"):
+        value = payload.get(key)
+        if isinstance(value, list) and value:
+            context_payload[key] = [dict(item) for item in value if isinstance(item, dict)]
+    if context_payload.get("task_verification_targets") and not context_payload.get("verification_targets"):
+        context_payload["verification_targets"] = [
+            dict(item) for item in context_payload["task_verification_targets"]
+        ]
     for source_key, context_key in (
         ("desktop_permission_retry", "desktop_permission_retry"),
         ("recovery_action_kind", "recovery_action_kind"),
@@ -154,3 +183,10 @@ def _metadata_text_list(metadata: Mapping[str, Any], key: str) -> list[str]:
     if not isinstance(value, list):
         return []
     return [str(item).strip() for item in value if str(item or "").strip()]
+
+
+def _metadata_mapping_list(metadata: Mapping[str, Any], key: str) -> list[dict[str, Any]]:
+    value = metadata.get(key)
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]

@@ -713,6 +713,13 @@ def _replan_recovery_update_action_record(
     }
     if verification_targets:
         action["verification_targets"] = [dict(target) for target in verification_targets]
+        action["task_verification_targets"] = [
+            dict(target) for target in verification_targets
+        ]
+    for key in ("action_target", "observation_evidence", "observation_retry"):
+        value = payload.get(key)
+        if isinstance(value, Mapping) and value:
+            action[key] = dict(value)
     return action
 
 

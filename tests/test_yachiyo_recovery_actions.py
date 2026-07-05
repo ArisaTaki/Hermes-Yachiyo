@@ -43,6 +43,16 @@ def test_recovery_action_metadata_snapshot_normalizes_task_metadata_contract() -
                 "text_source": "original_request",
                 "character_count": 5,
             },
+            "action_target": {"action": "capture", "target": "main_display"},
+            "observation_evidence": {"source_tool": "screen.capture"},
+            "observation_retry": {
+                "tool": "screen.capture",
+                "reason": "permission_recovered",
+            },
+            "verification_targets": [{"step_id": "verify-screen", "todo_id": "todo-screen"}],
+            "task_verification_targets": [
+                {"step_id": "verify-screen", "todo_title": "Verify screenshot"}
+            ],
             "source_task_id": "task-source-screen",
             "ignored": "value",
         }
@@ -68,6 +78,11 @@ def test_recovery_action_metadata_snapshot_normalizes_task_metadata_contract() -
         "recovery_retry_prompt",
         "recovery_followup_tool",
         "recovery_followup_input",
+        "action_target",
+        "observation_evidence",
+        "observation_retry",
+        "verification_targets",
+        "task_verification_targets",
         "recovery_retry_source_event_type",
         "recovery_retry_source_tool_call_id",
         "source_task_id",
@@ -98,6 +113,16 @@ def test_recovery_action_metadata_snapshot_normalizes_task_metadata_contract() -
             "text_source": "original_request",
             "character_count": 5,
         },
+        "action_target": {"action": "capture", "target": "main_display"},
+        "observation_evidence": {"source_tool": "screen.capture"},
+        "observation_retry": {
+            "tool": "screen.capture",
+            "reason": "permission_recovered",
+        },
+        "verification_targets": [{"step_id": "verify-screen", "todo_id": "todo-screen"}],
+        "task_verification_targets": [
+            {"step_id": "verify-screen", "todo_title": "Verify screenshot"}
+        ],
         "source_task_id": "task-source-screen",
     }
 
@@ -129,6 +154,16 @@ def test_recovery_retry_context_payload_projects_retry_context_for_replay() -> N
                 "text_source": "original_request",
                 "character_count": 5,
             },
+            "action_target": {"action": "capture", "target": "main_display"},
+            "observation_evidence": {"source_tool": "screen.capture"},
+            "observation_retry": {
+                "tool": "screen.capture",
+                "reason": "permission_recovered",
+            },
+            "verification_targets": [{"step_id": "verify-screen", "todo_id": "todo-screen"}],
+            "task_verification_targets": [
+                {"step_id": "verify-screen", "todo_title": "Verify screenshot"}
+            ],
             "recovery_retry_source_event_type": "agent.desktop.permission_recovery",
             "recovery_retry_source_tool_call_id": "tool-call-1",
             "source_task_id": "task-source-screen",
@@ -161,6 +196,16 @@ def test_recovery_retry_context_payload_projects_retry_context_for_replay() -> N
             "text_source": "original_request",
             "character_count": 5,
         },
+        "action_target": {"action": "capture", "target": "main_display"},
+        "observation_evidence": {"source_tool": "screen.capture"},
+        "observation_retry": {
+            "tool": "screen.capture",
+            "reason": "permission_recovered",
+        },
+        "verification_targets": [{"step_id": "verify-screen", "todo_id": "todo-screen"}],
+        "task_verification_targets": [
+            {"step_id": "verify-screen", "todo_title": "Verify screenshot"}
+        ],
         "retry_prompt": "截图当前屏幕",
         "retry_source_event_type": "agent.desktop.permission_recovery",
         "retry_source_tool_call_id": "tool-call-1",

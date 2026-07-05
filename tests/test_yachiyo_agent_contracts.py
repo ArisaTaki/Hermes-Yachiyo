@@ -4837,6 +4837,16 @@ def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> Non
             "text_source": "original_request",
             "character_count": 5,
         },
+        action_target={"action": "capture", "target": "main_display"},
+        observation_evidence={"source_tool": "screen.capture"},
+        observation_retry={
+            "tool": "screen.capture",
+            "reason": "permission_recovered",
+        },
+        verification_targets=[{"step_id": "verify-screen", "todo_id": "todo-screen"}],
+        task_verification_targets=[
+            {"step_id": "verify-screen", "todo_title": "Verify screenshot"}
+        ],
         recovery_retry_source_event_type="agent.desktop.permission_recovery",
         recovery_retry_source_tool_call_id="tool-call-1",
         source_task_id="task-source-screen",
@@ -4865,6 +4875,11 @@ def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> Non
         "recovery_retry_prompt",
         "recovery_followup_tool",
         "recovery_followup_input",
+        "action_target",
+        "observation_evidence",
+        "observation_retry",
+        "verification_targets",
+        "task_verification_targets",
         "recovery_retry_source_event_type",
         "recovery_retry_source_tool_call_id",
         "source_task_id",
@@ -4879,6 +4894,18 @@ def test_desktop_recovery_action_metadata_snapshot_json_shape_is_stable() -> Non
         "text_source": "original_request",
         "character_count": 5,
     }
+    assert payload["action_target"] == {"action": "capture", "target": "main_display"}
+    assert payload["observation_evidence"] == {"source_tool": "screen.capture"}
+    assert payload["observation_retry"] == {
+        "tool": "screen.capture",
+        "reason": "permission_recovered",
+    }
+    assert payload["verification_targets"] == [
+        {"step_id": "verify-screen", "todo_id": "todo-screen"}
+    ]
+    assert payload["task_verification_targets"] == [
+        {"step_id": "verify-screen", "todo_title": "Verify screenshot"}
+    ]
     assert payload["required_retry_fields"] == ["x", "y"]
     with pytest.raises(ValidationError):
         DesktopRecoveryActionMetadataSnapshot(

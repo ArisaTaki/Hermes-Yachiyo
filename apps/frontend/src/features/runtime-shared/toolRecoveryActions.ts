@@ -4,6 +4,7 @@ export type RuntimeToolRecoveryAction = {
   approval_required?: boolean;
   approval_id?: string;
   approval_status?: string;
+  action_target?: Record<string, unknown>;
   deferred_tool?: string;
   deferred_input?: Record<string, unknown>;
   deferred_context?: Record<string, unknown>;
@@ -27,7 +28,10 @@ export type RuntimeToolRecoveryAction = {
   retry_source_event_type?: string;
   retry_source_tool_call_id?: string;
   retry_tool?: string;
+  observation_evidence?: Record<string, unknown>;
+  observation_retry?: Record<string, unknown>;
   selected?: boolean;
+  task_verification_targets?: Array<Record<string, unknown>>;
   tool: string;
   verification_targets?: Array<Record<string, unknown>>;
 };
@@ -60,6 +64,7 @@ export type RuntimeToolRecoveryActionTaskMetadata = {
   recovery_risk_level?: string;
   approval_id?: string;
   approval_status?: string;
+  action_target?: Record<string, unknown>;
   deferred_tool?: string;
   deferred_input?: Record<string, unknown>;
   deferred_context?: Record<string, unknown>;
@@ -77,9 +82,12 @@ export type RuntimeToolRecoveryActionTaskMetadata = {
   recovery_retry_source_event_type?: string;
   recovery_retry_source_tool_call_id?: string;
   recovery_retry_tool?: string;
+  observation_evidence?: Record<string, unknown>;
+  observation_retry?: Record<string, unknown>;
   recommended_tools?: string[];
   required_retry_fields?: string[];
   recovery_tool: string;
+  task_verification_targets?: Array<Record<string, unknown>>;
   verification_targets?: Array<Record<string, unknown>>;
 } & Record<string, unknown>;
 
@@ -141,9 +149,13 @@ export const RUNTIME_TOOL_RECOVERY_TASK_METADATA_KEYS = [
   'recovery_retry_artifact_kind',
   'recovery_followup_tool',
   'recovery_followup_input',
+  'action_target',
+  'observation_evidence',
+  'observation_retry',
   'required_retry_fields',
   'recommended_tools',
   'verification_targets',
+  'task_verification_targets',
   'recovery_retry_prompt',
   'recovery_retry_source_event_type',
   'recovery_retry_source_tool_call_id',
@@ -184,6 +196,7 @@ export function runtimeToolRecoveryActionTaskMetadata(
     recovery_tool: action.tool,
     ...(action.approval_id ? { approval_id: action.approval_id } : {}),
     ...(action.approval_status ? { approval_status: action.approval_status } : {}),
+    ...runtimeToolRecoveryObservationMetadata(action),
     ...(action.deferred_tool ? { deferred_tool: action.deferred_tool } : {}),
     ...(Object.keys(action.deferred_input || {}).length ? { deferred_input: action.deferred_input } : {}),
     ...(Object.keys(action.deferred_context || {}).length ? { deferred_context: action.deferred_context } : {}),
@@ -200,6 +213,7 @@ export function runtimeToolRecoveryActionTaskMetadata(
     ...(action.required_retry_fields?.length ? { required_retry_fields: action.required_retry_fields } : {}),
     ...(action.recommended_tools?.length ? { recommended_tools: action.recommended_tools } : {}),
     ...(action.verification_targets?.length ? { verification_targets: action.verification_targets } : {}),
+    ...(action.task_verification_targets?.length ? { task_verification_targets: action.task_verification_targets } : {}),
     ...(action.retry_prompt ? { recovery_retry_prompt: action.retry_prompt } : {}),
     ...(action.retry_source_event_type ? { recovery_retry_source_event_type: action.retry_source_event_type } : {}),
     ...(action.retry_source_tool_call_id ? { recovery_retry_source_tool_call_id: action.retry_source_tool_call_id } : {}),
@@ -236,6 +250,7 @@ export function runtimeToolRecoveryActionRunStartRequest(
       permission_target: action.permission_target,
       ...runtimeToolRecoveryApprovalDeferredMetadata(action),
       ...(action.verification_targets?.length ? { verification_targets: action.verification_targets } : {}),
+      ...(action.task_verification_targets?.length ? { task_verification_targets: action.task_verification_targets } : {}),
       ...extra,
     },
   };
@@ -267,6 +282,7 @@ export function runtimeToolRecoveryActionToolRunStartRequest(
       source_tool_call_id: toolCallId,
       source_tool_name: toolCall.tool_name || '',
       ...(action.verification_targets?.length ? { verification_targets: action.verification_targets } : {}),
+      ...(action.task_verification_targets?.length ? { task_verification_targets: action.task_verification_targets } : {}),
       ...extra,
     },
   };
@@ -278,10 +294,24 @@ function runtimeToolRecoveryApprovalDeferredMetadata(
   return {
     ...(action.approval_id ? { approval_id: action.approval_id } : {}),
     ...(action.approval_status ? { approval_status: action.approval_status } : {}),
+    ...runtimeToolRecoveryObservationMetadata(action),
     ...(action.deferred_tool ? { deferred_tool: action.deferred_tool } : {}),
     ...(Object.keys(action.deferred_input || {}).length ? { deferred_input: action.deferred_input } : {}),
     ...(Object.keys(action.deferred_context || {}).length ? { deferred_context: action.deferred_context } : {}),
     ...(action.deferred_continuation?.length ? { deferred_continuation: action.deferred_continuation } : {}),
+  };
+}
+
+function runtimeToolRecoveryObservationMetadata(
+  action: RuntimeToolRecoveryAction,
+): Record<string, unknown> {
+  const actionTarget = objectValue(action.action_target);
+  const observationEvidence = objectValue(action.observation_evidence);
+  const observationRetry = objectValue(action.observation_retry);
+  return {
+    ...(Object.keys(actionTarget).length ? { action_target: actionTarget } : {}),
+    ...(Object.keys(observationEvidence).length ? { observation_evidence: observationEvidence } : {}),
+    ...(Object.keys(observationRetry).length ? { observation_retry: observationRetry } : {}),
   };
 }
 
@@ -300,6 +330,7 @@ export function runtimeToolRecoveryRetryAction(
     approval_required: action.approval_required,
     approval_id: action.approval_id,
     approval_status: action.approval_status,
+    action_target: action.action_target,
     deferred_tool: action.deferred_tool,
     deferred_input: action.deferred_input,
     deferred_context: action.deferred_context,
@@ -321,6 +352,9 @@ export function runtimeToolRecoveryRetryAction(
     retry_source_event_type: action.retry_source_event_type,
     retry_source_tool_call_id: action.retry_source_tool_call_id,
     retry_tool: retryTool,
+    observation_evidence: action.observation_evidence,
+    observation_retry: action.observation_retry,
+    task_verification_targets: action.task_verification_targets,
     tool: retryTool,
     verification_targets: action.verification_targets,
   };
@@ -393,6 +427,7 @@ export function runtimeToolRecoveryActionsFromRecord(
       approval_required: Boolean(action.approval_required || action.requires_approval),
       approval_id: String(action.approval_id || source.approval_id || '').trim() || undefined,
       approval_status: String(action.approval_status || source.approval_status || '').trim() || undefined,
+      action_target: objectValue(action.action_target || source.action_target),
       deferred_tool: String(action.deferred_tool || source.deferred_tool || '').trim() || undefined,
       deferred_input: objectValue(action.deferred_input || source.deferred_input),
       deferred_context: objectValue(action.deferred_context || source.deferred_context),
@@ -413,7 +448,12 @@ export function runtimeToolRecoveryActionsFromRecord(
       ).trim() || undefined,
       required_retry_fields: recoveryStringList(action.required_retry_fields),
       risk_level: String(action.risk_level || '').trim() || undefined,
+      observation_evidence: objectValue(action.observation_evidence || source.observation_evidence),
+      observation_retry: objectValue(action.observation_retry || source.observation_retry),
       selected: Boolean(action.selected),
+      task_verification_targets: recoveryRecordList(
+        action.task_verification_targets || source.task_verification_targets || source.verification_targets,
+      ),
       verification_targets: recoveryRecordList(
         action.verification_targets || source.verification_targets || source.task_verification_targets,
       ),

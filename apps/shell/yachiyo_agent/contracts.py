@@ -134,6 +134,11 @@ class DesktopRecoveryActionMetadataSnapshot(_PublicSnapshot):
     recovery_retry_prompt: str | None = None
     recovery_followup_tool: str | None = None
     recovery_followup_input: dict[str, Any] = Field(default_factory=dict)
+    action_target: dict[str, Any] = Field(default_factory=dict)
+    observation_evidence: dict[str, Any] = Field(default_factory=dict)
+    observation_retry: dict[str, Any] = Field(default_factory=dict)
+    verification_targets: list[dict[str, Any]] = Field(default_factory=list)
+    task_verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     recovery_retry_source_event_type: str | None = None
     recovery_retry_source_tool_call_id: str | None = None
     source_task_id: str | None = None
