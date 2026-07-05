@@ -939,9 +939,28 @@ def _apply_recovery_action_metadata(
     for action in _recovery_action_records(payload):
         _merge_recovery_action_record(record.recovery_actions, action)
 
+    selected_tool_hint = _first_text(
+        selected_tool,
+        payload.get("selected_tool_name"),
+        payload.get("tool_name"),
+        payload.get("tool"),
+        _first_selected_recovery_action_tool(record.recovery_actions),
+        _single_recovery_action_tool(record.recovery_actions),
+    )
     selected_action = _selected_recovery_action(
         record.recovery_actions,
-        _first_text(selected_tool, payload.get("tool_name"), payload.get("tool")),
+        selected_tool_hint,
+    )
+    record.selected_tool_name = _first_text(
+        record.selected_tool_name,
+        selected_tool_hint,
+        _recovery_action_tool(selected_action),
+    )
+    record.planning_reason = _first_text(
+        record.planning_reason,
+        payload.get("planning_reason"),
+        selected_action.get("planning_reason") if selected_action else "",
+        selected_action.get("reason") if selected_action else "",
     )
     record.recovery_action_label = _first_text(
         payload.get("recovery_action_label"),
@@ -1441,6 +1460,30 @@ def _selected_recovery_action(
             if clean_tool in recommended_tools:
                 return action
     return actions[0]
+
+
+def _first_selected_recovery_action_tool(actions: list[dict[str, Any]]) -> str:
+    for action in actions:
+        if bool(action.get("selected")):
+            tool = _recovery_action_tool(action)
+            if tool:
+                return tool
+    return ""
+
+
+def _single_recovery_action_tool(actions: list[dict[str, Any]]) -> str:
+    tools: list[str] = []
+    for action in actions:
+        tool = _recovery_action_tool(action)
+        if tool and tool not in tools:
+            tools.append(tool)
+    return tools[0] if len(tools) == 1 else ""
+
+
+def _recovery_action_tool(action: Mapping[str, Any] | None) -> str:
+    if not isinstance(action, Mapping):
+        return ""
+    return _first_text(action.get("tool"), action.get("tool_name"), action.get("recovery_tool"))
 
 
 def _runtime_execution_request_recovery_snapshot(
