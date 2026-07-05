@@ -120,6 +120,7 @@ python scripts/summarize_release_smoke.py \
   "tmp/rc-verification-${SHORT_COMMIT}-source-capabilities.json" \
   "tmp/rc-verification-${SHORT_COMMIT}-packaged-batch.json" \
   "tmp/rc-verification-${SHORT_COMMIT}-screen.json" \
+  "tmp/rc-verification-${SHORT_COMMIT}-oha-desktop-agent-release-smoke.json" \
   "tmp/rc-verification-${SHORT_COMMIT}-public-demo.json" \
   --diagnostics-zip "tmp/oha-yachiyo-diagnostics-${SHORT_COMMIT}.zip" \
   --output-json "tmp/rc-verification-${SHORT_COMMIT}-release-smoke.json" \
@@ -201,7 +202,8 @@ preflight after frontend dependencies are installed.
 `refresh_local_rc_signoff.py` builds/refreshes the current local RC evidence,
 generates the Native Agent capability matrix, writes release readiness
 diagnostics, exports a redacted diagnostics bundle, summarizes release-smoke
-user paths, writes `tmp/rc-verification-${SHORT_COMMIT}-public-demo.json` and
+user paths, writes `tmp/rc-verification-${SHORT_COMMIT}-oha-desktop-agent-release-smoke.json`,
+`tmp/rc-verification-${SHORT_COMMIT}-public-demo.json` and
 `tmp/rc-verification-${SHORT_COMMIT}-public-demo.md`, and writes signoff drafts.
 `--print-status` also prints the public-demo release level, missing required
 demo flows, and blocker hints when those reports exist. If the current commit's

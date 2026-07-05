@@ -206,6 +206,11 @@ USER_FACING_RELEASE_DOC_REQUIRED_TEXT: tuple[tuple[Path, str, str], ...] = (
     ),
     (
         Path("docs/public-release-readiness.md"),
+        "rc-verification-${SHORT_COMMIT}-oha-desktop-agent-release-smoke.json",
+        "public release readiness guide must document RC Oha product smoke evidence output",
+    ),
+    (
+        Path("docs/public-release-readiness.md"),
         "Equivalent RC capability evidence is also",
         "public release readiness guide must document release-smoke RC capability projection",
     ),
@@ -1345,6 +1350,10 @@ RELEASE_WORKFLOW_REQUIRED_TEXT: tuple[tuple[str, str], ...] = (
     (
         "release/public-release-gate/public-demo.json",
         "macOS release workflow release-smoke summary must include public demo evidence",
+    ),
+    (
+        "release/public-release-gate/oha-desktop-agent-release-smoke.json",
+        "macOS release workflow release-smoke summary must include Oha product smoke evidence",
     ),
     (
         "--diagnostics-zip release/public-release-gate/diagnostics.zip",

@@ -1028,6 +1028,7 @@ def test_verifier_requires_user_facing_release_docs_for_first_launch(tmp_path):
     assert "public release readiness guide must document strict release-smoke evidence enforcement" in messages
     assert "public release readiness guide must document public release gate existing report inputs" in messages
     assert "public release readiness guide must document RC public demo evidence output" in messages
+    assert "public release readiness guide must document RC Oha product smoke evidence output" in messages
     assert "public release readiness guide must document desktop planner public demo evidence" in messages
     assert "public release readiness guide must document real desktop discovery public demo evidence" in messages
     assert "public release readiness guide must document granular real desktop demo flags" in messages
@@ -1938,6 +1939,10 @@ def test_verifier_requires_release_workflow_binary_scans_packaged_outputs(tmp_pa
     assert "macOS release workflow must upload a release-candidate verification report" in messages
     assert "macOS release workflow must summarize release-smoke evidence after RC verification" in messages
     assert "macOS release workflow release-smoke summary must include public demo evidence" in messages
+    assert (
+        "macOS release workflow release-smoke summary must include Oha product smoke evidence"
+        in messages
+    )
     assert (
         "macOS release workflow release-smoke summary must include diagnostics bundle evidence"
         in messages

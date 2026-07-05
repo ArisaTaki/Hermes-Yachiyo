@@ -683,6 +683,7 @@ jobs:
           release_smoke_status=0
           python scripts/summarize_release_smoke.py \
             release/rc-verification.json \
+            release/public-release-gate/oha-desktop-agent-release-smoke.json \
             release/public-release-gate/public-demo.json \
             --diagnostics-zip release/public-release-gate/diagnostics.zip \
             --output-json release/release-smoke.json \
