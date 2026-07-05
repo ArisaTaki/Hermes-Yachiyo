@@ -6489,7 +6489,7 @@ class RuntimePlanner:
         research_query = _report_external_research_query_hint(intent.user_goal)
         if research_query and _task_output_target_hint(intent.user_goal) != "clipboard":
             research_tool = _first_allowed(
-                ("browser.search", "browser.open_url_and_extract_text", "browser.open_url"),
+                ("browser.open_url_and_extract_text", "browser.search", "browser.open_url"),
                 allowed,
             )
             artifact_tool = _first_allowed(("artifact.write",), allowed)
@@ -14896,6 +14896,8 @@ def _report_artifact_filename(text: str) -> str:
         return "annual-report.md"
     if _contains_any(value, ("发布说明", "变更说明", "更新说明", "release notes", "changelog")):
         return "release-notes.md"
+    if _contains_any(value, ("总结", "摘要", "概括", "summary", "summarize", "summarise")):
+        return "research-summary.md"
     return "report.md"
 
 
@@ -15349,6 +15351,14 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
     if (
         intent.kind == "web_research"
         and str(intent.inputs.get("browser_action") or "").strip()
+        in {"extract_text", "current_page"}
+        and _looks_like_browser_current_page_summary(text, text.casefold())
+        and _task_output_target_hint(text) != "clipboard"
+    ):
+        score += 0.42
+    if (
+        intent.kind == "web_research"
+        and str(intent.inputs.get("browser_action") or "").strip()
         in {"open_url", "open_url_extract", "open_url_screenshot"}
     ):
         score += 0.42
@@ -15471,6 +15481,13 @@ def _intent_rank_score(intent: TaskIntentSnapshot, text: str) -> float:
             score -= 0.24
         if str(intent.inputs.get("context_source") or "").strip():
             score += 0.34
+            if (
+                str(intent.inputs.get("context_source") or "").strip() == "current_page_content"
+                and _looks_like_browser_current_page_summary(text, text.casefold())
+                and not str(intent.inputs.get("target_app_hint") or "").strip()
+                and not isinstance(intent.inputs.get("target_app_capability_hint"), Mapping)
+            ):
+                score -= 0.38
         if (
             isinstance(intent.inputs.get("running_browser_app_hint"), Mapping)
             and _contains_any(

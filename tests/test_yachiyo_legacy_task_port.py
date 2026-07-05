@@ -82,8 +82,10 @@ def test_desktop_agent_entrypoint_prefetches_report_research_context() -> None:
     assert requests == [
         {
             "protocol": "json_fallback",
-            "tool": "browser.search",
-            "input": {"query": "竞品分析"},
+            "tool": "browser.open_url_and_extract_text",
+            "input": {
+                "url": "https://www.google.com/search?q=%E7%AB%9E%E5%93%81%E5%88%86%E6%9E%90"
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_report_context",
             "continue_to_model": True,
