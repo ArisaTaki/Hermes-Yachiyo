@@ -523,6 +523,30 @@ class _ApprovalReplanRecoveryTaskRuntimePort(_ReplanRecoveryTaskRuntimePort):
         return payload
 
 
+class _DeferredReplanRecoveryTaskRuntimePort(_ReplanRecoveryTaskRuntimePort):
+    def get_task_timeline(self, task_id: str) -> dict[str, Any]:
+        payload = super().get_task_timeline(task_id)
+        action = payload["events"][1]["payload"]["metadata"]["recovery_actions"][0]
+        action.update(
+            {
+                "deferred_tool": "desktop.click_ui_element",
+                "deferred_input": {
+                    "target": "Play",
+                    "role_filter": "button",
+                    "limit": 80,
+                },
+                "deferred_context": {"step_id": "operate-foreground-ui"},
+                "deferred_continuation": [
+                    {
+                        "tool": "desktop.ui_elements",
+                        "step_id": "verify-desktop-result",
+                    }
+                ],
+            }
+        )
+        return payload
+
+
 class _DesktopLoopReplanRecoveryTaskRuntimePort(_ReplanRecoveryTaskRuntimePort):
     def __init__(self, events: list[dict[str, Any]]) -> None:
         super().__init__()
@@ -712,6 +736,33 @@ def test_yachiyo_agent_service_plans_replan_continuation_without_bypassing_appro
         "replan-1:action:1:desktop.list_apps"
     )
     assert continuation.task_context["task_todo"]["todo_id"] == "todo-open-app"
+
+
+def test_yachiyo_agent_service_preserves_deferred_replan_recovery_context() -> None:
+    port = _DeferredReplanRecoveryTaskRuntimePort()
+    service = YachiyoAgentService(port)
+
+    task = service.start_replan_recovery_action(
+        "task-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.list_apps",
+            "conversation_id": "chat-1",
+        },
+    )
+
+    assert task.task_id == "recovery-task-1"
+    direct_request = port.calls[1][1]["direct_tool_requests"][0]
+    assert direct_request["deferred_tool"] == "desktop.click_ui_element"
+    assert direct_request["deferred_input"] == {
+        "target": "Play",
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert direct_request["deferred_context"] == {"step_id": "operate-foreground-ui"}
+    assert direct_request["deferred_continuation"] == [
+        {"tool": "desktop.ui_elements", "step_id": "verify-desktop-result"}
+    ]
 
 
 def test_yachiyo_agent_service_auto_starts_next_safe_replan_continuation() -> None:

@@ -705,6 +705,31 @@ class _ReplanRecoveryActionPort(_FakeStudioPort):
         }
 
 
+class _DeferredReplanRecoveryActionPort(_ReplanRecoveryActionPort):
+    @staticmethod
+    def _replan_event(source_run_id: str) -> dict[str, Any]:
+        event = _ReplanRecoveryActionPort._replan_event(source_run_id)
+        action = event["payload"]["metadata"]["recovery_actions"][0]
+        action.update(
+            {
+                "deferred_tool": "desktop.click_ui_element",
+                "deferred_input": {
+                    "target": "Play",
+                    "role_filter": "button",
+                    "limit": 80,
+                },
+                "deferred_context": {"step_id": "operate-foreground-ui"},
+                "deferred_continuation": [
+                    {
+                        "tool": "desktop.ui_elements",
+                        "step_id": "verify-desktop-result",
+                    }
+                ],
+            }
+        )
+        return event
+
+
 def _planner_events_with_failed_analysis() -> list[dict[str, Any]]:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",
@@ -1751,6 +1776,32 @@ def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None
         direct_request["task_verification_targets"][0]["workspace_items"][0]["item_id"]
         == "workspace-open-app"
     )
+
+
+def test_agent_studio_service_preserves_deferred_replan_recovery_context() -> None:
+    port = _DeferredReplanRecoveryActionPort()
+    service = AgentStudioService(port)
+
+    continuation = service.plan_replan_recovery_action(
+        "run-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.list_apps",
+            "agent_id": "agent-1",
+        },
+    )
+
+    direct_request = continuation.direct_tool_requests[0]
+    assert direct_request["deferred_tool"] == "desktop.click_ui_element"
+    assert direct_request["deferred_input"] == {
+        "target": "Play",
+        "role_filter": "button",
+        "limit": 80,
+    }
+    assert direct_request["deferred_context"] == {"step_id": "operate-foreground-ui"}
+    assert direct_request["deferred_continuation"] == [
+        {"tool": "desktop.ui_elements", "step_id": "verify-desktop-result"}
+    ]
 
 
 def test_agent_studio_service_starts_runtime_envelope_retry_action_direct_run() -> None:

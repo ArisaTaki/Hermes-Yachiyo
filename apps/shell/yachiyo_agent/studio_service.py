@@ -1857,6 +1857,18 @@ def _replan_recovery_action_direct_request(
         value = getattr(action, key) or getattr(recovery, key)
         if isinstance(value, Mapping) and value:
             request[key] = dict(value)
+    deferred_tool = _first_text(action.deferred_tool, recovery.deferred_tool)
+    if deferred_tool:
+        request["deferred_tool"] = deferred_tool
+    for key in ("deferred_input", "deferred_context"):
+        value = getattr(action, key) or getattr(recovery, key)
+        if isinstance(value, Mapping) and value:
+            request[key] = dict(value)
+    deferred_continuation = _mapping_list(
+        action.deferred_continuation or recovery.deferred_continuation
+    )
+    if deferred_continuation:
+        request["deferred_continuation"] = deferred_continuation
     action_metadata = _mapping(action.metadata)
     desktop_loop = _mapping(action_metadata.get("desktop_loop"))
     if desktop_loop:
