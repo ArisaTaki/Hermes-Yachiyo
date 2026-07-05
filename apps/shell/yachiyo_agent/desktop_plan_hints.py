@@ -2928,13 +2928,27 @@ def _safe_shortcut_action_from_hotkey_hint(value: str) -> str:
 
 def _safe_shortcut_action_from_phrase(value: str) -> str:
     phrase = re.sub(
-        r"^(?:你能帮我|你可以帮我|可以帮我|能帮我|帮我|请|麻烦|能否|能不能|可以|直接)\s*",
+        r"^(?:你能帮我|你可以帮我|可以帮我|能帮我|帮我|请|麻烦|能否|能不能|可以|直接|"
+        r"can\s+you|could\s+you|would\s+you|please)\s*",
         "",
         clean(value),
         flags=re.IGNORECASE,
     )
-    phrase = re.sub(r"\s*(?:一下|下|一次|可以吗|好吗|好么|行吗|吗|嘛|吧|呢)$", "", phrase)
+    phrase = re.sub(r"\s*[?.!。！？]+$", "", phrase)
+    phrase = re.sub(r"^(?:please)\s*", "", phrase, flags=re.IGNORECASE)
+    for _ in range(2):
+        phrase = re.sub(
+            r"\s*(?:一下|下|一次|可以吗|好吗|好么|行吗|吗|嘛|吧|呢|please)$",
+            "",
+            phrase,
+            flags=re.IGNORECASE,
+        )
     normalized = re.sub(r"\s+", "", phrase).lower()
+    normalized = re.sub(
+        r"^(复制|拷贝|粘贴|全选|撤销|重做|查找|搜索|刷新|后退|前进)(?:一下|下|一次)",
+        r"\1",
+        normalized,
+    )
     scoped_normalized = _strip_foreground_shortcut_scope(normalized)
     if scoped_normalized != normalized:
         scoped_action = _safe_shortcut_action_from_phrase(scoped_normalized)
@@ -2964,6 +2978,11 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
     ) or re.fullmatch(
         r"(?:copy|put)(?:the)?(?:current|selected)?(?:text|selection|content)"
         r"(?:to(?:the)?(?:system)?clipboard)?",
+        normalized,
+    ):
+        return "copy"
+    if re.fullmatch(
+        r"(?:复制|拷贝)(?:当前)?(?:选中|选中的)(?:文本|文字|内容)",
         normalized,
     ):
         return "copy"
@@ -3441,8 +3460,11 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "进入全屏模式": "toggle_full_screen",
         "maximize": "toggle_full_screen",
         "maximizewindow": "toggle_full_screen",
+        "maximizecurrentwindow": "toggle_full_screen",
+        "maximizethecurrentwindow": "toggle_full_screen",
         "fullscreen": "toggle_full_screen",
         "fullscreencurrentwindow": "toggle_full_screen",
+        "fullscreenthecurrentwindow": "toggle_full_screen",
         "enterfullscreen": "toggle_full_screen",
         "聚焦地址栏": "focus_address_bar",
         "打开地址栏": "focus_address_bar",
@@ -3460,6 +3482,23 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
 def _strip_foreground_shortcut_scope(normalized: str) -> str:
     value = str(normalized or "").strip()
     foreground_prefixes = (
+        "当前标签页",
+        "当前浏览器",
+        "当前网页",
+        "当前页面",
+        "当前页",
+        "这个标签页",
+        "这个浏览器",
+        "这个网页",
+        "这个页面",
+        "该标签页",
+        "该浏览器",
+        "该网页",
+        "该页面",
+        "标签页",
+        "浏览器",
+        "网页",
+        "页面",
         "在当前窗口",
         "在当前应用",
         "在当前app",
@@ -3486,8 +3525,34 @@ def _strip_foreground_shortcut_scope(normalized: str) -> str:
         "foregroundwindow",
         "foregroundapp",
         "foregroundapplication",
+        "currenttab",
+        "currentbrowser",
+        "currentpage",
+        "thistab",
+        "thisbrowser",
+        "thispage",
+        "browser",
+        "tab",
+        "page",
     )
     foreground_suffixes = (
+        "当前标签页",
+        "当前浏览器",
+        "当前网页",
+        "当前页面",
+        "当前页",
+        "这个标签页",
+        "这个浏览器",
+        "这个网页",
+        "这个页面",
+        "该标签页",
+        "该浏览器",
+        "该网页",
+        "该页面",
+        "标签页",
+        "浏览器",
+        "网页",
+        "页面",
         "当前窗口",
         "当前应用",
         "当前app",
@@ -3508,6 +3573,15 @@ def _strip_foreground_shortcut_scope(normalized: str) -> str:
         "foregroundwindow",
         "foregroundapp",
         "foregroundapplication",
+        "currenttab",
+        "currentbrowser",
+        "currentpage",
+        "thistab",
+        "thisbrowser",
+        "thispage",
+        "browser",
+        "tab",
+        "page",
     )
     for prefix in foreground_prefixes:
         if value.startswith(prefix):

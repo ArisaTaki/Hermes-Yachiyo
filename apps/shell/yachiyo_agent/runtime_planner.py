@@ -3293,7 +3293,6 @@ class RuntimePlanner:
             _safe_shortcut_targets_foreground(intent.user_goal, safe_shortcut, app_name)
             and not (foreground_paste and _foreground_compose_app_name_hint(intent.user_goal))
             and not app_scoped_safe_operation.get("safe_shortcut")
-            and not intent_safe_shortcut_from_inputs
         ):
             app_management = None
             app_name = ""
@@ -21442,7 +21441,12 @@ def _clean_dynamic_context_target_app(value: str) -> str:
     normalized_named_app = _clean_app_name_hint(app)
     if normalized_named_app:
         app = normalized_named_app
-    if not app or context_source_hint(app) or _is_generic_foreground_app_label(app):
+    if (
+        not app
+        or context_source_hint(app)
+        or _is_generic_foreground_app_label(app)
+        or _invalid_app_scoped_followup_app(app)
+    ):
         return ""
     return _canonical_app_name_hint(app)
 
@@ -24359,6 +24363,10 @@ def _invalid_app_scoped_followup_app(app_name: str) -> bool:
         "你",
         "你能",
         "你能帮我",
+        "你可以",
+        "你可以帮我",
+        "你能不能",
+        "你能不能帮我",
         "帮我",
         "请",
         "麻烦",
@@ -24392,6 +24400,9 @@ def _invalid_app_scoped_followup_app(app_name: str) -> bool:
         "标签页",
         "当前标签",
         "当前标签页",
+        "返回",
+        "后退",
+        "前进",
         "关闭的标签",
         "关闭的标签页",
         "刚关闭的标签",
