@@ -286,6 +286,10 @@ function RuntimeExecutionRequestRow({
   const actionTargetPreview = requestActionTargetPreview(objectRecord(request.action_target));
   const observationEvidencePreview = requestObservationEvidencePreview(objectRecord(request.observation_evidence));
   const observationRetryPreview = requestObservationRetryPreview(objectRecord(request.observation_retry));
+  const verificationEventIds = uniqueStrings(request.verification_event_ids || []);
+  const verificationArtifactPaths = uniqueStrings(request.verification_artifact_paths || []);
+  const verificationEventPreview = verificationEventIds.slice(0, 3).join(',');
+  const verificationArtifactPreview = verificationArtifactPaths.slice(0, 3).join(',');
   return (
     <div
       className="studio-planner-step"
@@ -298,6 +302,10 @@ function RuntimeExecutionRequestRow({
       data-request-observation-evidence={observationEvidencePreview}
       data-risk-level={request.risk_level || ''}
       data-runtime-stage={request.runtime_stage || ''}
+      data-verification-artifact-paths={verificationArtifactPreview}
+      data-verification-event-ids={verificationEventPreview}
+      data-verification-status={request.verification_status || ''}
+      data-verification-step-id={request.verification_step_id || ''}
       data-testid={testId}
     >
       <div>
@@ -309,6 +317,12 @@ function RuntimeExecutionRequestRow({
         {actionTargetPreview ? <span>target: {actionTargetPreview}</span> : null}
         {observationEvidencePreview ? <span>evidence: {observationEvidencePreview}</span> : null}
         {observationRetryPreview ? <span>retry: {observationRetryPreview}</span> : null}
+        {request.verification_status ? (
+          <span>verification: {request.verification_status}</span>
+        ) : null}
+        {verificationArtifactPreview ? (
+          <span>artifacts: {verificationArtifactPreview}</span>
+        ) : null}
         <RuntimeRecoveryEvidencePanel
           actionTarget={objectRecord(request.action_target)}
           approvalRequired={request.approval_required === true}

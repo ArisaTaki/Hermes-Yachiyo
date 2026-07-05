@@ -532,6 +532,10 @@ export type RuntimeExecutionRequestSnapshot = {
   task_checkpoints?: TaskCheckpointSnapshot[];
   task_workspace_items?: TaskWorkspaceItemSnapshot[];
   task_verification_targets?: Array<Record<string, unknown>>;
+  verification_status?: string | null;
+  verification_step_id?: string | null;
+  verification_event_ids?: string[];
+  verification_artifact_paths?: string[];
   checkpoint_policy?: RuntimeCheckpointPolicySnapshot | null;
   desktop_loop?: DesktopExecutionLoopSnapshot | null;
   source?: string;

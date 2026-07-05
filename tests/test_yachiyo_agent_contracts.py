@@ -109,6 +109,9 @@ from apps.shell.yachiyo_agent.events import public_run_event_from_payload
 from apps.shell.yachiyo_agent.group_run_snapshots import group_run_snapshot_from_payload
 from apps.shell.yachiyo_agent.planner_projection import planner_run_event_payloads
 from apps.shell.yachiyo_agent.run_snapshots import run_timeline_snapshot_from_payload
+from apps.shell.yachiyo_agent.runtime_execution_status import (
+    runtime_execution_envelope_with_status_overlay,
+)
 from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 from apps.shell.yachiyo_agent.task_cards import (
     agent_task_light_snapshot_from_task,
@@ -521,6 +524,108 @@ def test_runtime_execution_envelope_snapshot_is_public_contract() -> None:
     }
     assert payload["runtime_stage_counts"] == {"discover": 1}
     assert payload["replan_signal_count"] == 1
+
+
+def test_runtime_execution_request_projects_verification_evidence() -> None:
+    envelope = RuntimeExecutionEnvelopeSnapshot(
+        envelope_id="execution-envelope-verify",
+        decision_id="decision-verify",
+        plan_id="runtime-plan-verify",
+        intent_kind="data_analysis",
+        requests=[
+            RuntimeExecutionRequestSnapshot(
+                request_id="request-read-source",
+                step_id="read-source",
+                capability_id="workspace.file_read",
+                tool_name="workspace.read",
+                task_workspace_items=[
+                    {
+                        "item_id": "artifact-read-source",
+                        "kind": "artifact",
+                        "path": "reports/read-source.md",
+                        "source_step_id": "read-source",
+                    }
+                ],
+                task_verification_targets=[
+                    {
+                        "step_id": "read-source",
+                        "artifact_path": "reports/read-source.md",
+                    }
+                ],
+            )
+        ],
+    )
+    tool_call = ToolCallSnapshot(
+        tool_call_id="tool-call-read-source",
+        run_id="run-verify",
+        step_id="read-source",
+        capability_id="workspace.file_read",
+        tool_name="workspace.read",
+        status="completed",
+        output_preview={
+            "ok": True,
+            "artifact_path": "reports/read-source.md",
+        },
+    )
+    events = [
+        public_run_event_from_payload(
+            {
+                "event_id": "event-verify-read-source",
+                "run_id": "run-verify",
+                "sequence": 1,
+                "event_type": "workflow.run.task.checkpoint.updated",
+                "payload": {
+                    "checkpoint_id": "checkpoint-read-source",
+                    "step_id": "read-source",
+                    "status": "completed",
+                    "verification_status": "verified",
+                    "verified_by_step_id": "verify-read-source",
+                    "artifact_path": "reports/read-source-verified.md",
+                    "checkpoint": {
+                        "checkpoint_id": "checkpoint-read-source",
+                        "after_step_id": "read-source",
+                        "status": "completed",
+                        "payload": {
+                            "verification_status": "verified",
+                        },
+                    },
+                },
+            }
+        ),
+        public_run_event_from_payload(
+            {
+                "event_id": "event-artifact-read-source",
+                "run_id": "run-verify",
+                "sequence": 2,
+                "event_type": "agent.artifact.write",
+                "payload": {
+                    "step_id": "read-source",
+                    "tool_name": "workspace.read",
+                    "artifact": {
+                        "artifact_id": "artifact-read-source",
+                        "path": "reports/read-source.md",
+                    },
+                },
+            }
+        ),
+    ]
+
+    projected = runtime_execution_envelope_with_status_overlay(
+        envelope,
+        tool_calls=[tool_call],
+        events=events,
+    )
+
+    assert projected is not None
+    request = projected.requests[0]
+    assert request.status == "completed"
+    assert request.verification_status == "verified"
+    assert request.verification_step_id == "verify-read-source"
+    assert request.verification_event_ids == ["event-verify-read-source"]
+    assert request.verification_artifact_paths == [
+        "reports/read-source-verified.md",
+        "reports/read-source.md",
+    ]
 
 
 def test_replan_continuation_snapshot_is_public_contract() -> None:

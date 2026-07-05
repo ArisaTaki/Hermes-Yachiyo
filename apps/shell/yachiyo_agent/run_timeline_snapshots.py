@@ -114,6 +114,7 @@ def run_timeline_snapshot_from_payload(
         tool_calls=tool_calls,
         approvals=approvals,
         pending_approval=pending_approval,
+        events=events,
         task_progress=task_progress,
     )
     events = run_events_with_runtime_execution_replan_requests(
@@ -135,6 +136,7 @@ def run_timeline_snapshot_from_payload(
         tool_calls=tool_calls,
         approvals=approvals,
         pending_approval=pending_approval,
+        events=events,
         task_progress=task_progress,
     )
     replan_recoveries = merge_replan_recovery_snapshot_lists(
@@ -162,6 +164,7 @@ def run_timeline_snapshot_from_payload(
         approvals=approvals,
         pending_approval=pending_approval,
         replan_recoveries=replan_recoveries,
+        events=events,
         task_progress=task_progress,
     )
     memory_traces = memory_trace_snapshots_from_events(events)

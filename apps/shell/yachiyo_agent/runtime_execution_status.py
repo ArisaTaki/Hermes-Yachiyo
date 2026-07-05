@@ -7,6 +7,7 @@ from typing import Any
 
 from .contracts import (
     ApprovalCardSnapshot,
+    PublicRunEvent,
     ReplanRecoverySnapshot,
     RuntimeExecutionEnvelopeSnapshot,
     RuntimeExecutionRequestSnapshot,
@@ -35,6 +36,7 @@ def runtime_execution_envelope_with_status_overlay(
     approvals: Iterable[ApprovalCardSnapshot] | None = None,
     pending_approval: ApprovalCardSnapshot | None = None,
     replan_recoveries: Iterable[ReplanRecoverySnapshot] | None = None,
+    events: Iterable[PublicRunEvent] | None = None,
     task_progress: TaskProgressSummarySnapshot | None = None,
 ) -> RuntimeExecutionEnvelopeSnapshot | None:
     """Return a copy of the envelope with request statuses reconciled from run facts."""
@@ -45,6 +47,7 @@ def runtime_execution_envelope_with_status_overlay(
     tool_items = [item for item in tool_calls or [] if item is not None]
     approval_items = [item for item in approvals or [] if item is not None]
     recovery_items = [item for item in replan_recoveries or [] if item is not None]
+    event_items = [item for item in events or [] if item is not None]
     if pending_approval is not None and not any(
         _same_approval(item, pending_approval) for item in approval_items
     ):
@@ -62,7 +65,17 @@ def runtime_execution_envelope_with_status_overlay(
             current_step_id=current_step_id,
             active_status=active_status,
         )
-        requests.append(request.model_copy(update={"status": status}) if status else request)
+        request_update: dict[str, Any] = {}
+        if status:
+            request_update["status"] = status
+        request_update.update(
+            _request_verification_update(
+                request,
+                events=event_items,
+                tool_calls=tool_items,
+            )
+        )
+        requests.append(request.model_copy(update=request_update) if request_update else request)
 
     updates: dict[str, Any] = {"requests": requests}
     preferred_task_progress = _preferred_task_progress(
@@ -170,6 +183,168 @@ def _recovery_request_status(recovery: ReplanRecoverySnapshot) -> str:
     return ""
 
 
+def _request_verification_update(
+    request: RuntimeExecutionRequestSnapshot,
+    *,
+    events: list[PublicRunEvent],
+    tool_calls: list[ToolCallSnapshot],
+) -> dict[str, Any]:
+    verification_status = ""
+    verification_step_id = ""
+    verification_event_ids: list[str] = []
+    artifact_paths: list[str] = []
+
+    for event in events:
+        payload = _payload(event)
+        if not _event_matches_request(event, payload, request):
+            continue
+        status = _verification_status(payload)
+        if status:
+            verification_status = status
+            verification_step_id = _verification_step_id(payload) or verification_step_id
+            _extend_unique(verification_event_ids, [_event_identity(event)])
+        _extend_unique(artifact_paths, _artifact_paths_from_payload(payload))
+
+    for tool_call in tool_calls:
+        if not _tool_call_matches_request(tool_call, request):
+            continue
+        _extend_unique(artifact_paths, _artifact_paths_from_payload(tool_call.output_preview))
+        _extend_unique(artifact_paths, _artifact_paths_from_payload(tool_call.metadata))
+
+    update: dict[str, Any] = {}
+    if verification_status:
+        update["verification_status"] = verification_status
+    if verification_step_id:
+        update["verification_step_id"] = verification_step_id
+    if verification_event_ids:
+        update["verification_event_ids"] = verification_event_ids
+    if artifact_paths:
+        update["verification_artifact_paths"] = artifact_paths
+    return update
+
+
+def _event_matches_request(
+    event: PublicRunEvent,
+    payload: dict[str, Any],
+    request: RuntimeExecutionRequestSnapshot,
+) -> bool:
+    request_step_id = _text(request.step_id)
+    request_tool = _text(request.tool_name)
+    request_capability = _text(request.capability_id)
+    event_step_ids = _event_step_ids(payload)
+    if request_step_id and request_step_id in event_step_ids:
+        return True
+    event_tool = _text(payload.get("tool_name") or payload.get("tool"))
+    if request_tool and event_tool and request_tool == event_tool:
+        return True
+    event_capability = _text(payload.get("capability_id") or payload.get("target_capability_id"))
+    if request_capability and event_capability and request_capability == event_capability:
+        return True
+    event_type = _text(event.event_type)
+    if event_type.endswith(".artifact.created") or "artifact" in event_type:
+        return _artifact_event_matches_request(payload, request)
+    return False
+
+
+def _tool_call_matches_request(
+    tool_call: ToolCallSnapshot,
+    request: RuntimeExecutionRequestSnapshot,
+) -> bool:
+    request_step_id = _text(request.step_id)
+    request_tool = _text(request.tool_name)
+    request_capability = _text(request.capability_id)
+    if request_step_id and request_step_id in {
+        _text(tool_call.step_id),
+        _text(tool_call.planner_step_id),
+    }:
+        return True
+    if request_tool and request_tool == _text(tool_call.tool_name):
+        return True
+    return bool(request_capability and request_capability == _text(tool_call.capability_id))
+
+
+def _artifact_event_matches_request(
+    payload: dict[str, Any],
+    request: RuntimeExecutionRequestSnapshot,
+) -> bool:
+    request_paths = {
+        _text(item.get("path") or item.get("artifact_path"))
+        for item in request.task_workspace_items
+        if isinstance(item, dict)
+    }
+    request_paths.update(
+        _text(item.get("path") or item.get("artifact_path"))
+        for item in request.task_verification_targets
+        if isinstance(item, dict)
+    )
+    request_paths = {item for item in request_paths if item}
+    if not request_paths:
+        return False
+    return bool(request_paths.intersection(_artifact_paths_from_payload(payload)))
+
+
+def _event_step_ids(payload: dict[str, Any]) -> set[str]:
+    step_ids = {
+        _text(payload.get("step_id")),
+        _text(payload.get("planner_step_id")),
+        _text(payload.get("source_step_id")),
+        _text(payload.get("after_step_id")),
+    }
+    checkpoint = payload.get("checkpoint")
+    if isinstance(checkpoint, dict):
+        step_ids.add(_text(checkpoint.get("after_step_id")))
+    todo = payload.get("todo")
+    if isinstance(todo, dict):
+        step_ids.add(_text(todo.get("step_id")))
+    return {step_id for step_id in step_ids if step_id}
+
+
+def _verification_status(payload: dict[str, Any]) -> str:
+    status = _text(payload.get("verification_status"))
+    if status:
+        return status
+    checkpoint = payload.get("checkpoint")
+    if isinstance(checkpoint, dict):
+        checkpoint_payload = checkpoint.get("payload")
+        if isinstance(checkpoint_payload, dict):
+            return _text(checkpoint_payload.get("verification_status"))
+    return ""
+
+
+def _verification_step_id(payload: dict[str, Any]) -> str:
+    return _text(
+        payload.get("verified_by_step_id")
+        or payload.get("verification_step_id")
+        or payload.get("step_id")
+        or payload.get("planner_step_id")
+    )
+
+
+def _event_identity(event: PublicRunEvent) -> str:
+    return _text(event.event_id) or f"{event.sequence}:{event.event_type}"
+
+
+def _artifact_paths_from_payload(payload: dict[str, Any]) -> list[str]:
+    paths: list[str] = []
+    _extend_unique(paths, [payload.get("artifact_path")])
+    _extend_unique(paths, _string_list(payload.get("artifact_paths")))
+    artifact = payload.get("artifact")
+    if isinstance(artifact, dict):
+        _extend_unique(paths, [artifact.get("path"), artifact.get("artifact_path")])
+    for key in ("artifacts", "artifact_manifest"):
+        values = payload.get(key)
+        if not isinstance(values, list):
+            continue
+        for item in values:
+            if isinstance(item, dict):
+                _extend_unique(paths, [item.get("path"), item.get("artifact_path")])
+    for key in ("result", "data", "output", "output_preview"):
+        nested = payload.get(key)
+        if isinstance(nested, dict):
+            _extend_unique(paths, _artifact_paths_from_payload(nested))
+    return paths
+
+
 def _matching_approval(
     request: RuntimeExecutionRequestSnapshot,
     approvals: list[ApprovalCardSnapshot],
@@ -261,6 +436,23 @@ def _progress_total(progress: TaskProgressSummarySnapshot) -> int:
         )
         if isinstance(value, int) and value > 0
     )
+
+
+def _payload(event: PublicRunEvent) -> dict[str, Any]:
+    return dict(event.payload) if isinstance(event.payload, dict) else {}
+
+
+def _extend_unique(target: list[str], values: Iterable[Any]) -> None:
+    for value in values:
+        clean = _text(value)
+        if clean and clean not in target:
+            target.append(clean)
+
+
+def _string_list(values: Any) -> list[str]:
+    if not isinstance(values, list):
+        return []
+    return [_text(value) for value in values if _text(value)]
 
 
 def _text(value: Any) -> str:

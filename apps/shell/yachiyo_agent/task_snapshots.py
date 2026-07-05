@@ -223,6 +223,7 @@ def agent_task_snapshot_from_payload(
         runtime_execution_envelope,
         tool_calls=tool_calls,
         approvals=approvals,
+        events=all_events,
         task_progress=task_progress,
     )
     all_events = run_events_with_runtime_execution_replan_requests(
@@ -243,6 +244,7 @@ def agent_task_snapshot_from_payload(
         runtime_execution_envelope,
         tool_calls=tool_calls,
         approvals=approvals,
+        events=all_events,
         task_progress=task_progress,
     )
     replan_recoveries = merge_replan_recovery_snapshot_lists(
@@ -267,6 +269,7 @@ def agent_task_snapshot_from_payload(
         tool_calls=tool_calls,
         approvals=approvals,
         replan_recoveries=replan_recoveries,
+        events=all_events,
         task_progress=task_progress,
     )
     artifacts = artifact_snapshots_from_task_payload(

@@ -125,6 +125,7 @@ def group_run_snapshot_from_payload(
         runtime_execution_envelope,
         tool_calls=tool_calls,
         approvals=pending_approvals,
+        events=events,
         task_progress=task_progress,
     )
     events = run_events_with_runtime_execution_replan_requests(
@@ -144,6 +145,7 @@ def group_run_snapshot_from_payload(
         runtime_execution_envelope,
         tool_calls=tool_calls,
         approvals=pending_approvals,
+        events=events,
         task_progress=task_progress,
     )
     replan_recoveries = _group_run_replan_recoveries(
@@ -161,6 +163,7 @@ def group_run_snapshot_from_payload(
         tool_calls=tool_calls,
         approvals=pending_approvals,
         replan_recoveries=replan_recoveries,
+        events=events,
         task_progress=task_progress,
     )
     memory_traces = _group_run_memory_traces(runs, events)

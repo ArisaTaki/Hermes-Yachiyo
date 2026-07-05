@@ -620,6 +620,10 @@ class RuntimeExecutionRequestSnapshot(_PublicSnapshot):
     task_checkpoints: list[dict[str, Any]] = Field(default_factory=list)
     task_workspace_items: list[dict[str, Any]] = Field(default_factory=list)
     task_verification_targets: list[dict[str, Any]] = Field(default_factory=list)
+    verification_status: str | None = None
+    verification_step_id: str | None = None
+    verification_event_ids: list[str] = Field(default_factory=list)
+    verification_artifact_paths: list[str] = Field(default_factory=list)
     checkpoint_policy: RuntimeCheckpointPolicySnapshot | None = None
     desktop_loop: DesktopExecutionLoopSnapshot | None = None
     source: str = "runtime_planner"
