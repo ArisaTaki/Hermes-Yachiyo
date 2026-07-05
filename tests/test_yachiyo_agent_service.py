@@ -366,6 +366,94 @@ class _FirstPageKeyStatusRuntimePort(_FakeRuntimePort):
         }
 
 
+class _FirstPageRuntimeStateRuntimePort(_FakeRuntimePort):
+    def __init__(self, *, include_replan: bool = True) -> None:
+        super().__init__()
+        self.include_replan = include_replan
+
+    def get_task_event_page(
+        self,
+        task_id: str,
+        *,
+        after_sequence: int = 0,
+        limit: int = 200,
+    ) -> dict[str, Any]:
+        self.calls.append((
+            "get_task_event_page",
+            {
+                "task_id": task_id,
+                "after_sequence": after_sequence,
+                "limit": limit,
+            },
+        ))
+        return {
+            "run_id": "run-runtime-state",
+            "after_sequence": after_sequence,
+            "limit": limit,
+            "next_after_sequence": 2,
+            "has_more": True,
+            "events": [
+                {
+                    "event_type": "task.started",
+                    "sequence": 1,
+                    "payload": {"status": "running"},
+                },
+                {
+                    "event_type": "agent.plan.created",
+                    "sequence": 2,
+                    "payload": {"plan_id": "plan-1"},
+                },
+            ],
+        }
+
+    def get_task_event_stream(self, task_id: str) -> dict[str, Any]:
+        self.calls.append(("get_task_event_stream", task_id))
+        events = [
+            {
+                "event_type": "task.started",
+                "sequence": 1,
+                "payload": {"status": "running"},
+            },
+            {
+                "event_type": "agent.plan.created",
+                "sequence": 2,
+                "payload": {"plan_id": "plan-1"},
+            },
+            {
+                "event_type": "agent.task_core.created",
+                "sequence": 3,
+                "payload": {"core_id": "task-core-1"},
+            },
+            {
+                "event_type": "agent.task.todo.updated",
+                "sequence": 4,
+                "payload": {"todo_id": "todo-1", "status": "running"},
+            },
+            {
+                "event_type": "agent.task.checkpoint.updated",
+                "sequence": 5,
+                "payload": {"checkpoint_id": "checkpoint-1", "status": "pending"},
+            },
+            {
+                "event_type": "agent.tool.started",
+                "sequence": 6,
+                "payload": {"tool": "app.open"},
+            },
+        ]
+        if self.include_replan:
+            events.append(
+                {
+                    "event_type": "agent.replan.requested",
+                    "sequence": 7,
+                    "payload": {
+                        "request_id": "replan-1",
+                        "trigger": "verification_failed",
+                    },
+                }
+            )
+        return {"run_id": "run-runtime-state", "events": events}
+
+
 class _SensitiveTaskRuntimePort(_FakeRuntimePort):
     def get_task_timeline(self, task_id: str) -> dict[str, Any]:
         self.calls.append(("get_task_timeline", task_id))
@@ -2629,6 +2717,68 @@ def test_yachiyo_agent_service_task_event_first_page_includes_key_status_window(
     assert page.next_after_sequence == 4
     assert page.events[-1].task_id == "task-1"
     assert page.events[-1].payload["task_id"] == "task-1"
+    assert port.calls == [
+        (
+            "get_task_event_page",
+            {
+                "task_id": "task-1",
+                "after_sequence": 0,
+                "limit": 2,
+            },
+        ),
+        ("get_task_event_stream", "task-1"),
+    ]
+
+
+def test_yachiyo_agent_service_task_event_first_page_prefers_replan_window() -> None:
+    port = _FirstPageRuntimeStateRuntimePort(include_replan=True)
+    service = YachiyoAgentService(port)
+
+    page = service.get_task_event_page("task-1", after_sequence=0, limit=2)
+    event_types = [event.event_type for event in page.events]
+
+    assert event_types == [
+        "task.started",
+        "agent.plan.created",
+        "agent.task_core.created",
+        "agent.task.todo.updated",
+        "agent.task.checkpoint.updated",
+        "agent.tool.started",
+        "agent.replan.requested",
+    ]
+    assert page.next_after_sequence == 7
+    assert page.events[-1].payload["request_id"] == "replan-1"
+    assert port.calls == [
+        (
+            "get_task_event_page",
+            {
+                "task_id": "task-1",
+                "after_sequence": 0,
+                "limit": 2,
+            },
+        ),
+        ("get_task_event_stream", "task-1"),
+    ]
+
+
+def test_yachiyo_agent_service_task_event_first_page_includes_runtime_state_block() -> None:
+    port = _FirstPageRuntimeStateRuntimePort(include_replan=False)
+    service = YachiyoAgentService(port)
+
+    page = service.get_task_event_page("task-1", after_sequence=0, limit=2)
+    event_types = [event.event_type for event in page.events]
+
+    assert event_types == [
+        "task.started",
+        "agent.plan.created",
+        "agent.task_core.created",
+        "agent.task.todo.updated",
+        "agent.task.checkpoint.updated",
+    ]
+    assert page.next_after_sequence == 5
+    assert page.events[2].payload["core_id"] == "task-core-1"
+    assert page.events[3].payload["todo_id"] == "todo-1"
+    assert page.events[4].payload["checkpoint_id"] == "checkpoint-1"
     assert port.calls == [
         (
             "get_task_event_page",
