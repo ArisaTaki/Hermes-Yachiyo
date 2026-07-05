@@ -11271,7 +11271,7 @@ def test_chat_bridge_quick_message_returns_planned_web_task_before_run_link(tmp_
         assert [
             request["tool_name"]
             for request in result["agent_task"]["runtime_execution_envelope"]["requests"]
-        ] == ["browser.open_url"]
+        ] == ["browser.open_url", "artifact.write"]
         _assert_planner_trace_prefix(
             result["agent_task"],
             intent_kind="web_research",
@@ -11331,13 +11331,19 @@ def test_chat_bridge_quick_message_plans_screen_capture_for_lightweight_entrypoi
             "agent.desktop.intent_planned",
             detail="screen.capture",
         )
-        assert planned_event["payload"] == {
-            "input_preview": {"reason": "user asked to capture the screen"},
-            "planning_reason": "planner_desktop_operation",
-            "source": "runtime_planner",
-            "status": "planned",
-            "tool": "screen.capture",
+        assert planned_event["payload"]["input_preview"] == {
+            "reason": "user asked to capture the screen"
         }
+        assert planned_event["payload"]["planning_reason"] in {
+            "planner_desktop_operation",
+            "planner_full_plan_desktop_operation",
+        }
+        assert planned_event["payload"]["source"] == "runtime_planner"
+        assert planned_event["payload"]["status"] == "planned"
+        assert planned_event["payload"]["tool"] == "screen.capture"
+        assert planned_event["payload"]["capability_id"] == "desktop.app_discovery"
+        assert planned_event["payload"]["runtime_stage"] == "discover"
+        assert planned_event["payload"]["task_todo"]["tool_name"] == "screen.capture"
     finally:
         store.close()
 

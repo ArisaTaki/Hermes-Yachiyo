@@ -300,6 +300,13 @@ def planned_agent_task_snapshot_for_quick_message(
     if not timeline:
         return None
     task_metadata = {**dict(metadata or {}), **planner_metadata}
+    full_runtime_execution_envelope = daily_desktop_runtime_execution_envelope(
+        text,
+        metadata=metadata,
+        allowed_tools=allowed_tools,
+    )
+    if full_runtime_execution_envelope:
+        task_metadata["yachiyo_execution_envelope"] = full_runtime_execution_envelope
     runtime_execution_envelope = (
         task_metadata.get("yachiyo_execution_envelope")
         if isinstance(task_metadata.get("yachiyo_execution_envelope"), dict)
