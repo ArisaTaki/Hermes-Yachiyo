@@ -3,8 +3,11 @@ import type {
   ApprovalCardSnapshot,
   ArtifactSnapshot,
   PlannerTraceSummarySnapshot,
+  ReplanRecoverySnapshot,
   RuntimeDebugSummarySnapshot,
   RuntimeExecutionEnvelopeSnapshot,
+  TaskCoreSnapshot,
+  TaskProgressSummarySnapshot,
   TaskStatus,
 } from './types';
 import {
@@ -67,6 +70,13 @@ type YachiyoTaskChatMetadata = {
   runtime_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
   yachiyo_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
   execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
+  task_core?: TaskCoreSnapshot | null;
+  yachiyo_task_core?: TaskCoreSnapshot | null;
+  planner_task_core?: TaskCoreSnapshot | null;
+  task_progress?: TaskProgressSummarySnapshot | null;
+  yachiyo_task_progress?: TaskProgressSummarySnapshot | null;
+  replan_recoveries?: ReplanRecoverySnapshot[];
+  yachiyo_replan_recoveries?: ReplanRecoverySnapshot[];
 };
 
 export type YachiyoTaskChatMessage = {
@@ -120,6 +130,9 @@ export function agentTaskSnapshotFromMessage(
     planner_summary: messagePlannerSummary(message),
     runtime_debug: messageRuntimeDebug(message),
     runtime_execution_envelope: runtimeExecutionEnvelope,
+    task_core: messageTaskCore(message),
+    task_progress: messageTaskProgress(message),
+    replan_recoveries: messageReplanRecoveries(message),
     open_in_studio_url: studioRunUrl(runId, { groupRunId }),
     created_at: message.created_at || '',
     updated_at: message.created_at || '',
@@ -399,6 +412,27 @@ function messageRuntimeExecutionEnvelope(
   );
 }
 
+function messageTaskCore(message?: YachiyoTaskChatMessage | null): TaskCoreSnapshot | null {
+  return messageObjectMetadataValue<TaskCoreSnapshot>(
+    message,
+    ['task_core', 'yachiyo_task_core', 'planner_task_core'],
+  );
+}
+
+function messageTaskProgress(message?: YachiyoTaskChatMessage | null): TaskProgressSummarySnapshot | null {
+  return messageObjectMetadataValue<TaskProgressSummarySnapshot>(
+    message,
+    ['task_progress', 'yachiyo_task_progress'],
+  );
+}
+
+function messageReplanRecoveries(message?: YachiyoTaskChatMessage | null): ReplanRecoverySnapshot[] {
+  return messageArrayMetadataValue<ReplanRecoverySnapshot>(
+    message,
+    ['replan_recoveries', 'yachiyo_replan_recoveries'],
+  );
+}
+
 function messageObjectMetadataValue<T>(
   message: YachiyoTaskChatMessage | null | undefined,
   keys: string[],
@@ -411,6 +445,20 @@ function messageObjectMetadataValue<T>(
     if (value && typeof value === 'object' && !Array.isArray(value)) return value as T;
   }
   return null;
+}
+
+function messageArrayMetadataValue<T>(
+  message: YachiyoTaskChatMessage | null | undefined,
+  keys: string[],
+): T[] {
+  const metadata = message?.metadata;
+  if (!metadata) return [];
+  const record = metadata as Record<string, unknown>;
+  for (const key of keys) {
+    const value = record[key];
+    if (Array.isArray(value)) return value.filter((item) => item && typeof item === 'object') as T[];
+  }
+  return [];
 }
 
 function participantDisplayName(participant?: YachiyoTaskChatParticipant | null) {

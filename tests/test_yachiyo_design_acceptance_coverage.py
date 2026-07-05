@@ -533,8 +533,14 @@ def test_chat_daily_entry_acceptance_paths_are_guarded() -> None:
         [
             "runtime_debug: messageRuntimeDebug(message)",
             "runtime_execution_envelope: runtimeExecutionEnvelope",
+            "task_core: messageTaskCore(message)",
+            "task_progress: messageTaskProgress(message)",
+            "replan_recoveries: messageReplanRecoveries(message)",
             "function messageRuntimeDebug",
             "function messageRuntimeExecutionEnvelope",
+            "function messageTaskCore",
+            "function messageTaskProgress",
+            "function messageReplanRecoveries",
         ],
     )
     _assert_contains(
