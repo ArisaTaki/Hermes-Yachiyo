@@ -2055,7 +2055,9 @@ def test_planner_first_daily_desktop_entrypoint_requests_scope_foreground_safe_s
         ]
 
 
-def test_planner_first_daily_desktop_entrypoint_requests_keep_legacy_fallback(monkeypatch) -> None:
+def test_planner_first_daily_desktop_entrypoint_requests_default_to_planner_only(
+    monkeypatch,
+) -> None:
     monkeypatch.setattr(
         "apps.shell.yachiyo_agent.planner_execution.planner_tool_requests",
         lambda *_args, **_kwargs: [],
@@ -2064,6 +2066,21 @@ def test_planner_first_daily_desktop_entrypoint_requests_keep_legacy_fallback(mo
     assert planner_first_daily_desktop_entrypoint_requests(
         "可以帮我打开 Word 吗",
         allowed_tools=["app.open"],
+    ) == []
+
+
+def test_planner_first_daily_desktop_entrypoint_requests_can_opt_into_legacy_fallback(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.planner_execution.planner_tool_requests",
+        lambda *_args, **_kwargs: [],
+    )
+
+    assert planner_first_daily_desktop_entrypoint_requests(
+        "可以帮我打开 Word 吗",
+        allowed_tools=["app.open"],
+        allow_legacy_fallback=True,
     ) == [
         {
             "protocol": "json_fallback",

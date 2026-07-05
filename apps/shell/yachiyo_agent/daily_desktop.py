@@ -440,8 +440,9 @@ def planner_first_daily_desktop_entrypoint_requests(
     metadata_allowed_tools: Sequence[str] | None = None,
     execution_normalized: bool = False,
     include_runtime_context: bool = False,
+    allow_legacy_fallback: bool = False,
 ) -> list[dict[str, Any]]:
-    """Return daily entrypoint requests with Runtime Planner as the default."""
+    """Return daily entrypoint requests from Runtime Planner by default."""
 
     allowed = daily_desktop_allowed_tools(allowed_tools)
     direct_tool_request = daily_desktop_direct_metadata_request(
@@ -474,6 +475,8 @@ def planner_first_daily_desktop_entrypoint_requests(
         if execution_normalized:
             return planner_execution_tool_requests(planner_requests, allowed) or planner_requests
         return planner_requests
+    if not allow_legacy_fallback:
+        return []
     return _legacy_entrypoint_compatibility_requests(
         daily_desktop_entrypoint_requests(
             text,
