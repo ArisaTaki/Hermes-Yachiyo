@@ -14961,7 +14961,7 @@ def _report_artifact_filename(text: str) -> str:
     if _contains_any(value, ("发布说明", "变更说明", "更新说明", "release notes", "changelog")):
         return "release-notes.md"
     if _contains_any(value, ("总结", "摘要", "概括", "summary", "summarize", "summarise")):
-        return "research-summary.md"
+        return "summary.md"
     return "report.md"
 
 

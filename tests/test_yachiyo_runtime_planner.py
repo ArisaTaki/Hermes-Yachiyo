@@ -11115,6 +11115,10 @@ def test_runtime_planner_distinguishes_clipboard_output_target_from_source() -> 
         "把剪贴板内容做成报告",
         allowed_tools=allowed_tools,
     )
+    clipboard_summary_artifact = RuntimePlanner().decision(
+        "把剪贴板里的内容总结成 markdown 文件",
+        allowed_tools=allowed_tools,
+    )
     clipboard_summary = RuntimePlanner().decision(
         "把剪贴板内容摘要后复制到剪贴板",
         allowed_tools=allowed_tools,
@@ -11167,6 +11171,19 @@ def test_runtime_planner_distinguishes_clipboard_output_target_from_source() -> 
         "body_source": "clipboard",
     }
     assert clipboard_report.plan.tool_plan.artifacts_expected == ["report.md"]
+
+    assert clipboard_summary_artifact.selected_intent.kind == "report_generation"
+    assert clipboard_summary_artifact.selected_intent.inputs == {
+        "context_source": "clipboard"
+    }
+    assert _step_by_id(
+        clipboard_summary_artifact,
+        "write-report-artifact",
+    ).input_preview == {
+        "path": "summary.md",
+        "body_source": "clipboard",
+    }
+    assert clipboard_summary_artifact.plan.tool_plan.artifacts_expected == ["summary.md"]
 
     assert clipboard_summary.selected_intent.kind == "report_generation"
     assert clipboard_summary.selected_intent.inputs == {
