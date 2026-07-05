@@ -8533,7 +8533,7 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
     assert app_task_create.selected_intent.inputs == {
         "app_name_hint": "Linear",
         "operation_hint": "safe_shortcut",
-        "safe_shortcut_hint": {"action": "new_document"},
+        "safe_shortcut_hint": {"action": "new_task"},
         "foreground_compose_text_hint": "修复登录错误",
     }
     assert [step.step_id for step in app_task_create.plan.tool_plan.steps] == [
@@ -8545,7 +8545,7 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "verify-desktop-result",
     ]
     assert _step_by_id(app_task_create, "operate-foreground-ui").input_preview == {
-        "action": "new_document",
+        "action": "new_task",
     }
     assert _step_by_id(
         app_task_create,
@@ -8565,7 +8565,7 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
     assert app_issue_record.selected_intent.inputs == {
         "app_name_hint": "Linear",
         "operation_hint": "safe_shortcut",
-        "safe_shortcut_hint": {"action": "new_document"},
+        "safe_shortcut_hint": {"action": "new_task"},
         "foreground_compose_text_hint": "这个 bug",
     }
     assert [step.step_id for step in app_issue_record.plan.tool_plan.steps] == [
@@ -8576,7 +8576,7 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
     ]
     assert _step_by_id(app_issue_record, "operate-foreground-ui").input_preview == {
         "app_name": "Linear",
-        "action": "new_document",
+        "action": "new_task",
     }
     assert _step_by_id(
         app_issue_record,
@@ -8596,7 +8596,7 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
     assert app_issue_with_content.selected_intent.inputs == {
         "app_name_hint": "Linear",
         "operation_hint": "safe_shortcut",
-        "safe_shortcut_hint": {"action": "new_document"},
+        "safe_shortcut_hint": {"action": "new_task"},
         "foreground_compose_text_hint": "这个 bug",
     }
     assert [step.step_id for step in app_issue_with_content.plan.tool_plan.steps] == [
@@ -8607,7 +8607,7 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
     ]
     assert _step_by_id(app_issue_with_content, "operate-foreground-ui").input_preview == {
         "app_name": "Linear",
-        "action": "new_document",
+        "action": "new_task",
     }
     assert _step_by_id(
         app_issue_with_content,
@@ -8699,7 +8699,7 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         {
             "protocol": "json_fallback",
             "tool": "desktop.safe_shortcut",
-            "input": {"action": "new_document"},
+            "input": {"action": "new_task"},
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -8731,7 +8731,7 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         ],
     )
     assert english_app_task_create.selected_intent.inputs["safe_shortcut_hint"] == {
-        "action": "new_document"
+        "action": "new_task"
     }
     assert english_app_task_create.selected_intent.inputs["foreground_compose_text_hint"] == (
         "Fix login bug"
@@ -12170,6 +12170,10 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "find an issue tracker app and create an issue titled login bug",
         allowed_tools=allowed_tools,
     )
+    generic_issue_tracker = RuntimePlanner().decision(
+        "用任意 issue tracker 创建一个标题为登录失败的 bug ticket",
+        allowed_tools=allowed_tools,
+    )
 
     assert code.selected_intent.inputs["app_name_hint"] == ""
     assert code.selected_intent.inputs["app_capability_hint"]["query"] == "code"
@@ -12267,7 +12271,7 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "app_name": "<selected app from desktop.list_apps>",
         "selection_source": "desktop.list_apps",
         "query": "project management",
-        "action": "new_document",
+        "action": "new_task",
     }
     assert _step_by_id(project_task, "type-selected-discovered-app-text").input_preview == {
         "text": "整理发布清单"
@@ -12290,7 +12294,7 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "app_name": "<selected app from desktop.list_apps>",
         "selection_source": "desktop.list_apps",
         "query": "project management",
-        "action": "new_document",
+        "action": "new_task",
     }
     assert project_task_requests[2]["input"] == {"text": "整理发布清单"}
     assert issue_tracker.selected_intent.inputs["app_name_hint"] == ""
@@ -12298,7 +12302,41 @@ def test_runtime_planner_discovers_apps_by_capability_before_acting() -> None:
         "query": "task management",
         "description": "issue",
     }
+    assert issue_tracker.selected_intent.inputs["safe_shortcut_hint"] == {
+        "action": "new_task"
+    }
+    assert "app_search_hint" not in issue_tracker.selected_intent.inputs
     assert issue_tracker.selected_intent.inputs["foreground_compose_text_hint"] == "login bug"
+    assert [step.step_id for step in issue_tracker.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "type-selected-discovered-app-text",
+        "verify-selected-discovered-app-action",
+    ]
+    assert _step_by_id(issue_tracker, "open-selected-discovered-app").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "task management",
+        "action": "new_task",
+    }
+    assert _step_by_id(issue_tracker, "type-selected-discovered-app-text").input_preview == {
+        "text": "login bug"
+    }
+    assert generic_issue_tracker.selected_intent.inputs["app_name_hint"] == ""
+    assert generic_issue_tracker.selected_intent.inputs["app_capability_hint"] == {
+        "query": "task management",
+        "description": "issue tracker",
+    }
+    assert generic_issue_tracker.selected_intent.inputs["safe_shortcut_hint"] == {
+        "action": "new_task"
+    }
+    assert generic_issue_tracker.selected_intent.inputs["foreground_compose_text_hint"] == "登录失败"
+    assert [step.step_id for step in generic_issue_tracker.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "type-selected-discovered-app-text",
+        "verify-selected-discovered-app-action",
+    ]
 
     whiteboard_lookup = RuntimePlanner().decision(
         "找一个白板应用",
@@ -19230,13 +19268,13 @@ def test_runtime_planner_routes_generic_app_new_document_shortcuts() -> None:
         (
             "打开 Linear 创建一个 bug ticket",
             "Linear",
-            "new_document",
+            "new_task",
             "app.open_and_safe_shortcut",
         ),
         (
             "Linear create a new issue",
             "Linear",
-            "new_document",
+            "new_task",
             "app.focus_and_safe_shortcut",
         ),
         ("打开备忘录新建备忘录", "Notes", "new_note", "app.open_and_safe_shortcut"),

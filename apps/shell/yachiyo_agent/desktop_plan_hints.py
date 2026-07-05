@@ -3225,24 +3225,24 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "创建项目": "new_document",
         "创建一个项目": "new_document",
         "新项目": "new_document",
-        "新建工单": "new_document",
-        "创建工单": "new_document",
-        "新建任务": "new_document",
-        "创建任务": "new_document",
-        "新建卡片": "new_document",
-        "创建卡片": "new_document",
-        "新建ticket": "new_document",
-        "创建ticket": "new_document",
-        "创建一个ticket": "new_document",
-        "新建issue": "new_document",
-        "创建issue": "new_document",
-        "创建一个issue": "new_document",
-        "新建bug": "new_document",
-        "创建bug": "new_document",
-        "创建一个bug": "new_document",
-        "新建bugticket": "new_document",
-        "创建bugticket": "new_document",
-        "创建一个bugticket": "new_document",
+        "新建工单": "new_task",
+        "创建工单": "new_task",
+        "新建任务": "new_task",
+        "创建任务": "new_task",
+        "新建卡片": "new_task",
+        "创建卡片": "new_task",
+        "新建ticket": "new_task",
+        "创建ticket": "new_task",
+        "创建一个ticket": "new_task",
+        "新建issue": "new_task",
+        "创建issue": "new_task",
+        "创建一个issue": "new_task",
+        "新建bug": "new_task",
+        "创建bug": "new_task",
+        "创建一个bug": "new_task",
+        "新建bugticket": "new_task",
+        "创建bugticket": "new_task",
+        "创建一个bugticket": "new_task",
         "新建工作区": "new_document",
         "新建一个工作区": "new_document",
         "创建工作区": "new_document",
@@ -3261,12 +3261,12 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "newpresentation": "new_document",
         "newslide": "new_document",
         "newproject": "new_document",
-        "newticket": "new_document",
-        "newissue": "new_document",
-        "newtask": "new_document",
-        "newcard": "new_document",
-        "newbug": "new_document",
-        "newbugticket": "new_document",
+        "newticket": "new_task",
+        "newissue": "new_task",
+        "newtask": "new_task",
+        "newcard": "new_task",
+        "newbug": "new_task",
+        "newbugticket": "new_task",
         "newworkspace": "new_document",
         "makeanewdocument": "new_document",
         "createanewdocument": "new_document",
@@ -3304,24 +3304,24 @@ def _safe_shortcut_action_from_phrase(value: str) -> str:
         "createanewproject": "new_document",
         "makenewproject": "new_document",
         "createnewproject": "new_document",
-        "createanewticket": "new_document",
-        "makenewticket": "new_document",
-        "createnewticket": "new_document",
-        "createanewissue": "new_document",
-        "makenewissue": "new_document",
-        "createnewissue": "new_document",
-        "createanewtask": "new_document",
-        "makenewtask": "new_document",
-        "createnewtask": "new_document",
-        "createanewcard": "new_document",
-        "makenewcard": "new_document",
-        "createnewcard": "new_document",
-        "createanewbug": "new_document",
-        "makenewbug": "new_document",
-        "createnewbug": "new_document",
-        "createanewbugticket": "new_document",
-        "makenewbugticket": "new_document",
-        "createnewbugticket": "new_document",
+        "createanewticket": "new_task",
+        "makenewticket": "new_task",
+        "createnewticket": "new_task",
+        "createanewissue": "new_task",
+        "makenewissue": "new_task",
+        "createnewissue": "new_task",
+        "createanewtask": "new_task",
+        "makenewtask": "new_task",
+        "createnewtask": "new_task",
+        "createanewcard": "new_task",
+        "makenewcard": "new_task",
+        "createnewcard": "new_task",
+        "createanewbug": "new_task",
+        "makenewbug": "new_task",
+        "createnewbug": "new_task",
+        "createanewbugticket": "new_task",
+        "makenewbugticket": "new_task",
+        "createnewbugticket": "new_task",
         "makeanewworkspace": "new_document",
         "createanewworkspace": "new_document",
         "makenewworkspace": "new_document",
@@ -3609,6 +3609,46 @@ def _safe_shortcut_action_from_trailing_phrase(value: str) -> str:
     )
     if any(normalized.endswith(suffix) for suffix in full_screen_suffixes):
         return "toggle_full_screen"
+    new_task_suffixes = (
+        "新建工单",
+        "创建工单",
+        "新建任务",
+        "创建任务",
+        "新建卡片",
+        "创建卡片",
+        "新建ticket",
+        "创建ticket",
+        "创建一个ticket",
+        "新建issue",
+        "创建issue",
+        "创建一个issue",
+        "新建bug",
+        "创建bug",
+        "创建一个bug",
+        "新建bugticket",
+        "创建bugticket",
+        "创建一个bugticket",
+        "newticket",
+        "newissue",
+        "newtask",
+        "newcard",
+        "newbug",
+        "newbugticket",
+        "makeanewticket",
+        "createanewticket",
+        "makeanewissue",
+        "createanewissue",
+        "makeanewtask",
+        "createanewtask",
+        "makeanewcard",
+        "createanewcard",
+        "makeanewbug",
+        "createanewbug",
+        "makeanewbugticket",
+        "createanewbugticket",
+    )
+    if any(normalized.endswith(suffix) for suffix in new_task_suffixes):
+        return "new_task"
     new_document_suffixes = (
         "新建文档",
         "新建一个文档",
@@ -3743,7 +3783,7 @@ def _safe_shortcut_action_from_embedded_create_phrase(value: str) -> str:
     lowered = text.lower()
     if not re.search(
         r"(?:打开|启动|开启|切到|聚焦|写下|写入|记录下|记下|在|用|通过|"
-        r"\b(?:open|launch|start|focus|switch|type|enter|write)\b)",
+        r"\b(?:open|launch|start|focus|switch|type|enter|write|create|make|record|file)\b)",
         text,
         flags=re.IGNORECASE,
     ):
@@ -3753,7 +3793,7 @@ def _safe_shortcut_action_from_embedded_create_phrase(value: str) -> str:
         r"(?:今天的|今日的|新的|新|关于.+?的)?\s*"
         r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
         r"(?:笔记|备忘录|日志|日记)"
-        r"(?=$|[。！？!?，,]|(?:\s*(?:并|然后|再|接着|之后|后|"
+        r"(?=$|[。！？!?，,:：]|(?:\s*(?:并|然后|再|接着|之后|后|"
         r"标题|名称|名字|题目|内容|正文|写下|写入|记录下|记下|写)))",
         text,
         flags=re.IGNORECASE,
@@ -3765,11 +3805,31 @@ def _safe_shortcut_action_from_embedded_create_phrase(value: str) -> str:
     ):
         return "new_note"
     if re.search(
+        r"(?:新建|创建|新增|记录成|记成|登记成|转成|作为)\s*(?:一个|一份|一篇|一条|一张|一幅)?\s*"
+        r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
+        r"(?:工单|任务|卡片|ticket|issue|bug|bug\s*ticket)"
+        r"(?=$|[。！？!?，,:：]|(?:\s*(?:并|然后|再|接着|之后|后|"
+        r"标题|名称|名字|题目|内容|正文|写下|写入|记录下|记下|写)))",
+        text,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"\b(?:make|create|open)?\s*(?:a\s+)?new\s+"
+        r"(?:ticket|issue|task|card|bug|bug\s*ticket)\b",
+        lowered,
+        flags=re.IGNORECASE,
+    ) or re.search(
+        r"\b(?:create|make|open|record|file)\s+(?:a|an|the)?\s*"
+        r"(?:ticket|issue|task|card|bug|bug\s*ticket)\b",
+        lowered,
+        flags=re.IGNORECASE,
+    ):
+        return "new_task"
+    if re.search(
         r"(?:新建|创建|新增)\s*(?:一个|一份|一篇|一条|一张|一幅)?\s*"
         r"(?:\d{2,5}\s*(?:x|×|X|\*)\s*\d{2,5}\s*)?"
         r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
-        r"(?:页面|文档|文件(?!夹)|图片|图像|画布|表格|工作簿|演示|演示文稿|幻灯片|项目|工单|任务|卡片)"
-        r"(?=$|[。！？!?，,]|(?:\s*(?:并|然后|再|接着|之后|后|"
+        r"(?:页面|文档|文件(?!夹)|图片|图像|画布|表格|工作簿|演示|演示文稿|幻灯片|项目)"
+        r"(?=$|[。！？!?，,:：]|(?:\s*(?:并|然后|再|接着|之后|后|"
         r"标题|名称|名字|题目|内容|正文|写下|写入|记录下|记下|写)))",
         text,
         flags=re.IGNORECASE,

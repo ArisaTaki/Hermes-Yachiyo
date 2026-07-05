@@ -861,7 +861,7 @@ class TaskIntentRouter:
         if (
             screen_capture is not None
             and str((safe_shortcut or {}).get("action") or "").strip()
-            not in {"new_note", "new_document"}
+            not in {"new_note", "new_document", "new_task"}
         ):
             safe_shortcut = None
             safe_shortcut_sequence = []
@@ -1722,7 +1722,7 @@ class TaskIntentRouter:
                 and not _looks_like_context_artifact_request(text)
                 and not document_artifact_transform
             )
-            or shortcut_action in {"new_document", "new_note"}
+            or shortcut_action in {"new_document", "new_note", "new_task"}
             or _looks_like_schedule_request(text)
             or (
                 clipboard_hint
@@ -2487,7 +2487,7 @@ class TaskIntentRouter:
         if _explicit_app_open_request(text) and _app_name_hint(text):
             return _empty_intent("schedule", text)
         shortcut_action = str((safe_shortcut_hint(text) or {}).get("action") or "").strip()
-        if shortcut_action in {"new_note", "new_document"} and not _contains_any(
+        if shortcut_action in {"new_note", "new_document", "new_task"} and not _contains_any(
             text,
             _SCHEDULE_ACTION_TERMS,
         ):
@@ -3147,7 +3147,7 @@ class RuntimePlanner:
         if (
             screen_capture is not None
             and str((safe_shortcut or {}).get("action") or "").strip()
-            not in {"new_note", "new_document"}
+            not in {"new_note", "new_document", "new_task"}
         ):
             safe_shortcut = None
             safe_shortcut_sequence = []
@@ -3184,6 +3184,13 @@ class RuntimePlanner:
                     for key, value in app_search.items()
                     if key != "app_name"
                 }
+        if (
+            app_capability
+            and app_search
+            and str((safe_shortcut or {}).get("action") or "").strip()
+            in {"new_document", "new_note", "new_task"}
+        ):
+            app_search = {}
         if control_presence_current_scope:
             app_search = {}
         app_type_scope_hint = _app_first_type_scope_hint(intent.user_goal)
@@ -3456,7 +3463,7 @@ class RuntimePlanner:
             )
             else (
                 foreground_compose_text
-                if safe_shortcut_action in {"new_note", "new_document"} and foreground_compose_text
+                if safe_shortcut_action in {"new_note", "new_document", "new_task"} and foreground_compose_text
                 else safe_type_text_hint(intent.user_goal) or foreground_compose_text
             )
         )
@@ -3529,7 +3536,7 @@ class RuntimePlanner:
                 app_search = fallback_app_search
                 type_target = None
         create_first_safe_shortcut = (
-            safe_shortcut_action in {"new_note", "new_document"}
+            safe_shortcut_action in {"new_note", "new_document", "new_task"}
             and bool(safe_type_text)
         )
         followup_safe_shortcut = (
@@ -4084,7 +4091,7 @@ class RuntimePlanner:
         if (
             app_name
             and (screen_capture is not None or creative_canvas)
-            and observe_then_create_action in {"new_note", "new_document"}
+            and observe_then_create_action in {"new_note", "new_document", "new_task"}
             and not any(item for item in (click_target, type_target, safe_type_text) if item)
         ):
             observe_payload = {"limit": 80}
@@ -10162,6 +10169,7 @@ def _append_selected_discovered_foreground_compose_steps(
     if str((safe_shortcut or {}).get("action") or "").strip() in {
         "new_document",
         "new_note",
+        "new_task",
     }:
         return
     compose_text = str(intent.inputs.get("foreground_compose_text_hint") or "").strip()
@@ -10700,13 +10708,13 @@ def _append_selected_discovered_generic_action_steps(
     if (
         not safe_type_text
         and not type_target
-        and safe_shortcut_action in {"new_document", "new_note"}
+        and safe_shortcut_action in {"new_document", "new_note", "new_task"}
     ):
         safe_type_text = str(inputs.get("foreground_compose_text_hint") or "").strip()
     if (
         not safe_type_text
         and not type_target
-        and safe_shortcut_action not in {"new_document", "new_note"}
+        and safe_shortcut_action not in {"new_document", "new_note", "new_task"}
     ):
         safe_type_text = safe_type_text_hint(pending_action)
     if _looks_like_discovered_app_capability_phrase(safe_type_text):
@@ -11142,7 +11150,7 @@ def _append_selected_discovered_creative_action_steps(
         if isinstance(intent.inputs.get("creative_canvas_hint"), Mapping)
         else {}
     )
-    if safe_shortcut_action in {"new_document", "new_note"}:
+    if safe_shortcut_action in {"new_document", "new_note", "new_task"}:
         shortcut_tool = _first_allowed(
             (
                 "app.focus_and_safe_shortcut",
@@ -11357,7 +11365,7 @@ def _looks_like_discovered_creative_action(
     creative_action = bool(
         creative_canvas
         or compose_text
-        or safe_shortcut_action in {"new_document", "new_note"}
+        or safe_shortcut_action in {"new_document", "new_note", "new_task"}
         or
         re.search(
             r"(?:画|绘制|设计|draw|paint|sketch|design)",
@@ -12291,6 +12299,8 @@ def _normalize_intent_for_allowed_tools(
     intent: TaskIntentSnapshot,
     allowed: set[str] | None,
 ) -> TaskIntentSnapshot:
+    if intent.kind == "desktop_operation":
+        intent = _normalize_desktop_create_intent_inputs(intent)
     if allowed is None or intent.kind != "web_research":
         return intent
     browser_action = str(intent.inputs.get("browser_action") or "").strip()
@@ -12315,6 +12325,27 @@ def _normalize_intent_for_allowed_tools(
             inputs["browser_action"] = "open_url"
         return intent.model_copy(update={"inputs": inputs})
     return intent
+
+
+def _normalize_desktop_create_intent_inputs(
+    intent: TaskIntentSnapshot,
+) -> TaskIntentSnapshot:
+    safe_shortcut = intent.inputs.get("safe_shortcut_hint")
+    if not isinstance(safe_shortcut, Mapping):
+        return intent
+    if str((safe_shortcut or {}).get("action") or "").strip() not in {
+        "new_document",
+        "new_note",
+        "new_task",
+    }:
+        return intent
+    if not isinstance(intent.inputs.get("app_capability_hint"), Mapping):
+        return intent
+    if not isinstance(intent.inputs.get("app_search_hint"), Mapping):
+        return intent
+    inputs = dict(intent.inputs)
+    inputs.pop("app_search_hint", None)
+    return intent.model_copy(update={"inputs": inputs})
 
 
 def _select_intent_for_allowed_tools(
@@ -20343,6 +20374,8 @@ def _generic_create_title_text_hint(text: str) -> str:
 
 def _generic_create_container_action_hint(text: str) -> str:
     value = _clean_prompt(text)
+    if _looks_like_clicking_create_control(value):
+        return ""
     if re.search(
         r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份|一则)?\s*"
         r"(?:今天的|今日的|新的|新|关于.+?的)?\s*"
@@ -20357,18 +20390,10 @@ def _generic_create_container_action_hint(text: str) -> str:
     ):
         return "new_note"
     if re.search(
-        r"(?:新建|创建|新增)\s*(?:一个|一份|一篇|一条|一张|一幅)?\s*"
-        r"(?:\d{2,5}\s*(?:x|×|X|\*)\s*\d{2,5}\s*)?"
-        r"(?:新的|新)?\s*"
+        r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份|一则)?\s*"
+        r"(?:今天的|今日的|新的|新|关于.+?的)?\s*"
         r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
-        r"(?:一页|一个页面|一张页面|页面|页|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|图片|图像|图(?!标)|"
-        r"流程图|思维导图|脑图|图表|画布|表格|工作簿|[^。！？!?，,]{0,20}?表|演示|演示文稿|幻灯片|"
-        r"项目|任务|卡片|工单|事项|board|whiteboard|wireframe|mockup)",
-        value,
-        flags=re.IGNORECASE,
-    ) or re.search(
-        r"(?:新建|创建|新增)\s*(?:一个|一条|一张)?\s*"
-        r"(?:ticket|issue|bug|bug\s*ticket)",
+        r"(?:任务|卡片|工单|事项|ticket|issue|bug|bug\s*ticket)",
         value,
         flags=re.IGNORECASE,
     ) or re.search(
@@ -20378,9 +20403,26 @@ def _generic_create_container_action_hint(text: str) -> str:
         value,
         flags=re.IGNORECASE,
     ) or re.search(
+        r"\b(?:new|create|make|record|file)\b.{0,60}\b"
+        r"(?:task|card|ticket|issue|bug|bug\s*ticket)\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "new_task"
+    if re.search(
+        r"(?:新建|创建|新增)\s*(?:一个|一份|一篇|一条|一张|一幅)?\s*"
+        r"(?:\d{2,5}\s*(?:x|×|X|\*)\s*\d{2,5}\s*)?"
+        r"(?:新的|新)?\s*"
+        r"(?:(?:标题|名称|名字|题目)\s*(?:是|为|叫|:|：)\s*[^。！？!?，,]{1,80}?\s*的\s*)?"
+        r"(?:一页|一个页面|一张页面|页面|页|文档|(?:[A-Za-z0-9_+#.-]+\s*)?文件(?!夹)|图片|图像|图(?!标)|"
+        r"流程图|思维导图|脑图|图表|画布|表格|工作簿|[^。！？!?，,]{0,20}?表|演示|演示文稿|幻灯片|"
+        r"项目|board|whiteboard|wireframe|mockup)",
+        value,
+        flags=re.IGNORECASE,
+    ) or re.search(
         r"\b(?:new|create|make)\b.{0,60}\b"
         r"(?:page|document|file|image|picture|diagram|flowchart|mind\s*map|canvas|"
-        r"spreadsheet|workbook|presentation|slide|project|task|card|ticket|issue|bug|"
+        r"spreadsheet|workbook|presentation|slide|project|"
         r"board|whiteboard|wireframe|mockup)\b",
         value,
         flags=re.IGNORECASE,
@@ -20439,6 +20481,8 @@ def _app_scoped_create_text_hint(text: str) -> str:
 
 def _looks_like_app_scoped_create_followup(text: str) -> bool:
     value = _clean_prompt(text)
+    if _looks_like_clicking_create_control(value):
+        return False
     return bool(
         re.search(
             r"(?:新建|创建|新增)\s*(?:一个|一条|一篇|一份|一则)?\s*"
@@ -20463,6 +20507,20 @@ def _looks_like_app_scoped_create_followup(text: str) -> bool:
             r"(?:page|note|document|file|image|picture|diagram|flowchart|mind\s*map|"
             r"canvas|spreadsheet|workbook|presentation|slide|project|task|card|ticket|issue|bug|"
             r"board|whiteboard|wireframe|mockup)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_clicking_create_control(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not click_target_hint(value):
+        return False
+    return bool(
+        re.search(
+            r"(?:点击|点按|点一下|单击|按一下|按下|按|click|press|tap)"
+            r".{0,60}(?:new|create|新建|创建|新增)",
             value,
             flags=re.IGNORECASE,
         )
@@ -22398,6 +22456,7 @@ def _foreground_safe_shortcut_hint(hint: Mapping[str, Any] | None) -> bool:
         "new_tab",
         "new_window",
         "new_document",
+        "new_task",
         "new_private_window",
         "close_tab",
         "next_tab",
@@ -27515,6 +27574,16 @@ def _app_capability_discovery_hint(text: str) -> dict[str, str]:
     running_scope_hint = _running_scoped_app_capability_hint(value)
     if running_scope_hint:
         return running_scope_hint
+    if re.search(
+        r"(?:任意|任何|一个|一款|可用|合适|适合|推荐|any|some|available|suitable)"
+        r".{0,20}\b(?:issue|ticket|bug|task)\s+tracker\b",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return {
+            "query": "task management",
+            "description": "issue tracker",
+        }
     generic_prefix = (
         r"(?:(?:一个|一款|任意|任何|默认|可用|合适|适合|推荐|能用|可使用|已安装|"
         r"当前打开|当前已打开|已打开|正在运行|运行中|开着|已开启|前台|当前|"
