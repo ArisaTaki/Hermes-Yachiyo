@@ -14,8 +14,181 @@ class LegacyDesktopMigrationSample:
     legacy_boundary: str = "legacy_daily_desktop_intent"
 
 
+@dataclass(frozen=True)
+class LegacyDesktopPlannerContract:
+    planner_intents: tuple[str, ...]
+    planner_capabilities: tuple[str, ...]
+    planner_tools: tuple[str, ...]
+
+
 def _samples(area: str, *prompts: str) -> tuple[LegacyDesktopMigrationSample, ...]:
     return tuple(LegacyDesktopMigrationSample(prompt, area) for prompt in prompts)
+
+
+AREA_PLANNER_CONTRACTS: dict[str, LegacyDesktopPlannerContract] = {
+    "app_launch": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery", "desktop.app_control"),
+        ("desktop.list_apps", "app.open", "app.focus", "desktop.active_window"),
+    ),
+    "app_management": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery", "desktop.app_control"),
+        (
+            "desktop.list_apps",
+            "desktop.running_apps",
+            "app.show",
+            "app.quit",
+            "app.status",
+            "desktop.show_all_apps",
+        ),
+    ),
+    "app_new_item": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery", "desktop.ui_operation"),
+        (
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            "desktop.ui_elements",
+        ),
+    ),
+    "app_search": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery", "desktop.ui_operation"),
+        ("desktop.list_apps", "app.focus_and_safe_shortcut", "desktop.ui_elements"),
+    ),
+    "context_transfer": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery", "desktop.ui_operation", "desktop.app_control"),
+        (
+            "desktop.list_apps",
+            "desktop.safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            "app.focus",
+            "app.open",
+            "desktop.ui_elements",
+        ),
+    ),
+    "desktop_discovery": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery",),
+        (
+            "desktop.permissions",
+            "desktop.active_window",
+            "desktop.running_apps",
+            "desktop.list_apps",
+            "screen.capture",
+            "desktop.windows",
+        ),
+    ),
+    "desktop_shortcut": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery", "desktop.app_control", "desktop.ui_operation"),
+        (
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.submit_foreground",
+            "desktop.ui_elements",
+        ),
+    ),
+    "desktop_window": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery", "desktop.app_control", "desktop.ui_operation"),
+        (
+            "desktop.list_apps",
+            "app.focus",
+            "desktop.close_window",
+            "desktop.active_window",
+            "desktop.safe_shortcut",
+            "desktop.ui_elements",
+        ),
+    ),
+    "file_access": LegacyDesktopPlannerContract(
+        ("file_access",),
+        ("file.desktop_access",),
+        ("desktop.open_path", "desktop.reveal_path"),
+    ),
+    "file_search": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery", "desktop.app_control", "desktop.ui_operation"),
+        (
+            "desktop.list_apps",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.ui_elements",
+        ),
+    ),
+    "finder_location": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery", "desktop.ui_operation"),
+        (
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            "desktop.ui_elements",
+        ),
+    ),
+    "foreground_search": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.ui_operation",),
+        ("desktop.search_submit", "desktop.safe_shortcut", "desktop.safe_type_text"),
+    ),
+    "foreground_shortcut": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery", "desktop.ui_operation"),
+        (
+            "desktop.list_apps",
+            "app.open_and_safe_shortcut",
+            "app.focus_and_safe_shortcut",
+            "desktop.safe_shortcut",
+            "desktop.ui_elements",
+        ),
+    ),
+    "hotkey": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery", "desktop.ui_operation"),
+        (
+            "desktop.list_apps",
+            "desktop.safe_shortcut",
+            "app.focus_and_hotkey",
+            "app.open_and_hotkey",
+            "desktop.ui_elements",
+        ),
+    ),
+    "low_level_desktop": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery", "desktop.ui_operation"),
+        ("desktop.safe_click", "desktop.safe_type_text", "desktop.ui_elements"),
+    ),
+    "note_capture": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery", "desktop.ui_operation"),
+        ("desktop.safe_shortcut", "desktop.ui_elements"),
+    ),
+    "schedule_calendar": LegacyDesktopPlannerContract(
+        ("schedule",),
+        ("browser.research", "schedule.reminder"),
+        ("desktop.safe_shortcut", "desktop.list_apps", "app.open_and_safe_shortcut"),
+    ),
+    "schedule_reminder": LegacyDesktopPlannerContract(
+        ("schedule",),
+        ("browser.research", "schedule.reminder"),
+        ("desktop.safe_shortcut", "desktop.list_apps", "app.open_and_safe_shortcut"),
+    ),
+    "system_settings": LegacyDesktopPlannerContract(
+        ("system_control",),
+        ("system.control",),
+        ("system.settings_open",),
+    ),
+    "ui_targeting": LegacyDesktopPlannerContract(
+        ("desktop_operation",),
+        ("desktop.app_discovery", "desktop.ui_operation"),
+        ("desktop.list_apps", "desktop.inspect_app", "desktop.ui_elements"),
+    ),
+}
 
 
 MIGRATED_DAILY_DESKTOP_SAMPLES: tuple[LegacyDesktopMigrationSample, ...] = (
@@ -85,14 +258,72 @@ def migrated_daily_desktop_prompts() -> tuple[str, ...]:
     return tuple(sample.prompt for sample in MIGRATED_DAILY_DESKTOP_SAMPLES)
 
 
+def legacy_daily_desktop_cleanup_sample_contracts() -> tuple[dict[str, Any], ...]:
+    return tuple(_sample_contract(sample) for sample in MIGRATED_DAILY_DESKTOP_SAMPLES)
+
+
+def legacy_daily_desktop_cleanup_area_contracts() -> tuple[dict[str, Any], ...]:
+    area_counts: dict[str, int] = {}
+    for sample in MIGRATED_DAILY_DESKTOP_SAMPLES:
+        area_counts[sample.area] = area_counts.get(sample.area, 0) + 1
+    return tuple(
+        {
+            "area": area,
+            "sample_count": count,
+            "planner_intents": list(contract.planner_intents),
+            "planner_capabilities": list(contract.planner_capabilities),
+            "planner_tools": list(contract.planner_tools),
+        }
+        for area, count in sorted(area_counts.items())
+        for contract in (AREA_PLANNER_CONTRACTS[area],)
+    )
+
+
 def legacy_daily_desktop_cleanup_coverage() -> dict[str, Any]:
     areas: dict[str, int] = {}
     for sample in MIGRATED_DAILY_DESKTOP_SAMPLES:
         areas[sample.area] = areas.get(sample.area, 0) + 1
+    area_contracts = legacy_daily_desktop_cleanup_area_contracts()
+    sample_contracts = legacy_daily_desktop_cleanup_sample_contracts()
     return {
         "legacy_boundary": "legacy_daily_desktop_intent",
         "planner_owner": "runtime_planner",
         "total_samples": len(MIGRATED_DAILY_DESKTOP_SAMPLES),
         "areas": dict(sorted(areas.items())),
         "prompts": migrated_daily_desktop_prompts(),
+        "covered_intents": _sorted_unique(
+            intent
+            for contract in area_contracts
+            for intent in contract["planner_intents"]
+        ),
+        "covered_capabilities": _sorted_unique(
+            capability
+            for contract in area_contracts
+            for capability in contract["planner_capabilities"]
+        ),
+        "covered_tools": _sorted_unique(
+            tool
+            for contract in area_contracts
+            for tool in contract["planner_tools"]
+        ),
+        "area_contracts": area_contracts,
+        "sample_contracts": sample_contracts,
     }
+
+
+def _sample_contract(sample: LegacyDesktopMigrationSample) -> dict[str, Any]:
+    contract = AREA_PLANNER_CONTRACTS[sample.area]
+    return {
+        "prompt": sample.prompt,
+        "area": sample.area,
+        "planner_owner": sample.planner_owner,
+        "legacy_boundary": sample.legacy_boundary,
+        "cleanup_status": "planner_covered",
+        "planner_intents": list(contract.planner_intents),
+        "planner_capabilities": list(contract.planner_capabilities),
+        "planner_tools": list(contract.planner_tools),
+    }
+
+
+def _sorted_unique(values: Any) -> list[str]:
+    return sorted({str(value) for value in values if str(value)})

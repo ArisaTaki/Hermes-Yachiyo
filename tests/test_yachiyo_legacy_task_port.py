@@ -26,6 +26,7 @@ from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_tool_selection,
 )
 from apps.shell.yachiyo_agent.planner_projection import planner_enriched_chat_request
+from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
 
 
 def _recording_legacy_requests(
@@ -774,21 +775,40 @@ def test_runtime_planner_covers_migrated_desktop_samples_before_cleanup() -> Non
     legacy_calls: list[dict[str, Any]] = []
     prompts = migrated_daily_desktop_prompts()
     coverage = legacy_daily_desktop_cleanup_coverage()
+    sample_contracts = {
+        contract["prompt"]: contract
+        for contract in coverage["sample_contracts"]
+    }
+    planner = RuntimePlanner()
+    allowed_tools = daily_desktop_allowed_tools()
 
     assert coverage["legacy_boundary"] == "legacy_daily_desktop_intent"
     assert coverage["planner_owner"] == "runtime_planner"
     assert coverage["total_samples"] == len(prompts)
     assert "context_transfer" in coverage["areas"]
+    assert len(sample_contracts) == len(prompts)
+    assert "desktop_operation" in coverage["covered_intents"]
+    assert "desktop.app_discovery" in coverage["covered_capabilities"]
+    assert "desktop.list_apps" in coverage["covered_tools"]
 
     remaining_legacy_prompts: list[str] = []
     for prompt in prompts:
         selection = planner_first_direct_tool_selection(
             prompt,
-            daily_desktop_allowed_tools(),
+            allowed_tools,
             legacy_tool_requests=_recording_legacy_requests(legacy_calls),
         )
+        contract = sample_contracts[prompt]
+        decision = planner.decision(prompt, allowed_tools=allowed_tools)
+        selected_tools = set(selection.event_payload["selected_tools"])
+        contract_tools = set(contract["planner_tools"])
+        contract_capabilities = set(contract["planner_capabilities"])
         if selection.selected_source != "runtime_planner":
             remaining_legacy_prompts.append(prompt)
+        assert contract["cleanup_status"] == "planner_covered"
+        assert decision.selected_intent.kind in contract["planner_intents"]
+        assert set(decision.plan.tool_plan.required_capabilities).issubset(contract_capabilities)
+        assert selected_tools.issubset(contract_tools)
 
     assert remaining_legacy_prompts == []
     assert legacy_calls == []

@@ -283,9 +283,14 @@ function LegacyCleanupCoveragePanel({
   if (!coverage) return null;
   const areas = Object.entries(coverage.areas || {});
   const prompts = coverage.prompts || [];
+  const areaContracts = coverage.area_contracts || [];
+  const sampleContracts = coverage.sample_contracts || [];
   return (
     <section
       className="studio-tool-inspector-section studio-legacy-cleanup-coverage"
+      data-covered-capabilities={(coverage.covered_capabilities || []).join(',')}
+      data-covered-intents={(coverage.covered_intents || []).join(',')}
+      data-covered-tools={(coverage.covered_tools || []).join(',')}
       data-legacy-boundary={coverage.legacy_boundary || ''}
       data-planner-owner={coverage.planner_owner || ''}
       data-testid="studio-legacy-cleanup-coverage"
@@ -304,12 +309,32 @@ function LegacyCleanupCoveragePanel({
           <small>Areas</small>
           <strong>{areas.length || 'None'}</strong>
         </span>
+        <span>
+          <small>Planner Contracts</small>
+          <strong>{sampleContracts.length || areaContracts.length || 'None'}</strong>
+        </span>
       </div>
       {areas.length ? (
         <div className="studio-tool-pill-row" data-testid="studio-legacy-cleanup-areas">
           {areas.slice(0, 10).map(([area, count]) => (
             <span className="studio-tool-permission" data-cleanup-area={area} key={area}>
               {area} · {count}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {areaContracts.length ? (
+        <div className="studio-planner-step-list compact" data-testid="studio-legacy-cleanup-contracts">
+          {areaContracts.slice(0, 5).map((contract) => (
+            <span
+              className="studio-tool-empty"
+              data-cleanup-contract-area={contract.area}
+              data-cleanup-contract-capabilities={(contract.planner_capabilities || []).join(',')}
+              data-cleanup-contract-intents={(contract.planner_intents || []).join(',')}
+              data-cleanup-contract-tools={(contract.planner_tools || []).join(',')}
+              key={contract.area}
+            >
+              {contract.area} · {(contract.planner_intents || []).join(',') || 'planner'}
             </span>
           ))}
         </div>

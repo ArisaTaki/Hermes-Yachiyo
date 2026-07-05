@@ -182,12 +182,36 @@ class UpdateRestrictedToolPluginRequest(_PublicSnapshot):
     enabled: bool | None = None
 
 
+class LegacyCleanupSampleContractSnapshot(_PublicSnapshot):
+    prompt: str
+    area: str
+    planner_owner: str = "runtime_planner"
+    legacy_boundary: str = "legacy_daily_desktop_intent"
+    cleanup_status: str = "planner_covered"
+    planner_intents: list[str] = Field(default_factory=list)
+    planner_capabilities: list[str] = Field(default_factory=list)
+    planner_tools: list[str] = Field(default_factory=list)
+
+
+class LegacyCleanupAreaContractSnapshot(_PublicSnapshot):
+    area: str
+    sample_count: int = 0
+    planner_intents: list[str] = Field(default_factory=list)
+    planner_capabilities: list[str] = Field(default_factory=list)
+    planner_tools: list[str] = Field(default_factory=list)
+
+
 class LegacyCleanupCoverageSnapshot(_PublicSnapshot):
     legacy_boundary: str = "legacy_daily_desktop_intent"
     planner_owner: str = "runtime_planner"
     total_samples: int = 0
     areas: dict[str, int] = Field(default_factory=dict)
     prompts: list[str] = Field(default_factory=list)
+    covered_intents: list[str] = Field(default_factory=list)
+    covered_capabilities: list[str] = Field(default_factory=list)
+    covered_tools: list[str] = Field(default_factory=list)
+    area_contracts: list[LegacyCleanupAreaContractSnapshot] = Field(default_factory=list)
+    sample_contracts: list[LegacyCleanupSampleContractSnapshot] = Field(default_factory=list)
 
 
 class ToolCatalogSnapshot(_PublicSnapshot):

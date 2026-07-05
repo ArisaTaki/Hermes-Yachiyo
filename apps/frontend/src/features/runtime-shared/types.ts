@@ -104,6 +104,30 @@ export type LegacyCleanupCoverageSnapshot = {
   total_samples?: number;
   areas?: Record<string, number>;
   prompts?: string[];
+  covered_intents?: string[];
+  covered_capabilities?: string[];
+  covered_tools?: string[];
+  area_contracts?: LegacyCleanupAreaContractSnapshot[];
+  sample_contracts?: LegacyCleanupSampleContractSnapshot[];
+};
+
+export type LegacyCleanupAreaContractSnapshot = {
+  area: string;
+  sample_count?: number;
+  planner_intents?: string[];
+  planner_capabilities?: string[];
+  planner_tools?: string[];
+};
+
+export type LegacyCleanupSampleContractSnapshot = {
+  prompt: string;
+  area: string;
+  planner_owner?: string;
+  legacy_boundary?: string;
+  cleanup_status?: string;
+  planner_intents?: string[];
+  planner_capabilities?: string[];
+  planner_tools?: string[];
 };
 
 export type ToolCatalogSnapshot = {

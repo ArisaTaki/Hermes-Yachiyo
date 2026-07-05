@@ -838,6 +838,11 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert tool_catalog.legacy_cleanup_coverage.planner_owner == "runtime_planner"
     assert tool_catalog.legacy_cleanup_coverage.total_samples >= 57
     assert "app_launch" in tool_catalog.legacy_cleanup_coverage.areas
+    assert "desktop_operation" in tool_catalog.legacy_cleanup_coverage.covered_intents
+    assert "desktop.app_discovery" in tool_catalog.legacy_cleanup_coverage.covered_capabilities
+    assert "desktop.list_apps" in tool_catalog.legacy_cleanup_coverage.covered_tools
+    assert tool_catalog.legacy_cleanup_coverage.area_contracts[0].planner_tools
+    assert tool_catalog.legacy_cleanup_coverage.sample_contracts[0].cleanup_status == "planner_covered"
     assert restricted_plugins[0].plugin_id == "notes"
     assert installed_plugin.plugin_id == "desk"
     assert installed_plugin.enabled is True
