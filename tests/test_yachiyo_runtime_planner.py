@@ -313,6 +313,7 @@ def test_task_intent_router_covers_agent_work_domains() -> None:
             ["file.workspace_read", "terminal.execution", "artifact.write"],
         ),
         ("根据当前剪贴板写一份周报报告", "report_generation", ["artifact.write"]),
+        ("创建一份竞品分析报告，保存成 markdown", "report_generation", ["artifact.write"]),
         ("Summarize launch risk.", "report_generation", ["artifact.write"]),
         ("调研 https://example.com 的最新信息", "web_research", ["browser.research"]),
         ("整理 Downloads 里的 PDF 文件", "file_organization", ["file.organization"]),

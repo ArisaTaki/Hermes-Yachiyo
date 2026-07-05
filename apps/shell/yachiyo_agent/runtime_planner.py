@@ -1687,6 +1687,7 @@ class TaskIntentRouter:
         clipboard_hint = clipboard_operation_hint(text)
         transform_target = _dynamic_context_transform_target_hint(text)
         document_artifact_transform = _looks_like_document_artifact_transform_request(text)
+        standalone_report_artifact = _looks_like_standalone_report_artifact_request(text)
         plain_app_context_transfer = _app_scoped_dynamic_context_ui_transfer_hint(
             text,
             _app_name_hint(text),
@@ -1716,6 +1717,7 @@ class TaskIntentRouter:
             or (
                 _looks_like_ui_operation(text)
                 and not _looks_like_context_artifact_request(text)
+                and not standalone_report_artifact
                 and not transform_target
             )
         ):
@@ -17233,6 +17235,55 @@ def _looks_like_context_artifact_request(text: str) -> bool:
             "日报",
             "简报",
         ],
+    )
+
+
+def _looks_like_standalone_report_artifact_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if not _contains_any(
+        value,
+        [
+            "report",
+            "summary",
+            "brief",
+            "document",
+            "artifact",
+            "markdown",
+            "md",
+            "报告",
+            "总结",
+            "摘要",
+            "简报",
+            "文档",
+            "产物",
+            "分析报告",
+        ],
+    ):
+        return False
+    return bool(
+        _contains_any(
+            value,
+            [
+                "create",
+                "make",
+                "write",
+                "save",
+                "export",
+                "output",
+                "generate",
+                "创建",
+                "新建",
+                "生成",
+                "写",
+                "保存",
+                "输出",
+                "导出",
+                "整理成",
+            ],
+        )
+        or _markdown_marker_is_output_format(value)
     )
 
 
