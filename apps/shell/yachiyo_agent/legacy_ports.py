@@ -826,9 +826,6 @@ class LegacyChatTaskStarter:
                     selected_requests,
                     allowed_entrypoint_tools,
                 )
-            direct_tool_requests = _drop_nonblocking_trailing_verify_requests(
-                direct_tool_requests
-            )
             if direct_tool_requests and direct_tool_selection_payload:
                 direct_tool_selection_payload = _selection_payload_with_selected_requests(
                     direct_tool_selection_payload,
@@ -1777,7 +1774,7 @@ def _safe_runtime_planner_tool_requests(
             prompt,
             allowed_tools,
             metadata=metadata,
-        )
+        ) or list(selected_requests)
         raw_approval_sequence = _runtime_planner_direct_approval_sequence_requests(
             requests,
             allowed_tools,
@@ -1814,7 +1811,7 @@ def _safe_runtime_planner_tool_requests(
             prompt,
             allowed_tools,
             metadata=metadata,
-        )
+        ) or list(selected_requests)
         approval_sequence = _runtime_planner_direct_approval_sequence_requests(
             requests,
             allowed_tools,
@@ -1843,7 +1840,7 @@ def _safe_runtime_planner_tool_requests(
     requests = _drop_legacy_open_then_plain_find_submit(prompt, requests)
     execution_requests = planner_execution_tool_requests(requests, allowed_tools) or requests
     execution_requests = _drop_data_analysis_prepare_app_requests(execution_requests)
-    return _drop_nonblocking_trailing_verify_requests(execution_requests)
+    return execution_requests
 
 
 def _runtime_planner_direct_approval_sequence_requests(
@@ -2078,7 +2075,7 @@ def _safe_runtime_execution_envelope_requests(
         if _has_explicit_hotkey_safe_shortcut(prompt, requests, allowed_tools):
             continue
         requests = _split_redundant_app_safe_shortcut_requests(requests)
-        return _drop_nonblocking_trailing_verify_requests(requests)
+        return requests
     return []
 
 

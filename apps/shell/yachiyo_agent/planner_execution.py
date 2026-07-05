@@ -1584,7 +1584,12 @@ def planner_tool_requests_for_decision(
     return planner_execution_tool_requests(requests, allowed) or requests
 
 
-def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+def _tool_requests_for_decision(
+    decision: Any,
+    allowed: set[str],
+    *,
+    allow_unavailable_context: bool = False,
+) -> list[dict[str, Any]]:
     if decision.selected_intent.kind == "media_playback":
         return _media_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "data_analysis":
@@ -1592,7 +1597,11 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
     if decision.selected_intent.kind == "system_control":
         return _system_tool_requests(decision.selected_intent.inputs, allowed)
     if decision.selected_intent.kind == "web_research":
-        return _web_tool_requests(decision, allowed)
+        return _web_tool_requests(
+            decision,
+            allowed,
+            allow_unavailable_context=allow_unavailable_context,
+        )
     if decision.selected_intent.kind == "report_generation":
         if str(decision.selected_intent.inputs.get("context_source") or "").strip():
             return _context_source_tool_requests(
@@ -1600,6 +1609,7 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
                 allowed,
                 step_ids=("copy-selected-report-context", "read-report-context"),
                 planning_reason="planner_prefetch_report_context",
+                allow_unavailable=allow_unavailable_context,
             )
         return _context_prefetch_tool_requests(
             decision,
@@ -1610,6 +1620,7 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
                 "gather-context",
             ),
             planning_reason="planner_prefetch_report_context",
+            allow_unavailable=allow_unavailable_context,
         )
     if decision.selected_intent.kind == "code_task":
         return _code_task_tool_requests(decision, allowed)
@@ -1619,6 +1630,7 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
             allowed,
             step_ids=("inspect-file-scope",),
             planning_reason="planner_prefetch_file_scope",
+            allow_unavailable=allow_unavailable_context,
         )
     if decision.selected_intent.kind == "file_access":
         return _file_access_tool_requests(decision.selected_intent.inputs, allowed)
@@ -1637,6 +1649,7 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
             allowed,
             step_ids=("copy-selected-communication-context", "read-communication-context"),
             planning_reason="planner_prefetch_communication_context",
+            allow_unavailable=allow_unavailable_context,
         )
         if context_requests:
             return context_requests
@@ -1645,9 +1658,14 @@ def _tool_requests_for_decision(decision: Any, allowed: set[str]) -> list[dict[s
             allowed,
             step_ids=("discover_apps-desktop-state", "discover-communication-surface"),
             planning_reason="planner_prefetch_communication_surface",
+            allow_unavailable=allow_unavailable_context,
         )
     if decision.selected_intent.kind == "information_capture":
-        return _information_capture_tool_requests(decision, allowed)
+        return _information_capture_tool_requests(
+            decision,
+            allowed,
+            allow_unavailable_context=allow_unavailable_context,
+        )
     if decision.selected_intent.kind == "schedule":
         return _schedule_tool_requests(decision, allowed)
     if decision.selected_intent.kind == "clipboard_operation":
@@ -1671,9 +1689,17 @@ def _direct_tool_requests_for_decision(
         direct_requests = _direct_schedule_context_app_item_tool_requests(decision, allowed)
         if direct_requests:
             return direct_requests
-        return _tool_requests_for_decision(decision, allowed)
+        return _tool_requests_for_decision(
+            decision,
+            allowed,
+            allow_unavailable_context=_request_execution_context_enabled(metadata),
+        )
     if decision.selected_intent.kind != "desktop_operation":
-        return _tool_requests_for_decision(decision, allowed)
+        return _tool_requests_for_decision(
+            decision,
+            allowed,
+            allow_unavailable_context=_request_execution_context_enabled(metadata),
+        )
     return _direct_desktop_tool_requests(
         decision,
         allowed,
@@ -5172,7 +5198,12 @@ def _direct_app_search_result_context_tool_requests(
     return requests
 
 
-def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+def _web_tool_requests(
+    decision: Any,
+    allowed: set[str],
+    *,
+    allow_unavailable_context: bool = False,
+) -> list[dict[str, Any]]:
     browser_action = str(decision.selected_intent.inputs.get("browser_action") or "").strip()
     prepare_requests = _web_browser_prepare_requests(decision, allowed)
     if browser_action == "find_current_page":
@@ -5304,7 +5335,11 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
                 requests.append(post_request)
         return requests
     if _dynamic_context_browser_action(decision):
-        return _dynamic_context_browser_tool_requests(decision, allowed)
+        return _dynamic_context_browser_tool_requests(
+            decision,
+            allowed,
+            allow_unavailable=allow_unavailable_context,
+        )
     if str(decision.selected_intent.inputs.get("context_source") or "").strip() and not str(
         decision.selected_intent.inputs.get("url_hint") or ""
     ).strip():
@@ -5313,6 +5348,7 @@ def _web_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]
             allowed,
             step_ids=("copy-selected-web-context", "read-web-context"),
             planning_reason="planner_prefetch_web_context",
+            allow_unavailable=allow_unavailable_context,
         )
     url = str(decision.selected_intent.inputs.get("url_hint") or "").strip()
     if browser_action in {"current_page", "extract_text", "screenshot"} and url:
@@ -5873,7 +5909,12 @@ def _dynamic_context_browser_action(decision: Any) -> bool:
     return browser_action in {"open_search", "open_url"} and source in {"selection", "clipboard"} and not url_hint
 
 
-def _dynamic_context_browser_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+def _dynamic_context_browser_tool_requests(
+    decision: Any,
+    allowed: set[str],
+    *,
+    allow_unavailable: bool = False,
+) -> list[dict[str, Any]]:
     source = str(decision.selected_intent.inputs.get("context_source") or "").strip()
     if source == "selection":
         required_step_ids = (
@@ -5899,7 +5940,7 @@ def _dynamic_context_browser_tool_requests(decision: Any, allowed: set[str]) -> 
     for step_id in required_step_ids:
         step = steps_by_id.get(step_id)
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
-        if not _step_available(step):
+        if not allow_unavailable and not _step_available(step):
             return []
         if not tool_name or tool_name not in allowed:
             return []
@@ -5921,6 +5962,7 @@ def _context_prefetch_tool_requests(
     *,
     step_ids: tuple[str, ...],
     planning_reason: str,
+    allow_unavailable: bool = False,
 ) -> list[dict[str, Any]]:
     for step_id in step_ids:
         step = next(
@@ -5935,6 +5977,7 @@ def _context_prefetch_tool_requests(
             step,
             allowed,
             planning_reason=planning_reason,
+            allow_unavailable=allow_unavailable,
         )
         if request:
             return [request]
@@ -5946,9 +5989,10 @@ def _context_prefetch_request_for_step(
     allowed: set[str],
     *,
     planning_reason: str,
+    allow_unavailable: bool = False,
 ) -> dict[str, Any] | None:
     tool_name = str(getattr(step, "tool_name", "") or "").strip()
-    if not _step_available(step):
+    if not allow_unavailable and not _step_available(step):
         return None
     if tool_name not in allowed:
         return None
@@ -6148,7 +6192,12 @@ def _direct_context_clipboard_copy_requests(
     return None
 
 
-def _information_capture_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, Any]]:
+def _information_capture_tool_requests(
+    decision: Any,
+    allowed: set[str],
+    *,
+    allow_unavailable_context: bool = False,
+) -> list[dict[str, Any]]:
     artifact_request = _information_capture_artifact_request(decision, allowed)
     if artifact_request:
         return [artifact_request]
@@ -6159,6 +6208,7 @@ def _information_capture_tool_requests(decision: Any, allowed: set[str]) -> list
             allowed,
             step_ids=("copy-selected-note-context", "read-note-context"),
             planning_reason="planner_prefetch_information_capture_context",
+            allow_unavailable=allow_unavailable_context,
         )
     return [
         _request(
@@ -6206,6 +6256,7 @@ def _context_source_tool_requests(
     *,
     step_ids: tuple[str, ...],
     planning_reason: str,
+    allow_unavailable: bool = False,
 ) -> list[dict[str, Any]]:
     requests: list[dict[str, Any]] = []
     for step_id in step_ids:
@@ -6221,6 +6272,7 @@ def _context_source_tool_requests(
             step,
             allowed,
             planning_reason=planning_reason,
+            allow_unavailable=allow_unavailable,
         )
         if request:
             request.pop("continue_to_model", None)
