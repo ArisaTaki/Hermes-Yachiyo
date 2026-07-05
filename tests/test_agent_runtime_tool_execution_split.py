@@ -2388,9 +2388,14 @@ def test_runtime_tool_request_runner_keeps_readiness_blocker_after_failed_recove
     )
 
     assert calls == ["desktop.inspect_app", "app.open"]
-    assert timeline[-1]["event"] == "agent.tool.skipped"
-    assert timeline[-1]["detail"] == "app.open_and_click_ui_element"
-    assert timeline[-1]["result"]["blocked_by_runtime_readiness"] is True
+    skipped = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.tool.skipped"
+        and event["detail"] == "app.open_and_click_ui_element"
+    )
+    assert skipped["result"]["blocked_by_runtime_readiness"] is True
+    assert any(event["event"] == "agent.replan.requested" for event in timeline)
     assert budget.claims == [("app.open_and_click_ui_element", False)]
 
 
@@ -3096,6 +3101,8 @@ def test_runtime_tool_request_runner_resolves_selected_app_for_desktop_windows()
                         "match_score": 100,
                         "match_confidence": "high",
                         "match_reason": "exact_name",
+                        "matched_name": "Arc Browser",
+                        "matched_name_source": "bundle_metadata",
                     },
                 },
             }
@@ -3148,6 +3155,8 @@ def test_runtime_tool_request_runner_resolves_selected_app_for_desktop_windows()
         "app_resolution_score": "100",
         "app_resolution_confidence": "high",
         "app_resolution_reason": "exact_name",
+        "app_resolution_matched_name": "Arc Browser",
+        "app_resolution_matched_name_source": "bundle_metadata",
     }
     assert [
         event for event in timeline if event["event"] == "agent.tool.input_resolved"
@@ -3915,6 +3924,8 @@ def test_runtime_tool_request_runner_records_best_match_resolution_evidence() ->
                         "match_score": 100,
                         "match_confidence": "high",
                         "match_reason": "exact_name",
+                        "matched_name": "Arc Browser",
+                        "matched_name_source": "bundle_metadata",
                     },
                 },
             }
@@ -3957,6 +3968,8 @@ def test_runtime_tool_request_runner_records_best_match_resolution_evidence() ->
     assert resolution["app_resolution_score"] == "100"
     assert resolution["app_resolution_confidence"] == "high"
     assert resolution["app_resolution_reason"] == "exact_name"
+    assert resolution["app_resolution_matched_name"] == "Arc Browser"
+    assert resolution["app_resolution_matched_name_source"] == "bundle_metadata"
     assert resolution["resolved_app_path"] == "/Applications/Arc Browser.app"
 
 

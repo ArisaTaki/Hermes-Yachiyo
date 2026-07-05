@@ -438,6 +438,9 @@ def _best_match_from_list_apps_result(result: dict[str, Any]) -> dict[str, Any] 
                 "match_score": resolution.get("app_resolution_score"),
                 "match_confidence": resolution.get("app_resolution_confidence"),
                 "match_reason": resolution.get("app_resolution_reason"),
+                "matched_name": resolution.get("app_resolution_matched_name"),
+                "matched_name_source": resolution.get("app_resolution_matched_name_source"),
+                "matched_capability": resolution.get("app_resolution_matched_capability"),
             }
     return None
 
@@ -666,6 +669,9 @@ def _tool_request_existing_app_name_resolution(
             "app_resolution_score",
             "app_resolution_confidence",
             "app_resolution_reason",
+            "app_resolution_matched_name",
+            "app_resolution_matched_name_source",
+            "app_resolution_matched_capability",
             "resolved_app_path",
             "tool",
         }
@@ -1452,6 +1458,27 @@ def _discovered_app_best_match_evidence(app: Mapping[str, Any]) -> dict[str, str
     ).strip()
     if reason:
         evidence["app_resolution_reason"] = reason
+    matched_name = str(
+        app.get("matched_name")
+        or app.get("app_resolution_matched_name")
+        or ""
+    ).strip()
+    if matched_name:
+        evidence["app_resolution_matched_name"] = matched_name
+    matched_name_source = str(
+        app.get("matched_name_source")
+        or app.get("app_resolution_matched_name_source")
+        or ""
+    ).strip()
+    if matched_name_source:
+        evidence["app_resolution_matched_name_source"] = matched_name_source
+    matched_capability = str(
+        app.get("matched_capability")
+        or app.get("app_resolution_matched_capability")
+        or ""
+    ).strip()
+    if matched_capability:
+        evidence["app_resolution_matched_capability"] = matched_capability
     path = _app_candidate_path(app)
     if path:
         evidence["resolved_app_path"] = path
@@ -1479,6 +1506,9 @@ def _input_preview_with_app_name_resolution(
         "app_resolution_score",
         "app_resolution_confidence",
         "app_resolution_reason",
+        "app_resolution_matched_name",
+        "app_resolution_matched_name_source",
+        "app_resolution_matched_capability",
         "resolved_app_path",
     ):
         value = str(resolution.get(key) or "").strip()
@@ -1504,6 +1534,9 @@ def _tool_event_input_preview(tool_name: str, input_preview: Any) -> Any:
         "app_resolution_score",
         "app_resolution_confidence",
         "app_resolution_reason",
+        "app_resolution_matched_name",
+        "app_resolution_matched_name_source",
+        "app_resolution_matched_capability",
     }
     if input_preview and all(key in trace_scope_keys for key in input_preview):
         return {}
