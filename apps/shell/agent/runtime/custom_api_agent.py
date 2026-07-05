@@ -718,6 +718,60 @@ class RuntimeCustomApiAgentLoop:
                                 tool_timeline_start=auto_tool_timeline_start,
                                 run_id=run_id,
                             )
+                            auto_replan_deferred_continuation_requests = (
+                                _auto_replan_recovery_deferred_continuation_requests(
+                                    auto_replan_recovery_requests,
+                                    allowed_tools,
+                                    timeline,
+                                    tool_timeline_start=auto_tool_timeline_start,
+                                )
+                            )
+                            if auto_replan_deferred_continuation_requests:
+                                auto_replan_approval_requests = [
+                                    *auto_replan_approval_requests,
+                                    *auto_replan_deferred_continuation_requests,
+                                ]
+                                self._record_auto_model_followup_app_write_plan(
+                                    auto_replan_deferred_continuation_requests,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                )
+                                self._record_desktop_permission_preflight(
+                                    auto_replan_deferred_continuation_requests,
+                                    broker,
+                                    timeline=timeline,
+                                    run_id=run_id,
+                                )
+                                self._record_desktop_tool_policy_decisions(
+                                    auto_replan_deferred_continuation_requests,
+                                    allowed_tools=allowed_tools,
+                                    agent=agent,
+                                    run_id=run_id,
+                                )
+                                deferred_continuation_timeline_start = len(timeline)
+                                self._run_tool_requests(
+                                    auto_replan_deferred_continuation_requests,
+                                    allowed_tools,
+                                    broker,
+                                    messages,
+                                    timeline,
+                                    artifacts,
+                                    next_iteration=start_iteration,
+                                    run_id=run_id,
+                                    budget=budget,
+                                )
+                                self._record_runtime_planner_task_progress_events(
+                                    runtime_planner_decision,
+                                    timeline=timeline,
+                                    tool_timeline_start=deferred_continuation_timeline_start,
+                                    run_id=run_id,
+                                )
+                                auto_replan_recovery_requests = [
+                                    *_tool_requests_without_model_followup_and_deferred_continuation(
+                                        auto_replan_recovery_requests
+                                    ),
+                                    *auto_replan_deferred_continuation_requests,
+                                ]
                             auto_replan_continuation_requests = (
                                 _auto_replan_discovered_app_continuation_requests(
                                     replan_payloads,
@@ -14157,6 +14211,15 @@ def _tool_requests_without_model_followup(
         item = dict(request)
         item.pop("continue_to_model", None)
         cleaned.append(item)
+    return cleaned
+
+
+def _tool_requests_without_model_followup_and_deferred_continuation(
+    requests: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    cleaned = _tool_requests_without_model_followup(requests)
+    for item in cleaned:
+        item.pop("deferred_continuation", None)
     return cleaned
 
 

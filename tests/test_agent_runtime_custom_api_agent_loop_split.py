@@ -276,12 +276,15 @@ def test_auto_data_analysis_from_workspace_discovery_selects_all_files() -> None
 
 def _private_runtime_loop(
     *,
+    allowed_tools: list[str] | None = None,
     append_run_event=None,
     run_tool_requests=None,
 ) -> RuntimeCustomApiAgentLoop:
     return RuntimeCustomApiAgentLoop(
         agent_model_config_private=lambda _agent: {},
-        compile_agent_runtime=lambda _agent: {"tool_policy": {"allowed_tools": []}},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": list(allowed_tools or [])}
+        },
         run_budget=lambda _run_id, _timeline_value: FakeBudget(),
         check_context_budget=lambda _budget, _messages: None,
         tool_schemas=lambda _allowed_tools: [],
@@ -1212,6 +1215,154 @@ def test_auto_runtime_planner_requests_execute_safe_deferred_replan_continuation
     ]
     assert tool_calls[1]["replan_request_id"] == "replan-focus"
     assert tool_calls[1]["planning_reason"] == "planner_replan_deferred_continuation"
+
+
+def test_direct_runtime_replan_recovery_executes_safe_deferred_continuation() -> None:
+    tool_runs: list[list[dict[str, Any]]] = []
+    model_calls: list[Any] = []
+
+    def run_tool_requests(
+        requests: list[dict[str, Any]],
+        _allowed_tools: list[str],
+        _broker: Any,
+        _messages: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        _artifacts: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> None:
+        tool_runs.append([dict(request) for request in requests])
+        for request in requests:
+            tool = str(request.get("tool") or "")
+            payload = request.get("input") if isinstance(request.get("input"), dict) else {}
+            if tool == "desktop.active_window" and not request.get("replan_request_id"):
+                timeline.append(
+                    _timeline(
+                        "agent.tool.call",
+                        tool,
+                        input_preview=payload,
+                        result={
+                            "ok": False,
+                            "verification_failed": True,
+                            "error": "foreground_focus_unverified",
+                        },
+                    )
+                )
+                timeline.append(
+                    _timeline(
+                        "agent.replan.requested",
+                        "Runtime requested a safe app focus recovery.",
+                        payload={
+                            "request_id": "runtime-replan:focus",
+                            "trigger": "verification_failed",
+                            "source": "runtime_tool_request_runner",
+                            "source_step_id": "verify-foreground",
+                            "source_tool_name": "desktop.active_window",
+                            "target_capability_id": "desktop.app_operation",
+                            "failure_detail": "foreground_focus_unverified",
+                            "metadata": {
+                                "recovery_actions": [
+                                    {
+                                        "action_id": "action-open-pixelforge",
+                                        "label": "重新打开应用",
+                                        "tool": "app.open",
+                                        "input": {"app_name": "PixelForge"},
+                                        "risk_level": "low",
+                                        "approval_required": False,
+                                        "metadata": {
+                                            "runtime_replan_auto_start_eligible": True,
+                                            "runtime_replan_auto_start_blockers": [],
+                                        },
+                                        "deferred_continuation": [
+                                            {
+                                                "tool": "desktop.active_window",
+                                                "input": {},
+                                                "verification_target": {
+                                                    "app_name": "PixelForge"
+                                                },
+                                            }
+                                        ],
+                                    }
+                                ]
+                            },
+                        },
+                    )
+                )
+                continue
+            if tool == "app.open":
+                timeline.append(
+                    _timeline(
+                        "agent.tool.call",
+                        tool,
+                        input_preview=payload,
+                        result={"ok": True, "app_name": "PixelForge"},
+                        replan_request_id=str(request.get("replan_request_id") or ""),
+                    )
+                )
+                continue
+            if tool == "desktop.active_window":
+                timeline.append(
+                    _timeline(
+                        "agent.tool.call",
+                        tool,
+                        input_preview=payload,
+                        result={
+                            "ok": True,
+                            "data": {
+                                "app_name": "PixelForge",
+                                "title": "PixelForge",
+                            },
+                        },
+                        replan_request_id=str(request.get("replan_request_id") or ""),
+                        planning_reason=str(request.get("planning_reason") or ""),
+                    )
+                )
+                continue
+            raise AssertionError(f"unexpected tool: {tool}")
+
+    loop = _private_runtime_loop(
+        allowed_tools=["desktop.active_window", "app.open"],
+        run_tool_requests=run_tool_requests,
+    )
+    loop._call_model = lambda *_args, **_kwargs: model_calls.append(True) or {
+        "role": "assistant",
+        "content": "unexpected model fallback",
+    }
+    timeline: list[dict[str, Any]] = []
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "打开 PixelForge",
+        broker={"broker": True},
+        timeline=timeline,
+        artifacts=[],
+        messages=[{"role": "user", "content": "打开 PixelForge"}],
+        direct_tool_requests=[
+            {
+                "tool": "desktop.active_window",
+                "input": {},
+                "source": "runtime_planner",
+                "planning_reason": "verify_foreground_before_recovery",
+            }
+        ],
+        run_id="run-focus",
+    )
+
+    assert result == "已打开 PixelForge。"
+    assert model_calls == []
+    assert [[request["tool"] for request in batch] for batch in tool_runs] == [
+        ["desktop.active_window"],
+        ["app.open"],
+        ["desktop.active_window"],
+    ]
+    continuation_request = tool_runs[2][0]
+    assert continuation_request["replan_request_id"] == "runtime-replan:focus"
+    assert continuation_request["replan_recovery_action_id"] == "action-open-pixelforge"
+    assert continuation_request["planning_reason"] == "planner_replan_deferred_continuation"
+    completed = next(
+        event for event in timeline if event["event"] == "agent.desktop.intent_completed"
+    )
+    assert completed["tools"] == ["app.open", "desktop.active_window"]
+    assert completed["verification_status"] == "verified"
 
 
 def test_direct_daily_desktop_result_includes_safe_replan_deferred_verification() -> None:
