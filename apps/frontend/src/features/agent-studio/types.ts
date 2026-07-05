@@ -194,6 +194,10 @@ export type RunSpec = {
   user_goal?: string;
   result?: string;
   runtime_debug?: RuntimeDebugSummarySnapshot | null;
+  runtime_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
+  task_core?: TaskCoreSnapshot | null;
+  task_progress?: TaskProgressSummarySnapshot | null;
+  replan_recoveries?: ReplanRecoverySnapshot[];
   timeline?: Array<Record<string, unknown>>;
   artifacts?: Array<Record<string, unknown>>;
   pending_approval?: {

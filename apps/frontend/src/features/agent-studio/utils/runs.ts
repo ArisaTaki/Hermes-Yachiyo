@@ -151,6 +151,10 @@ export function publicRunTimelineToRunSpec(
     user_goal: (fallback.userGoal ?? workflowObjective) || legacyUserGoal || snapshot.title || '',
     result: finalAnswer || legacyResult || undefined,
     runtime_debug: snapshot.runtime_debug || undefined,
+    runtime_execution_envelope: snapshot.runtime_execution_envelope || undefined,
+    task_core: snapshot.task_core || undefined,
+    task_progress: snapshot.task_progress || undefined,
+    replan_recoveries: snapshot.replan_recoveries || [],
     timeline: (snapshot.events || []).map(publicRunEventToTimelineEvent),
     artifacts: publicArtifactsOrLegacy(snapshot.artifacts, undefined),
     pending_approval: pendingApproval

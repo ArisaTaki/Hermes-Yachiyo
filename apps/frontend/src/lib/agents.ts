@@ -202,6 +202,11 @@ export type RunSpec = {
   status: string;
   user_goal?: string;
   result?: string;
+  runtime_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
+  runtime_debug?: RuntimeDebugSummarySnapshot | null;
+  task_core?: TaskCoreSnapshot | null;
+  task_progress?: TaskProgressSummarySnapshot | null;
+  replan_recoveries?: ReplanRecoverySnapshot[];
   timeline?: Array<Record<string, unknown>>;
   artifacts?: Array<Record<string, unknown>>;
   pending_approval?: {

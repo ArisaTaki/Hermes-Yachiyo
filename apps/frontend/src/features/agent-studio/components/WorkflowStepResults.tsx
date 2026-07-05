@@ -1,7 +1,9 @@
 import { ExpandableRuntimeContent as RunExpandableContent } from '../../runtime-shared/components/ExpandableRuntimeContent';
 import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
+import { RuntimeExecutionEnvelopeSummary } from '../../runtime-shared/components/RuntimeExecutionEnvelopeSummary';
 import type { RecoveryRunProvenanceSnapshot, RerunRunRequest } from '../../yachiyo-studio/types';
 import type { RunSpec } from '../types';
+import { TaskCoreInspector, TaskProgressInspector } from './PlannerTraceInspector';
 import type { RunDetailWorkflowStepRef } from './runDetailTypes';
 
 type WorkflowStepResultsProps = {
@@ -62,6 +64,15 @@ export function WorkflowStepResults({
           const canRerunBranch = Boolean(step.nodeId && step.selectedTargetNodeId);
           const recoverySource = childRun?.recovery_source || null;
           const recoverySourceSummary = workflowStepRecoverySourceSummary(recoverySource);
+          const childRuntimeEnvelope = childRun?.runtime_execution_envelope || null;
+          const childTaskCore = childRun?.task_core || null;
+          const childTaskProgress = childRun?.task_progress || null;
+          const childReplanRecoveries = childRun?.replan_recoveries || [];
+          const childHasTaskWorkspace = Boolean(
+            childTaskCore
+            || childTaskProgress
+            || childReplanRecoveries.length,
+          );
           return (
             <article
               className={`workflow-child-result workflow-step-result ${step.kind}`}
@@ -70,6 +81,7 @@ export function WorkflowStepResults({
               data-recovery-source-run-id={recoverySource?.source_run_id || ''}
               data-recovery-tool={recoverySource?.recovery_tool || ''}
               data-testid="agent-run-detail-workflow-step"
+              data-task-progress-status={childTaskProgress?.status || ''}
               data-workflow-step-key={step.key}
               data-workflow-step-kind={step.kind}
               data-workflow-step-node-id={step.nodeId || ''}
@@ -184,6 +196,42 @@ export function WorkflowStepResults({
                 summary={childRun?.runtime_debug}
                 testId="agent-run-detail-workflow-step-runtime-debug"
               />
+              <RuntimeExecutionEnvelopeSummary
+                className="workflow-step-runtime-execution"
+                debugPillsTestId="agent-run-detail-workflow-step-runtime-execution-debug-pills"
+                envelope={childRuntimeEnvelope}
+                requestLimit={4}
+                requestListTestId="agent-run-detail-workflow-step-runtime-execution-requests"
+                requestTestId="agent-run-detail-workflow-step-runtime-execution-request"
+                showRequests
+                sourceLabel={step.childRunId ? `Child run ${step.childRunId} runtime execution` : 'Workflow step runtime execution'}
+                testId="agent-run-detail-workflow-step-runtime-execution-envelope"
+                title="Step Runtime Execution"
+                variant="studio"
+              />
+              {childHasTaskWorkspace ? (
+                <section
+                  className="group-run-runtime-section workflow-step-task-workspace"
+                  data-core-id={childTaskCore?.core_id || ''}
+                  data-task-progress-status={childTaskProgress?.status || ''}
+                  data-testid="agent-run-detail-workflow-step-task-workspace"
+                  data-workspace-id={childTaskCore?.workspace?.workspace_id || childTaskProgress?.workspace_id || ''}
+                >
+                  <div className="group-run-runtime-section-head">
+                    <strong>Task Workspace</strong>
+                    <span>{childTaskProgress?.progress_text || childTaskCore?.workspace?.title || 'workspace / todos / checkpoints / replan'}</span>
+                  </div>
+                  <div className="studio-task-workspace">
+                    {childTaskCore ? <TaskCoreInspector taskCore={childTaskCore} /> : null}
+                    {childTaskProgress || childReplanRecoveries.length ? (
+                      <TaskProgressInspector
+                        replanRecoveries={childReplanRecoveries}
+                        taskProgress={childTaskProgress}
+                      />
+                    ) : null}
+                  </div>
+                </section>
+              ) : null}
               {childRun && childArtifacts.length ? (
                 <div className="run-artifacts compact">
                   {childArtifacts.map((artifact, artifactIndex) => {
