@@ -2038,7 +2038,7 @@ def test_custom_api_agent_loop_guides_code_tasks_without_bypassing_approval() ->
     assert "selected intent=code_task" in system_prompt
     assert "workspace.list -> terminal.run -> artifact.write" in system_prompt
     assert "route to Studio=yes" in system_prompt
-    assert "inspect the workspace before shell execution" in system_prompt
+    assert "inspect the workspace before code or shell execution" in system_prompt
     assert "only when the plan contains a concrete command" in system_prompt
     assert "1. Inspect workspace: workspace.list" in system_prompt
     assert "2. Run code diagnostic: terminal.run" in system_prompt
@@ -2109,6 +2109,55 @@ def test_runtime_planner_routes_readme_edit_to_code_task_patch() -> None:
     ]
     assert requests[-1]["input"] == {"path": "README.md"}
     assert requests[-1]["continue_to_model"] is True
+
+
+def test_runtime_planner_runtime_requests_full_plan_code_task_with_deferred_patch() -> None:
+    allowed_tools = [
+        "workspace.list",
+        "workspace.read",
+        "workspace.write_patch",
+        "artifact.write",
+    ]
+
+    loop = _private_runtime_loop()
+    decision, requests, payload = loop._runtime_planner_tool_requests(
+        "给 README 增加安装说明",
+        allowed_tools,
+    )
+
+    assert decision is not None
+    assert decision.selected_intent.kind == "code_task"
+    assert [request["tool"] for request in requests] == [
+        "workspace.list",
+        "workspace.read",
+        "workspace.write_patch",
+    ]
+    assert requests[-1]["input"]["patch_source"] == "model_after_workspace_inspection"
+    assert requests[-1]["continue_to_model"] is True
+    assert requests[-1]["approval_required"] is True
+    assert payload["selection_reason"] == "runtime_planner_full_plan_execution"
+    assert payload["yachiyo_execution_projection"] == "full_plan"
+    assert payload["yachiyo_execution_requests"] == [
+        "workspace.list",
+        "workspace.read",
+        "workspace.write_patch",
+    ]
+    assert payload["yachiyo_execution_envelope"]["intent_kind"] == "code_task"
+    assert (
+        payload["yachiyo_execution_envelope"]["requests"][-1]["continue_to_model"]
+        is True
+    )
+
+    immediate, materialization = (
+        custom_api_agent_module._split_model_materialization_tool_requests(requests)
+    )
+    assert [request["tool"] for request in immediate] == [
+        "workspace.list",
+        "workspace.read",
+    ]
+    assert [request["tool"] for request in materialization] == [
+        "workspace.write_patch",
+    ]
 
 
 @pytest.mark.parametrize(

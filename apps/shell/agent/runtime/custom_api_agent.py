@@ -13754,6 +13754,7 @@ def _freeze_request_value(value: Any) -> Any:
 _CHAT_FULL_PLAN_EXECUTION_INTENTS = frozenset(
     {
         "clipboard_operation",
+        "code_task",
         "communication",
         "desktop_operation",
         "file_access",
@@ -14251,6 +14252,20 @@ def _tool_request_requires_model_materialization(request: Mapping[str, Any]) -> 
         )
     if tool_name == "clipboard.write":
         return bool(body_source) and not str(request_input.get("text") or "").strip()
+    if tool_name == "workspace.write_patch":
+        if any(
+            str(request_input.get(key) or "").strip()
+            for key in ("patch", "diff", "content")
+        ):
+            return False
+        if any(request_input.get(key) for key in ("changes", "edits", "operations")):
+            return False
+        return bool(
+            request_input.get("patch_source")
+            or request_input.get("diff_source")
+            or request_input.get("body_source")
+            or request_input.get("mode")
+        )
     if tool_name in _MODEL_FOLLOWUP_TEXT_ENTRY_TOOLS:
         return bool(body_source) and not str(request_input.get("text") or "").strip()
     return False
