@@ -133,16 +133,6 @@ export function useRunApprovalActions({
     return { selectedRunId: selectedAfterAction, statusMessage: '已拒绝，Run 已终止。' };
   }, [setSelectedRunId, upsertRunDetailCache]);
 
-  const approveSelectedRun = useCallback(async (): Promise<RunApprovalActionRefreshOptions> => {
-    if (!selectedRun) throw new Error('请选择待审批 Run');
-    return approveRunById(selectedRun.run_id);
-  }, [approveRunById, selectedRun]);
-
-  const rejectSelectedRun = useCallback(async (): Promise<RunApprovalActionRefreshOptions> => {
-    if (!selectedRun) throw new Error('请选择待审批 Run');
-    return rejectRunById(selectedRun.run_id);
-  }, [rejectRunById, selectedRun]);
-
   const cancelRunById = useCallback(async (
     runId: string,
     nextSelectedRunId?: string,
@@ -176,10 +166,8 @@ export function useRunApprovalActions({
 
   return {
     approveRunById,
-    approveSelectedRun,
     cancelRunById,
     cancelSelectedRun,
     rejectRunById,
-    rejectSelectedRun,
   };
 }

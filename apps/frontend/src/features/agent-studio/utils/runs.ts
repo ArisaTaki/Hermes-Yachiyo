@@ -484,6 +484,7 @@ export function publicApprovalToRunPendingApproval(approval: ApprovalCardSnapsho
     resolved_at: approval.resolved_at || '',
     risk_level: approval.risk_level || '',
     run_id: approval.run_id || '',
+    source_run_id: approval.source_run_id || '',
     status: approval.status || '',
     tool: approval.tool_name || legacyTool,
   };

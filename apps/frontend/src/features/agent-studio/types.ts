@@ -210,6 +210,7 @@ export type RunSpec = {
     resolved_at?: string;
     risk_level?: string;
     run_id?: string;
+    source_run_id?: string;
     status?: string;
     planning_reason?: string;
     decision_id?: string;

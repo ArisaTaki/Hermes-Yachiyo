@@ -783,11 +783,9 @@ export function AgentStudioView() {
 
   const {
     approveRunById,
-    approveSelectedRun,
     cancelRunById,
     cancelSelectedRun,
     rejectRunById,
-    rejectSelectedRun,
   } = useAgentStudioRunApprovalControls({
     acceptedRunUpdates,
     refresh,
@@ -1161,7 +1159,6 @@ export function AgentStudioView() {
           filteredRunIds={filteredRunIds}
           filteredRuns={filteredRuns}
           onApproveRunById={approveRunById}
-          onApproveSelectedRun={approveSelectedRun}
           onCancelRunById={cancelRunById}
           onCreateRun={() => void runAction(createRunFromTarget, '创建 Run')}
           onFinishRunHistoryManagement={finishRunHistoryManagement}
@@ -1172,7 +1169,6 @@ export function AgentStudioView() {
           onOpenWorkflowDesign={openWorkflowDesign}
           onPrepareSelectedRunRerun={prepareSelectedRunRerun}
           onRejectRunById={rejectRunById}
-          onRejectSelectedRun={rejectSelectedRun}
           onRequestCancelSelectedRun={requestCancelSelectedRun}
           onRequestDeleteSelectedRuns={requestDeleteSelectedRuns}
           onRerunSelectedRun={rerunSelectedRun}

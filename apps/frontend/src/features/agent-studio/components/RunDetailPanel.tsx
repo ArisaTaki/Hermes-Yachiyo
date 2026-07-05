@@ -60,7 +60,6 @@ export function RunDetailPanel({
   isActiveRunStatus,
   normalizeRunStatus,
   onApproveRunById,
-  onApproveSelectedRun,
   onCancelRunById,
   onLoadMoreSelectedGroupRunEvents,
   onLoadMoreSelectedRunEvents,
@@ -69,7 +68,6 @@ export function RunDetailPanel({
   onOpenWorkflowDesign,
   onPrepareSelectedRunRerun,
   onRejectRunById,
-  onRejectSelectedRun,
   onRequestCancelSelectedRun,
   onRunGroupReplanRecoveryAction,
   onRunReplanRecoveryAction,
@@ -122,7 +120,6 @@ export function RunDetailPanel({
   isActiveRunStatus: (status: string) => boolean;
   normalizeRunStatus: (status: string) => string;
   onApproveRunById: (runId: string, nextSelectedRunId?: string) => Promise<unknown>;
-  onApproveSelectedRun: () => Promise<unknown>;
   onCancelRunById: (runId: string, nextSelectedRunId?: string) => Promise<unknown>;
   onLoadMoreSelectedGroupRunEvents: () => Promise<void> | void;
   onLoadMoreSelectedRunEvents: () => Promise<void> | void;
@@ -131,7 +128,6 @@ export function RunDetailPanel({
   onOpenWorkflowDesign: (workflowId: string) => void;
   onPrepareSelectedRunRerun: () => void;
   onRejectRunById: (runId: string, nextSelectedRunId?: string) => Promise<unknown>;
-  onRejectSelectedRun: () => Promise<unknown>;
   onRequestCancelSelectedRun: () => void;
   onRunGroupReplanRecoveryAction?: (
     groupRunId: string,
@@ -503,8 +499,8 @@ export function RunDetailPanel({
             approvalHistory={selectedRunApprovalHistory}
             approvalHistorySource={approvalHistorySource}
             busy={busy}
-            onApproveSelectedRun={onApproveSelectedRun}
-            onRejectSelectedRun={onRejectSelectedRun}
+            onApproveRunById={onApproveRunById}
+            onRejectRunById={onRejectRunById}
             onRunAction={onRunAction}
             runKindLabel={runKindLabel}
             selectedPublicRunTimeline={selectedPublicRunTimeline}

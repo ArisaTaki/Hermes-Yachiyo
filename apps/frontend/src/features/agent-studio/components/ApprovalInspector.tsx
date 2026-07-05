@@ -13,8 +13,8 @@ type ApprovalInspectorProps = {
   approvalHistory?: ApprovalCardSnapshot[];
   approvalHistorySource?: string;
   busy: boolean;
-  onApproveSelectedRun: () => Promise<unknown>;
-  onRejectSelectedRun: () => Promise<unknown>;
+  onApproveRunById: (runId: string, nextSelectedRunId?: string) => Promise<unknown>;
+  onRejectRunById: (runId: string, nextSelectedRunId?: string) => Promise<unknown>;
   onRunAction: (action: () => Promise<unknown> | unknown, label: string) => void;
   runKindLabel: (kind: string) => string;
   selectedPublicRunTimeline: RunTimelineSnapshot | null;
@@ -26,8 +26,8 @@ export function ApprovalInspector({
   approvalHistory,
   approvalHistorySource = 'RunTimelineSnapshot approval facts',
   busy,
-  onApproveSelectedRun,
-  onRejectSelectedRun,
+  onApproveRunById,
+  onRejectRunById,
   onRunAction,
   runKindLabel,
   selectedPublicRunTimeline,
@@ -43,6 +43,12 @@ export function ApprovalInspector({
     (selectedRun.status === 'approval_required' || hasPendingPublicApproval)
     && Boolean(selectedRunApproval?.tool)
   );
+  const approvalActionRunId = (
+    selectedRunApproval?.source_run_id
+    || selectedRunApproval?.run_id
+    || selectedRun.run_id
+  );
+  const approvalSelectedRunId = approvalActionRunId === selectedRun.run_id ? undefined : selectedRun.run_id;
   if (!showApprovalGate && !approvals.length) {
     return null;
   }
@@ -86,6 +92,7 @@ export function ApprovalInspector({
             resolved_at: selectedRunApproval.resolved_at,
             risk_level: selectedRunApproval.risk_level,
             run_id: selectedRunApproval.run_id || selectedRun.run_id,
+            source_run_id: selectedRunApproval.source_run_id || undefined,
             status: selectedRunApproval.status || 'pending',
             title: `Approval Required · ${selectedRunApproval.tool}`,
             tool_name: selectedRunApproval.tool,
@@ -97,8 +104,14 @@ export function ApprovalInspector({
           cardTestId="agent-run-detail-approval-card"
           cardVariant="inspector"
           className="run-approval-box"
-          onApprove={() => onRunAction(onApproveSelectedRun, '批准工具调用')}
-          onReject={() => onRunAction(onRejectSelectedRun, '拒绝工具调用')}
+          onApprove={() => onRunAction(
+            () => onApproveRunById(approvalActionRunId, approvalSelectedRunId),
+            '批准工具调用',
+          )}
+          onReject={() => onRunAction(
+            () => onRejectRunById(approvalActionRunId, approvalSelectedRunId),
+            '拒绝工具调用',
+          )}
           rejectButtonClassName="danger-action"
           rejectTestId="agent-run-detail-approval-reject"
           testId="agent-run-detail-approval"
