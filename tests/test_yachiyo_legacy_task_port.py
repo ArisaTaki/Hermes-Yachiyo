@@ -206,17 +206,26 @@ def test_legacy_runtime_port_appends_runtime_planner_events_when_available() -> 
     )
 
     planner_events = [call for call in runtime.calls if call[0] == "append_run_event"]
+    planner_event_types = [event[1]["event_type"] for event in planner_events]
     assert task["task_id"] == "task-1"
-    assert [event[1]["event_type"] for event in planner_events] == [
+    assert planner_event_types[:4] == [
         "agent.intent.selected",
         "agent.plan.created",
         "agent.task_core.created",
         "agent.plan.step",
     ]
+    assert "agent.task.todo.updated" in planner_event_types
+    assert "agent.task.checkpoint.updated" in planner_event_types
     assert planner_events[0][1]["payload"]["intent"]["kind"] == "data_analysis"
     assert planner_events[1][1]["payload"]["plan"]["tool_plan"]["artifacts_expected"] == [
         "analysis-report.md",
     ]
+    task_core_event = next(
+        event for event in planner_events
+        if event[1]["event_type"] == "agent.task_core.created"
+    )
+    assert task_core_event[1]["payload"]["todo_count"] >= 1
+    assert task_core_event[1]["payload"]["checkpoint_count"] >= 1
     assert planner_events[3][1]["payload"]["step"]["tool_name"] == "data.analyze"
 
 
