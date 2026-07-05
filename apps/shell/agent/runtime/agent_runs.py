@@ -9,6 +9,9 @@ from contextlib import AbstractContextManager
 from dataclasses import dataclass
 from typing import Any
 
+from apps.shell.agent.runtime.direct_request_policy import (
+    agent_with_direct_request_approvals,
+)
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES, RuntimePolicyCompiler
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
@@ -384,6 +387,10 @@ def _runtime_planner_entrypoint_should_execute(context: str, allowed_tools: list
 
 def _with_entrypoint_runtime_planner(agent: dict[str, Any], payload: dict[str, Any]) -> dict[str, Any]:
     agent = _with_daily_desktop_policy_overlay(agent, payload)
+    agent = agent_with_direct_request_approvals(
+        agent,
+        _payload_direct_tool_requests(payload),
+    )
     if not payload.get("runtime_planner_entrypoint"):
         return agent
     user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()

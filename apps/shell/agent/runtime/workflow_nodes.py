@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from typing import Any
 
 from apps.shell.agent.runtime.callbacks import supports_keyword
+from apps.shell.agent.runtime.direct_request_policy import (
+    agent_with_direct_request_approvals,
+)
 from apps.shell.agent.runtime.events import tool_input_preview as _tool_input_preview
 from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broker
 from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES, RuntimePolicyCompiler
@@ -516,6 +519,10 @@ class WorkflowAgentNodeExecution:
             direct_tool_requests=direct_tool_requests,
             workflow_run_id=workflow_run_id,
             direct_request_fallback_node_id=direct_request_fallback_node_id,
+        )
+        execution_agent = agent_with_direct_request_approvals(
+            execution_agent,
+            node_direct_tool_requests,
         )
         if supports_keyword(execute_agent_run, "run_group_id"):
             execute_kwargs["run_group_id"] = run_group_id

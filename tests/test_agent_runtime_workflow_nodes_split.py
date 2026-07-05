@@ -269,6 +269,7 @@ def test_workflow_agent_node_execution_prefers_explicit_direct_requests_over_env
         execute_agent_run=lambda run_id, _agent, _goal, **kwargs: calls.append(
             {
                 "run_id": run_id,
+                "agent": _agent,
                 "direct_tool_requests": kwargs.get("direct_tool_requests"),
             }
         )
@@ -296,6 +297,7 @@ def test_workflow_agent_node_execution_prefers_explicit_direct_requests_over_env
                 "request_id": "explicit",
                 "tool": "app.open",
                 "input": {"app_name": "Music"},
+                "approval_required": True,
             }
         ],
         direct_request_fallback_node_id="research",
@@ -308,6 +310,7 @@ def test_workflow_agent_node_execution_prefers_explicit_direct_requests_over_env
             "request_id": "explicit",
             "tool": "app.open",
             "input": {"app_name": "Music"},
+            "approval_required": True,
             "workflow_run_id": "workflow_run",
             "workflow_node_id": "research",
             "workflow_node_label": "Research",
@@ -315,6 +318,9 @@ def test_workflow_agent_node_execution_prefers_explicit_direct_requests_over_env
             "agent_id": "agent_research",
         }
     ]
+    agent = calls[0]["agent"]
+    assert isinstance(agent, dict)
+    assert agent["tool_policy"]["approval_required"]["app.open"] is True
 
 
 def test_workflow_agent_node_execution_prepares_child_before_artifact_refs() -> None:

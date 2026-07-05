@@ -324,6 +324,36 @@ def test_agent_run_runtime_planner_entrypoint_overlays_stale_desktop_policy() ->
     assert approval_required["app.open_and_click_ui_element"] is True
 
 
+def test_agent_run_direct_request_approval_promotes_temporary_policy() -> None:
+    agent = {
+        "agent_id": "agent-yachiyo",
+        "name": "Yachiyo",
+        "tool_policy": {
+            "allowed_tools": ["python.run"],
+            "approval_required": {},
+        },
+    }
+
+    enriched = _with_entrypoint_runtime_planner(
+        agent,
+        {
+            "user_goal": "分析 sales.csv",
+            "direct_tool_requests": [
+                {
+                    "request_id": "request-run-analysis",
+                    "tool": "python.run",
+                    "input": {"code": "print('analysis')"},
+                    "approval_required": True,
+                }
+            ],
+        },
+    )
+
+    assert agent["tool_policy"]["approval_required"] == {}
+    assert enriched["tool_policy"]["allowed_tools"] == ["python.run"]
+    assert enriched["tool_policy"]["approval_required"]["python.run"] is True
+
+
 def test_agent_run_runtime_planner_entrypoint_does_not_overlay_howto_question() -> None:
     agent = {
         "agent_id": "agent-yachiyo",
