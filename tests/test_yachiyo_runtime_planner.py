@@ -25402,6 +25402,7 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
     _freeze_schedule_now(monkeypatch, datetime(2026, 6, 30, 10, 0))
     tomorrow_0900 = f"{(date.today() + timedelta(days=1)).isoformat()}T09:00"
     tomorrow_1000 = f"{(date.today() + timedelta(days=1)).isoformat()}T10:00"
+    tomorrow_1500 = f"{(date.today() + timedelta(days=1)).isoformat()}T15:00"
     today_1030 = "2026-06-30T10:30"
     today_1045 = "2026-06-30T10:45"
     today_1200 = "2026-06-30T12:00"
@@ -25433,6 +25434,10 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
     )
     create_prefixed_comma = RuntimePlanner().decision(
         "新建一个提醒，明天下午三点叫我提交周报",
+        allowed_tools=["reminders.create"],
+    )
+    create_explicit_reminder = RuntimePlanner().decision(
+        "创建一个提醒，明天下午三点提醒我开会",
         allowed_tools=["reminders.create"],
     )
     time_first_plain = RuntimePlanner().decision(
@@ -25497,7 +25502,19 @@ def test_runtime_planner_routes_relative_reminder_to_schedule_capability(monkeyp
     assert create_prefixed_comma.selected_intent.kind == "schedule"
     assert _step_by_id(create_prefixed_comma, "create-schedule-item").input_preview == {
         "title": "提交周报",
-        "due_at": f"{(date.today() + timedelta(days=1)).isoformat()}T15:00",
+        "due_at": tomorrow_1500,
+    }
+    assert create_explicit_reminder.selected_intent.kind == "schedule"
+    assert create_explicit_reminder.selected_intent.inputs["schedule_payload"] == {
+        "title": "开会",
+        "due_at": tomorrow_1500,
+    }
+    assert create_explicit_reminder.selected_intent.inputs["schedule_tool_hint"] == (
+        "reminders.create"
+    )
+    assert _step_by_id(create_explicit_reminder, "create-schedule-item").input_preview == {
+        "title": "开会",
+        "due_at": tomorrow_1500,
     }
     assert time_first_plain.selected_intent.kind == "schedule"
     time_first_plain_step = _step_by_id(time_first_plain, "create-schedule-item")

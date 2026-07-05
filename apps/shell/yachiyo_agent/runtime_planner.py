@@ -2459,6 +2459,11 @@ class TaskIntentRouter:
             return _empty_intent("schedule", text)
         context_source = schedule_context_source_hint(text)
         inputs: dict[str, Any] = {"context_source": context_source} if context_source else {}
+        schedule_tool_hint, schedule_payload = schedule_tool_preview(text, None)
+        if schedule_payload:
+            inputs["schedule_payload"] = dict(schedule_payload)
+        if schedule_tool_hint:
+            inputs["schedule_tool_hint"] = schedule_tool_hint
         if scheduled_runnable:
             inputs["scheduled_runnable"] = True
             runnable_name = str(scheduled_runnable.get("runnable_name") or "").strip()
