@@ -563,7 +563,15 @@ def test_runtime_planner_accepts_portable_capability_tool_aliases() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_web_research",
             "continue_to_model": True,
-        }
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        },
     ]
 
     file_prompt = "把桌面上的截图按月份整理到文件夹里"
@@ -587,6 +595,44 @@ def test_runtime_planner_accepts_portable_capability_tool_aliases() -> None:
             "source": "runtime_planner",
             "planning_reason": "planner_prefetch_file_scope",
             "continue_to_model": True,
+        }
+    ]
+
+
+def test_runtime_planner_observes_ui_without_app_mutation_tools() -> None:
+    read_prompt = "读取 Linear 界面"
+    read_allowed = ["desktop.read_ui"]
+    read_decision = RuntimePlanner().decision(read_prompt, allowed_tools=read_allowed)
+
+    assert read_decision.selected_intent.kind == "desktop_operation"
+    assert _step_by_id(read_decision, "read-foreground-ui").tool_name == "desktop.read_ui"
+    assert _step_by_id(read_decision, "read-foreground-ui").input_preview == {
+        "app_name": "Linear",
+        "limit": 80,
+    }
+    assert planner_tool_requests(read_prompt, read_allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.read_ui",
+            "input": {"app_name": "Linear", "limit": 80},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+        }
+    ]
+
+    verify_prompt = "确认 Linear 是否打开"
+    verify_allowed = ["desktop.verify"]
+    verify_decision = RuntimePlanner().decision(verify_prompt, allowed_tools=verify_allowed)
+
+    assert verify_decision.selected_intent.kind == "desktop_operation"
+    assert _step_by_id(verify_decision, "verify-desktop-result").tool_name == "desktop.verify"
+    assert planner_tool_requests(verify_prompt, verify_allowed) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.verify",
+            "input": {"app_name": "Linear"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
         }
     ]
 

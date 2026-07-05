@@ -4214,24 +4214,27 @@ class RuntimePlanner:
                         ),
                     )
                 ]
-            if app_name and not focus_step_added:
+            prepare_tool = _first_allowed(
+                app_control_tool_candidates(
+                    _desktop_observation_prepare_mode(intent.user_goal)
+                ),
+                allowed,
+            )
+            if app_name and not focus_step_added and prepare_tool:
                 steps.append(
                     _step(
                         intent,
                         "open-or-focus-app",
                         "Open or focus app",
                         "desktop.app_control",
-                        _first_allowed(
-                            app_control_tool_candidates(
-                                _desktop_observation_prepare_mode(intent.user_goal)
-                            ),
-                            allowed,
-                        ),
+                        prepare_tool,
                         input_preview={"app_name": app_name},
                         depends_on=["discover-desktop-state"],
                         reason="Prepare the requested app before reading its foreground UI.",
                     )
                 )
+            if app_name and not focus_step_added and not prepare_tool:
+                ui_payload["app_name"] = app_name
             steps.append(
                 _step(
                     intent,
@@ -4243,7 +4246,11 @@ class RuntimePlanner:
                     depends_on=(
                         ["focus-app-window"]
                         if focus_step_added
-                        else (["open-or-focus-app"] if app_name else ["discover-desktop-state"])
+                        else (
+                            ["open-or-focus-app"]
+                            if app_name and prepare_tool
+                            else ["discover-desktop-state"]
+                        )
                     ),
                     reason="Read visible UI controls or text as a discovery step before any action.",
                 )
@@ -4310,6 +4317,42 @@ class RuntimePlanner:
                 "minimize": "app.minimize",
                 "quit": "app.quit",
             }.get(action)
+            if action == "status" and not _first_allowed((tool_name,), allowed):
+                verify_tool = _first_allowed(
+                    (
+                        "desktop.verify",
+                        "desktop.running_apps",
+                        "desktop.active_window",
+                        "desktop.windows",
+                        "desktop.list_windows",
+                    ),
+                    allowed,
+                )
+                if verify_tool:
+                    verify_payload = _desktop_verify_input_preview(
+                        verify_tool,
+                        app_name=app_name,
+                        operation_preview={},
+                    )
+                    if (
+                        not verify_payload
+                        and steps
+                        and str(steps[-1].tool_name or "").strip() == verify_tool
+                    ):
+                        return steps
+                    steps.append(
+                        _step(
+                            intent,
+                            "verify-desktop-result",
+                            "Verify desktop result",
+                            "desktop.app_discovery",
+                            verify_tool,
+                            input_preview=verify_payload,
+                            depends_on=["discover-desktop-state"],
+                            reason="Use desktop observation as a non-mutating app status check.",
+                        )
+                    )
+                    return steps
             is_quit = action == "quit"
             manage_depends_on = ["discover-desktop-state"]
             if app_management_prepare_mode in {"open", "focus"}:
