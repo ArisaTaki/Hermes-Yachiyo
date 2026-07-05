@@ -171,7 +171,7 @@ function launcherAgentTaskProgressChips(
   const pendingVerificationCount = progress?.pending_verification_count ?? 0;
   const executionEnvelope = task.runtime_execution_envelope || null;
   const executionRequestCount = executionEnvelope?.requests?.length || 0;
-  const executionRiskCounts = launcherAgentTaskRuntimeRiskCounts(task);
+  const executionRiskCounts = launcherAgentTaskRuntimeRiskCounts(executionEnvelope);
   const executionRiskLabel = launcherAgentTaskRuntimeRiskLabel(executionRiskCounts);
   const chips: LauncherAgentTaskProgressChip[] = [];
 
@@ -243,10 +243,10 @@ function launcherAgentTaskProgressChips(
 }
 
 function launcherAgentTaskRuntimeRiskCounts(
-  task: AgentTaskSnapshot,
+  runtimeEnvelope: AgentTaskSnapshot['runtime_execution_envelope'],
 ): Array<[string, number]> {
   const counts = new Map<string, number>();
-  for (const request of task.runtime_execution_envelope?.requests || []) {
+  for (const request of runtimeEnvelope?.requests || []) {
     const risk = String(request.risk_level || '').trim();
     if (!risk) continue;
     counts.set(risk, (counts.get(risk) || 0) + 1);
@@ -383,8 +383,10 @@ export function LauncherAgentTaskLight({
     currentTask,
     mode === 'bubble' ? 2 : variant === 'panel' ? 5 : 4,
   );
-  const runtimeRiskCounts = launcherAgentTaskRuntimeRiskCounts(currentTask);
-  const runtimeEnvelope = currentTask.runtime_execution_envelope || null;
+  const runtimeEnvelope = lightTask.runtime_execution_envelope
+    || currentTask.runtime_execution_envelope
+    || null;
+  const runtimeRiskCounts = launcherAgentTaskRuntimeRiskCounts(runtimeEnvelope);
   const progress = lightTask.task_progress || currentTask.task_progress || null;
   const plannerSummary = plannerSummaryFromTask(currentTask);
   const plannerChips = plannerSummary
@@ -483,7 +485,7 @@ export function LauncherAgentTaskLight({
         className="launcher-agent-task-runtime-debug"
         compact
         sourceLabel={mode === 'bubble' ? 'Bubble runtime' : 'Live2D runtime'}
-        summary={currentTask.runtime_debug}
+        summary={lightTask.runtime_debug || currentTask.runtime_debug}
         testId={testIds.runtimeDebug}
       />
       {runId && studioUrl && studioParams ? (
