@@ -255,6 +255,12 @@ def merge_replan_recovery_snapshot_lists(
 def _without_shadowed_runtime_retry_recoveries(
     snapshots: list[ReplanRecoverySnapshot],
 ) -> list[ReplanRecoverySnapshot]:
+    runtime_retry_sources = {
+        signature
+        for snapshot in snapshots
+        if _is_runtime_retry_recovery(snapshot)
+        and (signature := _recovery_source_signature(snapshot)) is not None
+    }
     completed_sources: set[tuple[str, str, str]] = set()
     for snapshot in snapshots:
         if not _recovery_is_completed(snapshot):
@@ -262,12 +268,14 @@ def _without_shadowed_runtime_retry_recoveries(
         signature = _recovery_source_signature(snapshot)
         if signature is not None:
             completed_sources.add(signature)
-    if not completed_sources:
+    if not completed_sources and not runtime_retry_sources:
         return snapshots
 
     filtered: list[ReplanRecoverySnapshot] = []
     for snapshot in snapshots:
         signature = _recovery_source_signature(snapshot)
+        if _is_runtime_replan_projection(snapshot) and signature in runtime_retry_sources:
+            continue
         if _is_runtime_retry_recovery(snapshot) and signature in completed_sources:
             continue
         filtered.append(snapshot)
@@ -286,6 +294,10 @@ def _is_runtime_retry_recovery(snapshot: ReplanRecoverySnapshot) -> bool:
         _text(snapshot.planning_reason) == "runtime_execution_observation_retry"
         or _text(snapshot.request_id).startswith("runtime-retry:")
     )
+
+
+def _is_runtime_replan_projection(snapshot: ReplanRecoverySnapshot) -> bool:
+    return _text(snapshot.request_id).startswith("runtime-replan:")
 
 
 def _recovery_source_signature(snapshot: ReplanRecoverySnapshot) -> tuple[str, str, str] | None:

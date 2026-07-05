@@ -26,6 +26,7 @@ _TERMINAL_REQUEST_STATUSES = {
     "rejected",
     "recovered",
     "skipped",
+    "unavailable",
 }
 
 

@@ -1272,11 +1272,7 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     assert metadata["yachiyo_plan_artifacts_expected"] == ["analysis-report.md"]
     assert metadata["yachiyo_plan_open_questions"] == []
     assert metadata["yachiyo_missing_capabilities"] == []
-    assert metadata["yachiyo_execution_requests"] == [
-        "workspace.read",
-        "python.run",
-        "artifact.write",
-    ]
+    assert metadata["yachiyo_execution_requests"] == ["workspace.read", "data.analyze"]
     assert metadata["yachiyo_execution_envelope"]["intent_kind"] == "data_analysis"
     assert metadata["yachiyo_execution_envelope"]["requests"][0]["tool_name"] == (
         "workspace.read"
@@ -1290,19 +1286,17 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     assert metadata["yachiyo_task_progress"]["workspace_id"] == (
         metadata["yachiyo_task_core"]["workspace"]["workspace_id"]
     )
-    assert metadata["yachiyo_task_progress"]["total_todos"] == 3
-    assert metadata["yachiyo_task_progress"]["current_step_id"] == "inspect-data-source"
+    assert metadata["yachiyo_task_progress"]["total_todos"] == 2
+    assert metadata["yachiyo_task_progress"]["current_step_id"] == "read-data-source"
     assert [todo["step_id"] for todo in metadata["yachiyo_task_core"]["todos"]] == [
-        "inspect-data-source",
-        "run-analysis",
-        "write-analysis-artifact",
+        "read-data-source",
+        "analyze-data-file",
     ]
     assert task.task_core is not None
     assert task.task_core.workspace.workspace_id == metadata["yachiyo_task_core"]["workspace"]["workspace_id"]
     assert [todo.step_id for todo in task.task_core.todos] == [
-        "inspect-data-source",
-        "run-analysis",
-        "write-analysis-artifact",
+        "read-data-source",
+        "analyze-data-file",
     ]
     assert task.task_progress is not None
     assert task.task_progress.workspace_id == metadata["yachiyo_task_progress"]["workspace_id"]
@@ -1325,49 +1319,44 @@ def test_yachiyo_agent_service_starts_chat_with_full_runtime_execution_envelope(
     envelope = request_payload["runtime_execution_envelope"]
     assert [request["tool_name"] for request in envelope["requests"]] == [
         "workspace.read",
-        "python.run",
-        "artifact.write",
+        "data.analyze",
     ]
     assert [request["runtime_stage"] for request in envelope["requests"]] == [
         "discover",
         "operate",
-        "produce",
     ]
     assert [request["tool_name"] for request in metadata["yachiyo_execution_envelope"]["requests"]] == [
         "workspace.read",
-        "python.run",
-        "artifact.write",
+        "data.analyze",
     ]
     assert task.runtime_execution_envelope is not None
     assert [request.tool_name for request in task.runtime_execution_envelope.requests] == [
         "workspace.read",
-        "python.run",
-        "artifact.write",
+        "data.analyze",
     ]
     assert task.runtime_execution_envelope.task_progress is not None
-    assert task.runtime_execution_envelope.task_progress.total_todos == 3
+    assert task.runtime_execution_envelope.task_progress.total_todos == 2
     assert task.runtime_debug is not None
     assert task.runtime_debug.intent_kind == "data_analysis"
-    assert task.runtime_debug.total_todos == 3
+    assert task.runtime_debug.total_todos == 2
     assert task.runtime_debug.runtime_stage_counts == {
         "discover": 1,
         "operate": 1,
-        "produce": 1,
     }
     assert task.runtime_debug.runtime_doctrine == "discover_operate_verify"
     assert task.runtime_debug.runtime_stage == "discover"
     assert task.runtime_debug.runtime_role == "inspect_workspace"
     assert task.runtime_debug.current_capability_id == "file.workspace_read"
-    assert task.runtime_debug.runtime_request_count == 3
+    assert task.runtime_debug.runtime_request_count == 2
     assert (
         task.runtime_debug.pending_runtime_request_count
         + task.runtime_debug.waiting_runtime_request_count
-    ) == 3
+    ) == 2
     assert task.runtime_debug.current_request_id
     assert task.runtime_debug.current_request_tool_name == "workspace.read"
-    assert task.runtime_debug.current_request_status == "planned"
+    assert task.runtime_debug.current_request_status == "waiting_approval"
     assert task.runtime_debug.latest_request_id
-    assert task.runtime_debug.latest_request_tool_name == "artifact.write"
+    assert task.runtime_debug.latest_request_tool_name == "data.analyze"
     assert task.runtime_debug.latest_request_status == "planned"
     assert task.runtime_debug.latest_tool_name == "workspace.write_patch"
     assert task.runtime_debug.latest_tool_status == "waiting_approval"

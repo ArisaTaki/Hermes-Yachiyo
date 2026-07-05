@@ -2344,6 +2344,17 @@ def _unavailable_desktop_verification_request(
     ]
     if blockers or missing_permissions:
         request["policy_reason"] = ", ".join([*blockers, *missing_permissions])
+        retry_reason = blockers[0] if blockers else missing_permissions[0]
+        request["observation_evidence"] = {
+            key: value
+            for key, value in {
+                "blocking_condition": blockers[0] if blockers else "",
+                "blocking_conditions": blockers,
+                "missing_permissions": missing_permissions,
+            }.items()
+            if value not in (None, "", [], {})
+        }
+        request["observation_retry"] = {"reason": retry_reason}
     _attach_basic_step_metadata(request, step)
     return request
 

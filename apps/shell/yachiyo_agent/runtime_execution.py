@@ -547,17 +547,20 @@ def _execution_request_snapshot(
         replan_triggers=replan_metadata["replan_triggers"],
         replan_signal_ids=replan_metadata["replan_signal_ids"],
         followup_target=_mapping(request.get("followup_target")),
-        action_target=(
-            _mapping(request.get("action_target"))
-            or desktop_contract["action_target"]
+        action_target=_merged_request_contract_mapping(
+            request,
+            desktop_contract,
+            "action_target",
         ),
-        observation_evidence=(
-            _mapping(request.get("observation_evidence"))
-            or desktop_contract["observation_evidence"]
+        observation_evidence=_merged_request_contract_mapping(
+            request,
+            desktop_contract,
+            "observation_evidence",
         ),
-        observation_retry=(
-            _mapping(request.get("observation_retry"))
-            or desktop_contract["observation_retry"]
+        observation_retry=_merged_request_contract_mapping(
+            request,
+            desktop_contract,
+            "observation_retry",
         ),
         task_todo=task_context["task_todo"] or _mapping(deferred_context.get("task_todo")),
         task_checkpoints=(
@@ -582,6 +585,20 @@ def _execution_request_snapshot(
         desktop_loop=desktop_loop,
         source=str(request.get("source") or "runtime_planner"),
     )
+
+
+def _merged_request_contract_mapping(
+    request: Mapping[str, Any],
+    desktop_contract: Mapping[str, Mapping[str, Any]],
+    key: str,
+) -> dict[str, Any]:
+    contract_value = _mapping(desktop_contract.get(key))
+    request_value = _mapping(request.get(key))
+    if not contract_value:
+        return request_value
+    if not request_value:
+        return contract_value
+    return {**contract_value, **request_value}
 
 
 def _tool_request_from_execution_request(

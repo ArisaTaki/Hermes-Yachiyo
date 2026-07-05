@@ -114,6 +114,9 @@ from apps.shell.yachiyo_agent.runtime_execution import (
     runtime_execution_envelope_from_decision,
     runtime_execution_requests_from_envelope_payload,
 )
+from apps.shell.yachiyo_agent.replan_recovery_snapshots import (
+    replan_recovery_snapshots_from_runtime_execution_envelope,
+)
 from apps.shell.yachiyo_agent.run_snapshots import run_timeline_snapshot_from_payload
 from apps.shell.yachiyo_agent.runtime_execution_status import (
     runtime_execution_envelope_with_status_overlay,
@@ -5876,6 +5879,11 @@ def test_desktop_execution_envelope_keeps_blocked_verification_non_executable() 
     ]
     assert requests[2].step_id == "verify-desktop-result"
     assert requests[2].policy_reason == "screen_capture_blank"
+    assert requests[2].observation_evidence["blocking_condition"] == (
+        "screen_capture_blank"
+    )
+    assert requests[2].observation_evidence["app_name"] == "PixelForge"
+    assert requests[2].observation_retry["reason"] == "screen_capture_blank"
 
     executable = runtime_execution_requests_from_envelope_payload(
         envelope.model_dump(mode="json"),
@@ -5885,6 +5893,18 @@ def test_desktop_execution_envelope_keeps_blocked_verification_non_executable() 
         "desktop.list_apps",
         "app.open",
     ]
+
+    recoveries = replan_recovery_snapshots_from_runtime_execution_envelope(
+        envelope,
+        run_id="run-1",
+        task_id="task-1",
+    )
+    assert len(recoveries) == 1
+    assert recoveries[0].source_step_id == "verify-desktop-result"
+    assert recoveries[0].permission_target == "desktop_screen_visible"
+    assert recoveries[0].recovery_actions[0].observation_retry["reason"] == (
+        "screen_capture_blank"
+    )
 
 
 def test_runtime_tool_catalog_surfaces_restricted_plugin_metadata_and_uninstall() -> None:
