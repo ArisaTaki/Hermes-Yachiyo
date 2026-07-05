@@ -1025,6 +1025,23 @@ def test_auto_replan_runtime_recovery_actions_respect_manual_auto_start_metadata
                             },
                         },
                         {
+                            "label": "Bring PixelForge forward",
+                            "tool": "app.open",
+                            "input": {"app_name": "PixelForge"},
+                            "risk_level": "low",
+                            "metadata": {
+                                "runtime_replan_auto_start_eligible": True,
+                                "runtime_replan_auto_start_blockers": [],
+                            },
+                            "deferred_continuation": [
+                                {
+                                    "tool": "desktop.active_window",
+                                    "input": {},
+                                    "verification_target": {"app_name": "PixelForge"},
+                                }
+                            ],
+                        },
+                        {
                             "label": "Run fallback script",
                             "tool": "terminal.run",
                             "input": {"command": "python analyze_sales.py"},
@@ -1047,12 +1064,154 @@ def test_auto_replan_runtime_recovery_actions_respect_manual_auto_start_metadata
                 },
             }
         ],
-        ["desktop.list_apps", "terminal.run"],
+        ["desktop.list_apps", "app.open", "desktop.active_window", "terminal.run"],
     )
 
-    assert [request["tool"] for request in requests] == ["desktop.list_apps"]
+    assert [request["tool"] for request in requests] == ["desktop.list_apps", "app.open"]
     assert requests[0]["input"] == {"query": "PixelForge", "limit": 20}
     assert requests[0]["replan_request_id"] == "replan-safe"
+    assert requests[1]["input"] == {"app_name": "PixelForge"}
+    assert "continue_to_model" not in requests[1]
+    assert requests[1]["deferred_continuation"] == [
+        {
+            "tool": "desktop.active_window",
+            "input": {},
+            "verification_target": {"app_name": "PixelForge"},
+            "replan_request_id": "replan-safe",
+            "replan_trigger": "tool_failure",
+            "replan_triggers": ["tool_failure"],
+            "source": "runtime_planner",
+            "planning_reason": "planner_replan_deferred_continuation",
+        }
+    ]
+
+
+def test_auto_replan_recovery_runs_safe_deferred_continuation_after_source_success() -> None:
+    recovery_requests = [
+        {
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_replan_runtime_recovery_action",
+            "replan_request_id": "replan-focus",
+            "replan_trigger": "verification_failed",
+            "replan_recovery_action_id": "action-open",
+            "deferred_continuation": [
+                {
+                    "tool": "desktop.active_window",
+                    "input": {},
+                    "verification_target": {
+                        "app_name": "PixelForge",
+                        "source_tool": "desktop.active_window",
+                    },
+                }
+            ],
+        }
+    ]
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.open",
+            input_preview={"app_name": "PixelForge"},
+            result={"ok": True},
+            replan_request_id="replan-focus",
+        )
+    ]
+
+    continuation = custom_api_agent_module._auto_replan_recovery_deferred_continuation_requests(
+        recovery_requests,
+        ["app.open", "desktop.active_window"],
+        timeline,
+        tool_timeline_start=0,
+    )
+
+    assert continuation == [
+        {
+            "tool": "desktop.active_window",
+            "input": {},
+            "verification_target": {
+                "app_name": "PixelForge",
+                "source_tool": "desktop.active_window",
+            },
+            "replan_request_id": "replan-focus",
+            "replan_trigger": "verification_failed",
+            "replan_recovery_action_id": "action-open",
+            "source": "runtime_planner",
+            "planning_reason": "planner_replan_deferred_continuation",
+        }
+    ]
+
+
+def test_auto_runtime_planner_requests_execute_safe_deferred_replan_continuation() -> None:
+    batches: list[list[str]] = []
+
+    def run_tool_requests(
+        requests: list[dict[str, Any]],
+        _allowed_tools: list[str],
+        _broker: Any,
+        _messages: list[dict[str, Any]],
+        timeline: list[dict[str, Any]],
+        _artifacts: list[dict[str, Any]],
+        **_kwargs: Any,
+    ) -> None:
+        batches.append([str(request.get("tool") or "") for request in requests])
+        for request in requests:
+            timeline.append(
+                _timeline(
+                    "agent.tool.call",
+                    str(request.get("tool") or ""),
+                    input_preview=(
+                        request.get("input") if isinstance(request.get("input"), dict) else {}
+                    ),
+                    result={"ok": True},
+                    replan_request_id=str(request.get("replan_request_id") or ""),
+                    replan_trigger=str(request.get("replan_trigger") or ""),
+                    planning_reason=str(request.get("planning_reason") or ""),
+                )
+            )
+
+    loop = _private_runtime_loop(run_tool_requests=run_tool_requests)
+    timeline: list[dict[str, Any]] = []
+    requests = [
+        {
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_replan_runtime_recovery_action",
+            "replan_request_id": "replan-focus",
+            "replan_trigger": "verification_failed",
+            "deferred_continuation": [
+                {
+                    "tool": "desktop.active_window",
+                    "input": {},
+                    "verification_target": {"app_name": "PixelForge"},
+                }
+            ],
+        }
+    ]
+
+    loop._run_auto_runtime_planner_requests(
+        requests,
+        ["app.open", "desktop.active_window"],
+        object(),
+        [{"role": "user", "content": "open PixelForge"}],
+        timeline,
+        [],
+        agent={},
+        runtime_planner_decision=None,
+        run_id="",
+        budget=FakeBudget(),
+        next_iteration=1,
+    )
+
+    assert batches == [["app.open"], ["desktop.active_window"]]
+    tool_calls = [event for event in timeline if event["event"] == "agent.tool.call"]
+    assert [event["detail"] for event in tool_calls] == [
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert tool_calls[1]["replan_request_id"] == "replan-focus"
+    assert tool_calls[1]["planning_reason"] == "planner_replan_deferred_continuation"
 
 
 def test_daily_desktop_sequence_summary_includes_runtime_readiness_skips() -> None:

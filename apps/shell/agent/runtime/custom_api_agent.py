@@ -2677,6 +2677,41 @@ class RuntimeCustomApiAgentLoop:
                 run_id=run_id,
                 budget=budget,
             )
+            continuation_requests = _auto_replan_recovery_deferred_continuation_requests(
+                requests,
+                allowed_tools,
+                timeline,
+                tool_timeline_start=tool_timeline_start,
+            )
+            if continuation_requests:
+                self._record_auto_model_followup_app_write_plan(
+                    continuation_requests,
+                    timeline=timeline,
+                    run_id=run_id,
+                )
+                self._record_desktop_permission_preflight(
+                    continuation_requests,
+                    broker,
+                    timeline=timeline,
+                    run_id=run_id,
+                )
+                self._record_desktop_tool_policy_decisions(
+                    continuation_requests,
+                    allowed_tools=allowed_tools,
+                    agent=agent,
+                    run_id=run_id,
+                )
+                self._run_tool_requests(
+                    continuation_requests,
+                    allowed_tools,
+                    broker,
+                    messages,
+                    timeline,
+                    artifacts,
+                    next_iteration=next_iteration,
+                    run_id=run_id,
+                    budget=budget,
+                )
         except AgentApprovalRequired as exc:
             self._record_runtime_planner_task_progress_events(
                 runtime_planner_decision,
@@ -14689,6 +14724,10 @@ def _auto_replan_runtime_recovery_action_requests(
                 request["permission_target"] = permission_target
             if bool(action.get("approval_required")):
                 request["approval_required"] = True
+            action_id = str(action.get("action_id") or action.get("id") or "").strip()
+            if action_id:
+                request["action_id"] = action_id
+                request["replan_recovery_action_id"] = action_id
             action_metadata = (
                 action.get("metadata") if isinstance(action.get("metadata"), Mapping) else {}
             )
@@ -14716,7 +14755,18 @@ def _auto_replan_runtime_recovery_action_requests(
                 verification_targets = _mapping_list(payload.get("verification_targets"))
             if verification_targets:
                 request["verification_targets"] = [dict(target) for target in verification_targets]
-            request["continue_to_model"] = True
+            deferred_continuation = _runtime_replan_action_deferred_continuation_requests(
+                action,
+                payload,
+                allowed,
+            )
+            if deferred_continuation:
+                request["deferred_continuation"] = deferred_continuation
+            if _runtime_replan_action_needs_model_followup(
+                action,
+                deferred_continuation=deferred_continuation,
+            ):
+                request["continue_to_model"] = True
             _attach_replan_payload_trace_metadata(request, payload)
             requests.append(request)
     return _dedupe_replan_recovery_requests(requests)
@@ -14753,6 +14803,194 @@ def _runtime_replan_action_auto_start_blocked(action: Mapping[str, Any]) -> bool
         or risk_level in {"high", "critical"}
         or tool_name not in _RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS
     )
+
+
+def _runtime_replan_action_needs_model_followup(
+    action: Mapping[str, Any],
+    *,
+    deferred_continuation: list[dict[str, Any]],
+) -> bool:
+    metadata = action.get("metadata") if isinstance(action.get("metadata"), Mapping) else {}
+    explicit = action.get("continue_to_model")
+    if isinstance(explicit, bool):
+        return explicit
+    explicit = metadata.get("continue_to_model")
+    if isinstance(explicit, bool):
+        return explicit
+    if deferred_continuation:
+        return False
+    return True
+
+
+def _runtime_replan_action_deferred_continuation_requests(
+    action: Mapping[str, Any],
+    payload: Mapping[str, Any],
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    continuation = _mapping_list(action.get("deferred_continuation"))
+    if not continuation:
+        return []
+    requests: list[dict[str, Any]] = []
+    request_id = str(payload.get("request_id") or "").strip()
+    trigger = str(payload.get("trigger") or "").strip()
+    action_id = str(action.get("action_id") or action.get("id") or "").strip()
+    for item in continuation:
+        request = _runtime_replan_safe_deferred_continuation_request(
+            item,
+            allowed,
+        )
+        if not request:
+            continue
+        if request_id:
+            request.setdefault("replan_request_id", request_id)
+        if trigger:
+            request.setdefault("replan_trigger", trigger)
+        if action_id:
+            request.setdefault("action_id", action_id)
+            request.setdefault("replan_recovery_action_id", action_id)
+        request.setdefault("source", "runtime_planner")
+        request.setdefault("planning_reason", "planner_replan_deferred_continuation")
+        for key in (
+            "source_step_id",
+            "source_tool_name",
+            "target_capability_id",
+            "capability_id",
+            "target_app_name",
+            "target_app_query",
+            "target_search_text",
+        ):
+            value = payload.get(key)
+            if value not in (None, "", [], {}):
+                request.setdefault(key, value)
+        _attach_replan_payload_trace_metadata(request, payload)
+        requests.append(request)
+    return _dedupe_replan_recovery_requests(requests)
+
+
+def _auto_replan_recovery_deferred_continuation_requests(
+    recovery_requests: Iterable[Mapping[str, Any]],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    if not allowed:
+        return []
+    requests: list[dict[str, Any]] = []
+    for source_request in recovery_requests:
+        if not isinstance(source_request, Mapping):
+            continue
+        if not _runtime_replan_source_request_completed(
+            source_request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        ):
+            continue
+        for item in _mapping_list(source_request.get("deferred_continuation")):
+            request = _runtime_replan_safe_deferred_continuation_request(item, allowed)
+            if not request:
+                continue
+            for key, value in _runtime_replan_deferred_inherited_metadata(
+                source_request
+            ).items():
+                request.setdefault(key, value)
+            request.setdefault(
+                "source",
+                str(source_request.get("source") or "runtime_planner").strip(),
+            )
+            request.setdefault(
+                "planning_reason",
+                "planner_replan_deferred_continuation",
+            )
+            requests.append(request)
+    requests = _dedupe_replan_recovery_requests(requests)
+    return _drop_completed_auto_followup_prefix(
+        requests,
+        timeline,
+        tool_timeline_start=tool_timeline_start,
+    )
+
+
+def _runtime_replan_source_request_completed(
+    request: Mapping[str, Any],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> bool:
+    comparable = {
+        key: value
+        for key, value in dict(request).items()
+        if key
+        not in {
+            "continue_to_model",
+            "deferred_tool",
+            "deferred_input",
+            "deferred_context",
+            "deferred_continuation",
+        }
+    }
+    return _auto_followup_request_completed(
+        comparable,
+        timeline,
+        tool_timeline_start=tool_timeline_start,
+    )
+
+
+def _runtime_replan_safe_deferred_continuation_request(
+    item: Mapping[str, Any],
+    allowed: set[str],
+) -> dict[str, Any]:
+    tool_name = str(item.get("tool") or item.get("tool_name") or "").strip()
+    if not tool_name or tool_name not in allowed:
+        return {}
+    if tool_name not in _RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS:
+        return {}
+    risk_level = str(item.get("risk_level") or "").strip().lower()
+    if risk_level in {"high", "critical"}:
+        return {}
+    if bool(item.get("approval_required")):
+        return {}
+    request = dict(item)
+    request["tool"] = tool_name
+    raw_input = item.get("input") if isinstance(item.get("input"), Mapping) else {}
+    request["input"] = dict(raw_input)
+    request.pop("tool_name", None)
+    request.pop("continue_to_model", None)
+    return request
+
+
+def _runtime_replan_deferred_inherited_metadata(
+    request: Mapping[str, Any],
+) -> dict[str, Any]:
+    metadata = {
+        key: value
+        for key, value in _request_observability_metadata(request).items()
+        if key
+        not in {
+            "continue_to_model",
+            "deferred_tool",
+            "deferred_input",
+            "deferred_context",
+            "deferred_continuation",
+        }
+    }
+    for key in (
+        "action_id",
+        "replan_recovery_action_id",
+        "source_step_id",
+        "source_tool_name",
+        "target_capability_id",
+        "task_todo",
+        "task_checkpoints",
+        "task_workspace_items",
+        "task_verification_targets",
+        "verification_targets",
+    ):
+        value = request.get(key)
+        if value not in (None, "", [], {}):
+            metadata[key] = value
+    return metadata
 
 
 def _replan_fallback_request_needs_model_followup(
