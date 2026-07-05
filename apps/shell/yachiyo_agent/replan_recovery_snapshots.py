@@ -1619,6 +1619,32 @@ def _runtime_execution_recovery_action_metadata(
     target_step_ids = _verification_target_step_ids(verification_targets)
     if target_step_ids:
         metadata["verification_target_step_ids"] = target_step_ids
+    for key in (
+        "core_id",
+        "workspace_id",
+        "group_run_id",
+        "run_group_id",
+        "group_id",
+        "workflow_run_id",
+        "workflow_id",
+        "workflow_node_id",
+        "workflow_node_label",
+        "workflow_node_kind",
+    ):
+        value = _first_text(_runtime_request_value(request, key))
+        if value:
+            metadata[key] = value
+    task_todo = _mapping(_runtime_request_value(request, "task_todo"))
+    if task_todo:
+        metadata["task_todo"] = task_todo
+    for key in (
+        "task_checkpoints",
+        "task_workspace_items",
+        "task_verification_targets",
+    ):
+        values = _mapping_list(_runtime_request_value(request, key))
+        if values:
+            metadata[key] = values
     return metadata
 
 

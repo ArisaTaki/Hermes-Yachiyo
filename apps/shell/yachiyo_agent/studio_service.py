@@ -1839,11 +1839,29 @@ def _replan_recovery_task_context(
     action: ReplanRecoveryActionSnapshot,
 ) -> dict[str, Any]:
     source_step_id = str(recovery.source_step_id or "").strip()
+    action_metadata = _mapping(action.metadata)
+    metadata_task_context = _mapping(action_metadata.get("task_context"))
     task_core = _source_task_core_for_recovery(source_run, recovery)
     workspace = getattr(task_core, "workspace", None) if task_core is not None else None
-    todo = _task_todo_context_for_step(task_core, source_step_id)
-    checkpoints = _task_checkpoints_context_for_step(task_core, source_step_id)
-    workspace_items = _task_workspace_items_context_for_step(workspace, source_step_id)
+    todo = (
+        _task_todo_context_for_step(task_core, source_step_id)
+        or _mapping(action_metadata.get("task_todo"))
+        or _mapping(metadata_task_context.get("task_todo"))
+    )
+    checkpoints = (
+        _task_checkpoints_context_for_step(task_core, source_step_id)
+        or _mapping_list(action_metadata.get("task_checkpoints"))
+        or _mapping_list(metadata_task_context.get("task_checkpoints"))
+    )
+    workspace_items = (
+        _task_workspace_items_context_for_step(workspace, source_step_id)
+        or _mapping_list(action_metadata.get("task_workspace_items"))
+        or _mapping_list(metadata_task_context.get("task_workspace_items"))
+    )
+    metadata_verification_targets = _merge_mapping_lists(
+        _mapping_list(action_metadata.get("task_verification_targets")),
+        _mapping_list(metadata_task_context.get("task_verification_targets")),
+    )
     task_verification_targets = _replan_recovery_task_verification_targets(
         recovery,
         action,
@@ -1851,6 +1869,10 @@ def _replan_recovery_task_context(
         fallback_todo=todo,
         fallback_checkpoints=checkpoints,
         fallback_workspace_items=workspace_items,
+    )
+    task_verification_targets = _merge_mapping_lists(
+        task_verification_targets,
+        metadata_verification_targets,
     )
     if not todo and task_verification_targets:
         todo = _mapping(task_verification_targets[0].get("todo"))
@@ -1862,8 +1884,22 @@ def _replan_recovery_task_context(
     context: dict[str, Any] = {}
     for key, value in (
         ("core_id", _first_text(recovery.core_id, getattr(task_core, "core_id", ""))),
-        ("workspace_id", _first_text(getattr(workspace, "workspace_id", ""))),
-        ("workspace_title", _first_text(getattr(workspace, "title", ""))),
+        (
+            "workspace_id",
+            _first_text(
+                action_metadata.get("workspace_id"),
+                metadata_task_context.get("workspace_id"),
+                getattr(workspace, "workspace_id", ""),
+            ),
+        ),
+        (
+            "workspace_title",
+            _first_text(
+                action_metadata.get("workspace_title"),
+                metadata_task_context.get("workspace_title"),
+                getattr(workspace, "title", ""),
+            ),
+        ),
         ("task_id", _first_text(recovery.task_id, getattr(source_run, "task_id", ""))),
         ("source_step_id", source_step_id),
         ("planner_step_id", source_step_id),
@@ -1885,6 +1921,16 @@ def _replan_recovery_task_context(
     if verification_targets:
         context["verification_targets"] = [dict(target) for target in verification_targets]
     return context
+
+
+def _merge_mapping_lists(*items: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    merged: list[dict[str, Any]] = []
+    for item_list in items:
+        for item in item_list:
+            record = _mapping(item)
+            if record and record not in merged:
+                merged.append(record)
+    return merged
 
 
 def _source_task_core_for_recovery(

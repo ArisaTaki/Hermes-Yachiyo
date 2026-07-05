@@ -201,6 +201,65 @@ class _ReplanRecoveryStudioPort(_FakeStudioExecutionPort):
         )
 
 
+class _MetadataOnlyReplanRecoveryStudioPort(_ReplanRecoveryStudioPort):
+    def get_run_timeline(self, run_id: str) -> dict[str, Any]:
+        self.calls.append(("get_run_timeline", run_id))
+        payload = _replan_recovery_task_payload(task_id="task-1")
+        replan_event = payload["events"][1]
+        action = replan_event["payload"]["metadata"]["recovery_actions"][0]
+        action["metadata"].update(
+            {
+                "workspace_id": "task-workspace-1",
+                "workspace_title": "Desktop Recovery Workspace",
+                "task_todo": {
+                    "todo_id": "todo-open-app",
+                    "title": "Open Apple Music",
+                    "status": "blocked",
+                    "step_id": "open-app",
+                    "tool_name": "desktop.open_app",
+                },
+                "task_checkpoints": [
+                    {
+                        "checkpoint_id": "checkpoint:open-app",
+                        "title": "Verify Apple Music opened",
+                        "status": "blocked",
+                        "after_step_id": "open-app",
+                    }
+                ],
+                "task_workspace_items": [
+                    {
+                        "item_id": "workspace-open-app",
+                        "title": "Apple Music app target",
+                        "kind": "scratch",
+                        "source_step_id": "open-app",
+                        "status": "blocked",
+                    }
+                ],
+                "task_verification_targets": [
+                    {
+                        "step_id": "open-app",
+                        "todo": {
+                            "todo_id": "todo-open-app",
+                            "title": "Open Apple Music",
+                            "status": "blocked",
+                            "step_id": "open-app",
+                        },
+                        "checkpoints": [
+                            {
+                                "checkpoint_id": "checkpoint:open-app",
+                                "title": "Verify Apple Music opened",
+                                "status": "blocked",
+                                "after_step_id": "open-app",
+                            }
+                        ],
+                    }
+                ],
+            }
+        )
+        payload["events"] = [replan_event]
+        return payload
+
+
 class _PagedRuntimePort(_FakeRuntimePort):
     def get_task_event_page(
         self,
@@ -789,6 +848,35 @@ def test_agent_studio_service_plans_and_starts_replan_continuation() -> None:
         "replan-continuation:replan-1:replan-1:action:1:desktop.list_apps"
     )
     assert request["direct_tool_requests"][0]["approval_required"] is False
+
+
+def test_agent_studio_service_uses_replan_action_metadata_task_context() -> None:
+    port = _MetadataOnlyReplanRecoveryStudioPort()
+    service = AgentStudioService(port)
+
+    continuation = service.plan_replan_recovery_action(
+        "run-1",
+        {
+            "request_id": "replan-1",
+            "action_id": "replan-1:action:1:desktop.list_apps",
+            "agent_id": "agent-1",
+        },
+    )
+
+    direct_request = continuation.direct_tool_requests[0]
+    assert continuation.task_context["workspace_id"] == "task-workspace-1"
+    assert continuation.task_context["task_todo"]["todo_id"] == "todo-open-app"
+    assert continuation.task_context["task_checkpoints"][0]["checkpoint_id"] == (
+        "checkpoint:open-app"
+    )
+    assert continuation.task_context["task_workspace_items"][0]["item_id"] == (
+        "workspace-open-app"
+    )
+    assert direct_request["workspace_id"] == "task-workspace-1"
+    assert direct_request["task_todo"]["todo_id"] == "todo-open-app"
+    assert direct_request["task_checkpoints"][0]["checkpoint_id"] == "checkpoint:open-app"
+    assert direct_request["task_workspace_items"][0]["item_id"] == "workspace-open-app"
+    assert direct_request["task_verification_targets"][0]["step_id"] == "open-app"
 
 
 def test_agent_studio_service_auto_starts_next_safe_replan_continuation() -> None:
