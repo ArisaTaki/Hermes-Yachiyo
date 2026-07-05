@@ -1074,6 +1074,10 @@ def test_refresh_local_rc_signoff_print_status_fails_when_draft_missing(
         "{}",
         encoding="utf-8",
     )
+    (tmp / "rc-verification-old12345-oha-desktop-agent-release-smoke.json").write_text(
+        "{}",
+        encoding="utf-8",
+    )
     (tmp / "rc-verification-old12345-release-smoke.json").write_text(
         "{}",
         encoding="utf-8",
@@ -1089,6 +1093,10 @@ def test_refresh_local_rc_signoff_print_status_fails_when_draft_missing(
     assert "latest available local RC evidence:" in stderr
     assert "latest signoff draft: tmp/rc-signoff-old12345-current.json" in stderr
     assert "latest release readiness: tmp/rc-verification-old12345-release-readiness.json" in stderr
+    assert (
+        "latest Oha product smoke: "
+        "tmp/rc-verification-old12345-oha-desktop-agent-release-smoke.json"
+    ) in stderr
     assert "latest release smoke: tmp/rc-verification-old12345-release-smoke.json" in stderr
     assert "latest public demo: tmp/rc-verification-old12345-public-demo.json" in stderr
     assert "refresh current local RC signoff draft:" in stderr

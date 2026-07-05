@@ -195,6 +195,10 @@ def _print_missing_current_signoff_guidance(
             _latest_tmp_report("rc-verification-*-release-readiness.json"),
         ),
         (
+            "latest Oha product smoke",
+            _latest_tmp_report("rc-verification-*-oha-desktop-agent-release-smoke.json"),
+        ),
+        (
             "latest release smoke",
             _latest_tmp_report("rc-verification-*-release-smoke.json"),
         ),
