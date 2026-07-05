@@ -27070,6 +27070,36 @@ def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> N
             "input": {"app_name": "Notes"},
             "source": "runtime_planner",
             "planning_reason": "explicit_full_plan",
+            "decision_id": "decision-explicit-direct",
+            "plan_id": "runtime-plan-explicit-direct",
+            "core_id": "task-core-explicit-direct",
+            "workspace_id": "task-workspace-explicit-direct",
+            "step_id": "open-notes",
+            "capability_id": "desktop.app_control",
+            "task_todo": {
+                "todo_id": "todo-open-notes",
+                "title": "Open Notes",
+                "status": "pending",
+                "step_id": "open-notes",
+                "tool_name": "app.open",
+            },
+            "task_checkpoints": [
+                {
+                    "checkpoint_id": "checkpoint-open-notes",
+                    "title": "Verify Notes opened",
+                    "status": "planned",
+                    "after_step_id": "open-notes",
+                }
+            ],
+            "task_workspace_items": [
+                {
+                    "item_id": "workspace-open-notes-input",
+                    "title": "open-notes.input.json",
+                    "kind": "scratch",
+                    "status": "planned",
+                    "source_step_id": "open-notes",
+                }
+            ],
         },
         {
             "protocol": "json_fallback",
@@ -27175,6 +27205,23 @@ def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> N
         "desktop.active_window",
     ]
     assert not [event for event in timeline if event["event"] == "agent.plan.selection"]
+    todo_event = next(
+        event for event in timeline if event["event"] == "agent.task.todo.updated"
+    )
+    checkpoint_event = next(
+        event for event in timeline if event["event"] == "agent.task.checkpoint.updated"
+    )
+    workspace_event = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.task.workspace_item.updated"
+    )
+    assert todo_event["todo_id"] == "todo-open-notes"
+    assert todo_event["status"] == "completed"
+    assert checkpoint_event["checkpoint_id"] == "checkpoint-open-notes"
+    assert checkpoint_event["status"] == "completed"
+    assert workspace_event["workspace_item_id"] == "workspace-open-notes-input"
+    assert workspace_event["status"] == "completed"
     completed = [event for event in timeline if event["event"] == "agent.desktop.intent_completed"]
     assert completed[-1]["detail"] == "app.open"
     assert completed[-1]["tools"] == [
@@ -27182,6 +27229,93 @@ def test_custom_api_agent_loop_executes_explicit_direct_tool_request_list() -> N
         "app.open",
         "desktop.active_window",
     ]
+
+
+def test_custom_api_agent_loop_derives_direct_requests_from_runtime_envelope() -> None:
+    budget = FakeBudget()
+    tool_runs: list[list[dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+    runtime_execution_envelope = {
+        "envelope_id": "execution-envelope-direct",
+        "intent_kind": "desktop_operation",
+        "requests": [
+            {
+                "request_id": "request-open-notes",
+                "tool_name": "app.open",
+                "input": {"app_name": "Notes"},
+                "status": "planned",
+            }
+        ],
+    }
+
+    def run_tool_requests(
+        tool_requests,
+        _allowed_tools,
+        _broker,
+        _messages_arg,
+        timeline_arg,
+        _artifacts,
+        **_kwargs,
+    ):
+        tool_runs.append(tool_requests)
+        timeline_arg.append(
+            _timeline(
+                "agent.tool.call",
+                "app.open",
+                input_preview={"app_name": "Notes"},
+                result={
+                    "ok": True,
+                    "action": "app.open",
+                    "summary": "Opened Notes",
+                    "data": {"app_name": "Notes"},
+                },
+            )
+        )
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {},
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["app.open"]},
+        },
+        run_budget=lambda _run_id, _timeline_value: budget,
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=2,
+        operating_doctrine="Use runtime execution envelope requests.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("runtime envelope direct request should not call model")
+        ),
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=run_tool_requests,
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "ignored",
+        broker={},
+        timeline=timeline,
+        artifacts=[],
+        run_id="run-runtime-envelope-direct",
+        runtime_execution_envelope=runtime_execution_envelope,
+    )
+
+    assert result == "已打开 Notes。"
+    assert [request["tool"] for request in tool_runs[0]] == ["app.open"]
+    selection = next(event for event in timeline if event["event"] == "agent.plan.selection")
+    assert selection["selected_source"] == "runtime_execution_envelope"
+    assert selection["yachiyo_execution_envelope"] == runtime_execution_envelope
+    assert selection["yachiyo_execution_requests"] == ["app.open"]
 
 
 def test_custom_api_agent_loop_verifies_model_system_volume_tool_call() -> None:

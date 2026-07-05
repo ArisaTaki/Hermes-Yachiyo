@@ -69,6 +69,7 @@ from apps.shell.yachiyo_agent.planner_projection import (
 from apps.shell.yachiyo_agent.runtime_execution import (
     runtime_execution_envelope_payload,
     runtime_execution_requests_from_envelope_payload,
+    runtime_execution_requests_from_metadata,
 )
 from apps.shell.yachiyo_agent.runtime_doctrine import YACHIYO_RUNTIME_OPERATING_MANUAL
 
@@ -232,6 +233,8 @@ class RuntimeCustomApiAgentLoop:
         messages: list[dict[str, Any]] | None = None,
         direct_tool_request: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        runtime_execution_metadata: Mapping[str, Any] | None = None,
         daily_desktop_planning_context: str | None = None,
         start_iteration: int = 0,
         run_id: str = "",
@@ -239,6 +242,18 @@ class RuntimeCustomApiAgentLoop:
     ) -> str:
         runtime = self._compile_agent_runtime(agent)
         allowed_tools = runtime["tool_policy"].get("allowed_tools") or []
+        if direct_tool_requests is None:
+            direct_tool_requests = _runtime_execution_context_tool_requests(
+                runtime_execution_envelope,
+                runtime_execution_metadata,
+                allowed_tools,
+            )
+        runtime_execution_selection_payload = _runtime_execution_context_selection_payload(
+            runtime_execution_envelope,
+            runtime_execution_metadata,
+            direct_tool_requests
+            or ([direct_tool_request] if isinstance(direct_tool_request, dict) else None),
+        )
         default_messages = messages is None
         if messages is None:
             messages = self._initial_messages(context, allowed_tools)
@@ -289,6 +304,8 @@ class RuntimeCustomApiAgentLoop:
             planner_replan_only = False
             if direct_planned_tool_requests:
                 planned_tool_requests = direct_planned_tool_requests
+                if not direct_tool_selection_payload:
+                    direct_tool_selection_payload = runtime_execution_selection_payload
                 if any(
                     bool(request.get("continue_to_model"))
                     and str(request.get("source") or "").strip() == "runtime_planner"
@@ -307,6 +324,8 @@ class RuntimeCustomApiAgentLoop:
                         planned_tool_requests = planner_execution_requests
             elif direct_planned_tool_request:
                 planned_tool_requests = [direct_planned_tool_request]
+                if not direct_tool_selection_payload:
+                    direct_tool_selection_payload = runtime_execution_selection_payload
             else:
                 (
                     runtime_planner_decision,
@@ -526,6 +545,12 @@ class RuntimeCustomApiAgentLoop:
                     replan_payloads = []
                 self._record_runtime_planner_task_progress_events(
                     runtime_planner_decision,
+                    timeline=timeline,
+                    tool_timeline_start=tool_timeline_start,
+                    run_id=run_id,
+                )
+                self._record_tool_request_task_progress_events(
+                    execution_tool_requests,
                     timeline=timeline,
                     tool_timeline_start=tool_timeline_start,
                     run_id=run_id,
@@ -13864,6 +13889,98 @@ _CHAT_FULL_PLAN_EXECUTION_INTENTS = frozenset(
         "web_research",
     }
 )
+
+
+def _runtime_execution_context_tool_requests(
+    runtime_execution_envelope: Mapping[str, Any] | None,
+    runtime_execution_metadata: Mapping[str, Any] | None,
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]] | None:
+    requests = runtime_execution_requests_from_envelope_payload(
+        runtime_execution_envelope,
+        allowed_tools=allowed_tools,
+    )
+    if requests:
+        return requests
+    if not isinstance(runtime_execution_metadata, Mapping):
+        return None
+    requests = runtime_execution_requests_from_metadata(
+        runtime_execution_metadata,
+        allowed_tools=allowed_tools,
+    )
+    return requests or None
+
+
+def _runtime_execution_context_selection_payload(
+    runtime_execution_envelope: Mapping[str, Any] | None,
+    runtime_execution_metadata: Mapping[str, Any] | None,
+    direct_tool_requests: Iterable[Mapping[str, Any]] | None,
+) -> dict[str, Any]:
+    metadata = (
+        dict(runtime_execution_metadata)
+        if isinstance(runtime_execution_metadata, Mapping)
+        else {}
+    )
+    envelope = (
+        dict(runtime_execution_envelope)
+        if isinstance(runtime_execution_envelope, Mapping)
+        else metadata.get("yachiyo_execution_envelope")
+    )
+    envelope = dict(envelope) if isinstance(envelope, Mapping) else {}
+    tool_names = _tool_names_from_requests(direct_tool_requests)
+    if not tool_names:
+        tool_names = [
+            str(tool or "").strip()
+            for tool in metadata.get("yachiyo_execution_requests", [])
+            if str(tool or "").strip()
+        ]
+    if not tool_names and envelope:
+        requests = envelope.get("requests") if isinstance(envelope.get("requests"), list) else []
+        tool_names = [
+            str(request.get("tool_name") or request.get("tool") or "").strip()
+            for request in requests
+            if isinstance(request, Mapping)
+            and str(request.get("tool_name") or request.get("tool") or "").strip()
+        ]
+    metadata_has_execution_context = any(
+        metadata.get(key) not in (None, "", [], {})
+        for key in (
+            "yachiyo_execution_requests",
+            "yachiyo_execution_envelope",
+            "yachiyo_task_core",
+            "yachiyo_task_progress",
+        )
+    )
+    if not envelope and not metadata_has_execution_context:
+        return {}
+    payload = {
+        "selected_source": "runtime_execution_envelope" if envelope else "direct_tool_requests",
+        "selected_reason": "runtime_execution_direct_requests",
+        "selection_source": "runtime_execution_envelope" if envelope else "direct_tool_requests",
+        "selection_reason": "runtime_execution_direct_requests",
+        "selected_request_count": len(tool_names),
+        "execution_request_count": len(tool_names),
+    }
+    if envelope:
+        payload["yachiyo_execution_envelope"] = envelope
+    if tool_names:
+        payload["selected_tools"] = tool_names
+        payload["execution_tools"] = tool_names
+        payload["yachiyo_execution_requests"] = tool_names
+        payload["yachiyo_execution_request_count"] = len(tool_names)
+    for key in (
+        "yachiyo_decision_id",
+        "yachiyo_plan_id",
+        "yachiyo_intent_kind",
+        "yachiyo_task_core",
+        "yachiyo_task_progress",
+        "yachiyo_capability_plan",
+        "yachiyo_execution_request_previews",
+    ):
+        value = metadata.get(key)
+        if value not in (None, "", [], {}):
+            payload[key] = value
+    return payload
 
 
 def _selection_payload_with_runtime_execution_envelope(

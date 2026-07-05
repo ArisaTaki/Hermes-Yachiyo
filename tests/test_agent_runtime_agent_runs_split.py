@@ -129,6 +129,8 @@ def test_agent_run_executor_projects_completed_agent_run() -> None:
         "Ship",
         "Upstream",
         run_group_id="group-1",
+        runtime_execution_envelope={"envelope_id": "env-agent", "requests": []},
+        runtime_execution_metadata={"yachiyo_runtime_planner": True},
     )
 
     assert result == {"run_id": "run-1", "status": "completed", "result": "Done"}
@@ -146,6 +148,11 @@ def test_agent_run_executor_projects_completed_agent_run() -> None:
                 "daily_desktop_planning_context": "",
                 "direct_tool_request": None,
                 "direct_tool_requests": None,
+                "runtime_execution_envelope": {
+                    "envelope_id": "env-agent",
+                    "requests": [],
+                },
+                "runtime_execution_metadata": {"yachiyo_runtime_planner": True},
                 "run_id": "run-1",
             },
         ),
@@ -366,6 +373,8 @@ def test_agent_run_direct_request_tool_name_alias_is_normalized() -> None:
     }
     payload = {
         "user_goal": "分析 sales.csv",
+        "runtime_execution_envelope": {"envelope_id": "env-agent", "requests": []},
+        "metadata": {"yachiyo_runtime_planner": True},
         "direct_tool_request": {
             "request_id": "request-run-analysis",
             "tool_name": "python.run",
@@ -379,6 +388,11 @@ def test_agent_run_direct_request_tool_name_alias_is_normalized() -> None:
 
     assert options["direct_tool_request"]["tool"] == "python.run"
     assert options["direct_tool_requests"][0]["tool"] == "python.run"
+    assert options["runtime_execution_envelope"] == {
+        "envelope_id": "env-agent",
+        "requests": [],
+    }
+    assert options["runtime_execution_metadata"] == {"yachiyo_runtime_planner": True}
     assert enriched["tool_policy"]["approval_required"]["python.run"] is True
 
 

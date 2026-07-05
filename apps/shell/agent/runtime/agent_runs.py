@@ -121,6 +121,8 @@ class RuntimeAgentRunExecutor:
         workflow_run_id: str = "",
         direct_tool_request: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        runtime_execution_metadata: dict[str, Any] | None = None,
         daily_desktop_planning_context: str | None = None,
     ) -> dict[str, Any]:
         preparation = self._preparer.prepare(
@@ -155,6 +157,8 @@ class RuntimeAgentRunExecutor:
                 ),
                 direct_tool_request=direct_tool_request,
                 direct_tool_requests=direct_tool_requests,
+                runtime_execution_envelope=runtime_execution_envelope,
+                runtime_execution_metadata=runtime_execution_metadata,
                 run_id=run_id,
             )
             return self._agent_run_outcomes.completed(
@@ -511,6 +515,11 @@ def _agent_run_execution_options(payload: dict[str, Any]) -> dict[str, Any]:
     direct_tool_requests = _payload_direct_tool_requests(payload)
     if direct_tool_requests:
         options["direct_tool_requests"] = direct_tool_requests
+    if isinstance(payload.get("runtime_execution_envelope"), dict):
+        options["runtime_execution_envelope"] = dict(payload["runtime_execution_envelope"])
+    metadata = payload.get("metadata")
+    if isinstance(metadata, dict):
+        options["runtime_execution_metadata"] = dict(metadata)
     if "daily_desktop_planning_context" in payload:
         options["daily_desktop_planning_context"] = str(
             payload.get("daily_desktop_planning_context") or ""
