@@ -403,6 +403,65 @@ def test_public_task_replan_events_project_explicit_verification_failure() -> No
     assert event.payload["target_capability_id"] == "data.analysis"
 
 
+def test_public_task_replan_events_recover_active_window_mismatch_by_opening_target_app() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge",
+        allowed_tools=["desktop.list_apps", "app.open", "desktop.active_window"],
+    )
+
+    events = public_task_replan_events_for_tool_result(
+        decision,
+        tool_request={
+            "tool": "desktop.active_window",
+            "step_id": "verify-desktop-result",
+            "capability_id": "active_window",
+            "task_id": "task-1",
+            "run_id": "run-1",
+            "verification_target": {"app_name": "PixelForge"},
+            "task_verification_targets": [{"step_id": "open-or-focus-app"}],
+            "replan_triggers": ["verification_failed"],
+            "replan_signal_ids": ["replan-verify-focus"],
+        },
+        tool_event={
+            "event": "agent.tool.call",
+            "detail": "desktop.active_window",
+            "result": {
+                "ok": False,
+                "error": "foreground_focus_unverified",
+                "verification_failed": True,
+                "blocking_condition": "foreground_focus_unverified",
+                "expected_app_name": "PixelForge",
+                "active_app_name": "Finder",
+                "data": {
+                    "expected_app_name": "PixelForge",
+                    "active_app_name": "Finder",
+                    "focus_verified": False,
+                },
+            },
+        },
+        run_id="run-1",
+        after_sequence=50,
+    )
+
+    assert len(events) == 1
+    event = events[0]
+    assert event.event_type == "agent.replan.requested"
+    assert event.payload["trigger"] == "verification_failed"
+    assert event.payload["fallback_tools"][:2] == ["app.open", "desktop.active_window"]
+    actions = event.payload["metadata"]["recovery_actions"]
+    assert actions[0]["tool"] == "app.open"
+    assert actions[0]["input"] == {"app_name": "PixelForge"}
+    assert actions[0]["selected"] is True
+    assert actions[0]["observation_retry"]["reason"] == "foreground_focus_unverified"
+    assert actions[0]["metadata"]["runtime_replan_auto_start_eligible"] is True
+    continuation = actions[0]["deferred_continuation"][0]
+    assert continuation["tool"] == "desktop.active_window"
+    assert continuation["verification_target"] == {
+        "app_name": "PixelForge",
+        "source_tool": "desktop.active_window",
+    }
+
+
 def test_task_replan_payloads_scope_group_run_and_skip_success() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",

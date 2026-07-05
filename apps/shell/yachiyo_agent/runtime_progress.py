@@ -291,6 +291,7 @@ def _failure_payload_from_tool_result(
         "action_target",
         "observation_evidence",
         "observation_retry",
+        "verification_target",
     ):
         value = _mapping(tool_request.get(key))
         if value:

@@ -2407,6 +2407,8 @@ def _runtime_replan_fallback_tools(
         *_string_list(result.get("suggested_tool")),
         *_string_list(result.get("recommended_tools")),
     ]
+    if _runtime_focus_unverified_target_app(tool_request, result):
+        tools.extend(["app.open", "desktop.active_window"])
     observation_retry_tool = _runtime_observation_retry_tool(
         _first_mapping(
             tool_request.get("observation_retry"),
@@ -2539,7 +2541,7 @@ def _runtime_default_recovery_input(
             or ""
         ).strip()
         return {"path": path} if path else None
-    if fallback_tool in {"app.open", "desktop.open_app"}:
+    if fallback_tool in {"app.open", "desktop.open_app", "app.focus", "desktop.focus_app"}:
         return {"app_name": app_name} if app_name else None
     if fallback_tool == "desktop.active_window":
         return {}
@@ -2758,19 +2760,6 @@ def _runtime_replan_verification_failure_context(
         "source_step_id": source_step_id,
         "reason": "verification_failed",
     }
-    recovery_actions: list[dict[str, Any]] = []
-    if source_tool_name:
-        recovery_action: dict[str, Any] = {
-            "label": "Re-observe failed verification target",
-            "tool": source_tool_name,
-            "input": dict(input_preview),
-            "permission_target": "runtime_verification",
-            "risk_level": "low",
-            "action_target": action_target,
-            "observation_evidence": observation_evidence,
-            "observation_retry": observation_retry,
-        }
-        recovery_actions.append(recovery_action)
     target_app_name = _runtime_replan_first_text(
         ("target_app_name", "app_name", "expected_app_name"),
         target,
@@ -2789,6 +2778,29 @@ def _runtime_replan_verification_failure_context(
         action_target,
         input_preview,
     )
+    recovery_actions: list[dict[str, Any]] = []
+    focus_recovery = _runtime_focus_unverified_recovery_action(
+        target_app_name=target_app_name,
+        source_step_id=source_step_id,
+        source_tool_name=source_tool_name,
+        action_target=action_target,
+        observation_evidence=observation_evidence,
+        failure_detail=failure_detail,
+    )
+    if focus_recovery:
+        recovery_actions.append(focus_recovery)
+    if source_tool_name:
+        recovery_action: dict[str, Any] = {
+            "label": "Re-observe failed verification target",
+            "tool": source_tool_name,
+            "input": dict(input_preview),
+            "permission_target": "runtime_verification",
+            "risk_level": "low",
+            "action_target": action_target,
+            "observation_evidence": observation_evidence,
+            "observation_retry": observation_retry,
+        }
+        recovery_actions.append(recovery_action)
     return {
         "verification_targets": verification_targets,
         "action_target": action_target,
@@ -2799,6 +2811,103 @@ def _runtime_replan_verification_failure_context(
         **({"target_app_name": target_app_name} if target_app_name else {}),
         **({"target_app_query": target_app_query} if target_app_query else {}),
         **({"target_search_text": target_search_text} if target_search_text else {}),
+    }
+
+
+def _runtime_focus_unverified_target_app(
+    tool_request: Mapping[str, Any],
+    result: Mapping[str, Any],
+) -> str:
+    if not _runtime_result_has_condition(result, "foreground_focus_unverified"):
+        return ""
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    verification_target = (
+        tool_request.get("verification_target")
+        if isinstance(tool_request.get("verification_target"), Mapping)
+        else {}
+    )
+    action_target = (
+        tool_request.get("action_target")
+        if isinstance(tool_request.get("action_target"), Mapping)
+        else {}
+    )
+    raw_input = (
+        tool_request.get("input") if isinstance(tool_request.get("input"), Mapping) else {}
+    )
+    return _runtime_replan_first_text(
+        ("app_name", "target_app_name", "expected_app_name"),
+        verification_target,
+        action_target,
+        raw_input,
+        result,
+        data,
+    )
+
+
+def _runtime_result_has_condition(result: Mapping[str, Any], condition: str) -> bool:
+    clean_condition = str(condition or "").strip()
+    if not clean_condition:
+        return False
+    values = [
+        result.get("error"),
+        result.get("blocking_condition"),
+        result.get("status"),
+    ]
+    values.extend(_string_list(result.get("blocking_conditions")))
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    values.extend(
+        [
+            data.get("error"),
+            data.get("blocking_condition"),
+            data.get("status"),
+        ]
+    )
+    values.extend(_string_list(data.get("blocking_conditions")))
+    return clean_condition in {str(value or "").strip() for value in values}
+
+
+def _runtime_focus_unverified_recovery_action(
+    *,
+    target_app_name: str,
+    source_step_id: str,
+    source_tool_name: str,
+    action_target: Mapping[str, Any],
+    observation_evidence: Mapping[str, Any],
+    failure_detail: str,
+) -> dict[str, Any]:
+    clean_app_name = str(target_app_name or "").strip()
+    if not clean_app_name or "foreground_focus_unverified" not in str(failure_detail or ""):
+        return {}
+    verify_request = {
+        "tool": "desktop.active_window",
+        "input": {},
+        "source": "runtime_replan_recovery",
+        "planning_reason": "planner_replan_verify_foreground_focus",
+        "replan_triggers": ["verification_failed"],
+        "verification_target": {
+            "app_name": clean_app_name,
+            **({"source_tool": source_tool_name} if source_tool_name else {}),
+        },
+    }
+    if source_step_id:
+        verify_request["step_id"] = source_step_id
+        verify_request["planner_step_id"] = source_step_id
+    return {
+        "label": "Bring expected app to foreground",
+        "tool": "app.open",
+        "input": {"app_name": clean_app_name},
+        "permission_target": "app_launch",
+        "risk_level": "low",
+        "selected": True,
+        "action_target": dict(action_target),
+        "observation_evidence": dict(observation_evidence),
+        "observation_retry": {
+            "tool": "app.open",
+            "input": {"app_name": clean_app_name},
+            "reason": "foreground_focus_unverified",
+            "source_tool": source_tool_name,
+        },
+        "deferred_continuation": [verify_request],
     }
 
 

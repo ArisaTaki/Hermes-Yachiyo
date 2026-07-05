@@ -1337,7 +1337,7 @@ def test_runtime_tool_request_runner_records_explicit_desktop_verification_targe
                 "verification_target": {"app_name": "PixelForge"},
             }
         ],
-        ["desktop.active_window"],
+        ["app.open", "desktop.active_window"],
         FakeBroker({"ok": True}),
         [{"role": "user", "content": "open PixelForge"}],
         timeline,
@@ -1369,9 +1369,18 @@ def test_runtime_tool_request_runner_records_explicit_desktop_verification_targe
         "tool_name": "desktop.active_window",
         "app_name": "PixelForge",
     }
-    assert payload["metadata"]["recovery_actions"][0]["tool"] == "desktop.active_window"
+    actions = payload["metadata"]["recovery_actions"]
+    assert actions[0]["tool"] == "app.open"
+    assert actions[0]["input"] == {"app_name": "PixelForge"}
+    assert actions[0]["selected"] is True
+    assert actions[0]["observation_retry"]["reason"] == "foreground_focus_unverified"
+    assert actions[0]["deferred_continuation"][0]["tool"] == "desktop.active_window"
+    assert actions[0]["deferred_continuation"][0]["verification_target"] == {
+        "app_name": "PixelForge",
+        "source_tool": "desktop.active_window",
+    }
     assert (
-        payload["metadata"]["recovery_actions"][0]["action_target"]
+        actions[0]["action_target"]
         == payload["action_target"]
     )
     run_replan_event = next(

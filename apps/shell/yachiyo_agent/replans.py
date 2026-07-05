@@ -529,6 +529,8 @@ def _default_recovery_tools(
     step: ToolPlanStepSnapshot | None,
     failure: Mapping[str, Any],
 ) -> list[str]:
+    if _foreground_focus_unverified_target_app(failure):
+        return ["app.open", "desktop.active_window"]
     capability = _text(target_capability)
     step_action = _text(getattr(step, "action", "") if step is not None else "")
     step_input = getattr(step, "input_preview", {}) if step is not None else {}
@@ -669,6 +671,25 @@ def _fallback_recovery_action(
         "source_step_id": _text(source_step_id),
         "target_capability_id": _text(target_capability_id),
     }
+    focus_target_app = _foreground_focus_unverified_target_app(failure)
+    if focus_target_app and tool_name in {
+        "app.open",
+        "app.focus",
+        "desktop.open_app",
+        "desktop.focus_app",
+    }:
+        action.update(
+            _foreground_focus_unverified_recovery_context(
+                tool_name=tool_name,
+                tool_input=tool_input,
+                source_step_id=source_step_id,
+                source_tool_name=_text(
+                    failure.get("source_tool_name") or failure.get("tool_name")
+                ),
+                target_app_name=focus_target_app,
+                failure=failure,
+            )
+        )
     verification_targets = _task_context_verification_targets(task_context)
     if verification_targets:
         action["verification_targets"] = verification_targets
@@ -722,7 +743,11 @@ def _fallback_recovery_tool_input(
         )
         return {"path": path} if path else None
     if tool_name in {"app.open", "app.focus", "app.status", "desktop.list_windows"}:
-        app_name = _first_text(request_input.get("app_name"), input_preview.get("app_name"))
+        app_name = _first_text(
+            request_input.get("app_name"),
+            input_preview.get("app_name"),
+            _foreground_focus_unverified_target_app(failure),
+        )
         if not app_name or app_name == "<selected app from desktop.list_apps>":
             return None
         return {"app_name": app_name}
@@ -880,6 +905,135 @@ def _desktop_loop_recovery_metadata(
     if verification_ids:
         metadata["verification_target_step_ids"] = verification_ids
     return _compact_mapping(metadata)
+
+
+def _foreground_focus_unverified_recovery_context(
+    *,
+    tool_name: str,
+    tool_input: Mapping[str, Any],
+    source_step_id: str,
+    source_tool_name: str,
+    target_app_name: str,
+    failure: Mapping[str, Any],
+) -> dict[str, Any]:
+    verification_target = {
+        "app_name": target_app_name,
+        **({"source_tool": source_tool_name} if source_tool_name else {}),
+    }
+    verify_request = {
+        "tool": "desktop.active_window",
+        "input": {},
+        "source": "runtime_replan_recovery",
+        "planning_reason": "planner_replan_verify_foreground_focus",
+        "replan_triggers": ["verification_failed"],
+        "verification_target": verification_target,
+    }
+    if source_step_id:
+        verify_request["step_id"] = source_step_id
+        verify_request["planner_step_id"] = source_step_id
+    return {
+        "selected": True,
+        "action_target": _mapping(failure.get("action_target")),
+        "observation_evidence": (
+            _mapping(failure.get("observation_evidence"))
+            or _foreground_focus_observation_evidence(failure)
+        ),
+        "observation_retry": _compact_mapping(
+            {
+                "tool": tool_name,
+                "input": dict(tool_input),
+                "reason": "foreground_focus_unverified",
+                "source_tool": source_tool_name,
+            }
+        ),
+        "deferred_continuation": [verify_request],
+        "metadata": {
+            "runtime_replan_auto_start_eligible": True,
+            "runtime_replan_auto_start_reason": "safe_low_risk_runtime_replan_recovery",
+            "runtime_replan_auto_start_blockers": [],
+            "replan_recovery_reason": "foreground_focus_unverified",
+        },
+    }
+
+
+def _foreground_focus_unverified_target_app(failure: Mapping[str, Any]) -> str:
+    if not _failure_has_condition(failure, "foreground_focus_unverified"):
+        return ""
+    result = failure.get("result") if isinstance(failure.get("result"), Mapping) else {}
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    verification_target = _mapping(failure.get("verification_target"))
+    action_target = _mapping(failure.get("action_target"))
+    request_input = _failure_tool_input(failure)
+    return _first_text(
+        verification_target.get("app_name"),
+        verification_target.get("target_app_name"),
+        verification_target.get("expected_app_name"),
+        action_target.get("app_name"),
+        action_target.get("target_app_name"),
+        action_target.get("expected_app_name"),
+        request_input.get("app_name"),
+        request_input.get("target_app_name"),
+        request_input.get("expected_app_name"),
+        result.get("app_name"),
+        result.get("target_app_name"),
+        result.get("expected_app_name"),
+        data.get("app_name"),
+        data.get("target_app_name"),
+        data.get("expected_app_name"),
+    )
+
+
+def _foreground_focus_observation_evidence(failure: Mapping[str, Any]) -> dict[str, Any]:
+    result = failure.get("result") if isinstance(failure.get("result"), Mapping) else {}
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    return _compact_mapping(
+        {
+            "expected_app_name": _first_text(
+                result.get("expected_app_name"),
+                data.get("expected_app_name"),
+                _foreground_focus_unverified_target_app(failure),
+            ),
+            "active_app_name": _first_text(
+                result.get("active_app_name"),
+                data.get("active_app_name"),
+            ),
+            "focus_verified": data.get("focus_verified"),
+            "blocking_condition": _first_text(
+                result.get("blocking_condition"),
+                data.get("blocking_condition"),
+            ),
+        }
+    )
+
+
+def _failure_has_condition(failure: Mapping[str, Any], condition: str) -> bool:
+    clean_condition = _text(condition)
+    if not clean_condition:
+        return False
+    result = failure.get("result") if isinstance(failure.get("result"), Mapping) else {}
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    values = [
+        failure.get("error"),
+        failure.get("detail"),
+        failure.get("status"),
+        failure.get("blocking_condition"),
+        result.get("error"),
+        result.get("hint"),
+        result.get("status"),
+        result.get("blocking_condition"),
+        data.get("error"),
+        data.get("hint"),
+        data.get("status"),
+        data.get("blocking_condition"),
+    ]
+    values.extend(_text_list(failure.get("blocking_conditions"), limit=8))
+    values.extend(_text_list(result.get("blocking_conditions"), limit=8))
+    values.extend(_text_list(data.get("blocking_conditions"), limit=8))
+    for value in values:
+        clean_value = _text(value)
+        if clean_value == clean_condition or clean_condition in clean_value:
+            return True
+    return False
 
 
 def _failure_tool_input(failure: Mapping[str, Any]) -> dict[str, Any]:
