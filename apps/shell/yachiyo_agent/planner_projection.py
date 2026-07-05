@@ -116,9 +116,11 @@ def planner_enriched_chat_request(
     metadata = _normalized_entrypoint_metadata(
         payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
     )
+    request_allowed_tools = _request_allowed_tools(payload)
+    effective_allowed_tools = allowed_tools or request_allowed_tools
     decision = runtime_planner_decision(
         str(payload.get("prompt") or payload.get("goal") or ""),
-        allowed_tools=allowed_tools,
+        allowed_tools=effective_allowed_tools,
         metadata=metadata,
     )
     if decision is None:
@@ -127,14 +129,13 @@ def planner_enriched_chat_request(
         str(payload.get("prompt") or payload.get("goal") or ""),
         metadata=metadata,
     )
-    request_allowed_tools = _request_allowed_tools(payload)
     planner_metadata = runtime_planner_metadata(
         decision,
-        allowed_tools=allowed_tools or request_allowed_tools,
+        allowed_tools=effective_allowed_tools,
     )
     execution_allowed_tools = _entrypoint_runtime_execution_allowed_tools(
         decision,
-        explicit_allowed_tools=allowed_tools or request_allowed_tools,
+        explicit_allowed_tools=effective_allowed_tools,
     )
     execution_decision = (
         runtime_planner_decision(

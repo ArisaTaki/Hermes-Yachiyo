@@ -2793,6 +2793,28 @@ def test_planner_selection_payload_surfaces_discovered_app_followup_target() -> 
         context_payload["followup_target"]
     )
 
+    restricted_enriched = planner_enriched_chat_request(
+        {
+            "prompt": "请分析 data/sales.csv 并输出报告",
+            "agent_id": "builtin:yachiyo-main",
+            "allowed_tools": ["artifact.write"],
+            "metadata": {},
+        }
+    )
+    assert restricted_enriched["metadata"]["yachiyo_plan_tools"] == ["artifact.write"]
+    assert restricted_enriched["metadata"]["yachiyo_missing_capabilities"] == [
+        "file.workspace_read",
+        "data.analysis",
+    ]
+    assert [
+        request["tool_name"]
+        for request in restricted_enriched["runtime_execution_envelope"]["requests"]
+    ] == ["artifact.write"]
+    assert [
+        request["tool"]
+        for request in restricted_enriched["direct_tool_requests"]
+    ] == ["artifact.write"]
+
     image_prompt = "打开一个能编辑图片的应用，新建一张 1024x1024 图片"
     image_decision = RuntimePlanner().decision(image_prompt, allowed_tools=allowed_tools)
     image_requests = planner_tool_requests(image_prompt, allowed_tools)
