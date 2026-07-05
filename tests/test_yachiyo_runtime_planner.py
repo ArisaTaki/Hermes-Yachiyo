@@ -149,6 +149,21 @@ def _selected_discovered_app_open_chain(query: str) -> list[dict[str, Any]]:
     ]
 
 
+def test_runtime_planner_does_not_route_unscoped_content_generation_as_desktop_typing() -> None:
+    allowed_tools = ["desktop.safe_type_text", "desktop.ui_elements"]
+
+    selection = planner_first_direct_tool_selection("写一首诗", allowed_tools)
+    english_selection = planner_first_direct_tool_selection("write a poem", allowed_tools)
+    foreground_selection = planner_first_direct_tool_selection("前台输入 hello", allowed_tools)
+
+    assert selection.requests == []
+    assert english_selection.requests == []
+    assert [request["tool"] for request in foreground_selection.requests] == [
+        "desktop.safe_type_text",
+        "desktop.ui_elements",
+    ]
+
+
 def _data_analysis_preview(
     path: str,
     source_kind: str,

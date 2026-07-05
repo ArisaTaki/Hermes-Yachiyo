@@ -115,7 +115,10 @@ class TestNativeAgentUnavailableExecutor:
         assert executor.reason_code == "model_profile_required"
 
     @pytest.mark.asyncio
-    async def test_select_executor_keeps_daily_desktop_fallback_when_model_profile_missing(self):
+    async def test_select_executor_keeps_daily_desktop_fallback_when_model_profile_missing(
+        self,
+        monkeypatch,
+    ):
         calls: list[tuple[str, object]] = []
 
         class FakeRuntimeService:
@@ -152,6 +155,10 @@ class TestNativeAgentUnavailableExecutor:
             agent_runtime_service=FakeRuntimeService(),
             main_chat_tool_policy=lambda: {"allowed_tools": ["app.open"], "approval_required": {}},
             main_chat_workspace_policy=lambda: {},
+        )
+        monkeypatch.setattr(
+            "apps.shell.agent.runtime.desktop_intents.daily_desktop_intent_candidates",
+            lambda *_args, **_kwargs: pytest.fail("legacy desktop parser should not classify fallback"),
         )
 
         executor = select_executor(runtime)

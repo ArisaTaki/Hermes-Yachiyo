@@ -38,6 +38,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 NATIVE_AGENT_NOT_READY_MESSAGE = "Native Agent 当前未就绪，请先配置并选择默认对话模型。"
+_DAILY_DESKTOP_FALLBACK_TOOL_PREFIXES = (
+    "app.",
+    "desktop.",
+    "media.",
+    "system.",
+    "clipboard.",
+    "reminders.",
+    "calendar.",
+    "notes.",
+)
 
 
 class NativeAgentError(RuntimeError):
@@ -964,12 +974,35 @@ class NativeAgentUnavailableExecutor(ExecutionStrategy):
         if getattr(task, "attachments", None):
             return False
         try:
-            from apps.shell.agent.runtime.desktop_intents import daily_desktop_intent_candidates
+            from apps.shell.yachiyo_agent.daily_desktop import daily_desktop_allowed_tools
+            from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
+                planner_first_direct_tool_selection,
+            )
 
-            return bool(daily_desktop_intent_candidates(str(task.description or "")))
+            selection = planner_first_direct_tool_selection(
+                str(task.description or ""),
+                daily_desktop_allowed_tools(),
+                metadata={"runtime_planner_execution_context": True},
+            )
+            return bool(
+                selection.requests
+                and selection.selected_source == "runtime_planner"
+                and _daily_desktop_fallback_requests_are_direct(selection.requests)
+            )
         except Exception:
-            logger.debug("日常桌面意图识别失败", exc_info=True)
+            logger.debug("日常桌面 planner 识别失败", exc_info=True)
             return False
+
+
+def _daily_desktop_fallback_requests_are_direct(requests: list[dict[str, Any]]) -> bool:
+    tools = [
+        str(request.get("tool") or request.get("tool_name") or "").strip()
+        for request in requests
+        if str(request.get("tool") or request.get("tool_name") or "").strip()
+    ]
+    return bool(tools) and all(
+        tool.startswith(_DAILY_DESKTOP_FALLBACK_TOOL_PREFIXES) for tool in tools
+    )
 
 
 class NativeAgentExecutor(ExecutionStrategy):

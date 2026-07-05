@@ -18818,6 +18818,8 @@ def _looks_like_non_desktop_content_task(text: str) -> bool:
     value = str(text or "").strip()
     if not value:
         return False
+    if _looks_like_unscoped_content_generation_task(value):
+        return True
     if not re.match(
         r"^(?:summari[sz]e|write|draft|create|produce|generate|"
         r"analy[sz]e|review|compare|explain)\b",
@@ -18831,6 +18833,53 @@ def _looks_like_non_desktop_content_task(text: str) -> bool:
             r"strategy|report|analysis|summary|notes?|proposal|brief|"
             r"current\s+(?:web\s+)?page|web\s*page|visible\s+text|"
             r"selected\s+text|selection)\b",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
+def _looks_like_unscoped_content_generation_task(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    if _contains_any(
+        value,
+        (
+            "输入框",
+            "文本框",
+            "搜索框",
+            "搜索栏",
+            "消息框",
+            "聊天框",
+            "地址栏",
+            "前台",
+            "当前窗口",
+            "current window",
+            "foreground",
+            "search field",
+            "message field",
+            "address bar",
+            "input field",
+            "text box",
+        ),
+    ):
+        return False
+    if re.search(
+        r"^(?:帮我|请|麻烦(?:你)?|给我)?\s*"
+        r"(?:写(?!入)|撰写|起草|生成|创作|产出|输出|做|制作)\s*"
+        r"(?:一|1)?(?:首|篇|份|个|段|封|则)?\s*"
+        r"(?:诗|诗歌|文章|作文|故事|报告|文案|方案|计划|总结|摘要|邮件|简历|提纲|大纲|说明|介绍|脚本|演讲稿)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return True
+    return bool(
+        re.search(
+            r"^(?:write|draft|create|produce|generate)\s+"
+            r"(?:a|an|the|some)?\s*"
+            r"(?:poem|story|essay|article|email|report|proposal|brief|plan|summary|"
+            r"outline|script|speech|copy|bio|introduction)\b",
             value,
             flags=re.IGNORECASE,
         )
