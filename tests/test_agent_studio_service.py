@@ -1208,6 +1208,13 @@ def test_agent_studio_service_starts_workflow_from_planner_orchestration() -> No
     assert metadata["yachiyo_intent_kind"] == "workflow_orchestration"
     assert metadata["yachiyo_execution_requests"] == ["workflow.run"]
     assert metadata["yachiyo_execution_envelope"]["intent_kind"] == "workflow_orchestration"
+    assert workflow_payload["runtime_execution_envelope"] == metadata["yachiyo_execution_envelope"]
+    assert workflow_payload["direct_tool_requests"][0]["tool"] == "workflow.run"
+    assert workflow_payload["direct_tool_requests"][0]["workflow_id"] == "workflow-1"
+    assert workflow_payload["direct_tool_requests"][0]["task_todo"]["tool_name"] == "workflow.run"
+    assert workflow_payload["direct_tool_requests"][0]["checkpoint_policy"][
+        "requires_post_action_verification"
+    ] is True
     metadata_request = metadata["yachiyo_execution_envelope"]["requests"][0]
     assert metadata_request["workflow_id"] == "workflow-1"
     planner_events = [
@@ -1278,6 +1285,13 @@ def test_agent_studio_service_starts_group_run_from_planner_orchestration() -> N
     assert metadata["yachiyo_intent_kind"] == "multi_agent"
     assert metadata["yachiyo_execution_requests"] == ["group.run"]
     assert metadata["yachiyo_execution_envelope"]["intent_kind"] == "multi_agent"
+    assert group_payload["runtime_execution_envelope"] == metadata["yachiyo_execution_envelope"]
+    assert group_payload["direct_tool_requests"][0]["tool"] == "group.run"
+    assert group_payload["direct_tool_requests"][0]["group_id"] == "group-1"
+    assert group_payload["direct_tool_requests"][0]["task_todo"]["tool_name"] == "group.run"
+    assert group_payload["direct_tool_requests"][0]["checkpoint_policy"][
+        "requires_post_action_verification"
+    ] is True
     metadata_request = metadata["yachiyo_execution_envelope"]["requests"][0]
     assert metadata_request["group_id"] == "group-1"
     planner_events = [

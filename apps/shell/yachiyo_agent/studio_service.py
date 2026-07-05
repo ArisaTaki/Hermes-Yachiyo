@@ -283,21 +283,21 @@ class AgentStudioService:
                     kind="workflow",
                     target_id=target.target_id,
                 )
-                workflow_payload = {
-                    "workflow_id": target.target_id,
-                    "objective": objective,
-                    "title": title or target.target_name or "Workflow run",
-                    "client_run_id": client_run_id or None,
-                    "metadata": _planner_orchestration_run_metadata(
-                        metadata,
-                        decision,
-                        kind="workflow",
-                        target_id=target.target_id,
-                        target_name=target.target_name,
-                        allowed_tools=allowed_tools,
-                        execution_context=metadata_context,
-                    ),
-                }
+                workflow_payload = _planner_orchestration_start_payload(
+                    {
+                        "workflow_id": target.target_id,
+                        "objective": objective,
+                        "title": title or target.target_name or "Workflow run",
+                        "client_run_id": client_run_id or None,
+                    },
+                    metadata,
+                    decision,
+                    kind="workflow",
+                    target_id=target.target_id,
+                    target_name=target.target_name,
+                    allowed_tools=allowed_tools,
+                    execution_context=metadata_context,
+                )
                 raw_workflow_run = self._studio_port.start_workflow_run(workflow_payload)
                 workflow_run = workflow_run_snapshot_from_payload(
                     start_payload_with_planner_decision_events(
@@ -347,21 +347,21 @@ class AgentStudioService:
                     kind="group_run",
                     target_id=target.target_id,
                 )
-                group_payload = {
-                    "group_id": target.target_id,
-                    "objective": objective,
-                    "title": title or target.target_name or "Group run",
-                    "client_run_id": client_run_id or None,
-                    "metadata": _planner_orchestration_run_metadata(
-                        metadata,
-                        decision,
-                        kind="group_run",
-                        target_id=target.target_id,
-                        target_name=target.target_name,
-                        allowed_tools=allowed_tools,
-                        execution_context=metadata_context,
-                    ),
-                }
+                group_payload = _planner_orchestration_start_payload(
+                    {
+                        "group_id": target.target_id,
+                        "objective": objective,
+                        "title": title or target.target_name or "Group run",
+                        "client_run_id": client_run_id or None,
+                    },
+                    metadata,
+                    decision,
+                    kind="group_run",
+                    target_id=target.target_id,
+                    target_name=target.target_name,
+                    allowed_tools=allowed_tools,
+                    execution_context=metadata_context,
+                )
                 raw_group_run = self._studio_port.start_group_run(group_payload)
                 group_run = group_run_snapshot_from_payload(
                     start_payload_with_planner_decision_events(
@@ -1285,6 +1285,41 @@ def _planner_orchestration_run_metadata(
             "route_to_studio": bool(decision.plan.route_to_studio),
         }
     )
+    return payload
+
+
+def _planner_orchestration_start_payload(
+    base_payload: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+    decision: PlannerDecisionSnapshot,
+    *,
+    kind: str,
+    target_id: str,
+    target_name: str,
+    allowed_tools: Iterable[str] | None = None,
+    execution_context: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = dict(base_payload)
+    enriched_metadata = _planner_orchestration_run_metadata(
+        metadata,
+        decision,
+        kind=kind,
+        target_id=target_id,
+        target_name=target_name,
+        allowed_tools=allowed_tools,
+        execution_context=execution_context,
+    )
+    payload["metadata"] = enriched_metadata
+    envelope = enriched_metadata.get("yachiyo_execution_envelope")
+    if isinstance(envelope, Mapping):
+        payload.setdefault("runtime_execution_envelope", dict(envelope))
+        if "direct_tool_requests" not in payload:
+            direct_tool_requests = runtime_execution_requests_from_envelope_payload(
+                envelope,
+                allowed_tools=allowed_tools,
+            )
+            if direct_tool_requests:
+                payload["direct_tool_requests"] = direct_tool_requests
     return payload
 
 
