@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import inspect
 import subprocess
 from datetime import date, timedelta
 from typing import Any
@@ -25516,6 +25517,9 @@ def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rul
         "apps.shell.agent.runtime.custom_api_agent.daily_desktop_intent_candidates",
         fail_legacy_daily_planner,
     )
+    assert "legacy_tool_requests" not in inspect.getsource(
+        RuntimeCustomApiAgentLoop._runtime_planner_tool_requests
+    )
 
     budget = FakeBudget()
     appended_events: list[tuple[str, str, dict[str, Any]]] = []
@@ -25639,12 +25643,25 @@ def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rul
     checkpoint_events = [
         event for event in timeline if event["event"] == "agent.task.checkpoint.updated"
     ]
-    planned_todos = [event for event in todo_events if event["status"] == "pending"]
+    planned_todos = [
+        event
+        for event in todo_events
+        if event["status"] in {"pending", "planned"}
+        and (
+            event.get("payload", {}).get("status")
+            if isinstance(event.get("payload"), dict)
+            else event["status"]
+        )
+        in {"pending", "planned"}
+    ]
     completed_todos = [event for event in todo_events if event["status"] == "completed"]
     completed_checkpoints = [
         event for event in checkpoint_events if event["status"] == "completed"
     ]
-    assert [event["step_id"] for event in planned_todos] == [
+    assert [
+        event.get("step_id") or event.get("payload", {}).get("step_id")
+        for event in planned_todos
+    ] == [
         "open-or-focus-app",
         "operate-foreground-ui",
     ]

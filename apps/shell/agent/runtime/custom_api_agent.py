@@ -14,7 +14,6 @@ from apps.shell.agent.runtime.approval_tool_sets import (
 from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_metadata_tool_request,
     daily_desktop_intent_candidates,
-    daily_desktop_intent_tool_request,
     daily_desktop_intent_tool_requests,
 )
 from apps.shell.agent.runtime.desktop_tool_labels import (
@@ -2389,16 +2388,6 @@ class RuntimeCustomApiAgentLoop:
                 planning_context,
                 allowed_tools,
                 metadata={"runtime_planner_execution_context": True},
-                legacy_tool_requests=daily_desktop_intent_tool_requests,
-                legacy_postprocess=lambda requests: [
-                    self._approval_hotkey_request_for_safe_shortcut(
-                        planning_context,
-                        requests,
-                        allowed_tools,
-                    )
-                    or request
-                    for request in requests
-                ],
             )
             if selection.selected_source == "runtime_planner" and selection.decision is not None:
                 runtime_trace_metadata = _runtime_planner_request_trace_metadata(
