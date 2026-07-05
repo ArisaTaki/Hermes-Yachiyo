@@ -124,6 +124,81 @@ def test_workflow_run_snapshot_projects_planner_summary_from_workflow_events() -
     assert workflow_run.planner_summary.event_count == 2
 
 
+def test_workflow_run_snapshot_scopes_replan_from_failed_tool_event() -> None:
+    workflow_run = workflow_run_snapshot_from_payload(
+        {
+            "run_id": "workflow-run-replan",
+            "workflow_run_id": "workflow-run-replan",
+            "workflow_id": "workflow-1",
+            "kind": "workflow_run",
+            "task_id": "task-workflow-replan",
+            "status": "running",
+            "events": [
+                {
+                    "event_type": "workflow.run.plan.created",
+                    "payload": {
+                        "source": "runtime_planner",
+                        "planner_event_type": "agent.plan.created",
+                        "planner_scope": "workflow.run",
+                        "decision_id": "decision-workflow-replan",
+                        "plan": {
+                            "plan_id": "plan-workflow-replan",
+                            "intent": {
+                                "intent_id": "intent-workflow-replan",
+                                "kind": "data_analysis",
+                                "title": "Analyze sales",
+                                "user_goal": "Analyze sales",
+                                "confidence": 0.9,
+                                "required_capabilities": ["data.analysis"],
+                            },
+                            "capabilities": [],
+                            "tool_plan": {
+                                "plan_id": "tool-plan-workflow-replan",
+                                "title": "Workflow analysis tools",
+                                "steps": [
+                                    {
+                                        "step_id": "analyze-data",
+                                        "title": "Analyze data",
+                                        "capability_id": "data.analysis",
+                                        "tool_name": "python.exec",
+                                        "fallback_tools": ["artifact.write"],
+                                    }
+                                ],
+                                "required_capabilities": ["data.analysis"],
+                            },
+                        },
+                    },
+                },
+                {
+                    "event_type": "agent.tool.call",
+                    "payload": {
+                        "step_id": "analyze-data",
+                        "tool_name": "python.exec",
+                        "status": "failed",
+                        "result": {"ok": False, "error": "Python execution failed"},
+                    },
+                },
+            ],
+        }
+    )
+
+    event_types = [event.event_type for event in workflow_run.events]
+    assert "workflow.run.replan.requested" in event_types
+    assert "agent.replan.requested" not in event_types
+    replan_event = next(
+        event
+        for event in workflow_run.events
+        if event.event_type == "workflow.run.replan.requested"
+    )
+    assert replan_event.payload["planner_event_type"] == "agent.replan.requested"
+    assert replan_event.payload["planner_scope"] == "workflow_run"
+    assert workflow_run.replan_recoveries
+    assert workflow_run.replan_recoveries[0].workflow_run_id == "workflow-run-replan"
+    assert workflow_run.runtime_debug is not None
+    assert workflow_run.runtime_debug.replan_recovery_count == 1
+    assert workflow_run.runtime_debug.latest_replan_trigger == "tool_failure"
+
+
 def test_workflow_run_snapshot_projects_task_core_progress_from_workflow_events() -> None:
     workflow_run = workflow_run_snapshot_from_payload(
         {

@@ -454,7 +454,7 @@ def _canonical_planner_event_type(event_type: str) -> str:
 
 def _planner_scope(event: PublicRunEvent) -> str:
     payload = event.payload if isinstance(event.payload, Mapping) else {}
-    explicit = _text(payload.get("planner_scope"))
+    explicit = _normalized_planner_scope(payload.get("planner_scope"))
     if explicit:
         return explicit
     event_type = _text(event.event_type)
@@ -466,11 +466,23 @@ def _planner_scope(event: PublicRunEvent) -> str:
 
 
 def _scoped_replan_event_type(scope: str, event_type: str) -> str:
-    if scope == "workflow_run":
+    normalized_scope = _normalized_planner_scope(scope)
+    if normalized_scope == "workflow_run":
         return "workflow.run.replan.requested"
-    if scope == "group_run":
+    if normalized_scope == "group_run":
         return "group.run.replan.requested"
     return event_type
+
+
+def _normalized_planner_scope(value: Any) -> str:
+    scope = _text(value).lower().replace("-", "_")
+    if scope in {"workflow.run", "workflow_run", "workflow"}:
+        return "workflow_run"
+    if scope in {"group.run", "group_run", "run_group", "group"}:
+        return "group_run"
+    if scope in {"agent.run", "agent_run", "run", "agent"}:
+        return "agent_run"
+    return scope
 
 
 def _event_step_id(event: PublicRunEvent) -> str:
