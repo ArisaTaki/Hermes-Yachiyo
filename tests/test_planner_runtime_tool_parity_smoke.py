@@ -103,6 +103,18 @@ def test_planner_runtime_tool_parity_covers_runtime_executable_tools():
         "desktop.safe_shortcut",
         "desktop.submit_foreground",
     ]
+    assert case_by_id["clipboard_send_to_slack"]["plan_tools"] == [
+        "app.focus",
+        "desktop.safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "desktop.safe_shortcut",
+        "desktop.submit_foreground",
+        "desktop.ui_elements",
+    ]
+    assert case_by_id["clipboard_send_to_slack"]["deferred_plan_tools"] == [
+        "desktop.ui_elements"
+    ]
     assert case_by_id["clipboard_send_to_slack"]["approval_required_tools"] == [
         "desktop.submit_foreground"
     ]

@@ -262,6 +262,7 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
             "desktop.search_submit",
             "desktop.safe_shortcut",
             "desktop.submit_foreground",
+            "desktop.ui_elements",
         ],
         "expected_request_tools": [
             "app.focus",
@@ -271,6 +272,7 @@ PLANNER_TOOL_PARITY_CASES: tuple[dict[str, Any], ...] = (
             "desktop.safe_shortcut",
             "desktop.submit_foreground",
         ],
+        "expected_deferred_plan_tools": ["desktop.ui_elements"],
         "approval_required": ["desktop.submit_foreground"],
     },
     {
@@ -362,6 +364,18 @@ def _deferred_plan_tools(
     return plan_tools[len(request_tools) :]
 
 
+_DEFERRED_VERIFICATION_TOOLS = {
+    "desktop.active_window",
+    "desktop.ui_elements",
+    "desktop.windows",
+    "screen.capture",
+}
+
+
+def _is_deferred_verification_only(tools: list[str]) -> bool:
+    return bool(tools) and set(tools).issubset(_DEFERRED_VERIFICATION_TOOLS)
+
+
 def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
     category = str(case["category"])
     policy = _compiled_policy(category)
@@ -403,6 +417,7 @@ def _case_evidence(case: dict[str, Any]) -> dict[str, Any]:
         "deferred_followup_boundary_present": (
             not deferred_plan_tools
             or bool(request_continue_to_model and request_continue_to_model[-1])
+            or _is_deferred_verification_only(deferred_plan_tools)
         ),
         "plan_tools_registered": all(tool in KNOWN_AGENT_TOOLS for tool in plan_tools),
         "request_tools_dispatched": all(tool in TOOL_DISPATCH_REGISTRY for tool in request_tools),
