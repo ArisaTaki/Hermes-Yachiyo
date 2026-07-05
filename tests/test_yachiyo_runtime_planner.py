@@ -8176,6 +8176,34 @@ def test_runtime_planner_inspects_app_before_app_scoped_ui_operation() -> None:
         "desktop.ui_elements",
     ]
 
+    current_foreground_click = RuntimePlanner().decision(
+        "在当前前台应用中点击导出按钮，然后确认是否成功",
+        allowed_tools=[
+            "desktop.list_apps",
+            "desktop.active_window",
+            "desktop.ui_elements",
+            "desktop.click_ui_element",
+        ],
+    )
+    assert current_foreground_click.selected_intent.kind == "desktop_operation"
+    assert current_foreground_click.selected_intent.inputs == {
+        "app_name_hint": "",
+        "operation_hint": "click",
+    }
+    assert [step.tool_name for step in current_foreground_click.plan.tool_plan.steps] == [
+        "desktop.active_window",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    foreground_click_step = _step_by_id(current_foreground_click, "operate-foreground-ui")
+    assert foreground_click_step.input_preview == {
+        "target": "导出",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert "app_name" not in foreground_click_step.input_preview
+
     ambiguous_find_then_click = RuntimePlanner().decision(
         "打开 SuperData Studio，先看看界面，然后点击最像导出的按钮",
         allowed_tools=[
