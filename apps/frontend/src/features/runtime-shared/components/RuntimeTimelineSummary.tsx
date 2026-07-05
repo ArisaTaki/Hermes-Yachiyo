@@ -178,7 +178,36 @@ function runtimeTimelineRecoveryTargetDetail(event: RuntimeTimelineEventSnapshot
     ? payload.input_preview as Record<string, unknown>
     : {};
   const appName = runtimeTimelineFirstRecordString(
-    ['target_app_name', 'expected_app_name', 'resolved_app_name', 'discovered_app_name', 'requested_app_name', 'app_name'],
+    [
+      'target_app_name',
+      'expected_app_name',
+      'resolved_app_name',
+      'discovered_app_name',
+      'app_resolution_matched_name',
+      'requested_app_name',
+      'app_name',
+    ],
+    record,
+    payload,
+    metadata,
+    inputPreview,
+  );
+  const matchedName = runtimeTimelineFirstRecordString(
+    ['app_resolution_matched_name'],
+    record,
+    payload,
+    metadata,
+    inputPreview,
+  );
+  const matchedNameSource = runtimeTimelineFirstRecordString(
+    ['app_resolution_matched_name_source'],
+    record,
+    payload,
+    metadata,
+    inputPreview,
+  );
+  const matchedCapability = runtimeTimelineFirstRecordString(
+    ['app_resolution_matched_capability'],
     record,
     payload,
     metadata,
@@ -198,7 +227,12 @@ function runtimeTimelineRecoveryTargetDetail(event: RuntimeTimelineEventSnapshot
     metadata,
     inputPreview,
   );
-  const parts = [appName, appQuery && appQuery !== appName ? appQuery : '', searchText].filter(Boolean);
+  const matchDetail = [
+    matchedName && matchedName !== appName ? `匹配 ${matchedName}` : '',
+    matchedNameSource ? `来源 ${matchedNameSource}` : '',
+    matchedCapability ? `能力 ${matchedCapability}` : '',
+  ].filter(Boolean).join(' · ');
+  const parts = [appName, appQuery && appQuery !== appName ? appQuery : '', searchText, matchDetail].filter(Boolean);
   return parts.length ? `恢复目标 · ${parts.join(' · ')}` : '';
 }
 

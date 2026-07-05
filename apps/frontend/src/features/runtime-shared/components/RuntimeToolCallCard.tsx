@@ -144,6 +144,9 @@ export function RuntimeToolCallCard({
       data-runtime-stage={runtimeToolTraceString(toolCall, 'runtime_stage')}
       data-runtime-step-id={runtimeToolTraceString(toolCall, 'step_id', 'planner_step_id')}
       data-runtime-checkpoint-policy={runtimeToolCheckpointPolicySummary(checkpointPolicy)}
+      data-runtime-app-resolution-match-capability={runtimeToolTraceString(toolCall, 'app_resolution_matched_capability')}
+      data-runtime-app-resolution-match-name={runtimeToolTraceString(toolCall, 'app_resolution_matched_name')}
+      data-runtime-app-resolution-match-source={runtimeToolTraceString(toolCall, 'app_resolution_matched_name_source')}
       data-source-runnable-id={toolCall.source_runnable_id || ''}
       data-source-run-id={toolCall.source_run_id || ''}
       data-task-verification-target-count={taskVerificationTargets.length}
@@ -305,6 +308,7 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
   const deferredContext = runtimeToolTraceRecord(toolCall, 'deferred_context');
   const deferredContinuation = runtimeToolTraceRecordList(toolCall, 'deferred_continuation');
   const capabilityTitle = runtimeToolTraceString(toolCall, 'capability_title');
+  const appResolution = runtimeToolAppResolutionSummary(toolCall);
   return [
     { label: 'run', value: toolCall.run_id || '' },
     { label: 'source', value: toolCall.source_run_id || '' },
@@ -328,6 +332,7 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
     { label: 'targets', value: runtimeToolRecoveryVerificationTargetsSummary(taskVerificationTargets) },
     { label: 'checkpoint policy', value: runtimeToolCheckpointPolicySummary(checkpointPolicy) },
     { label: 'desktop loop', value: runtimeToolDesktopLoopSummary(desktopLoop) },
+    { label: 'app resolution', value: appResolution },
     { label: 'replan', value: runtimeToolTraceString(toolCall, 'replan_request_id') || replanTrigger || replanTriggers.join(', ') },
     { label: 'signals', value: runtimeToolTraceStringList(toolCall, 'replan_signal_ids').join(', ') },
     { label: 'deferred', value: runtimeToolTraceString(toolCall, 'deferred_tool') },
@@ -338,6 +343,28 @@ function toolCallMetadataItems(toolCall: RuntimeToolCallCardSnapshot): Array<{ l
     { label: 'observed', value: observedActionEvidenceSummary(observedMetadata.observationEvidence) },
     { label: 'retry', value: observedActionRetrySummary(observedMetadata.observationRetry) },
   ].filter((item) => item.value);
+}
+
+function runtimeToolAppResolutionSummary(toolCall: RuntimeToolCallCardSnapshot): string {
+  const requested = runtimeToolTraceString(toolCall, 'requested_app_name');
+  const resolved = runtimeToolTraceString(toolCall, 'resolved_app_name', 'app_name');
+  const matchedName = runtimeToolTraceString(toolCall, 'app_resolution_matched_name');
+  const matchedSource = runtimeToolTraceString(toolCall, 'app_resolution_matched_name_source');
+  const matchedCapability = runtimeToolTraceString(toolCall, 'app_resolution_matched_capability');
+  const source = runtimeToolTraceString(toolCall, 'app_resolution_source');
+  const confidence = runtimeToolTraceString(toolCall, 'app_resolution_confidence');
+  const score = runtimeToolTraceString(toolCall, 'app_resolution_score');
+  const reason = runtimeToolTraceString(toolCall, 'app_resolution_reason');
+  return [
+    requested && requested !== resolved ? `requested ${requested}` : '',
+    resolved ? `resolved ${resolved}` : '',
+    matchedName ? `matched ${matchedName}` : '',
+    matchedSource ? `name source ${matchedSource}` : '',
+    matchedCapability ? `capability ${matchedCapability}` : '',
+    source ? `via ${source}` : '',
+    confidence || score ? [confidence, score].filter(Boolean).join('/') : '',
+    reason,
+  ].filter(Boolean).join(' · ');
 }
 
 function runtimeToolObservedMetadata(toolCall: RuntimeToolCallCardSnapshot): {

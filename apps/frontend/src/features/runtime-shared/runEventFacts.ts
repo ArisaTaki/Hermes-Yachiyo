@@ -1138,6 +1138,9 @@ function toolCallCorrelationPreview(preview: Record<string, unknown>): Record<st
     'app_resolution_source',
     'app_resolution_score',
     'app_resolution_confidence',
+    'app_resolution_matched_capability',
+    'app_resolution_matched_name',
+    'app_resolution_matched_name_source',
     'app_resolution_reason',
     'group_id',
     'group_run_id',
@@ -1184,6 +1187,9 @@ function toolInputResolutionPreview(
   const sourceTool = publicRunEventPayloadString(payload, 'source_tool');
   const resolutionScore = publicRunEventPayloadString(payload, 'app_resolution_score');
   const resolutionConfidence = publicRunEventPayloadString(payload, 'app_resolution_confidence');
+  const resolutionMatchedCapability = publicRunEventPayloadString(payload, 'app_resolution_matched_capability');
+  const resolutionMatchedName = publicRunEventPayloadString(payload, 'app_resolution_matched_name');
+  const resolutionMatchedNameSource = publicRunEventPayloadString(payload, 'app_resolution_matched_name_source');
   const resolutionReason = publicRunEventPayloadString(payload, 'app_resolution_reason');
   const resolvedAppPath = publicRunEventPayloadString(payload, 'resolved_app_path');
   if (resolvedAppName) {
@@ -1201,6 +1207,15 @@ function toolInputResolutionPreview(
   }
   if (resolutionConfidence && !preview.app_resolution_confidence) {
     preview.app_resolution_confidence = resolutionConfidence;
+  }
+  if (resolutionMatchedCapability && !preview.app_resolution_matched_capability) {
+    preview.app_resolution_matched_capability = resolutionMatchedCapability;
+  }
+  if (resolutionMatchedName && !preview.app_resolution_matched_name) {
+    preview.app_resolution_matched_name = resolutionMatchedName;
+  }
+  if (resolutionMatchedNameSource && !preview.app_resolution_matched_name_source) {
+    preview.app_resolution_matched_name_source = resolutionMatchedNameSource;
   }
   if (resolutionReason && !preview.app_resolution_reason) {
     preview.app_resolution_reason = resolutionReason;

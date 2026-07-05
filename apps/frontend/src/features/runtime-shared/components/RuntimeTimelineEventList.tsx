@@ -112,6 +112,9 @@ export function RuntimeTimelineEventList({
               data-run-event-observed-action-evidence={observedContext.observationEvidence}
               data-run-event-observed-action-target={observedContext.actionTarget}
               data-run-event-observed-center={observedContext.observedCenter}
+              data-run-event-recovery-app-match-capability={recoveryTarget.appResolutionMatchedCapability}
+              data-run-event-recovery-app-match-name={recoveryTarget.appResolutionMatchedName}
+              data-run-event-recovery-app-match-source={recoveryTarget.appResolutionMatchedNameSource}
               data-run-event-recovery-target-app={recoveryTarget.targetAppName}
               data-run-event-recovery-target-query={recoveryTarget.targetAppQuery}
               data-run-event-recovery-target-text={recoveryTarget.targetSearchText}
@@ -460,6 +463,9 @@ function runtimeEventMetadata(
     { label: 'target app', value: recoveryTarget.targetAppName },
     { label: 'target query', value: recoveryTarget.targetAppQuery },
     { label: 'target text', value: recoveryTarget.targetSearchText },
+    { label: 'app match', value: recoveryTarget.appResolutionMatchedName },
+    { label: 'app match source', value: recoveryTarget.appResolutionMatchedNameSource },
+    { label: 'app capability', value: recoveryTarget.appResolutionMatchedCapability },
     { label: 'artifact', value: runtimeEventString(event, payload, 'artifact_id') },
     { label: 'memory', value: runtimeEventMemoryId(event, payload) },
     { label: 'skill', value: runtimeEventSkillId(event, payload) },
@@ -536,6 +542,9 @@ type RuntimeTimelineRuntimeContext = {
 };
 
 type RuntimeTimelineRecoveryTarget = {
+  appResolutionMatchedCapability: string;
+  appResolutionMatchedName: string;
+  appResolutionMatchedNameSource: string;
   targetAppName: string;
   targetAppQuery: string;
   targetSearchText: string;
@@ -650,6 +659,21 @@ function runtimeEventRecoveryTarget(
   payload: RuntimeTimelineEventRecord,
 ): RuntimeTimelineRecoveryTarget {
   return {
+    appResolutionMatchedCapability: runtimeEventContextString(
+      event,
+      payload,
+      'app_resolution_matched_capability',
+    ),
+    appResolutionMatchedName: runtimeEventContextString(
+      event,
+      payload,
+      'app_resolution_matched_name',
+    ),
+    appResolutionMatchedNameSource: runtimeEventContextString(
+      event,
+      payload,
+      'app_resolution_matched_name_source',
+    ),
     targetAppName: runtimeEventContextString(
       event,
       payload,
@@ -657,6 +681,7 @@ function runtimeEventRecoveryTarget(
       'expected_app_name',
       'resolved_app_name',
       'discovered_app_name',
+      'app_resolution_matched_name',
       'requested_app_name',
     ),
     targetAppQuery: runtimeEventContextString(
@@ -889,7 +914,7 @@ function runtimeEventContextRecords(
     seen.add(record);
     records.push(record);
   };
-  for (const key of ['pending_approval', 'approval', 'tool_request', 'planned_request', 'request', 'result', 'metadata']) {
+  for (const key of ['pending_approval', 'approval', 'tool_request', 'planned_request', 'request', 'result', 'metadata', 'input_preview']) {
     addRecord(runtimeEventNestedRecord(payload, key));
   }
   for (const record of records.slice(2)) {
