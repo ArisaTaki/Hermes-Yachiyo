@@ -3676,6 +3676,17 @@ class RuntimeCustomApiAgentLoop:
             for todo in task_core.get("todos", [])
             if isinstance(todo, Mapping) and str(todo.get("step_id") or "").strip()
         }
+        for request in planned_tool_requests:
+            if not isinstance(request, Mapping):
+                continue
+            task_todo = (
+                request.get("task_todo")
+                if isinstance(request.get("task_todo"), Mapping)
+                else {}
+            )
+            step_id = str(task_todo.get("step_id") or request.get("step_id") or "").strip()
+            if step_id and task_todo:
+                todos_by_step.setdefault(step_id, task_todo)
         checkpoints_by_step: dict[str, list[Mapping[str, Any]]] = {}
         for checkpoint in task_core.get("checkpoints", []):
             if not isinstance(checkpoint, Mapping):
@@ -3683,6 +3694,20 @@ class RuntimeCustomApiAgentLoop:
             step_id = str(checkpoint.get("after_step_id") or "").strip()
             if step_id:
                 checkpoints_by_step.setdefault(step_id, []).append(checkpoint)
+        for request in planned_tool_requests:
+            if not isinstance(request, Mapping):
+                continue
+            for checkpoint in request.get("task_checkpoints", []):
+                if not isinstance(checkpoint, Mapping):
+                    continue
+                step_id = str(
+                    checkpoint.get("after_step_id")
+                    or checkpoint.get("step_id")
+                    or request.get("step_id")
+                    or ""
+                ).strip()
+                if step_id:
+                    checkpoints_by_step.setdefault(step_id, []).append(checkpoint)
         tool_events = [
             event
             for event in timeline[tool_timeline_start:]
@@ -7609,6 +7634,8 @@ def _model_replan_followup_context_payload(
     if task_progress:
         payload["task_progress"] = task_progress
     task_core = _runtime_replan_task_core_payload(replan_payloads, timeline or [])
+    if not task_core:
+        task_core = _runtime_replan_task_core_context_payload(replan_payloads)
     if task_core:
         payload["task_core"] = task_core
         followup_target = _model_followup_target_from_task_core_context(payload)
@@ -7630,7 +7657,182 @@ def _model_replan_followup_context_payload(
     )
     if recovery_actions:
         payload["recovery_actions"] = recovery_actions
+    pending_plan_steps = _runtime_replan_pending_code_repair_steps(
+        requests,
+        allowed_tools=allowed,
+    )
+    if pending_plan_steps:
+        payload["pending_plan_steps"] = pending_plan_steps
     return payload
+
+
+def _runtime_replan_task_core_context_payload(
+    replan_payloads: list[dict[str, Any]],
+) -> dict[str, Any]:
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+        context = (
+            metadata.get("task_core_context")
+            if isinstance(metadata.get("task_core_context"), Mapping)
+            else {}
+        )
+        if not context:
+            continue
+        workspace_items = _mapping_list(context.get("workspace_items"))
+        workspace = {
+            "workspace_id": str(context.get("workspace_id") or "").strip(),
+            "title": str(context.get("workspace_title") or "").strip(),
+            "items": [dict(item) for item in workspace_items],
+        }
+        return {
+            "core_id": str(context.get("core_id") or "").strip(),
+            "workspace": {
+                key: value
+                for key, value in workspace.items()
+                if value not in ("", [], {})
+            },
+            "todos": [dict(todo) for todo in _mapping_list(context.get("todos"))],
+            "checkpoints": [
+                dict(checkpoint)
+                for checkpoint in _mapping_list(context.get("checkpoints"))
+            ],
+            "replan_signals": [
+                dict(signal)
+                for signal in _mapping_list(context.get("replan_signals"))
+            ],
+        }
+    return {}
+
+
+def _runtime_replan_pending_code_repair_steps(
+    requests: Iterable[Mapping[str, Any]],
+    *,
+    allowed_tools: set[str],
+) -> list[dict[str, Any]]:
+    steps: list[dict[str, Any]] = []
+    for request in requests:
+        if not _runtime_replan_request_needs_code_repair(request):
+            continue
+        source_step = str(request.get("source_step_id") or "verification").strip()
+        suffix = _runtime_replan_safe_step_suffix(source_step)
+        request_id = str(request.get("request_id") or "").strip()
+        trigger = str(request.get("trigger") or "").strip()
+        repair_step_id = f"repair-after-{suffix}"
+        verify_step_id = f"verify-after-{suffix}"
+        command = _runtime_replan_verification_command(request)
+        common = {
+            "replan_request_id": request_id,
+            "replan_trigger": trigger,
+            "decision_id": str(request.get("decision_id") or "").strip(),
+            "plan_id": str(request.get("plan_id") or "").strip(),
+            "runtime_doctrine": "discover_operate_verify",
+        }
+        if "workspace.write_patch" in allowed_tools:
+            steps.append(
+                {
+                    **common,
+                    "step_id": repair_step_id,
+                    "title": "Repair code after failed verification",
+                    "tool_name": "workspace.write_patch",
+                    "capability_id": "file.workspace_write",
+                    "action": "apply_patch",
+                    "input_preview": {
+                        "mode": "fix",
+                        "patch_source": "model_after_failed_verification",
+                        "failure_detail": str(request.get("failure_detail") or "").strip(),
+                    },
+                    "risk_level": "high",
+                    "approval_required": True,
+                    "runtime_stage": "operate",
+                    "runtime_role": "apply_patch",
+                    "requires_observation": False,
+                    "requires_post_action_verification": True,
+                    "task_todo": {
+                        "todo_id": f"todo-{repair_step_id}",
+                        "step_id": repair_step_id,
+                        "title": "Repair code after failed verification",
+                        "status": "pending",
+                        "tool_name": "workspace.write_patch",
+                        "capability_id": "file.workspace_write",
+                        "approval_required": True,
+                    },
+                }
+            )
+        if command and "terminal.run" in allowed_tools:
+            verify_step: dict[str, Any] = {
+                **common,
+                "step_id": verify_step_id,
+                "title": "Verify repaired code",
+                "tool_name": "terminal.run",
+                "capability_id": "terminal.execution",
+                "action": "run_verification",
+                "input_preview": {"command": command},
+                "risk_level": "high",
+                "approval_required": True,
+                "runtime_stage": "verify",
+                "runtime_role": "verify_result",
+                "requires_observation": True,
+                "requires_post_action_verification": False,
+                "task_todo": {
+                    "todo_id": f"todo-{verify_step_id}",
+                    "step_id": verify_step_id,
+                    "title": "Verify repaired code",
+                    "status": "pending",
+                    "tool_name": "terminal.run",
+                    "capability_id": "terminal.execution",
+                    "approval_required": True,
+                },
+            }
+            if any(step.get("step_id") == repair_step_id for step in steps):
+                verify_step["depends_on"] = [repair_step_id]
+            steps.append(verify_step)
+        if steps:
+            break
+    return [
+        {key: value for key, value in step.items() if value not in ("", [], {})}
+        for step in steps
+    ]
+
+
+def _runtime_replan_request_needs_code_repair(request: Mapping[str, Any]) -> bool:
+    if str(request.get("trigger") or "").strip() != "verification_failed":
+        return False
+    source_tool = str(request.get("source_tool_name") or "").strip()
+    capability_id = str(request.get("target_capability_id") or "").strip()
+    metadata = request.get("metadata") if isinstance(request.get("metadata"), Mapping) else {}
+    intent_kind = str(metadata.get("original_intent_kind") or "").strip()
+    fallback_tools = set(_string_list(request.get("fallback_tools")))
+    return bool(
+        intent_kind == "code_task"
+        or source_tool == "terminal.run"
+        or capability_id == "terminal.execution"
+        or "workspace.write_patch" in fallback_tools
+    )
+
+
+def _runtime_replan_verification_command(request: Mapping[str, Any]) -> str:
+    metadata = request.get("metadata") if isinstance(request.get("metadata"), Mapping) else {}
+    input_preview = (
+        metadata.get("input_preview")
+        if isinstance(metadata.get("input_preview"), Mapping)
+        else {}
+    )
+    command = str(input_preview.get("command") or "").strip()
+    if command:
+        return command
+    result_preview = (
+        metadata.get("result_preview")
+        if isinstance(metadata.get("result_preview"), Mapping)
+        else {}
+    )
+    return str(result_preview.get("command") or "").strip()
+
+
+def _runtime_replan_safe_step_suffix(value: str) -> str:
+    clean = re.sub(r"[^a-zA-Z0-9_-]+", "-", str(value or "").strip()).strip("-")
+    return clean[:60] or "verification"
 
 
 def _timeline_replan_request_payloads(
@@ -8001,6 +8203,9 @@ def _model_replan_followup_context_message(payload: dict[str, Any]) -> str:
     target_instruction = _model_followup_target_instruction(followup_target)
     if target_instruction:
         lines.append(target_instruction.strip())
+    pending_plan_instruction = _model_followup_pending_plan_instruction(payload)
+    if pending_plan_instruction:
+        lines.append(pending_plan_instruction)
     if failed_tools:
         lines.append(f"Failed tools: {', '.join(failed_tools)}.")
     if fallback_tools:
@@ -18513,10 +18718,7 @@ def _latest_model_followup_context(
         }
         if (
             not _followup_event_has_readable_source(event)
-            and not (
-                include_pending_execution_only
-                and _followup_event_has_pending_execution(event)
-            )
+            and not _followup_event_has_pending_execution(event)
             and not _model_followup_target_from_task_core_context(context)
         ):
             return {}
@@ -18626,12 +18828,18 @@ def _followup_event_has_readable_source(event: Mapping[str, Any]) -> bool:
 
 def _followup_event_has_pending_execution(event: Mapping[str, Any]) -> bool:
     pending_requests = event.get("pending_execution_requests")
-    if not isinstance(pending_requests, list):
+    pending_steps = event.get("pending_plan_steps")
+    values: list[Any] = []
+    if isinstance(pending_requests, list):
+        values.extend(pending_requests)
+    if isinstance(pending_steps, list):
+        values.extend(pending_steps)
+    if not values:
         return False
     return any(
         isinstance(request, Mapping)
         and str(request.get("tool_name") or request.get("tool") or "").strip()
-        for request in pending_requests
+        for request in values
     )
 
 
@@ -19399,6 +19607,12 @@ def _attach_model_followup_pending_plan_trace_metadata(
         value = step.get(key)
         if value not in (None, "", [], {}):
             request[key] = value
+    for key in ("depends_on", "fallback_tools", "replan_triggers", "replan_signal_ids"):
+        if key in request:
+            continue
+        values = _string_list(step.get(key))
+        if values:
+            request[key] = values
     for key in (
         "task_todo",
         "task_checkpoints",

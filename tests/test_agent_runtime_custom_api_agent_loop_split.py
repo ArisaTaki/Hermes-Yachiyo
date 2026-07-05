@@ -3236,6 +3236,7 @@ def test_custom_api_agent_loop_attaches_pending_patch_step_metadata_to_model_too
             "decision_id": "decision-code",
             "plan_id": "plan-code",
             "intent_kind": "code_task",
+            "depends_on": ["run-code-diagnostic"],
             "planning_reason": "planner_fallback_code_diagnostic",
             "planner_step_id": "apply-code-changes",
         }
@@ -3576,6 +3577,12 @@ def test_custom_api_agent_loop_replans_failed_pending_verify_after_model_patch_t
         tool_batches.append([dict(request) for request in tool_requests])
         for request in tool_requests:
             tool_name = str(request.get("tool") or "")
+            terminal_run_count = sum(
+                1
+                for batch in tool_batches
+                for item in batch
+                if item.get("tool") == "terminal.run"
+            )
             input_preview = (
                 request.get("input") if isinstance(request.get("input"), dict) else {}
             )
@@ -3586,13 +3593,22 @@ def test_custom_api_agent_loop_replans_failed_pending_verify_after_model_patch_t
                     "summary": "Patch applied",
                 }
             elif tool_name == "terminal.run":
-                result = {
-                    "ok": False,
-                    "command": input_preview.get("command"),
-                    "stdout": "FAILED tests/test_app.py::test_total\n",
-                    "stderr": "",
-                    "exit_code": 1,
-                }
+                if terminal_run_count == 1:
+                    result = {
+                        "ok": False,
+                        "command": input_preview.get("command"),
+                        "stdout": "FAILED tests/test_app.py::test_total\n",
+                        "stderr": "",
+                        "exit_code": 1,
+                    }
+                else:
+                    result = {
+                        "ok": True,
+                        "command": input_preview.get("command"),
+                        "stdout": "1 passed\n",
+                        "stderr": "",
+                        "exit_code": 0,
+                    }
             else:
                 raise AssertionError(f"unexpected tool: {tool_name}")
             timeline_arg.append(
@@ -3642,7 +3658,20 @@ def test_custom_api_agent_loop_replans_failed_pending_verify_after_model_patch_t
                     }
                 ],
             }
-        return {"role": "assistant", "content": "replan ready"}
+        return {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [
+                {
+                    "id": "call_repair_patch",
+                    "type": "function",
+                    "function": {
+                        "name": "workspace_write_patch",
+                        "arguments": "{}",
+                    },
+                }
+            ],
+        }
 
     def fake_tool_requests_from_message(message, _content):
         if not message.get("tool_calls"):
@@ -3705,9 +3734,11 @@ def test_custom_api_agent_loop_replans_failed_pending_verify_after_model_patch_t
         run_id="run-code-patch-auto-verify-replan",
     )
 
-    assert str(result) == "replan ready"
+    assert "1 passed" in str(result)
     assert len(model_calls) == 2
     assert [[request["tool"] for request in batch] for batch in tool_batches] == [
+        ["workspace.write_patch"],
+        ["terminal.run"],
         ["workspace.write_patch"],
         ["terminal.run"],
     ]
@@ -3726,6 +3757,19 @@ def test_custom_api_agent_loop_replans_failed_pending_verify_after_model_patch_t
     assert followup_event["planning_reason"] == "planner_replan_after_verification_failed"
     assert followup_event["task_progress"]["completed_steps"] == ["apply-code-changes"]
     assert followup_event["task_progress"]["blocked_steps"] == ["verify-code-changes"]
+    assert [step["tool_name"] for step in followup_event["pending_plan_steps"]] == [
+        "workspace.write_patch",
+        "terminal.run",
+    ]
+    assert "workspace.write_patch steps" in model_calls[1][-1]["content"]
+    repair_request = tool_batches[2][0]
+    verify_request = tool_batches[3][0]
+    assert repair_request["step_id"].startswith("repair-after-verify-code-changes")
+    assert repair_request["replan_trigger"] == "verification_failed"
+    assert repair_request["task_todo"]["tool_name"] == "workspace.write_patch"
+    assert verify_request["step_id"].startswith("verify-after-verify-code-changes")
+    assert verify_request["input"] == {"command": "python -m pytest"}
+    assert verify_request["depends_on"] == [repair_request["step_id"]]
 
 
 def test_custom_api_agent_loop_runs_plain_test_command_without_model_followup() -> None:
