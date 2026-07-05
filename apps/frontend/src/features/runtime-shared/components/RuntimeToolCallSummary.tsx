@@ -9,6 +9,8 @@ import { publicRunEventIsSecret } from '../runEvents';
 export type RuntimeToolCallSummaryItem = {
   count: number;
   name: string;
+  policyReason?: string;
+  riskLevel?: string;
   sequence: number;
   status: string;
 };
@@ -83,6 +85,8 @@ export function RuntimeToolCallSummary({
           <span
             className={`${itemClassName} status-${tool.status}`}
             data-testid={itemTestId}
+            data-policy-reason={tool.policyReason || ''}
+            data-risk-level={tool.riskLevel || ''}
             data-tool-family={runtimeToolFamily(tool.name)}
             data-tool-name={tool.name}
             data-tool-status={tool.status}
@@ -90,6 +94,7 @@ export function RuntimeToolCallSummary({
           >
             <strong>{runtimeToolSummaryDisplayName(tool.name, tool.status)}</strong>
             {tool.count > 1 ? <em>x{tool.count}</em> : null}
+            {tool.riskLevel ? <em title={tool.policyReason || undefined}>{tool.riskLevel}</em> : null}
             <small>{runtimeToolStatusLabel(tool.status)}</small>
           </span>
         ))}
@@ -108,18 +113,24 @@ export function summarizeRuntimeToolCallSnapshots(
     if (!name) return;
     const sequence = index + 1;
     const status = normalizeRuntimeToolStatus(String(toolCall.status || '').trim());
+    const riskLevel = String(toolCall.risk_level || '').trim();
+    const policyReason = String(toolCall.policy_reason || '').trim();
     const previous = byName.get(name);
     if (previous) {
       previous.count += 1;
       if (sequence >= previous.sequence) {
         previous.sequence = sequence;
         previous.status = status;
+        previous.riskLevel = riskLevel || previous.riskLevel;
+        previous.policyReason = policyReason || previous.policyReason;
       }
       return;
     }
     byName.set(name, {
       count: 1,
       name,
+      policyReason,
+      riskLevel,
       sequence,
       status: status || 'completed',
     });
@@ -143,22 +154,52 @@ export function summarizeRuntimeToolCalls(
     const name = runtimeToolNameFromEvent(event);
     const sequence = Number.isFinite(event.sequence) ? Number(event.sequence) : 0;
     const status = runtimeToolStatusFromEvent(event);
+    const riskLevel = runtimeToolRiskLevelFromEvent(event);
+    const policyReason = runtimeToolPolicyReasonFromEvent(event);
     const previous = byName.get(name);
     if (previous) {
       previous.count += 1;
       if (sequence >= previous.sequence) {
         previous.sequence = sequence;
         previous.status = status;
+        previous.riskLevel = riskLevel || previous.riskLevel;
+        previous.policyReason = policyReason || previous.policyReason;
       }
       continue;
     }
 
-    byName.set(name, { count: 1, name, sequence, status });
+    byName.set(name, { count: 1, name, policyReason, riskLevel, sequence, status });
   }
 
   return Array.from(byName.values())
     .sort((left, right) => right.sequence - left.sequence)
     .slice(0, Math.max(1, limit));
+}
+
+function runtimeToolRiskLevelFromEvent(event: PublicRunEvent): string {
+  const pendingApproval = objectPayload(event.payload, 'pending_approval');
+  const approval = objectPayload(event.payload, 'approval');
+  return (
+    stringPayload(event.payload, 'risk_level') ||
+    stringPayload(event.payload, 'risk') ||
+    stringPayload(pendingApproval, 'risk_level') ||
+    stringPayload(pendingApproval, 'risk') ||
+    stringPayload(approval, 'risk_level') ||
+    stringPayload(approval, 'risk')
+  );
+}
+
+function runtimeToolPolicyReasonFromEvent(event: PublicRunEvent): string {
+  const pendingApproval = objectPayload(event.payload, 'pending_approval');
+  const approval = objectPayload(event.payload, 'approval');
+  return (
+    stringPayload(event.payload, 'policy_reason') ||
+    stringPayload(event.payload, 'approval_reason') ||
+    stringPayload(pendingApproval, 'policy_reason') ||
+    stringPayload(pendingApproval, 'reason') ||
+    stringPayload(approval, 'policy_reason') ||
+    stringPayload(approval, 'reason')
+  );
 }
 
 function runtimeToolEventIsVisible(eventType: string): boolean {
