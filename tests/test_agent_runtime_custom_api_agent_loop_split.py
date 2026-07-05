@@ -1214,6 +1214,110 @@ def test_auto_runtime_planner_requests_execute_safe_deferred_replan_continuation
     assert tool_calls[1]["planning_reason"] == "planner_replan_deferred_continuation"
 
 
+def test_direct_daily_desktop_result_includes_safe_replan_deferred_verification() -> None:
+    loop = _private_runtime_loop()
+    requests = [
+        {
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_replan_runtime_recovery_action",
+            "replan_request_id": "replan-focus",
+            "replan_trigger": "verification_failed",
+            "deferred_continuation": [
+                {
+                    "tool": "desktop.active_window",
+                    "input": {},
+                    "verification_target": {"app_name": "PixelForge"},
+                }
+            ],
+        }
+    ]
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.open",
+            input_preview={"app_name": "PixelForge"},
+            result={"ok": True, "app_name": "PixelForge"},
+            replan_request_id="replan-focus",
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.active_window",
+            input_preview={},
+            result={
+                "ok": True,
+                "data": {"app_name": "PixelForge", "title": "PixelForge"},
+            },
+            replan_request_id="replan-focus",
+            planning_reason="planner_replan_deferred_continuation",
+        ),
+    ]
+
+    result = loop._direct_daily_desktop_sequence_result(
+        requests,
+        timeline,
+        tool_timeline_start=0,
+    )
+
+    assert result == "已打开 PixelForge。"
+    completed = next(
+        event for event in timeline if event["event"] == "agent.desktop.intent_completed"
+    )
+    assert completed["tools"] == ["app.open", "desktop.active_window"]
+    assert completed["summary"] == "已打开 PixelForge。"
+
+
+def test_direct_daily_desktop_result_waits_when_replan_deferred_verification_fails() -> None:
+    loop = _private_runtime_loop()
+    requests = [
+        {
+            "tool": "app.open",
+            "input": {"app_name": "PixelForge"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_replan_runtime_recovery_action",
+            "replan_request_id": "replan-focus",
+            "deferred_continuation": [
+                {
+                    "tool": "desktop.active_window",
+                    "input": {},
+                    "verification_target": {"app_name": "PixelForge"},
+                }
+            ],
+        }
+    ]
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.open",
+            input_preview={"app_name": "PixelForge"},
+            result={"ok": True, "app_name": "PixelForge"},
+            replan_request_id="replan-focus",
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.active_window",
+            input_preview={},
+            result={
+                "ok": False,
+                "verification_failed": True,
+                "error": "foreground_focus_unverified",
+            },
+            replan_request_id="replan-focus",
+            planning_reason="planner_replan_deferred_continuation",
+        ),
+    ]
+
+    result = loop._direct_daily_desktop_sequence_result(
+        requests,
+        timeline,
+        tool_timeline_start=0,
+    )
+
+    assert result == ""
+    assert not any(event["event"] == "agent.desktop.intent_completed" for event in timeline)
+
+
 def test_daily_desktop_sequence_summary_includes_runtime_readiness_skips() -> None:
     loop = RuntimeCustomApiAgentLoop(
         agent_model_config_private=lambda _agent: {},

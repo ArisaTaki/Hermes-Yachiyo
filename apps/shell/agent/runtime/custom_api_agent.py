@@ -3750,6 +3750,9 @@ class RuntimeCustomApiAgentLoop:
             for event in timeline[tool_timeline_start:]
             if event.get("event") in {"agent.tool.call", "agent.tool.skipped"}
         ]
+        planned_tool_requests = _direct_sequence_requests_with_safe_deferred_continuations(
+            planned_tool_requests
+        )
         if any(
             bool(request.get("continue_to_model"))
             for request in planned_tool_requests
@@ -3791,6 +3794,10 @@ class RuntimeCustomApiAgentLoop:
                 return ""
             result = tool_event.get("result") if isinstance(tool_event.get("result"), dict) else {}
             if result.get("approval_required"):
+                return ""
+            if planned_tool_request.get("replan_request_id") and (
+                result.get("ok") is False or result.get("verification_failed") is True
+            ):
                 return ""
             result = _with_retry_recovery_action(planned_tool, planned_input, result)
             tool_event["result"] = result
@@ -12230,6 +12237,39 @@ def _tool_requests_without_model_followup(
         item.pop("continue_to_model", None)
         cleaned.append(item)
     return cleaned
+
+
+def _direct_sequence_requests_with_safe_deferred_continuations(
+    requests: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    expanded: list[dict[str, Any]] = []
+    allowed = {str(tool or "").strip() for tool in _DIRECT_DAILY_DESKTOP_TOOLS}
+    for request in requests:
+        if not isinstance(request, Mapping):
+            continue
+        item = dict(request)
+        expanded.append(item)
+        if bool(item.get("continue_to_model")):
+            continue
+        for continuation in _mapping_list(item.get("deferred_continuation")):
+            next_request = _runtime_replan_safe_deferred_continuation_request(
+                continuation,
+                allowed,
+            )
+            if not next_request:
+                continue
+            for key, value in _runtime_replan_deferred_inherited_metadata(item).items():
+                next_request.setdefault(key, value)
+            next_request.setdefault(
+                "source",
+                str(item.get("source") or "runtime_planner").strip(),
+            )
+            next_request.setdefault(
+                "planning_reason",
+                "planner_replan_deferred_continuation",
+            )
+            expanded.append(next_request)
+    return expanded
 
 
 def _split_model_materialization_tool_requests(
