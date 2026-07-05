@@ -184,7 +184,10 @@ function runtimeExecutionRequestRetryAction(
     retry_prompt: label,
     retry_tool: tool,
     tool,
-    verification_targets: recordList(request.task_verification_targets),
+    verification_targets: uniqueRecords([
+      ...recordList(request.verification_targets),
+      ...recordList(request.task_verification_targets),
+    ]),
   };
 }
 
@@ -235,6 +238,18 @@ function recordList(value: unknown): Array<Record<string, unknown>> {
   return value.filter((item): item is Record<string, unknown> => (
     Boolean(item) && typeof item === 'object' && !Array.isArray(item)
   ));
+}
+
+function uniqueRecords(records: Array<Record<string, unknown>>): Array<Record<string, unknown>> {
+  const result: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  records.forEach((record) => {
+    const key = JSON.stringify(record);
+    if (seen.has(key)) return;
+    seen.add(key);
+    result.push(record);
+  });
+  return result;
 }
 
 function agentTaskSnapshotOrNull(value: unknown): AgentTaskSnapshot | null {

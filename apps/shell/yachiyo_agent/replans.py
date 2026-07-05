@@ -518,6 +518,7 @@ def _task_core_replan_context(
         plan_step,
     )
     if verification_targets:
+        context["verification_targets"] = verification_targets
         context["task_verification_targets"] = verification_targets
     return {key: value for key, value in context.items() if value not in ("", [], {})}
 

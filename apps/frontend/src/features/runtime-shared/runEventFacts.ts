@@ -317,6 +317,7 @@ function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | nul
       recordList(inputPreview.deferred_continuation),
     ),
     task_workspace_items: approvalTaskWorkspaceItems(source, payload, inputPreview),
+    verification_targets: approvalTaskVerificationTargets(source, payload, inputPreview),
     task_verification_targets: approvalTaskVerificationTargets(source, payload, inputPreview),
     status,
     title: publicRunEventPayloadString(source, 'title') || `Approval · ${toolName}`,
@@ -429,6 +430,7 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
       recordList(inputPreview.deferred_continuation),
     ),
     task_workspace_items: toolCallTaskWorkspaceItems(payload, inputPreview),
+    verification_targets: toolCallTaskVerificationTargets(payload, inputPreview),
     task_verification_targets: toolCallTaskVerificationTargets(payload, inputPreview),
     tool_name: toolName,
     status,
@@ -587,6 +589,10 @@ function mergeApprovalTrace(current: ApprovalCardSnapshot, incoming: ApprovalCar
       incoming.deferred_continuation,
     ),
     task_workspace_items: mergeRecordLists(current.task_workspace_items, incoming.task_workspace_items),
+    verification_targets: mergeRecordLists(
+      current.verification_targets,
+      incoming.verification_targets,
+    ),
     task_verification_targets: mergeRecordLists(
       current.task_verification_targets,
       incoming.task_verification_targets,
@@ -657,6 +663,10 @@ function mergeApprovalReplayTrace(
       incoming.deferred_continuation,
     ),
     task_workspace_items: mergeRecordLists(current.task_workspace_items, incoming.task_workspace_items),
+    verification_targets: mergeRecordLists(
+      current.verification_targets,
+      incoming.verification_targets,
+    ),
     task_verification_targets: mergeRecordLists(
       current.task_verification_targets,
       incoming.task_verification_targets,
@@ -733,6 +743,10 @@ function mergeToolCallTrace(current: ToolCallSnapshot, incoming: ToolCallSnapsho
       incoming.deferred_continuation,
     ),
     task_workspace_items: mergeRecordLists(current.task_workspace_items, incoming.task_workspace_items),
+    verification_targets: mergeRecordLists(
+      current.verification_targets,
+      incoming.verification_targets,
+    ),
     task_verification_targets: mergeRecordLists(
       current.task_verification_targets,
       incoming.task_verification_targets,
@@ -807,6 +821,10 @@ function mergeToolCallReplayTrace(current: ToolCallSnapshot, incoming: ToolCallS
       incoming.deferred_continuation,
     ),
     task_workspace_items: mergeRecordLists(current.task_workspace_items, incoming.task_workspace_items),
+    verification_targets: mergeRecordLists(
+      current.verification_targets,
+      incoming.verification_targets,
+    ),
     task_verification_targets: mergeRecordLists(
       current.task_verification_targets,
       incoming.task_verification_targets,

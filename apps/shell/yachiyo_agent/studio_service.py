@@ -2042,6 +2042,7 @@ def _apply_replan_recovery_task_context(
         ("task_todo", "task_todo"),
         ("task_checkpoints", "task_checkpoints"),
         ("task_workspace_items", "task_workspace_items"),
+        ("verification_targets", "verification_targets"),
         ("task_verification_targets", "task_verification_targets"),
     ):
         value = task_context.get(context_key)
@@ -2075,6 +2076,8 @@ def _replan_recovery_task_context(
         or _mapping_list(metadata_task_context.get("task_workspace_items"))
     )
     metadata_verification_targets = _merge_mapping_lists(
+        _mapping_list(action_metadata.get("verification_targets")),
+        _mapping_list(metadata_task_context.get("verification_targets")),
         _mapping_list(action_metadata.get("task_verification_targets")),
         _mapping_list(metadata_task_context.get("task_verification_targets")),
     )
@@ -2132,10 +2135,14 @@ def _replan_recovery_task_context(
         context["task_workspace_items"] = workspace_items
         context["workspace_items"] = workspace_items
     if task_verification_targets:
+        context["verification_targets"] = task_verification_targets
         context["task_verification_targets"] = task_verification_targets
     verification_targets = action.verification_targets or recovery.verification_targets
     if verification_targets:
-        context["verification_targets"] = [dict(target) for target in verification_targets]
+        context["verification_targets"] = _merge_mapping_lists(
+            _mapping_list(context.get("verification_targets")),
+            verification_targets,
+        )
     return context
 
 

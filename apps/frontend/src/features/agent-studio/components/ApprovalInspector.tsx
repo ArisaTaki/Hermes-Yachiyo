@@ -87,6 +87,7 @@ export function ApprovalInspector({
             requires_observation: selectedRunApproval.requires_observation,
             requires_post_action_verification: selectedRunApproval.requires_post_action_verification,
             task_workspace_items: selectedRunApproval.task_workspace_items,
+            verification_targets: selectedRunApproval.verification_targets,
             task_verification_targets: selectedRunApproval.task_verification_targets,
             requested_at: selectedRunApproval.requested_at,
             resolved_at: selectedRunApproval.resolved_at,

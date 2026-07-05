@@ -376,6 +376,10 @@ def merge_tool_call_snapshots(
             current.task_workspace_items,
             next_call.task_workspace_items,
         ),
+        verification_targets=_merge_record_lists(
+            current.verification_targets,
+            next_call.verification_targets,
+        ),
         task_verification_targets=_merge_record_lists(
             current.task_verification_targets,
             next_call.task_verification_targets,

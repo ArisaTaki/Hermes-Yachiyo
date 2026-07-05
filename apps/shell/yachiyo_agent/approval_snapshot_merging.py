@@ -68,6 +68,10 @@ def merge_approval_snapshots(
             current.task_workspace_items,
             next_approval.task_workspace_items,
         ),
+        verification_targets=_merge_record_lists(
+            current.verification_targets,
+            next_approval.verification_targets,
+        ),
         task_verification_targets=_merge_record_lists(
             current.task_verification_targets,
             next_approval.task_verification_targets,

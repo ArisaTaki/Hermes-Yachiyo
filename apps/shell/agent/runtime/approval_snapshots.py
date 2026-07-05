@@ -108,6 +108,7 @@ def public_pending_approval(value: Any) -> dict[str, Any]:
                 snapshot[key] = items
     for key, aliases in (
         ("task_workspace_items", ("task_workspace_items", "workspace_items")),
+        ("verification_targets", ("verification_targets", "task_verification_targets")),
         ("task_verification_targets", ("task_verification_targets", "verification_targets")),
     ):
         items = _first_mapping_items(raw, tool_request, preview_record, aliases)

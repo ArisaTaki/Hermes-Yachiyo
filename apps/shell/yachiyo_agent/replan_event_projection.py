@@ -482,7 +482,10 @@ def _runtime_execution_replan_request(
         action_target=dict(request.action_target or {}),
         observation_evidence=dict(evidence),
         observation_retry=dict(retry),
-        verification_targets=[dict(item) for item in request.task_verification_targets],
+        verification_targets=[
+            dict(item)
+            for item in [*request.verification_targets, *request.task_verification_targets]
+        ],
         task_verification_targets=[
             dict(item) for item in request.task_verification_targets
         ],
@@ -612,7 +615,10 @@ def _runtime_replan_recovery_actions(
         "action_target": dict(request.action_target or {}),
         "observation_evidence": dict(evidence),
         "observation_retry": dict(retry),
-        "verification_targets": [dict(item) for item in request.task_verification_targets],
+        "verification_targets": [
+            dict(item)
+            for item in [*request.verification_targets, *request.task_verification_targets]
+        ],
         "task_verification_targets": [
             dict(item) for item in request.task_verification_targets
         ],

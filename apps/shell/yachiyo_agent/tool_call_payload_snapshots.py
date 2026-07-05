@@ -148,6 +148,12 @@ def tool_call_snapshot_from_payload(
             or payload.get("workspace_items")
             or input_preview.get("workspace_items")
         ),
+        verification_targets=_record_list(
+            payload.get("verification_targets")
+            or input_preview.get("verification_targets")
+            or payload.get("task_verification_targets")
+            or input_preview.get("task_verification_targets")
+        ),
         task_verification_targets=_record_list(
             payload.get("task_verification_targets")
             or input_preview.get("task_verification_targets")
@@ -310,6 +316,7 @@ def _redacted_tool_call_snapshot(snapshot: ToolCallSnapshot) -> ToolCallSnapshot
             "deferred_context": _mapping(snapshot.deferred_context),
             "deferred_continuation": _record_list(snapshot.deferred_continuation),
             "task_workspace_items": _record_list(snapshot.task_workspace_items),
+            "verification_targets": _record_list(snapshot.verification_targets),
             "task_verification_targets": _record_list(snapshot.task_verification_targets),
             "tool_name": _text(snapshot.tool_name),
             "status": _text(snapshot.status),

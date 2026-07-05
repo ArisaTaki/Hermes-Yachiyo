@@ -479,6 +479,7 @@ export function publicApprovalToRunPendingApproval(approval: ApprovalCardSnapsho
     requires_observation: approval.requires_observation || false,
     requires_post_action_verification: approval.requires_post_action_verification || false,
     task_workspace_items: approval.task_workspace_items || [],
+    verification_targets: approval.verification_targets || [],
     task_verification_targets: approval.task_verification_targets || [],
     requested_at: approval.requested_at || '',
     resolved_at: approval.resolved_at || '',

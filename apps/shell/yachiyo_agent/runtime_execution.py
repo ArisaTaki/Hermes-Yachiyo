@@ -574,6 +574,13 @@ def _execution_request_snapshot(
                 for item in _mapping_list(deferred_context.get("task_workspace_items"))
             ]
         ),
+        verification_targets=(
+            task_context["verification_targets"]
+            or [
+                dict(item)
+                for item in _mapping_list(deferred_context.get("verification_targets"))
+            ]
+        ),
         task_verification_targets=(
             task_context["task_verification_targets"]
             or [
@@ -658,6 +665,7 @@ def _tool_request_from_execution_request(
         "task_todo",
         "task_checkpoints",
         "task_workspace_items",
+        "verification_targets",
         "task_verification_targets",
         "checkpoint_policy",
         "desktop_loop",
@@ -792,7 +800,10 @@ def _desktop_execution_loop_snapshot(
     retry_tool = _text(observation_retry.get("tool"))
     retry_reason = _text(observation_retry.get("reason"))
     retry_input = _mapping(observation_retry.get("input"))
-    verification_targets = _mapping_list(task_context.get("task_verification_targets"))
+    verification_targets = [
+        *list(_mapping_list(task_context.get("verification_targets"))),
+        *list(_mapping_list(task_context.get("task_verification_targets"))),
+    ]
     return DesktopExecutionLoopSnapshot(
         stage=_text(runtime_metadata.get("runtime_stage")),
         role=_text(runtime_metadata.get("runtime_role")),
@@ -1305,6 +1316,8 @@ def _apply_envelope_task_context(
     if workspace_items and "task_workspace_items" not in payload:
         payload["task_workspace_items"] = workspace_items
     verification_targets = _task_verification_targets_for_request(task_core, payload)
+    if verification_targets and "verification_targets" not in payload:
+        payload["verification_targets"] = verification_targets
     if verification_targets and "task_verification_targets" not in payload:
         payload["task_verification_targets"] = verification_targets
 
@@ -1324,6 +1337,7 @@ def _execution_request_task_context(
             "task_todo": {},
             "task_checkpoints": [],
             "task_workspace_items": [],
+            "verification_targets": [],
             "task_verification_targets": [],
         }
     payload = {
@@ -1331,16 +1345,18 @@ def _execution_request_task_context(
         "runtime_stage": runtime_stage,
         "depends_on": list(depends_on),
     }
+    verification_targets = _task_verification_targets_for_request(
+        task_core,
+        payload,
+    )
     return {
         "core_id": str(task_core.get("core_id") or "").strip(),
         "workspace_id": _task_workspace_id(task_core),
         "task_todo": _task_todo_for_step(task_core, step_id),
         "task_checkpoints": _task_checkpoints_for_step(task_core, step_id),
         "task_workspace_items": _task_workspace_items_for_step(task_core, step_id),
-        "task_verification_targets": _task_verification_targets_for_request(
-            task_core,
-            payload,
-        ),
+        "verification_targets": verification_targets,
+        "task_verification_targets": verification_targets,
     }
 
 
@@ -1352,7 +1368,10 @@ def _execution_request_checkpoint_policy(
     runtime_metadata: Mapping[str, Any],
 ) -> RuntimeCheckpointPolicySnapshot | None:
     checkpoints = _mapping_list(task_context.get("task_checkpoints"))
-    verification_targets = _mapping_list(task_context.get("task_verification_targets"))
+    verification_targets = [
+        *list(_mapping_list(task_context.get("verification_targets"))),
+        *list(_mapping_list(task_context.get("task_verification_targets"))),
+    ]
     fallback_tools = list(step.fallback_tools) if step is not None else []
     replan_triggers = _string_list(replan_metadata.get("replan_triggers"))
     replan_signal_ids = _string_list(replan_metadata.get("replan_signal_ids"))

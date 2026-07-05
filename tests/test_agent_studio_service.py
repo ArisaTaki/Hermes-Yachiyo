@@ -1769,7 +1769,14 @@ def test_agent_studio_service_starts_replan_recovery_action_direct_run() -> None
     assert direct_request["task_todo"]["todo_id"] == "todo-open-app"
     assert direct_request["task_checkpoints"][0]["checkpoint_id"] == "checkpoint:open-app"
     assert direct_request["task_workspace_items"][0]["item_id"] == "workspace-open-app"
-    assert direct_request["verification_targets"][0]["todo_id"] == "todo-open-app"
+    assert any(
+        target.get("todo_id") == "todo-open-app"
+        for target in direct_request["verification_targets"]
+    )
+    assert any(
+        target.get("tool_name") == "desktop.open_app"
+        for target in direct_request["verification_targets"]
+    )
     assert direct_request["task_verification_targets"][0]["todo"]["todo_id"] == "todo-open-app"
     assert direct_request["task_verification_targets"][0]["checkpoints"][0]["checkpoint_id"] == "checkpoint:open-app"
     assert (

@@ -901,6 +901,7 @@ class ApprovalCardSnapshot(_PublicSnapshot):
     deferred_context: dict[str, Any] = Field(default_factory=dict)
     deferred_continuation: list[dict[str, Any]] = Field(default_factory=list)
     task_workspace_items: list[dict[str, Any]] = Field(default_factory=list)
+    verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     task_verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     title: str
     description: str | None = None
@@ -992,6 +993,7 @@ class ToolCallSnapshot(_PublicSnapshot):
     deferred_context: dict[str, Any] = Field(default_factory=dict)
     deferred_continuation: list[dict[str, Any]] = Field(default_factory=list)
     task_workspace_items: list[dict[str, Any]] = Field(default_factory=list)
+    verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     task_verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     tool_name: str
     status: str

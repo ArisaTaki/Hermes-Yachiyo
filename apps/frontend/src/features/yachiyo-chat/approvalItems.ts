@@ -153,6 +153,12 @@ export function approvalRequestDetails(message: ChatApprovalMessage): ApprovalRe
       pending.workspace_items,
       isRecord(preview) ? preview.workspace_items : undefined,
     ),
+    verification_targets: approvalRecordList(
+      pending.verification_targets,
+      isRecord(preview) ? preview.verification_targets : undefined,
+      pending.task_verification_targets,
+      isRecord(preview) ? preview.task_verification_targets : undefined,
+    ),
     task_verification_targets: approvalRecordList(
       pending.task_verification_targets,
       isRecord(preview) ? preview.task_verification_targets : undefined,

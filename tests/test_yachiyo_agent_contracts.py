@@ -561,6 +561,12 @@ def test_runtime_execution_request_projects_verification_evidence() -> None:
                         "artifact_path": "reports/read-source.md",
                     }
                 ],
+                verification_targets=[
+                    {
+                        "step_id": "verify-read-source",
+                        "artifact_path": "reports/read-source-verified.md",
+                    }
+                ],
             )
         ],
     )
@@ -632,6 +638,12 @@ def test_runtime_execution_request_projects_verification_evidence() -> None:
     assert request.event_ids == ["event-verify-read-source", "event-artifact-read-source"]
     assert request.tool_call_ids == ["tool-call-read-source"]
     assert request.approval_ids == ["approval-read-source"]
+    assert request.verification_targets == [
+        {
+            "step_id": "verify-read-source",
+            "artifact_path": "reports/read-source-verified.md",
+        }
+    ]
     assert request.artifact_ids == ["artifact-read-source"]
     assert request.artifact_paths == [
         "reports/read-source-verified.md",
@@ -4433,6 +4445,7 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
         deferred_input={"target": "Review"},
         deferred_context={"step_id": "review-step"},
         deferred_continuation=[{"tool": "screen.capture", "step_id": "verify"}],
+        verification_targets=[{"step_id": "verify-review", "todo_id": "todo-review"}],
         title="Approve Review Gate",
         description="Needs review",
         status="pending",
@@ -4485,6 +4498,7 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
         "deferred_context",
         "deferred_continuation",
         "task_workspace_items",
+        "verification_targets",
         "task_verification_targets",
         "title",
         "description",
@@ -4509,6 +4523,9 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["replan_triggers"] == ["approval_retry"]
     assert payload["runtime_stage"] == "approve"
     assert payload["requires_post_action_verification"] is True
+    assert payload["verification_targets"] == [
+        {"step_id": "verify-review", "todo_id": "todo-review"}
+    ]
     assert payload["deferred_tool"] == "desktop.click_ui_element"
     assert payload["deferred_context"] == {"step_id": "review-step"}
 
@@ -4543,6 +4560,9 @@ def test_public_pending_approval_projects_runtime_planner_trace_fields() -> None
                 "replan_trigger": "ui_not_found",
                 "task_workspace_items": [
                     {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
+                ],
+                "verification_targets": [
+                    {"step_id": "verify-save", "todo_id": "todo-save"}
                 ],
                 "task_verification_targets": [
                     {
@@ -4581,6 +4601,9 @@ def test_public_pending_approval_projects_runtime_planner_trace_fields() -> None
     assert snapshot["task_workspace_items"] == [
         {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
     ]
+    assert snapshot["verification_targets"] == [
+        {"step_id": "verify-save", "todo_id": "todo-save"}
+    ]
     assert snapshot["task_verification_targets"] == [
         {
             "todo_id": "todo-save",
@@ -4616,6 +4639,9 @@ def test_approval_card_from_payload_maps_runtime_planner_trace_fields() -> None:
                 ],
                 "task_workspace_items": [
                     {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
+                ],
+                "verification_targets": [
+                    {"step_id": "verify-save", "todo_id": "todo-save"}
                 ],
                 "task_verification_targets": [
                     {
@@ -4656,6 +4682,9 @@ def test_approval_card_from_payload_maps_runtime_planner_trace_fields() -> None:
     ]
     assert snapshot.task_workspace_items == [
         {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
+    ]
+    assert snapshot.verification_targets == [
+        {"step_id": "verify-save", "todo_id": "todo-save"}
     ]
     assert snapshot.task_verification_targets == [
         {
@@ -6778,6 +6807,7 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
         deferred_input={"target": "Export", "limit": 80},
         deferred_context={"step_id": "operate-foreground-ui"},
         deferred_continuation=[{"tool": "desktop.ui_elements", "step_id": "verify"}],
+        verification_targets=[{"step_id": "verify-export", "todo_id": "todo-export"}],
         tool_name="workspace.read",
         status="completed",
         risk_level="low",
@@ -6829,6 +6859,7 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
         "deferred_context",
         "deferred_continuation",
         "task_workspace_items",
+        "verification_targets",
         "task_verification_targets",
         "tool_name",
         "status",
@@ -6851,6 +6882,9 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["runtime_stage"] == "operate"
     assert payload["policy_reason"] == "Read-only workspace inspection."
     assert payload["requires_post_action_verification"] is True
+    assert payload["verification_targets"] == [
+        {"step_id": "verify-export", "todo_id": "todo-export"}
+    ]
     assert payload["deferred_tool"] == "desktop.click_ui_element"
     assert payload["deferred_input"] == {"target": "Export", "limit": 80}
 

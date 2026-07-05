@@ -136,6 +136,12 @@ def approval_card_from_payload(
             or payload.get("workspace_items")
             or input_preview.get("workspace_items")
         ),
+        verification_targets=_record_list(
+            payload.get("verification_targets")
+            or input_preview.get("verification_targets")
+            or payload.get("task_verification_targets")
+            or input_preview.get("task_verification_targets")
+        ),
         task_verification_targets=_record_list(
             payload.get("task_verification_targets")
             or input_preview.get("task_verification_targets")

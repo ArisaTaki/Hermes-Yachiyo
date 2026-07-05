@@ -949,6 +949,7 @@ def _deferred_request_context(source: Mapping[str, Any]) -> dict[str, Any]:
         "task_todo",
         "task_checkpoints",
         "task_workspace_items",
+        "verification_targets",
         "task_verification_targets",
     ):
         value = source.get(key)
@@ -1987,6 +1988,7 @@ def _task_execution_context_for_step(decision: Any, step_id: str) -> dict[str, A
         clean_step_id,
     )
     if verification_targets:
+        payload["verification_targets"] = verification_targets
         payload["task_verification_targets"] = verification_targets
 
     replan_metadata = _task_replan_metadata_for_step(task_core, clean_step_id)
@@ -2859,6 +2861,7 @@ _COMBINED_REQUEST_TRACE_KEYS = (
     "task_todo",
     "task_checkpoints",
     "task_workspace_items",
+    "verification_targets",
     "task_verification_targets",
     "replan_signal_ids",
     "replan_triggers",

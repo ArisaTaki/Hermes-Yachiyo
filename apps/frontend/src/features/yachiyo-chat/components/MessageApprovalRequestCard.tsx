@@ -10,6 +10,7 @@ export type ApprovalRequestDetails = {
   codeText: string;
   summary: Array<{ label: string; value: string }>;
   task_workspace_items?: Array<Record<string, unknown>>;
+  verification_targets?: Array<Record<string, unknown>>;
   task_verification_targets?: Array<Record<string, unknown>>;
 };
 
@@ -122,6 +123,7 @@ function messageApprovalSnapshot({
     run_id: runId || undefined,
     status: 'pending',
     task_workspace_items: details.task_workspace_items || [],
+    verification_targets: details.verification_targets || [],
     task_verification_targets: details.task_verification_targets || [],
     title,
     tool_name: details.tool,

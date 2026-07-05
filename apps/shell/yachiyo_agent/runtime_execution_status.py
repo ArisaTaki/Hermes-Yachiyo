@@ -343,7 +343,7 @@ def _artifact_event_matches_request(
     }
     request_paths.update(
         _text(item.get("path") or item.get("artifact_path"))
-        for item in request.task_verification_targets
+        for item in [*request.verification_targets, *request.task_verification_targets]
         if isinstance(item, dict)
     )
     request_paths = {item for item in request_paths if item}

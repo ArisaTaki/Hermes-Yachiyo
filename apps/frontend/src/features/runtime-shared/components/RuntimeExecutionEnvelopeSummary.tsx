@@ -341,7 +341,10 @@ function RuntimeExecutionRequestRow({
           status={request.status || ''}
           testId={`${testId}-evidence`}
           tool={request.tool_name || ''}
-          verificationTargets={recordList(request.task_verification_targets)}
+          verificationTargets={mergeRecordLists(
+            recordList(request.verification_targets),
+            recordList(request.task_verification_targets),
+          )}
         />
       </div>
       <small>{stage || 'operate'}{request.approval_required ? ' / approval' : ''}</small>
@@ -455,6 +458,22 @@ function recordList(value: unknown): Array<Record<string, unknown>> {
   return value.filter((item): item is Record<string, unknown> => (
     Boolean(item) && typeof item === 'object' && !Array.isArray(item)
   ));
+}
+
+function mergeRecordLists(
+  ...lists: Array<Array<Record<string, unknown>> | undefined>
+): Array<Record<string, unknown>> {
+  const records: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  lists.forEach((list) => {
+    (list || []).forEach((record) => {
+      const key = JSON.stringify(record);
+      if (seen.has(key)) return;
+      seen.add(key);
+      records.push(record);
+    });
+  });
+  return records;
 }
 
 function uniqueStrings(values: Array<string | null | undefined>): string[] {

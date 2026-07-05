@@ -47,6 +47,7 @@ export type RuntimeApprovalCardSnapshot = Pick<
   | 'status'
   | 'step_id'
   | 'task_workspace_items'
+  | 'verification_targets'
   | 'task_verification_targets'
   | 'title'
   | 'tool_name'
@@ -82,7 +83,10 @@ export function RuntimeApprovalCard({
   const target = approvalPreviewTarget(preview, toolName);
   const displayTool = variant === 'compact' ? runtimeToolDisplayLabel(toolName) : toolName;
   const taskWorkspaceItems = recordList(approval.task_workspace_items);
-  const taskVerificationTargets = recordList(approval.task_verification_targets);
+  const taskVerificationTargets = mergeRecordLists(
+    recordList(approval.verification_targets),
+    recordList(approval.task_verification_targets),
+  );
   const deferredContinuation = recordList(approval.deferred_continuation);
   const title = variant === 'compact'
     ? compactApprovalTitle(approval.title, toolName, displayTool)
@@ -165,7 +169,10 @@ function compactApprovalTitle(title: string | null | undefined, toolName: string
 
 function approvalMetadataItems(approval: RuntimeApprovalCardSnapshot, toolName: string) {
   const taskWorkspaceItems = recordList(approval.task_workspace_items);
-  const taskVerificationTargets = recordList(approval.task_verification_targets);
+  const taskVerificationTargets = mergeRecordLists(
+    recordList(approval.verification_targets),
+    recordList(approval.task_verification_targets),
+  );
   const deferredInput = approvalPreviewRecord(approval.deferred_input);
   const deferredContext = approvalPreviewRecord(approval.deferred_context);
   const deferredContinuation = recordList(approval.deferred_continuation);
@@ -275,6 +282,22 @@ function recordList(value: unknown): Array<Record<string, unknown>> {
   return value.filter((item): item is Record<string, unknown> => (
     Boolean(item) && typeof item === 'object' && !Array.isArray(item)
   ));
+}
+
+function mergeRecordLists(
+  ...lists: Array<Array<Record<string, unknown>> | undefined>
+): Array<Record<string, unknown>> {
+  const records: Array<Record<string, unknown>> = [];
+  const seen = new Set<string>();
+  lists.forEach((list) => {
+    (list || []).forEach((record) => {
+      const key = JSON.stringify(record);
+      if (seen.has(key)) return;
+      seen.add(key);
+      records.push(record);
+    });
+  });
+  return records;
 }
 
 function stringValue(value: unknown): string {
