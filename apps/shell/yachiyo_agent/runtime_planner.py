@@ -6065,9 +6065,38 @@ class RuntimePlanner:
                 if steps:
                     content_depends_on = steps[-1].step_id
             if (
+                browser_action == "open_search"
+                and not str(intent.inputs.get("post_open_action") or "").strip()
+                and _web_search_readback_requested(
+                    intent,
+                    target_app=target_app,
+                    target_app_capability=target_app_capability,
+                )
+            ):
+                readback_tool = _first_allowed(
+                    ("browser.extract_text", "browser.current_page", "browser.extract"),
+                    allowed,
+                )
+                if readback_tool:
+                    readback_step = _step(
+                        intent,
+                        "inspect-web-search-results",
+                        "Inspect web search results",
+                        "browser.research",
+                        readback_tool,
+                        input_preview={},
+                        depends_on=[content_depends_on],
+                        action="extract_text",
+                        reason=(
+                            "Inspect the opened search results before producing the requested "
+                            "research report or delivering it to another app."
+                        ),
+                    )
+                    steps.append(readback_step)
+                    content_depends_on = readback_step.step_id
+            if (
                 browser_action in {"open_search", "open_url"}
                 and str(intent.inputs.get("post_open_action") or "").strip() == "extract_text"
-                and tool_name not in {"browser.search"}
             ):
                 readback_tool = _first_allowed(
                     ("browser.extract_text", "browser.current_page", "browser.extract"),
@@ -15672,6 +15701,20 @@ def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
             "输出表格",
             "生成表格",
         ],
+    )
+
+
+def _web_search_readback_requested(
+    intent: TaskIntentSnapshot,
+    *,
+    target_app: str,
+    target_app_capability: Any,
+) -> bool:
+    return bool(
+        _web_research_artifact_requested(intent)
+        or isinstance(intent.inputs.get("communication_target_hint"), Mapping)
+        or str(target_app or "").strip()
+        or isinstance(target_app_capability, Mapping)
     )
 
 

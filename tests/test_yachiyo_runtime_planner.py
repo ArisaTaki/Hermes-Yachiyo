@@ -5128,6 +5128,54 @@ def test_runtime_planner_routes_browser_docs_lookup_to_web_research() -> None:
     ]
 
 
+def test_runtime_planner_reads_search_results_before_research_report() -> None:
+    prompt = "帮我搜索 Hanako 和 Hermes 的 agent 架构并输出对比报告"
+    expected_url = (
+        "https://www.google.com/search?q=Hanako+%E5%92%8C+Hermes+%E7%9A%84+agent+"
+        "%E6%9E%B6%E6%9E%84"
+    )
+    allowed_tools = ["browser.search", "browser.extract_text", "artifact.write"]
+
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert decision.selected_intent.kind == "web_research"
+    assert decision.selected_intent.inputs == {
+        "url_hint": expected_url,
+        "browser_action": "open_search",
+        "query": "Hanako 和 Hermes 的 agent 架构",
+        "post_open_action": "extract_text",
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "open-web-search",
+        "extract-opened-web-content",
+        "write-research-artifact",
+    ]
+    assert _step_by_id(decision, "extract-opened-web-content").tool_name == (
+        "browser.extract_text"
+    )
+    assert _step_by_id(decision, "write-research-artifact").depends_on == [
+        "extract-opened-web-content"
+    ]
+    assert planner_tool_requests(prompt, allowed_tools) == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.search",
+            "input": {"query": "Hanako 和 Hermes 的 agent 架构"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.extract_text",
+            "input": {},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        },
+    ]
+
+
 def test_runtime_planner_routes_web_research_report_to_communication_target() -> None:
     prompt = "调研 https://example.com 的信息并把报告发给 Slack 的 yachiyo"
     allowed_tools = [
