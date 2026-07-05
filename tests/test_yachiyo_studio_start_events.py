@@ -46,6 +46,54 @@ def test_studio_start_agent_run_enriches_bare_port_payload_with_planner_events()
     ]
 
 
+def test_studio_start_agent_run_routes_media_query_through_desktop_fallback() -> None:
+    port = _BareStartPort()
+    run = AgentStudioService(port).start_agent_run(
+        {
+            "agent_id": "agent-1",
+            "objective": "用 Apple Music 播放超时空辉夜姬",
+            "allowed_tools": [
+                "desktop.list_apps",
+                "app.open",
+                "desktop.safe_shortcut",
+                "desktop.type",
+                "desktop.safe_key",
+                "desktop.click_ui_element",
+                "desktop.ui_elements",
+            ],
+        }
+    )
+
+    start_payload = port.agent_run_payloads[0]
+    tools = [request["tool"] for request in start_payload["direct_tool_requests"]]
+    assert tools == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.type",
+        "desktop.safe_key",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert start_payload["direct_tool_requests"][0]["step_id"] == "discover-media-app"
+    assert start_payload["direct_tool_requests"][3]["input"] == {"text": "超时空辉夜姬"}
+    assert start_payload["direct_tool_requests"][4]["input"] == {
+        "key": "return",
+        "modifiers": [],
+    }
+    assert start_payload["metadata"]["yachiyo_execution_requests"] == tools
+    assert run.task_core is not None
+    assert [todo.step_id for todo in run.task_core.todos] == [
+        "discover-media-app",
+        "open-media-app",
+        "focus-media-app-search",
+        "type-media-search-query",
+        "submit-media-search",
+        "play-media-search-result",
+        "verify-media-search",
+    ]
+
+
 def test_studio_start_group_run_enriches_bare_port_payload_with_group_scoped_events() -> None:
     port = _BareStartPort()
     group_run = AgentStudioService(port).start_group_run(
