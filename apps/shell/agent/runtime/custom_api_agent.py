@@ -1847,6 +1847,16 @@ class RuntimeCustomApiAgentLoop:
                     include_pending_execution_only=True,
                 )
                 followup_target = _model_followup_context_target(followup_context)
+                if _model_followup_artifact_target_completed(
+                    followup_target,
+                    timeline,
+                ):
+                    result_text, truncated = self._limit_model_output(content)
+                    return self._model_output_text_factory(
+                        result_text,
+                        metadata=self._model_message_metadata(message),
+                        truncated=truncated,
+                    )
                 auto_app_write_requests = _model_followup_app_write_requests(
                     content,
                     followup_target,
@@ -1858,6 +1868,15 @@ class RuntimeCustomApiAgentLoop:
                         auto_app_write_requests,
                         followup_context,
                     )
+                )
+                auto_app_write_requests = _drop_completed_auto_followup_prefix(
+                    auto_app_write_requests,
+                    timeline,
+                    tool_timeline_start=0,
+                )
+                auto_app_write_requests = _drop_completed_artifact_write_requests(
+                    auto_app_write_requests,
+                    artifacts,
                 )
                 if auto_app_write_requests:
                     messages.append({"role": "assistant", "content": content})
@@ -1984,6 +2003,15 @@ class RuntimeCustomApiAgentLoop:
                         allowed_tools,
                         generated_content=content,
                         timeline=timeline,
+                    )
+                    auto_pending_plan_requests = _drop_completed_auto_followup_prefix(
+                        auto_pending_plan_requests,
+                        timeline,
+                        tool_timeline_start=0,
+                    )
+                    auto_pending_plan_requests = _drop_completed_artifact_write_requests(
+                        auto_pending_plan_requests,
+                        artifacts,
                     )
                     if auto_pending_plan_requests:
                         messages.append({"role": "assistant", "content": content})
@@ -6534,6 +6562,11 @@ def _model_followup_context_payload(
         for request in content_requests
         if _tool_request_requires_model_materialization(request)
     ]
+    if materialization_content_requests and not observation_content_requests:
+        observation_content_requests = _model_followup_pre_materialization_requests(
+            planned_tool_requests,
+            materialization_content_requests,
+        )
     allowed = {
         str(tool or "").strip()
         for tool in allowed_tools
@@ -6571,6 +6604,14 @@ def _model_followup_context_payload(
         payload["followup_target"] = followup_target
     if artifacts_expected:
         payload["artifacts_expected"] = artifacts_expected
+    materialization_requests_for_pending = (
+        []
+        if followup_target
+        and _materialization_requests_are_artifact_writes(
+            materialization_content_requests
+        )
+        else materialization_content_requests
+    )
     pending_plan_steps = (
         []
         if context_only_followup
@@ -6595,7 +6636,7 @@ def _model_followup_context_payload(
         if context_only_followup
         else _model_followup_materialization_execution_requests(
             selection_payload,
-            materialization_content_requests,
+            materialization_requests_for_pending,
             allowed,
         )
     )
@@ -6633,6 +6674,60 @@ def _model_followup_context_payload(
         if value:
             payload[key] = value
     return payload
+
+
+def _model_followup_pre_materialization_requests(
+    planned_tool_requests: list[dict[str, Any]],
+    materialization_requests: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    materialization_ids = {id(request) for request in materialization_requests}
+    observed: list[dict[str, Any]] = []
+    for request in planned_tool_requests:
+        if not isinstance(request, dict):
+            continue
+        if id(request) in materialization_ids:
+            break
+        if str(request.get("tool") or "").strip() and not (
+            _tool_request_requires_model_materialization(request)
+        ):
+            observed.append(request)
+    preferred = [
+        request
+        for request in observed
+        if str(request.get("tool") or "").strip()
+        in _MODEL_FOLLOWUP_PRIMARY_OBSERVATION_TOOLS
+    ]
+    return preferred[-1:] if preferred else observed
+
+
+def _materialization_requests_are_artifact_writes(
+    requests: Iterable[Mapping[str, Any]],
+) -> bool:
+    tools = [
+        str(request.get("tool") or request.get("tool_name") or "").strip()
+        for request in requests
+        if isinstance(request, Mapping)
+    ]
+    return bool(tools) and set(tools) == {"artifact.write"}
+
+
+_MODEL_FOLLOWUP_PRIMARY_OBSERVATION_TOOLS = frozenset(
+    {
+        "browser.extract_text",
+        "browser.open_url_and_extract_text",
+        "clipboard.read",
+        "data.analyze",
+        "desktop.inspect_app",
+        "desktop.read_ui",
+        "desktop.ui_elements",
+        "file.read",
+        "file.search",
+        "screen.capture",
+        "terminal.run",
+        "workspace.list",
+        "workspace.read",
+    }
+)
 
 
 def _model_followup_context_requests_from_selection_target(
@@ -13756,12 +13851,17 @@ _CHAT_FULL_PLAN_EXECUTION_INTENTS = frozenset(
         "clipboard_operation",
         "code_task",
         "communication",
+        "data_analysis",
         "desktop_operation",
         "file_access",
         "file_operation",
+        "file_organization",
+        "information_capture",
         "media_playback",
+        "report_generation",
         "schedule",
         "system_control",
+        "web_research",
     }
 )
 
@@ -14266,9 +14366,60 @@ def _tool_request_requires_model_materialization(request: Mapping[str, Any]) -> 
             or request_input.get("body_source")
             or request_input.get("mode")
         )
+    if tool_name in {"terminal.run", "python.run"}:
+        return _command_tool_request_requires_model_materialization(
+            tool_name,
+            request_input,
+        )
     if tool_name in _MODEL_FOLLOWUP_TEXT_ENTRY_TOOLS:
         return bool(body_source) and not str(request_input.get("text") or "").strip()
     return False
+
+
+def _command_tool_request_requires_model_materialization(
+    tool_name: str,
+    request_input: Mapping[str, Any],
+) -> bool:
+    command = str(request_input.get("command") or "").strip()
+    code = str(request_input.get("code") or "").strip()
+    if tool_name == "python.run" and code:
+        return False
+    if command and not _command_tool_request_looks_like_placeholder(command):
+        return False
+    if _command_tool_request_looks_like_placeholder(command):
+        return True
+    return any(
+        request_input.get(key)
+        for key in (
+            "body_source",
+            "file_type",
+            "operation",
+            "path",
+            "paths",
+            "pattern",
+            "query",
+            "selection",
+            "source",
+            "source_path",
+        )
+    )
+
+
+def _command_tool_request_looks_like_placeholder(command: str) -> bool:
+    value = str(command or "").strip().lower()
+    if not value:
+        return False
+    return any(
+        marker in value
+        for marker in (
+            "# analyze captured tabular data",
+            "# inspect data, compute summary, generate charts",
+            "# inspect data",
+            "todo:",
+            "<model",
+            "<generated",
+        )
+    )
 
 
 def _runtime_planner_should_trace_tool_requests(decision: Any | None) -> bool:
@@ -14676,6 +14827,33 @@ def _drop_completed_auto_followup_prefix(
     return remaining
 
 
+def _drop_completed_artifact_write_requests(
+    requests: list[dict[str, Any]],
+    artifacts: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    completed_paths = {
+        str(artifact.get("path") or "").strip()
+        for artifact in artifacts
+        if str(artifact.get("path") or "").strip()
+    }
+    if not completed_paths:
+        return requests
+    filtered: list[dict[str, Any]] = []
+    for request in requests:
+        request_input = (
+            request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        )
+        tool_name = str(request.get("tool") or "").strip()
+        path = str(request_input.get("path") or "").strip()
+        if tool_name == "artifact.write" and path and any(
+            completed == path or completed.endswith(f"/{path}")
+            for completed in completed_paths
+        ):
+            continue
+        filtered.append(request)
+    return filtered
+
+
 def _auto_followup_request_completed(
     request: Mapping[str, Any],
     timeline: list[dict[str, Any]],
@@ -14701,6 +14879,11 @@ def _auto_followup_request_completed(
         if result.get("ok") is not True or result.get("approval_required"):
             continue
         event_input = event.get("input_preview") if isinstance(event.get("input_preview"), Mapping) else {}
+        if tool_name == "artifact.write":
+            request_path = str(request_input.get("path") or "").strip()
+            event_path = str(event_input.get("path") or "").strip()
+            if request_path and request_path == event_path:
+                return True
         if _auto_followup_input_matches_event(request_input, event_input):
             return True
     return False
@@ -21862,6 +22045,37 @@ def _model_followup_app_write_requests(
         ]
         return [*artifact_requests, *requests, *([verify_request] if verify_request else [])]
     return artifact_requests
+
+
+def _model_followup_artifact_target_completed(
+    target: Mapping[str, Any] | None,
+    timeline: list[dict[str, Any]],
+) -> bool:
+    if not isinstance(target, Mapping):
+        return False
+    path = str(target.get("path") or "").strip()
+    if not path:
+        raw = target.get("artifact_write") if isinstance(target.get("artifact_write"), Mapping) else {}
+        path = str(raw.get("path") or "").strip()
+    if not path:
+        return False
+    for event in reversed(timeline):
+        if str(event.get("event") or "").strip() != "agent.tool.call":
+            continue
+        if str(event.get("detail") or "").strip() != "artifact.write":
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is not True:
+            continue
+        input_preview = (
+            event.get("input_preview")
+            if isinstance(event.get("input_preview"), Mapping)
+            else {}
+        )
+        completed_path = str(input_preview.get("path") or result.get("path") or "").strip()
+        if completed_path == path or completed_path.endswith(f"/{path}"):
+            return True
+    return False
 
 
 def _model_followup_discovered_app_write_discovery_requests(

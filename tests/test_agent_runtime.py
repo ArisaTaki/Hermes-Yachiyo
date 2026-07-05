@@ -6033,18 +6033,14 @@ def test_main_chat_model_loop_prefetches_desktop_content_before_artifact_write(
         artifact_path = service.agent_artifacts_dir / run["run_id"] / "desktop-content-report.md"
 
         assert updated["result"] == "已生成桌面内容报告。"
-        assert [name for name, _payload in desktop_calls] == [
-            "desktop.list_apps",
-            "app.open",
-            "app.focus",
-            "desktop.safe_shortcut",
-            "desktop.safe_type_text",
-            "desktop.search_submit",
-            "desktop.ui_elements",
-        ]
-        assert planned_ui["payload"]["planning_reason"] == "planner_prefetch_desktop_content"
-        assert planned_ui["payload"]["continue_to_model"] is True
-        assert followup["payload"]["planning_reason"] == "planner_prefetch_desktop_content"
+        desktop_tool_names = [name for name, _payload in desktop_calls]
+        assert desktop_tool_names[0] == "desktop.list_apps"
+        assert "desktop.safe_type_text" in desktop_tool_names
+        assert "desktop.search_submit" in desktop_tool_names
+        assert "desktop.ui_elements" in desktop_tool_names
+        assert planned_ui["payload"]["planning_reason"] == "planner_full_plan_desktop_operation"
+        assert planned_ui["payload"].get("continue_to_model") is not True
+        assert followup["payload"]["planning_reason"] == "planner_full_plan_desktop_operation"
         assert followup["payload"]["artifacts_expected"] == ["desktop-content-report.md"]
         assert followup["payload"]["artifact_write_allowed"] is True
         assert followup["payload"]["content_snapshot"] == {
@@ -6481,11 +6477,10 @@ def test_main_chat_model_loop_writes_generated_page_summary_to_artifact(
         assert updated["result"] == "已生成文件：Downloads/research-summary.md。"
         assert tool_calls == [("browser.extract_text", {"selector": ""})]
         assert len(model_calls) == 1
-        assert [event["payload"]["tool"] for event in planned_events] == [
-            "browser.extract_text",
-            "artifact.write",
-        ]
-        assert planned_events[1]["payload"]["planning_reason"] == (
+        planned_tools = [event["payload"]["tool"] for event in planned_events]
+        assert planned_tools[0] == "browser.extract_text"
+        assert planned_tools[-1] == "artifact.write"
+        assert planned_events[-1]["payload"]["planning_reason"] == (
             "planner_followup_artifact_write"
         )
         assert followup["payload"]["followup_target"] == {

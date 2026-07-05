@@ -228,6 +228,8 @@ def _request_needs_model_materialization(
             or request_input.get("body_source")
             or request_input.get("mode")
         )
+    if tool_name in {"terminal.run", "python.run"}:
+        return _command_request_needs_model_materialization(tool_name, request_input)
     if tool_name in {
         "app.focus_and_safe_type_text",
         "app.focus_and_type_into_ui_element",
@@ -242,6 +244,52 @@ def _request_needs_model_materialization(
             request_input.get("text") or ""
         ).strip()
     return False
+
+
+def _command_request_needs_model_materialization(
+    tool_name: str,
+    request_input: Mapping[str, Any],
+) -> bool:
+    command = str(request_input.get("command") or "").strip()
+    code = str(request_input.get("code") or "").strip()
+    if tool_name == "python.run" and code:
+        return False
+    if command and not _command_looks_like_planner_placeholder(command):
+        return False
+    if _command_looks_like_planner_placeholder(command):
+        return True
+    return any(
+        request_input.get(key)
+        for key in (
+            "body_source",
+            "file_type",
+            "operation",
+            "path",
+            "paths",
+            "pattern",
+            "query",
+            "selection",
+            "source",
+            "source_path",
+        )
+    )
+
+
+def _command_looks_like_planner_placeholder(command: str) -> bool:
+    value = str(command or "").strip().lower()
+    if not value:
+        return False
+    return any(
+        marker in value
+        for marker in (
+            "# analyze captured tabular data",
+            "# inspect data, compute summary, generate charts",
+            "# inspect data",
+            "todo:",
+            "<model",
+            "<generated",
+        )
+    )
 
 
 _EXECUTION_REQUEST_CONTEXT_KEYS = {

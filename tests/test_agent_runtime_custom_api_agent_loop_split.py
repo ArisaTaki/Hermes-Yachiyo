@@ -2160,6 +2160,97 @@ def test_runtime_planner_runtime_requests_full_plan_code_task_with_deferred_patc
     ]
 
 
+def test_runtime_planner_runtime_requests_full_plan_data_analysis_defers_generated_command() -> None:
+    allowed_tools = ["workspace.read", "terminal.run", "artifact.write"]
+
+    loop = _private_runtime_loop()
+    decision, requests, payload = loop._runtime_planner_tool_requests(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools,
+    )
+
+    assert decision is not None
+    assert decision.selected_intent.kind == "data_analysis"
+    assert [request["tool"] for request in requests] == [
+        "workspace.read",
+        "terminal.run",
+        "artifact.write",
+    ]
+    assert requests[0]["continue_to_model"] is False
+    assert requests[1]["continue_to_model"] is True
+    assert requests[1]["approval_required"] is True
+    assert requests[1]["step_id"] == "run-analysis"
+    assert requests[2]["continue_to_model"] is True
+    assert payload["selection_reason"] == "runtime_planner_full_plan_execution"
+    assert payload["yachiyo_execution_projection"] == "full_plan"
+    assert payload["yachiyo_execution_envelope"]["intent_kind"] == "data_analysis"
+
+    immediate, materialization = (
+        custom_api_agent_module._split_model_materialization_tool_requests(requests)
+    )
+    assert [request["tool"] for request in immediate] == ["workspace.read"]
+    assert [request["tool"] for request in materialization] == [
+        "terminal.run",
+        "artifact.write",
+    ]
+
+
+def test_runtime_planner_runtime_requests_full_plan_report_generation_defers_artifact_body() -> None:
+    allowed_tools = ["workspace.list", "terminal.run", "artifact.write"]
+
+    loop = _private_runtime_loop()
+    decision, requests, payload = loop._runtime_planner_tool_requests(
+        "请根据现有文档写一份项目报告",
+        allowed_tools,
+    )
+
+    assert decision is not None
+    assert decision.selected_intent.kind == "report_generation"
+    assert [request["tool"] for request in requests] == [
+        "workspace.list",
+        "artifact.write",
+    ]
+    assert requests[0]["continue_to_model"] is False
+    assert requests[1]["continue_to_model"] is True
+    assert payload["selection_reason"] == "runtime_planner_full_plan_execution"
+    assert payload["yachiyo_execution_envelope"]["intent_kind"] == "report_generation"
+
+    immediate, materialization = (
+        custom_api_agent_module._split_model_materialization_tool_requests(requests)
+    )
+    assert [request["tool"] for request in immediate] == ["workspace.list"]
+    assert [request["tool"] for request in materialization] == ["artifact.write"]
+
+
+def test_runtime_planner_runtime_requests_full_plan_web_research_defers_report_artifact() -> None:
+    allowed_tools = ["browser.open_url_and_extract_text", "artifact.write"]
+
+    loop = _private_runtime_loop()
+    decision, requests, payload = loop._runtime_planner_tool_requests(
+        "研究 https://example.com 并输出报告",
+        allowed_tools,
+    )
+
+    assert decision is not None
+    assert decision.selected_intent.kind == "web_research"
+    assert [request["tool"] for request in requests] == [
+        "browser.open_url_and_extract_text",
+        "artifact.write",
+    ]
+    assert requests[0]["continue_to_model"] is False
+    assert requests[1]["continue_to_model"] is True
+    assert payload["selection_reason"] == "runtime_planner_full_plan_execution"
+    assert payload["yachiyo_execution_envelope"]["intent_kind"] == "web_research"
+
+    immediate, materialization = (
+        custom_api_agent_module._split_model_materialization_tool_requests(requests)
+    )
+    assert [request["tool"] for request in immediate] == [
+        "browser.open_url_and_extract_text"
+    ]
+    assert [request["tool"] for request in materialization] == ["artifact.write"]
+
+
 @pytest.mark.parametrize(
     ("prompt", "expected_area"),
     [
@@ -2806,8 +2897,8 @@ def test_custom_api_agent_loop_prefetches_runtime_planner_data_source_before_mod
             "tool": "workspace.read",
             "input": {"path": "data/sales.csv"},
             "source": "runtime_planner",
-            "planning_reason": "planner_prefetch_data_source",
-            "continue_to_model": True,
+            "planning_reason": "planner_full_plan_data_analysis",
+            "continue_to_model": False,
         },
     )
     _assert_planner_task_core_metadata(request, require_task_todo=True)
@@ -2822,7 +2913,7 @@ def test_custom_api_agent_loop_prefetches_runtime_planner_data_source_before_mod
         event for event in timeline if event["event"] == "agent.model.followup_context"
     )
     assert planned_event["source"] == "runtime_planner"
-    assert followup_event["planning_reason"] == "planner_prefetch_data_source"
+    assert followup_event["planning_reason"] == "planner_full_plan_data_analysis"
     assert followup_event["observation_tools"] == ["workspace.read"]
     assert followup_event["content_snapshot"] == {
         "source_tool": "workspace.read",
