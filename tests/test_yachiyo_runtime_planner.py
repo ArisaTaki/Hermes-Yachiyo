@@ -9321,8 +9321,16 @@ def test_planner_execution_tool_requests_prepends_unknown_app_discovery() -> Non
             "protocol": "json_fallback",
             "tool": "desktop.active_window",
             "input": {},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
+            "source": "runtime_verification",
+            "planning_reason": "runtime_desktop_app_foreground_verification",
+            "runtime_doctrine": "discover_operate_verify",
+            "continue_to_model": True,
+            "requires_observation": True,
+            "runtime_stage": "verify",
+            "runtime_role": "verify_result",
+            "replan_triggers": ["verification_failed"],
+            "target_app_name": "PixelForge",
+            "verification_target": {"app_name": "PixelForge"},
         },
     ]
 

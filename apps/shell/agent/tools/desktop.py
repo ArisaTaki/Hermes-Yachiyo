@@ -3153,34 +3153,57 @@ def _installed_app_match_score(
     candidate_name: str,
     metadata: Mapping[str, Any] | None = None,
 ) -> int:
+    name_score = max(
+        [
+            _installed_app_name_match_score(query_name, candidate)
+            for candidate in _installed_app_match_names(candidate_name, metadata or {})
+        ]
+        or [0]
+    )
+    capability_match = _installed_app_capability_match(query_name, metadata or {})
+    capability_score = int(capability_match.get("score") or 0)
+    return max(name_score, capability_score)
+
+
+def _installed_app_match_names(
+    candidate_name: str,
+    metadata: Mapping[str, Any],
+) -> list[str]:
+    names = [str(candidate_name or "").strip()]
+    for value in metadata.get("names") or []:
+        text = str(value or "").strip()
+        if text and text not in names:
+            names.append(text)
+    return names
+
+
+def _installed_app_name_match_score(query_name: str, candidate_name: str) -> int:
     query_compact = _compact_app_match_name(query_name)
     candidate_compact = _compact_app_match_name(candidate_name)
     if not query_compact or not candidate_compact:
         return 0
-    capability_match = _installed_app_capability_match(query_name, metadata or {})
-    capability_score = int(capability_match.get("score") or 0)
     if candidate_compact == query_compact:
-        return max(100, capability_score)
+        return 100
     query_tokens = _app_match_tokens(query_name)
     candidate_tokens = _app_match_tokens(candidate_name)
     if query_tokens and all(token in candidate_tokens for token in query_tokens):
-        return max(90, capability_score)
+        return 90
     if candidate_tokens and all(token in query_tokens for token in candidate_tokens):
-        return max(85, capability_score)
+        return 85
     if query_tokens and all(
         any(candidate_token.startswith(token) for candidate_token in candidate_tokens)
         for token in query_tokens
     ):
-        return max(82, capability_score)
+        return 82
     if candidate_compact.endswith(query_compact):
-        return max(80, capability_score)
+        return 80
     if query_compact.endswith(candidate_compact):
-        return max(75, capability_score)
+        return 75
     if _contains_non_ascii(query_name) and query_compact in candidate_compact:
-        return max(70, capability_score)
+        return 70
     if _contains_non_ascii(candidate_name) and candidate_compact in query_compact:
-        return max(65, capability_score)
-    return capability_score
+        return 65
+    return 0
 
 
 def _installed_app_capability_match(
