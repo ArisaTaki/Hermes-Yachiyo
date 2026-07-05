@@ -23111,6 +23111,117 @@ def test_runtime_planner_replans_empty_auto_discovered_app_observation() -> None
     }
 
 
+def test_runtime_planner_replans_ui_verification_when_target_element_missing() -> None:
+    decision = RuntimePlanner().decision(
+        "点击 PixelForge 的登录按钮",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "app.open_and_click_ui_element",
+            "desktop.ui_elements",
+            "desktop.active_window",
+            "screen.capture",
+        ],
+    )
+    loop = _private_runtime_loop()
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.open_and_click_ui_element",
+            input_preview={
+                "app_name": "PixelForge",
+                "target": "登录",
+                "role_filter": "button",
+            },
+            result={
+                "ok": True,
+                "data": {
+                    "app_name": "PixelForge",
+                    "matched_label": "登录",
+                    "x": 120,
+                    "y": 220,
+                },
+            },
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            input_preview={
+                "app_name": "PixelForge",
+                "role_filter": "button",
+                "limit": 80,
+            },
+            result={
+                "ok": True,
+                "data": {
+                    "app_name": "PixelForge",
+                    "elements": [
+                        {
+                            "role": "AXButton",
+                            "name": "取消",
+                            "enabled": True,
+                            "center": {"x": 80, "y": 220},
+                        }
+                    ],
+                },
+            },
+        ),
+    ]
+
+    payloads = loop._record_runtime_planner_replan_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-ui-target-missing-replan",
+    )
+
+    assert len(payloads) == 1
+    payload = payloads[0]
+    assert payload["trigger"] == "verification_failed"
+    assert payload["source_step_id"] == "verify-desktop-result"
+    assert payload["source_tool_name"] == "desktop.ui_elements"
+    assert payload["metadata"]["target_search_text"] == "登录"
+    assert payload["metadata"]["ui_role_filter"] == "button"
+    assert "target UI element" in payload["failure_detail"]
+    assert payload["metadata"]["ui_target_found"] is False
+    assert payload["metadata"]["ui_match_count"] == 0
+    assert payload["metadata"]["blocking_conditions"] == ["ui_target_not_found"]
+
+    recovery_requests = custom_api_agent_module._auto_replan_verification_recovery_requests(
+        payloads,
+        [
+            "desktop.active_window",
+            "desktop.inspect_app",
+            "desktop.ui_elements",
+            "screen.capture",
+        ],
+    )
+
+    assert [request["tool"] for request in recovery_requests] == [
+        "desktop.active_window",
+        "desktop.inspect_app",
+        "desktop.ui_elements",
+        "screen.capture",
+    ]
+    inspect_request = recovery_requests[1]
+    ui_request = recovery_requests[2]
+    assert inspect_request["input"] == {
+        "app_name": "PixelForge",
+        "open_if_needed": True,
+        "focus": True,
+        "limit": 80,
+        "role_filter": "button",
+    }
+    assert ui_request["input"] == {
+        "app_name": "PixelForge",
+        "limit": 80,
+        "role_filter": "button",
+    }
+    assert {request["target_search_text"] for request in recovery_requests} == {"登录"}
+    assert {request["replan_request_id"] for request in recovery_requests} == {
+        payload["request_id"]
+    }
+
+
 def test_runtime_planner_replan_maps_tool_failure_to_plan_step_without_request_trace() -> None:
     decision = RuntimePlanner().decision(
         "请分析 sales.csv 并输出一份数据分析报告",

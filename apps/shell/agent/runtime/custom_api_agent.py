@@ -8934,15 +8934,36 @@ def _runtime_planner_verification_failure_payloads(
             if isinstance(tool_event.get("result"), Mapping)
             else {}
         )
-        if not _tool_result_verification_weak(tool_name, result):
+        verification_context = _runtime_planner_verification_context(
+            tool_events[: max(0, event_index - 1)],
+            tool_event,
+        )
+        target_missing = _tool_result_verification_target_missing(
+            tool_name,
+            result,
+            target_text=str(verification_context.get("target_search_text") or ""),
+            role_filter=str(verification_context.get("ui_role_filter") or ""),
+        )
+        weak_observation = _tool_result_verification_weak(tool_name, result)
+        if not weak_observation and not target_missing:
             continue
         metadata = {
             **_runtime_trace_metadata_from_mapping(tool_event),
-            **_runtime_planner_verification_context(
-                tool_events[: max(0, event_index - 1)],
-                tool_event,
+            **verification_context,
+            **_ui_verification_failure_metadata(
+                tool_name,
+                result,
+                target_text=str(verification_context.get("target_search_text") or ""),
+                role_filter=str(verification_context.get("ui_role_filter") or ""),
+                target_missing=target_missing,
             ),
         }
+        detail = "verification observation returned no UI elements or readable text"
+        if target_missing:
+            detail = (
+                "verification observation did not include target UI element"
+                f": {verification_context.get('target_search_text')}"
+            )
         payloads.append(
             {
                 "event_type": "agent.tool.call",
@@ -8956,8 +8977,9 @@ def _runtime_planner_verification_failure_payloads(
                     if isinstance(tool_event.get("input_preview"), Mapping)
                     else {}
                 ),
-                "detail": "verification observation returned no UI elements or readable text",
+                "detail": detail,
                 "result": result,
+                **verification_context,
                 **({"metadata": metadata} if metadata else {}),
             }
         )
@@ -8970,11 +8992,13 @@ def _runtime_planner_verification_context(
 ) -> dict[str, Any]:
     app_name = _runtime_planner_verification_app_name(events, current_event)
     app_query = _runtime_planner_verification_app_query(events)
-    search_text = _runtime_planner_verification_search_text(events)
+    search_text = _runtime_planner_verification_target_text(events, current_event)
+    role_filter = _runtime_planner_verification_role_filter(events, current_event)
     context = {
         "target_app_name": app_name,
         "target_app_query": app_query,
         "target_search_text": search_text,
+        "ui_role_filter": role_filter,
         "recovery_observation_goal": "inspect_current_target_after_verification_gap",
     }
     return {key: value for key, value in context.items() if value not in ("", [], {})}
@@ -9086,6 +9110,118 @@ def _runtime_planner_verification_search_text(events: list[dict[str, Any]]) -> s
     return ""
 
 
+def _runtime_planner_verification_target_text(
+    events: list[dict[str, Any]],
+    current_event: Mapping[str, Any],
+) -> str:
+    current_input = (
+        current_event.get("input_preview")
+        if isinstance(current_event.get("input_preview"), Mapping)
+        else {}
+    )
+    current_target = _first_runtime_planner_event_text(
+        current_input,
+        keys=("target_search_text", "target", "text", "value"),
+    )
+    if current_target:
+        return current_target
+    for event in reversed(events):
+        tool_name = str(event.get("detail") or "").strip()
+        if tool_name not in {
+            "app.open_and_click_ui_element",
+            "app.focus_and_click_ui_element",
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_type_into_ui_element",
+            "desktop.click_ui_element",
+            "desktop.type_into_ui_element",
+        }:
+            continue
+        input_preview = (
+            event.get("input_preview")
+            if isinstance(event.get("input_preview"), Mapping)
+            else {}
+        )
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+        if tool_name in {
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_type_into_ui_element",
+            "desktop.type_into_ui_element",
+        }:
+            target = _first_runtime_planner_event_text(
+                input_preview,
+                data,
+                result,
+                keys=("text", "value", "target_search_text", "matched_label", "target"),
+            )
+            if target:
+                return target
+            continue
+        target = _first_runtime_planner_event_text(
+            data,
+            result,
+            input_preview,
+            keys=("matched_label", "target", "target_search_text", "label", "name"),
+        )
+        if target:
+            return target
+    return _runtime_planner_verification_search_text(events)
+
+
+def _runtime_planner_verification_role_filter(
+    events: list[dict[str, Any]],
+    current_event: Mapping[str, Any],
+) -> str:
+    current_input = (
+        current_event.get("input_preview")
+        if isinstance(current_event.get("input_preview"), Mapping)
+        else {}
+    )
+    role_filter = _first_runtime_planner_event_text(
+        current_input,
+        keys=("role_filter", "role"),
+    )
+    if role_filter:
+        return role_filter
+    for event in reversed(events):
+        tool_name = str(event.get("detail") or "").strip()
+        if tool_name not in {
+            "app.open_and_click_ui_element",
+            "app.focus_and_click_ui_element",
+            "app.open_and_type_into_ui_element",
+            "app.focus_and_type_into_ui_element",
+            "desktop.click_ui_element",
+            "desktop.type_into_ui_element",
+        }:
+            continue
+        input_preview = (
+            event.get("input_preview")
+            if isinstance(event.get("input_preview"), Mapping)
+            else {}
+        )
+        role_filter = _first_runtime_planner_event_text(
+            input_preview,
+            keys=("role_filter", "role"),
+        )
+        if role_filter:
+            return role_filter
+    return ""
+
+
+def _first_runtime_planner_event_text(
+    *sources: Mapping[str, Any],
+    keys: tuple[str, ...],
+) -> str:
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        for key in keys:
+            value = str(source.get(key) or "").strip()
+            if value:
+                return value
+    return ""
+
+
 def _runtime_planner_text_candidates(
     keys: tuple[str, ...],
     *sources: Mapping[str, Any],
@@ -9194,6 +9330,59 @@ def _tool_result_verification_weak(tool_name: str, result: Mapping[str, Any]) ->
     return not _ui_observation_has_readable_text(result, data, elements)
 
 
+def _tool_result_verification_target_missing(
+    tool_name: str,
+    result: Mapping[str, Any],
+    *,
+    target_text: str,
+    role_filter: str = "",
+) -> bool:
+    if str(tool_name or "").strip() not in {"desktop.ui_elements", "desktop.read_ui"}:
+        return False
+    if not str(target_text or "").strip():
+        return False
+    if not isinstance(result, Mapping):
+        return False
+    if result.get("ok") is not True:
+        return False
+    if result.get("approval_required") or result.get("blocked_by_user_goal"):
+        return False
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    elements = _ui_elements_from_result(result, data)
+    if not elements and not _ui_observation_has_readable_text(result, data, elements):
+        return False
+    if _ui_observation_text_matches_target(result, data, target_text):
+        return False
+    return not _ui_observation_target_matches(elements, target_text, role_filter)
+
+
+def _ui_verification_failure_metadata(
+    tool_name: str,
+    result: Mapping[str, Any],
+    *,
+    target_text: str,
+    role_filter: str,
+    target_missing: bool,
+) -> dict[str, Any]:
+    if str(tool_name or "").strip() not in {"desktop.ui_elements", "desktop.read_ui"}:
+        return {}
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    elements = _ui_elements_from_result(result, data)
+    metadata: dict[str, Any] = {
+        "ui_element_count": _ui_element_count(result, data, elements),
+    }
+    if target_text:
+        metadata["target_search_text"] = str(target_text).strip()
+        metadata["ui_target"] = str(target_text).strip()
+    if role_filter:
+        metadata["ui_role_filter"] = str(role_filter).strip()
+    if target_missing and target_text:
+        metadata["ui_target_found"] = False
+        metadata["ui_match_count"] = 0
+        metadata["blocking_conditions"] = ["ui_target_not_found"]
+    return {key: value for key, value in metadata.items() if value not in ("", [], {})}
+
+
 def _ui_elements_from_result(
     result: Mapping[str, Any],
     data: Mapping[str, Any],
@@ -9245,6 +9434,72 @@ def _ui_observation_has_readable_text(
             continue
         for key in ("name", "value", "title", "label", "description", "text"):
             if str(element.get(key) or "").strip():
+                return True
+    return False
+
+
+def _ui_observation_target_matches(
+    elements: list[Any],
+    target_text: str,
+    role_filter: str = "",
+) -> list[dict[str, Any]]:
+    normalized_target = _normalize_observed_desktop_text(target_text)
+    if not normalized_target:
+        return []
+    ordinal = _observed_desktop_target_ordinal(target_text)
+    if ordinal:
+        return _ordinal_observed_desktop_elements(elements, ordinal, role_filter)
+    normalized_filter = _normalize_observed_desktop_text(role_filter)
+    matches: list[dict[str, Any]] = []
+    for raw_element in elements:
+        if not isinstance(raw_element, Mapping):
+            continue
+        element = dict(raw_element)
+        if element.get("enabled") is False:
+            continue
+        searchable = _normalize_observed_desktop_text(
+            " ".join(
+                str(element.get(key) or "")
+                for key in ("role", "subrole", "name", "description", "value", "label")
+            )
+        )
+        if normalized_filter and not _observed_desktop_text_matches(
+            searchable,
+            normalized_filter,
+        ):
+            continue
+        if _observed_desktop_element_match_score(
+            element,
+            normalized_target,
+            role_filter,
+        ) > 0:
+            matches.append(element)
+    return matches
+
+
+def _ui_observation_text_matches_target(
+    result: Mapping[str, Any],
+    data: Mapping[str, Any],
+    target_text: str,
+) -> bool:
+    normalized_target = _normalize_observed_desktop_text(target_text)
+    if not normalized_target:
+        return False
+    for source in (data, result):
+        for key in (
+            "text",
+            "content",
+            "ocr_text",
+            "selected_text",
+            "value",
+            "title",
+            "window_title",
+        ):
+            searchable = _normalize_observed_desktop_text(source.get(key))
+            if searchable and _observed_desktop_text_matches(
+                searchable,
+                normalized_target,
+            ):
                 return True
     return False
 
@@ -12441,11 +12696,7 @@ def _ui_observation_verification_evidence(
     if role_filter:
         evidence["ui_role_filter"] = role_filter
     if target_text:
-        ordinal = _observed_desktop_target_ordinal(target_text)
-        if ordinal:
-            matches = _ordinal_observed_desktop_elements(elements, ordinal, role_filter)
-        else:
-            matches = _matching_observed_desktop_elements(elements, target_text, role_filter)
+        matches = _ui_observation_target_matches(elements, target_text, role_filter)
         evidence["ui_target_found"] = bool(matches)
         evidence["ui_match_count"] = len(matches)
         if matches:
@@ -14217,12 +14468,19 @@ def _replan_recovery_target(payload: Mapping[str, Any]) -> dict[str, str]:
         input_preview,
         payload,
     )
+    role_filter = _first_replan_recovery_text(
+        ("ui_role_filter", "role_filter", "role"),
+        metadata,
+        input_preview,
+        payload,
+    )
     return {
         key: value
         for key, value in {
             "target_app_name": app_name,
             "target_app_query": app_query,
             "target_search_text": search_text,
+            "ui_role_filter": role_filter,
         }.items()
         if value
     }
@@ -14235,19 +14493,26 @@ def _verification_recovery_tool_input(
     clean_tool = str(tool_name or "").strip()
     app_name = str(target.get("target_app_name") or "").strip()
     search_text = str(target.get("target_search_text") or "").strip()
+    role_filter = str(target.get("ui_role_filter") or "").strip()
     if clean_tool == "desktop.inspect_app":
         if not app_name:
             return None
-        return {
+        payload: dict[str, Any] = {
             "app_name": app_name,
             "open_if_needed": True,
             "focus": True,
             "limit": 80,
         }
+        if role_filter:
+            payload["role_filter"] = role_filter
+        return payload
     if clean_tool in {"desktop.list_windows", "desktop.windows"}:
         return {"app_name": app_name} if app_name else {}
     if clean_tool in {"desktop.read_ui", "desktop.ui_elements"}:
-        return {"app_name": app_name, "limit": 80} if app_name else {"limit": 80}
+        payload = {"app_name": app_name, "limit": 80} if app_name else {"limit": 80}
+        if role_filter:
+            payload["role_filter"] = role_filter
+        return payload
     if clean_tool == "screen.capture":
         reason = "runtime verification recovery"
         if app_name and search_text:
