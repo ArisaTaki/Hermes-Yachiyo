@@ -25,6 +25,7 @@ export type {
   FutureTaskTriggerResultSnapshot,
   GroupRunSnapshot,
   InstallRestrictedToolPluginRequest,
+  LegacyCleanupCoverageSnapshot,
   MemorySnapshot,
   MemoryTraceSnapshot,
   PlannerDecisionSnapshot,

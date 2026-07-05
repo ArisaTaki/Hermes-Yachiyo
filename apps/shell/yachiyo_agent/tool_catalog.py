@@ -17,11 +17,13 @@ from apps.shell.agent.tools.plugins import list_restricted_plugin_tools, restric
 
 from .contracts import (
     DesktopExecutionCapabilitySnapshot,
+    LegacyCleanupCoverageSnapshot,
     RestrictedPluginToolSnapshot,
     RestrictedToolPluginSnapshot,
     ToolCatalogItemSnapshot,
     ToolCatalogSnapshot,
 )
+from .legacy_cleanup_coverage import legacy_daily_desktop_cleanup_coverage
 from .policy import (
     DESKTOP_CAPABILITY_DIAGNOSTIC_ROUTES,
     DESKTOP_CAPABILITY_TOOLS,
@@ -67,6 +69,7 @@ def runtime_tool_catalog_snapshot(
         tools=tools,
         capabilities=capabilities,
         plugins=_restricted_plugin_snapshots(plugin_states),
+        legacy_cleanup_coverage=_legacy_cleanup_coverage_snapshot(),
     )
 
 
@@ -100,6 +103,9 @@ def tool_catalog_snapshot_from_payload(payload: Any) -> ToolCatalogSnapshot:
         tools=tools,
         capabilities=capabilities,
         plugins=_restricted_plugin_snapshots_from_payload(payload.get("plugins")),
+        legacy_cleanup_coverage=_legacy_cleanup_coverage_snapshot(
+            payload.get("legacy_cleanup_coverage")
+        ),
         source=str(payload.get("source") or "runtime"),
     )
 
@@ -151,6 +157,14 @@ def _catalog_item_from_descriptor(
         diagnostic_route=_diagnostic_route_for_tool(capability_id),
         source=_source_for_tool(tool_name),
     )
+
+
+def _legacy_cleanup_coverage_snapshot(payload: Any = None) -> LegacyCleanupCoverageSnapshot:
+    if isinstance(payload, LegacyCleanupCoverageSnapshot):
+        return payload
+    if isinstance(payload, Mapping):
+        return LegacyCleanupCoverageSnapshot.model_validate(dict(payload))
+    return LegacyCleanupCoverageSnapshot.model_validate(legacy_daily_desktop_cleanup_coverage())
 
 
 def _catalog_item_from_payload(payload: Mapping[str, Any]) -> ToolCatalogItemSnapshot:

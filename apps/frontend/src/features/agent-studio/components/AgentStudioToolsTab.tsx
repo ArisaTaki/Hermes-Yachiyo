@@ -6,6 +6,7 @@ import {
   startYachiyoStudioPlannerOrchestration,
 } from '../../yachiyo-studio/api';
 import type {
+  LegacyCleanupCoverageSnapshot,
   PlannerDecisionSnapshot,
   PlannerOrchestrationStartSnapshot,
   RuntimeExecutionEnvelopeSnapshot,
@@ -53,6 +54,7 @@ export function AgentStudioToolsTab({
   const [plannerExecutionEnvelope, setPlannerExecutionEnvelope] = useState<RuntimeExecutionEnvelopeSnapshot | null>(null);
   const [plannerExecutionError, setPlannerExecutionError] = useState('');
   const [plannerExecutionLoading, setPlannerExecutionLoading] = useState(false);
+  const legacyCleanupCoverage = catalog.legacy_cleanup_coverage || null;
 
   useEffect(() => {
     const tools = catalog.tools || [];
@@ -225,6 +227,8 @@ export function AgentStudioToolsTab({
           </label>
         </div>
 
+        <LegacyCleanupCoveragePanel coverage={legacyCleanupCoverage} />
+
         {error ? <div className="notice danger">{error}</div> : null}
         <div className="studio-tool-list" data-testid="agent-studio-tool-list">
           {filteredTools.map((tool) => (
@@ -267,6 +271,56 @@ export function AgentStudioToolsTab({
         {!selectedTool && !loading ? <span className="studio-tool-empty">No tool selected</span> : null}
         {loading ? <span className="studio-tool-empty">Loading tools</span> : null}
       </div>
+    </section>
+  );
+}
+
+function LegacyCleanupCoveragePanel({
+  coverage,
+}: {
+  coverage: LegacyCleanupCoverageSnapshot | null;
+}) {
+  if (!coverage) return null;
+  const areas = Object.entries(coverage.areas || {});
+  const prompts = coverage.prompts || [];
+  return (
+    <section
+      className="studio-tool-inspector-section studio-legacy-cleanup-coverage"
+      data-legacy-boundary={coverage.legacy_boundary || ''}
+      data-planner-owner={coverage.planner_owner || ''}
+      data-testid="studio-legacy-cleanup-coverage"
+      data-total-samples={coverage.total_samples || 0}
+    >
+      <div className="studio-tool-inspector-heading">
+        <h3>Legacy Cleanup Coverage</h3>
+        <span>{coverage.planner_owner || 'planner'} · {coverage.legacy_boundary || 'legacy boundary'}</span>
+      </div>
+      <div className="studio-tool-detail-grid">
+        <span>
+          <small>Samples</small>
+          <strong>{coverage.total_samples || prompts.length}</strong>
+        </span>
+        <span>
+          <small>Areas</small>
+          <strong>{areas.length || 'None'}</strong>
+        </span>
+      </div>
+      {areas.length ? (
+        <div className="studio-tool-pill-row" data-testid="studio-legacy-cleanup-areas">
+          {areas.slice(0, 10).map(([area, count]) => (
+            <span className="studio-tool-permission" data-cleanup-area={area} key={area}>
+              {area} · {count}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {prompts.length ? (
+        <div className="studio-planner-step-list compact" data-testid="studio-legacy-cleanup-prompts">
+          {prompts.slice(0, 5).map((prompt) => (
+            <span className="studio-tool-empty" data-cleanup-prompt={prompt} key={prompt}>{prompt}</span>
+          ))}
+        </div>
+      ) : null}
     </section>
   );
 }

@@ -182,10 +182,19 @@ class UpdateRestrictedToolPluginRequest(_PublicSnapshot):
     enabled: bool | None = None
 
 
+class LegacyCleanupCoverageSnapshot(_PublicSnapshot):
+    legacy_boundary: str = "legacy_daily_desktop_intent"
+    planner_owner: str = "runtime_planner"
+    total_samples: int = 0
+    areas: dict[str, int] = Field(default_factory=dict)
+    prompts: list[str] = Field(default_factory=list)
+
+
 class ToolCatalogSnapshot(_PublicSnapshot):
     tools: list[ToolCatalogItemSnapshot] = Field(default_factory=list)
     capabilities: dict[str, DesktopExecutionCapabilitySnapshot] = Field(default_factory=dict)
     plugins: list[RestrictedToolPluginSnapshot] = Field(default_factory=list)
+    legacy_cleanup_coverage: LegacyCleanupCoverageSnapshot | None = None
     source: str = "runtime"
 
 

@@ -834,6 +834,10 @@ def test_agent_studio_service_maps_agent_group_workflow_snapshots() -> None:
     assert tool_catalog.plugins[0].plugin_id == "notes"
     assert tool_catalog.plugins[0].enabled is False
     assert tool_catalog.plugins[0].tools[0].risk_level == "medium"
+    assert tool_catalog.legacy_cleanup_coverage is not None
+    assert tool_catalog.legacy_cleanup_coverage.planner_owner == "runtime_planner"
+    assert tool_catalog.legacy_cleanup_coverage.total_samples >= 57
+    assert "app_launch" in tool_catalog.legacy_cleanup_coverage.areas
     assert restricted_plugins[0].plugin_id == "notes"
     assert installed_plugin.plugin_id == "desk"
     assert installed_plugin.enabled is True

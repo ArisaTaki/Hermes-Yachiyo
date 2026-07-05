@@ -98,10 +98,19 @@ export type UpdateRestrictedToolPluginRequest = {
   enabled?: boolean | null;
 };
 
+export type LegacyCleanupCoverageSnapshot = {
+  legacy_boundary?: string;
+  planner_owner?: string;
+  total_samples?: number;
+  areas?: Record<string, number>;
+  prompts?: string[];
+};
+
 export type ToolCatalogSnapshot = {
   tools: ToolCatalogItemSnapshot[];
   capabilities?: Record<string, DesktopExecutionCapabilitySnapshot>;
   plugins?: RestrictedToolPluginSnapshot[];
+  legacy_cleanup_coverage?: LegacyCleanupCoverageSnapshot | null;
   source?: string;
 };
 
