@@ -1027,6 +1027,114 @@ def test_agent_studio_workflow_run_timeline_uses_native_runtime_events(tmp_path)
         runtime.close()
 
 
+def test_yachiyo_chat_workflow_task_rolls_native_child_debug_state(tmp_path) -> None:
+    credential_store = MemoryCredentialStore()
+    runtime = NativeRunEngine(
+        db_path=tmp_path / "agent-runtime-chat-workflow-child.db",
+        workspace_dir=tmp_path / "runtime-chat-workflow-child",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    try:
+        run_group = runtime._insert_run_group(
+            title="Native chat workflow",
+            source="workflow",
+            workspace_dir=str(tmp_path / "workflow-workspace"),
+        )
+        workflow_run = runtime._insert_run(
+            kind="workflow_run",
+            runnable_id="workflow-native-chat-1",
+            user_goal="Build workflow report",
+            run_group_id=run_group["run_group_id"],
+        )
+        child_run = runtime._insert_run(
+            kind="agent_run",
+            runnable_id="agent-analysis",
+            user_goal="Analyze data",
+            run_group_id=run_group["run_group_id"],
+        )
+        runtime._update_run(
+            workflow_run["run_id"],
+            status="approval_required",
+            timeline=[
+                {
+                    "event_type": "workflow.node.agent",
+                    "payload": {
+                        "child_run_id": child_run["run_id"],
+                        "workflow_id": "workflow-native-chat-1",
+                        "workflow_run_id": workflow_run["run_id"],
+                        "workflow_node_id": "analyze",
+                        "workflow_node_label": "Analyze data",
+                    },
+                }
+            ],
+            pending_approval=None,
+        )
+        runtime.append_run_event(
+            workflow_run["run_id"],
+            "workflow.node.agent",
+            {
+                "child_run_id": child_run["run_id"],
+                "workflow_id": "workflow-native-chat-1",
+                "workflow_run_id": workflow_run["run_id"],
+                "workflow_node_id": "analyze",
+                "workflow_node_label": "Analyze data",
+            },
+        )
+        runtime._update_run(
+            child_run["run_id"],
+            status="approval_required",
+            pending_approval={
+                "approval_id": "approval-native-child",
+                "tool": "terminal.run",
+                "title": "Run analysis",
+            },
+            artifacts=[
+                {
+                    "artifact_id": "artifact-native-child",
+                    "kind": "markdown",
+                    "path": "analysis.md",
+                }
+            ],
+            timeline=[
+                {
+                    "event_type": "agent.tool.approval_required",
+                    "payload": {
+                        "approval_id": "approval-native-child",
+                        "tool_name": "terminal.run",
+                        "title": "Run analysis",
+                    },
+                },
+            ],
+        )
+        runtime.link_task_run(
+            task_id="task-native-workflow",
+            run_id=workflow_run["run_id"],
+            session_id="chat-1",
+        )
+
+        chat = YachiyoAgentService(LegacyRuntimePort(runtime))
+
+        task = chat.get_task_snapshot("task-native-workflow")
+        timeline = chat.get_task_timeline("task-native-workflow")
+        page = chat.get_task_event_page("task-native-workflow", limit=10)
+
+        assert task.task_id == "task-native-workflow"
+        assert task.status == "waiting_approval"
+        assert task.metadata["runnable_kind"] == "workflow"
+        assert task.pending_approvals[0].approval_id == "approval-native-child"
+        assert task.artifacts[0].source_run_id == child_run["run_id"]
+        assert timeline.workflow_run_id == workflow_run["run_id"]
+        assert timeline.children[0].run_id == child_run["run_id"]
+        assert timeline.children[0].workflow_node_id == "analyze"
+        assert timeline.pending_approval is not None
+        assert timeline.pending_approval.run_id == child_run["run_id"]
+        assert timeline.artifacts[0].source_run_id == child_run["run_id"]
+        assert page.run_id == workflow_run["run_id"]
+    finally:
+        runtime.close()
+
+
 def test_agent_studio_rejects_native_tool_approval_with_replay_events(tmp_path) -> None:
     credential_store = MemoryCredentialStore()
     runtime = NativeRunEngine(

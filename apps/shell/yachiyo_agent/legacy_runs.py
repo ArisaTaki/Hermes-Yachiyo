@@ -132,6 +132,7 @@ class LegacyRunPayloadProjector:
             "run_group_id": run_group_id,
             "group_run_id": run_group_id,
             "group_id": str(run_group.get("group_id") or event_group_id or ""),
+            "source": str(run_group.get("source") or ""),
             "title": run_group.get("title") or "Run group",
             "status": run_group.get("status") or "unknown",
             "objective": event_objective or run_group.get("summary") or run_group.get("title") or "",

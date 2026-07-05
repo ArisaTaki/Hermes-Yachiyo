@@ -7482,15 +7482,14 @@ async def test_yachiyo_task_route_can_start_workflow_task_from_chat() -> None:
     assert rejected["task_id"] == "task-workflow-1"
     assert rejected["status"] == "failed"
     assert rejected["open_in_studio_url"] == "#/agents?run_id=workflow-run-1&group_run=group-run-1"
-    assert (
-        "create_workflow_run",
-        {
-            "workflow_id": "workflow-1",
-            "user_goal": "Build report",
-            "source": "yachiyo_chat",
-            "client_run_id": "task-workflow-1",
-        },
-    ) in runtime.calls
+    create_workflow_call = next(
+        payload for name, payload in runtime.calls if name == "create_workflow_run"
+    )
+    assert create_workflow_call["workflow_id"] == "workflow-1"
+    assert create_workflow_call["user_goal"] == "Build report"
+    assert create_workflow_call["source"] == "yachiyo_chat"
+    assert create_workflow_call["client_run_id"] == "task-workflow-1"
+    assert create_workflow_call["runtime_planner_entrypoint"] is True
     assert (
         "link_task_run",
         {"task_id": "task-workflow-1", "run_id": "workflow-run-1", "session_id": "chat-1"},

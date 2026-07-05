@@ -3195,6 +3195,166 @@ def test_legacy_runtime_port_reads_group_task_artifact_from_source_child_run() -
     ) in runtime.calls
 
 
+def test_legacy_runtime_port_aggregates_workflow_child_debug_state_for_chat_task() -> None:
+    runtime = _EventStoreFakeRuntime()
+    runtime.group_child_run_ids = ["workflow-run-1", "workflow-child-1"]
+    runtime.runs["workflow-run-1"]["run_group_id"] = "workflow-group-1"
+    runtime.runs["workflow-run-1"]["pending_approval"] = None
+    runtime.runs["workflow-run-1"]["timeline"] = [
+        {
+            "event_type": "workflow.run.started",
+            "sequence": 1,
+            "payload": {
+                "workflow_id": "workflow-1",
+                "workflow_run_id": "workflow-run-1",
+            },
+        },
+        {
+            "event_type": "workflow.node.agent",
+            "sequence": 2,
+            "payload": {
+                "child_run_id": "workflow-child-1",
+                "workflow_id": "workflow-1",
+                "workflow_run_id": "workflow-run-1",
+                "workflow_node_id": "analyze",
+                "workflow_node_label": "Analyze data",
+            },
+        },
+    ]
+    runtime.runs["workflow-child-1"] = {
+        "run_id": "workflow-child-1",
+        "kind": "agent_run",
+        "runnable_id": "agent-1",
+        "run_group_id": "workflow-group-1",
+        "workflow_run_id": "workflow-run-1",
+        "workflow_id": "workflow-1",
+        "user_goal": "Analyze data",
+        "status": "approval_required",
+        "pending_approval": {
+            "approval_id": "approval-child-1",
+            "tool": "terminal.run",
+        },
+        "artifacts": [
+            {
+                "artifact_id": "artifact-workflow-child",
+                "kind": "markdown",
+                "path": "analysis.md",
+            }
+        ],
+        "timeline": [
+            {
+                "event_type": "artifact.created",
+                "sequence": 1,
+                "payload": {
+                    "artifact_id": "artifact-workflow-child",
+                    "kind": "markdown",
+                    "path": "analysis.md",
+                },
+            },
+            {
+                "event_type": "agent.tool.approval_required",
+                "sequence": 2,
+                "payload": {
+                    "approval_id": "approval-child-1",
+                    "tool_name": "terminal.run",
+                    "title": "Run analysis",
+                },
+            },
+        ],
+    }
+    port = LegacyRuntimePort(runtime)
+    port.start_chat_task(
+        {
+            "prompt": "Build report",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-workflow-1",
+            "workflow_id": "workflow-1",
+        }
+    )
+
+    task = port.get_task_snapshot("task-workflow-1")
+    timeline = port.get_task_timeline("task-workflow-1")
+    page = port.get_task_event_page("task-workflow-1", after_sequence=0, limit=10)
+
+    assert task["metadata"]["runnable_kind"] == "workflow"
+    assert task["metadata"]["workflow_run_id"] == "workflow-run-1"
+    assert task["status"] == "approval_required"
+    assert task["pending_approvals"][0]["approval_id"] == "approval-child-1"
+    assert task["artifacts"][0]["path"] == "analysis.md"
+    assert task["artifacts"][0]["source_run_id"] == "workflow-child-1"
+    assert timeline["children"][0]["run_id"] == "workflow-child-1"
+    assert timeline["children"][0]["workflow_node_id"] == "analyze"
+    assert timeline["pending_approval"]["run_id"] == "workflow-child-1"
+    assert timeline["artifacts"][0]["source_run_id"] == "workflow-child-1"
+    assert page["run_id"] == "workflow-run-1"
+    assert page["workflow_run_id"] == "workflow-run-1"
+
+
+def test_legacy_runtime_port_routes_workflow_task_approval_and_artifact_to_child_run() -> None:
+    runtime = _EventStoreFakeRuntime()
+    runtime.group_child_run_ids = ["workflow-run-1", "workflow-child-1"]
+    runtime.runs["workflow-run-1"]["run_group_id"] = "workflow-group-1"
+    runtime.runs["workflow-run-1"]["pending_approval"] = None
+    runtime.runs["workflow-run-1"]["timeline"] = [
+        {
+            "event_type": "workflow.node.agent",
+            "sequence": 1,
+            "payload": {
+                "child_run_id": "workflow-child-1",
+                "workflow_id": "workflow-1",
+                "workflow_run_id": "workflow-run-1",
+                "workflow_node_id": "analyze",
+                "workflow_node_label": "Analyze data",
+            },
+        }
+    ]
+    runtime.runs["workflow-child-1"] = {
+        "run_id": "workflow-child-1",
+        "kind": "agent_run",
+        "runnable_id": "agent-1",
+        "run_group_id": "workflow-group-1",
+        "workflow_run_id": "workflow-run-1",
+        "workflow_id": "workflow-1",
+        "user_goal": "Analyze data",
+        "status": "approval_required",
+        "pending_approval": {
+            "approval_id": "approval-child-1",
+            "tool": "terminal.run",
+        },
+        "artifacts": [
+            {
+                "artifact_id": "artifact-workflow-child",
+                "kind": "markdown",
+                "path": "analysis.md",
+            }
+        ],
+        "timeline": [{"event": "run.started"}],
+    }
+    port = LegacyRuntimePort(runtime)
+    port.start_chat_task(
+        {
+            "prompt": "Build report",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-workflow-1",
+            "workflow_id": "workflow-1",
+        }
+    )
+    runtime.calls.clear()
+
+    approved = port.approve("task-workflow-1", {"approval_id": "approval-child-1"})
+    artifact = port.read_task_artifact("task-workflow-1", "analysis.md")
+
+    assert ("approve_run_approval", "workflow-child-1") in runtime.calls
+    assert approved["task_id"] == "task-workflow-1"
+    assert approved["metadata"]["workflow_run_id"] == "workflow-run-1"
+    assert artifact["run_id"] == "workflow-child-1"
+    assert artifact["workflow_run_id"] == "workflow-run-1"
+    assert (
+        "read_run_artifact",
+        {"run_id": "workflow-child-1", "artifact_path": "analysis.md"},
+    ) in runtime.calls
+
+
 def test_legacy_runtime_port_forwards_runtime_execution_plan_to_workflow_run() -> None:
     runtime = _FakeRuntime()
     request = planner_enriched_chat_request(

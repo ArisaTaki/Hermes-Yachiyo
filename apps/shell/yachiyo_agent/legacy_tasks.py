@@ -28,6 +28,7 @@ from .runtime_execution import (
     runtime_execution_requests_from_envelope_payload,
     runtime_execution_requests_from_metadata,
 )
+from .workflow_run_snapshots import workflow_run_snapshot_from_payload
 
 MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
 
@@ -343,6 +344,14 @@ class LegacyRuntimePort:
                 run = self._run_with_task_link(task_id, run, link)
             else:
                 run = {**run, "task_id": task_id, "session_id": conversation_id}
+        if workflow_id:
+            workflow_payload = self._workflow_chat_task_payload(task_id, run)
+            if workflow_payload is not None:
+                return self._projector.chat_task_payload(
+                    workflow_payload,
+                    conversation_id=conversation_id,
+                    runtime=self._runtime,
+                )
         return self._projector.chat_task_payload(
             run,
             conversation_id=conversation_id,
@@ -446,6 +455,12 @@ class LegacyRuntimePort:
                 group_payload,
                 runtime=self._runtime,
             )
+        workflow_payload = self._workflow_chat_task_payload(task_id, payload)
+        if workflow_payload is not None:
+            return self._projector.chat_task_payload(
+                workflow_payload,
+                runtime=self._runtime,
+            )
         if not payload.get("task_id"):
             payload = {**payload, "task_id": task_id}
         return self._projector.chat_task_payload(
@@ -459,6 +474,9 @@ class LegacyRuntimePort:
         group_payload = self._group_chat_task_payload(task_id, payload)
         if group_payload is not None:
             return group_payload
+        workflow_payload = self._workflow_chat_task_payload(task_id, payload)
+        if workflow_payload is not None:
+            return workflow_payload
         if not payload.get("task_id"):
             payload = {**payload, "task_id": task_id}
         events = self._projector.chat_events_for_run(payload, self._runtime)
@@ -494,6 +512,18 @@ class LegacyRuntimePort:
                 "group_run_id": group_run_id,
                 "run_group_id": group_run_id,
                 "events": list(group_payload.get("events") or []),
+            }
+        workflow_payload = self._workflow_chat_task_payload(task_id, payload)
+        if workflow_payload is not None:
+            workflow_run_id = str(
+                workflow_payload.get("workflow_run_id") or workflow_payload.get("run_id") or run_id
+            ).strip()
+            return {
+                "run_id": workflow_run_id or run_id,
+                "task_id": task_id,
+                "workflow_run_id": workflow_run_id or None,
+                "run_group_id": workflow_payload.get("run_group_id"),
+                "events": list(workflow_payload.get("events") or []),
             }
         list_run_events = getattr(self._runtime, "list_run_events", None)
         if callable(list_run_events):
@@ -548,6 +578,23 @@ class LegacyRuntimePort:
                 limit=clean_limit,
                 group_run_id=group_run_id,
             )
+        workflow_payload = self._workflow_chat_task_payload(task_id, payload)
+        if workflow_payload is not None:
+            workflow_run_id = str(
+                workflow_payload.get("workflow_run_id") or workflow_payload.get("run_id") or run_id
+            ).strip()
+            page = self._event_page_from_events(
+                workflow_payload.get("events"),
+                run_id=workflow_run_id or run_id,
+                task_id=task_id,
+                after_sequence=clean_after_sequence,
+                limit=clean_limit,
+            )
+            return {
+                **page,
+                "workflow_run_id": workflow_run_id or None,
+                "run_group_id": workflow_payload.get("run_group_id"),
+            }
         get_run_event_page = getattr(self._runtime, "get_run_event_page", None)
         if callable(get_run_event_page):
             payload = get_run_event_page(
@@ -597,15 +644,25 @@ class LegacyRuntimePort:
         except KeyError:
             task_payload = {}
         group_payload = self._group_chat_task_payload(task_id, task_payload)
-        artifact_run_id = self._group_artifact_source_run_id(group_payload, artifact_path) or run_id
+        workflow_payload = self._workflow_chat_task_payload(task_id, task_payload)
+        artifact_run_id = (
+            self._workflow_artifact_source_run_id(workflow_payload, artifact_path)
+            or self._group_artifact_source_run_id(group_payload, artifact_path)
+            or run_id
+        )
         payload = self._runtime.read_run_artifact(artifact_run_id, artifact_path)
         return {
             **payload,
             "run_id": payload.get("run_id") or artifact_run_id,
             "task_id": payload.get("task_id") or task_id,
+            "workflow_run_id": payload.get("workflow_run_id")
+            or (workflow_payload or {}).get("workflow_run_id"),
+            "workflow_id": payload.get("workflow_id")
+            or (workflow_payload or {}).get("workflow_id"),
             "group_run_id": payload.get("group_run_id")
             or (group_payload or {}).get("group_run_id"),
             "run_group_id": payload.get("run_group_id")
+            or (workflow_payload or {}).get("run_group_id")
             or (group_payload or {}).get("run_group_id"),
             "path": payload.get("path") or artifact_path,
         }
@@ -639,8 +696,9 @@ class LegacyRuntimePort:
         approved = self._complete_main_chat_daily_desktop_approval_if_ready(run_id, approved)
         payload = self._payload_with_task_link(task_id, approved)
         group_payload = self._group_chat_task_payload(task_id, payload)
+        workflow_payload = self._workflow_chat_task_payload(task_id, payload)
         return self._projector.chat_task_payload(
-            group_payload or payload,
+            group_payload or workflow_payload or payload,
             runtime=self._runtime,
         )
 
@@ -656,18 +714,22 @@ class LegacyRuntimePort:
             ),
         )
         group_payload = self._group_chat_task_payload(task_id, payload)
+        workflow_payload = self._workflow_chat_task_payload(task_id, payload)
         return self._projector.chat_task_payload(
-            group_payload or payload,
+            group_payload or workflow_payload or payload,
             runtime=self._runtime,
         )
 
     def cancel(self, task_id: str) -> dict[str, Any]:
         run_id = self._run_id_for_task(task_id)
+        payload = self._payload_with_task_link(
+            task_id,
+            self._run_action_payload(run_id, self._runtime.cancel_run(run_id)),
+        )
+        group_payload = self._group_chat_task_payload(task_id, payload)
+        workflow_payload = self._workflow_chat_task_payload(task_id, payload)
         return self._projector.chat_task_payload(
-            self._payload_with_task_link(
-                task_id,
-                self._run_action_payload(run_id, self._runtime.cancel_run(run_id)),
-            ),
+            group_payload or workflow_payload or payload,
             runtime=self._runtime,
         )
 
@@ -700,6 +762,10 @@ class LegacyRuntimePort:
         if self._payload_pending_approval_id(run) == requested_approval_id:
             return run_id
         for child in self._group_child_runs_for_run(run):
+            child_run_id = str(child.get("run_id") or "").strip()
+            if child_run_id and self._payload_pending_approval_id(child) == requested_approval_id:
+                return child_run_id
+        for child in self._workflow_child_runs_for_run(run):
             child_run_id = str(child.get("run_id") or "").strip()
             if child_run_id and self._payload_pending_approval_id(child) == requested_approval_id:
                 return child_run_id
@@ -736,7 +802,11 @@ class LegacyRuntimePort:
         if not run_group_id:
             return None
         group_run = self._group_run_payload_for_task(run_group_id)
-        if group_run is None or not self._is_agent_group_run_payload(group_run):
+        if (
+            group_run is None
+            or self._is_workflow_run_group_payload(group_run)
+            or not self._is_agent_group_run_payload(group_run)
+        ):
             return None
 
         events = list(group_run.get("events") or [])
@@ -800,14 +870,234 @@ class LegacyRuntimePort:
                 return True
         return False
 
+    def _is_workflow_run_group_payload(self, group_run: dict[str, Any]) -> bool:
+        if str(group_run.get("group_id") or "").strip():
+            return False
+        if str(group_run.get("source") or "").strip() == "workflow":
+            return True
+        return any(
+            isinstance(run, dict) and self._is_workflow_parent_run(run)
+            for run in group_run.get("runs") or []
+        )
+
     def _group_child_runs_for_run(self, run: dict[str, Any]) -> list[dict[str, Any]]:
         run_group_id = str(run.get("run_group_id") or run.get("group_run_id") or "").strip()
         if not run_group_id:
             return []
         group_run = self._group_run_payload_for_task(run_group_id)
-        if group_run is None or not self._is_agent_group_run_payload(group_run):
+        if (
+            group_run is None
+            or self._is_workflow_run_group_payload(group_run)
+            or not self._is_agent_group_run_payload(group_run)
+        ):
             return []
         return [dict(item) for item in group_run.get("runs") or [] if isinstance(item, dict)]
+
+    def _workflow_chat_task_payload(
+        self,
+        task_id: str,
+        run: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        parent = self._workflow_parent_run_for_run(run)
+        if parent is None:
+            return None
+        parent_run_id = str(parent.get("run_id") or parent.get("workflow_run_id") or "").strip()
+        if not parent_run_id:
+            return None
+        parent = self._payload_with_task_link(task_id, parent)
+        workflow_events = self._projector.chat_events_for_run(parent, self._runtime)
+        child_runs = self._workflow_child_runs_for_parent(parent, events=workflow_events)
+        workflow_payload = {
+            **parent,
+            "run_id": parent_run_id,
+            "workflow_run_id": parent.get("workflow_run_id") or parent_run_id,
+            "workflow_id": parent.get("workflow_id") or parent.get("runnable_id") or "",
+            "events": workflow_events or parent.get("events") or parent.get("timeline") or [],
+            "runs": child_runs,
+        }
+        snapshot = workflow_run_snapshot_from_payload(workflow_payload).model_dump(mode="python")
+        pending_approvals = [
+            dict(item)
+            for item in snapshot.get("approvals") or []
+            if isinstance(item, dict) and str(item.get("status") or "pending") == "pending"
+        ]
+        pending = snapshot.get("pending_approval")
+        if isinstance(pending, dict) and pending not in pending_approvals:
+            pending_approvals.insert(0, dict(pending))
+        status = str(snapshot.get("status") or parent.get("status") or "running").strip()
+        if pending_approvals and status in {"", "queued", "running", "processing"}:
+            status = "approval_required"
+        session_id = str(parent.get("session_id") or parent.get("conversation_id") or "").strip()
+        metadata = dict(parent.get("metadata")) if isinstance(parent.get("metadata"), dict) else {}
+        metadata.update(
+            {
+                "runnable_kind": "workflow",
+                "workflow_id": snapshot.get("workflow_id") or workflow_payload.get("workflow_id"),
+                "workflow_run_id": snapshot.get("workflow_run_id") or parent_run_id,
+            }
+        )
+        run_group_id = str(snapshot.get("run_group_id") or snapshot.get("group_run_id") or "").strip()
+        if run_group_id:
+            metadata["run_group_id"] = run_group_id
+        return {
+            **snapshot,
+            "run_id": parent_run_id,
+            "kind": "workflow_run",
+            "workflow_id": snapshot.get("workflow_id") or workflow_payload.get("workflow_id"),
+            "workflow_run_id": snapshot.get("workflow_run_id") or parent_run_id,
+            "task_id": task_id,
+            "session_id": session_id,
+            "conversation_id": session_id,
+            "user_goal": parent.get("user_goal") or snapshot.get("objective") or "",
+            "title": parent.get("title") or parent.get("user_goal") or snapshot.get("objective") or "Workflow run",
+            "status": status,
+            "summary": snapshot.get("final_answer") or parent.get("summary") or parent.get("result") or "",
+            "events": snapshot.get("events") or [],
+            "recent_events": snapshot.get("events") or [],
+            "timeline": snapshot.get("events") or [],
+            "artifacts": snapshot.get("artifacts") or [],
+            "pending_approvals": pending_approvals,
+            "pending_approval": pending if isinstance(pending, dict) else None,
+            "metadata": metadata,
+        }
+
+    def _workflow_parent_run_for_run(self, run: dict[str, Any]) -> dict[str, Any] | None:
+        if self._is_workflow_parent_run(run):
+            return dict(run)
+        workflow_run_id = str(run.get("workflow_run_id") or "").strip()
+        run_id = str(run.get("run_id") or "").strip()
+        if workflow_run_id and workflow_run_id != run_id:
+            try:
+                parent = self._runtime.get_run(workflow_run_id)
+            except KeyError:
+                parent = None
+            if isinstance(parent, dict) and self._is_workflow_parent_run(parent):
+                return parent
+        run_group_id = str(run.get("run_group_id") or run.get("group_run_id") or "").strip()
+        if not run_group_id:
+            return None
+        for candidate in self._run_group_runs(run_group_id):
+            if self._is_workflow_parent_run(candidate):
+                return candidate
+        return None
+
+    def _is_workflow_parent_run(self, run: dict[str, Any]) -> bool:
+        run_id = str(run.get("run_id") or "").strip()
+        workflow_run_id = str(run.get("workflow_run_id") or "").strip()
+        return str(run.get("kind") or "").strip() == "workflow_run" or bool(
+            workflow_run_id and workflow_run_id == run_id
+        )
+
+    def _workflow_child_runs_for_run(self, run: dict[str, Any]) -> list[dict[str, Any]]:
+        parent = self._workflow_parent_run_for_run(run)
+        if parent is None:
+            return []
+        return self._workflow_child_runs_for_parent(parent)
+
+    def _workflow_child_runs_for_parent(
+        self,
+        parent: dict[str, Any],
+        *,
+        events: list[dict[str, Any]] | None = None,
+    ) -> list[dict[str, Any]]:
+        parent_run_id = str(parent.get("run_id") or parent.get("workflow_run_id") or "").strip()
+        raw_children = self._explicit_workflow_child_runs(parent)
+        run_group_id = str(parent.get("run_group_id") or parent.get("group_run_id") or "").strip()
+        if run_group_id:
+            raw_children.extend(self._run_group_runs(run_group_id))
+        context_by_child = self._workflow_child_context_by_run_id(parent, events=events)
+        workflow_id = str(parent.get("workflow_id") or parent.get("runnable_id") or "").strip()
+        children: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        for child in raw_children:
+            child_run_id = str(child.get("run_id") or "").strip()
+            if not child_run_id or child_run_id == parent_run_id or child_run_id in seen:
+                continue
+            seen.add(child_run_id)
+            child_payload = self._projector.child_run_payload(dict(child), self._runtime)
+            child_payload.setdefault("workflow_id", workflow_id)
+            child_payload.setdefault("workflow_run_id", parent_run_id)
+            child_payload.setdefault("parent_run_id", parent_run_id)
+            context = context_by_child.get(child_run_id) or {}
+            for key, value in context.items():
+                if value and not child_payload.get(key):
+                    child_payload[key] = value
+            children.append(child_payload)
+        return children
+
+    def _explicit_workflow_child_runs(self, parent: dict[str, Any]) -> list[dict[str, Any]]:
+        children: list[dict[str, Any]] = []
+        for key in ("runs", "child_runs", "children"):
+            value = parent.get(key)
+            if not isinstance(value, list):
+                continue
+            children.extend(dict(item) for item in value if isinstance(item, dict))
+        return children
+
+    def _run_group_runs(self, run_group_id: str) -> list[dict[str, Any]]:
+        try:
+            run_group = self._runtime.get_run_group(run_group_id)
+        except (KeyError, AttributeError):
+            return []
+        if not isinstance(run_group, dict):
+            return []
+        runs = [
+            dict(item)
+            for item in run_group.get("runs") or run_group.get("child_runs") or []
+            if isinstance(item, dict)
+        ]
+        seen = {str(item.get("run_id") or "") for item in runs if str(item.get("run_id") or "")}
+        for run_id in run_group.get("child_run_ids") or []:
+            clean_run_id = str(run_id or "").strip()
+            if not clean_run_id or clean_run_id in seen:
+                continue
+            try:
+                runs.append(dict(self._runtime.get_run(clean_run_id)))
+                seen.add(clean_run_id)
+            except KeyError:
+                continue
+        return runs
+
+    def _workflow_child_context_by_run_id(
+        self,
+        parent: dict[str, Any],
+        *,
+        events: list[dict[str, Any]] | None = None,
+    ) -> dict[str, dict[str, str]]:
+        raw_events = events
+        if raw_events is None:
+            raw_events = self._projector.chat_events_for_run(parent, self._runtime)
+        context: dict[str, dict[str, str]] = {}
+        for event in raw_events or []:
+            if not isinstance(event, dict):
+                continue
+            payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+            child_run_id = str(
+                payload.get("child_run_id")
+                or payload.get("child_agent_run_id")
+                or event.get("child_run_id")
+                or event.get("child_agent_run_id")
+                or ""
+            ).strip()
+            if not child_run_id:
+                continue
+            item: dict[str, str] = {}
+            for key in (
+                "workflow_node_id",
+                "workflow_node_kind",
+                "workflow_node_label",
+                "workflow_parent_node_id",
+                "workflow_parent_node_kind",
+                "workflow_parent_node_label",
+                "workflow_parallel_branch_entry_node_id",
+                "workflow_parallel_branch_label",
+            ):
+                value = str(payload.get(key) or event.get(key) or "").strip()
+                if value:
+                    item[key] = value
+            if item:
+                context.setdefault(child_run_id, {}).update(item)
+        return context
 
     def _payload_pending_approval_id(self, payload: dict[str, Any]) -> str:
         pending = payload.get("pending_approval")
@@ -835,6 +1125,24 @@ class LegacyRuntimePort:
             if str(artifact.get("path") or "").strip() != clean_path:
                 continue
             source_run_id = str(artifact.get("source_run_id") or "").strip()
+            if source_run_id:
+                return source_run_id
+        return ""
+
+    def _workflow_artifact_source_run_id(
+        self,
+        workflow_payload: dict[str, Any] | None,
+        artifact_path: str,
+    ) -> str:
+        if not isinstance(workflow_payload, dict):
+            return ""
+        clean_path = str(artifact_path or "").strip()
+        for artifact in workflow_payload.get("artifacts") or []:
+            if not isinstance(artifact, dict):
+                continue
+            if str(artifact.get("path") or "").strip() != clean_path:
+                continue
+            source_run_id = str(artifact.get("source_run_id") or artifact.get("run_id") or "").strip()
             if source_run_id:
                 return source_run_id
         return ""
