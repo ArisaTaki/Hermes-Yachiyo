@@ -9,9 +9,12 @@ from .contracts import (
     PlannerDecisionSnapshot,
     PublicRunEvent,
     ReplanSignalSnapshot,
+    RuntimeExecutionEnvelopeSnapshot,
+    RuntimeExecutionRequestSnapshot,
     RuntimePlanSnapshot,
     TaskCoreSnapshot,
     TaskIntentSnapshot,
+    TaskReplanRequestSnapshot,
     TaskTodoItemSnapshot,
     TaskWorkspaceSnapshot,
     ToolPlanSnapshot,
@@ -60,6 +63,70 @@ def run_events_with_replan_requests(
         if request_id:
             seen_requests.add(request_id)
         projected.append(request_event)
+        next_sequence += 1
+    return [*event_list, *projected]
+
+
+def run_events_with_runtime_execution_replan_requests(
+    events: Iterable[PublicRunEvent],
+    envelope: RuntimeExecutionEnvelopeSnapshot | None,
+    *,
+    run_id: str = "",
+    task_id: str = "",
+    group_run_id: str = "",
+    workflow_run_id: str = "",
+    created_at: str = "",
+) -> list[PublicRunEvent]:
+    """Append replan requests derived from observed runtime request failures."""
+    event_list = list(events)
+    if envelope is None or not envelope.requests:
+        return event_list
+
+    existing_request_ids = _existing_replan_request_ids(event_list)
+    next_sequence = max([int(event.sequence or 0) for event in event_list] or [0]) + 1
+    projected: list[PublicRunEvent] = []
+    for request in envelope.requests:
+        replan_request = _runtime_execution_replan_request(
+            request,
+            envelope=envelope,
+            run_id=run_id,
+            task_id=task_id,
+            group_run_id=group_run_id,
+            workflow_run_id=workflow_run_id,
+            created_at=created_at,
+        )
+        if replan_request is None:
+            continue
+        if replan_request.request_id in existing_request_ids:
+            continue
+        existing_request_ids.add(replan_request.request_id)
+        event_type = _runtime_execution_replan_event_type(
+            group_run_id=group_run_id,
+            workflow_run_id=workflow_run_id,
+        )
+        payload = replan_request.model_dump(mode="json")
+        if event_type != "agent.replan.requested":
+            payload["planner_event_type"] = "agent.replan.requested"
+            payload["planner_scope"] = (
+                "workflow_run" if workflow_run_id else "group_run"
+            )
+        projected.append(
+            public_run_event_from_payload(
+                {
+                    "run_id": run_id,
+                    "sequence": next_sequence,
+                    "event_type": event_type,
+                    "title": "Runtime replan requested",
+                    "detail": replan_request.reason
+                    or replan_request.failure_detail
+                    or replan_request.trigger,
+                    "payload": payload,
+                    "created_at": created_at,
+                },
+                run_id=run_id,
+                sequence=next_sequence,
+            )
+        )
         next_sequence += 1
     return [*event_list, *projected]
 
@@ -336,6 +403,247 @@ def _has_replan_request(events: list[PublicRunEvent]) -> bool:
     )
 
 
+def _existing_replan_request_ids(events: list[PublicRunEvent]) -> set[str]:
+    request_ids: set[str] = set()
+    for event in events:
+        if _planner_event_type(event) != "agent.replan.requested":
+            continue
+        payload = event.payload if isinstance(event.payload, Mapping) else {}
+        request_id = _text(
+            payload.get("request_id")
+            or payload.get("replan_request_id")
+            or (
+                payload.get("request", {}).get("request_id")
+                if isinstance(payload.get("request"), Mapping)
+                else ""
+            )
+        )
+        if request_id:
+            request_ids.add(request_id)
+    return request_ids
+
+
+def _runtime_execution_replan_request(
+    request: RuntimeExecutionRequestSnapshot,
+    *,
+    envelope: RuntimeExecutionEnvelopeSnapshot,
+    run_id: str,
+    task_id: str,
+    group_run_id: str,
+    workflow_run_id: str,
+    created_at: str,
+) -> TaskReplanRequestSnapshot | None:
+    if not _runtime_request_needs_replan(request):
+        return None
+
+    trigger = _runtime_replan_trigger(request)
+    request_id = _runtime_replan_request_id(request, trigger=trigger)
+    evidence = _mapping(getattr(request, "observation_evidence", None))
+    retry = _mapping(getattr(request, "observation_retry", None))
+    failure_detail = _runtime_replan_failure_detail(
+        request,
+        evidence=evidence,
+        retry=retry,
+    )
+    fallback_tools = _runtime_replan_fallback_tools(request, retry)
+    metadata = _runtime_replan_metadata(
+        request,
+        envelope=envelope,
+        group_run_id=group_run_id,
+        workflow_run_id=workflow_run_id,
+        evidence=evidence,
+        retry=retry,
+    )
+    return TaskReplanRequestSnapshot(
+        request_id=request_id,
+        trigger=trigger,
+        run_id=run_id or None,
+        task_id=task_id or None,
+        decision_id=envelope.decision_id or request.decision_id,
+        plan_id=envelope.plan_id or request.plan_id,
+        core_id=request.core_id,
+        source_step_id=request.step_id,
+        source_tool_name=request.tool_name,
+        target_capability_id=request.capability_id or "",
+        condition=_text(evidence.get("blocking_condition"))
+        or _text(retry.get("reason"))
+        or _text(request.status),
+        reason="Runtime observed a failed or blocked execution request and needs a replan.",
+        failure_event_type=f"runtime_execution_request.{_text(request.status) or 'failed'}",
+        failure_detail=failure_detail,
+        fallback_tools=fallback_tools,
+        replan_prompt=_runtime_replan_prompt(
+            envelope,
+            request,
+            trigger=trigger,
+            failure_detail=failure_detail,
+            fallback_tools=fallback_tools,
+        ),
+        metadata=metadata,
+        created_at=created_at,
+    )
+
+
+def _runtime_request_needs_replan(request: RuntimeExecutionRequestSnapshot) -> bool:
+    status = _text(request.status).lower()
+    if status in {"failed", "failure", "error", "blocked", "unavailable"}:
+        return True
+    evidence = _mapping(getattr(request, "observation_evidence", None))
+    if evidence.get("verification_failed") is True:
+        return True
+    if evidence.get("foreground_required") is True and evidence.get("foreground_ready") is False:
+        return True
+    return bool(_text(evidence.get("blocking_condition")))
+
+
+def _runtime_replan_trigger(request: RuntimeExecutionRequestSnapshot) -> str:
+    triggers = [_text(item) for item in request.replan_triggers if _text(item)]
+    evidence = _mapping(getattr(request, "observation_evidence", None))
+    status = _text(request.status).lower()
+    detail = " ".join(
+        _text(value).lower()
+        for value in (
+            evidence.get("failure_detail"),
+            evidence.get("message"),
+            evidence.get("blocking_condition"),
+        )
+        if _text(value)
+    )
+    if evidence.get("verification_failed") is True or "verification" in detail:
+        return "verification_failed"
+    if "unavailable" in status or "missing" in detail or "unavailable" in detail:
+        return "tool_unavailable"
+    if triggers:
+        return triggers[0]
+    return "tool_failure"
+
+
+def _runtime_replan_request_id(
+    request: RuntimeExecutionRequestSnapshot,
+    *,
+    trigger: str,
+) -> str:
+    return "runtime-replan:" + ":".join(
+        part
+        for part in (
+            _text(request.request_id),
+            _text(request.step_id),
+            _text(request.tool_name),
+            trigger,
+        )
+        if part
+    )
+
+
+def _runtime_replan_failure_detail(
+    request: RuntimeExecutionRequestSnapshot,
+    *,
+    evidence: Mapping[str, Any],
+    retry: Mapping[str, Any],
+) -> str:
+    parts = [
+        _text(evidence.get("failure_detail")),
+        _text(evidence.get("message")),
+        _text(evidence.get("blocking_condition")),
+        _text(retry.get("reason")),
+        _text(request.status),
+    ]
+    return "；".join(part for part in parts if part)
+
+
+def _runtime_replan_fallback_tools(
+    request: RuntimeExecutionRequestSnapshot,
+    retry: Mapping[str, Any],
+) -> list[str]:
+    values: list[str] = []
+    for item in list(request.fallback_tools or []):
+        clean = _text(item)
+        if clean and clean not in values:
+            values.append(clean)
+    for item in (retry.get("tool"), retry.get("retry_tool"), retry.get("from_tool")):
+        clean = _text(item)
+        if clean and clean not in values:
+            values.append(clean)
+    return values
+
+
+def _runtime_replan_metadata(
+    request: RuntimeExecutionRequestSnapshot,
+    *,
+    envelope: RuntimeExecutionEnvelopeSnapshot,
+    group_run_id: str,
+    workflow_run_id: str,
+    evidence: Mapping[str, Any],
+    retry: Mapping[str, Any],
+) -> dict[str, Any]:
+    metadata: dict[str, Any] = {
+        "runtime_execution_envelope_id": envelope.envelope_id,
+        "runtime_execution_request_id": request.request_id,
+        "runtime_retry_source": "runtime_execution_envelope",
+    }
+    for key, value in {
+        "group_run_id": group_run_id or request.group_run_id or request.run_group_id,
+        "workflow_run_id": workflow_run_id or request.workflow_run_id,
+        "runtime_stage": request.runtime_stage,
+        "runtime_role": request.runtime_role,
+        "runtime_doctrine": request.runtime_doctrine,
+    }.items():
+        clean = _text(value)
+        if clean:
+            metadata[key] = clean
+    if request.replan_signal_ids:
+        metadata["replan_signal_ids"] = list(request.replan_signal_ids)
+    if request.replan_triggers:
+        metadata["replan_triggers"] = list(request.replan_triggers)
+    if evidence:
+        metadata["observation_evidence"] = dict(evidence)
+    if retry:
+        metadata["observation_retry"] = dict(retry)
+    return metadata
+
+
+def _runtime_replan_prompt(
+    envelope: RuntimeExecutionEnvelopeSnapshot,
+    request: RuntimeExecutionRequestSnapshot,
+    *,
+    trigger: str,
+    failure_detail: str,
+    fallback_tools: list[str],
+) -> str:
+    lines = [
+        "Continue the existing runtime task from the failed execution request.",
+        f"- intent_kind: {envelope.intent_kind}",
+        f"- plan_id: {envelope.plan_id}",
+        f"- failed_request: {request.request_id}",
+        f"- failed_tool: {request.tool_name}",
+        f"- trigger: {trigger}",
+    ]
+    if request.step_id:
+        lines.append(f"- failed_step: {request.step_id}")
+    if request.capability_id:
+        lines.append(f"- target_capability: {request.capability_id}")
+    if failure_detail:
+        lines.append(f"- failure_detail: {failure_detail}")
+    if fallback_tools:
+        lines.append(f"- preferred_fallback_tools: {', '.join(fallback_tools)}")
+    lines.append(
+        "Inspect current state, avoid repeating completed requests, and keep approval gates."
+    )
+    return "\n".join(lines)
+
+
+def _runtime_execution_replan_event_type(
+    *,
+    group_run_id: str,
+    workflow_run_id: str,
+) -> str:
+    if workflow_run_id:
+        return "workflow.run.replan.requested"
+    if group_run_id:
+        return "group.run.replan.requested"
+    return "agent.replan.requested"
+
+
 def _is_public_failure_event(event: PublicRunEvent) -> bool:
     if event.visibility != "user" or event.sensitivity != "public":
         return False
@@ -501,6 +809,12 @@ def _list_or_default(value: Any, default: list[str]) -> list[str]:
     if not isinstance(value, list):
         return list(default)
     return [_text(item) for item in value if _text(item)]
+
+
+def _mapping(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {key: item for key, item in value.items() if item not in (None, "", [], {})}
 
 
 def _text(value: Any) -> str:

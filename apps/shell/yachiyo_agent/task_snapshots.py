@@ -30,8 +30,15 @@ from .contracts import (
 from .events import public_run_event_from_payload, run_event_parent_context
 from .links import studio_run_url
 from .recovery_actions import RECOVERY_RETRY_CONTEXT_EVENT_TYPE
-from .replan_event_projection import run_events_with_replan_requests
-from .replan_recovery_snapshots import replan_recovery_snapshots_from_events
+from .replan_event_projection import (
+    run_events_with_replan_requests,
+    run_events_with_runtime_execution_replan_requests,
+)
+from .replan_recovery_snapshots import (
+    merge_replan_recovery_snapshot_lists,
+    replan_recovery_snapshots_from_events,
+    replan_recovery_snapshots_from_runtime_execution_envelope,
+)
 from .runtime_debug_snapshots import runtime_debug_summary_from_runtime_objects
 from .runtime_execution_status import runtime_execution_envelope_with_status_overlay
 from .timeline_metadata_snapshots import planner_trace_summary_from_payload
@@ -205,6 +212,8 @@ def agent_task_snapshot_from_payload(
         )
     )
     task_core = task_core_snapshot_from_payload(payload, events=all_events)
+    if task_core is None and runtime_execution_envelope is not None:
+        task_core = runtime_execution_envelope.task_core
     task_progress = task_progress_summary_from_task_core(
         task_core,
         events=all_events,
@@ -216,11 +225,42 @@ def agent_task_snapshot_from_payload(
         approvals=approvals,
         task_progress=task_progress,
     )
-    replan_recoveries = replan_recovery_snapshots_from_events(
+    all_events = run_events_with_runtime_execution_replan_requests(
         all_events,
+        runtime_execution_envelope,
         run_id=run_id,
         task_id=task_id,
         group_run_id=group_run_id,
+        created_at=_text(payload.get("updated_at") or payload.get("created_at")),
+    )
+    recent_events = _chat_visible_events(all_events)
+    task_progress = task_progress_summary_from_task_core(
+        task_core,
+        events=all_events,
+        needs_user_action=needs_user_action,
+    )
+    runtime_execution_envelope = runtime_execution_envelope_with_status_overlay(
+        runtime_execution_envelope,
+        tool_calls=tool_calls,
+        approvals=approvals,
+        task_progress=task_progress,
+    )
+    replan_recoveries = merge_replan_recovery_snapshot_lists(
+        replan_recovery_snapshots_from_events(
+            all_events,
+            run_id=run_id,
+            task_id=task_id,
+            group_run_id=group_run_id,
+        ),
+        replan_recovery_snapshots_from_runtime_execution_envelope(
+            runtime_execution_envelope,
+            run_id=run_id,
+            task_id=task_id,
+            group_run_id=group_run_id,
+            task_progress=task_progress,
+            created_at=_text(payload.get("created_at")),
+            updated_at=_text(payload.get("updated_at")),
+        ),
     )
     artifacts = artifact_snapshots_from_task_payload(
         payload,

@@ -19,7 +19,10 @@ from .contracts import (
     ToolCallSnapshot,
 )
 from .group_member_snapshots import group_run_participants_from_payload
-from .replan_event_projection import run_events_with_replan_requests
+from .replan_event_projection import (
+    run_events_with_replan_requests,
+    run_events_with_runtime_execution_replan_requests,
+)
 from .replan_recovery_snapshots import (
     merge_replan_recovery_snapshot_lists,
     replan_recovery_snapshots_from_events,
@@ -110,6 +113,32 @@ def group_run_snapshot_from_payload(
     runtime_execution_envelope = runtime_execution_envelope_from_payload(
         payload,
         events=events,
+    )
+    if task_core is None and runtime_execution_envelope is not None:
+        task_core = runtime_execution_envelope.task_core
+        task_progress = task_progress_summary_from_task_core(
+            task_core,
+            events=events,
+            needs_user_action=bool(pending_approvals),
+        )
+    runtime_execution_envelope = runtime_execution_envelope_with_status_overlay(
+        runtime_execution_envelope,
+        tool_calls=tool_calls,
+        approvals=pending_approvals,
+        task_progress=task_progress,
+    )
+    events = run_events_with_runtime_execution_replan_requests(
+        events,
+        runtime_execution_envelope,
+        run_id=group_run_id,
+        task_id=_text(payload.get("task_id")),
+        group_run_id=group_run_id,
+        created_at=_text(payload.get("updated_at") or payload.get("created_at")),
+    )
+    task_progress = task_progress_summary_from_task_core(
+        task_core,
+        events=events,
+        needs_user_action=bool(pending_approvals),
     )
     runtime_execution_envelope = runtime_execution_envelope_with_status_overlay(
         runtime_execution_envelope,

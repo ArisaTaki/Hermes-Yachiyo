@@ -164,6 +164,82 @@ def test_run_timeline_snapshot_returns_existing_public_snapshot() -> None:
     assert run_timeline_snapshot_from_payload(existing) is existing
 
 
+def test_run_timeline_projects_failed_runtime_request_into_replan_event() -> None:
+    timeline = run_timeline_snapshot_from_payload(
+        {
+            "run_id": "run-runtime-replan",
+            "task_id": "task-runtime-replan",
+            "workflow_run_id": "workflow-runtime-replan",
+            "status": "running",
+            "runtime_execution_envelope": {
+                "envelope_id": "execution-envelope-runtime-replan",
+                "decision_id": "decision-runtime-replan",
+                "plan_id": "runtime-plan-replan",
+                "intent_kind": "desktop_operation",
+                "task_core": {
+                    "core_id": "task-core-runtime-replan",
+                    "workspace": {
+                        "workspace_id": "workspace-runtime-replan",
+                        "title": "Runtime Replan Workspace",
+                    },
+                    "todos": [
+                        {
+                            "todo_id": "todo-open-app",
+                            "title": "Open app",
+                            "step_id": "open-app",
+                            "tool_name": "app.open",
+                        }
+                    ],
+                },
+                "requests": [
+                    {
+                        "request_id": "request-open-app",
+                        "step_id": "open-app",
+                        "tool_name": "app.open",
+                        "runtime_stage": "operate",
+                        "runtime_role": "open_app",
+                        "fallback_tools": ["desktop.list_apps"],
+                        "observation_evidence": {
+                            "blocking_condition": "app_not_found",
+                        },
+                        "observation_retry": {
+                            "tool": "desktop.list_apps",
+                            "input": {"query": "PixelForge", "limit": 20},
+                            "reason": "discover_app_again",
+                        },
+                    }
+                ],
+                "runtime_stage_counts": {"operate": 1},
+            },
+            "tool_calls": [
+                {
+                    "tool_call_id": "tool-call-open-app",
+                    "tool_name": "app.open",
+                    "step_id": "open-app",
+                    "status": "failed",
+                }
+            ],
+            "created_at": "2026-06-16T00:00:00Z",
+            "updated_at": "2026-06-16T00:00:01Z",
+        }
+    )
+
+    assert timeline.runtime_execution_envelope is not None
+    assert timeline.runtime_execution_envelope.requests[0].status == "failed"
+    assert timeline.task_progress is not None
+    assert timeline.task_progress.needs_replan is True
+    assert timeline.runtime_debug is not None
+    assert timeline.runtime_debug.needs_replan is True
+    assert any(
+        event.event_type == "workflow.run.replan.requested"
+        for event in timeline.events
+    )
+    assert any(
+        recovery.selected_tool_name == "desktop.list_apps"
+        for recovery in timeline.replan_recoveries
+    )
+
+
 def test_run_timeline_merges_stale_pending_approval_with_resolution_event() -> None:
     timeline = run_timeline_snapshot_from_payload(
         {
