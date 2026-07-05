@@ -35085,6 +35085,30 @@ def test_runtime_execution_envelope_can_project_full_web_research_plan() -> None
         "produce": 1,
     }
 
+    open_research_decision = RuntimePlanner().decision(
+        "研究一下 OpenAI 最新的 Agent SDK 变化并输出总结",
+        allowed_tools=allowed_tools,
+    )
+    open_research_envelope = runtime_execution_envelope_from_decision(
+        open_research_decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert open_research_envelope is not None
+    assert [request.tool_name for request in open_research_envelope.requests] == [
+        "browser.open_url_and_extract_text",
+        "artifact.write",
+    ]
+    assert [request.runtime_stage for request in open_research_envelope.requests] == [
+        "discover",
+        "produce",
+    ]
+    assert open_research_envelope.requests[1].continue_to_model is True
+    assert open_research_envelope.requests[1].input == {
+        "path": "research-summary.md",
+    }
+
 
 def test_runtime_execution_envelope_can_project_full_report_app_write_plan() -> None:
     allowed_tools = [

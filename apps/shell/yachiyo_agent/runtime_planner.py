@@ -15319,11 +15319,16 @@ def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
         for item in intent.expected_outputs
         if str(item or "").strip()
     }
-    if outputs.intersection({"report", "table", "links", "presentation"}):
+    if outputs.intersection({"report", "summary", "table", "links", "presentation"}):
         return True
     return _contains_any(
         intent.user_goal,
         [
+            "summarize",
+            "summarise",
+            "summary",
+            "write summary",
+            "output summary",
             "write up",
             "write a report",
             "report",
@@ -15332,10 +15337,15 @@ def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
             "md file",
             "document",
             "artifact",
+            "总结",
+            "摘要",
             "报告",
             "文档",
             "文件",
             "产物",
+            "输出总结",
+            "生成总结",
+            "整理总结",
             "链接清单",
             "链接列表",
             "列出链接",
