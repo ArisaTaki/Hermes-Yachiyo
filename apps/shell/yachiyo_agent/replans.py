@@ -135,6 +135,7 @@ def task_replan_request_from_failure(
         failure_event_type=failure_event_type,
         failure_detail=failure_detail,
         fallback_tools=fallback_tools,
+        recovery_actions=recovery_actions,
         replan_prompt=_replan_prompt(
             decision,
             trigger=clean_trigger,

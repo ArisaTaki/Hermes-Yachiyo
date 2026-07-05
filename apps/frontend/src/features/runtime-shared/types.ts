@@ -376,6 +376,7 @@ export type TaskReplanRequestSnapshot = {
   failure_event_type?: string;
   failure_detail?: string;
   fallback_tools?: string[];
+  recovery_actions?: ReplanRecoveryActionSnapshot[];
   replan_prompt?: string;
   route_to_studio?: boolean;
   metadata?: Record<string, unknown>;

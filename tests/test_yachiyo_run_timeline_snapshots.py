@@ -230,10 +230,16 @@ def test_run_timeline_projects_failed_runtime_request_into_replan_event() -> Non
     assert timeline.task_progress.needs_replan is True
     assert timeline.runtime_debug is not None
     assert timeline.runtime_debug.needs_replan is True
-    assert any(
-        event.event_type == "workflow.run.replan.requested"
+    replan_event = next(
+        event
         for event in timeline.events
+        if event.event_type == "workflow.run.replan.requested"
     )
+    assert replan_event.payload["recovery_actions"][0]["tool"] == "desktop.list_apps"
+    assert replan_event.payload["recovery_actions"][0]["input"] == {
+        "query": "PixelForge",
+        "limit": 20,
+    }
     assert any(
         recovery.selected_tool_name == "desktop.list_apps"
         for recovery in timeline.replan_recoveries

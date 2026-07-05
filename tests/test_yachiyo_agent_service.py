@@ -1656,6 +1656,7 @@ def test_yachiyo_agent_service_projects_replan_recovery_actions_from_fallback_to
     assert replan_event.payload["source_step_id"] == step_id
     assert replan_event.payload["fallback_tools"] == ["desktop.list_apps"]
     recovery_actions = replan_event.payload["metadata"]["recovery_actions"]
+    assert replan_event.payload["recovery_actions"] == recovery_actions
     assert recovery_actions == [
         {
             "label": "重新发现应用",
@@ -1736,6 +1737,7 @@ def test_yachiyo_agent_service_projects_desktop_loop_auto_retry_recovery_action(
     assert replan_event.payload["fallback_tools"] == ["desktop.list_apps"]
     assert replan_event.payload["metadata"]["desktop_loop"]["can_auto_retry"] is True
     recovery_actions = replan_event.payload["metadata"]["recovery_actions"]
+    assert replan_event.payload["recovery_actions"] == recovery_actions
     assert len(recovery_actions) == 1
     action = recovery_actions[0]
     assert action["tool"] == "desktop.list_apps"

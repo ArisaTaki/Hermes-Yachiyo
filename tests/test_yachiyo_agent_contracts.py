@@ -3710,7 +3710,15 @@ def test_agent_task_snapshot_projects_failed_runtime_request_into_replan_recover
     assert snapshot.runtime_debug is not None
     assert snapshot.runtime_debug.needs_replan is True
     assert snapshot.runtime_debug.failed_runtime_request_count == 1
-    assert any(event.event_type == "agent.replan.requested" for event in snapshot.recent_events)
+    replan_event = next(
+        event
+        for event in snapshot.recent_events
+        if event.event_type == "agent.replan.requested"
+    )
+    assert replan_event.payload["recovery_actions"][0]["tool"] == "desktop.ui_elements"
+    assert replan_event.payload["recovery_actions"][0]["input"] == {
+        "app_name": "PixelForge"
+    }
     assert any(
         recovery.selected_tool_name == "desktop.ui_elements"
         for recovery in snapshot.replan_recoveries

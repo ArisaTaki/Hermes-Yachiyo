@@ -446,6 +446,12 @@ def _runtime_execution_replan_request(
         retry=retry,
     )
     fallback_tools = _runtime_replan_fallback_tools(request, retry)
+    recovery_actions = _runtime_replan_recovery_actions(
+        request,
+        evidence=evidence,
+        retry=retry,
+        fallback_tools=fallback_tools,
+    )
     metadata = _runtime_replan_metadata(
         request,
         envelope=envelope,
@@ -472,6 +478,7 @@ def _runtime_execution_replan_request(
         failure_event_type=f"runtime_execution_request.{_text(request.status) or 'failed'}",
         failure_detail=failure_detail,
         fallback_tools=fallback_tools,
+        recovery_actions=recovery_actions,
         replan_prompt=_runtime_replan_prompt(
             envelope,
             request,
@@ -565,6 +572,86 @@ def _runtime_replan_fallback_tools(
         if clean and clean not in values:
             values.append(clean)
     return values
+
+
+def _runtime_replan_recovery_actions(
+    request: RuntimeExecutionRequestSnapshot,
+    *,
+    evidence: Mapping[str, Any],
+    retry: Mapping[str, Any],
+    fallback_tools: list[str],
+) -> list[dict[str, Any]]:
+    tool = _text(retry.get("tool") or retry.get("retry_tool") or retry.get("from_tool"))
+    if not tool:
+        tool = fallback_tools[0] if fallback_tools else ""
+    if not tool:
+        return []
+    retry_input = _mapping(retry.get("input"))
+    if not retry_input:
+        retry_input = dict(request.input or {})
+    action: dict[str, Any] = {
+        "label": _runtime_replan_recovery_label(tool, retry),
+        "tool": tool,
+        "input": retry_input,
+        "planning_reason": _text(
+            retry.get("planning_reason")
+            or "runtime_execution_observation_retry"
+        ),
+        "permission_target": _runtime_replan_permission_target(request, evidence, retry),
+        "risk_level": "medium" if request.approval_required else "low",
+        "approval_required": bool(request.approval_required),
+        "source_step_id": _text(request.step_id),
+        "target_capability_id": _text(request.capability_id),
+        "action_target": dict(request.action_target or {}),
+        "observation_evidence": dict(evidence),
+        "observation_retry": dict(retry),
+        "verification_targets": [dict(item) for item in request.task_verification_targets],
+        "task_verification_targets": [
+            dict(item) for item in request.task_verification_targets
+        ],
+        "metadata": {
+            "runtime_execution_request_id": request.request_id,
+            "runtime_stage": request.runtime_stage,
+            "runtime_role": request.runtime_role,
+            "replan_signal_ids": list(request.replan_signal_ids),
+            "replan_triggers": list(request.replan_triggers),
+        },
+    }
+    return [_compact_runtime_recovery_action(action)]
+
+
+def _runtime_replan_recovery_label(tool: str, retry: Mapping[str, Any]) -> str:
+    explicit = _text(retry.get("label") or retry.get("title") or retry.get("reason"))
+    if explicit:
+        return explicit
+    return f"重试 {tool}"
+
+
+def _runtime_replan_permission_target(
+    request: RuntimeExecutionRequestSnapshot,
+    evidence: Mapping[str, Any],
+    retry: Mapping[str, Any],
+) -> str:
+    return _text(
+        retry.get("permission_target")
+        or evidence.get("permission_target")
+        or evidence.get("blocking_condition")
+        or request.policy_reason
+    )
+
+
+def _compact_runtime_recovery_action(action: Mapping[str, Any]) -> dict[str, Any]:
+    compact: dict[str, Any] = {}
+    for key, value in action.items():
+        if isinstance(value, Mapping):
+            value = {
+                item_key: item
+                for item_key, item in value.items()
+                if item not in ("", [], {})
+            }
+        if value not in (None, "", [], {}):
+            compact[key] = value
+    return compact
 
 
 def _runtime_replan_metadata(
