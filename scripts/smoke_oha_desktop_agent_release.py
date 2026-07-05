@@ -15,6 +15,7 @@ if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
 from apps.shell.yachiyo_agent import RuntimePlanner
+from apps.shell.yachiyo_agent import daily_desktop as daily_desktop_module
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
@@ -174,6 +175,123 @@ def _tool_catalog_case() -> dict[str, Any]:
     }
 
 
+def _legacy_facade_planner_ownership_case() -> dict[str, Any]:
+    cases = [
+        {
+            "id": "media_playback",
+            "prompt": "能帮我播放 Apple Music 吗",
+            "expected": [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "media.music_app_open_and_play",
+                    "input": {"app_name": "Music"},
+                },
+            ],
+        },
+        {
+            "id": "simple_app_open",
+            "prompt": "可以帮我打开 Word 吗",
+            "expected": [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.open",
+                    "input": {"app_name": "Microsoft Word"},
+                },
+            ],
+        },
+        {
+            "id": "file_reveal",
+            "prompt": "显示当前选中文件",
+            "expected": [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "desktop.reveal_path",
+                    "input": {"path": "finder_selection"},
+                },
+            ],
+        },
+        {
+            "id": "browser_navigation",
+            "prompt": "打开 GitHub 首页",
+            "expected": [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "browser.open_url",
+                    "input": {"url": "https://github.com"},
+                },
+            ],
+        },
+        {
+            "id": "safe_app_action",
+            "prompt": "Chrome 新建无痕窗口",
+            "expected": [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus_and_safe_shortcut",
+                    "input": {"app_name": "Google Chrome", "action": "new_private_window"},
+                },
+            ],
+        },
+    ]
+    legacy_calls: list[dict[str, Any]] = []
+    original_legacy_parser = daily_desktop_module.daily_desktop_entrypoint_tool_requests
+
+    def fail_legacy_parser(context: str, allowed_tools: Sequence[str], **_kwargs: Any) -> list[dict[str, Any]]:
+        legacy_calls.append(
+            {
+                "context": str(context or ""),
+                "allowed_tools": [str(tool) for tool in allowed_tools],
+            }
+        )
+        raise AssertionError("legacy daily desktop parser should not own planner-compatible entrypoints")
+
+    results: list[dict[str, Any]] = []
+    daily_desktop_module.daily_desktop_entrypoint_tool_requests = fail_legacy_parser
+    try:
+        for case in cases:
+            error = ""
+            actual: list[dict[str, Any]] = []
+            try:
+                actual = daily_desktop_module.daily_desktop_entrypoint_requests(case["prompt"])
+            except Exception as exc:
+                error = str(exc)
+            expected = case["expected"]
+            results.append(
+                {
+                    "id": case["id"],
+                    "prompt": case["prompt"],
+                    "ok": not error and actual == expected,
+                    "tools": _tools(actual),
+                    "expected_tools": _tools(expected),
+                    "actual": actual,
+                    "expected": expected,
+                    "error": error,
+                }
+            )
+    finally:
+        daily_desktop_module.daily_desktop_entrypoint_tool_requests = original_legacy_parser
+
+    checks = {
+        "legacy_parser_not_called": legacy_calls == [],
+        "all_compatible_facade_cases_matched": all(result["ok"] for result in results),
+        "covers_media_app_file_browser_and_action": {
+            "media_playback",
+            "simple_app_open",
+            "file_reveal",
+            "browser_navigation",
+            "safe_app_action",
+        }.issubset({str(result["id"]) for result in results}),
+    }
+    return {
+        "id": "legacy_facade_planner_ownership",
+        "ok": all(checks.values()),
+        "legacy_call_count": len(legacy_calls),
+        "legacy_calls": legacy_calls,
+        "cases": results,
+        "checks": checks,
+    }
+
+
 def _run_section(
     section_id: str,
     objective: str,
@@ -216,6 +334,11 @@ def _build_sections(workdir: Path) -> list[dict[str, Any]]:
             lambda: smoke_agent_entrypoint_desktop_execution.run_smoke(
                 workdir=workdir / "desktop-entrypoint"
             ),
+        ),
+        _run_section(
+            "legacy_facade_planner_ownership",
+            "Legacy-compatible Chat facade entrypoints are owned by Runtime Planner.",
+            _legacy_facade_planner_ownership_case,
         ),
         _run_section(
             "capability_planner_tool_parity",
@@ -266,6 +389,9 @@ def run_smoke(*, workdir: Path | None = None) -> dict[str, Any]:
         "covers_deepagent_core": any(section["id"] == "deepagent_core" for section in sections),
         "covers_desktop_executor": any(
             section["id"] == "desktop_executor_before_model" for section in sections
+        ),
+        "covers_legacy_facade_planner_ownership": any(
+            section["id"] == "legacy_facade_planner_ownership" for section in sections
         ),
         "covers_chat_bubble_live2d": any(
             section["id"] == "shared_daily_surfaces" for section in sections

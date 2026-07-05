@@ -15,6 +15,7 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(tmp_path) -> N
         "all_sections_passed": True,
         "covers_deepagent_core": True,
         "covers_desktop_executor": True,
+        "covers_legacy_facade_planner_ownership": True,
         "covers_chat_bubble_live2d": True,
         "covers_agent_studio": True,
         "covers_groups_workflow": True,
@@ -35,6 +36,12 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(tmp_path) -> N
     assert section_by_id["desktop_executor_before_model"]["report"]["checks"][
         "model_never_called"
     ] is True
+    assert section_by_id["legacy_facade_planner_ownership"]["report"]["checks"][
+        "legacy_parser_not_called"
+    ] is True
+    assert section_by_id["legacy_facade_planner_ownership"]["report"][
+        "legacy_call_count"
+    ] == 0
     assert section_by_id["agent_studio_orchestration"]["report"][
         "started_workflow_run_id"
     ] == "workflow-run-studio-planner"
