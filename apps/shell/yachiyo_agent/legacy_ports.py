@@ -8,9 +8,13 @@ from collections.abc import Mapping
 from typing import Any
 
 from apps.shell.chat_api import ChatAPI
+from apps.shell.agent.runtime.callbacks import supports_keyword
 from apps.shell.agent.runtime.approval_tool_sets import (
     APPROVAL_PLAN_TOOLS as _APPROVAL_PLAN_TOOLS,
     SAFE_SHORTCUT_APPROVAL_TOOLS as _SAFE_SHORTCUT_APPROVAL_TOOLS,
+)
+from apps.shell.agent.runtime.direct_request_policy import (
+    approval_required_policy_from_direct_requests,
 )
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 
@@ -740,11 +744,20 @@ class LegacyChatTaskStarter:
                     RECOVERY_RETRY_CONTEXT_EVENT_TYPE,
                     retry_context_payload,
                 )
+            model_loop_kwargs = {
+                "direct_tool_request": direct_tool_request,
+                "direct_tool_requests": direct_tool_requests,
+            }
+            tool_policy = _main_chat_direct_request_tool_policy(
+                direct_tool_request,
+                direct_tool_requests,
+            )
+            if tool_policy and supports_keyword(execute_main_chat_model_loop, "tool_policy"):
+                model_loop_kwargs["tool_policy"] = tool_policy
             run = execute_main_chat_model_loop(
                 run_id,
                 [{"role": "user", "content": execution_prompt or prompt or "执行恢复后的原操作"}],
-                direct_tool_request=direct_tool_request,
-                direct_tool_requests=direct_tool_requests,
+                **model_loop_kwargs,
             )
             self._append_runtime_tool_progress_events(
                 run_id,
@@ -2145,6 +2158,23 @@ def _explicit_direct_tool_request(
 ) -> dict[str, Any] | None:
     requests = _explicit_direct_tool_requests([value], allowed_tools)
     return requests[0] if requests else None
+
+
+def _main_chat_direct_request_tool_policy(
+    direct_tool_request: Any,
+    direct_tool_requests: Any,
+) -> dict[str, Any]:
+    requests: list[dict[str, Any]] = []
+    if isinstance(direct_tool_request, dict):
+        requests.append(dict(direct_tool_request))
+    if isinstance(direct_tool_requests, list):
+        requests.extend(
+            dict(item) for item in direct_tool_requests if isinstance(item, dict)
+        )
+    approval_required = approval_required_policy_from_direct_requests(requests)
+    if not approval_required:
+        return {}
+    return {"approval_required": approval_required}
 
 
 def _explicit_direct_tool_requests(

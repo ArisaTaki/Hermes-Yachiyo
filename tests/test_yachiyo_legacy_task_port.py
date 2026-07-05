@@ -2139,10 +2139,47 @@ def test_legacy_chat_task_starter_prefers_explicit_direct_tool_requests() -> Non
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
     ][0]
     direct_requests = model_loop_call[1]["direct_tool_requests"]
-    assert [request["tool"] for request in direct_requests] == ["desktop.list_apps"]
+    assert [request["tool"] for request in direct_requests] == [
+        "desktop.list_apps",
+        "terminal.run",
+    ]
     assert direct_requests[0]["input"] == {"query": "PixelForge", "limit": 20}
     assert direct_requests[0]["planning_reason"] == "planner_desktop_loop_auto_retry"
     assert direct_requests[0]["desktop_loop"]["can_auto_retry"] is True
+    assert direct_requests[1]["approval_required"] is True
+    assert model_loop_call[1]["tool_policy"] == {
+        "approval_required": {"terminal.run": True}
+    }
+
+
+def test_legacy_chat_task_starter_promotes_direct_request_approval_policy() -> None:
+    app_runtime = _FakeAppRuntime()
+    runtime = _MainChatDataAnalysisRuntime()
+    starter = LegacyChatTaskStarter(app_runtime, runtime)
+
+    task = starter.execute_existing_main_chat_task(
+        task_id="task-main",
+        conversation_id="chat-1",
+        prompt="运行分析脚本",
+        direct_tool_requests=[
+            {
+                "tool": "terminal.run",
+                "input": {"command": "python scripts/analyze.py"},
+                "approval_required": True,
+                "planning_reason": "planner_full_plan_data_analysis",
+            },
+        ],
+    )
+
+    assert task is not None
+    model_loop_call = [
+        call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
+    ][0]
+    direct_requests = model_loop_call[1]["direct_tool_requests"]
+    assert [request["tool"] for request in direct_requests] == ["terminal.run"]
+    assert model_loop_call[1]["tool_policy"] == {
+        "approval_required": {"terminal.run": True}
+    }
 
 
 def test_legacy_chat_task_starter_prefers_top_level_runtime_execution_envelope() -> None:
@@ -3693,6 +3730,7 @@ class _MainChatPlannerEventRuntime:
         *,
         direct_tool_request: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
+        tool_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.calls.append(
             (
@@ -3702,6 +3740,7 @@ class _MainChatPlannerEventRuntime:
                     "messages": messages,
                     "direct_tool_request": direct_tool_request,
                     "direct_tool_requests": direct_tool_requests,
+                    "tool_policy": tool_policy,
                 },
             )
         )
@@ -3740,6 +3779,7 @@ class _MainChatToolProgressRuntime(_MainChatPlannerEventRuntime):
         *,
         direct_tool_request: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
+        tool_policy: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         self.calls.append(
             (
@@ -3749,6 +3789,7 @@ class _MainChatToolProgressRuntime(_MainChatPlannerEventRuntime):
                     "messages": messages,
                     "direct_tool_request": direct_tool_request,
                     "direct_tool_requests": direct_tool_requests,
+                    "tool_policy": tool_policy,
                 },
             )
         )

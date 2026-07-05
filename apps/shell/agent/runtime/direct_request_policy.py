@@ -12,8 +12,10 @@ def agent_with_direct_request_approvals(
 ) -> dict[str, Any]:
     """Promote request-level approval flags into the temporary agent policy."""
 
-    approval_tools = _approval_required_tools(direct_tool_requests)
-    if not approval_tools:
+    approval_overrides = approval_required_policy_from_direct_requests(
+        direct_tool_requests,
+    )
+    if not approval_overrides:
         return agent
 
     policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
@@ -23,7 +25,7 @@ def agent_with_direct_request_approvals(
         else {}
     )
     changed = False
-    for tool_name in approval_tools:
+    for tool_name in approval_overrides:
         if approval_required.get(tool_name) is True:
             continue
         approval_required[tool_name] = True
@@ -37,6 +39,12 @@ def agent_with_direct_request_approvals(
             "approval_required": approval_required,
         },
     }
+
+
+def approval_required_policy_from_direct_requests(
+    direct_tool_requests: Any,
+) -> dict[str, bool]:
+    return {tool_name: True for tool_name in _approval_required_tools(direct_tool_requests)}
 
 
 def _approval_required_tools(direct_tool_requests: Any) -> list[str]:
