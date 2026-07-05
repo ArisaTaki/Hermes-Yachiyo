@@ -6026,6 +6026,15 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     assert workflow_step.action == "create_workflow"
     assert workflow_step.tool_name == "workflow.run"
     assert workflow_step.status == "planned"
+    assert workflow_step.input_preview == {
+        "objective": "创建一个 workflow 分析数据然后发微信给我",
+        "title": "Workflow Orchestration",
+        "target_name": "",
+        "intent_kind": "workflow_orchestration",
+        "orchestration_action": "create_workflow",
+        "orchestration_kind": "workflow",
+        "workflow_action_hint": "create",
+    }
 
     create_workflow = RuntimePlanner().decision(
         "创建一个工作流：每天上午搜索 AI 新闻并生成摘要",
@@ -6052,7 +6061,15 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     }
     named_workflow_step = _step_by_id(named_workflow, "workflow-orchestration")
     assert named_workflow_step.tool_name == "workflow.start"
-    assert named_workflow_step.input_preview == {"target_name": "Daily Summary"}
+    assert named_workflow_step.input_preview == {
+        "objective": "运行 Daily Summary workflow",
+        "title": "Workflow Orchestration",
+        "target_name": "Daily Summary",
+        "intent_kind": "workflow_orchestration",
+        "orchestration_action": "start_workflow",
+        "orchestration_kind": "workflow",
+        "workflow_action_hint": "run",
+    }
     assert planner_tool_requests(
         "运行 Daily Summary workflow",
         ["workflow.run", "group.run", "artifact.write"],
@@ -6288,7 +6305,14 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     }
     named_group_step = _step_by_id(named_group, "group-multi_agent")
     assert named_group_step.tool_name == "group.start"
-    assert named_group_step.input_preview == {"target_name": "Research Team"}
+    assert named_group_step.input_preview == {
+        "objective": "运行 Research Team group",
+        "title": "Multi-Agent Coordination",
+        "target_name": "Research Team",
+        "intent_kind": "multi_agent",
+        "orchestration_action": "start_group_run",
+        "orchestration_kind": "group_run",
+    }
 
     current_page_group = RuntimePlanner().decision(
         "运行研究群组，比较当前网页里的三个方案并输出报告",
@@ -6300,7 +6324,14 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     }
     current_page_group_step = _step_by_id(current_page_group, "group-multi_agent")
     assert current_page_group_step.tool_name == "group.run"
-    assert current_page_group_step.input_preview == {"target_name": "研究"}
+    assert current_page_group_step.input_preview == {
+        "objective": "运行研究群组，比较当前网页里的三个方案并输出报告",
+        "title": "Multi-Agent Coordination",
+        "target_name": "研究",
+        "intent_kind": "multi_agent",
+        "orchestration_action": "start_group_run",
+        "orchestration_kind": "group_run",
+    }
 
     natural_named_group = RuntimePlanner().decision(
         "用月夜群组一起分析这个需求",
@@ -35529,6 +35560,15 @@ def test_runtime_execution_envelope_marks_orchestration_runs_as_operate() -> Non
             "workflow_orchestration",
             "workflow.run",
             "start_workflow",
+            {
+                "objective": "运行 Daily Summary workflow",
+                "title": "Workflow Orchestration",
+                "target_name": "Daily Summary",
+                "intent_kind": "workflow_orchestration",
+                "orchestration_action": "start_workflow",
+                "orchestration_kind": "workflow",
+                "workflow_action_hint": "run",
+            },
         ),
         (
             "启动 Research squad group 调研 Hanako",
@@ -35536,10 +35576,18 @@ def test_runtime_execution_envelope_marks_orchestration_runs_as_operate() -> Non
             "multi_agent",
             "group.run",
             "start_group_run",
+            {
+                "objective": "启动 Research squad group 调研 Hanako",
+                "title": "Multi-Agent Coordination",
+                "target_name": "Research squad",
+                "intent_kind": "multi_agent",
+                "orchestration_action": "start_group_run",
+                "orchestration_kind": "group_run",
+            },
         ),
     ]
 
-    for prompt, allowed_tools, intent_kind, tool_name, runtime_role in cases:
+    for prompt, allowed_tools, intent_kind, tool_name, runtime_role, expected_input in cases:
         decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
         envelope = runtime_execution_envelope_from_decision(
             decision,
@@ -35554,6 +35602,7 @@ def test_runtime_execution_envelope_marks_orchestration_runs_as_operate() -> Non
         assert envelope.runtime_stage_counts == {"operate": 1}
         assert envelope.requests[0].runtime_stage == "operate"
         assert envelope.requests[0].runtime_role == runtime_role
+        assert envelope.requests[0].input == expected_input
         assert envelope.requests[0].task_todo["metadata"]["runtime_role"] == runtime_role
 
 

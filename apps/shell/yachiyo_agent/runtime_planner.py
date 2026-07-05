@@ -7764,12 +7764,39 @@ def _service_step(
         capability_id=capability_id,
         action=_service_action(capability_id, intent),
         tool_name=tool_name,
-        input_preview={"target_name": target_name} if target_name else {},
+        input_preview=_service_input_preview(
+            intent,
+            capability_id=capability_id,
+            target_name=target_name,
+        ),
         reason=(
             "Use the shared Agent Studio service orchestration entrypoint when available; "
             "otherwise keep this as an observable Studio-managed step."
         ),
     )
+
+
+def _service_input_preview(
+    intent: TaskIntentSnapshot,
+    *,
+    capability_id: str,
+    target_name: str,
+) -> dict[str, Any]:
+    action = _service_action(capability_id, intent)
+    payload: dict[str, Any] = {
+        "objective": str(intent.user_goal or "").strip(),
+        "title": str(intent.title or "").strip(),
+        "target_name": str(target_name or "").strip(),
+        "intent_kind": str(intent.kind or "").strip(),
+        "orchestration_action": action,
+        "orchestration_kind": (
+            "workflow" if capability_id == "workflow.orchestration" else "group_run"
+        ),
+    }
+    workflow_action = str(intent.inputs.get("workflow_action_hint") or "").strip()
+    if workflow_action:
+        payload["workflow_action_hint"] = workflow_action
+    return payload
 
 
 _DESKTOP_OPERATION_TOOL_ALIASES = {
