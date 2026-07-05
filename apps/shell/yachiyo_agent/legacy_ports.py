@@ -1528,7 +1528,12 @@ class LegacyStudioPort:
         }
 
     def get_run_event_stream(self, run_id: str) -> dict[str, Any]:
-        return self._runtime.list_run_events(run_id)
+        raw_stream = self._runtime.list_run_events(run_id)
+        return _workflow_run_events_with_child_replay(
+            self._runtime,
+            run_id,
+            raw_stream,
+        )
 
     def get_run_event_page(
         self,
@@ -1537,6 +1542,13 @@ class LegacyStudioPort:
         after_sequence: int = 0,
         limit: int = 200,
     ) -> dict[str, Any]:
+        if _is_workflow_parent_run_id(self._runtime, run_id):
+            return _run_event_page_from_legacy_stream(
+                self.get_run_event_stream(run_id),
+                run_id=run_id,
+                after_sequence=after_sequence,
+                limit=limit,
+            )
         try:
             return self._runtime.list_run_events(
                 run_id,
@@ -3203,6 +3215,155 @@ def _workflow_child_runs_for_parent_run(run: dict[str, Any], runtime: Any) -> li
         dict(item)
         for item in _workflow_run_with_child_runs(run, runtime).get("runs") or []
         if isinstance(item, dict)
+    ]
+
+
+def _is_workflow_parent_run_id(runtime: Any, run_id: str) -> bool:
+    try:
+        run = runtime.get_run(run_id)
+    except (AttributeError, KeyError):
+        return False
+    workflow_run_id = str(run.get("workflow_run_id") or "").strip()
+    return (
+        str(run.get("kind") or "").strip() == "workflow_run"
+        or bool(workflow_run_id and workflow_run_id == run_id)
+    )
+
+
+def _workflow_run_events_with_child_replay(
+    runtime: Any,
+    run_id: str,
+    raw_stream: Any,
+) -> dict[str, Any]:
+    parent_events = _events_from_payload(raw_stream)
+    try:
+        parent = runtime.get_run(run_id)
+    except (AttributeError, KeyError):
+        parent = {}
+    if str(parent.get("kind") or "").strip() != "workflow_run":
+        if isinstance(raw_stream, dict):
+            return raw_stream
+        return {"run_id": run_id, "events": parent_events}
+
+    parent_run_id = str(parent.get("run_id") or parent.get("workflow_run_id") or run_id).strip()
+    workflow_id = str(parent.get("workflow_id") or parent.get("runnable_id") or "").strip()
+    parent_with_children = _workflow_run_with_child_runs(
+        _run_with_replay_events(parent, runtime),
+        runtime,
+    )
+    child_runs = [
+        dict(item)
+        for item in parent_with_children.get("runs") or []
+        if isinstance(item, dict)
+    ]
+    context_by_child = _workflow_child_context_by_run_id(parent, parent_events)
+    events = [dict(event) for event in parent_events]
+    for child in child_runs:
+        child_run_id = str(child.get("run_id") or "").strip()
+        if not child_run_id:
+            continue
+        child_context = context_by_child.get(child_run_id) or {}
+        for event in _events_from_payload(child):
+            events.append(
+                _workflow_child_replay_event(
+                    event,
+                    parent_run_id=parent_run_id,
+                    workflow_id=workflow_id,
+                    child_run_id=child_run_id,
+                    context=child_context,
+                )
+            )
+
+    base = dict(raw_stream) if isinstance(raw_stream, dict) else {}
+    return {
+        **base,
+        "run_id": base.get("run_id") or parent_run_id or run_id,
+        "workflow_run_id": base.get("workflow_run_id") or parent_run_id or run_id,
+        "workflow_id": base.get("workflow_id") or workflow_id or None,
+        "events": _resequence_events(events),
+    }
+
+
+def _workflow_child_context_by_run_id(
+    parent: dict[str, Any],
+    parent_events: list[dict[str, Any]],
+) -> dict[str, dict[str, str]]:
+    context: dict[str, dict[str, str]] = {}
+    for event in parent_events or _events_from_payload(parent):
+        payload = event.get("payload") if isinstance(event.get("payload"), dict) else {}
+        child_run_id = str(
+            payload.get("child_run_id")
+            or payload.get("child_agent_run_id")
+            or event.get("child_run_id")
+            or event.get("child_agent_run_id")
+            or ""
+        ).strip()
+        if not child_run_id:
+            continue
+        item: dict[str, str] = {}
+        for key in (
+            "workflow_node_id",
+            "workflow_node_kind",
+            "workflow_node_label",
+            "workflow_parent_node_id",
+            "workflow_parent_node_kind",
+            "workflow_parent_node_label",
+            "workflow_parallel_branch_entry_node_id",
+            "workflow_parallel_branch_label",
+        ):
+            value = str(payload.get(key) or event.get(key) or "").strip()
+            if value:
+                item[key] = value
+        if item:
+            context.setdefault(child_run_id, {}).update(item)
+    return context
+
+
+def _workflow_child_replay_event(
+    event: dict[str, Any],
+    *,
+    parent_run_id: str,
+    workflow_id: str,
+    child_run_id: str,
+    context: dict[str, str],
+) -> dict[str, Any]:
+    item = dict(event)
+    payload = dict(item.get("payload")) if isinstance(item.get("payload"), dict) else {}
+    source_sequence = str(item.get("sequence") or "").strip()
+    source_event_id = str(item.get("event_id") or "").strip()
+    payload.setdefault("source_run_id", child_run_id)
+    payload.setdefault("parent_run_id", parent_run_id)
+    if source_sequence:
+        payload.setdefault("source_sequence", source_sequence)
+    if source_event_id:
+        payload.setdefault("source_event_id", source_event_id)
+    if workflow_id:
+        payload.setdefault("workflow_id", workflow_id)
+    payload.setdefault("workflow_run_id", parent_run_id)
+    for key, value in context.items():
+        if value:
+            payload.setdefault(key, value)
+    item["run_id"] = parent_run_id
+    item["payload"] = payload
+    return item
+
+
+def _events_from_payload(payload: Any) -> list[dict[str, Any]]:
+    if isinstance(payload, list):
+        return [dict(item) for item in payload if isinstance(item, dict)]
+    if not isinstance(payload, dict):
+        return []
+    for key in ("events", "run_events", "recent_events", "timeline"):
+        value = payload.get(key)
+        if isinstance(value, list) and value:
+            return [dict(item) for item in value if isinstance(item, dict)]
+    return []
+
+
+def _resequence_events(events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    return [
+        {**event, "sequence": index}
+        for index, event in enumerate(events, start=1)
     ]
 
 

@@ -461,6 +461,73 @@ def test_legacy_studio_port_routes_workflow_parent_approval_to_child_run() -> No
     assert approved["runs"][0]["run_id"] == "workflow-child-1"
 
 
+def test_legacy_studio_port_replays_workflow_child_events_in_parent_page() -> None:
+    runtime = _FakeGroupRuntime()
+    runtime.child_run_ids = ["workflow-run-1", "workflow-child-1"]
+    runtime.runs["workflow-run-1"] = {
+        "kind": "workflow_run",
+        "pending_approval": None,
+        "run_group_id": "workflow-group-1",
+        "run_id": "workflow-run-1",
+        "runnable_id": "workflow-1",
+        "status": "processing",
+        "timeline": [],
+        "user_goal": "Build report",
+    }
+    runtime.runs["workflow-child-1"] = {
+        "artifacts": [],
+        "kind": "agent_run",
+        "pending_approval": None,
+        "run_group_id": "workflow-group-1",
+        "run_id": "workflow-child-1",
+        "status": "completed",
+        "timeline": [],
+        "user_goal": "Analyze data",
+    }
+    runtime.events["workflow-run-1"] = [
+        {
+            "event_type": "workflow.node.agent",
+            "payload": {
+                "child_run_id": "workflow-child-1",
+                "workflow_id": "workflow-1",
+                "workflow_run_id": "workflow-run-1",
+                "workflow_node_id": "analyze",
+                "workflow_node_label": "Analyze data",
+            },
+            "run_id": "workflow-run-1",
+            "sequence": 1,
+        }
+    ]
+    runtime.events["workflow-child-1"] = [
+        {
+            "event_id": "child-event-1",
+            "event_type": "agent.tool.completed",
+            "payload": {"tool_name": "data.analyze"},
+            "run_id": "workflow-child-1",
+            "sequence": 1,
+        }
+    ]
+    port = LegacyStudioPort(runtime)
+
+    page = port.get_run_event_page("workflow-run-1", after_sequence=0, limit=10)
+
+    assert page["run_id"] == "workflow-run-1"
+    assert [event["event_type"] for event in page["events"]] == [
+        "workflow.node.agent",
+        "agent.tool.completed",
+    ]
+    child_event = page["events"][1]
+    assert child_event["run_id"] == "workflow-run-1"
+    assert child_event["sequence"] == 2
+    assert child_event["payload"]["source_run_id"] == "workflow-child-1"
+    assert child_event["payload"]["source_sequence"] == "1"
+    assert child_event["payload"]["source_event_id"] == "child-event-1"
+    assert child_event["payload"]["workflow_id"] == "workflow-1"
+    assert child_event["payload"]["workflow_run_id"] == "workflow-run-1"
+    assert child_event["payload"]["workflow_node_id"] == "analyze"
+    assert child_event["payload"]["workflow_node_label"] == "Analyze data"
+
+
 def test_legacy_studio_port_reads_workflow_child_artifact_from_source_run() -> None:
     runtime = _FakeGroupRuntime()
     runtime.child_run_ids = ["workflow-run-1", "workflow-child-1"]
