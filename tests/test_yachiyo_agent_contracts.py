@@ -3569,6 +3569,116 @@ def test_agent_task_snapshot_projects_failed_runtime_request_into_replan_recover
     )
 
 
+def test_agent_task_snapshot_marks_recovered_runtime_request_after_recovery_success() -> None:
+    replan_request_id = (
+        "runtime-replan:request-inspect-ui:inspect-ui:desktop.ui_elements:"
+        "verification_failed"
+    )
+    snapshot = agent_task_snapshot_from_payload(
+        {
+            "run_id": "run-runtime-recovered",
+            "task_id": "task-runtime-recovered",
+            "status": "completed",
+            "metadata": {
+                "yachiyo_execution_envelope": {
+                    "envelope_id": "execution-envelope-runtime-recovered",
+                    "decision_id": "decision-runtime-recovered",
+                    "plan_id": "runtime-plan-recovered",
+                    "intent_kind": "desktop_operation",
+                    "task_core": {
+                        "core_id": "task-core-runtime-recovered",
+                        "workspace": {
+                            "workspace_id": "workspace-runtime-recovered",
+                            "title": "Runtime Recovered Workspace",
+                        },
+                        "todos": [
+                            {
+                                "todo_id": "todo-inspect-ui",
+                                "title": "Inspect app UI",
+                                "step_id": "inspect-ui",
+                                "tool_name": "desktop.ui_elements",
+                            }
+                        ],
+                    },
+                    "requests": [
+                        {
+                            "request_id": "request-inspect-ui",
+                            "step_id": "inspect-ui",
+                            "capability_id": "desktop.ui_operation",
+                            "tool_name": "desktop.ui_elements",
+                            "runtime_stage": "operate",
+                            "runtime_role": "inspect_ui",
+                            "replan_triggers": ["verification_failed"],
+                            "observation_evidence": {
+                                "verification_failed": True,
+                                "message": "No actionable controls found.",
+                            },
+                            "observation_retry": {
+                                "tool": "desktop.ui_elements",
+                                "input": {"app_name": "PixelForge"},
+                                "reason": "inspect_current_ui_again",
+                            },
+                        }
+                    ],
+                    "runtime_stage_counts": {"operate": 1},
+                }
+            },
+            "tool_calls": [
+                {
+                    "tool_call_id": "tool-call-inspect-ui",
+                    "tool_name": "desktop.ui_elements",
+                    "step_id": "inspect-ui",
+                    "status": "failed",
+                }
+            ],
+            "events": [
+                {
+                    "event_type": "agent.replan.requested",
+                    "sequence": 1,
+                    "run_id": "run-runtime-recovered",
+                    "payload": {
+                        "request_id": replan_request_id,
+                        "trigger": "verification_failed",
+                        "source_step_id": "inspect-ui",
+                        "source_tool_name": "desktop.ui_elements",
+                        "target_capability_id": "desktop.ui_operation",
+                    },
+                },
+                {
+                    "event_type": "agent.replan.recovery.updated",
+                    "sequence": 2,
+                    "run_id": "run-runtime-recovered",
+                    "payload": {
+                        "request_id": replan_request_id,
+                        "replan_request_id": replan_request_id,
+                        "trigger": "verification_failed",
+                        "status": "completed",
+                        "source_step_id": "inspect-ui",
+                        "source_tool_name": "desktop.ui_elements",
+                        "target_capability_id": "desktop.ui_operation",
+                        "selected_tool_name": "desktop.ui_elements",
+                        "tool_status": "completed",
+                        "todo_status": "completed",
+                        "checkpoint_status": "completed",
+                    },
+                },
+            ],
+            "created_at": "2026-06-16T00:00:00Z",
+            "updated_at": "2026-06-16T00:00:02Z",
+        }
+    )
+
+    assert snapshot.runtime_execution_envelope is not None
+    assert snapshot.runtime_execution_envelope.requests[0].status == "recovered"
+    assert snapshot.task_progress is not None
+    assert snapshot.task_progress.needs_replan is False
+    assert snapshot.runtime_debug is not None
+    assert snapshot.runtime_debug.needs_replan is False
+    assert snapshot.runtime_debug.failed_runtime_request_count == 0
+    assert snapshot.runtime_debug.pending_runtime_request_count == 0
+    assert snapshot.replan_recoveries[0].status == "completed"
+
+
 def test_agent_task_snapshot_projects_runtime_execution_envelope_from_events() -> None:
     snapshot = agent_task_snapshot_from_payload(
         {

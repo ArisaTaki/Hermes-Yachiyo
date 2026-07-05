@@ -7,6 +7,7 @@ from typing import Any
 
 from .contracts import (
     ApprovalCardSnapshot,
+    ReplanRecoverySnapshot,
     RuntimeExecutionEnvelopeSnapshot,
     RuntimeExecutionRequestSnapshot,
     TaskProgressSummarySnapshot,
@@ -22,6 +23,7 @@ _TERMINAL_REQUEST_STATUSES = {
     "expired",
     "failed",
     "rejected",
+    "recovered",
     "skipped",
 }
 
@@ -32,6 +34,7 @@ def runtime_execution_envelope_with_status_overlay(
     tool_calls: Iterable[ToolCallSnapshot] | None = None,
     approvals: Iterable[ApprovalCardSnapshot] | None = None,
     pending_approval: ApprovalCardSnapshot | None = None,
+    replan_recoveries: Iterable[ReplanRecoverySnapshot] | None = None,
     task_progress: TaskProgressSummarySnapshot | None = None,
 ) -> RuntimeExecutionEnvelopeSnapshot | None:
     """Return a copy of the envelope with request statuses reconciled from run facts."""
@@ -41,6 +44,7 @@ def runtime_execution_envelope_with_status_overlay(
 
     tool_items = [item for item in tool_calls or [] if item is not None]
     approval_items = [item for item in approvals or [] if item is not None]
+    recovery_items = [item for item in replan_recoveries or [] if item is not None]
     if pending_approval is not None and not any(
         _same_approval(item, pending_approval) for item in approval_items
     ):
@@ -54,6 +58,7 @@ def runtime_execution_envelope_with_status_overlay(
             request,
             tool_calls=tool_items,
             approvals=approval_items,
+            replan_recoveries=recovery_items,
             current_step_id=current_step_id,
             active_status=active_status,
         )
@@ -74,6 +79,7 @@ def _observed_request_status(
     *,
     tool_calls: list[ToolCallSnapshot],
     approvals: list[ApprovalCardSnapshot],
+    replan_recoveries: list[ReplanRecoverySnapshot],
     current_step_id: str,
     active_status: str,
 ) -> str:
@@ -82,6 +88,10 @@ def _observed_request_status(
         approval_status = _approval_request_status(approval.status)
         if approval_status:
             return approval_status
+
+    recovery = _matching_completed_recovery(request, replan_recoveries)
+    if recovery is not None:
+        return "recovered"
 
     tool_call = _matching_tool_call(request, tool_calls)
     if tool_call is not None and _text(tool_call.status):
@@ -118,6 +128,46 @@ def _matching_tool_call(
         if request_tool and _text(tool_call.tool_name) == request_tool:
             return tool_call
     return None
+
+
+def _matching_completed_recovery(
+    request: RuntimeExecutionRequestSnapshot,
+    recoveries: list[ReplanRecoverySnapshot],
+) -> ReplanRecoverySnapshot | None:
+    request_step_id = _text(request.step_id)
+    request_tool = _text(request.tool_name)
+    request_capability = _text(request.capability_id)
+    for recovery in reversed(recoveries):
+        if _recovery_request_status(recovery) not in {"completed", "resolved"}:
+            continue
+        recovery_step_id = _text(recovery.source_step_id)
+        recovery_tool = _text(recovery.source_tool_name)
+        recovery_capability = _text(recovery.target_capability_id)
+        if request_step_id and recovery_step_id and request_step_id != recovery_step_id:
+            continue
+        if request_tool and recovery_tool and request_tool != recovery_tool:
+            continue
+        if request_capability and recovery_capability and request_capability != recovery_capability:
+            continue
+        if request_step_id and recovery_step_id:
+            return recovery
+        if request_tool and recovery_tool:
+            return recovery
+        if request_capability and recovery_capability:
+            return recovery
+    return None
+
+
+def _recovery_request_status(recovery: ReplanRecoverySnapshot) -> str:
+    status = _text(recovery.status)
+    if status:
+        return status
+    tool_status = _text(recovery.tool_status)
+    if tool_status in {"completed", "resolved"}:
+        return tool_status
+    if _text(recovery.todo_status) == "completed" or _text(recovery.checkpoint_status) == "completed":
+        return "completed"
+    return ""
 
 
 def _matching_approval(

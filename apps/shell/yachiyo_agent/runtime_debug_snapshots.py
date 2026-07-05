@@ -16,6 +16,7 @@ _TERMINAL_RUNTIME_REQUEST_STATUSES = {
     "expired",
     "failed",
     "rejected",
+    "recovered",
     "skipped",
 }
 
@@ -116,8 +117,10 @@ def runtime_debug_summary_from_runtime_objects(
         planner_items=[item for item in (planner_summary, runtime_execution_envelope) if item is not None],
         task_items=[item for item in (effective_task_core, effective_task_progress) if item is not None],
     )
-    replan_needed = needs_replan or bool(replan_items) or any(
-        "replan" in _text(_field(event, "event_type")) for event in event_items
+    replan_needed = (
+        needs_replan
+        or any(_replan_item_needs_replan(item) for item in replan_items)
+        or _events_have_unresolved_replan(event_items)
     )
 
     return RuntimeDebugSummarySnapshot(
@@ -539,6 +542,46 @@ def _items(values: Iterable[Any] | None) -> list[Any]:
     if values is None:
         return []
     return [item for item in values if item is not None]
+
+
+def _replan_item_needs_replan(item: Any) -> bool:
+    status = _text(_field(item, "status")).lower()
+    if status in {"completed", "resolved", "cancelled", "canceled"}:
+        return False
+    if status:
+        return True
+    tool_status = _text(_field(item, "tool_status")).lower()
+    return tool_status not in {"completed", "resolved"}
+
+
+def _events_have_unresolved_replan(events: list[Any]) -> bool:
+    resolved_request_ids: set[str] = set()
+    for event in reversed(events):
+        event_type = _text(_field(event, "event_type"))
+        payload = _field(event, "payload")
+        payload = payload if isinstance(payload, dict) else {}
+        request_id = _text(payload.get("request_id") or payload.get("replan_request_id"))
+        if request_id and not _event_is_replan_request(event_type) and _event_resolves_replan(payload):
+            resolved_request_ids.add(request_id)
+            continue
+        if not _event_is_replan_request(event_type):
+            continue
+        if request_id and request_id in resolved_request_ids:
+            continue
+        return True
+    return False
+
+
+def _event_is_replan_request(event_type: str) -> bool:
+    clean = _text(event_type)
+    return clean == "agent.replan.requested" or clean.endswith(".replan.requested")
+
+
+def _event_resolves_replan(payload: dict[str, Any]) -> bool:
+    return _text(payload.get("status") or payload.get("tool_status")).lower() in {
+        "completed",
+        "resolved",
+    }
 
 
 def _field(item: Any, key: str) -> Any:

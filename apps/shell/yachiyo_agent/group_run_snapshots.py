@@ -156,6 +156,13 @@ def group_run_snapshot_from_payload(
         created_at=_text(payload.get("created_at")),
         updated_at=_text(payload.get("updated_at")),
     )
+    runtime_execution_envelope = runtime_execution_envelope_with_status_overlay(
+        runtime_execution_envelope,
+        tool_calls=tool_calls,
+        approvals=pending_approvals,
+        replan_recoveries=replan_recoveries,
+        task_progress=task_progress,
+    )
     memory_traces = _group_run_memory_traces(runs, events)
     skill_traces = _group_run_skill_traces(runs, events)
     return GroupRunSnapshot(

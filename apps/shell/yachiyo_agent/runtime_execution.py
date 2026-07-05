@@ -28,6 +28,7 @@ _NON_EXECUTABLE_REQUEST_STATUSES = {
     "expired",
     "failed",
     "rejected",
+    "recovered",
     "skipped",
 }
 

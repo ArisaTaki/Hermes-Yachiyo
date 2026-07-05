@@ -35,6 +35,7 @@ _NON_RESUMABLE_REMAINING_REQUEST_STATUSES = {
     "expired",
     "failed",
     "rejected",
+    "recovered",
     "skipped",
 }
 

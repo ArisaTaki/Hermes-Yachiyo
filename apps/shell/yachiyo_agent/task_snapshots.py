@@ -262,6 +262,13 @@ def agent_task_snapshot_from_payload(
             updated_at=_text(payload.get("updated_at")),
         ),
     )
+    runtime_execution_envelope = runtime_execution_envelope_with_status_overlay(
+        runtime_execution_envelope,
+        tool_calls=tool_calls,
+        approvals=approvals,
+        replan_recoveries=replan_recoveries,
+        task_progress=task_progress,
+    )
     artifacts = artifact_snapshots_from_task_payload(
         payload,
         run_id=run_id,

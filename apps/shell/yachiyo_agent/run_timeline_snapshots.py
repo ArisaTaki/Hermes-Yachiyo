@@ -156,6 +156,14 @@ def run_timeline_snapshot_from_payload(
             updated_at=_text(payload.get("updated_at")),
         ),
     )
+    runtime_execution_envelope = runtime_execution_envelope_with_status_overlay(
+        runtime_execution_envelope,
+        tool_calls=tool_calls,
+        approvals=approvals,
+        pending_approval=pending_approval,
+        replan_recoveries=replan_recoveries,
+        task_progress=task_progress,
+    )
     memory_traces = memory_trace_snapshots_from_events(events)
     skill_traces = skill_trace_snapshots_from_events(events)
     artifacts = artifact_snapshots_from_timeline_payload(
