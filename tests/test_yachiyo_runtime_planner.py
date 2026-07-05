@@ -34234,6 +34234,41 @@ def test_runtime_execution_envelope_projects_decision_into_executable_requests()
     assert scoped_projected_requests[1]["workflow_node_label"] == "Export"
     assert scoped_projected_requests[1]["workflow_node_kind"] == "agent"
 
+    scoped_context_payload = (
+        runtime_execution_module.runtime_execution_envelope_payload_with_request_context(
+            envelope.model_dump(mode="json"),
+            {
+                "task_id": "task-1",
+                "run_id": "run-1",
+                "agent_id": "agent-1",
+                "group_run_id": "group-run-1",
+                "run_group_id": "group-run-1",
+                "group_id": "group-1",
+                "workflow_run_id": "workflow-run-1",
+                "workflow_id": "workflow-1",
+                "workflow_node_id": "node-export",
+                "workflow_node_label": "Export",
+                "workflow_node_kind": "agent",
+            },
+        )
+    )
+    scoped_context_envelope = RuntimeExecutionEnvelopeSnapshot.model_validate(
+        scoped_context_payload
+    )
+    task_context = scoped_context_envelope.task_core.workspace.context
+    assert task_context["task_id"] == "task-1"
+    assert task_context["run_id"] == "run-1"
+    assert task_context["agent_id"] == "agent-1"
+    assert task_context["group_run_id"] == "group-run-1"
+    assert task_context["workflow_run_id"] == "workflow-run-1"
+    assert task_context["workflow_node_label"] == "Export"
+    assert (
+        scoped_context_envelope.task_core.workspace.workspace_id
+        == envelope.task_core.workspace.workspace_id
+    )
+    assert scoped_context_envelope.requests[0].group_run_id == "group-run-1"
+    assert scoped_context_envelope.requests[0].workflow_node_label == "Export"
+
 
 def test_runtime_execution_envelope_targets_foreground_ui_actions() -> None:
     allowed_tools = [

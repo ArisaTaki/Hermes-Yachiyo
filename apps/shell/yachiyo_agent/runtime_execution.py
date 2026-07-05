@@ -100,17 +100,23 @@ def runtime_execution_envelope_payload_with_request_context(
 ) -> dict[str, Any]:
     payload = dict(envelope)
     request_context = _execution_request_context(context)
-    if not request_context:
+    task_workspace_context = _task_workspace_context(context)
+    if not request_context and not task_workspace_context:
         return payload
 
     requests = payload.get("requests")
-    if isinstance(requests, list):
+    if request_context and isinstance(requests, list):
         payload["requests"] = [
             _execution_request_with_context(request, request_context)
             if isinstance(request, Mapping)
             else request
             for request in requests
         ]
+    if task_workspace_context:
+        payload = _execution_envelope_task_core_with_context(
+            payload,
+            task_workspace_context,
+        )
     return payload
 
 
@@ -215,6 +221,20 @@ _EXECUTION_REQUEST_CONTEXT_KEYS = {
     "workflow_node_kind",
 }
 
+_TASK_WORKSPACE_CONTEXT_KEYS = {
+    "task_id",
+    "run_id",
+    "agent_id",
+    "group_run_id",
+    "run_group_id",
+    "group_id",
+    "workflow_run_id",
+    "workflow_id",
+    "workflow_node_id",
+    "workflow_node_label",
+    "workflow_node_kind",
+}
+
 
 def _execution_request_context(context: Mapping[str, Any] | None) -> dict[str, str]:
     if not isinstance(context, Mapping):
@@ -222,6 +242,16 @@ def _execution_request_context(context: Mapping[str, Any] | None) -> dict[str, s
     return {
         key: text
         for key in _EXECUTION_REQUEST_CONTEXT_KEYS
+        if (text := _text(context.get(key)))
+    }
+
+
+def _task_workspace_context(context: Mapping[str, Any] | None) -> dict[str, str]:
+    if not isinstance(context, Mapping):
+        return {}
+    return {
+        key: text
+        for key in _TASK_WORKSPACE_CONTEXT_KEYS
         if (text := _text(context.get(key)))
     }
 
@@ -235,6 +265,41 @@ def _execution_request_with_context(
         if not _text(payload.get(key)):
             payload[key] = value
     return payload
+
+
+def _execution_envelope_task_core_with_context(
+    envelope: Mapping[str, Any],
+    context: Mapping[str, str],
+) -> dict[str, Any]:
+    task_core = envelope.get("task_core")
+    if not isinstance(task_core, Mapping):
+        return dict(envelope)
+    workspace = task_core.get("workspace")
+    if not isinstance(workspace, Mapping):
+        return dict(envelope)
+    workspace_context = (
+        dict(workspace.get("context"))
+        if isinstance(workspace.get("context"), Mapping)
+        else {}
+    )
+    updated_context = {
+        **context,
+        **{
+            str(key): value
+            for key, value in workspace_context.items()
+            if str(key).strip()
+        },
+    }
+    return {
+        **dict(envelope),
+        "task_core": {
+            **dict(task_core),
+            "workspace": {
+                **dict(workspace),
+                "context": updated_context,
+            },
+        },
+    }
 
 
 def runtime_execution_requests_from_metadata(
