@@ -171,13 +171,20 @@ function launcherAgentTaskProgressChips(
   const pendingVerificationCount = progress?.pending_verification_count ?? 0;
   const executionEnvelope = task.runtime_execution_envelope || null;
   const executionRequestCount = executionEnvelope?.requests?.length || 0;
+  const executionRiskCounts = launcherAgentTaskRuntimeRiskCounts(task);
+  const executionRiskLabel = launcherAgentTaskRuntimeRiskLabel(executionRiskCounts);
   const chips: LauncherAgentTaskProgressChip[] = [];
 
   if (executionRequestCount > 0) {
     chips.push({
       kind: 'execution',
-      label: `exec ${executionRequestCount}`,
-      title: executionEnvelope?.requests?.map((request) => request.tool_name).filter(Boolean).join(' · ') || undefined,
+      label: executionRiskLabel
+        ? `exec ${executionRequestCount} ${executionRiskLabel}`
+        : `exec ${executionRequestCount}`,
+      title: [
+        executionEnvelope?.requests?.map((request) => request.tool_name).filter(Boolean).join(' · '),
+        launcherAgentTaskRuntimeRiskTitle(executionRiskCounts),
+      ].filter(Boolean).join(' · ') || undefined,
       tone: executionEnvelope?.approvals_required?.length ? 'warning' : 'running',
     });
   }
@@ -233,6 +240,28 @@ function launcherAgentTaskProgressChips(
     });
   }
   return chips.slice(0, Math.max(0, limit));
+}
+
+function launcherAgentTaskRuntimeRiskCounts(
+  task: AgentTaskSnapshot,
+): Array<[string, number]> {
+  const counts = new Map<string, number>();
+  for (const request of task.runtime_execution_envelope?.requests || []) {
+    const risk = String(request.risk_level || '').trim();
+    if (!risk) continue;
+    counts.set(risk, (counts.get(risk) || 0) + 1);
+  }
+  return ['high', 'medium', 'low']
+    .map((risk): [string, number] => [risk, counts.get(risk) || 0])
+    .filter(([, count]) => count > 0);
+}
+
+function launcherAgentTaskRuntimeRiskLabel(risks: Array<[string, number]>): string {
+  return risks[0]?.[0] || '';
+}
+
+function launcherAgentTaskRuntimeRiskTitle(risks: Array<[string, number]>): string {
+  return risks.map(([risk, count]) => `risk ${risk}:${count}`).join(' · ');
 }
 
 function launcherAgentTaskPlannerChips(
@@ -352,6 +381,8 @@ export function LauncherAgentTaskLight({
     currentTask,
     mode === 'bubble' ? 2 : variant === 'panel' ? 5 : 4,
   );
+  const runtimeRiskCounts = launcherAgentTaskRuntimeRiskCounts(currentTask);
+  const runtimeEnvelope = currentTask.runtime_execution_envelope || null;
   const progress = lightTask.task_progress || currentTask.task_progress || null;
   const plannerSummary = plannerSummaryFromTask(currentTask);
   const plannerChips = plannerSummary
@@ -388,6 +419,9 @@ export function LauncherAgentTaskLight({
       data-plan-missing-capabilities={plannerSummary?.missingCapabilities.join(',') || ''}
       data-plan-tools={plannerSummary?.tools.join(',') || ''}
       data-route-to-studio={plannerSummary ? plannerSummary.routeToStudio === null ? '' : String(plannerSummary.routeToStudio) : ''}
+      data-runtime-approval-count={runtimeEnvelope?.approvals_required?.length || 0}
+      data-runtime-request-count={runtimeEnvelope?.requests?.length || 0}
+      data-runtime-risk-levels={runtimeRiskCounts.map(([risk, count]) => `${risk}:${count}`).join(',')}
       data-task-progress-status={progress?.status || ''}
       data-task-needs-replan={String(progress?.needs_replan === true)}
       data-testid={testIds.light}
