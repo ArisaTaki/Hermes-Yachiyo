@@ -10172,6 +10172,11 @@ def _append_selected_discovered_foreground_compose_steps(
         "new_task",
     }:
         return
+    pending_action = discovered_app_pending_user_action(intent.user_goal)
+    if pending_action and (
+        click_target_hint(pending_action) or type_into_ui_hint(pending_action)
+    ):
+        return
     compose_text = str(intent.inputs.get("foreground_compose_text_hint") or "").strip()
     if not compose_text:
         return
@@ -10320,6 +10325,11 @@ def _append_selected_discovered_app_observation_step(
         if isinstance(inputs.get("ui_inspection_hint"), Mapping)
         else {}
     )
+    screen_capture = (
+        inputs.get("screen_capture_hint")
+        if isinstance(inputs.get("screen_capture_hint"), Mapping)
+        else {}
+    )
     needs_followup_observation = discovered_app_open_needs_model_followup(
         inputs,
         intent.user_goal,
@@ -10331,11 +10341,18 @@ def _append_selected_discovered_app_observation_step(
             or isinstance(inputs.get("creative_canvas_hint"), Mapping)
         ):
             return
-    if not ui_inspection and not needs_followup_observation:
-        return
     pending_action = discovered_app_pending_user_action(intent.user_goal)
+    click_target = click_target_hint(pending_action)
     if (
-        safe_shortcut_hint(pending_action)
+        not ui_inspection
+        and not screen_capture
+        and not needs_followup_observation
+        and not click_target
+    ):
+        return
+    if (
+        not click_target
+        and safe_shortcut_hint(pending_action)
         or safe_key_hint(pending_action)
         or safe_scroll_hint(pending_action)
         or safe_click_hint(pending_action)
@@ -10758,6 +10775,47 @@ def _append_selected_discovered_generic_action_steps(
         safe_shortcut = {}
     previous_step = depends_on
     planned_action = False
+    click_already_planned = False
+
+    if (
+        click_target
+        and (type_target or safe_type_text)
+        and _pending_action_click_precedes_type(pending_action)
+    ):
+        click_tool = _first_allowed(
+            (
+                "app.focus_and_click_ui_element",
+                "app.open_and_click_ui_element",
+                "desktop.click_ui_element",
+            ),
+            allowed,
+        )
+        if click_tool:
+            steps.append(
+                _step(
+                    intent,
+                    "operate-selected-discovered-app-ui",
+                    "Operate selected app UI",
+                    "desktop.ui_operation",
+                    click_tool,
+                    input_preview=_selected_discovered_app_operation_input(
+                        intent,
+                        click_tool,
+                        {**click_target, "limit": 80},
+                    ),
+                    depends_on=[previous_step],
+                    action="click",
+                    risk_level="medium",
+                    approval_required=True,
+                    reason=(
+                        "Click the requested visible control before typing the follow-up "
+                        "text in the runtime-resolved selected app."
+                    ),
+                )
+            )
+            previous_step = "operate-selected-discovered-app-ui"
+            planned_action = True
+            click_already_planned = True
 
     if safe_shortcut:
         shortcut_tool = _first_allowed(
@@ -11006,7 +11064,7 @@ def _append_selected_discovered_generic_action_steps(
             previous_step = "click-selected-discovered-app-point"
             planned_action = True
 
-    elif click_target and not type_target:
+    elif click_target and not click_already_planned:
         click_tool = _first_allowed(
             (
                 "app.focus_and_click_ui_element",
@@ -20525,6 +20583,23 @@ def _looks_like_clicking_create_control(text: str) -> bool:
             flags=re.IGNORECASE,
         )
     )
+
+
+def _pending_action_click_precedes_type(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    click_match = re.search(
+        r"(?:点击|点按|点一下|单击|按一下|按下|click|press|tap)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    type_match = re.search(
+        r"(?:输入|键入|填写|填入|写入|type|enter|fill)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    return bool(click_match and type_match and click_match.start() < type_match.start())
 
 
 def _foreground_paste_hint(text: str) -> bool:

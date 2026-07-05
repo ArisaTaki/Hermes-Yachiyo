@@ -3948,6 +3948,99 @@ def test_planner_adds_generic_discovered_app_followup_action_steps() -> None:
     assert plan_step_stages == ["discover", "operate", "discover", "operate", "verify"]
 
 
+def test_planner_sequences_selected_discovered_app_click_then_type() -> None:
+    prompt = "打开一个项目管理应用，点击新建任务按钮，然后输入登录失败"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "app.focus_and_click_ui_element",
+        "app.focus_and_safe_type_text",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "observe-selected-discovered-app",
+        "operate-selected-discovered-app-ui",
+        "type-selected-discovered-app-text",
+        "verify-selected-discovered-app-action",
+    ]
+    click = _step_by_id(decision, "operate-selected-discovered-app-ui")
+    assert click.tool_name == "app.focus_and_click_ui_element"
+    assert click.depends_on == ["observe-selected-discovered-app"]
+    assert click.input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "project management",
+        "target": "新建任务",
+        "role_filter": "button",
+        "click_count": 1,
+        "limit": 80,
+    }
+    typed = _step_by_id(decision, "type-selected-discovered-app-text")
+    assert typed.tool_name == "app.focus_and_safe_type_text"
+    assert typed.depends_on == ["operate-selected-discovered-app-ui"]
+    assert typed.input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "project management",
+        "text": "登录失败",
+    }
+    assert _step_by_id(decision, "verify-selected-discovered-app-action").depends_on == [
+        "type-selected-discovered-app-text"
+    ]
+
+
+def test_planner_sequences_selected_discovered_app_type_then_click() -> None:
+    prompt = "打开一个数据库工具，在搜索框输入 customers，然后点击 Search"
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.ui_elements",
+        "app.focus_and_type_into_ui_element",
+        "app.focus_and_click_ui_element",
+    ]
+    decision = RuntimePlanner().decision(prompt, allowed_tools=allowed_tools)
+
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "observe-selected-discovered-app",
+        "type-selected-discovered-app-ui",
+        "operate-selected-discovered-app-ui",
+        "verify-selected-discovered-app-action",
+    ]
+    typed = _step_by_id(decision, "type-selected-discovered-app-ui")
+    assert typed.tool_name == "app.focus_and_type_into_ui_element"
+    assert typed.depends_on == ["observe-selected-discovered-app"]
+    assert typed.input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "database",
+        "target": "搜索",
+        "text": "customers",
+        "role_filter": "text",
+        "limit": 80,
+    }
+    click = _step_by_id(decision, "operate-selected-discovered-app-ui")
+    assert click.tool_name == "app.focus_and_click_ui_element"
+    assert click.depends_on == ["type-selected-discovered-app-ui"]
+    assert click.input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "database",
+        "target": "Search",
+        "role_filter": "",
+        "click_count": 1,
+        "limit": 80,
+    }
+    assert _step_by_id(decision, "verify-selected-discovered-app-action").depends_on == [
+        "operate-selected-discovered-app-ui"
+    ]
+
+
 def test_planner_binds_discovered_app_hotkey_to_selected_app_without_dangling_observation() -> None:
     prompt = "打开一个能编辑图片的应用，然后按 Command+S"
     allowed_tools = [
