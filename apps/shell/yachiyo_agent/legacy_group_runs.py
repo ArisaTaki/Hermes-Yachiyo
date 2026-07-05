@@ -460,6 +460,12 @@ def _runtime_execution_request_candidates(
     allowed_tools = _member_allowed_tools(member)
     metadata = request.get("metadata") if isinstance(request.get("metadata"), Mapping) else {}
     candidates: list[list[dict[str, Any]]] = []
+    direct_requests = _allowed_direct_tool_requests(
+        request.get("direct_tool_requests"),
+        allowed_tools=allowed_tools,
+    )
+    if direct_requests:
+        candidates.append(direct_requests)
     top_level_requests = runtime_execution_requests_from_envelope_payload(
         request.get("runtime_execution_envelope"),
         allowed_tools=allowed_tools,
@@ -473,6 +479,33 @@ def _runtime_execution_request_candidates(
     if metadata_requests:
         candidates.append(metadata_requests)
     return candidates
+
+
+def _allowed_direct_tool_requests(
+    direct_tool_requests: Any,
+    *,
+    allowed_tools: list[str] | None,
+) -> list[dict[str, Any]]:
+    if not isinstance(direct_tool_requests, list):
+        return []
+    allowed = {
+        str(tool or "").strip()
+        for tool in allowed_tools or []
+        if str(tool or "").strip()
+    }
+    requests: list[dict[str, Any]] = []
+    for request in direct_tool_requests:
+        if not isinstance(request, Mapping):
+            continue
+        tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+        if not tool_name:
+            continue
+        if allowed and tool_name not in allowed:
+            continue
+        copied = dict(request)
+        copied["tool"] = tool_name
+        requests.append(copied)
+    return requests
 
 
 def _runtime_execution_request_with_group_context(

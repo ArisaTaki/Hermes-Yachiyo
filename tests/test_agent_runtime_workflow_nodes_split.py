@@ -242,6 +242,74 @@ def test_workflow_agent_node_execution_keeps_legacy_execute_callback_signature()
     assert calls == [("execute", "child_run:Previous result")]
 
 
+def test_workflow_agent_node_execution_prefers_explicit_direct_requests_over_envelope() -> None:
+    calls: list[dict[str, object]] = []
+    handoff = WorkflowAgentNodeHandoff.from_agent(
+        {"id": "research", "type": "agent"},
+        agent={
+            "agent_id": "agent_research",
+            "tool_policy": {"allowed_tools": ["app.open"], "approval_required": {}},
+        },
+        label="Research",
+        kind="agent",
+        step_task="Open Music.",
+        child_goal="Open Music from workflow.",
+        context="",
+        has_agent_upstream=False,
+    )
+    ports = WorkflowNodePortBundle(
+        insert_run=lambda **_kwargs: {"run_id": "child_run"},
+        execute_agent_run=lambda run_id, _agent, _goal, **kwargs: calls.append(
+            {
+                "run_id": run_id,
+                "direct_tool_requests": kwargs.get("direct_tool_requests"),
+            }
+        )
+        or {"run_id": run_id, "status": "completed", "result": "done"},
+        workflow_child_artifact_refs=lambda _run, _label: [],
+    )
+
+    WorkflowAgentNodeExecution.from_handoff(
+        object(),
+        handoff,
+        run_group_id="workflow_group",
+        workflow_run_id="workflow_run",
+        runtime_execution_envelope={
+            "requests": [
+                {
+                    "request_id": "from-envelope",
+                    "tool_name": "app.open",
+                    "input": {"app_name": "Notes"},
+                    "workflow_node_id": "research",
+                }
+            ],
+        },
+        direct_tool_requests=[
+            {
+                "request_id": "explicit",
+                "tool": "app.open",
+                "input": {"app_name": "Music"},
+            }
+        ],
+        direct_request_fallback_node_id="research",
+        ports=ports,
+    )
+
+    direct_requests = calls[0]["direct_tool_requests"]
+    assert direct_requests == [
+        {
+            "request_id": "explicit",
+            "tool": "app.open",
+            "input": {"app_name": "Music"},
+            "workflow_run_id": "workflow_run",
+            "workflow_node_id": "research",
+            "workflow_node_label": "Research",
+            "workflow_node_kind": "agent",
+            "agent_id": "agent_research",
+        }
+    ]
+
+
 def test_workflow_agent_node_execution_prepares_child_before_artifact_refs() -> None:
     calls: list[tuple[str, str]] = []
     handoff = WorkflowAgentNodeHandoff.from_agent(

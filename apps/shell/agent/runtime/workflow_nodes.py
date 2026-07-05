@@ -209,6 +209,12 @@ def _workflow_node_direct_tool_request_candidates(
     allowed_tools: list[str] | None,
 ) -> list[list[dict[str, Any]]]:
     candidates: list[list[dict[str, Any]]] = []
+    direct_requests = _allowed_direct_tool_requests(
+        direct_tool_requests,
+        allowed_tools=allowed_tools,
+    )
+    if direct_requests:
+        candidates.append(direct_requests)
     top_level_requests = runtime_execution_requests_from_envelope_payload(
         runtime_execution_envelope,
         allowed_tools=allowed_tools,
@@ -221,12 +227,6 @@ def _workflow_node_direct_tool_request_candidates(
     )
     if metadata_requests:
         candidates.append(metadata_requests)
-    direct_requests = _allowed_direct_tool_requests(
-        direct_tool_requests,
-        allowed_tools=allowed_tools,
-    )
-    if direct_requests:
-        candidates.append(direct_requests)
     return candidates
 
 
