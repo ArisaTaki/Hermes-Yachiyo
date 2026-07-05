@@ -25,7 +25,11 @@ from .legacy_group_orchestration import (
     normalized_group_mode as _normalized_group_mode,
 )
 from .legacy_runs import LegacyRunPayloadProjector
-from .planner_projection import planner_run_event_payloads, runtime_planner_decision
+from .planner_projection import (
+    planner_run_event_payloads,
+    runtime_planner_decision,
+    runtime_planner_metadata,
+)
 from .runtime_execution import runtime_execution_envelope_payload_with_request_context
 from .runtime_execution import runtime_execution_requests_from_envelope_payload
 from .runtime_execution import runtime_execution_requests_from_metadata
@@ -478,7 +482,40 @@ def _runtime_execution_request_candidates(
     )
     if metadata_requests:
         candidates.append(metadata_requests)
+    planner_requests = _runtime_planner_direct_requests(
+        request,
+        allowed_tools=allowed_tools,
+    )
+    if planner_requests:
+        candidates.append(planner_requests)
     return candidates
+
+
+def _runtime_planner_direct_requests(
+    request: Mapping[str, Any],
+    *,
+    allowed_tools: list[str] | None,
+) -> list[dict[str, Any]]:
+    objective = _group_planning_context(
+        request,
+        str(request.get("objective") or request.get("goal") or "").strip(),
+    )
+    if not objective:
+        return []
+    metadata = request.get("metadata") if isinstance(request.get("metadata"), Mapping) else {}
+    decision = runtime_planner_decision(
+        objective,
+        allowed_tools=allowed_tools,
+        metadata=metadata,
+    )
+    planner_metadata = runtime_planner_metadata(
+        decision,
+        allowed_tools=allowed_tools,
+    )
+    return runtime_execution_requests_from_metadata(
+        planner_metadata,
+        allowed_tools=allowed_tools,
+    )
 
 
 def _allowed_direct_tool_requests(

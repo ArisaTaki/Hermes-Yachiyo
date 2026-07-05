@@ -223,6 +223,16 @@ def test_legacy_group_run_inherits_builtin_desktop_policy_for_member_runs(
         "browser.click": True,
         "browser.type_text": True,
     }
+    assert [request["tool"] for request in create_call["direct_tool_requests"]] == [
+        "desktop.list_apps",
+        "app.open",
+        "screen.capture",
+    ]
+    first_direct_request = create_call["direct_tool_requests"][0]
+    assert first_direct_request["source"] == "runtime_planner"
+    assert first_direct_request["group_id"] == group["group_id"]
+    assert first_direct_request["agent_id"] == "agent-reviewer"
+    assert first_direct_request["group_member_index"] == 0
     assert started["participants"][0]["inherited_tool_policy_id"] == "desktop_execution"
     assert member_started["payload"]["inherited_tool_policy_id"] == "desktop_execution"
     assert member_started["payload"]["member_allowed_tools"] == allowed_tools
