@@ -1266,6 +1266,16 @@ def test_direct_daily_desktop_result_includes_safe_replan_deferred_verification(
     )
     assert completed["tools"] == ["app.open", "desktop.active_window"]
     assert completed["summary"] == "已打开 PixelForge。"
+    assert completed["verification_status"] == "verified"
+    assert completed["verification_tool"] == "desktop.active_window"
+    assert completed["expected_app_name"] == "PixelForge"
+    assert completed["active_app_name"] == "PixelForge"
+    assert completed["focus_verified"] is True
+    assert completed["verification_target"] == {"app_name": "PixelForge"}
+    assert completed["verification_evidence"]["verification_status"] == "verified"
+    assert completed["verification_evidence"]["verification_result"]["app_name"] == (
+        "PixelForge"
+    )
 
 
 def test_direct_daily_desktop_result_waits_when_replan_deferred_verification_fails() -> None:

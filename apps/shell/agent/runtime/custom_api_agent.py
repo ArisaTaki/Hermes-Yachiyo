@@ -3880,6 +3880,10 @@ class RuntimeCustomApiAgentLoop:
             "steps": completed_steps,
             "summary": summary,
         }
+        verification_evidence = _desktop_intent_verification_evidence(completed_steps)
+        if verification_evidence:
+            event_payload.update(verification_evidence)
+            event_payload["verification_evidence"] = verification_evidence
         if len(planning_reasons) == 1:
             event_payload["planning_reason"] = next(iter(planning_reasons))
         event_payload.update(_step_observability_metadata(last_step))
@@ -11739,6 +11743,7 @@ def _request_observability_metadata(request: Mapping[str, Any]) -> dict[str, Any
         "action_target",
         "observation_evidence",
         "observation_retry",
+        "verification_target",
         "deferred_input",
         "deferred_context",
     ):
@@ -12270,6 +12275,135 @@ def _direct_sequence_requests_with_safe_deferred_continuations(
             )
             expanded.append(next_request)
     return expanded
+
+
+def _desktop_intent_verification_evidence(
+    completed_steps: Iterable[Mapping[str, Any]],
+) -> dict[str, Any]:
+    for step in reversed([item for item in completed_steps if isinstance(item, Mapping)]):
+        tool_name = str(step.get("tool") or "").strip()
+        if tool_name not in _DAILY_DESKTOP_VERIFY_TOOLS:
+            continue
+        result = step.get("result") if isinstance(step.get("result"), Mapping) else {}
+        if not result:
+            continue
+        status = _desktop_verification_status(result)
+        if not status:
+            continue
+        evidence: dict[str, Any] = {
+            "verification_status": status,
+            "verification_tool": tool_name,
+            "verification_result": _desktop_verification_result_preview(result),
+        }
+        for key in (
+            "step_id",
+            "planner_step_id",
+            "replan_request_id",
+            "replan_trigger",
+            "target_app_name",
+            "target_app_query",
+            "target_search_text",
+        ):
+            value = step.get(key)
+            if value not in (None, "", [], {}):
+                evidence[key] = value
+        verification_target = (
+            step.get("verification_target")
+            if isinstance(step.get("verification_target"), Mapping)
+            else {}
+        )
+        if verification_target:
+            evidence["verification_target"] = dict(verification_target)
+        if tool_name == "desktop.active_window":
+            evidence.update(
+                _active_window_verification_evidence(
+                    step,
+                    result,
+                    verification_target=verification_target,
+                )
+            )
+        return {key: value for key, value in evidence.items() if value not in ("", [], {})}
+    return {}
+
+
+def _desktop_verification_status(result: Mapping[str, Any]) -> str:
+    if result.get("approval_required"):
+        return "waiting_approval"
+    if result.get("verification_failed") is True:
+        return "verification_failed"
+    if result.get("ok") is True:
+        return "verified"
+    if result.get("ok") is False:
+        return "verification_failed"
+    return ""
+
+
+def _desktop_verification_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    preview: dict[str, Any] = {}
+    for key in (
+        "ok",
+        "action",
+        "summary",
+        "error",
+        "hint",
+        "verification_failed",
+        "blocking_condition",
+        "expected_app_name",
+        "active_app_name",
+    ):
+        value = result.get(key)
+        if value not in (None, "", [], {}):
+            preview[key] = value
+    for key in ("app_name", "title", "frontmost_app", "frontmost_app_name"):
+        value = data.get(key)
+        if value not in (None, "", [], {}):
+            preview[key] = value
+    return preview
+
+
+def _active_window_verification_evidence(
+    step: Mapping[str, Any],
+    result: Mapping[str, Any],
+    *,
+    verification_target: Mapping[str, Any],
+) -> dict[str, Any]:
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    expected_app_name = _first_nonempty_text(
+        verification_target.get("app_name"),
+        verification_target.get("target_app_name"),
+        verification_target.get("expected_app_name"),
+        step.get("target_app_name"),
+        result.get("expected_app_name"),
+        data.get("expected_app_name"),
+    )
+    active_app_name = _first_nonempty_text(
+        result.get("active_app_name"),
+        data.get("active_app_name"),
+        data.get("app_name"),
+        result.get("app_name"),
+        data.get("frontmost_app"),
+        data.get("frontmost_app_name"),
+    )
+    evidence = {
+        "expected_app_name": expected_app_name,
+        "active_app_name": active_app_name,
+        "active_window_title": _first_nonempty_text(data.get("title"), result.get("title")),
+    }
+    if expected_app_name and active_app_name:
+        evidence["focus_verified"] = _replan_app_names_match(
+            expected_app_name,
+            active_app_name,
+        )
+    return {key: value for key, value in evidence.items() if value not in ("", [], {})}
+
+
+def _first_nonempty_text(*values: Any) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
 
 
 def _split_model_materialization_tool_requests(
