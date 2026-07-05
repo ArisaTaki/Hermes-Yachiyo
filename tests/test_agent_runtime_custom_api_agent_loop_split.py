@@ -1278,6 +1278,118 @@ def test_direct_daily_desktop_result_includes_safe_replan_deferred_verification(
     )
 
 
+def test_direct_daily_desktop_result_surfaces_ui_target_verification_evidence() -> None:
+    loop = _private_runtime_loop()
+    requests = [
+        {
+            "tool": "app.open_and_click_ui_element",
+            "input": {
+                "app_name": "PixelForge",
+                "target": "登录",
+                "role_filter": "button",
+            },
+            "source": "runtime_planner",
+            "planning_reason": "planner_desktop_operation",
+            "replan_request_id": "replan-ui",
+            "followup_target": {
+                "kind": "desktop_observed_action",
+                "target": "登录",
+                "role_filter": "button",
+                "app_name": "PixelForge",
+            },
+            "deferred_continuation": [
+                {
+                    "tool": "desktop.ui_elements",
+                    "input": {
+                        "app_name": "PixelForge",
+                        "role_filter": "button",
+                        "limit": 80,
+                    },
+                }
+            ],
+        }
+    ]
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.open_and_click_ui_element",
+            input_preview={
+                "app_name": "PixelForge",
+                "target": "登录",
+                "role_filter": "button",
+            },
+            result={
+                "ok": True,
+                "data": {
+                    "app_name": "PixelForge",
+                    "matched_label": "登录",
+                    "x": 120,
+                    "y": 220,
+                },
+            },
+            replan_request_id="replan-ui",
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            input_preview={
+                "app_name": "PixelForge",
+                "role_filter": "button",
+                "limit": 80,
+            },
+            result={
+                "ok": True,
+                "data": {
+                    "app_name": "PixelForge",
+                    "elements": [
+                        {
+                            "role": "AXButton",
+                            "name": "登录",
+                            "enabled": True,
+                            "center": {"x": 120, "y": 220},
+                            "depth": 2,
+                        },
+                        {
+                            "role": "AXStaticText",
+                            "name": "欢迎",
+                            "enabled": True,
+                            "center": {"x": 50, "y": 80},
+                        },
+                    ],
+                },
+            },
+            replan_request_id="replan-ui",
+            planning_reason="planner_replan_deferred_continuation",
+        ),
+    ]
+
+    result = loop._direct_daily_desktop_sequence_result(
+        requests,
+        timeline,
+        tool_timeline_start=0,
+    )
+
+    assert result
+    completed = next(
+        event for event in timeline if event["event"] == "agent.desktop.intent_completed"
+    )
+    assert completed["tools"] == [
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert completed["verification_status"] == "verified"
+    assert completed["verification_tool"] == "desktop.ui_elements"
+    assert completed["ui_app_name"] == "PixelForge"
+    assert completed["ui_target"] == "登录"
+    assert completed["ui_role_filter"] == "button"
+    assert completed["ui_element_count"] == 2
+    assert completed["ui_target_found"] is True
+    assert completed["ui_match_count"] == 1
+    assert completed["ui_matches"][0]["name"] == "登录"
+    assert completed["ui_matches"][0]["center"] == {"x": 120, "y": 220}
+    assert completed["verification_evidence"]["ui_target_found"] is True
+
+
 def test_direct_daily_desktop_result_waits_when_replan_deferred_verification_fails() -> None:
     loop = _private_runtime_loop()
     requests = [

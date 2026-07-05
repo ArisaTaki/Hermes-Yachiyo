@@ -12322,6 +12322,15 @@ def _desktop_intent_verification_evidence(
                     verification_target=verification_target,
                 )
             )
+        if tool_name in {"desktop.read_ui", "desktop.ui_elements"}:
+            evidence.update(
+                _ui_observation_verification_evidence(
+                    step,
+                    result,
+                    tool_name=tool_name,
+                    verification_target=verification_target,
+                )
+            )
         return {key: value for key, value in evidence.items() if value not in ("", [], {})}
     return {}
 
@@ -12396,6 +12405,110 @@ def _active_window_verification_evidence(
             active_app_name,
         )
     return {key: value for key, value in evidence.items() if value not in ("", [], {})}
+
+
+def _ui_observation_verification_evidence(
+    step: Mapping[str, Any],
+    result: Mapping[str, Any],
+    *,
+    tool_name: str,
+    verification_target: Mapping[str, Any],
+) -> dict[str, Any]:
+    target = _ui_observation_verification_target(step, verification_target)
+    target_text = _first_nonempty_text(
+        target.get("target"),
+        target.get("target_search_text"),
+        target.get("target_label"),
+        target.get("ui_target"),
+        target.get("element_name"),
+        target.get("name"),
+    )
+    role_filter = _first_nonempty_text(target.get("role_filter"), target.get("role"))
+    data = result.get("data") if isinstance(result.get("data"), Mapping) else {}
+    app_name = _first_nonempty_text(
+        _observed_action_app_name(target),
+        step.get("target_app_name"),
+        data.get("app_name"),
+    )
+    elements = _desktop_observation_result_elements(tool_name, result)
+    evidence: dict[str, Any] = {
+        "ui_element_count": len(elements),
+    }
+    if app_name:
+        evidence["ui_app_name"] = app_name
+    if target_text:
+        evidence["ui_target"] = target_text
+    if role_filter:
+        evidence["ui_role_filter"] = role_filter
+    if target_text:
+        ordinal = _observed_desktop_target_ordinal(target_text)
+        if ordinal:
+            matches = _ordinal_observed_desktop_elements(elements, ordinal, role_filter)
+        else:
+            matches = _matching_observed_desktop_elements(elements, target_text, role_filter)
+        evidence["ui_target_found"] = bool(matches)
+        evidence["ui_match_count"] = len(matches)
+        if matches:
+            evidence["ui_matches"] = [
+                _compact_ui_observation_match(match)
+                for match in matches[:3]
+            ]
+    return {key: value for key, value in evidence.items() if value not in ("", [], {})}
+
+
+def _ui_observation_verification_target(
+    step: Mapping[str, Any],
+    verification_target: Mapping[str, Any],
+) -> dict[str, Any]:
+    target: dict[str, Any] = {}
+    for source in (
+        step.get("followup_target"),
+        step.get("action_target"),
+        step.get("input_preview"),
+        verification_target,
+    ):
+        if not isinstance(source, Mapping):
+            continue
+        for key in (
+            "kind",
+            "target",
+            "target_search_text",
+            "target_label",
+            "ui_target",
+            "element_name",
+            "name",
+            "role_filter",
+            "role",
+            "app_name",
+            "target_app_name",
+            "app_query",
+            "target_app_query",
+        ):
+            value = source.get(key)
+            if value not in (None, "", [], {}) and key not in target:
+                target[key] = value
+    return target
+
+
+def _compact_ui_observation_match(element: Mapping[str, Any]) -> dict[str, Any]:
+    payload: dict[str, Any] = {}
+    for key in ("role", "subrole", "name", "description", "value", "label"):
+        value = _compact_ui_observation_text(element.get(key))
+        if value:
+            payload[key] = value
+    center = element.get("center") if isinstance(element.get("center"), Mapping) else {}
+    if center.get("x") is not None and center.get("y") is not None:
+        payload["center"] = {"x": center.get("x"), "y": center.get("y")}
+    if isinstance(element.get("enabled"), bool):
+        payload["enabled"] = bool(element.get("enabled"))
+    return payload
+
+
+def _compact_ui_observation_text(value: Any, *, limit: int = 120) -> str:
+    text = re.sub(r"\s+", " ", str(value or "").strip())
+    if len(text) <= limit:
+        return text
+    return f"{text[: max(0, limit - 1)].rstrip()}..."
 
 
 def _first_nonempty_text(*values: Any) -> str:
