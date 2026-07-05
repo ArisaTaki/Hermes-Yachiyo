@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 
 import type { ApprovalCardSnapshot } from '../types';
+import { runtimeAnchorId } from '../runtimeAnchors';
 import {
   approvalPreviewRecord,
   approvalPreviewTarget,
@@ -88,9 +89,11 @@ export function RuntimeApprovalCard({
     : approval.title || toolName;
   const metadata = variant === 'inspector' ? approvalMetadataItems(approval, toolName) : [];
   const reason = variant === 'inspector' ? approvalReasonText(approval, toolName, preview) : '';
+  const anchorId = actions ? '' : runtimeAnchorId('approval', approval.approval_id);
   return (
     <div
       className={className}
+      id={anchorId || undefined}
       data-approval-id={approval.approval_id}
       data-approval-capability-id={approval.capability_id || ''}
       data-approval-decision-id={approval.decision_id || ''}
@@ -109,6 +112,9 @@ export function RuntimeApprovalCard({
       data-approval-source-run-id={approval.source_run_id || ''}
       data-approval-status={status}
       data-approval-step-id={approval.step_id || approval.planner_step_id || ''}
+      data-runtime-anchor={anchorId}
+      data-runtime-anchor-kind="approval"
+      data-runtime-anchor-value={approval.approval_id}
       data-approval-task-verification-target-count={taskVerificationTargets.length}
       data-approval-task-workspace-item-count={taskWorkspaceItems.length}
       data-approval-replan-request-id={approval.replan_request_id || ''}

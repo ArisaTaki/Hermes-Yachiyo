@@ -1,4 +1,5 @@
 import type { RuntimeExecutionRequestSnapshot } from '../types';
+import { runtimeAnchorId, runtimeAnchorSelector, type RuntimeAnchorKind } from '../runtimeAnchors';
 
 export type RuntimeRequestReplayEvidenceSnapshot = {
   eventIds: string[];
@@ -62,20 +63,12 @@ export function RuntimeRequestReplayEvidencePanel({
       data-verification-step-id={evidence.verificationStepId}
       data-testid={testId}
     >
-      {evidence.toolCallPreview ? (
-        <span data-runtime-request-evidence-kind="tool-call">tool calls · {evidence.toolCallPreview}</span>
-      ) : null}
-      {evidence.approvalPreview ? (
-        <span data-runtime-request-evidence-kind="approval">approvals · {evidence.approvalPreview}</span>
-      ) : null}
-      {evidence.eventPreview ? (
-        <span data-runtime-request-evidence-kind="event">events · {evidence.eventPreview}</span>
-      ) : null}
-      {evidence.artifactPathPreview ? (
-        <span data-runtime-request-evidence-kind="artifact">artifacts · {evidence.artifactPathPreview}</span>
-      ) : null}
-      {evidence.artifactIdPreview && !evidence.artifactPathPreview ? (
-        <span data-runtime-request-evidence-kind="artifact-id">artifact ids · {evidence.artifactIdPreview}</span>
+      <RuntimeRequestEvidenceTarget kind="tool-call" label="tool calls" values={evidence.toolCallIds} />
+      <RuntimeRequestEvidenceTarget kind="approval" label="approvals" values={evidence.approvalIds} />
+      <RuntimeRequestEvidenceTarget kind="event" label="events" values={evidence.eventIds} />
+      <RuntimeRequestEvidenceTarget kind="artifact-path" label="artifacts" values={evidence.artifactPaths} />
+      {!evidence.artifactPaths.length ? (
+        <RuntimeRequestEvidenceTarget kind="artifact" label="artifact ids" values={evidence.artifactIds} />
       ) : null}
       {evidence.verificationStatus ? (
         <span data-runtime-request-evidence-kind="verification-status">
@@ -96,6 +89,31 @@ export function RuntimeRequestReplayEvidencePanel({
         </span>
       ) : null}
     </div>
+  );
+}
+
+function RuntimeRequestEvidenceTarget({
+  kind,
+  label,
+  values,
+}: {
+  kind: RuntimeAnchorKind;
+  label: string;
+  values: string[];
+}) {
+  const preview = previewIds(values);
+  const primary = values[0] || '';
+  if (!preview) return null;
+  return (
+    <span
+      data-runtime-request-evidence-kind={kind}
+      data-runtime-target-anchor={runtimeAnchorId(kind, primary)}
+      data-runtime-target-kind={kind}
+      data-runtime-target-selector={runtimeAnchorSelector(kind, primary)}
+      data-runtime-target-value={primary}
+    >
+      {label} · {preview}
+    </span>
   );
 }
 

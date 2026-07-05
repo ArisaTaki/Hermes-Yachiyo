@@ -1,4 +1,5 @@
 import { ExpandableRuntimeContent } from './ExpandableRuntimeContent';
+import { runtimeAnchorId } from '../runtimeAnchors';
 
 export type RuntimeTimelineEventRecord = Record<string, unknown>;
 
@@ -55,6 +56,8 @@ export function RuntimeTimelineEventList({
         const eventSequence = defaultEventSequence(event);
         const eventId = defaultEventId(event);
         const eventRunId = defaultEventRunId(event);
+        const eventIdentity = eventId || (eventSequence && eventName ? `${eventSequence}:${eventName}` : eventSequence);
+        const eventAnchorId = runtimeAnchorId('event', eventIdentity);
         const eventIsSecret = defaultEventIsSecret(event);
         const eventTitle = eventIsSecret ? defaultSecretEventTitle(event) : getEventTitle(event);
         const detail = eventIsSecret ? '' : getEventDetail(event);
@@ -86,10 +89,12 @@ export function RuntimeTimelineEventList({
           return (
             <li
               className={`run-execution-step ${eventTone}`}
+              id={eventAnchorId || undefined}
               data-child-run-id={childRunId || ''}
               data-run-event={eventName}
               data-run-event-actor={defaultEventActor(event)}
               data-run-event-id={eventId}
+              data-run-event-identity={eventIdentity}
               data-run-event-run-id={eventRunId}
               data-run-event-sequence={eventSequence}
               data-run-event-sensitivity={defaultEventSensitivity(event)}
@@ -129,6 +134,9 @@ export function RuntimeTimelineEventList({
               data-run-event-workflow-id={traceContext.workflowId}
               data-run-event-workflow-node-id={traceContext.workflowNodeId}
               data-run-event-workflow-run-id={traceContext.workflowRunId}
+              data-runtime-anchor={eventAnchorId}
+              data-runtime-anchor-kind="event"
+              data-runtime-anchor-value={eventIdentity}
               data-testid={eventTestId}
               key={`${eventName || 'event'}-${index}`}
             >
@@ -202,11 +210,16 @@ export function RuntimeTimelineEventList({
         }
         return (
           <li
+            id={eventAnchorId || undefined}
             data-run-event={eventName}
             data-run-event-id={eventId}
+            data-run-event-identity={eventIdentity}
             data-run-event-run-id={eventRunId}
             data-run-event-sequence={eventSequence}
             data-run-event-status={eventStatus}
+            data-runtime-anchor={eventAnchorId}
+            data-runtime-anchor-kind="event"
+            data-runtime-anchor-value={eventIdentity}
             data-testid={eventTestId}
             key={eventId || `${eventName}-${eventSequence || index}`}
           >

@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react';
 
 import type { ArtifactSnapshot } from '../types';
+import { runtimeAnchorId } from '../runtimeAnchors';
 
 export type RuntimeArtifactSnapshot = Pick<
   ArtifactSnapshot,
@@ -74,9 +75,13 @@ export function RuntimeArtifactPreview({
 }) {
   const label = artifact.title || artifact.path || artifact.kind || 'Artifact';
   const metadata = variant === 'full' ? artifactMetadataItems(artifact) : [];
+  const anchorValue = artifact.artifact_id || artifact.path || '';
+  const anchorKind = artifact.artifact_id ? 'artifact' : 'artifact-path';
+  const anchorId = runtimeAnchorId(anchorKind, anchorValue);
   return (
     <Component
       className={className}
+      id={anchorId || undefined}
       data-artifact-id={artifact.artifact_id}
       data-artifact-group-id={artifact.group_id || ''}
       data-artifact-group-run-id={artifact.group_run_id || ''}
@@ -101,6 +106,9 @@ export function RuntimeArtifactPreview({
       data-artifact-workflow-id={artifact.workflow_id || ''}
       data-artifact-workflow-node-id={artifact.workflow_node_id || ''}
       data-artifact-workflow-run-id={artifact.workflow_run_id || ''}
+      data-runtime-anchor={anchorId}
+      data-runtime-anchor-kind={anchorKind}
+      data-runtime-anchor-value={anchorValue}
       data-testid={testId}
       title={artifact.path || label}
     >

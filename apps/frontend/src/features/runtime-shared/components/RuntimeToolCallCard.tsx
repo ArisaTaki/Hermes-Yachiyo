@@ -13,6 +13,7 @@ import {
   type RuntimeToolRecoveryAction,
 } from '../toolRecoveryActions';
 import { runtimeToolRecoveryHintsFromRecords } from '../toolRecoveryHints';
+import { runtimeAnchorId } from '../runtimeAnchors';
 import { ExpandableRuntimeContent } from './ExpandableRuntimeContent';
 
 export type RuntimeToolCallCardSnapshot = {
@@ -118,9 +119,11 @@ export function RuntimeToolCallCard({
   const desktopLoop = runtimeToolTraceRecord(toolCall, 'desktop_loop');
   const deferredContinuation = runtimeToolTraceRecordList(toolCall, 'deferred_continuation');
   const metadata = toolCallMetadataItems(toolCall);
+  const anchorId = runtimeAnchorId('tool-call', toolCall.tool_call_id);
   return (
     <div
       className={className}
+      id={anchorId || undefined}
       data-approval-id={toolCall.approval_id || ''}
       data-blocking-conditions={blockingConditions.join(',')}
       data-deferred-continuation-count={deferredContinuation.length}
@@ -150,6 +153,9 @@ export function RuntimeToolCallCard({
       data-runtime-app-resolution-match-source={runtimeToolTraceString(toolCall, 'app_resolution_matched_name_source')}
       data-source-runnable-id={toolCall.source_runnable_id || ''}
       data-source-run-id={toolCall.source_run_id || ''}
+      data-runtime-anchor={anchorId}
+      data-runtime-anchor-kind="tool-call"
+      data-runtime-anchor-value={toolCall.tool_call_id}
       data-task-verification-target-count={taskVerificationTargets.length}
       data-task-workspace-item-count={taskWorkspaceItems.length}
       data-testid={testId}
