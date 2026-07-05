@@ -205,7 +205,13 @@ def _legacy_compatible_simple_entrypoint_requests(
 _LEGACY_COMPATIBLE_SIMPLE_PLANNER_TOOLS = frozenset(
     {
         "app.focus",
+        "app.focus_and_safe_key",
+        "app.focus_and_safe_scroll",
+        "app.focus_and_safe_shortcut",
         "app.open",
+        "app.open_and_safe_key",
+        "app.open_and_safe_scroll",
+        "app.open_and_safe_shortcut",
         "app.status",
         "browser.open_url",
         "desktop.open_path",
@@ -221,6 +227,8 @@ def _legacy_compatible_simple_request(text: str, request: Mapping[str, Any]) -> 
         return True
     if tool_name == "browser.open_url":
         return _legacy_compatible_browser_open_request(text, request)
+    if tool_name in _LEGACY_COMPATIBLE_APP_ACTION_TOOLS:
+        return _legacy_compatible_app_action_request(request)
     if tool_name == "app.status":
         payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
         return bool(str(payload.get("app_name") or "").strip())
@@ -235,6 +243,79 @@ def _legacy_compatible_simple_request(text: str, request: Mapping[str, Any]) -> 
     return not _app_prompt_has_non_launch_followup(text)
 
 
+_LEGACY_COMPATIBLE_APP_ACTION_TOOLS = frozenset(
+    {
+        "app.focus_and_safe_key",
+        "app.focus_and_safe_scroll",
+        "app.focus_and_safe_shortcut",
+        "app.open_and_safe_key",
+        "app.open_and_safe_scroll",
+        "app.open_and_safe_shortcut",
+    }
+)
+
+_LEGACY_COMPATIBLE_APP_ACTIONS = frozenset(
+    {
+        "copy",
+        "escape",
+        "find",
+        "finder_get_info",
+        "focus_address_bar",
+        "new_event",
+        "new_message",
+        "new_note",
+        "new_private_window",
+        "new_reminder",
+        "open_devtools",
+        "parent_folder",
+        "rename_selected",
+        "show_history",
+        "tab",
+    }
+)
+
+_LEGACY_COMPATIBLE_NEW_MESSAGE_APPS = frozenset(
+    {"Mail", "Messages", "Microsoft Outlook", "Slack", "WeChat"}
+)
+
+_LEGACY_COMPATIBLE_CREATION_ACTION_APPS = {
+    "new_event": "Calendar",
+    "new_note": "Notes",
+    "new_reminder": "Reminders",
+}
+
+_LEGACY_COMPATIBLE_FINDER_ACTIONS = frozenset(
+    {"copy", "finder_get_info", "parent_folder", "rename_selected"}
+)
+
+
+def _legacy_compatible_app_action_request(request: Mapping[str, Any]) -> bool:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    app_name = str(payload.get("app_name") or "").strip()
+    if not app_name or _generic_non_app_name(app_name):
+        return False
+    action = str(
+        payload.get("action")
+        or payload.get("direction")
+        or ""
+    ).strip()
+    if not action:
+        return False
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name.endswith("_safe_scroll"):
+        return action in {"down", "left", "right", "up"}
+    if action not in _LEGACY_COMPATIBLE_APP_ACTIONS:
+        return False
+    if action in _LEGACY_COMPATIBLE_FINDER_ACTIONS:
+        return False
+    if action == "new_message":
+        return app_name in _LEGACY_COMPATIBLE_NEW_MESSAGE_APPS
+    expected_creation_app = _LEGACY_COMPATIBLE_CREATION_ACTION_APPS.get(action)
+    if expected_creation_app:
+        return app_name == expected_creation_app
+    return True
+
+
 def _generic_non_app_name(app_name: str) -> bool:
     compact = re.sub(r"\s+", "", str(app_name or "").strip().lower())
     return compact in {
@@ -242,9 +323,15 @@ def _generic_non_app_name(app_name: str) -> bool:
         "repo",
         "repository",
         "workspace",
+        "leave",
+        "privatewindow",
+        "incognitowindow",
         "项目",
         "仓库",
         "工作区",
+        "私密窗口",
+        "无痕窗口",
+        "隐身窗口",
     }
 
 

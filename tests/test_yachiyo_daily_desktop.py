@@ -2227,6 +2227,62 @@ def test_daily_desktop_entrypoint_requests_use_planner_for_direct_browser_naviga
         assert daily_desktop_entrypoint_requests(prompt) == expected
 
 
+def test_daily_desktop_entrypoint_requests_use_planner_for_safe_app_actions(monkeypatch) -> None:
+    def fail_legacy(*_args, **_kwargs):
+        raise AssertionError("legacy desktop parser should not own compatible app-scoped actions")
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.daily_desktop.daily_desktop_entrypoint_tool_requests",
+        fail_legacy,
+    )
+
+    cases = (
+        (
+            "Chrome 新建无痕窗口",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus_and_safe_shortcut",
+                    "input": {"app_name": "Google Chrome", "action": "new_private_window"},
+                },
+            ],
+        ),
+        (
+            "在 Slack 里按 Tab",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus_and_safe_key",
+                    "input": {"app_name": "Slack", "action": "tab", "repeat_count": 1},
+                },
+            ],
+        ),
+        (
+            "在 Slack 里向下滚动两页",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus_and_safe_scroll",
+                    "input": {"app_name": "Slack", "direction": "down", "pages": 2},
+                },
+            ],
+        ),
+        (
+            "Slack 新建消息",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "app.focus_and_safe_shortcut",
+                    "input": {"app_name": "Slack", "action": "new_message"},
+                },
+            ],
+        ),
+    )
+
+    for prompt, expected in cases:
+        assert daily_desktop_entrypoint_requests(prompt) == expected
+
+
 def test_planner_first_daily_desktop_entrypoint_verifies_simple_media_playback() -> None:
     requests = planner_first_daily_desktop_entrypoint_requests(
         "能帮我播放 Apple Music 吗",
