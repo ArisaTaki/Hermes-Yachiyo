@@ -15655,7 +15655,8 @@ button.studio-tool-permission:disabled {
   flex-basis: 100%;
 }
 
-.runtime-recovery-evidence-panel span {
+.runtime-recovery-evidence-panel span,
+.runtime-recovery-evidence-panel button {
   display: inline-flex;
   max-width: 100%;
   padding: 3px 7px;
@@ -15663,15 +15664,34 @@ button.studio-tool-permission:disabled {
   border-radius: 999px;
   background: oklch(255 0 0 / 0.022);
   color: var(--hy-muted);
+  font-family: inherit;
   font-size: 10.5px;
   line-height: 1.35;
   overflow-wrap: anywhere;
+}
+
+.runtime-recovery-evidence-panel button {
+  cursor: pointer;
+  text-align: left;
+}
+
+.runtime-recovery-evidence-panel button:hover,
+.runtime-recovery-evidence-panel button:focus-visible {
+  border-color: var(--hy-accent);
+  color: var(--hy-text);
+  outline: none;
 }
 
 .runtime-recovery-evidence-panel span.missing {
   border-color: oklch(76% 0.12 86 / 0.36);
   background: oklch(76% 0.12 86 / 0.12);
   color: oklch(84% 0.13 86);
+}
+
+[data-runtime-anchor-active="true"] {
+  outline: 2px solid var(--hy-accent);
+  outline-offset: 3px;
+  scroll-margin: 96px;
 }
 
 .studio-tool-schema-property-list {

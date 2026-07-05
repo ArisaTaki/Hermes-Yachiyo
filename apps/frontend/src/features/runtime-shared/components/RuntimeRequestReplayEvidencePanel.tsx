@@ -104,17 +104,55 @@ function RuntimeRequestEvidenceTarget({
   const preview = previewIds(values);
   const primary = values[0] || '';
   if (!preview) return null;
+  const targetAnchor = runtimeAnchorId(kind, primary);
+  const targetSelector = runtimeAnchorSelector(kind, primary);
   return (
-    <span
+    <button
+      type="button"
       data-runtime-request-evidence-kind={kind}
-      data-runtime-target-anchor={runtimeAnchorId(kind, primary)}
+      data-runtime-target-anchor={targetAnchor}
       data-runtime-target-kind={kind}
-      data-runtime-target-selector={runtimeAnchorSelector(kind, primary)}
+      data-runtime-target-selector={targetSelector}
       data-runtime-target-value={primary}
+      onClick={() => runtimeRequestReplayNavigateToTarget(targetSelector, targetAnchor)}
+      title={`Locate ${primary}`}
     >
       {label} · {preview}
-    </span>
+    </button>
   );
+}
+
+function runtimeRequestReplayNavigateToTarget(selector: string, anchorId: string): void {
+  if (typeof document === 'undefined') return;
+  const target = runtimeRequestReplayTargetElement(selector, anchorId);
+  if (!target) return;
+  runtimeRequestReplayOpenDetails(target);
+  target.setAttribute('data-runtime-anchor-active', 'true');
+  target.scrollIntoView({ behavior: 'smooth', block: 'center', inline: 'nearest' });
+  if (target instanceof HTMLElement) {
+    if (!target.hasAttribute('tabindex')) target.setAttribute('tabindex', '-1');
+    target.focus({ preventScroll: true });
+  }
+  window.setTimeout(() => {
+    target.removeAttribute('data-runtime-anchor-active');
+  }, 1600);
+}
+
+function runtimeRequestReplayTargetElement(selector: string, anchorId: string): Element | null {
+  if (selector) {
+    const selected = document.querySelector(selector);
+    if (selected) return selected;
+  }
+  if (!anchorId) return null;
+  return document.getElementById(anchorId);
+}
+
+function runtimeRequestReplayOpenDetails(target: Element): void {
+  let current: Element | null = target;
+  while (current) {
+    if (current instanceof HTMLDetailsElement) current.open = true;
+    current = current.parentElement;
+  }
 }
 
 export function runtimeRequestReplayEvidenceFromRequest(
