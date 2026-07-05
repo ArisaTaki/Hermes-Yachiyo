@@ -5393,11 +5393,18 @@ class RuntimePlanner:
                         "the generic media playback tool cannot search for a specific query."
                     )
                 elif tool_name in {"desktop.safe_shortcut", "desktop.shortcut", "desktop.hotkey"}:
-                    step_id = "focus-media-app-search"
-                    title = "Focus media app search"
-                    capability_id = "desktop.ui_operation"
-                    action = "shortcut"
-                    reason = "Focus the media app search affordance with a safe or generic foreground shortcut."
+                    if _media_shortcut_input_submits(input_preview):
+                        step_id = "submit-media-search"
+                        title = "Submit media search"
+                        capability_id = "desktop.ui_operation"
+                        action = "submit"
+                        reason = "Submit the media app search with a safe or generic foreground shortcut."
+                    else:
+                        step_id = "focus-media-app-search"
+                        title = "Focus media app search"
+                        capability_id = "desktop.ui_operation"
+                        action = "shortcut"
+                        reason = "Focus the media app search affordance with a safe or generic foreground shortcut."
                 elif tool_name in {"desktop.safe_type_text", "desktop.type", "desktop.type_text"}:
                     step_id = "type-media-search-query"
                     title = "Type media search query"
@@ -8842,7 +8849,11 @@ def _direct_communication_steps(
         app_foreground_tool_candidates(mode, "safe_shortcut"),
         allowed,
     )
-    app_tool, shortcut_tool = _app_scoped_safe_shortcut_split_tools(app_name, mode, allowed)
+    app_tool, shortcut_tool = _communication_app_scoped_shortcut_split_tools(
+        app_name,
+        mode,
+        allowed,
+    )
     type_tool, recipient_type_input = _safe_type_text_operation_preview(
         app_name=app_name,
         mode=mode,
@@ -8850,7 +8861,7 @@ def _direct_communication_steps(
         payload={"text": recipient},
     )
     recipient_submit_tool = _app_search_submit_operation_tool(allowed)
-    send_tool = _first_allowed(("desktop.submit_foreground",), allowed)
+    send_tool = _communication_send_operation_tool(allowed)
     steps: list[ToolPlanStepSnapshot] = []
     source_step_id = ""
     generated_body = _direct_message_requires_generated_body(direct_message)
@@ -8883,12 +8894,16 @@ def _direct_communication_steps(
             source_step_id = context_steps[-1].step_id
     elif body_source == "selection":
         source_step_id = "copy-communication-body-source"
-        copy_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
-        copy_input = {"action": "copy"}
+        copy_tool = _communication_safe_shortcut_operation_tool(allowed)
+        copy_input = _communication_shortcut_input_preview(copy_tool, "copy")
         if not copy_tool and app_name:
             copy_tool = app_shortcut_tool
             if str(copy_tool or "").startswith("app."):
-                copy_input = {"app_name": app_name, "action": "copy"}
+                copy_input = _communication_shortcut_input_preview(
+                    copy_tool,
+                    "copy",
+                    app_name=app_name,
+                )
         steps.append(
             _step(
                 intent,
@@ -9065,7 +9080,10 @@ def _direct_communication_steps(
         )
         focus_depends_on = ["open-or-focus-app"]
         focus_tool = shortcut_tool
-        focus_input = {"action": _communication_recipient_focus_action(channel)}
+        focus_input = _communication_shortcut_input_preview(
+            shortcut_tool,
+            _communication_recipient_focus_action(channel),
+        )
         focus_capability = "communication.compose"
         focus_reason = "Open foreground recipient search with a generic safe shortcut."
     else:
@@ -9119,12 +9137,16 @@ def _direct_communication_steps(
         ]
     )
     if body_source in {"clipboard", "selection", "current_page_link"} and not generated_body:
-        paste_tool = _first_allowed(("desktop.safe_shortcut",), allowed)
-        paste_input = {"action": "paste"}
+        paste_tool = _communication_safe_shortcut_operation_tool(allowed)
+        paste_input = _communication_shortcut_input_preview(paste_tool, "paste")
         if not paste_tool and app_name:
             paste_tool = app_shortcut_tool
             if str(paste_tool or "").startswith("app."):
-                paste_input = {"app_name": app_name, "action": "paste"}
+                paste_input = _communication_shortcut_input_preview(
+                    paste_tool,
+                    "paste",
+                    app_name=app_name,
+                )
         steps.append(
             _step(
                 intent,
@@ -9187,7 +9209,7 @@ def _direct_communication_steps(
             "Send communication message",
             "communication.compose",
             send_tool,
-            input_preview={"action": "send"},
+            input_preview=_communication_send_input_preview(send_tool),
             risk_level="high",
             approval_required=True,
             depends_on=send_depends_on,
@@ -9196,6 +9218,62 @@ def _direct_communication_steps(
         )
     )
     return steps
+
+
+def _communication_safe_shortcut_operation_tool(allowed: set[str] | None) -> str | None:
+    return _first_allowed(
+        ("desktop.safe_shortcut", "desktop.shortcut", "desktop.hotkey"),
+        allowed,
+    )
+
+
+def _communication_app_scoped_shortcut_split_tools(
+    app_name: str,
+    mode: str,
+    allowed: set[str] | None,
+) -> tuple[str | None, str | None]:
+    if not app_name:
+        return None, None
+    app_tool = _first_allowed(app_control_tool_candidates(mode or "focus"), allowed)
+    shortcut_tool = _communication_safe_shortcut_operation_tool(allowed)
+    if not app_tool or not shortcut_tool:
+        return None, None
+    return app_tool, shortcut_tool
+
+
+def _communication_shortcut_input_preview(
+    tool_name: str | None,
+    action: str,
+    *,
+    app_name: str = "",
+) -> dict[str, Any]:
+    clean_tool = str(tool_name or "").strip()
+    clean_action = str(action or "").strip()
+    if clean_tool in {"desktop.shortcut", "desktop.hotkey"}:
+        if clean_action == "find":
+            return {"key": "f", "modifiers": ["command"]}
+        if clean_action == "new_message":
+            return {"key": "n", "modifiers": ["command"]}
+        if clean_action == "paste":
+            return {"key": "v", "modifiers": ["command"]}
+        if clean_action == "copy":
+            return {"key": "c", "modifiers": ["command"]}
+        if clean_action in {"confirm", "send", "submit_search"}:
+            return {"key": "return", "modifiers": []}
+    if clean_tool.startswith("app."):
+        return {"app_name": app_name, "action": clean_action}
+    return {"action": clean_action}
+
+
+def _communication_send_operation_tool(allowed: set[str] | None) -> str | None:
+    return _first_allowed(
+        ("desktop.submit_foreground", "desktop.shortcut", "desktop.hotkey"),
+        allowed,
+    )
+
+
+def _communication_send_input_preview(tool_name: str | None) -> dict[str, Any]:
+    return _communication_shortcut_input_preview(tool_name, "send")
 
 
 def _direct_communication_discovered_app_steps(
@@ -11343,6 +11421,14 @@ def _media_app_open_focus_action(tool_name: str | None) -> str:
     if clean_tool == "app.focus":
         return "focus"
     return "open"
+
+
+def _media_shortcut_input_submits(input_preview: Mapping[str, Any] | None) -> bool:
+    if not isinstance(input_preview, Mapping):
+        return False
+    action = str(input_preview.get("action") or "").strip().lower()
+    key = str(input_preview.get("key") or "").strip().lower()
+    return action in {"confirm", "submit", "search"} or key in {"return", "enter"}
 
 
 def _desktop_operation_action(tool_name: str | None) -> str:
@@ -15320,6 +15406,8 @@ def _looks_like_report_app_delivery_request(text: str) -> bool:
 
 
 def _web_research_artifact_requested(intent: TaskIntentSnapshot) -> bool:
+    if _task_output_target_hint(intent.user_goal) == "clipboard":
+        return False
     outputs = {
         str(item or "").strip()
         for item in intent.expected_outputs
@@ -24656,12 +24744,22 @@ def _safe_type_text_operation_candidates(
 
 
 def _app_search_submit_operation_tool(allowed: set[str] | None) -> str | None:
-    return _first_allowed(("desktop.search_submit", "desktop.submit_foreground"), allowed)
+    return _first_allowed(
+        (
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "desktop.shortcut",
+            "desktop.hotkey",
+        ),
+        allowed,
+    )
 
 
 def _app_search_submit_input_preview(tool_name: str | None) -> dict[str, Any]:
     if tool_name == "desktop.submit_foreground":
         return {"action": "confirm"}
+    if tool_name in {"desktop.shortcut", "desktop.hotkey"}:
+        return {"key": "return", "modifiers": []}
     return {}
 
 

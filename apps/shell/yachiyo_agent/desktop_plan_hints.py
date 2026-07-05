@@ -1137,11 +1137,19 @@ def media_app_query_search_plan(
         ),
         allowed,
     )
-    submit_tool = _first_allowed(("desktop.search_submit", "desktop.submit_foreground"), allowed)
+    submit_tool = _first_allowed(
+        (
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+            "desktop.shortcut",
+            "desktop.hotkey",
+        ),
+        allowed,
+    )
     verify_tool = _first_allowed(("desktop.ui_elements", "desktop.active_window", "screen.capture"), allowed)
     if (not type_tool and not type_into_tool) or (not submit_tool and not verify_tool):
         return []
-    submit_payload = {"action": "confirm"} if submit_tool == "desktop.submit_foreground" else {}
+    submit_payload = _media_search_submit_payload(submit_tool)
     submit_step = [(submit_tool, submit_payload)] if submit_tool else []
     type_payload = {"text": query}
     if type_tool and type_tool.startswith("app."):
@@ -1236,7 +1244,10 @@ def media_app_query_search_plan(
         _append_media_app_verify_step(plan, allowed)
         return plan
 
-    shortcut_tool = _first_allowed(("desktop.safe_shortcut", "desktop.hotkey"), allowed)
+    shortcut_tool = _first_allowed(
+        ("desktop.safe_shortcut", "desktop.shortcut", "desktop.hotkey"),
+        allowed,
+    )
     if not app_tool or not shortcut_tool:
         return []
     plan = [
@@ -1262,6 +1273,14 @@ def _media_search_shortcut_payload(tool_name: str | None) -> dict[str, Any]:
     return {"action": "find"}
 
 
+def _media_search_submit_payload(tool_name: str | None) -> dict[str, Any]:
+    if tool_name == "desktop.submit_foreground":
+        return {"action": "confirm"}
+    if tool_name in {"desktop.shortcut", "desktop.hotkey"}:
+        return {"key": "return", "modifiers": []}
+    return {}
+
+
 def _append_media_search_result_play_step(
     plan: list[tuple[str, dict[str, Any]]],
     *,
@@ -1275,7 +1294,11 @@ def _append_media_search_result_play_step(
         plan.append((play_tool, {"app_name": app_name, **dict(selected_app_payload)}))
         return
     click_tool = _first_allowed(
-        ("app.focus_and_click_ui_element", "desktop.click_ui_element"),
+        (
+            "app.focus_and_click_ui_element",
+            "app.open_and_click_ui_element",
+            "desktop.click_ui_element",
+        ),
         allowed,
     )
     if not click_tool:

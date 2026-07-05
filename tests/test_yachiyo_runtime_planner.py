@@ -8709,10 +8709,14 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "discover-browser-app",
         "open-or-focus-browser",
         "extract-web-url-text",
+        "write-research-artifact",
     ]
     assert _step_by_id(chrome_search_summary, "extract-web-url-text").tool_name == (
         "browser.open_url_and_extract_text"
     )
+    assert _step_by_id(chrome_search_summary, "write-research-artifact").depends_on == [
+        "extract-web-url-text"
+    ]
 
     chrome_search_screenshot = RuntimePlanner().decision(
         "在 Chrome 打开 OpenAI pricing 并截图",
@@ -8770,7 +8774,12 @@ def test_runtime_planner_routes_static_web_search_to_open_url() -> None:
         "open-web-search",
         "click-web-search-result",
         "extract-clicked-web-result-text",
+        "write-research-artifact",
     ]
+    assert _step_by_id(
+        chrome_first_result_summary,
+        "write-research-artifact",
+    ).depends_on == ["extract-clicked-web-result-text"]
     assert _step_by_id(chrome_first_result_summary, "extract-clicked-web-result-text").tool_name == (
         "browser.extract_text"
     )
@@ -9395,8 +9404,15 @@ def test_planner_execution_tool_requests_uses_desktop_verify_for_unknown_app() -
                 "query": "PixelForge",
                 "limit": 80,
             },
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
+            "source": "runtime_verification",
+            "planning_reason": "runtime_desktop_app_foreground_verification",
+            "runtime_doctrine": "discover_operate_verify",
+            "continue_to_model": True,
+            "requires_observation": True,
+            "runtime_stage": "verify",
+            "runtime_role": "verify_result",
+            "replan_triggers": ["verification_failed"],
+            "target_app_name": "PixelForge",
         },
     ]
 
@@ -9637,9 +9653,20 @@ def test_planner_execution_tool_requests_verifies_after_unknown_app_foreground_c
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"limit": 80},
-            "source": "runtime_planner",
-            "planning_reason": "planner_desktop_operation",
+            "input": {
+                "app_name": "PixelForge",
+                "selection_source": "desktop.list_apps",
+                "query": "PixelForge",
+                "limit": 80,
+            },
+            "source": "runtime_verification",
+            "planning_reason": "runtime_desktop_app_operation_verification",
+            "runtime_doctrine": "discover_operate_verify",
+            "continue_to_model": True,
+            "requires_observation": True,
+            "runtime_stage": "verify",
+            "runtime_role": "verify_result",
+            "replan_triggers": ["verification_failed"],
         },
     ]
 
@@ -20700,6 +20727,50 @@ def test_runtime_planner_prefers_discovered_media_app_operation_for_apple_music_
     ]
 
 
+def test_runtime_planner_plays_media_query_with_generic_desktop_tools() -> None:
+    decision = RuntimePlanner().decision(
+        "打开 Apple Music 播放超时空辉夜姬",
+        allowed_tools=[
+            "desktop.list_apps",
+            "app.open",
+            "app.focus_and_type_into_ui_element",
+            "desktop.shortcut",
+            "app.open_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "media_playback"
+    assert decision.plan.tool_plan.missing_capabilities == []
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-media-app",
+        "open-media-app",
+        "type-media-search-query",
+        "submit-media-search",
+        "play-media-search-result",
+        "verify-media-search",
+    ]
+    assert [step.tool_name for step in decision.plan.tool_plan.steps] == [
+        "desktop.list_apps",
+        "app.open",
+        "app.focus_and_type_into_ui_element",
+        "desktop.shortcut",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert _step_by_id(decision, "submit-media-search").input_preview == {
+        "key": "return",
+        "modifiers": [],
+    }
+    assert _step_by_id(decision, "play-media-search-result").input_preview == {
+        "app_name": "Music",
+        "target": "first result",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+
+
 def test_runtime_planner_routes_generic_music_app_query_to_search_play_plan() -> None:
     for prompt, query, description in (
         ("打开任意音乐 app，搜索 lo-fi beats，然后播放第一个结果", "lo-fi beats", "音乐"),
@@ -21620,6 +21691,40 @@ def test_runtime_planner_routes_direct_communication_send_sequence() -> None:
             "planning_reason": "planner_fallback_communication_send",
         },
     ]
+
+    generic_desktop_decision = RuntimePlanner().decision(
+        "打开 Slack 发消息给 yachiyo：hello",
+        allowed_tools=["app.open", "desktop.shortcut", "desktop.type"],
+    )
+
+    assert generic_desktop_decision.plan.tool_plan.missing_capabilities == []
+    assert [step.step_id for step in generic_desktop_decision.plan.tool_plan.steps] == [
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-communication-message",
+        "send-communication-message",
+    ]
+    assert [step.tool_name for step in generic_desktop_decision.plan.tool_plan.steps] == [
+        "app.open",
+        "desktop.shortcut",
+        "desktop.type",
+        "desktop.shortcut",
+        "desktop.type",
+        "desktop.shortcut",
+    ]
+    assert _step_by_id(
+        generic_desktop_decision,
+        "focus-communication-recipient-search",
+    ).input_preview == {"key": "f", "modifiers": ["command"]}
+    assert _step_by_id(
+        generic_desktop_decision,
+        "submit-communication-recipient-search",
+    ).input_preview == {"key": "return", "modifiers": []}
+    generic_send = _step_by_id(generic_desktop_decision, "send-communication-message")
+    assert generic_send.input_preview == {"key": "return", "modifiers": []}
+    assert generic_send.approval_required is True
 
 
 def test_runtime_planner_uses_observed_safe_communication_when_shortcut_is_missing() -> None:
@@ -25611,6 +25716,13 @@ def test_runtime_planner_schedules_future_runnable_runs(monkeypatch: Any) -> Non
 
     assert workflow.selected_intent.kind == "schedule"
     assert workflow.selected_intent.inputs == {
+        "schedule_payload": {
+            "title": "运行 Daily Summary workflow",
+            "prompt": "运行 Daily Summary workflow",
+            "scheduled_at_epoch": tomorrow_1500_epoch,
+            "runnable_name": "Daily Summary",
+        },
+        "schedule_tool_hint": "future_task.schedule",
         "scheduled_runnable": True,
         "target_name_hint": "Daily Summary",
     }
