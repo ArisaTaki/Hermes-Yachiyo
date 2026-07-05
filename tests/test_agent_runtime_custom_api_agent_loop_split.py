@@ -25697,6 +25697,91 @@ def test_custom_api_agent_loop_prefers_runtime_planner_desktop_before_legacy_rul
     ]
 
 
+def test_custom_api_agent_loop_no_plan_does_not_execute_legacy_parser(
+    monkeypatch,
+) -> None:
+    def fail_legacy_daily_planner(*_args, **_kwargs):
+        raise AssertionError("planner misses should not execute legacy desktop requests")
+
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_tool_requests",
+        fail_legacy_daily_planner,
+    )
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "daily_desktop_intent_candidates",
+        lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        custom_api_agent_module,
+        "planner_first_direct_tool_selection",
+        lambda *_args, **_kwargs: custom_api_agent_module.DirectToolSelection(
+            decision=None,
+            requests=[],
+            event_payload={
+                "selected_source": "none",
+                "selected_reason": "forced_no_direct_plan",
+            },
+            selected_source="none",
+        ),
+    )
+    assert "daily_desktop_intent_tool_requests(" not in inspect.getsource(
+        RuntimeCustomApiAgentLoop.run
+    )
+
+    model_calls: list[list[dict[str, Any]]] = []
+    tool_runs: list[list[dict[str, Any]]] = []
+
+    loop = RuntimeCustomApiAgentLoop(
+        agent_model_config_private=lambda _agent: {
+            "base_url": "https://model.local",
+            "model": "m",
+            "api_key": "k",
+        },
+        compile_agent_runtime=lambda _agent: {
+            "tool_policy": {"allowed_tools": ["app.open", "desktop.click_ui_element"]},
+        },
+        run_budget=lambda _run_id, _timeline_value: FakeBudget(),
+        check_context_budget=lambda _budget, _messages: None,
+        tool_schemas=lambda allowed_tools: [{"name": tool} for tool in allowed_tools],
+        normalize_tool_iteration=lambda value: int(value or 0),
+        max_tool_iterations=1,
+        operating_doctrine="Use runtime planner for desktop actions.",
+        memory_tool_names=set(),
+        future_task_tool_names=set(),
+        call_model=lambda _base_url, _model, _api_key, model_messages, **_kwargs: model_calls.append(
+            list(model_messages)
+        )
+        or {"role": "assistant", "content": "model fallback"},
+        coalesce_model_message=lambda value: value,
+        message_visible_content_text=lambda message: str(message.get("content") or ""),
+        model_message_metadata=lambda _message: {},
+        tool_requests_from_message=lambda _message, _content: [],
+        timeline_factory=_timeline,
+        limit_model_output=lambda value: (str(value), False),
+        model_output_text_factory=agent_runtime._ModelOutputText,
+        tool_loop_projection=FakeToolLoopProjection(),
+        run_tool_requests=lambda tool_requests, *_args, **_kwargs: tool_runs.append(
+            list(tool_requests)
+        ),
+        error_type=agent_runtime.AgentRuntimeError,
+    )
+
+    result = loop.run(
+        {"name": "Yachiyo"},
+        "打开 LegacyPad 并点击导出按钮",
+        broker={"broker": True},
+        timeline=[],
+        artifacts=[],
+        run_id="run-no-plan-no-legacy-parser",
+    )
+
+    assert str(result) == "model fallback"
+    assert len(model_calls) == 1
+    assert tool_runs == []
+
+
 def test_runtime_planner_generic_desktop_click_execution_observes_target_before_click() -> None:
     allowed_tools = ["app.open", "desktop.click_ui_element", "desktop.ui_elements"]
 

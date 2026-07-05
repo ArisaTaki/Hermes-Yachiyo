@@ -9,7 +9,6 @@ from typing import Any, Callable
 
 from apps.shell.agent.runtime.approval_tool_sets import (
     APPROVAL_PLAN_TOOLS as _DAILY_DESKTOP_APPROVAL_PLAN_TOOLS,
-    SAFE_SHORTCUT_APPROVAL_TOOLS as _SAFE_SHORTCUT_HOTKEY_TOOLS,
 )
 from apps.shell.agent.runtime.desktop_intents import (
     daily_desktop_metadata_tool_request,
@@ -48,7 +47,6 @@ from apps.shell.agent.tools.policy import (
 from apps.shell.yachiyo_agent.app_name_hints import compact_app_name_hint
 from apps.shell.yachiyo_agent.desktop_plan_hints import (
     click_target_hint,
-    hotkey_hint,
     type_into_ui_hint,
 )
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
@@ -362,20 +360,6 @@ class RuntimeCustomApiAgentLoop:
                                 run_id=run_id,
                             )
                         planner_replan_only = True
-                    if not planner_replan_only:
-                        runtime_planner_decision = None
-                        direct_tool_selection_payload = {}
-                        planned_tool_requests = daily_desktop_intent_tool_requests(
-                            planning_context,
-                            allowed_tools,
-                        )
-                        approval_hotkey_request = self._approval_hotkey_request_for_safe_shortcut(
-                            planning_context,
-                            planned_tool_requests,
-                            allowed_tools,
-                        )
-                        if approval_hotkey_request:
-                            planned_tool_requests = [approval_hotkey_request]
             if planned_tool_requests:
                 if runtime_planner_decision is not None:
                     planner_scope_context = _runtime_planner_scope_context(
@@ -2345,38 +2329,6 @@ class RuntimeCustomApiAgentLoop:
         ):
             return "planner_fallback_desktop_operation"
         return planning_reason
-
-    @staticmethod
-    def _approval_hotkey_request_for_safe_shortcut(
-        planning_context: str,
-        tool_requests: list[dict[str, Any]],
-        allowed_tools: list[str],
-    ) -> dict[str, Any] | None:
-        if len(tool_requests) != 1 or not isinstance(tool_requests[0], dict):
-            return None
-        safe_request = tool_requests[0]
-        safe_tool = str(safe_request.get("tool") or "").strip()
-        hotkey_tool = _SAFE_SHORTCUT_HOTKEY_TOOLS.get(safe_tool, "")
-        allowed = {str(tool or "").strip() for tool in allowed_tools}
-        if not hotkey_tool or hotkey_tool not in allowed:
-            return None
-        hotkey = hotkey_hint(planning_context)
-        if not hotkey:
-            return None
-        safe_input = safe_request.get("input") if isinstance(safe_request.get("input"), dict) else {}
-        if str(safe_input.get("action") or "").strip() != "focus_address_bar":
-            return None
-        payload = dict(hotkey)
-        app_name = str(safe_input.get("app_name") or "").strip()
-        if app_name:
-            payload = {"app_name": app_name, **payload}
-        return {
-            "protocol": "json_fallback",
-            "tool": hotkey_tool,
-            "input": payload,
-            "source": "daily_desktop_intent",
-            "planning_reason": "explicit_hotkey_requires_approval",
-        }
 
     def _runtime_planner_tool_requests(
         self,
