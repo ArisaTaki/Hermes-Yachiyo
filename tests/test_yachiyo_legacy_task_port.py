@@ -839,7 +839,7 @@ def test_planner_first_direct_selection_owns_remaining_app_scoped_samples_withou
         ),
         (
             "Chrome 点登录",
-            ["desktop.list_apps", "desktop.list_apps", "app.focus", "desktop.ui_elements"],
+            ["desktop.list_apps", "app.focus", "desktop.ui_elements"],
         ),
     )
 

@@ -177,7 +177,7 @@ def _prepend_unknown_app_discovery_requests(
 ) -> list[dict[str, Any]]:
     if "desktop.list_apps" not in allowed:
         return requests
-    discovered_queries: set[str] = set()
+    discovered_queries: dict[str, str] = {}
     normalized: list[dict[str, Any]] = []
     for request in requests:
         tool_name = str(request.get("tool") or "").strip()
@@ -185,22 +185,36 @@ def _prepend_unknown_app_discovery_requests(
         if tool_name == "desktop.list_apps":
             query = str(payload.get("query") or "").strip()
             if query:
-                discovered_queries.add(_discovery_query_key(query))
+                for query_key in _discovery_query_keys(query):
+                    discovered_queries.setdefault(query_key, query)
             normalized.append(request)
             continue
         app_name = str(payload.get("app_name") or "").strip()
         if _request_needs_app_discovery_first(tool_name, payload, request):
-            query_key = _discovery_query_key(app_name)
-            if query_key and query_key not in discovered_queries:
+            query_keys = _discovery_query_keys(app_name)
+            existing_query = next(
+                (
+                    discovered_queries[query_key]
+                    for query_key in query_keys
+                    if query_key in discovered_queries
+                ),
+                "",
+            )
+            if query_keys and not existing_query:
                 normalized.append(
                     _desktop_app_discovery_request_for_execution(
                         app_name,
                         request,
                     )
                 )
-                discovered_queries.add(query_key)
-            if query_key:
-                request = _request_with_desktop_app_selection_source(request, app_name)
+                existing_query = app_name
+                for query_key in query_keys:
+                    discovered_queries.setdefault(query_key, app_name)
+            if query_keys:
+                request = _request_with_desktop_app_selection_source(
+                    request,
+                    existing_query or app_name,
+                )
         normalized.append(request)
     return normalized
 
@@ -982,6 +996,17 @@ def _tool_uses_app_name_for_foreground_execution(tool_name: str) -> bool:
 
 def _discovery_query_key(value: str) -> str:
     return " ".join(str(value or "").strip().casefold().split())
+
+
+def _discovery_query_keys(value: str) -> set[str]:
+    clean = str(value or "").strip()
+    if not clean:
+        return set()
+    keys = {_discovery_query_key(clean)}
+    canonical = str(legacy_app_name_hint(clean) or "").strip()
+    if canonical:
+        keys.add(_discovery_query_key(canonical))
+    return {key for key in keys if key}
 
 
 def _append_unknown_app_post_execution_verification(
