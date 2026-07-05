@@ -5126,6 +5126,54 @@ def test_runtime_planner_routes_data_analysis_to_discovered_app_write_target() -
         "content_transform_hint": "report",
     }
 
+    contextual_communication_prompt = (
+        "分析 Downloads 里的销售 CSV，生成图表报告，然后用任意聊天应用发给小王"
+    )
+    contextual_communication_decision = RuntimePlanner().decision(
+        contextual_communication_prompt,
+        allowed_tools=[
+            "workspace.read",
+            "python.run",
+            "artifact.write",
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+    assert contextual_communication_decision.selected_intent.inputs[
+        "communication_target_hint"
+    ] == {
+        "recipient": "小王",
+        "body_source": "analysis_artifact",
+        "mode": "focus",
+        "send_action": "send",
+        "channel": "message",
+        "content_transform_hint": "report",
+    }
+    assert [
+        step.step_id
+        for step in contextual_communication_decision.plan.tool_plan.steps[-7:]
+    ] == [
+        "discover-analysis-communication-app",
+        "open-or-focus-app",
+        "focus-communication-recipient-search",
+        "type-communication-recipient",
+        "submit-communication-recipient-search",
+        "draft-analysis-communication-message",
+        "send-analysis-communication-message",
+    ]
+    assert _step_by_id(
+        contextual_communication_decision,
+        "discover-analysis-communication-app",
+    ).input_preview == {"query": "chat", "limit": 20}
+    assert _step_by_id(
+        contextual_communication_decision,
+        "send-analysis-communication-message",
+    ).approval_required is True
+
     visible_prompt = "分析当前窗口里的表格并把报告写进任意文档应用"
     visible_decision = RuntimePlanner().decision(
         visible_prompt,
@@ -5564,6 +5612,52 @@ def test_runtime_planner_routes_web_research_report_to_communication_target() ->
     }
     assert generic_payload["followup_target"]["artifact_write"]["path"] == "research-summary.md"
     assert "desktop.list_apps" in generic_payload["plan_tools"]
+
+    contextual_generic_prompt = "调研 OpenAI 最新新闻，总结后用任意聊天应用发给小王"
+    contextual_generic_decision = RuntimePlanner().decision(
+        contextual_generic_prompt,
+        allowed_tools=[
+            "browser.search",
+            "browser.extract_text",
+            "artifact.write",
+            "desktop.list_apps",
+            "app.open",
+            "desktop.safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "desktop.submit_foreground",
+        ],
+    )
+    assert contextual_generic_decision.selected_intent.inputs[
+        "communication_target_hint"
+    ] == {
+        "recipient": "小王",
+        "body_source": "research_artifact",
+        "mode": "focus",
+        "send_action": "send",
+        "channel": "message",
+        "content_transform_hint": "summary",
+    }
+    assert [
+        step.step_id
+        for step in contextual_generic_decision.plan.tool_plan.steps[-7:]
+    ] == [
+        "discover-research-communication-app",
+        "open-or-focus-research-communication-app",
+        "focus-research-communication-recipient-search",
+        "type-research-communication-recipient",
+        "submit-research-communication-recipient-search",
+        "draft-research-communication-message",
+        "send-research-communication-message",
+    ]
+    assert _step_by_id(
+        contextual_generic_decision,
+        "discover-research-communication-app",
+    ).input_preview == {"query": "chat", "limit": 20}
+    assert _step_by_id(
+        contextual_generic_decision,
+        "send-research-communication-message",
+    ).approval_required is True
 
     app_scoped_allowed_tools = [
         "browser.open_url_and_extract_text",

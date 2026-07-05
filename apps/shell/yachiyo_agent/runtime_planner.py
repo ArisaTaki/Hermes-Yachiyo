@@ -17172,6 +17172,28 @@ def _data_analysis_delivery_channel_hint(text: str) -> str:
         flags=re.IGNORECASE,
     ):
         return "email"
+    generic_prefix = r"(?:(?:任意|任何|默认|可用|合适|适合|推荐|已安装)(?:的)?\s*)?"
+    app_suffix = (
+        r"(?:应用(?:程序)?|app|软件|客户端|工具|程序|client|tool|program)?"
+    )
+    message_surface = r"(?:聊天|通讯|通信|消息|即时通讯|短信|chat|messaging|message|messenger)"
+    if re.search(
+        rf"(?:用|使用|通过|经由|借助|在|到|发到|发送到|分享到|转发到)\s*"
+        rf"{generic_prefix}{message_surface}\s*{app_suffix}"
+        r"(?:里|中|上|内|里面)?"
+        r"(?:\s*(?:发|发送|分享|转发|send|message|forward))?",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "message"
+    if re.search(
+        rf"{generic_prefix}{message_surface}\s*"
+        r"(?:应用(?:程序)?|app|软件|客户端|工具|程序|client|tool|program)"
+        r".{0,20}?(?:发给|发送给|发到|发送到|分享给|转发给|send|message|forward|to)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return "message"
     return ""
 
 
