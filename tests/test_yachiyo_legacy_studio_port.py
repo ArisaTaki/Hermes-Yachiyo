@@ -115,13 +115,29 @@ def test_legacy_studio_workflow_run_appends_runtime_planner_events() -> None:
     )
 
     assert run["workflow_run_id"] == "workflow-run-1"
-    assert runtime.workflow_run_payload == {
-        "workflow_id": "workflow-1",
-        "user_goal": "打开 PixelForge",
-        "source": "yachiyo_studio",
-        "client_run_id": "client-workflow-run-1",
-        "run_group_id": None,
-    }
+    assert runtime.workflow_run_payload is not None
+    assert runtime.workflow_run_payload["workflow_id"] == "workflow-1"
+    assert runtime.workflow_run_payload["user_goal"] == "打开 PixelForge"
+    assert runtime.workflow_run_payload["source"] == "yachiyo_studio"
+    assert runtime.workflow_run_payload["client_run_id"] == "client-workflow-run-1"
+    assert runtime.workflow_run_payload["run_group_id"] is None
+    assert runtime.workflow_run_payload["daily_desktop_planning_context"] == "打开 PixelForge"
+    metadata = runtime.workflow_run_payload["metadata"]
+    assert metadata["yachiyo_runtime_planner"] is True
+    assert metadata["yachiyo_intent_kind"] == "desktop_operation"
+    assert metadata["yachiyo_execution_envelope"]["requests"][0]["workflow_id"] == "workflow-1"
+    envelope = runtime.workflow_run_payload["runtime_execution_envelope"]
+    assert envelope["intent_kind"] == "desktop_operation"
+    assert [request["tool_name"] for request in envelope["requests"]] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
+    assert [request["tool"] for request in runtime.workflow_run_payload["direct_tool_requests"]] == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+    ]
     events = runtime.events["workflow-run-1"]
     assert [event["event_type"] for event in events[:4]] == [
         "agent.intent.selected",
@@ -204,6 +220,10 @@ def test_legacy_studio_group_run_records_group_run_started_event() -> None:
         "group.run.plan.created",
         "group.run.task_core.created",
         "group.run.plan.step",
+        "group.run.task.todo.updated",
+        "group.run.task.todo.updated",
+        "group.run.task.checkpoint.updated",
+        "group.run.task.checkpoint.updated",
         "group.member.started",
         "group.member.started",
     ]
@@ -292,7 +312,13 @@ def test_legacy_studio_group_run_records_member_failed_and_cancelled_events() ->
         "group.run.task_core.created",
         "group.run.plan.step",
     ]
-    assert event_types[6:] == [
+    assert event_types[6:10] == [
+        "group.run.task.todo.updated",
+        "group.run.task.todo.updated",
+        "group.run.task.checkpoint.updated",
+        "group.run.task.checkpoint.updated",
+    ]
+    assert event_types[10:] == [
         "group.member.started",
         "group.member.failed",
         "group.member.started",

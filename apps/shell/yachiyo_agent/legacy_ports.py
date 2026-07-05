@@ -1400,11 +1400,25 @@ class LegacyStudioPort:
         user_goal = str(request.get("objective") or request.get("goal") or "").strip()
         metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
         planner_metadata = _planner_metadata_with_desktop_readiness(metadata)
-        run_payload = _studio_workflow_run_payload(request, user_goal=user_goal)
+        allowed_tools = _request_allowed_tools(request)
+        planner_decision = runtime_planner_decision(
+            user_goal,
+            allowed_tools=allowed_tools,
+            metadata=planner_metadata,
+        )
+        run_payload = _studio_workflow_run_payload(
+            request,
+            user_goal=user_goal,
+            planner_decision=planner_decision,
+            allowed_tools=allowed_tools,
+            event_context={
+                "workflow_id": str(request.get("workflow_id") or "").strip(),
+            },
+        )
         run = self._runtime.create_workflow_run(run_payload)
         self._append_planner_run_events(
             _run_id_from_payload(run),
-            runtime_planner_decision(user_goal, metadata=planner_metadata),
+            planner_decision,
             event_context={
                 "workflow_id": str(request.get("workflow_id") or "").strip(),
                 "workflow_run_id": _run_id_from_payload(run),
@@ -1600,6 +1614,14 @@ def _agent_allowed_tools(runtime: Any, agent_id: Any) -> list[str] | None:
     if not isinstance(allowed, list):
         return None
     tools = [str(tool or "").strip() for tool in allowed if str(tool or "").strip()]
+    return tools or None
+
+
+def _request_allowed_tools(request: Mapping[str, Any]) -> list[str] | None:
+    value = request.get("allowed_tools")
+    if not isinstance(value, list):
+        return None
+    tools = [str(tool or "").strip() for tool in value if str(tool or "").strip()]
     return tools or None
 
 
@@ -1958,6 +1980,9 @@ def _studio_workflow_run_payload(
     request: dict[str, Any],
     *,
     user_goal: str,
+    planner_decision: Any | None = None,
+    allowed_tools: list[str] | None = None,
+    event_context: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     payload: dict[str, Any] = {
         "workflow_id": request.get("workflow_id"),
@@ -1967,12 +1992,43 @@ def _studio_workflow_run_payload(
         "run_group_id": request.get("run_group_id"),
     }
     metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
+    metadata = dict(metadata)
+    had_metadata_envelope = isinstance(metadata.get("yachiyo_execution_envelope"), dict)
+    explicit_runtime_envelope = (
+        request.get("runtime_execution_envelope") is not None
+        or had_metadata_envelope
+    )
+    if planner_decision is not None:
+        for key, value in runtime_planner_metadata(
+            planner_decision,
+            allowed_tools=allowed_tools,
+        ).items():
+            if explicit_runtime_envelope and key in {
+                "yachiyo_execution_envelope",
+                "yachiyo_execution_requests",
+                "yachiyo_execution_request_previews",
+            }:
+                continue
+            metadata.setdefault(key, value)
     if metadata:
-        payload["metadata"] = dict(metadata)
+        payload["metadata"] = metadata
 
     envelope = request.get("runtime_execution_envelope")
+    envelope_from_metadata = False
+    generated_metadata_envelope = (
+        not had_metadata_envelope
+        and isinstance(metadata.get("yachiyo_execution_envelope"), dict)
+    )
     if envelope is None and isinstance(metadata.get("yachiyo_execution_envelope"), dict):
         envelope = metadata.get("yachiyo_execution_envelope")
+        envelope_from_metadata = True
+    if generated_metadata_envelope and envelope_from_metadata and isinstance(envelope, Mapping):
+        envelope = runtime_execution_envelope_payload_with_request_context(
+            envelope,
+            event_context,
+        )
+        metadata["yachiyo_execution_envelope"] = dict(envelope)
+        payload["metadata"] = metadata
     if envelope is not None:
         payload["runtime_execution_envelope"] = envelope
 
@@ -1980,6 +2036,7 @@ def _studio_workflow_run_payload(
         request,
         envelope,
         metadata,
+        allowed_tools=allowed_tools,
     )
     if direct_tool_requests:
         payload["direct_tool_requests"] = direct_tool_requests
@@ -1996,14 +2053,17 @@ def _studio_workflow_direct_tool_requests(
     request: dict[str, Any],
     runtime_execution_envelope: Any | None,
     metadata: dict[str, Any],
+    *,
+    allowed_tools: list[str] | None = None,
 ) -> list[dict[str, Any]]:
+    explicit_allowed_tools = allowed_tools or []
     direct_tool_request = _explicit_direct_tool_request(
         request.get("direct_tool_request"),
-        [],
+        explicit_allowed_tools,
     )
     direct_tool_requests = _explicit_direct_tool_requests(
         request.get("direct_tool_requests"),
-        [],
+        explicit_allowed_tools,
     )
     if direct_tool_request:
         return [direct_tool_request, *direct_tool_requests]
@@ -2012,13 +2072,13 @@ def _studio_workflow_direct_tool_requests(
 
     envelope_requests = runtime_execution_requests_from_envelope_payload(
         runtime_execution_envelope,
-        allowed_tools=None,
+        allowed_tools=allowed_tools,
     )
     if envelope_requests:
         return envelope_requests
     return runtime_execution_requests_from_metadata(
         metadata,
-        allowed_tools=None,
+        allowed_tools=allowed_tools,
     )
 
 
