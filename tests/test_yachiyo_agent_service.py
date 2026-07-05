@@ -1470,25 +1470,40 @@ def test_yachiyo_agent_service_plans_shared_chat_execution_envelope() -> None:
     assert envelope.task_core.workspace.workspace_id.startswith("task-workspace-")
     assert envelope.task_progress.workspace_id == envelope.task_core.workspace.workspace_id
     assert envelope.task_progress.total_todos == len(envelope.task_core.todos)
-    assert [request.tool_name for request in envelope.requests] == ["data.analyze"]
-    request = envelope.requests[0]
-    assert request.step_id == "analyze-data-file"
-    assert request.capability_id == "data.analysis"
-    assert request.replan_signal_ids
-    assert request.core_id == envelope.task_core.core_id
-    assert request.workspace_id == envelope.task_core.workspace.workspace_id
-    assert request.task_todo["step_id"] == "analyze-data-file"
-    assert request.task_checkpoints[0]["after_step_id"] == "analyze-data-file"
-    assert request.checkpoint_policy is not None
-    assert request.checkpoint_policy.checkpoint_ids == [
-        checkpoint["checkpoint_id"] for checkpoint in request.task_checkpoints
+    assert [request.tool_name for request in envelope.requests] == [
+        "workspace.read",
+        "data.analyze",
     ]
-    assert request.checkpoint_policy.replan_on_failure is True
-    assert request.checkpoint_policy.replan_signal_ids == request.replan_signal_ids
-    assert request.checkpoint_policy.fallback_tools == ["terminal.run"]
-    assert envelope.runtime_stage_counts == {"operate": 1}
-    assert request.runtime_stage == "operate"
-    assert request.runtime_role == "analyze_data"
+    read_request = envelope.requests[0]
+    analyze_request = envelope.requests[1]
+    assert read_request.step_id == "read-data-source"
+    assert read_request.capability_id == "file.workspace_read"
+    assert read_request.core_id == envelope.task_core.core_id
+    assert read_request.workspace_id == envelope.task_core.workspace.workspace_id
+    assert read_request.task_todo["step_id"] == "read-data-source"
+    assert read_request.task_checkpoints[0]["after_step_id"] == "read-data-source"
+    assert analyze_request.step_id == "analyze-data-file"
+    assert analyze_request.capability_id == "data.analysis"
+    assert analyze_request.depends_on == ["read-data-source"]
+    assert analyze_request.replan_signal_ids
+    assert analyze_request.core_id == envelope.task_core.core_id
+    assert analyze_request.workspace_id == envelope.task_core.workspace.workspace_id
+    assert analyze_request.task_todo["step_id"] == "analyze-data-file"
+    assert analyze_request.task_checkpoints[0]["after_step_id"] == "analyze-data-file"
+    assert analyze_request.checkpoint_policy is not None
+    assert analyze_request.checkpoint_policy.checkpoint_ids == [
+        checkpoint["checkpoint_id"] for checkpoint in analyze_request.task_checkpoints
+    ]
+    assert analyze_request.checkpoint_policy.replan_on_failure is True
+    assert analyze_request.checkpoint_policy.replan_signal_ids == (
+        analyze_request.replan_signal_ids
+    )
+    assert analyze_request.checkpoint_policy.fallback_tools == ["terminal.run"]
+    assert envelope.runtime_stage_counts == {"discover": 1, "operate": 1}
+    assert read_request.runtime_stage == "discover"
+    assert read_request.runtime_role == "inspect_workspace"
+    assert analyze_request.runtime_stage == "operate"
+    assert analyze_request.runtime_role == "analyze_data"
     assert envelope.replan_signal_count == len(envelope.task_core.replan_signals)
 
 

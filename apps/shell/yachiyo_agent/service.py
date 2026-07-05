@@ -94,7 +94,7 @@ class YachiyoAgentService:
         allowed_tools: Iterable[str] | None = None,
         metadata: Mapping[str, Any] | None = None,
         direct: bool = False,
-        full_plan: bool = False,
+        full_plan: bool = True,
     ) -> RuntimeExecutionEnvelopeSnapshot:
         port_planner = getattr(self._runtime_port, "plan_chat_execution", None)
         if callable(port_planner):

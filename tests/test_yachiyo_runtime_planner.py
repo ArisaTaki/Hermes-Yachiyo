@@ -796,17 +796,26 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_simple_reports() -> N
 
     assert decision.selected_intent.kind == "data_analysis"
     assert decision.selected_intent.preferred_capabilities == ["data.analysis"]
-    assert decision.plan.tool_plan.required_capabilities == ["data.analysis"]
+    assert decision.plan.tool_plan.required_capabilities == [
+        "data.analysis",
+        "file.workspace_read",
+    ]
     assert decision.plan.tool_plan.missing_capabilities == []
     assert decision.plan.tool_plan.approvals_required == []
     assert decision.plan.tool_plan.artifacts_expected == ["analysis-report.md"]
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
-        "analyze-data-file"
+        "read-data-source",
+        "analyze-data-file",
     ]
+    read_step = _step_by_id(decision, "read-data-source")
+    assert read_step.action == "read_file"
+    assert read_step.tool_name == "workspace.read"
+    assert read_step.input_preview == {"path": "sales.csv", "source_kind": "csv"}
     step = _step_by_id(decision, "analyze-data-file")
     assert step.action == "analyze_data_file"
     assert step.tool_name == "data.analyze"
     assert step.input_preview == _data_analysis_preview("sales.csv", "csv")
+    assert step.depends_on == ["read-data-source"]
 
 
 def test_runtime_planner_prefers_builtin_data_analysis_for_explicit_local_paths() -> None:
@@ -819,11 +828,19 @@ def test_runtime_planner_prefers_builtin_data_analysis_for_explicit_local_paths(
     assert decision.selected_intent.inputs["data_source_hint"] == "~/Downloads/sales.csv"
     assert decision.selected_intent.inputs["data_source_kind"] == "csv"
     assert [step.step_id for step in decision.plan.tool_plan.steps] == [
-        "analyze-data-file"
+        "read-data-source",
+        "analyze-data-file",
     ]
+    read_step = _step_by_id(decision, "read-data-source")
+    assert read_step.tool_name == "workspace.read"
+    assert read_step.input_preview == {
+        "path": "~/Downloads/sales.csv",
+        "source_kind": "csv",
+    }
     step = _step_by_id(decision, "analyze-data-file")
     assert step.tool_name == "data.analyze"
     assert step.input_preview == _data_analysis_preview("~/Downloads/sales.csv", "csv")
+    assert step.depends_on == ["read-data-source"]
 
 
 def test_runtime_planner_opens_explicit_spreadsheet_app_before_builtin_analysis() -> None:
