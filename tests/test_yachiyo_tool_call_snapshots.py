@@ -41,6 +41,12 @@ def test_tool_call_snapshots_from_events_merge_lifecycle_and_trace_context() -> 
                         ],
                     }
                 ],
+                "action_target": {"action": "write", "path": "README.md"},
+                "observation_evidence": {"source_tool": "workspace.write"},
+                "observation_retry": {
+                    "from_tool": "workspace.write",
+                    "reason": "write_unverified",
+                },
                 "checkpoint_policy": {
                     "checkpoint_ids": ["checkpoint-write-report"],
                     "replan_on_failure": True,
@@ -137,6 +143,12 @@ def test_tool_call_snapshots_from_events_merge_lifecycle_and_trace_context() -> 
             ],
         }
     ]
+    assert call.action_target == {"action": "write", "path": "README.md"}
+    assert call.observation_evidence == {"source_tool": "workspace.write"}
+    assert call.observation_retry == {
+        "from_tool": "workspace.write",
+        "reason": "write_unverified",
+    }
     assert call.metadata["checkpoint_policy"] == {
         "checkpoint_ids": ["checkpoint-write-report"],
         "replan_on_failure": True,

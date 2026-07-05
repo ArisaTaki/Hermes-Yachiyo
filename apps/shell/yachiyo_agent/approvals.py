@@ -130,6 +130,16 @@ def approval_card_from_payload(
         deferred_continuation=_record_list(
             payload.get("deferred_continuation") or input_preview.get("deferred_continuation")
         ),
+        action_target=_mapping(
+            payload.get("action_target") or input_preview.get("action_target")
+        ),
+        observation_evidence=_mapping(
+            payload.get("observation_evidence")
+            or input_preview.get("observation_evidence")
+        ),
+        observation_retry=_mapping(
+            payload.get("observation_retry") or input_preview.get("observation_retry")
+        ),
         task_workspace_items=_record_list(
             payload.get("task_workspace_items")
             or input_preview.get("task_workspace_items")

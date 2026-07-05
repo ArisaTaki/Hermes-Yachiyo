@@ -12,6 +12,7 @@ import {
 export type RuntimeApprovalCardSnapshot = Pick<
   ApprovalCardSnapshot,
   | 'approval_id'
+  | 'action_target'
   | 'capability_id'
   | 'description'
   | 'decision_id'
@@ -23,6 +24,8 @@ export type RuntimeApprovalCardSnapshot = Pick<
   | 'group_run_id'
   | 'input_preview'
   | 'intent_kind'
+  | 'observation_evidence'
+  | 'observation_retry'
   | 'open_in_studio_url'
   | 'plan_id'
   | 'policy_reason'
@@ -176,6 +179,9 @@ function approvalMetadataItems(approval: RuntimeApprovalCardSnapshot, toolName: 
   const deferredInput = approvalPreviewRecord(approval.deferred_input);
   const deferredContext = approvalPreviewRecord(approval.deferred_context);
   const deferredContinuation = recordList(approval.deferred_continuation);
+  const actionTarget = approvalPreviewRecord(approval.action_target);
+  const observationEvidence = approvalPreviewRecord(approval.observation_evidence);
+  const observationRetry = approvalPreviewRecord(approval.observation_retry);
   const items = [
     { label: 'approval', value: approval.approval_id },
     { label: 'run', value: approval.run_id || '' },
@@ -202,6 +208,9 @@ function approvalMetadataItems(approval: RuntimeApprovalCardSnapshot, toolName: 
     { label: 'deferred input', value: approvalObjectSummary(deferredInput) },
     { label: 'deferred context', value: approvalObjectSummary(deferredContext) },
     { label: 'continuation', value: approvalDeferredContinuationSummary(deferredContinuation) },
+    { label: 'action', value: approvalObjectSummary(actionTarget) },
+    { label: 'observed', value: approvalObjectSummary(observationEvidence) },
+    { label: 'retry', value: approvalObjectSummary(observationRetry) },
     { label: 'risk', value: approval.risk_level || '' },
     { label: 'requested', value: approval.requested_at || '' },
     { label: 'resolved', value: approval.resolved_at || '' },

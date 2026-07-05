@@ -45,12 +45,23 @@ const RUNTIME_TRACE_KEYS = [
   'deferred_context',
   'deferred_continuation',
 ];
+const OBSERVATION_TRACE_KEYS = [
+  'action_target',
+  'observation_evidence',
+  'observation_retry',
+];
 const TASK_CONTEXT_KEYS = [
   'core_id',
   'workspace_id',
   'task_id',
 ];
 const TRACE_KEYS = [
+  ...TASK_CONTEXT_KEYS,
+  ...PLANNER_TRACE_KEYS,
+  ...RUNTIME_TRACE_KEYS,
+  ...OBSERVATION_TRACE_KEYS,
+];
+const INPUT_TRACE_KEYS = [
   ...TASK_CONTEXT_KEYS,
   ...PLANNER_TRACE_KEYS,
   ...RUNTIME_TRACE_KEYS,
@@ -316,6 +327,9 @@ function approvalFromRunEvent(event: PublicRunEvent): ApprovalCardSnapshot | nul
       recordList(payload.deferred_continuation),
       recordList(inputPreview.deferred_continuation),
     ),
+    action_target: eventTraceRecord(source, payload, inputPreview, 'action_target'),
+    observation_evidence: eventTraceRecord(source, payload, inputPreview, 'observation_evidence'),
+    observation_retry: eventTraceRecord(source, payload, inputPreview, 'observation_retry'),
     task_workspace_items: approvalTaskWorkspaceItems(source, payload, inputPreview),
     verification_targets: approvalTaskVerificationTargets(source, payload, inputPreview),
     task_verification_targets: approvalTaskVerificationTargets(source, payload, inputPreview),
@@ -368,7 +382,7 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
       workflow_run_id: payload.workflow_run_id,
       workflow_node_id: payload.workflow_node_id,
       workflow_node_label: payload.workflow_node_label,
-      ...Object.fromEntries(TRACE_KEYS.map((key) => [key, payload[key]])),
+      ...Object.fromEntries(INPUT_TRACE_KEYS.map((key) => [key, payload[key]])),
     },
   );
   return {
@@ -429,6 +443,9 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
       recordList(payload.deferred_continuation),
       recordList(inputPreview.deferred_continuation),
     ),
+    action_target: plannerTraceRecord(payload, inputPreview, 'action_target'),
+    observation_evidence: plannerTraceRecord(payload, inputPreview, 'observation_evidence'),
+    observation_retry: plannerTraceRecord(payload, inputPreview, 'observation_retry'),
     task_workspace_items: toolCallTaskWorkspaceItems(payload, inputPreview),
     verification_targets: toolCallTaskVerificationTargets(payload, inputPreview),
     task_verification_targets: toolCallTaskVerificationTargets(payload, inputPreview),
@@ -588,6 +605,12 @@ function mergeApprovalTrace(current: ApprovalCardSnapshot, incoming: ApprovalCar
       current.deferred_continuation,
       incoming.deferred_continuation,
     ),
+    action_target: mergeTraceRecords(current.action_target, incoming.action_target),
+    observation_evidence: mergeTraceRecords(
+      current.observation_evidence,
+      incoming.observation_evidence,
+    ),
+    observation_retry: mergeTraceRecords(current.observation_retry, incoming.observation_retry),
     task_workspace_items: mergeRecordLists(current.task_workspace_items, incoming.task_workspace_items),
     verification_targets: mergeRecordLists(
       current.verification_targets,
@@ -662,6 +685,12 @@ function mergeApprovalReplayTrace(
       current.deferred_continuation,
       incoming.deferred_continuation,
     ),
+    action_target: mergeTraceRecords(current.action_target, incoming.action_target),
+    observation_evidence: mergeTraceRecords(
+      current.observation_evidence,
+      incoming.observation_evidence,
+    ),
+    observation_retry: mergeTraceRecords(current.observation_retry, incoming.observation_retry),
     task_workspace_items: mergeRecordLists(current.task_workspace_items, incoming.task_workspace_items),
     verification_targets: mergeRecordLists(
       current.verification_targets,
@@ -742,6 +771,12 @@ function mergeToolCallTrace(current: ToolCallSnapshot, incoming: ToolCallSnapsho
       current.deferred_continuation,
       incoming.deferred_continuation,
     ),
+    action_target: mergeTraceRecords(current.action_target, incoming.action_target),
+    observation_evidence: mergeTraceRecords(
+      current.observation_evidence,
+      incoming.observation_evidence,
+    ),
+    observation_retry: mergeTraceRecords(current.observation_retry, incoming.observation_retry),
     task_workspace_items: mergeRecordLists(current.task_workspace_items, incoming.task_workspace_items),
     verification_targets: mergeRecordLists(
       current.verification_targets,
@@ -820,6 +855,12 @@ function mergeToolCallReplayTrace(current: ToolCallSnapshot, incoming: ToolCallS
       current.deferred_continuation,
       incoming.deferred_continuation,
     ),
+    action_target: mergeTraceRecords(current.action_target, incoming.action_target),
+    observation_evidence: mergeTraceRecords(
+      current.observation_evidence,
+      incoming.observation_evidence,
+    ),
+    observation_retry: mergeTraceRecords(current.observation_retry, incoming.observation_retry),
     task_workspace_items: mergeRecordLists(current.task_workspace_items, incoming.task_workspace_items),
     verification_targets: mergeRecordLists(
       current.verification_targets,
@@ -1310,6 +1351,17 @@ function toolCallTaskVerificationTargets(
   );
 }
 
+function plannerTraceRecord(
+  payload: Record<string, unknown>,
+  inputPreview: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> {
+  return {
+    ...(objectPreview(inputPreview[key]) || {}),
+    ...(objectPreview(payload[key]) || {}),
+  };
+}
+
 function toolCallInputPreviewWithTraceContext(
   inputPreview: Record<string, unknown>,
   traceContext: Record<string, unknown>,
@@ -1346,6 +1398,16 @@ function mergeRecordLists(
     records.push(record);
   });
   return records;
+}
+
+function mergeTraceRecords(
+  current: Record<string, unknown> | null | undefined,
+  incoming: Record<string, unknown> | null | undefined,
+): Record<string, unknown> {
+  return {
+    ...(current || {}),
+    ...(incoming || {}),
+  };
 }
 
 function stableJson(value: unknown): string {
@@ -1537,6 +1599,19 @@ function eventTraceStringList(
     publicRunEventPayloadStringList(payload, key),
     publicRunEventPayloadStringList(inputPreview, key),
   );
+}
+
+function eventTraceRecord(
+  source: Record<string, unknown>,
+  payload: Record<string, unknown>,
+  inputPreview: Record<string, unknown>,
+  key: string,
+): Record<string, unknown> {
+  return {
+    ...(objectPreview(inputPreview[key]) || {}),
+    ...(objectPreview(payload[key]) || {}),
+    ...(objectPreview(source[key]) || {}),
+  };
 }
 
 function eventTraceBool(

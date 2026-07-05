@@ -9,6 +9,9 @@ export type ApprovalRequestDetails = {
   codeLanguage: string;
   codeText: string;
   summary: Array<{ label: string; value: string }>;
+  action_target?: Record<string, unknown>;
+  observation_evidence?: Record<string, unknown>;
+  observation_retry?: Record<string, unknown>;
   task_workspace_items?: Array<Record<string, unknown>>;
   verification_targets?: Array<Record<string, unknown>>;
   task_verification_targets?: Array<Record<string, unknown>>;
@@ -122,6 +125,9 @@ function messageApprovalSnapshot({
     input_preview: messageApprovalInputPreview(details),
     run_id: runId || undefined,
     status: 'pending',
+    action_target: details.action_target || {},
+    observation_evidence: details.observation_evidence || {},
+    observation_retry: details.observation_retry || {},
     task_workspace_items: details.task_workspace_items || [],
     verification_targets: details.verification_targets || [],
     task_verification_targets: details.task_verification_targets || [],

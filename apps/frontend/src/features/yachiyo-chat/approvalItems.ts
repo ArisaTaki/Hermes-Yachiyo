@@ -14,6 +14,9 @@ export type ChatApprovalPending = {
   tool?: unknown;
   input_preview?: unknown;
   requested_at?: unknown;
+  action_target?: unknown;
+  observation_evidence?: unknown;
+  observation_retry?: unknown;
   task_workspace_items?: unknown;
   task_verification_targets?: unknown;
   workspace_items?: unknown;
@@ -147,6 +150,18 @@ export function approvalRequestDetails(message: ChatApprovalMessage): ApprovalRe
     codeLanguage,
     codeText,
     summary,
+    action_target: approvalRecordValue(
+      pending.action_target,
+      isRecord(preview) ? preview.action_target : undefined,
+    ),
+    observation_evidence: approvalRecordValue(
+      pending.observation_evidence,
+      isRecord(preview) ? preview.observation_evidence : undefined,
+    ),
+    observation_retry: approvalRecordValue(
+      pending.observation_retry,
+      isRecord(preview) ? preview.observation_retry : undefined,
+    ),
     task_workspace_items: approvalRecordList(
       pending.task_workspace_items,
       isRecord(preview) ? preview.task_workspace_items : undefined,
@@ -516,6 +531,10 @@ function approvalRecordList(...values: unknown[]): Array<Record<string, unknown>
     });
   });
   return records;
+}
+
+function approvalRecordValue(...values: unknown[]): Record<string, unknown> {
+  return values.find(isRecord) || {};
 }
 
 function stableApprovalRecordKey(value: Record<string, unknown>) {

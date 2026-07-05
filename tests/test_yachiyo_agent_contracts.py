@@ -4445,6 +4445,9 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
         deferred_input={"target": "Review"},
         deferred_context={"step_id": "review-step"},
         deferred_continuation=[{"tool": "screen.capture", "step_id": "verify"}],
+        action_target={"action": "click", "label": "Review"},
+        observation_evidence={"source_tool": "desktop.ui_elements", "strategy": "button"},
+        observation_retry={"from_tool": "desktop.ui_elements", "reason": "target_not_found"},
         verification_targets=[{"step_id": "verify-review", "todo_id": "todo-review"}],
         title="Approve Review Gate",
         description="Needs review",
@@ -4497,6 +4500,9 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
         "deferred_input",
         "deferred_context",
         "deferred_continuation",
+        "action_target",
+        "observation_evidence",
+        "observation_retry",
         "task_workspace_items",
         "verification_targets",
         "task_verification_targets",
@@ -4526,6 +4532,15 @@ def test_approval_card_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["verification_targets"] == [
         {"step_id": "verify-review", "todo_id": "todo-review"}
     ]
+    assert payload["action_target"] == {"action": "click", "label": "Review"}
+    assert payload["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "button",
+    }
+    assert payload["observation_retry"] == {
+        "from_tool": "desktop.ui_elements",
+        "reason": "target_not_found",
+    }
     assert payload["deferred_tool"] == "desktop.click_ui_element"
     assert payload["deferred_context"] == {"step_id": "review-step"}
 
@@ -4558,6 +4573,15 @@ def test_public_pending_approval_projects_runtime_planner_trace_fields() -> None
                 "replan_triggers": ["ui_not_found"],
                 "replan_request_id": "replan-1",
                 "replan_trigger": "ui_not_found",
+                "action_target": {"action": "click", "label": "Save"},
+                "observation_evidence": {
+                    "source_tool": "desktop.ui_elements",
+                    "strategy": "button",
+                },
+                "observation_retry": {
+                    "from_tool": "desktop.ui_elements",
+                    "reason": "target_not_found",
+                },
                 "task_workspace_items": [
                     {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
                 ],
@@ -4598,6 +4622,15 @@ def test_public_pending_approval_projects_runtime_planner_trace_fields() -> None
     assert snapshot["replan_triggers"] == ["ui_not_found"]
     assert snapshot["replan_request_id"] == "replan-1"
     assert snapshot["replan_trigger"] == "ui_not_found"
+    assert snapshot["action_target"] == {"action": "click", "label": "Save"}
+    assert snapshot["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "button",
+    }
+    assert snapshot["observation_retry"] == {
+        "from_tool": "desktop.ui_elements",
+        "reason": "target_not_found",
+    }
     assert snapshot["task_workspace_items"] == [
         {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
     ]
@@ -4637,6 +4670,15 @@ def test_approval_card_from_payload_maps_runtime_planner_trace_fields() -> None:
                 "deferred_continuation": [
                     {"tool": "screen.capture", "step_id": "verify"}
                 ],
+                "action_target": {"action": "click", "label": "Save"},
+                "observation_evidence": {
+                    "source_tool": "desktop.ui_elements",
+                    "strategy": "button",
+                },
+                "observation_retry": {
+                    "from_tool": "desktop.ui_elements",
+                    "reason": "target_not_found",
+                },
                 "task_workspace_items": [
                     {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
                 ],
@@ -4680,6 +4722,15 @@ def test_approval_card_from_payload_maps_runtime_planner_trace_fields() -> None:
     assert snapshot.deferred_continuation == [
         {"tool": "screen.capture", "step_id": "verify"}
     ]
+    assert snapshot.action_target == {"action": "click", "label": "Save"}
+    assert snapshot.observation_evidence == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "button",
+    }
+    assert snapshot.observation_retry == {
+        "from_tool": "desktop.ui_elements",
+        "reason": "target_not_found",
+    }
     assert snapshot.task_workspace_items == [
         {"item_id": "workspace-save", "title": "Saved draft", "path": "draft.md"}
     ]
@@ -6807,6 +6858,9 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
         deferred_input={"target": "Export", "limit": 80},
         deferred_context={"step_id": "operate-foreground-ui"},
         deferred_continuation=[{"tool": "desktop.ui_elements", "step_id": "verify"}],
+        action_target={"action": "click", "label": "Export"},
+        observation_evidence={"source_tool": "desktop.ui_elements", "strategy": "button"},
+        observation_retry={"from_tool": "desktop.ui_elements", "reason": "target_not_found"},
         verification_targets=[{"step_id": "verify-export", "todo_id": "todo-export"}],
         tool_name="workspace.read",
         status="completed",
@@ -6858,6 +6912,9 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
         "deferred_input",
         "deferred_context",
         "deferred_continuation",
+        "action_target",
+        "observation_evidence",
+        "observation_retry",
         "task_workspace_items",
         "verification_targets",
         "task_verification_targets",
@@ -6885,6 +6942,15 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["verification_targets"] == [
         {"step_id": "verify-export", "todo_id": "todo-export"}
     ]
+    assert payload["action_target"] == {"action": "click", "label": "Export"}
+    assert payload["observation_evidence"] == {
+        "source_tool": "desktop.ui_elements",
+        "strategy": "button",
+    }
+    assert payload["observation_retry"] == {
+        "from_tool": "desktop.ui_elements",
+        "reason": "target_not_found",
+    }
     assert payload["deferred_tool"] == "desktop.click_ui_element"
     assert payload["deferred_input"] == {"target": "Export", "limit": 80}
 

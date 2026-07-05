@@ -142,6 +142,16 @@ def tool_call_snapshot_from_payload(
         deferred_continuation=_record_list(
             payload.get("deferred_continuation") or input_preview.get("deferred_continuation")
         ),
+        action_target=_mapping(
+            payload.get("action_target") or input_preview.get("action_target")
+        ),
+        observation_evidence=_mapping(
+            payload.get("observation_evidence")
+            or input_preview.get("observation_evidence")
+        ),
+        observation_retry=_mapping(
+            payload.get("observation_retry") or input_preview.get("observation_retry")
+        ),
         task_workspace_items=_record_list(
             payload.get("task_workspace_items")
             or input_preview.get("task_workspace_items")
@@ -315,6 +325,9 @@ def _redacted_tool_call_snapshot(snapshot: ToolCallSnapshot) -> ToolCallSnapshot
             "deferred_input": _mapping(snapshot.deferred_input),
             "deferred_context": _mapping(snapshot.deferred_context),
             "deferred_continuation": _record_list(snapshot.deferred_continuation),
+            "action_target": _mapping(snapshot.action_target),
+            "observation_evidence": _mapping(snapshot.observation_evidence),
+            "observation_retry": _mapping(snapshot.observation_retry),
             "task_workspace_items": _record_list(snapshot.task_workspace_items),
             "verification_targets": _record_list(snapshot.verification_targets),
             "task_verification_targets": _record_list(snapshot.task_verification_targets),
@@ -419,6 +432,12 @@ def _restore_known_preview_types(value: dict[str, Any]) -> dict[str, Any]:
         if isinstance(item, str):
             parsed = _literal_preview_value(item)
             if isinstance(parsed, list):
+                result[key] = parsed
+    for key in ("action_target", "observation_evidence", "observation_retry"):
+        item = result.get(key)
+        if isinstance(item, str):
+            parsed = _literal_preview_value(item)
+            if isinstance(parsed, dict):
                 result[key] = parsed
     data = result.get("data")
     if isinstance(data, str):

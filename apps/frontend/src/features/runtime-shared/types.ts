@@ -830,6 +830,9 @@ export type ApprovalCardSnapshot = {
   deferred_input?: Record<string, unknown>;
   deferred_context?: Record<string, unknown>;
   deferred_continuation?: Array<Record<string, unknown>>;
+  action_target?: Record<string, unknown>;
+  observation_evidence?: Record<string, unknown>;
+  observation_retry?: Record<string, unknown>;
   title: string;
   description?: string | null;
   status?: ApprovalStatus | string;
@@ -950,6 +953,9 @@ export type ToolCallSnapshot = {
   deferred_input?: Record<string, unknown>;
   deferred_context?: Record<string, unknown>;
   deferred_continuation?: Array<Record<string, unknown>>;
+  action_target?: Record<string, unknown>;
+  observation_evidence?: Record<string, unknown>;
+  observation_retry?: Record<string, unknown>;
   tool_name: string;
   status: string;
   risk_level?: string | null;

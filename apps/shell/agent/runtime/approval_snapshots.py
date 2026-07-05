@@ -107,13 +107,21 @@ def public_pending_approval(value: Any) -> dict[str, Any]:
             if items:
                 snapshot[key] = items
     for key, aliases in (
+        ("action_target", ("action_target",)),
+        ("observation_evidence", ("observation_evidence",)),
+        ("observation_retry", ("observation_retry",)),
         ("task_workspace_items", ("task_workspace_items", "workspace_items")),
         ("verification_targets", ("verification_targets", "task_verification_targets")),
         ("task_verification_targets", ("task_verification_targets", "verification_targets")),
     ):
-        items = _first_mapping_items(raw, tool_request, preview_record, aliases)
-        if items:
-            snapshot[key] = items
+        if key in {"action_target", "observation_evidence", "observation_retry"}:
+            item = _first_mapping(raw, tool_request, preview_record, aliases)
+            if item:
+                snapshot[key] = item
+        else:
+            items = _first_mapping_items(raw, tool_request, preview_record, aliases)
+            if items:
+                snapshot[key] = items
     if risk_level:
         snapshot["risk_level"] = risk_level
     if policy_reason:
@@ -177,6 +185,20 @@ def _workflow_approval_criteria(raw: dict[str, Any], public_input_preview: Any) 
     return ""
 
 
+def _first_mapping(
+    raw: dict[str, Any],
+    tool_request: dict[str, Any],
+    preview_record: dict[str, Any],
+    aliases: tuple[str, ...],
+) -> dict[str, Any]:
+    for source in (raw, tool_request, preview_record):
+        for key in aliases:
+            item = _mapping_item(source.get(key))
+            if item:
+                return item
+    return {}
+
+
 def _first_mapping_items(
     raw: dict[str, Any],
     tool_request: dict[str, Any],
@@ -189,6 +211,13 @@ def _first_mapping_items(
             if items:
                 return items
     return []
+
+
+def _mapping_item(value: Any) -> dict[str, Any]:
+    if not isinstance(value, dict):
+        return {}
+    public_value = approval_input_preview(value)
+    return dict(public_value) if isinstance(public_value, dict) else {}
 
 
 def _mapping_items(value: Any) -> list[dict[str, Any]]:

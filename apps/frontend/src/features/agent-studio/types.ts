@@ -229,6 +229,9 @@ export type RunSpec = {
     runtime_role?: string;
     requires_observation?: boolean;
     requires_post_action_verification?: boolean;
+    action_target?: Record<string, unknown>;
+    observation_evidence?: Record<string, unknown>;
+    observation_retry?: Record<string, unknown>;
     task_workspace_items?: Array<Record<string, unknown>>;
     verification_targets?: Array<Record<string, unknown>>;
     task_verification_targets?: Array<Record<string, unknown>>;

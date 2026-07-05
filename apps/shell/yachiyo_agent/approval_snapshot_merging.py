@@ -64,6 +64,18 @@ def merge_approval_snapshots(
             current.deferred_continuation,
             next_approval.deferred_continuation,
         ),
+        action_target=_merge_mappings(
+            current.action_target,
+            next_approval.action_target,
+        ),
+        observation_evidence=_merge_mappings(
+            current.observation_evidence,
+            next_approval.observation_evidence,
+        ),
+        observation_retry=_merge_mappings(
+            current.observation_retry,
+            next_approval.observation_retry,
+        ),
         task_workspace_items=_merge_record_lists(
             current.task_workspace_items,
             next_approval.task_workspace_items,
@@ -105,6 +117,13 @@ def merge_approval_snapshot_lists(
             else:
                 by_key[key] = merge_approval_snapshots(by_key[key], approval)
     return [by_key[key] for key in ordered_keys]
+
+
+def _merge_mappings(
+    current: dict[str, Any],
+    next_items: dict[str, Any],
+) -> dict[str, Any]:
+    return {**dict(current or {}), **dict(next_items or {})}
 
 
 def _merge_record_lists(

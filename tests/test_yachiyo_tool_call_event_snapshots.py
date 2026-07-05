@@ -175,6 +175,12 @@ def test_tool_call_snapshots_from_events_preserve_planner_trace_context() -> Non
                     "workspace_id": "workspace-1",
                     "task_id": "task-1",
                     "replan_request_id": "replan-1",
+                    "action_target": {"action": "read", "path": "report.csv"},
+                    "observation_evidence": {"source_tool": "workspace.read"},
+                    "observation_retry": {
+                        "from_tool": "workspace.read",
+                        "reason": "content_missing",
+                    },
                 },
             ),
             PublicRunEvent(
@@ -203,6 +209,12 @@ def test_tool_call_snapshots_from_events_preserve_planner_trace_context() -> Non
     assert calls[0].workspace_id == "workspace-1"
     assert calls[0].task_id == "task-1"
     assert calls[0].replan_request_id == "replan-1"
+    assert calls[0].action_target == {"action": "read", "path": "report.csv"}
+    assert calls[0].observation_evidence == {"source_tool": "workspace.read"}
+    assert calls[0].observation_retry == {
+        "from_tool": "workspace.read",
+        "reason": "content_missing",
+    }
     assert calls[0].input_preview["path"] == "report.csv"
     assert calls[0].input_preview["core_id"] == "core-1"
     assert calls[0].input_preview["workspace_id"] == "workspace-1"

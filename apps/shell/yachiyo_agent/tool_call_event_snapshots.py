@@ -49,6 +49,11 @@ _RUNTIME_TRACE_KEYS = (
     "deferred_context",
     "deferred_continuation",
 )
+_OBSERVATION_TRACE_KEYS = (
+    "action_target",
+    "observation_evidence",
+    "observation_retry",
+)
 
 
 def tool_call_snapshots_from_events(events: list[PublicRunEvent]) -> list[ToolCallSnapshot]:
@@ -143,18 +148,17 @@ def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         "approval_id": approval_id,
         "risk_level": risk_level,
         "policy_reason": policy_reason,
-        "group_id": explicit_payload.get("group_id"),
-        "group_run_id": explicit_payload.get("group_run_id")
-        or explicit_payload.get("run_group_id"),
-        "member_agent_id": explicit_payload.get("member_agent_id"),
-        "member_agent_name": explicit_payload.get("member_agent_name"),
-        "workflow_id": explicit_payload.get("workflow_id"),
-        "workflow_run_id": explicit_payload.get("workflow_run_id"),
-        "workflow_node_id": explicit_payload.get("workflow_node_id"),
-        "workflow_node_label": explicit_payload.get("workflow_node_label"),
-        "core_id": explicit_payload.get("core_id"),
-        "workspace_id": explicit_payload.get("workspace_id"),
-        "task_id": _tool_call_preview_task_id(event, explicit_payload),
+        "group_id": payload.get("group_id"),
+        "group_run_id": payload.get("group_run_id") or payload.get("run_group_id"),
+        "member_agent_id": payload.get("member_agent_id"),
+        "member_agent_name": payload.get("member_agent_name"),
+        "workflow_id": payload.get("workflow_id"),
+        "workflow_run_id": payload.get("workflow_run_id"),
+        "workflow_node_id": payload.get("workflow_node_id"),
+        "workflow_node_label": payload.get("workflow_node_label"),
+        "core_id": payload.get("core_id"),
+        "workspace_id": payload.get("workspace_id"),
+        "task_id": _tool_call_preview_task_id(event, payload),
     }
     for key in (*_PLANNER_TRACE_KEYS, *_RUNTIME_TRACE_KEYS):
         if key == "source" and is_daily_desktop_intent_tool_event(event.event_type):
@@ -219,6 +223,7 @@ def daily_desktop_intent_step_payloads(event: PublicRunEvent) -> list[dict[str, 
                 "risk",
                 *_PLANNER_TRACE_KEYS,
                 *_RUNTIME_TRACE_KEYS,
+                *_OBSERVATION_TRACE_KEYS,
             }
         }
         step_payload.update(
@@ -262,6 +267,7 @@ def merge_tool_trace_context(source: dict[str, Any], payload: dict[str, Any]) ->
         "verification_targets",
         *_PLANNER_TRACE_KEYS,
         *_RUNTIME_TRACE_KEYS,
+        *_OBSERVATION_TRACE_KEYS,
     ):
         if payload.get(key):
             source.setdefault(key, payload.get(key))
@@ -372,6 +378,18 @@ def merge_tool_call_snapshots(
             current.deferred_continuation,
             next_call.deferred_continuation,
         ),
+        action_target=_merge_mappings(
+            current.action_target,
+            next_call.action_target,
+        ),
+        observation_evidence=_merge_mappings(
+            current.observation_evidence,
+            next_call.observation_evidence,
+        ),
+        observation_retry=_merge_mappings(
+            current.observation_retry,
+            next_call.observation_retry,
+        ),
         task_workspace_items=_merge_record_lists(
             current.task_workspace_items,
             next_call.task_workspace_items,
@@ -425,6 +443,10 @@ def latest_matching_tool_call_index(
 def tool_call_snapshot_match_key(call: ToolCallSnapshot) -> str:
     preview = _tool_call_correlation_preview(call.input_preview)
     return f"{call.run_id or ''}:tool:{call.tool_name}:{_stable_json(preview)}"
+
+
+def _merge_mappings(current: dict[str, Any], next_items: dict[str, Any]) -> dict[str, Any]:
+    return {**dict(current or {}), **dict(next_items or {})}
 
 
 def is_tool_event(event_type: str) -> bool:

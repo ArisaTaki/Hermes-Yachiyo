@@ -45,6 +45,31 @@ _RUNTIME_TRACE_KEYS = (
     "deferred_context",
     "deferred_continuation",
 )
+_OBSERVATION_TRACE_KEYS = (
+    "action_target",
+    "observation_evidence",
+    "observation_retry",
+)
+_CONTEXT_PREVIEW_KEYS = {
+    "source_run_id",
+    "source_runnable_id",
+    "source_runnable_name",
+    "group_id",
+    "group_run_id",
+    "run_group_id",
+    "member_agent_id",
+    "member_agent_name",
+    "workflow_id",
+    "workflow_run_id",
+    "workflow_node_id",
+    "workflow_node_label",
+    "core_id",
+    "workspace_id",
+    "task_id",
+    *_PLANNER_TRACE_KEYS,
+    *_RUNTIME_TRACE_KEYS,
+    *_OBSERVATION_TRACE_KEYS,
+}
 
 
 def approval_snapshots_from_events(
@@ -175,6 +200,7 @@ def merge_trace_context_into_approval(
             "task_id",
             *_PLANNER_TRACE_KEYS,
             *_RUNTIME_TRACE_KEYS,
+            *_OBSERVATION_TRACE_KEYS,
         )
         if payload.get(key)
     }
@@ -182,20 +208,25 @@ def merge_trace_context_into_approval(
         return
     for key, value in context.items():
         source.setdefault(key, value)
-    preview_source = preview_payload if isinstance(preview_payload, Mapping) else payload
+    preview_source = (
+        preview_payload
+        if isinstance(preview_payload, Mapping) and _has_context_preview(preview_payload)
+        else payload
+    )
     preview_context = {
         key: preview_source.get(key)
         for key in context
         if preview_source.get(key)
     }
-    if preview_source.get("member_agent_id") and not preview_context.get("source_runnable_id"):
-        preview_context["source_runnable_id"] = preview_source.get("member_agent_id")
-    if preview_source.get("member_agent_name") and not preview_context.get("source_runnable_name"):
-        preview_context["source_runnable_name"] = preview_source.get("member_agent_name")
-    if preview_source.get("group_run_id") and not preview_context.get("run_group_id"):
-        preview_context["run_group_id"] = preview_source.get("group_run_id")
-    if preview_source.get("run_group_id") and not preview_context.get("group_run_id"):
-        preview_context["group_run_id"] = preview_source.get("run_group_id")
+    if _should_preview_context_aliases(preview_payload):
+        if preview_source.get("member_agent_id") and not preview_context.get("source_runnable_id"):
+            preview_context["source_runnable_id"] = preview_source.get("member_agent_id")
+        if preview_source.get("member_agent_name") and not preview_context.get("source_runnable_name"):
+            preview_context["source_runnable_name"] = preview_source.get("member_agent_name")
+        if preview_source.get("group_run_id") and not preview_context.get("run_group_id"):
+            preview_context["run_group_id"] = preview_source.get("group_run_id")
+        if preview_source.get("run_group_id") and not preview_context.get("group_run_id"):
+            preview_context["group_run_id"] = preview_source.get("run_group_id")
     if (
         preview_context.get("task_id")
         and not preview_context.get("core_id")
@@ -208,6 +239,16 @@ def merge_trace_context_into_approval(
         preview.setdefault(key, value)
     if preview:
         source["input_preview"] = preview
+
+
+def _has_context_preview(payload: Mapping[str, Any]) -> bool:
+    return any(payload.get(key) for key in _CONTEXT_PREVIEW_KEYS)
+
+
+def _should_preview_context_aliases(payload: Mapping[str, Any] | None) -> bool:
+    return isinstance(payload, Mapping) and bool(
+        payload.get("group_run_id") or payload.get("run_group_id")
+    )
 
 
 def _approval_required_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:

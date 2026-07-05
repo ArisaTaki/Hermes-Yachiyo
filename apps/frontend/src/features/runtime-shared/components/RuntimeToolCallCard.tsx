@@ -44,6 +44,9 @@ export type RuntimeToolCallCardSnapshot = {
   capability_planned_step_ids?: string[];
   replan_request_id?: string | null;
   replan_trigger?: string | null;
+  action_target?: Record<string, unknown>;
+  observation_evidence?: Record<string, unknown>;
+  observation_retry?: Record<string, unknown>;
   task_workspace_items?: Array<Record<string, unknown>>;
   verification_targets?: Array<Record<string, unknown>>;
   task_verification_targets?: Array<Record<string, unknown>>;
@@ -383,11 +386,10 @@ function runtimeToolObservedMetadata(toolCall: RuntimeToolCallCardSnapshot): {
   observationEvidence: Record<string, unknown>;
   observationRetry: Record<string, unknown>;
 } {
-  const metadata = approvalPreviewRecord(toolCall.metadata);
   return {
-    actionTarget: approvalPreviewRecord(metadata.action_target),
-    observationEvidence: approvalPreviewRecord(metadata.observation_evidence),
-    observationRetry: approvalPreviewRecord(metadata.observation_retry),
+    actionTarget: runtimeToolTraceRecord(toolCall, 'action_target'),
+    observationEvidence: runtimeToolTraceRecord(toolCall, 'observation_evidence'),
+    observationRetry: runtimeToolTraceRecord(toolCall, 'observation_retry'),
   };
 }
 
