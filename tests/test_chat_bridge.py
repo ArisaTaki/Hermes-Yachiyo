@@ -111,6 +111,24 @@ def test_chat_bridge_quick_task_forwards_runtime_execution_envelope(
         store.close()
 
 
+def test_chat_bridge_quick_candidates_use_execution_context() -> None:
+    requests = chat_bridge_mod._desktop_candidates_for_quick_message(
+        "打开 PixelForge 并点击导出按钮"
+    )
+
+    assert [request["tool"] for request in requests] == [
+        "desktop.list_apps",
+        "desktop.inspect_app",
+        "app.open_and_click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert requests[0]["runtime_stage"] == "discover"
+    assert requests[2]["step_id"] == "operate-foreground-ui"
+    assert requests[2]["runtime_stage"] == "operate"
+    assert requests[2]["task_todo"]["tool_name"] == "app.open_and_click_ui_element"
+    assert requests[3]["runtime_stage"] == "verify"
+
+
 def _agent_task_event(
     agent_task: dict[str, Any],
     event_type: str,

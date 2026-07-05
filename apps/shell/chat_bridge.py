@@ -237,6 +237,8 @@ def _desktop_candidates_for_quick_message(
         text,
         metadata=metadata,
         allowed_tools=allowed_tools,
+        execution_normalized=True,
+        include_runtime_context=True,
     )
 
 

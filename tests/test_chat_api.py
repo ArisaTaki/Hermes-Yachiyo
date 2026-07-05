@@ -132,6 +132,33 @@ def test_chat_api_direct_daily_desktop_task_forwards_runtime_execution_envelope(
         store.close()
 
 
+def test_chat_api_daily_desktop_requests_use_execution_context(tmp_path):
+    api, runtime, store = _make_api(tmp_path)
+    runtime.agent_runtime_service = object()
+
+    try:
+        requests = api._daily_desktop_entrypoint_requests("打开 PixelForge 并点击导出按钮")
+
+        assert [request["tool"] for request in requests] == [
+            "desktop.list_apps",
+            "desktop.inspect_app",
+            "app.open_and_click_ui_element",
+            "desktop.ui_elements",
+        ]
+        assert requests[0]["runtime_stage"] == "discover"
+        assert requests[1]["step_id"] == "inspect-app"
+        assert requests[2]["step_id"] == "operate-foreground-ui"
+        assert requests[2]["runtime_stage"] == "operate"
+        assert requests[2]["runtime_role"] == "click_ui"
+        assert requests[2]["task_todo"]["step_id"] == "operate-foreground-ui"
+        assert requests[3]["runtime_stage"] == "verify"
+        assert requests[3]["task_verification_targets"][0]["step_id"] == (
+            "operate-foreground-ui"
+        )
+    finally:
+        store.close()
+
+
 def _wait_for_agent_run(service: AgentRuntimeService, run_id: str, timeout: float = 5.0) -> dict:
     """等待 Agent Run 异步执行完成"""
     deadline = time.time() + timeout

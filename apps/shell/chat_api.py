@@ -1277,6 +1277,8 @@ class ChatAPI:
             metadata=metadata,
             allowed_tools=allowed_entrypoint_tools,
             metadata_allowed_tools=allowed_daily_desktop_tools,
+            execution_normalized=True,
+            include_runtime_context=True,
         )
 
     def _daily_desktop_runtime_execution_envelope(
