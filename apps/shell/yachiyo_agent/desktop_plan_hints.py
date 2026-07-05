@@ -1222,6 +1222,27 @@ def media_app_query_search_plan(
         _append_media_app_verify_step(plan, allowed)
         return plan
 
+    shortcut_tool = _first_allowed(
+        ("desktop.safe_shortcut", "desktop.shortcut", "desktop.hotkey"),
+        allowed,
+    )
+    if app_tool and shortcut_tool and type_tool:
+        plan = [
+            *discovery_step,
+            (app_tool, {"app_name": app_name, **selected_app_payload}),
+            (shortcut_tool, _media_search_shortcut_payload(shortcut_tool)),
+            (type_tool, type_payload),
+            *submit_step,
+        ]
+        _append_media_search_result_play_step(
+            plan,
+            app_name=app_name,
+            selected_app_payload=selected_app_payload,
+            allowed=allowed,
+        )
+        _append_media_app_verify_step(plan, allowed)
+        return plan
+
     observed_type_tool = _first_allowed(("desktop.type_into_ui_element",), allowed)
     if not observed_type_tool and _media_observed_type_fallback_available(allowed):
         observed_type_tool = "desktop.type_into_ui_element"
@@ -1255,27 +1276,7 @@ def media_app_query_search_plan(
         _append_media_app_verify_step(plan, allowed)
         return plan
 
-    shortcut_tool = _first_allowed(
-        ("desktop.safe_shortcut", "desktop.shortcut", "desktop.hotkey"),
-        allowed,
-    )
-    if not app_tool or not shortcut_tool:
-        return []
-    plan = [
-        *discovery_step,
-        (app_tool, {"app_name": app_name, **selected_app_payload}),
-        (shortcut_tool, _media_search_shortcut_payload(shortcut_tool)),
-        (type_tool, type_payload),
-        *submit_step,
-    ]
-    _append_media_search_result_play_step(
-        plan,
-        app_name=app_name,
-        selected_app_payload=selected_app_payload,
-        allowed=allowed,
-    )
-    _append_media_app_verify_step(plan, allowed)
-    return plan
+    return []
 
 
 def _media_search_shortcut_payload(tool_name: str | None) -> dict[str, Any]:
