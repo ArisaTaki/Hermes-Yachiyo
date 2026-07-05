@@ -5046,6 +5046,16 @@ class RuntimePlanner:
                 ("desktop.ui_elements", "desktop.active_window", "screen.capture"),
                 allowed,
             )
+            verify_preview = _desktop_verify_input_preview(
+                verify_tool,
+                app_name=search_app_name or app_name,
+                operation_preview={},
+            )
+            if (
+                selected_app_payload
+                and verify_tool in {"desktop.ui_elements", "desktop.read_ui"}
+            ):
+                verify_preview = {**verify_preview, **selected_app_payload}
             steps.append(
                 _step(
                     intent,
@@ -5053,11 +5063,7 @@ class RuntimePlanner:
                     "Verify desktop result",
                     "desktop.app_discovery",
                     verify_tool,
-                    input_preview=_desktop_verify_input_preview(
-                        verify_tool,
-                        app_name=app_name,
-                        operation_preview={},
-                    ),
+                    input_preview=verify_preview,
                     depends_on=[search_terminal_step_id],
                     reason="Observe the app after submitting the search.",
                 )
@@ -24676,10 +24682,10 @@ def _app_capability_search_hint(text: str, app_capability: Mapping[str, str]) ->
         r"\b(?:inside|within|in)\s+(?:it|the\s+app|the\s+application|the\s+tool|the\s+program)"
         r"\s+(?:search|find|look\s+up)(?:\s+for)?\s+(?P<scoped_query_en>.+)$",
         r"(?:应用(?:程序)?|app|软件|工具|程序|客户端|编辑器|阅读器|查看器|浏览器)"
-        r"(?:里|中|内|上)?\s*(?:并|然后|再|去|来|用于|用来)?\s*"
+        r"(?:里|中|内|上)?\s*(?:[，,]\s*)?(?:并|然后|再|去|来|用于|用来)?\s*"
         r"(?:搜索|查找|检索|找)(?:一下|下)?\s*(?P<query>.+)$",
         r"\b(?:app|application|tool|program|client|editor|reader|viewer)\b"
-        r"(?:\s+(?:and|then|to|for))?\s*"
+        r"(?:\s*,)?(?:\s+(?:and|then|to|for))?\s*"
         r"(?:search|find|look\s+up)(?:\s+for)?\s+(?P<query_en>.+)$",
     )
     for pattern in patterns:
@@ -25591,6 +25597,18 @@ def _app_search_followup_hint(text: str) -> dict[str, Any]:
         flags=re.IGNORECASE,
     ):
         return {"action": "arrow_down_confirm"}
+    explicit_click = click_target_hint(value)
+    if explicit_click and re.search(
+        r"(?:搜索|查找|检索|找|search|find|look\s+up).{0,120}"
+        r"(?:选择|选中|点击|点按|打开|click|select|choose|open)",
+        value,
+        flags=re.IGNORECASE,
+    ):
+        return {
+            "action": "click_first_result",
+            "target": str(explicit_click.get("target") or "第一个结果"),
+            "click_count": int(explicit_click.get("click_count") or 1),
+        }
     if re.search(
         r"(?:选择|选中|点击|点按|打开).{0,8}(?:第一个|首个|第1个).{0,8}(?:结果|项)?",
         value,
@@ -28436,7 +28454,11 @@ def _selected_discovered_app_target_path_hint(text: str) -> str:
     if source_hint:
         if _path_hint_is_app_search_query(text, source_hint):
             return ""
-        return source_hint
+        path = _clean_file_open_explicit_path(source_hint, text)
+        location = _file_open_location_hint(text)
+        if location and path and "/" not in path and not path.startswith(("~", ".")):
+            return f"{location}/{path}"
+        return path or source_hint
     file_hint = file_access_hint(text)
     if str(file_hint.get("action") or "").strip() == "open_path":
         path = str(file_hint.get("path") or "").strip()

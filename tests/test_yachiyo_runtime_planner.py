@@ -3765,6 +3765,71 @@ def test_runtime_planner_discovers_generic_browser_before_specific_search() -> N
     assert web_decision.selected_intent.inputs["query"] == "OpenAI 最新新闻"
 
 
+def test_runtime_planner_clicks_selected_discovered_app_search_results() -> None:
+    allowed_tools = [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.click_ui_element",
+        "app.focus_and_click_ui_element",
+        "app.focus_and_safe_type_text",
+        "desktop.search_submit",
+        "desktop.ui_elements",
+    ]
+    mail = RuntimePlanner().decision(
+        "打开一个邮件应用，搜索 Alice，然后点击第一封邮件",
+        allowed_tools=allowed_tools,
+    )
+    project = RuntimePlanner().decision(
+        "找一个项目管理应用，搜索 login bug，然后点击第一个结果",
+        allowed_tools=allowed_tools,
+    )
+
+    assert mail.selected_intent.inputs["app_search_hint"] == {
+        "query": "Alice",
+        "target": "搜索",
+    }
+    assert [step.step_id for step in mail.plan.tool_plan.steps] == [
+        "discover_apps-desktop-state",
+        "open-selected-discovered-app",
+        "focus-app-search-field",
+        "type-app-search-query",
+        "submit-app-search",
+        "select-app-search-result",
+        "verify-desktop-result",
+    ]
+    mail_result = _step_by_id(mail, "select-app-search-result")
+    assert mail_result.input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "mail",
+        "target": "第一封邮件",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+    assert _step_by_id(mail, "verify-desktop-result").input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "mail",
+    }
+
+    assert project.selected_intent.inputs["app_search_hint"] == {
+        "query": "login bug",
+        "target": "搜索",
+    }
+    project_result = _step_by_id(project, "select-app-search-result")
+    assert project_result.input_preview == {
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "project management",
+        "target": "第一个结果",
+        "role_filter": "",
+        "limit": 80,
+        "click_count": 1,
+    }
+    assert project_result.depends_on == ["submit-app-search"]
+
+
 def test_planner_binds_discovered_creative_actions_to_selected_app_when_available() -> None:
     prompt = "打开一个能画图的应用，画一个圆并保存到桌面"
     allowed_tools = [
@@ -12986,7 +13051,11 @@ def test_runtime_planner_keeps_scoped_capability_app_search_off_web_research() -
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "code",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -13097,7 +13166,11 @@ def test_runtime_planner_discovers_generic_design_tool_before_searching() -> Non
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "pdf",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -13630,7 +13703,11 @@ def test_runtime_planner_opens_file_with_discovered_app_before_in_app_search() -
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {},
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "selection_source": "desktop.list_apps",
+                "query": "pdf",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
