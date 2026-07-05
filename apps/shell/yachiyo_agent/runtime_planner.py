@@ -91,6 +91,7 @@ from .schedule_plan_hints import (
     scheduled_runnable_payload,
 )
 from .system_plan_hints import system_control_hint, system_tool_preview
+from .task_core_event_projection import task_core_initial_progress_preview_events
 from .terminal_plan_hints import terminal_command_hint
 from .web_destination_hints import (
     legacy_known_web_destination_search_url,
@@ -14721,6 +14722,8 @@ def _timeline_preview(
                 },
             }
         )
+    if task_core is not None:
+        events.extend(task_core_initial_progress_preview_events(task_core))
     return events
 
 

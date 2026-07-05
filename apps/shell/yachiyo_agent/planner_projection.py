@@ -22,6 +22,10 @@ from .runtime_execution import (
     runtime_execution_envelope_payload,
     runtime_execution_requests_from_envelope_payload,
 )
+from .task_core_event_projection import (
+    task_core_initial_progress_event_payloads,
+    task_core_progress_event_detail,
+)
 
 _MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
 
@@ -1339,6 +1343,8 @@ def _planner_timeline_detail(event_type: str, payload: Mapping[str, Any]) -> str
         task_core = payload.get("task_core") if isinstance(payload.get("task_core"), Mapping) else {}
         workspace = task_core.get("workspace") if isinstance(task_core.get("workspace"), Mapping) else {}
         return str(workspace.get("title") or task_core.get("core_id") or "").strip()
+    if event_type in {"agent.task.todo.updated", "agent.task.checkpoint.updated"}:
+        return task_core_progress_event_detail(event_type, dict(payload))
     return event_type
 
 
@@ -1414,6 +1420,15 @@ def planner_run_event_payloads(
                     "plan_id": decision.plan.plan_id,
                     "step": step.model_dump(mode="json"),
                 },
+            )
+        )
+    if task_core is not None:
+        payloads.extend(
+            task_core_initial_progress_event_payloads(
+                task_core,
+                source=decision.source,
+                decision_id=decision.decision_id,
+                plan_id=decision.plan.plan_id,
             )
         )
     return payloads

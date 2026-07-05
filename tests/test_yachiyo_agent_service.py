@@ -1846,6 +1846,9 @@ def test_yachiyo_agent_service_enriches_bare_chat_start_payload_with_planner_eve
         "agent.task_core.created",
         "agent.plan.step",
     ]
+    event_types = [event.event_type for event in task.recent_events]
+    assert "agent.task.todo.updated" in event_types
+    assert "agent.task.checkpoint.updated" in event_types
     assert task.recent_events[0].payload["intent"]["kind"] == "data_analysis"
     assert task.task_core is not None
     assert [todo.step_id for todo in task.task_core.todos] == ["analyze-data-file"]

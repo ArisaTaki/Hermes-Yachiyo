@@ -23,6 +23,9 @@ def test_studio_start_agent_run_enriches_bare_port_payload_with_planner_events()
         "agent.task_core.created",
         "agent.plan.step",
     ]
+    event_types = [event.event_type for event in run.events]
+    assert "agent.task.todo.updated" in event_types
+    assert "agent.task.checkpoint.updated" in event_types
     assert run.task_core is not None
     assert run.task_core.todos
     assert run.events[0].payload["intent"]["kind"] == "data_analysis"
@@ -50,6 +53,8 @@ def test_studio_start_group_run_enriches_bare_port_payload_with_group_scoped_eve
     assert "group.run.intent.selected" in event_types
     assert "group.run.plan.created" in event_types
     assert "group.run.task_core.created" in event_types
+    assert "group.run.task.todo.updated" in event_types
+    assert "group.run.task.checkpoint.updated" in event_types
     assert group_run.task_core is not None
     assert group_run.task_core.todos
     start_payload = port.group_run_payloads[0]
@@ -79,6 +84,8 @@ def test_studio_start_workflow_run_enriches_bare_port_payload_with_workflow_scop
     assert "workflow.run.intent.selected" in event_types
     assert "workflow.run.plan.created" in event_types
     assert "workflow.run.task_core.created" in event_types
+    assert "workflow.run.task.todo.updated" in event_types
+    assert "workflow.run.task.checkpoint.updated" in event_types
     assert workflow_run.task_core is not None
     assert workflow_run.task_core.todos
     start_payload = port.workflow_run_payloads[0]

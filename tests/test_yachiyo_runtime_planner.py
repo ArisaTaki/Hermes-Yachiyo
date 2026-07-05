@@ -2180,6 +2180,13 @@ def test_runtime_planner_timeline_preview_includes_created_plan_event() -> None:
         "agent.plan.step",
         "agent.plan.step",
         "agent.plan.step",
+        "agent.task.todo.updated",
+        "agent.task.todo.updated",
+        "agent.task.todo.updated",
+        "agent.task.checkpoint.updated",
+        "agent.task.checkpoint.updated",
+        "agent.task.checkpoint.updated",
+        "agent.task.checkpoint.updated",
     ]
     created = decision.plan.timeline_preview[1]
     assert created["payload"]["plan_id"] == decision.plan.plan_id
@@ -2191,6 +2198,17 @@ def test_runtime_planner_timeline_preview_includes_created_plan_event() -> None:
     assert task_core_event["payload"]["core_id"] == decision.plan.task_core.core_id
     assert task_core_event["payload"]["todo_count"] == 3
     assert task_core_event["payload"]["checkpoint_count"] == 4
+    todo_event = decision.plan.timeline_preview[6]
+    assert todo_event["payload"]["todo_id"] == (
+        decision.plan.task_core.todos[0].todo_id
+    )
+    assert todo_event["payload"]["step_id"] == "inspect-data-source"
+    assert todo_event["payload"]["status"] == "pending"
+    checkpoint_event = decision.plan.timeline_preview[-1]
+    assert checkpoint_event["payload"]["checkpoint_id"] == (
+        decision.plan.task_core.checkpoints[-1].checkpoint_id
+    )
+    assert checkpoint_event["payload"]["status"] == "planned"
 
 
 def test_runtime_planner_emits_deepagent_style_task_core() -> None:
@@ -2329,6 +2347,9 @@ def test_runtime_planner_timeline_events_include_full_studio_trace_payloads() ->
     assert events[2]["payload"]["todo_count"] == len(decision.plan.task_core.todos)
     assert events[2]["payload"]["checkpoint_count"] == len(decision.plan.task_core.checkpoints)
     assert events[3]["payload"]["step"]["step_id"] == "discover-desktop-state"
+    event_types = [event["event"] for event in events]
+    assert "agent.task.todo.updated" in event_types
+    assert "agent.task.checkpoint.updated" in event_types
 
 
 def test_runtime_planner_selection_projection_uses_shared_replay_shape() -> None:
