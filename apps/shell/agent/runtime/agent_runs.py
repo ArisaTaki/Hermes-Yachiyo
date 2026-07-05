@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
-from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
+from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES, RuntimePolicyCompiler
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_decision_and_tool_requests,
 )
@@ -400,7 +400,10 @@ def _with_entrypoint_runtime_planner(agent: dict[str, Any], payload: dict[str, A
         allowed,
     )
     if not direct_requests:
-        return agent
+        overlay_selection = _daily_desktop_policy_overlay_selection(planning_goal)
+        if not overlay_selection:
+            return agent
+        agent = _agent_with_daily_desktop_policy_overlay(agent)
     return {
         **agent,
         "_runtime_planner_entrypoint": True,
@@ -426,9 +429,41 @@ def _with_daily_desktop_policy_overlay(agent: dict[str, Any], payload: dict[str,
         )
         if not direct_requests:
             return agent
+    return _agent_with_daily_desktop_policy_overlay(agent)
+
+
+def _daily_desktop_policy_overlay_selection(planning_goal: str) -> bool:
+    try:
+        decision, direct_requests = planner_first_direct_decision_and_tool_requests(
+            planning_goal,
+            list(DAILY_DESKTOP_TOOL_NAMES),
+        )
+    except Exception:
+        return False
+    if not direct_requests:
+        return False
+    return _decision_supports_daily_desktop_policy_overlay(decision)
+
+
+def _decision_supports_daily_desktop_policy_overlay(decision: Any) -> bool:
+    intent = getattr(decision, "selected_intent", None)
+    kind = str(getattr(intent, "kind", "") or "").strip()
+    return kind in {
+        "desktop_operation",
+        "media_playback",
+        "system_control",
+        "clipboard_operation",
+        "web_research",
+        "information_capture",
+        "communication",
+        "schedule",
+    }
+
+
+def _agent_with_daily_desktop_policy_overlay(agent: dict[str, Any]) -> dict[str, Any]:
     policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
     allowed = _string_list(policy.get("allowed_tools"))
-    approval_required = dict(policy.get("approval_required")) if isinstance(policy.get("approval_required"), dict) else {}
+    approval_required = _daily_desktop_overlay_approval_required(policy)
     return {
         **agent,
         "_daily_desktop_policy_overlay": True,
@@ -438,6 +473,21 @@ def _with_daily_desktop_policy_overlay(agent: dict[str, Any], payload: dict[str,
             "approval_required": approval_required,
         },
     }
+
+
+def _daily_desktop_overlay_approval_required(policy: dict[str, Any]) -> dict[str, Any]:
+    approval_required = (
+        dict(policy.get("approval_required"))
+        if isinstance(policy.get("approval_required"), dict)
+        else {}
+    )
+    default_approval = RuntimePolicyCompiler.default_tool_policy("custom")[
+        "approval_required"
+    ]
+    for tool in DAILY_DESKTOP_TOOL_NAMES:
+        if default_approval.get(tool):
+            approval_required.setdefault(tool, True)
+    return approval_required
 
 
 def _payload_daily_desktop_planning_context(payload: dict[str, Any]) -> str:

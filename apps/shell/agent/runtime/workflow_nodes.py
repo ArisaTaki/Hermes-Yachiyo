@@ -9,7 +9,7 @@ from typing import Any
 from apps.shell.agent.runtime.callbacks import supports_keyword
 from apps.shell.agent.runtime.events import tool_input_preview as _tool_input_preview
 from apps.shell.agent.runtime.tool_brokers import write_artifact_with_tool_broker
-from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES
+from apps.shell.agent.tools.policy import DAILY_DESKTOP_TOOL_NAMES, RuntimePolicyCompiler
 from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
     planner_first_direct_tool_selection,
 )
@@ -102,11 +102,7 @@ def _agent_with_daily_desktop_policy_overlay(
         return agent
     policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
     allowed = _string_list(policy.get("allowed_tools"))
-    approval_required = (
-        dict(policy.get("approval_required"))
-        if isinstance(policy.get("approval_required"), dict)
-        else {}
-    )
+    approval_required = _daily_desktop_overlay_approval_required(policy)
     return {
         **agent,
         "_daily_desktop_policy_overlay": True,
@@ -116,6 +112,21 @@ def _agent_with_daily_desktop_policy_overlay(
             "approval_required": approval_required,
         },
     }
+
+
+def _daily_desktop_overlay_approval_required(policy: dict[str, Any]) -> dict[str, Any]:
+    approval_required = (
+        dict(policy.get("approval_required"))
+        if isinstance(policy.get("approval_required"), dict)
+        else {}
+    )
+    default_approval = RuntimePolicyCompiler.default_tool_policy("custom")[
+        "approval_required"
+    ]
+    for tool in DAILY_DESKTOP_TOOL_NAMES:
+        if default_approval.get(tool):
+            approval_required.setdefault(tool, True)
+    return approval_required
 
 
 def _decision_supports_daily_desktop_policy_overlay(decision: Any) -> bool:

@@ -14,6 +14,7 @@ from apps.shell.agent.runtime.agent_runs import (
     RuntimeAgentRunCoordinator,
     RuntimeAgentRunExecutor,
     RuntimeAgentRunStarter,
+    _with_entrypoint_runtime_planner,
 )
 from apps.shell.agent_runtime import AgentRuntimeService
 from apps.shell.credential_store import MemoryCredentialStore
@@ -290,6 +291,59 @@ def test_agent_run_executor_projects_failed_agent_run() -> None:
         "timeline": prepared.timeline,
         "artifacts": prepared.artifacts,
     }
+
+
+def test_agent_run_runtime_planner_entrypoint_overlays_stale_desktop_policy() -> None:
+    agent = {
+        "agent_id": "agent-yachiyo",
+        "name": "Yachiyo",
+        "tool_policy": {
+            "allowed_tools": ["workspace.read"],
+            "approval_required": {},
+        },
+    }
+
+    enriched = _with_entrypoint_runtime_planner(
+        agent,
+        {
+            "runtime_planner_entrypoint": True,
+            "user_goal": "能否帮我播放apple Music?",
+        },
+    )
+
+    allowed = enriched["tool_policy"]["allowed_tools"]
+    approval_required = enriched["tool_policy"]["approval_required"]
+    assert "_daily_desktop_policy_overlay" not in agent
+    assert enriched["_runtime_planner_entrypoint"] is True
+    assert enriched["_daily_desktop_policy_overlay"] is True
+    assert allowed[:1] == ["workspace.read"]
+    assert "desktop.list_apps" in allowed
+    assert "app.open" in allowed
+    assert "media.music_app_open_and_play" in allowed
+    assert approval_required["desktop.hotkey"] is True
+    assert approval_required["app.open_and_click_ui_element"] is True
+
+
+def test_agent_run_runtime_planner_entrypoint_does_not_overlay_howto_question() -> None:
+    agent = {
+        "agent_id": "agent-yachiyo",
+        "name": "Yachiyo",
+        "tool_policy": {
+            "allowed_tools": ["workspace.read"],
+            "approval_required": {},
+        },
+    }
+
+    enriched = _with_entrypoint_runtime_planner(
+        agent,
+        {
+            "runtime_planner_entrypoint": True,
+            "user_goal": "怎么播放 Apple Music？",
+        },
+    )
+
+    assert enriched is agent
+    assert enriched["tool_policy"]["allowed_tools"] == ["workspace.read"]
 
 
 def test_agent_run_starter_creates_root_group_and_preserves_idempotency() -> None:

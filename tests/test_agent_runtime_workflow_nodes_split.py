@@ -58,6 +58,11 @@ def test_workflow_agent_node_runtime_planner_entrypoint_overlays_desktop_policy(
     assert enriched["tool_policy"]["allowed_tools"][:1] == ["workspace.read"]
     assert "app.open" in enriched["tool_policy"]["allowed_tools"]
     assert "desktop.list_apps" in enriched["tool_policy"]["allowed_tools"]
+    assert enriched["tool_policy"]["approval_required"]["desktop.hotkey"] is True
+    assert (
+        enriched["tool_policy"]["approval_required"]["app.open_and_click_ui_element"]
+        is True
+    )
 
 
 def test_workflow_agent_node_handoff_accepts_prepared_agent_goal_and_task() -> None:
