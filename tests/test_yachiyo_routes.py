@@ -7677,7 +7677,9 @@ async def test_yachiyo_studio_execution_route_returns_shared_execution_envelope(
     assert response["requests"][0]["step_id"] == "analyze-data-file"
     assert response["requests"][0]["capability_id"] == "data.analysis"
     assert response["requests"][0]["replan_signal_ids"]
-    assert response["task_core"]["todos"][0]["step_id"] == "analyze-data-file"
+    assert "analyze-data-file" in [
+        todo["step_id"] for todo in response["task_core"]["todos"]
+    ]
     assert service.calls == [
         {
             "prompt": "请分析 data/sales.csv 并输出报告",

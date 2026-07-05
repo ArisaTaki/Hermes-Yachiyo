@@ -45,7 +45,11 @@ def test_legacy_studio_agent_run_appends_runtime_planner_events() -> None:
         "agent.plan.step",
     ]
     assert events[0]["payload"]["intent"]["kind"] == "data_analysis"
-    assert events[1]["payload"]["plan"]["tool_plan"]["steps"][0]["tool_name"] == "data.analyze"
+    plan_steps = events[1]["payload"]["plan"]["tool_plan"]["steps"]
+    assert [step["tool_name"] for step in plan_steps[:2]] == ["workspace.read", "data.analyze"]
+    execution_requests = events[1]["payload"]["runtime_execution_envelope"]["requests"]
+    assert execution_requests[1]["tool_name"] == "data.analyze"
+    assert execution_requests[1]["step_id"] == "analyze-data-file"
     assert events[2]["payload"]["task_core"]["workspace"]["title"] == "Data Analysis Workspace"
 
 

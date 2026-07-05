@@ -1100,14 +1100,26 @@ def _tool_blocking_conditions(
     capability_id: str,
     blocking_by_capability: Mapping[str, Iterable[str]],
 ) -> list[str]:
-    values = [*_missing_permissions(blocking_by_capability, "desktop_execution")]
+    values: list[str] = []
     capability_blocking = _missing_permissions(blocking_by_capability, capability_id)
     foreground_activation_blocking = _missing_permissions(
         blocking_by_capability,
         "foreground_activation",
     )
     foreground_input_blocking = _missing_permissions(blocking_by_capability, "foreground_input")
-    if tool in {"app.focus", "desktop.focus_app", "app.focus_window", "app.show"}:
+    if tool in {"desktop.list_apps", "desktop.permissions"}:
+        values.extend(
+            value
+            for value in capability_blocking
+            if value not in {"desktop_session_locked", "screen_capture_blank"}
+        )
+    elif tool in {"app.open", "desktop.open_app", "system.settings_open"}:
+        values.extend(
+            value
+            for value in capability_blocking
+            if value not in {"desktop_session_locked", "screen_capture_blank"}
+        )
+    elif tool in {"app.focus", "desktop.focus_app", "app.focus_window", "app.show"}:
         values.extend(foreground_activation_blocking)
     elif tool in {
         "app.open_and_safe_type_text",

@@ -105,8 +105,10 @@ from apps.shell.yachiyo_agent import (
     task_requires_user_action,
 )
 from apps.shell.yachiyo_agent.approvals import approval_card_from_payload
+from apps.shell.yachiyo_agent.capability_registry import runtime_execution_tool_names
 from apps.shell.yachiyo_agent.events import public_run_event_from_payload
 from apps.shell.yachiyo_agent.group_run_snapshots import group_run_snapshot_from_payload
+from apps.shell.yachiyo_agent.planner_execution import planner_direct_tool_requests
 from apps.shell.yachiyo_agent.planner_projection import planner_run_event_payloads
 from apps.shell.yachiyo_agent.run_snapshots import run_timeline_snapshot_from_payload
 from apps.shell.yachiyo_agent.runtime_execution_status import (
@@ -5788,6 +5790,22 @@ def test_runtime_tool_catalog_surfaces_multi_file_data_analysis_schema() -> None
     assert "artifact_paths" in data_analysis.input_schema["properties"]
 
 
+def test_low_level_runtime_tools_keep_builtin_data_analysis_execution() -> None:
+    tools = runtime_execution_tool_names(
+        intent_kind="data_analysis",
+        prefer_low_level=True,
+    )
+
+    requests = planner_direct_tool_requests(
+        "请分析 data/sales.csv 并输出报告",
+        tools,
+    )
+
+    assert "data.analyze" in tools
+    assert requests[0]["tool"] == "data.analyze"
+    assert requests[0]["input"]["path"] == "data/sales.csv"
+
+
 def test_runtime_tool_catalog_surfaces_foreground_activation_blockers_per_tool() -> None:
     catalog = runtime_tool_catalog_snapshot(
         platform_name="Darwin",
@@ -5805,6 +5823,23 @@ def test_runtime_tool_catalog_surfaces_foreground_activation_blockers_per_tool()
     assert catalog.capabilities["foreground_activation"].blocking_conditions == [
         "foreground_focus_unavailable"
     ]
+
+
+def test_runtime_tool_catalog_does_not_root_block_app_launch_or_discovery() -> None:
+    catalog = runtime_tool_catalog_snapshot(
+        platform_name="Darwin",
+        blocking_conditions={
+            "desktop_execution": ["screen_capture_blank"],
+            "active_window": ["screen_capture_blank"],
+            "foreground_input": ["screen_capture_blank"],
+        },
+    )
+    tools = {tool.tool_name: tool for tool in catalog.tools}
+
+    assert tools["desktop.list_apps"].blocking_conditions == []
+    assert tools["app.open"].blocking_conditions == []
+    assert tools["desktop.active_window"].blocking_conditions == ["screen_capture_blank"]
+    assert tools["desktop.ui_elements"].blocking_conditions == ["screen_capture_blank"]
 
 
 def test_runtime_tool_catalog_surfaces_restricted_plugin_metadata_and_uninstall() -> None:

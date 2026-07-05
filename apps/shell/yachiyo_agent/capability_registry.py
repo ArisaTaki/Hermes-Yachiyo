@@ -696,10 +696,7 @@ def _low_level_runtime_tools(
     *,
     intent_kind: str | None,
 ) -> list[str]:
-    excluded = set()
-    if str(intent_kind or "").strip() in {"data_analysis", "report_generation"}:
-        excluded.add("data.analyze")
-    return _dedupe(tool for tool in tools if tool not in excluded)
+    return _dedupe(tools)
 
 
 def _dedupe(values: Iterable[str]) -> list[str]:
