@@ -263,6 +263,7 @@ def test_legacy_group_run_forwards_execution_envelope_to_first_member_run(
         {
             "group_id": group["group_id"],
             "objective": "Open Music and confirm it is available",
+            "metadata": {"yachiyo_runtime_planner": True},
             "runtime_execution_envelope": {
                 "decision_id": "decision-group",
                 "plan_id": "plan-group",
@@ -295,6 +296,10 @@ def test_legacy_group_run_forwards_execution_envelope_to_first_member_run(
     assert [request["tool"] for request in create_calls[0]["direct_tool_requests"]] == [
         "app.open",
     ]
+    assert create_calls[0]["metadata"] == {"yachiyo_runtime_planner": True}
+    assert create_calls[1]["metadata"] == {"yachiyo_runtime_planner": True}
+    assert create_calls[0]["runtime_execution_envelope"]["decision_id"] == "decision-group"
+    assert create_calls[1]["runtime_execution_envelope"]["decision_id"] == "decision-group"
     direct_request = create_calls[0]["direct_tool_requests"][0]
     assert direct_request["request_id"] == "request-open-music"
     assert direct_request["input"] == {"app_name": "Music"}

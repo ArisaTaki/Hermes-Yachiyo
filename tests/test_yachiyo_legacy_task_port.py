@@ -180,17 +180,17 @@ def test_legacy_runtime_port_forwards_runtime_execution_plan_to_runnable_run() -
     assert task["task_id"] == "task-1"
     assert create_call["runtime_planner_entrypoint"] is True
     assert create_call["daily_desktop_planning_context"] == "请分析 data/sales.csv 并输出报告"
+    assert create_call["metadata"]["yachiyo_runtime_planner"] is True
+    assert create_call["runtime_execution_envelope"]["intent_kind"] == "data_analysis"
     assert [request["tool"] for request in direct_requests] == [
         "workspace.read",
-        "python.run",
-        "artifact.write",
+        "data.analyze",
     ]
-    assert direct_requests[0]["step_id"] == "inspect-data-source"
-    assert direct_requests[1]["step_id"] == "run-analysis"
-    assert direct_requests[2]["step_id"] == "write-analysis-artifact"
-    assert direct_requests[1]["approval_required"] is True
-    assert "runtime_execution_envelope" not in create_call
-    assert "metadata" not in create_call
+    assert direct_requests[0]["step_id"] == "read-data-source"
+    assert direct_requests[1]["step_id"] == "analyze-data-file"
+    assert direct_requests[1]["checkpoint_policy"][
+        "requires_post_action_verification"
+    ] is True
     assert "daily_desktop_policy_overlay" not in create_call
 
 

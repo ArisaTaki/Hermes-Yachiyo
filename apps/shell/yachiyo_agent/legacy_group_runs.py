@@ -114,6 +114,16 @@ def start_legacy_group_run(
             agent_override=group_member_agent_override(runtime, member, group),
             daily_desktop_policy_overlay=True,
             runtime_planner_entrypoint=True,
+            runtime_execution_envelope=(
+                dict(request.get("runtime_execution_envelope"))
+                if isinstance(request.get("runtime_execution_envelope"), Mapping)
+                else None
+            ),
+            metadata=(
+                dict(request.get("metadata"))
+                if isinstance(request.get("metadata"), Mapping)
+                else None
+            ),
             direct_tool_requests=(
                 member_direct_tool_requests if member_direct_tool_requests else None
             ),

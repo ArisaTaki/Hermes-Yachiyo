@@ -249,11 +249,15 @@ def test_runnable_run_coordinator_forwards_direct_agent_execution_plan() -> None
     calls: list[tuple[str, dict[str, object]]] = []
     coordinator = _run_coordinator(calls)
     direct_requests = [{"tool": "app.open", "input": {"app_name": "Music"}}]
+    envelope = {"envelope_id": "env-agent", "requests": []}
+    metadata = {"yachiyo_runtime_planner": True}
 
     run = coordinator.create_run_async(
         runnable_id="agent-1",
         user_goal="Open Music",
         runtime_planner_entrypoint=True,
+        runtime_execution_envelope=envelope,
+        metadata=metadata,
         direct_tool_requests=direct_requests,
         daily_desktop_planning_context="Open Music from planner",
     )
@@ -269,6 +273,8 @@ def test_runnable_run_coordinator_forwards_direct_agent_execution_plan() -> None
                 "run_group_id": "",
                 "upstream": "",
                 "runtime_planner_entrypoint": True,
+                "runtime_execution_envelope": envelope,
+                "metadata": metadata,
                 "direct_tool_requests": direct_requests,
                 "daily_desktop_planning_context": "Open Music from planner",
             },
@@ -280,10 +286,14 @@ def test_runnable_run_coordinator_forwards_direct_workflow_execution_plan() -> N
     calls: list[tuple[str, dict[str, object]]] = []
     coordinator = _run_coordinator(calls)
     direct_requests = [{"tool": "app.open", "input": {"app_name": "Music"}}]
+    envelope = {"envelope_id": "env-workflow", "requests": []}
+    metadata = {"yachiyo_runtime_planner": True}
 
     run = coordinator.create_run_async(
         runnable_id="workflow-1",
         user_goal="Open Music",
+        runtime_execution_envelope=envelope,
+        metadata=metadata,
         direct_tool_requests=direct_requests,
         daily_desktop_planning_context="Open Music from workflow plan",
     )
@@ -297,6 +307,8 @@ def test_runnable_run_coordinator_forwards_direct_workflow_execution_plan() -> N
                 "user_goal": "Open Music",
                 "source": "workflow",
                 "run_group_id": "",
+                "runtime_execution_envelope": envelope,
+                "metadata": metadata,
                 "direct_tool_requests": direct_requests,
                 "daily_desktop_planning_context": "Open Music from workflow plan",
             },

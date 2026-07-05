@@ -125,6 +125,8 @@ def create_runnable_run(
     agent_override: dict[str, Any] | None = None,
     daily_desktop_policy_overlay: bool = False,
     runtime_planner_entrypoint: bool = False,
+    runtime_execution_envelope: dict[str, Any] | None = None,
+    metadata: dict[str, Any] | None = None,
     direct_tool_requests: list[dict[str, Any]] | None = None,
     daily_desktop_planning_context: str | None = None,
 ) -> dict[str, Any]:
@@ -140,6 +142,10 @@ def create_runnable_run(
         payload["daily_desktop_policy_overlay"] = True
     if runtime_planner_entrypoint:
         payload["runtime_planner_entrypoint"] = True
+    if runtime_execution_envelope is not None:
+        payload["runtime_execution_envelope"] = runtime_execution_envelope
+    if metadata is not None:
+        payload["metadata"] = metadata
     if direct_tool_requests is not None:
         payload["direct_tool_requests"] = direct_tool_requests
     if daily_desktop_planning_context is not None:

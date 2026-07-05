@@ -222,6 +222,8 @@ class RuntimeRunnableRunCoordinator:
         agent_override: dict[str, Any] | None = None,
         daily_desktop_policy_overlay: bool = False,
         runtime_planner_entrypoint: bool = False,
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
         daily_desktop_planning_context: str | None = None,
     ) -> dict[str, Any]:
@@ -242,6 +244,10 @@ class RuntimeRunnableRunCoordinator:
                 payload["daily_desktop_policy_overlay"] = True
             if runtime_planner_entrypoint:
                 payload["runtime_planner_entrypoint"] = True
+            if runtime_execution_envelope is not None:
+                payload["runtime_execution_envelope"] = runtime_execution_envelope
+            if metadata is not None:
+                payload["metadata"] = metadata
             if direct_tool_requests is not None:
                 payload["direct_tool_requests"] = direct_tool_requests
             if daily_desktop_planning_context is not None:
@@ -259,6 +265,10 @@ class RuntimeRunnableRunCoordinator:
         }
         if direct_tool_requests is not None:
             workflow_payload["direct_tool_requests"] = direct_tool_requests
+        if runtime_execution_envelope is not None:
+            workflow_payload["runtime_execution_envelope"] = runtime_execution_envelope
+        if metadata is not None:
+            workflow_payload["metadata"] = metadata
         if daily_desktop_planning_context is not None:
             workflow_payload["daily_desktop_planning_context"] = daily_desktop_planning_context
         run = self._create_workflow_run(workflow_payload)
@@ -277,6 +287,8 @@ class RuntimeRunnableRunCoordinator:
         agent_override: dict[str, Any] | None = None,
         daily_desktop_policy_overlay: bool = False,
         runtime_planner_entrypoint: bool = False,
+        runtime_execution_envelope: dict[str, Any] | None = None,
+        metadata: dict[str, Any] | None = None,
         direct_tool_requests: list[dict[str, Any]] | None = None,
         daily_desktop_planning_context: str | None = None,
         on_complete: Callable[[dict[str, Any]], None] | None = None,
@@ -296,6 +308,10 @@ class RuntimeRunnableRunCoordinator:
                 payload["daily_desktop_policy_overlay"] = True
             if runtime_planner_entrypoint:
                 payload["runtime_planner_entrypoint"] = True
+            if runtime_execution_envelope is not None:
+                payload["runtime_execution_envelope"] = runtime_execution_envelope
+            if metadata is not None:
+                payload["metadata"] = metadata
             if direct_tool_requests is not None:
                 payload["direct_tool_requests"] = direct_tool_requests
             if daily_desktop_planning_context is not None:
@@ -316,6 +332,10 @@ class RuntimeRunnableRunCoordinator:
         }
         if direct_tool_requests is not None:
             workflow_payload["direct_tool_requests"] = direct_tool_requests
+        if runtime_execution_envelope is not None:
+            workflow_payload["runtime_execution_envelope"] = runtime_execution_envelope
+        if metadata is not None:
+            workflow_payload["metadata"] = metadata
         if daily_desktop_planning_context is not None:
             workflow_payload["daily_desktop_planning_context"] = daily_desktop_planning_context
         run = self._create_workflow_run_async(workflow_payload, on_complete=on_complete)

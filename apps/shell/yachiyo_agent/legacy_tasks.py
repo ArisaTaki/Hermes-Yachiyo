@@ -145,11 +145,7 @@ def _chat_runtime_execution_kwargs(
 
 
 def _runnable_chat_execution_kwargs(kwargs: dict[str, Any]) -> dict[str, Any]:
-    return {
-        key: value
-        for key, value in kwargs.items()
-        if key not in {"runtime_execution_envelope", "metadata"}
-    }
+    return dict(kwargs)
 
 
 def _request_direct_tool_requests(request: dict[str, Any]) -> list[dict[str, Any]]:

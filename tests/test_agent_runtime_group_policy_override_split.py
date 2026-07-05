@@ -73,6 +73,8 @@ def test_create_runnable_run_passes_daily_desktop_overlay_to_async_runtime() -> 
 def test_create_runnable_run_passes_direct_execution_plan_to_async_runtime() -> None:
     captured: dict[str, Any] = {}
     direct_requests = [{"tool": "app.open", "input": {"app_name": "Music"}}]
+    envelope = {"envelope_id": "env-runnable", "requests": []}
+    metadata = {"yachiyo_runtime_planner": True}
 
     class Runtime:
         def create_run_for_runnable_async(self, **payload: Any) -> dict[str, Any]:
@@ -84,11 +86,15 @@ def test_create_runnable_run_passes_direct_execution_plan_to_async_runtime() -> 
         runnable_id="agent-desktop",
         user_goal="打开 Music",
         runtime_planner_entrypoint=True,
+        runtime_execution_envelope=envelope,
+        metadata=metadata,
         direct_tool_requests=direct_requests,
         daily_desktop_planning_context="打开 Music",
     )
 
     assert run["run_id"] == "run-agent"
+    assert captured["payload"]["runtime_execution_envelope"] == envelope
+    assert captured["payload"]["metadata"] == metadata
     assert captured["payload"]["direct_tool_requests"] == direct_requests
     assert captured["payload"]["daily_desktop_planning_context"] == "打开 Music"
 
@@ -196,14 +202,7 @@ def test_agent_run_async_overlays_daily_desktop_policy_for_clear_chat_intent() -
     assert captured["executed"]["agent"] == captured["validated"]
 
 
-def test_agent_run_async_uses_runtime_planner_for_daily_desktop_overlay(monkeypatch) -> None:
-    from apps.shell.agent.runtime import agent_runs as agent_runs_module
-
-    monkeypatch.setattr(
-        agent_runs_module,
-        "daily_desktop_entrypoint_tool_requests",
-        lambda *_args, **_kwargs: [],
-    )
+def test_agent_run_async_uses_runtime_planner_for_daily_desktop_overlay() -> None:
     captured: dict[str, Any] = {}
     persisted_agent = {
         "agent_id": "agent-yachiyo",
