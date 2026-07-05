@@ -142,11 +142,17 @@ def test_legacy_runtime_port_starts_and_links_chat_task() -> None:
     assert task["task_id"] == "task-1"
     assert task["conversation_id"] == "chat-1"
     assert task["open_in_studio_url"] == "#/agents?run_id=run-1"
-    assert runtime.calls == [
-        (
-            "create_run_for_runnable_async",
-            {"runnable_id": "builtin:yachiyo-main", "user_goal": "Patch README"},
-        ),
+    create_call = runtime.calls[0]
+    assert create_call[0] == "create_run_for_runnable_async"
+    assert create_call[1]["runnable_id"] == "builtin:yachiyo-main"
+    assert create_call[1]["user_goal"] == "Patch README"
+    assert create_call[1]["runtime_planner_entrypoint"] is True
+    assert create_call[1]["daily_desktop_planning_context"] == "Patch README"
+    assert [request["tool"] for request in create_call[1]["direct_tool_requests"]] == [
+        "workspace.list",
+        "workspace.read",
+    ]
+    assert runtime.calls[1:] == [
         ("link_task_run", {"task_id": "task-1", "run_id": "run-1", "session_id": "chat-1"}),
         ("get_run", "run-1"),
         ("list_run_events", "run-1"),
@@ -2983,15 +2989,18 @@ def test_legacy_runtime_port_starts_and_links_chat_workflow_task() -> None:
     assert task["task_id"] == "task-workflow-1"
     assert task["conversation_id"] == "chat-1"
     assert task["open_in_studio_url"] == "#/agents?run_id=workflow-run-1"
-    assert (
-        "create_workflow_run",
-        {
-            "workflow_id": "workflow-1",
-            "user_goal": "Build report",
-            "source": "yachiyo_chat",
-            "client_run_id": "task-workflow-1",
-        },
-    ) in runtime.calls
+    create_call = next(call for call in runtime.calls if call[0] == "create_workflow_run")
+    assert create_call[1]["workflow_id"] == "workflow-1"
+    assert create_call[1]["user_goal"] == "Build report"
+    assert create_call[1]["source"] == "yachiyo_chat"
+    assert create_call[1]["client_run_id"] == "task-workflow-1"
+    assert create_call[1]["runtime_planner_entrypoint"] is True
+    assert create_call[1]["daily_desktop_planning_context"] == "Build report"
+    assert create_call[1]["metadata"]["yachiyo_runtime_planner"] is True
+    assert create_call[1]["runtime_execution_envelope"]["intent_kind"] == "code_task"
+    assert [request["tool"] for request in create_call[1]["direct_tool_requests"]] == [
+        "workspace.list",
+    ]
     assert (
         "link_task_run",
         {"task_id": "task-workflow-1", "run_id": "workflow-run-1", "session_id": "chat-1"},

@@ -12,7 +12,11 @@ from .desktop_permissions import (
     desktop_runtime_blocking_conditions_by_capability,
 )
 from .legacy_runs import LegacyRunPayloadProjector
-from .planner_projection import planner_run_event_payloads, runtime_planner_decision
+from .planner_projection import (
+    planner_run_event_payloads,
+    runtime_planner_decision,
+    runtime_planner_metadata,
+)
 from .policy import desktop_execution_capability_snapshots
 from .runtime_execution import (
     runtime_execution_requests_from_envelope_payload,
@@ -80,32 +84,48 @@ def _chat_runtime_execution_kwargs(
     *,
     metadata: dict[str, Any],
     prompt: str,
+    planner_decision: Any | None = None,
 ) -> dict[str, Any]:
     kwargs: dict[str, Any] = {}
+    request_allowed_tools = _request_allowed_tools(request)
+    planner_metadata = (
+        runtime_planner_metadata(
+            planner_decision,
+            allowed_tools=request_allowed_tools,
+        )
+        if planner_decision is not None
+        else {}
+    )
+    effective_metadata = {**planner_metadata, **dict(metadata)}
     envelope = request.get("runtime_execution_envelope")
+    if envelope is None and isinstance(
+        effective_metadata.get("yachiyo_execution_envelope"),
+        dict,
+    ):
+        envelope = effective_metadata.get("yachiyo_execution_envelope")
     if envelope is not None:
         kwargs["runtime_execution_envelope"] = envelope
-    if metadata and (
-        metadata.get("yachiyo_runtime_planner") is True
-        or isinstance(metadata.get("yachiyo_execution_envelope"), dict)
+    if effective_metadata and (
+        effective_metadata.get("yachiyo_runtime_planner") is True
+        or isinstance(effective_metadata.get("yachiyo_execution_envelope"), dict)
     ):
-        kwargs["metadata"] = dict(metadata)
+        kwargs["metadata"] = dict(effective_metadata)
 
     direct_requests = _request_direct_tool_requests(request)
     if not direct_requests:
         direct_requests = runtime_execution_requests_from_envelope_payload(
             envelope,
-            allowed_tools=_request_allowed_tools(request),
+            allowed_tools=request_allowed_tools,
         )
     if not direct_requests:
         direct_requests = runtime_execution_requests_from_metadata(
-            metadata,
-            allowed_tools=_request_allowed_tools(request),
+            effective_metadata,
+            allowed_tools=request_allowed_tools,
         )
     if direct_requests:
         kwargs["direct_tool_requests"] = direct_requests
 
-    if kwargs or metadata.get("yachiyo_runtime_planner") is True:
+    if kwargs or effective_metadata.get("yachiyo_runtime_planner") is True:
         kwargs["runtime_planner_entrypoint"] = True
         planning_context = str(
             request.get("daily_desktop_planning_context") or prompt or ""
@@ -258,6 +278,7 @@ class LegacyRuntimePort:
             request,
             metadata=metadata,
             prompt=prompt,
+            planner_decision=planner_decision,
         )
         requested_task_id = str(
             request.get("task_id")
