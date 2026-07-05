@@ -24755,6 +24755,15 @@ def test_runtime_planner_replan_for_verify_failure_preserves_target_context() ->
     metadata = payload["metadata"]
     assert payload["trigger"] == "verification_failed"
     assert payload["source_step_id"] == "verify-desktop-result"
+    assert payload["verification_targets"][0]["step_id"] == "operate-foreground-ui"
+    assert payload["verification_targets"][0]["todo_id"].startswith("todo-")
+    assert payload["task_verification_targets"][0]["todo"]["step_id"] == (
+        "operate-foreground-ui"
+    )
+    assert payload["action_target"]["app_name"] == "Notion"
+    assert payload["action_target"]["target"] == "New Page"
+    assert payload["observation_evidence"]["verification_failed"] is True
+    assert payload["observation_retry"]["tool"] == "desktop.ui_elements"
     assert metadata["verification_targets"][0]["step_id"] == "operate-foreground-ui"
     assert metadata["verification_targets"][0]["todo_id"].startswith("todo-")
     assert metadata["task_verification_targets"][0]["todo"]["step_id"] == (

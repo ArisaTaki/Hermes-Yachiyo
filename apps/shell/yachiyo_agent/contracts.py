@@ -461,6 +461,11 @@ class TaskReplanRequestSnapshot(_PublicSnapshot):
     failure_detail: str = ""
     fallback_tools: list[str] = Field(default_factory=list)
     recovery_actions: list[dict[str, Any]] = Field(default_factory=list)
+    action_target: dict[str, Any] = Field(default_factory=dict)
+    observation_evidence: dict[str, Any] = Field(default_factory=dict)
+    observation_retry: dict[str, Any] = Field(default_factory=dict)
+    verification_targets: list[dict[str, Any]] = Field(default_factory=list)
+    task_verification_targets: list[dict[str, Any]] = Field(default_factory=list)
     replan_prompt: str = ""
     route_to_studio: bool = True
     metadata: dict[str, Any] = Field(default_factory=dict)

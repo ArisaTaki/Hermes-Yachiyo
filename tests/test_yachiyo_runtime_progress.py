@@ -448,6 +448,14 @@ def test_public_task_replan_events_recover_active_window_mismatch_by_opening_tar
     assert event.event_type == "agent.replan.requested"
     assert event.payload["trigger"] == "verification_failed"
     assert event.payload["fallback_tools"][:2] == ["app.open", "desktop.active_window"]
+    assert event.payload["verification_targets"] == [{"step_id": "open-or-focus-app"}]
+    assert event.payload["task_verification_targets"] == [
+        {"step_id": "open-or-focus-app"}
+    ]
+    assert event.payload["observation_evidence"]["blocking_condition"] == (
+        "foreground_focus_unverified"
+    )
+    assert event.payload["observation_retry"]["source_tool"] == "desktop.active_window"
     actions = event.payload["metadata"]["recovery_actions"]
     assert actions[0]["tool"] == "app.open"
     assert actions[0]["input"] == {"app_name": "PixelForge"}

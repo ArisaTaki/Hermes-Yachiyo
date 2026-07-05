@@ -479,6 +479,13 @@ def _runtime_execution_replan_request(
         failure_detail=failure_detail,
         fallback_tools=fallback_tools,
         recovery_actions=recovery_actions,
+        action_target=dict(request.action_target or {}),
+        observation_evidence=dict(evidence),
+        observation_retry=dict(retry),
+        verification_targets=[dict(item) for item in request.task_verification_targets],
+        task_verification_targets=[
+            dict(item) for item in request.task_verification_targets
+        ],
         replan_prompt=_runtime_replan_prompt(
             envelope,
             request,

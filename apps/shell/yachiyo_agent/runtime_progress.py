@@ -305,6 +305,10 @@ def _failure_payload_from_tool_result(
         value = _mapping(tool_request.get(key))
         if value:
             failure[key] = value
+    for key in ("verification_targets", "task_verification_targets"):
+        values = _mapping_list(tool_request.get(key))
+        if values:
+            failure[key] = values
     for key in ("replan_triggers", "replan_signal_ids"):
         values = _string_list(tool_request.get(key))
         if values:

@@ -110,6 +110,12 @@ def task_replan_request_from_failure(
             ),
         ]
     )
+    replan_context_fields = _replan_request_context_fields(
+        failure_payload,
+        metadata or {},
+        task_context,
+        recovery_actions,
+    )
     request_metadata = {
         **dict(metadata or {}),
         **_signal_metadata(signal),
@@ -136,6 +142,11 @@ def task_replan_request_from_failure(
         failure_detail=failure_detail,
         fallback_tools=fallback_tools,
         recovery_actions=recovery_actions,
+        action_target=replan_context_fields["action_target"],
+        observation_evidence=replan_context_fields["observation_evidence"],
+        observation_retry=replan_context_fields["observation_retry"],
+        verification_targets=replan_context_fields["verification_targets"],
+        task_verification_targets=replan_context_fields["task_verification_targets"],
         replan_prompt=_replan_prompt(
             decision,
             trigger=clean_trigger,
@@ -149,6 +160,112 @@ def task_replan_request_from_failure(
         metadata=request_metadata,
         created_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
     )
+
+
+def _replan_request_context_fields(
+    failure: Mapping[str, Any],
+    metadata: Mapping[str, Any],
+    task_context: Mapping[str, Any],
+    recovery_actions: list[dict[str, Any]],
+) -> dict[str, Any]:
+    task_verification_targets = (
+        _record_list(failure.get("task_verification_targets"))
+        or _record_list(metadata.get("task_verification_targets"))
+        or _record_list(task_context.get("task_verification_targets"))
+        or _first_recovery_record_list(recovery_actions, "task_verification_targets")
+    )
+    verification_targets = (
+        _record_list(failure.get("verification_targets"))
+        or _record_list(metadata.get("verification_targets"))
+        or _compact_replan_verification_targets(task_verification_targets)
+        or _first_recovery_record_list(recovery_actions, "verification_targets")
+    )
+    return {
+        "action_target": (
+            _mapping(failure.get("action_target"))
+            or _mapping(metadata.get("action_target"))
+            or _first_recovery_mapping(recovery_actions, "action_target")
+        ),
+        "observation_evidence": (
+            _mapping(failure.get("observation_evidence"))
+            or _mapping(metadata.get("observation_evidence"))
+            or _first_recovery_mapping(recovery_actions, "observation_evidence")
+        ),
+        "observation_retry": (
+            _mapping(failure.get("observation_retry"))
+            or _mapping(metadata.get("observation_retry"))
+            or _first_recovery_mapping(recovery_actions, "observation_retry")
+        ),
+        "verification_targets": verification_targets,
+        "task_verification_targets": task_verification_targets,
+    }
+
+
+def _first_recovery_mapping(
+    recovery_actions: list[dict[str, Any]],
+    key: str,
+) -> dict[str, Any]:
+    for action in recovery_actions:
+        value = action.get(key) if isinstance(action, Mapping) else {}
+        mapped = _mapping(value)
+        if mapped:
+            return mapped
+    return {}
+
+
+def _first_recovery_record_list(
+    recovery_actions: list[dict[str, Any]],
+    key: str,
+) -> list[dict[str, Any]]:
+    for action in recovery_actions:
+        records = _record_list(action.get(key) if isinstance(action, Mapping) else None)
+        if records:
+            return records
+    return []
+
+
+def _record_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _compact_replan_verification_targets(
+    targets: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    compact_targets: list[dict[str, Any]] = []
+    for target in targets:
+        step_id = _text(target.get("step_id"))
+        if not step_id:
+            continue
+        compact: dict[str, Any] = {"step_id": step_id}
+        todo = _mapping(target.get("todo"))
+        todo_id = _text(todo.get("todo_id") or target.get("todo_id"))
+        if todo_id:
+            compact["todo_id"] = todo_id
+        todo_title = _text(todo.get("title") or target.get("todo_title"))
+        if todo_title:
+            compact["todo_title"] = todo_title
+        tool_name = _text(todo.get("tool_name") or todo.get("tool") or target.get("tool_name"))
+        if tool_name:
+            compact["tool_name"] = tool_name
+        checkpoints = _record_list(target.get("checkpoints"))
+        checkpoint_ids = [
+            _text(checkpoint.get("checkpoint_id"))
+            for checkpoint in checkpoints
+            if _text(checkpoint.get("checkpoint_id"))
+        ]
+        if checkpoint_ids:
+            compact["checkpoint_ids"] = checkpoint_ids
+        checkpoint_titles = [
+            _text(checkpoint.get("title"))
+            for checkpoint in checkpoints
+            if _text(checkpoint.get("title"))
+        ]
+        if checkpoint_titles:
+            compact["checkpoint_titles"] = checkpoint_titles
+        compact_targets.append(compact)
+    return compact_targets
 
 
 def task_replan_run_event_payload(
