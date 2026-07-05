@@ -312,6 +312,11 @@ def test_task_intent_router_covers_agent_work_domains() -> None:
             "data_analysis",
             ["file.workspace_read", "terminal.execution", "artifact.write"],
         ),
+        (
+            "整理桌面上的 PDF 发票，输出一个表格",
+            "data_analysis",
+            ["file.workspace_read", "terminal.execution", "artifact.write"],
+        ),
         ("根据当前剪贴板写一份周报报告", "report_generation", ["artifact.write"]),
         ("创建一份竞品分析报告，保存成 markdown", "report_generation", ["artifact.write"]),
         ("Summarize launch risk.", "report_generation", ["artifact.write"]),
@@ -372,6 +377,36 @@ def test_runtime_planner_routes_data_analysis_to_file_terminal_artifact_plan() -
     assert _step_by_id(decision, "run-analysis").approval_required is True
     assert _step_by_id(decision, "write-analysis-artifact").input_preview == {
         "paths": ["analysis-report.md", "analysis-chart.png"]
+    }
+
+
+def test_runtime_planner_routes_invoice_pdf_table_output_to_data_analysis() -> None:
+    decision = RuntimePlanner().decision(
+        "整理桌面上的 PDF 发票，输出一个表格",
+        allowed_tools=[
+            "workspace.read",
+            "workspace.list",
+            "terminal.run",
+            "python.run",
+            "artifact.write",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "data_analysis"
+    assert decision.selected_intent.inputs["data_source_kind"] == "pdf"
+    assert decision.selected_intent.inputs["data_source_scope_hint"] == "Desktop"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "inspect-data-source",
+        "run-analysis",
+        "write-analysis-artifact",
+    ]
+    assert _step_by_id(decision, "inspect-data-source").input_preview == {
+        "path": "Desktop",
+        "pattern": "*.pdf",
+        "file_type": "pdf",
+    }
+    assert "apply-file-organization" not in {
+        step.step_id for step in decision.plan.tool_plan.steps
     }
 
 

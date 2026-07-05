@@ -2113,6 +2113,8 @@ class TaskIntentRouter:
             return _empty_intent("file_organization", text)
         if _looks_like_document_artifact_transform_request(text):
             return _empty_intent("file_organization", text)
+        if _looks_like_file_content_table_extraction_request(text):
+            return _empty_intent("file_organization", text)
         score = _score_terms(
             text,
             [
@@ -8807,6 +8809,7 @@ def _data_source_pattern_hint(source_kind: str) -> str:
         "jsonl": "*.jsonl",
         "json": "*.json",
         "parquet": "*.parquet",
+        "pdf": "*.pdf",
         "text": "*.txt",
         "text_table": "*.{csv,tsv,xls,xlsx,json,jsonl,txt,md,markdown}",
     }.get(str(source_kind or "").strip().lower(), "")
@@ -18289,6 +18292,65 @@ def _looks_like_file_organization_request(text: str) -> bool:
         or archive_extract
         or _file_duplicate_hint(text)
         or (inventory_query and (explicit_file_inventory_scope or bool(file_type)))
+    )
+
+
+def _looks_like_file_content_table_extraction_request(text: str) -> bool:
+    value = _clean_prompt(text)
+    if not value:
+        return False
+    if not (_file_location_hint(value) or _file_type_hint(value) or _report_file_context_hint(value)):
+        return False
+    if not _contains_any(
+        value,
+        (
+            "表格",
+            "电子表格",
+            "csv",
+            "spreadsheet",
+            "table",
+            "清单",
+            "列表",
+            "summary table",
+        ),
+    ):
+        return False
+    if _contains_any(
+        value,
+        (
+            "删除",
+            "移除",
+            "移动",
+            "重命名",
+            "归档",
+            "delete",
+            "remove",
+            "move",
+            "rename",
+            "archive",
+        ),
+    ):
+        return False
+    return _contains_any(
+        value,
+        (
+            "发票",
+            "票据",
+            "收据",
+            "账单",
+            "invoice",
+            "receipt",
+            "bill",
+            "extract",
+            "读取",
+            "识别",
+            "汇总",
+            "统计",
+            "分析",
+            "整理",
+            "输出",
+            "生成",
+        ),
     )
 
 

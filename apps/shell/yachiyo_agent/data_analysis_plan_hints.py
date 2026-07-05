@@ -14,7 +14,7 @@ def data_source_hint(text: str, metadata: Mapping[str, Any] | None = None) -> st
         if value:
             return value
     match = re.search(
-        r"([^\s\"']+\.(?:csv|tsv|xlsx|xls|jsonl|json|parquet|txt|md|markdown))",
+        r"([^\s\"']+\.(?:csv|tsv|xlsx|xls|jsonl|json|parquet|pdf|txt|md|markdown))",
         text,
         flags=re.IGNORECASE,
     )
@@ -25,7 +25,7 @@ def named_data_source_hint(text: str) -> dict[str, str]:
     value = str(text or "").strip()
     if not value:
         return {}
-    kind_pattern = r"csv|tsv|xlsx|xls|excel|jsonl|json|parquet|txt|md|markdown"
+    kind_pattern = r"csv|tsv|xlsx|xls|excel|jsonl|json|parquet|pdf|txt|md|markdown"
     quoted_name = r"[\"'“”‘’「」『』]?(?P<name>[\w\u4e00-\u9fff ._-]{1,80}?)[\"'“”‘’「」『』]?"
     patterns = (
         rf"(?:叫做|叫|名为|名字叫)\s*{quoted_name}\s*(?:的)?\s*(?P<kind>{kind_pattern})\b",
@@ -165,6 +165,7 @@ def data_source_kind_hint(source_hint: str, text: str = "") -> str:
         ((".jsonl",), "jsonl"),
         ((".json",), "json"),
         ((".parquet",), "parquet"),
+        ((".pdf",), "pdf"),
         ((".md", ".markdown"), "text_table"),
         ((".txt",), "text"),
     )
@@ -282,6 +283,7 @@ def _scoped_data_source_kind_hint(lowered_text: str) -> str:
         ("jsonl", "jsonl"),
         ("json", "json"),
         ("parquet", "parquet"),
+        ("pdf", "pdf"),
         ("csv", "csv"),
         ("tsv", "tsv"),
         ("xlsx", "xlsx"),
@@ -306,6 +308,7 @@ def _bare_data_source_kind_hint(lowered_text: str) -> str:
     format_map = (
         ("jsonl", "jsonl"),
         ("parquet", "parquet"),
+        ("pdf", "pdf"),
         ("markdown", "text_table"),
         ("json", "json"),
         ("csv", "csv"),
