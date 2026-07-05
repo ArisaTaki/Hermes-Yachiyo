@@ -51,6 +51,24 @@ def test_oha_desktop_agent_release_smoke_covers_product_readiness(tmp_path) -> N
     assert section_by_id["studio_tool_catalog"]["report"]["coverage"][
         "planner_owner"
     ] == "runtime_planner"
+    assert section_by_id["studio_tool_catalog"]["report"]["coverage"][
+        "planner_owned_entrypoints"
+    ][0]["owner"] == "runtime_planner"
+    assert section_by_id["studio_tool_catalog"]["report"]["coverage"][
+        "planner_owned_entrypoints"
+    ][0]["legacy_shape_preserved"] is True
+    assert section_by_id["studio_tool_catalog"]["report"]["coverage"][
+        "remaining_fallback_contracts"
+    ][0]["status"] == "keep_until_planner_parity"
+    assert section_by_id["studio_tool_catalog"]["report"]["coverage"][
+        "remaining_fallback_contracts"
+    ][0]["required_before_delete"]
+    assert section_by_id["studio_tool_catalog"]["report"]["checks"][
+        "cleanup_lists_planner_owned_entrypoints"
+    ] is True
+    assert section_by_id["studio_tool_catalog"]["report"]["checks"][
+        "cleanup_lists_remaining_fallbacks"
+    ] is True
 
 
 def test_oha_desktop_agent_release_smoke_cli_writes_report(

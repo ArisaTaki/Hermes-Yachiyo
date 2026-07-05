@@ -201,6 +201,25 @@ class LegacyCleanupAreaContractSnapshot(_PublicSnapshot):
     planner_tools: list[str] = Field(default_factory=list)
 
 
+class LegacyCleanupFallbackContractSnapshot(_PublicSnapshot):
+    fallback_id: str
+    title: str
+    reason: str = ""
+    owner: str = "legacy_daily_desktop_intent"
+    status: str = "keep_until_planner_parity"
+    example_prompts: list[str] = Field(default_factory=list)
+    required_before_delete: list[str] = Field(default_factory=list)
+
+
+class LegacyPlannerOwnedEntrypointSnapshot(_PublicSnapshot):
+    entrypoint_id: str
+    title: str
+    owner: str = "runtime_planner"
+    legacy_shape_preserved: bool = True
+    tools: list[str] = Field(default_factory=list)
+    example_prompts: list[str] = Field(default_factory=list)
+
+
 class LegacyCleanupCoverageSnapshot(_PublicSnapshot):
     legacy_boundary: str = "legacy_daily_desktop_intent"
     planner_owner: str = "runtime_planner"
@@ -212,6 +231,8 @@ class LegacyCleanupCoverageSnapshot(_PublicSnapshot):
     covered_tools: list[str] = Field(default_factory=list)
     area_contracts: list[LegacyCleanupAreaContractSnapshot] = Field(default_factory=list)
     sample_contracts: list[LegacyCleanupSampleContractSnapshot] = Field(default_factory=list)
+    planner_owned_entrypoints: list[LegacyPlannerOwnedEntrypointSnapshot] = Field(default_factory=list)
+    remaining_fallback_contracts: list[LegacyCleanupFallbackContractSnapshot] = Field(default_factory=list)
 
 
 class ToolCatalogSnapshot(_PublicSnapshot):

@@ -165,6 +165,10 @@ def _tool_catalog_case() -> dict[str, Any]:
         and coverage.total_samples >= 57,
         "cleanup_tracks_app_launch": bool(coverage)
         and int(coverage.areas.get("app_launch", 0)) > 0,
+        "cleanup_lists_planner_owned_entrypoints": bool(coverage)
+        and len(coverage.planner_owned_entrypoints) >= 5,
+        "cleanup_lists_remaining_fallbacks": bool(coverage)
+        and len(coverage.remaining_fallback_contracts) >= 4,
     }
     return {
         "id": "studio_tool_catalog_runtime_coverage",

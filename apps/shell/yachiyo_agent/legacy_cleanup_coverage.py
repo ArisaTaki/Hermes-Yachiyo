@@ -191,6 +191,89 @@ AREA_PLANNER_CONTRACTS: dict[str, LegacyDesktopPlannerContract] = {
 }
 
 
+PLANNER_OWNED_LEGACY_ENTRYPOINTS: tuple[dict[str, Any], ...] = (
+    {
+        "entrypoint_id": "media_playback_facade",
+        "title": "Legacy media playback facade",
+        "tools": ["media.music_app_open_and_play", "media.apple_music_play", "media.apple_music_status"],
+        "example_prompts": ["能帮我播放 Apple Music 吗", "打开 Spotify 搜索 Taylor Swift 并播放"],
+    },
+    {
+        "entrypoint_id": "simple_app_facade",
+        "title": "Legacy app open/focus/status facade",
+        "tools": ["app.open", "app.focus", "app.status"],
+        "example_prompts": ["可以帮我打开 Word 吗", "切到 Slack", "Chrome 开着吗"],
+    },
+    {
+        "entrypoint_id": "file_access_facade",
+        "title": "Legacy local file access facade",
+        "tools": ["desktop.open_path", "desktop.reveal_path"],
+        "example_prompts": ["打开下载目录里的最新文件", "显示当前选中文件"],
+    },
+    {
+        "entrypoint_id": "browser_navigation_facade",
+        "title": "Legacy browser navigation facade",
+        "tools": ["browser.open_url"],
+        "example_prompts": ["打开 GitHub 首页", "上 B 站"],
+    },
+    {
+        "entrypoint_id": "safe_app_action_facade",
+        "title": "Legacy app-scoped safe action facade",
+        "tools": [
+            "app.focus_and_safe_key",
+            "app.focus_and_safe_scroll",
+            "app.focus_and_safe_shortcut",
+            "app.open_and_safe_shortcut",
+        ],
+        "example_prompts": ["Chrome 新建无痕窗口", "在 Slack 里按 Tab", "Slack 新建消息"],
+    },
+)
+
+
+REMAINING_FALLBACK_CONTRACTS: tuple[dict[str, Any], ...] = (
+    {
+        "fallback_id": "finder_item_shortcuts",
+        "title": "Finder selected-item shortcuts",
+        "reason": "Finder item actions still have open/focus differences and selected-file safety constraints.",
+        "example_prompts": ["Finder 重命名选中文件", "Finder 上一级目录", "打开 Finder 复制选中文件"],
+        "required_before_delete": [
+            "Planner must preserve open-vs-focus action shape for Finder item prompts.",
+            "Planner must keep delete/trash operations rejected or approval-gated.",
+        ],
+    },
+    {
+        "fallback_id": "spotlight_and_foreground_search",
+        "title": "Spotlight and foreground search sequences",
+        "reason": "Foreground search can be a multi-step shortcut-plus-type sequence, not a browser search.",
+        "example_prompts": ["Spotlight 搜索 yachiyo", "打开聚焦搜索 yachiyo", "提交当前搜索"],
+        "required_before_delete": [
+            "Planner must distinguish Spotlight search from browser/web search.",
+            "Planner must preserve shortcut/type/submit sequence shape for legacy facade callers.",
+        ],
+    },
+    {
+        "fallback_id": "browser_search_and_app_scoped_search",
+        "title": "Browser search and app-scoped search sequences",
+        "reason": "Legacy facade still preserves app focus plus browser.open_url or app search-box sequences.",
+        "example_prompts": ["Chrome 搜索 OpenAI", "微信打开搜索", "把当前页面内容输入到搜索框"],
+        "required_before_delete": [
+            "Planner must preserve app focus before browser search when requested.",
+            "Planner must keep context-transfer search-box prompts as inspectable UI plans.",
+        ],
+    },
+    {
+        "fallback_id": "semantic_ui_targeting",
+        "title": "Semantic UI click/type targeting",
+        "reason": "Semantic UI operations require inspect-before-act behavior and recovery coordinates.",
+        "example_prompts": ["Chrome 点登录", "在 Linear 上的创建按钮点击", "Can you type hello into the search field?"],
+        "required_before_delete": [
+            "Planner execution must keep read_ui/click/type verification events observable.",
+            "Retry/recovery artifacts must remain linked to target UI evidence.",
+        ],
+    },
+)
+
+
 MIGRATED_DAILY_DESKTOP_SAMPLES: tuple[LegacyDesktopMigrationSample, ...] = (
     *_samples("desktop_window", "微信关闭窗口", "切到下一个窗口"),
     *_samples("desktop_shortcut", "在 VS Code 里执行命令 Format Document"),
@@ -308,6 +391,8 @@ def legacy_daily_desktop_cleanup_coverage() -> dict[str, Any]:
         ),
         "area_contracts": area_contracts,
         "sample_contracts": sample_contracts,
+        "planner_owned_entrypoints": PLANNER_OWNED_LEGACY_ENTRYPOINTS,
+        "remaining_fallback_contracts": REMAINING_FALLBACK_CONTRACTS,
     }
 
 

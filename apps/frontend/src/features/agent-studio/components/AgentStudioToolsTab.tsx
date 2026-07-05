@@ -285,6 +285,8 @@ function LegacyCleanupCoveragePanel({
   const prompts = coverage.prompts || [];
   const areaContracts = coverage.area_contracts || [];
   const sampleContracts = coverage.sample_contracts || [];
+  const plannerOwnedEntrypoints = coverage.planner_owned_entrypoints || [];
+  const remainingFallbacks = coverage.remaining_fallback_contracts || [];
   return (
     <section
       className="studio-tool-inspector-section studio-legacy-cleanup-coverage"
@@ -293,6 +295,8 @@ function LegacyCleanupCoveragePanel({
       data-covered-tools={(coverage.covered_tools || []).join(',')}
       data-legacy-boundary={coverage.legacy_boundary || ''}
       data-planner-owner={coverage.planner_owner || ''}
+      data-planner-owned-entrypoints={plannerOwnedEntrypoints.map((entrypoint) => entrypoint.entrypoint_id).join(',')}
+      data-remaining-fallbacks={remainingFallbacks.map((fallback) => fallback.fallback_id).join(',')}
       data-testid="studio-legacy-cleanup-coverage"
       data-total-samples={coverage.total_samples || 0}
     >
@@ -312,6 +316,14 @@ function LegacyCleanupCoveragePanel({
         <span>
           <small>Planner Contracts</small>
           <strong>{sampleContracts.length || areaContracts.length || 'None'}</strong>
+        </span>
+        <span>
+          <small>Owned Entry</small>
+          <strong>{plannerOwnedEntrypoints.length || 'None'}</strong>
+        </span>
+        <span>
+          <small>Fallbacks</small>
+          <strong>{remainingFallbacks.length || 'None'}</strong>
         </span>
       </div>
       {areas.length ? (
@@ -335,6 +347,36 @@ function LegacyCleanupCoveragePanel({
               key={contract.area}
             >
               {contract.area} · {(contract.planner_intents || []).join(',') || 'planner'}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {plannerOwnedEntrypoints.length ? (
+        <div className="studio-planner-step-list compact" data-testid="studio-legacy-cleanup-owned-entrypoints">
+          {plannerOwnedEntrypoints.slice(0, 5).map((entrypoint) => (
+            <span
+              className="studio-tool-empty"
+              data-cleanup-owned-entrypoint={entrypoint.entrypoint_id}
+              data-cleanup-owned-tools={(entrypoint.tools || []).join(',')}
+              data-cleanup-owned-shape-preserved={String(entrypoint.legacy_shape_preserved !== false)}
+              key={entrypoint.entrypoint_id}
+            >
+              {entrypoint.title || entrypoint.entrypoint_id}
+            </span>
+          ))}
+        </div>
+      ) : null}
+      {remainingFallbacks.length ? (
+        <div className="studio-planner-step-list compact" data-testid="studio-legacy-cleanup-fallbacks">
+          {remainingFallbacks.slice(0, 5).map((fallback) => (
+            <span
+              className="studio-tool-empty"
+              data-cleanup-fallback={fallback.fallback_id}
+              data-cleanup-fallback-status={fallback.status || ''}
+              title={fallback.reason || fallback.title}
+              key={fallback.fallback_id}
+            >
+              {fallback.title || fallback.fallback_id}
             </span>
           ))}
         </div>

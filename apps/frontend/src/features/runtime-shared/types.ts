@@ -109,6 +109,8 @@ export type LegacyCleanupCoverageSnapshot = {
   covered_tools?: string[];
   area_contracts?: LegacyCleanupAreaContractSnapshot[];
   sample_contracts?: LegacyCleanupSampleContractSnapshot[];
+  planner_owned_entrypoints?: LegacyPlannerOwnedEntrypointSnapshot[];
+  remaining_fallback_contracts?: LegacyCleanupFallbackContractSnapshot[];
 };
 
 export type LegacyCleanupAreaContractSnapshot = {
@@ -128,6 +130,25 @@ export type LegacyCleanupSampleContractSnapshot = {
   planner_intents?: string[];
   planner_capabilities?: string[];
   planner_tools?: string[];
+};
+
+export type LegacyPlannerOwnedEntrypointSnapshot = {
+  entrypoint_id: string;
+  title: string;
+  owner?: string;
+  legacy_shape_preserved?: boolean;
+  tools?: string[];
+  example_prompts?: string[];
+};
+
+export type LegacyCleanupFallbackContractSnapshot = {
+  fallback_id: string;
+  title: string;
+  reason?: string;
+  owner?: string;
+  status?: string;
+  example_prompts?: string[];
+  required_before_delete?: string[];
 };
 
 export type ToolCatalogSnapshot = {
