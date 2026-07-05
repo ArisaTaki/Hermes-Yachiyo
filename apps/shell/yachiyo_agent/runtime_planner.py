@@ -7985,7 +7985,118 @@ def _service_input_preview(
     workflow_action = str(intent.inputs.get("workflow_action_hint") or "").strip()
     if workflow_action:
         payload["workflow_action_hint"] = workflow_action
+    if capability_id == "group.multi_agent":
+        group_task_plan = _group_task_plan_preview(intent.user_goal)
+        if group_task_plan:
+            payload["group_task_plan"] = group_task_plan
     return payload
+
+
+def _group_task_plan_preview(text: str) -> dict[str, Any]:
+    value = _clean_prompt(text)
+    if not value:
+        return {}
+    if not _contains_any(
+        value,
+        (
+            "分别",
+            "分工",
+            "各自",
+            "parallel",
+            "separately",
+            "split",
+            "divide",
+        ),
+    ):
+        return {}
+    split_tasks = _group_split_work_items(value)
+    if split_tasks and _contains_any(value, ("分工", "split", "divide")):
+        return {
+            "strategy": "role_split_then_delivery",
+            "tasks": split_tasks,
+        }
+    topics = _group_parallel_research_topics(value)
+    if len(topics) >= 2:
+        tasks = [
+            {
+                "task_id": f"research-{index}",
+                "role": "researcher",
+                "objective": f"调研 {topic}",
+                "expected_output": "research_notes",
+            }
+            for index, topic in enumerate(topics[:4], start=1)
+        ]
+        return {
+            "strategy": "parallel_research_then_synthesis",
+            "tasks": [
+                *tasks,
+                {
+                    "task_id": "synthesize-findings",
+                    "role": "synthesizer",
+                    "objective": "汇总并对比各研究任务的结果",
+                    "expected_output": "summary_report",
+                    "depends_on": [task["task_id"] for task in tasks],
+                },
+            ],
+        }
+    if split_tasks:
+        return {
+            "strategy": "role_split_then_delivery",
+            "tasks": split_tasks,
+        }
+    return {}
+
+
+def _group_parallel_research_topics(text: str) -> list[str]:
+    value = _clean_prompt(text)
+    match = re.search(
+        r"(?:调研|研究|比较|分析|搜索|research|compare|analy[sz]e)\s*(?P<topics>.+?)"
+        r"(?:然后|之后|最后|并(?:汇总|总结|输出|产出)|再|$)",
+        value,
+        flags=re.IGNORECASE,
+    )
+    if not match:
+        return []
+    raw_topics = str(match.group("topics") or "").strip(" ：:，,。；;")
+    raw_topics = re.sub(
+        r"(?:的)?(?:差异|区别|架构|agent\s+architecture|architecture)$",
+        "",
+        raw_topics,
+        flags=re.IGNORECASE,
+    ).strip(" 的")
+    parts = re.split(r"\s*(?:和|与|及|、|,|，|\band\b|\bvs\.?\b)\s*", raw_topics)
+    topics: list[str] = []
+    for part in parts:
+        topic = str(part or "").strip(" ：:，,。；; ")
+        if not topic or topic in topics:
+            continue
+        topics.append(topic)
+    return topics
+
+
+def _group_split_work_items(text: str) -> list[dict[str, str]]:
+    value = _clean_prompt(text)
+    match = re.search(
+        r"一个(?P<first>[^，,。；;]+)[，,；;]\s*(?:另?一个|一个)(?P<second>[^，,。；;]+)",
+        value,
+    )
+    if not match:
+        return []
+    first = str(match.group("first") or "").strip()
+    second = str(match.group("second") or "").strip()
+    tasks = []
+    for index, objective in enumerate((first, second), start=1):
+        if not objective:
+            continue
+        tasks.append(
+            {
+                "task_id": f"role-task-{index}",
+                "role": "specialist",
+                "objective": objective,
+                "expected_output": "task_result",
+            }
+        )
+    return tasks
 
 
 _DESKTOP_OPERATION_TOOL_ALIASES = {

@@ -2082,6 +2082,23 @@ def _orchestration_request(decision: Any, orchestration_kind: str) -> dict[str, 
     intent = decision.selected_intent
     inputs = intent.inputs if isinstance(intent.inputs, Mapping) else {}
     target_name = str(inputs.get("target_name_hint") or "").strip()
+    step_id = (
+        "group-multi_agent"
+        if orchestration_kind == "group_run"
+        else "workflow-orchestration"
+    )
+    step = _planned_step_by_id(decision, step_id)
+    input_preview = getattr(step, "input_preview", None) if step is not None else None
+    preview_payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+    request_input = {
+        "objective": str(intent.user_goal or "").strip(),
+        "title": str(intent.title or "").strip(),
+        "target_name": target_name,
+    }
+    for key in ("group_task_plan",):
+        value = preview_payload.get(key)
+        if value:
+            request_input[key] = value
     return {
         "kind": "orchestration",
         "orchestration_kind": orchestration_kind,
@@ -2091,11 +2108,7 @@ def _orchestration_request(decision: Any, orchestration_kind: str) -> dict[str, 
         "decision_id": str(decision.decision_id or ""),
         "plan_id": str(decision.plan.plan_id or ""),
         "intent_kind": str(intent.kind or ""),
-        "input": {
-            "objective": str(intent.user_goal or "").strip(),
-            "title": str(intent.title or "").strip(),
-            "target_name": target_name,
-        },
+        "input": request_input,
     }
 
 
@@ -2112,14 +2125,18 @@ def _multi_agent_tool_requests(decision: Any, allowed: set[str]) -> list[dict[st
     input_preview = getattr(step, "input_preview", None)
     payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
     target_name = str(payload.get("target_name") or target_name).strip()
+    request_input = {
+        "objective": str(intent.user_goal or "").strip(),
+        "title": str(intent.title or "").strip(),
+        "target_name": target_name,
+    }
+    group_task_plan = payload.get("group_task_plan")
+    if group_task_plan:
+        request_input["group_task_plan"] = group_task_plan
     return [
         _request(
             tool_name,
-            {
-                "objective": str(intent.user_goal or "").strip(),
-                "title": str(intent.title or "").strip(),
-                "target_name": target_name,
-            },
+            request_input,
             planning_reason="planner_fallback_group_run",
         )
     ]

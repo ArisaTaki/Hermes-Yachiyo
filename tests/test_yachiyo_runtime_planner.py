@@ -6329,6 +6329,30 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
         "让两个 agent 分别调研 Hanako 和 Hermes 然后汇总",
         allowed_tools=["group.run", "browser.open_url_and_extract_text", "artifact.write"],
     )
+    expected_group_task_plan = {
+        "strategy": "parallel_research_then_synthesis",
+        "tasks": [
+            {
+                "task_id": "research-1",
+                "role": "researcher",
+                "objective": "调研 Hanako",
+                "expected_output": "research_notes",
+            },
+            {
+                "task_id": "research-2",
+                "role": "researcher",
+                "objective": "调研 Hermes",
+                "expected_output": "research_notes",
+            },
+            {
+                "task_id": "synthesize-findings",
+                "role": "synthesizer",
+                "objective": "汇总并对比各研究任务的结果",
+                "expected_output": "summary_report",
+                "depends_on": ["research-1", "research-2"],
+            },
+        ],
+    }
 
     assert group.selected_intent.kind == "multi_agent"
     assert group.plan.route_to_studio is True
@@ -6337,6 +6361,7 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
     assert group_step.action == "start_group_run"
     assert group_step.tool_name == "group.run"
     assert group_step.status == "planned"
+    assert group_step.input_preview["group_task_plan"] == expected_group_task_plan
     assert planner_tool_requests(
         "让两个 agent 分别调研 Hanako 和 Hermes 然后汇总",
         ["group.run", "artifact.write"],
@@ -6348,6 +6373,7 @@ def test_runtime_planner_preserves_workflow_and_multi_agent_orchestration_routes
                 "objective": "让两个 agent 分别调研 Hanako 和 Hermes 然后汇总",
                 "title": "Multi-Agent Coordination",
                 "target_name": "",
+                "group_task_plan": expected_group_task_plan,
             },
             "source": "runtime_planner",
             "planning_reason": "planner_fallback_group_run",
@@ -6570,6 +6596,30 @@ def test_planner_orchestration_requests_project_workflow_and_group_handoffs() ->
     assert group_request[0]["intent_kind"] == "multi_agent"
     assert group_request[0]["route_to_studio"] is True
     assert group_request[0]["input"]["target_name"] == ""
+    assert group_request[0]["input"]["group_task_plan"] == {
+        "strategy": "parallel_research_then_synthesis",
+        "tasks": [
+            {
+                "task_id": "research-1",
+                "role": "researcher",
+                "objective": "调研 Hanako",
+                "expected_output": "research_notes",
+            },
+            {
+                "task_id": "research-2",
+                "role": "researcher",
+                "objective": "调研 Hermes",
+                "expected_output": "research_notes",
+            },
+            {
+                "task_id": "synthesize-findings",
+                "role": "synthesizer",
+                "objective": "汇总并对比各研究任务的结果",
+                "expected_output": "summary_report",
+                "depends_on": ["research-1", "research-2"],
+            },
+        ],
+    }
     role_group_request = planner_orchestration_requests(
         "让研究员和写作者两个 Agent 协作，研究 Hermes 和 Hanako 的差异并产出报告"
     )
