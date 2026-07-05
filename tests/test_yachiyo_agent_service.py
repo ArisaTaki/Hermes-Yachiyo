@@ -1043,12 +1043,19 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     assert metadata["yachiyo_task_core"]["workspace"]["workspace_id"].startswith(
         "task-workspace-"
     )
+    assert metadata["yachiyo_task_progress"]["workspace_id"] == (
+        metadata["yachiyo_task_core"]["workspace"]["workspace_id"]
+    )
+    assert metadata["yachiyo_task_progress"]["total_todos"] == 1
+    assert metadata["yachiyo_task_progress"]["current_step_id"] == "analyze-data-file"
     assert [todo["step_id"] for todo in metadata["yachiyo_task_core"]["todos"]] == [
         "analyze-data-file"
     ]
     assert task.task_core is not None
     assert task.task_core.workspace.workspace_id == metadata["yachiyo_task_core"]["workspace"]["workspace_id"]
     assert [todo.step_id for todo in task.task_core.todos] == ["analyze-data-file"]
+    assert task.task_progress is not None
+    assert task.task_progress.workspace_id == metadata["yachiyo_task_progress"]["workspace_id"]
 
 
 def test_yachiyo_agent_service_starts_chat_with_full_runtime_execution_envelope() -> None:

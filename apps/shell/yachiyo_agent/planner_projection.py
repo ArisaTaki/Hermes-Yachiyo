@@ -26,6 +26,7 @@ from .task_core_event_projection import (
     task_core_initial_progress_event_payloads,
     task_core_progress_event_detail,
 )
+from .task_progress_snapshots import task_progress_summary_from_task_core
 
 _MAIN_CHAT_AGENT_ID = "builtin:yachiyo-main"
 
@@ -79,6 +80,9 @@ def runtime_planner_metadata(
     }
     if decision.plan.task_core is not None:
         payload["yachiyo_task_core"] = decision.plan.task_core.model_dump(mode="json")
+        task_progress = task_progress_summary_from_task_core(decision.plan.task_core)
+        if task_progress is not None:
+            payload["yachiyo_task_progress"] = task_progress.model_dump(mode="json")
     execution_envelope = runtime_execution_envelope_payload(
         decision,
         allowed_tools=allowed_tools,
