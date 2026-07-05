@@ -35198,6 +35198,28 @@ def test_runtime_planner_execution_keeps_open_and_focus_verification_steps() -> 
         "app.focus_window",
         "desktop.active_window",
     ]
+    assert focus_envelope.requests[1].action_target == {
+        "kind": "desktop_discovery",
+        "action": "list_windows",
+        "selection_source": "desktop.windows",
+        "app_name": "Slack",
+        "step_id": "list-app-windows",
+    }
+    assert focus_envelope.requests[1].observation_retry == {
+        "from_tool": "desktop.windows",
+        "tool": "desktop.windows",
+        "input": {"app_name": "Slack"},
+        "reason": "observe_windows",
+    }
+    assert focus_envelope.requests[2].action_target == {
+        "kind": "desktop_app",
+        "action": "focus_app_window",
+        "selection_source": "direct_app_name",
+        "app_name": "Slack",
+        "query": "Slack",
+        "title_contains": "General",
+        "step_id": "focus-app-window",
+    }
     assert focus_envelope.requests[-1].runtime_stage == "verify"
     assert focus_envelope.requests[-1].depends_on == ["focus-app-window"]
 
@@ -35221,6 +35243,49 @@ def test_runtime_planner_execution_keeps_open_and_focus_verification_steps() -> 
         "app_name": "PixelForge",
         "selection_source": "desktop.list_apps",
         "query": "PixelForge",
+    }
+
+    direct_open_decision = RuntimePlanner().decision(
+        "打开 Obsidian",
+        allowed_tools=["desktop.open_app"],
+    )
+    direct_open_envelope = runtime_execution_envelope_from_decision(
+        direct_open_decision,
+        allowed_tools=["desktop.open_app"],
+        full_plan=True,
+    )
+    assert direct_open_envelope is not None
+    assert direct_open_envelope.requests[0].action_target == {
+        "kind": "desktop_app",
+        "action": "open_app",
+        "selection_source": "direct_app_name",
+        "app_name": "Obsidian",
+        "query": "Obsidian",
+        "step_id": "open-or-focus-app",
+    }
+    assert direct_open_envelope.requests[0].observation_retry == {
+        "from_tool": "desktop.list_apps",
+        "tool": "desktop.list_apps",
+        "input": {"limit": 20, "query": "Obsidian"},
+        "reason": "resolve_desktop_app",
+    }
+    direct_open_verify_envelope = runtime_execution_envelope_from_decision(
+        RuntimePlanner().decision(
+            "打开 Obsidian",
+            allowed_tools=["desktop.open_app", "desktop.active_window"],
+        ),
+        allowed_tools=["desktop.open_app", "desktop.active_window"],
+        full_plan=True,
+    )
+    assert direct_open_verify_envelope is not None
+    assert direct_open_verify_envelope.requests[-1].action_target == {
+        "kind": "desktop_app",
+        "action": "verify_after_action",
+        "selection_source": "direct_app_name",
+        "app_name": "Obsidian",
+        "query": "Obsidian",
+        "step_id": "verify-desktop-result",
+        "verified_step_ids": ["open-or-focus-app"],
     }
 
 

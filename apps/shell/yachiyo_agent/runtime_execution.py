@@ -685,9 +685,11 @@ _SELECTED_DESKTOP_APP_NAME = "<selected app from desktop.list_apps>"
 _SELECTED_RUNNING_DESKTOP_APP_NAME = "<selected app from desktop.running_apps>"
 _DESKTOP_APP_SELECTION_SOURCE = "desktop.list_apps"
 _DESKTOP_RUNNING_APP_SELECTION_SOURCE = "desktop.running_apps"
+_DESKTOP_DIRECT_APP_NAME_SOURCE = "direct_app_name"
 _DESKTOP_APP_SELECTION_SOURCES = {
     _DESKTOP_APP_SELECTION_SOURCE,
     _DESKTOP_RUNNING_APP_SELECTION_SOURCE,
+    _DESKTOP_DIRECT_APP_NAME_SOURCE,
 }
 _DESKTOP_APP_UI_ELEMENT_TYPE_TOOLS = {
     "app.focus_and_type_into_ui_element",
@@ -715,6 +717,11 @@ def _desktop_execution_request_contract(
         scope = _desktop_app_selection_scope_from_previous_requests(
             depends_on,
             previous_requests,
+        )
+    if not scope:
+        scope = _desktop_direct_app_scope(
+            tool_name=tool_name,
+            request_input=request_input,
         )
     if not scope:
         scope = _desktop_foreground_scope(
@@ -928,6 +935,8 @@ def _desktop_app_selection_scope_from_previous_requests(
             },
         )
         if not scope:
+            scope = _desktop_app_scope_from_action_target(previous.action_target)
+        if not scope:
             continue
         if not fallback_scope:
             fallback_scope = scope
@@ -952,6 +961,9 @@ def _desktop_discovery_scope(
         "desktop.ui_elements",
         "desktop.read_ui",
         "desktop.active_window",
+        "desktop.windows",
+        "desktop.list_windows",
+        "desktop.verify",
         "screen.capture",
     }:
         return {}
@@ -960,9 +972,11 @@ def _desktop_discovery_scope(
             "selection_source": clean_tool,
             "query": request_input.get("query"),
             "app_name": request_input.get("app_name"),
+            "title_contains": request_input.get("title_contains"),
             "role_filter": request_input.get("role_filter"),
             "target": request_input.get("target"),
             "selector": request_input.get("selector"),
+            "limit": request_input.get("limit"),
             "reason": request_input.get("reason"),
         }
     )
@@ -988,6 +1002,39 @@ def _desktop_foreground_scope(
         **_desktop_foreground_scope_from_input(request_input),
     }
     return _non_empty_mapping(scope)
+
+
+def _desktop_direct_app_scope(
+    *,
+    tool_name: str,
+    request_input: Mapping[str, Any],
+) -> dict[str, Any]:
+    if str(tool_name or "").strip() not in {
+        "app.open",
+        "app.focus",
+        "app.focus_window",
+        "app.status",
+        "app.show",
+        "app.hide",
+        "app.minimize",
+        "app.quit",
+        "desktop.open_app",
+        "desktop.focus_app",
+    }:
+        return {}
+    app_name = _text(request_input.get("app_name"))
+    if not app_name or _desktop_app_placeholder_selection_source(app_name):
+        return {}
+    query = _text(request_input.get("query")) or app_name
+    scope = {
+        "selection_source": _DESKTOP_DIRECT_APP_NAME_SOURCE,
+        "app_name": app_name,
+        "query": query,
+    }
+    title_contains = _text(request_input.get("title_contains"))
+    if title_contains:
+        scope["title_contains"] = title_contains
+    return scope
 
 
 def _desktop_foreground_scope_from_input(
@@ -1049,6 +1096,26 @@ def _desktop_foreground_scope_from_previous_requests(
     return fallback_scope
 
 
+def _desktop_app_scope_from_action_target(value: Any) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    if str(value.get("kind") or "").strip() != "desktop_app":
+        return {}
+    return _non_empty_mapping(
+        {
+            key: value.get(key)
+            for key in (
+                "selection_source",
+                "app_name",
+                "query",
+                "title_contains",
+                "resolved_app_name",
+                "resolved_app_path",
+            )
+        }
+    )
+
+
 def _desktop_request_action(tool_name: str, runtime_stage: str) -> str:
     clean_tool = str(tool_name or "").strip()
     if runtime_stage == "verify":
@@ -1057,8 +1124,12 @@ def _desktop_request_action(tool_name: str, runtime_stage: str) -> str:
         return "open_app"
     if clean_tool in {"app.focus", "desktop.focus_app"}:
         return "focus_app"
+    if clean_tool == "app.focus_window":
+        return "focus_app_window"
     if clean_tool == "desktop.active_window":
         return "read_active_window"
+    if clean_tool in {"desktop.windows", "desktop.list_windows"}:
+        return "list_windows"
     if clean_tool in {"desktop.ui_elements", "desktop.read_ui"}:
         return "read_ui"
     if clean_tool == "desktop.list_apps":
@@ -1177,6 +1248,13 @@ def _desktop_observation_retry(
             runtime_stage=runtime_stage,
             scope=scope,
         )
+    if target_kind == "desktop_discovery":
+        return _desktop_discovery_observation_retry(
+            tool_name=tool_name,
+            request_input=request_input,
+            runtime_stage=runtime_stage,
+            scope=scope,
+        )
     if runtime_stage == "verify":
         retry_input = {
             key: request_input[key]
@@ -1199,6 +1277,8 @@ def _desktop_observation_retry(
         )
     query = str(scope.get("query") or scope.get("app_name") or "").strip()
     selection_source = str(scope.get("selection_source") or _DESKTOP_APP_SELECTION_SOURCE).strip()
+    if selection_source == _DESKTOP_DIRECT_APP_NAME_SOURCE:
+        selection_source = _DESKTOP_APP_SELECTION_SOURCE
     retry_input: dict[str, Any] = (
         {}
         if selection_source == _DESKTOP_RUNNING_APP_SELECTION_SOURCE
@@ -1210,6 +1290,94 @@ def _desktop_observation_retry(
         {
             "from_tool": selection_source,
             "tool": selection_source,
+            "input": retry_input,
+            "reason": "resolve_desktop_app",
+        }
+    )
+
+
+def _desktop_discovery_observation_retry(
+    *,
+    tool_name: str,
+    request_input: Mapping[str, Any],
+    runtime_stage: str,
+    scope: Mapping[str, Any],
+) -> dict[str, Any]:
+    clean_tool = str(tool_name or "").strip()
+    if clean_tool in {"desktop.windows", "desktop.list_windows"}:
+        retry_input = {
+            key: request_input[key]
+            for key in ("app_name", "title_contains", "limit")
+            if key in request_input and request_input[key] not in (None, "")
+        }
+        if not retry_input:
+            retry_input = {
+                key: scope[key]
+                for key in ("app_name", "title_contains", "limit")
+                if key in scope and scope[key] not in (None, "")
+            }
+        return _non_empty_mapping(
+            {
+                "from_tool": clean_tool,
+                "tool": clean_tool,
+                "input": retry_input,
+                "reason": "observe_windows",
+            }
+        )
+    if clean_tool in {"desktop.ui_elements", "desktop.read_ui", "desktop.verify"}:
+        retry_input = {
+            key: request_input[key]
+            for key in ("app_name", "role_filter", "target", "selector", "limit", "reason")
+            if key in request_input and request_input[key] not in (None, "")
+        }
+        if not retry_input:
+            retry_input = {
+                key: scope[key]
+                for key in ("app_name", "role_filter", "target", "selector", "limit", "reason")
+                if key in scope and scope[key] not in (None, "")
+            }
+        return _non_empty_mapping(
+            {
+                "from_tool": clean_tool,
+                "tool": clean_tool,
+                "input": retry_input,
+                "reason": (
+                    "verification_failed"
+                    if clean_tool == "desktop.verify" or runtime_stage == "verify"
+                    else "observe_ui"
+                ),
+            }
+        )
+    if clean_tool == "desktop.active_window":
+        return _non_empty_mapping(
+            {
+                "from_tool": clean_tool,
+                "tool": clean_tool,
+                "input": {},
+                "reason": "observe_active_window",
+            }
+        )
+    if clean_tool == "screen.capture":
+        return _non_empty_mapping(
+            {
+                "from_tool": clean_tool,
+                "tool": clean_tool,
+                "input": {},
+                "reason": "capture_screen",
+            }
+        )
+    query = str(scope.get("query") or scope.get("app_name") or "").strip()
+    retry_input: dict[str, Any] = (
+        {}
+        if clean_tool == _DESKTOP_RUNNING_APP_SELECTION_SOURCE
+        else {"limit": 20}
+    )
+    if query and clean_tool != _DESKTOP_RUNNING_APP_SELECTION_SOURCE:
+        retry_input["query"] = query
+    return _non_empty_mapping(
+        {
+            "from_tool": clean_tool,
+            "tool": clean_tool,
             "input": retry_input,
             "reason": "resolve_desktop_app",
         }
