@@ -193,6 +193,20 @@ def _request_needs_model_materialization(
             or request_input.get("path")
             or request_input.get("paths")
         )
+    if tool_name == "workspace.write_patch":
+        if any(
+            str(request_input.get(key) or "").strip()
+            for key in ("patch", "diff", "content")
+        ):
+            return False
+        if any(request_input.get(key) for key in ("changes", "edits", "operations")):
+            return False
+        return bool(
+            request_input.get("patch_source")
+            or request_input.get("diff_source")
+            or request_input.get("body_source")
+            or request_input.get("mode")
+        )
     if tool_name in {
         "app.focus_and_safe_type_text",
         "app.focus_and_type_into_ui_element",

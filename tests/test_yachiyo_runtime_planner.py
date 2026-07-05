@@ -35011,6 +35011,7 @@ def test_runtime_execution_envelope_can_project_full_code_task_plan() -> None:
         "verify": 1,
     }
     assert full_envelope.requests[2].approval_required is True
+    assert full_envelope.requests[2].continue_to_model is True
     assert full_envelope.requests[2].requires_post_action_verification is True
     assert full_envelope.requests[3].requires_observation is True
     assert full_envelope.requests[2].task_todo["step_id"] == "apply-code-changes"
@@ -35027,6 +35028,7 @@ def test_runtime_execution_envelope_can_project_full_code_task_plan() -> None:
     )
 
     assert projected_requests[2]["task_todo"]["step_id"] == "apply-code-changes"
+    assert projected_requests[2]["continue_to_model"] is True
     assert projected_requests[2]["task_checkpoints"][0]["after_step_id"] == (
         "apply-code-changes"
     )
