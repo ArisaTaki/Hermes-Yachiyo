@@ -125,148 +125,6 @@ def _prefer_legacy_planned_timeline_for_metadata(metadata: dict[str, Any] | None
     return bool(metadata.get("daily_desktop_intent"))
 
 
-def _legacy_direct_execution_override_requests(
-    prompt: str,
-    metadata: dict[str, Any] | None,
-    allowed_tools: list[str],
-    planner_requests: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
-    legacy_requests = daily_desktop_entrypoint_requests(
-        prompt,
-        metadata=metadata,
-        allowed_tools=allowed_tools,
-    )
-    if not legacy_requests:
-        return []
-    if _legacy_information_capture_override_requests(legacy_requests, planner_requests):
-        return legacy_requests
-    if _legacy_clipboard_link_open_override_requests(legacy_requests, planner_requests):
-        return legacy_requests
-    if _legacy_default_browser_open_override_requests(prompt, legacy_requests, planner_requests):
-        return legacy_requests
-    if _legacy_app_ui_approval_override_requests(legacy_requests, planner_requests):
-        return legacy_requests
-    if _legacy_app_submit_approval_override_requests(legacy_requests, planner_requests):
-        return legacy_requests
-    if not _prefer_legacy_planned_timeline_for_metadata(metadata):
-        return []
-    legacy_tools = _tool_names_for_requests(legacy_requests)
-    if legacy_tools and _planner_requests_cover_legacy_plan(legacy_requests, planner_requests):
-        return []
-    if _has_approval_plan_tool(legacy_requests) and _planner_requests_need_model_followup(
-        planner_requests
-    ):
-        return _legacy_requests_with_type_sequence_verification(
-            legacy_requests,
-            allowed_tools,
-        )
-    return []
-
-
-def _legacy_default_browser_open_override_requests(
-    prompt: str,
-    legacy_requests: list[dict[str, Any]],
-    planner_requests: list[dict[str, Any]],
-) -> bool:
-    if not _looks_like_legacy_default_browser_open(prompt):
-        return False
-    if _tool_names_for_requests(legacy_requests) != ["app.open"]:
-        return False
-    legacy_payload = (
-        legacy_requests[0].get("input")
-        if isinstance(legacy_requests[0].get("input"), dict)
-        else {}
-    )
-    if str(legacy_payload.get("app_name") or "").strip() != "Google Chrome":
-        return False
-    return True
-
-
-def _looks_like_legacy_default_browser_open(prompt: str) -> bool:
-    value = str(prompt or "").strip()
-    if not value:
-        return False
-    patterns = (
-        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?打开\s*(?:默认)?(?:浏览器|网页)\s*[?？。！!]*$",
-        r"^(?:open|launch|start)\s+(?:a\s+|the\s+|default\s+)?(?:browser|webpage|web\s+page)\s*[.!?]*$",
-    )
-    return any(re.search(pattern, value, flags=re.IGNORECASE) for pattern in patterns)
-
-
-def _legacy_app_ui_approval_override_requests(
-    legacy_requests: list[dict[str, Any]],
-    planner_requests: list[dict[str, Any]],
-) -> bool:
-    if not _planner_requests_need_model_followup(planner_requests):
-        return False
-    return any(
-        str(request.get("tool") or "").strip()
-        in {
-            "app.open_and_click_ui_element",
-            "app.focus_and_click_ui_element",
-            "app.open_and_type_into_ui_element",
-            "app.focus_and_type_into_ui_element",
-        }
-        for request in legacy_requests
-        if isinstance(request, dict)
-    )
-
-
-def _legacy_app_submit_approval_override_requests(
-    legacy_requests: list[dict[str, Any]],
-    planner_requests: list[dict[str, Any]],
-) -> bool:
-    if "desktop.list_apps" not in _tool_names_for_requests(planner_requests):
-        return False
-    return _legacy_app_submit_approval_plan(legacy_requests)
-
-
-def _legacy_information_capture_override_requests(
-    legacy_requests: list[dict[str, Any]],
-    planner_requests: list[dict[str, Any]],
-) -> bool:
-    if not _planner_requests_need_model_followup(planner_requests):
-        return False
-    planner_tools = set(_tool_names_for_requests(planner_requests))
-    if planner_tools != {"clipboard.read"}:
-        return False
-    legacy_tools = _tool_names_for_requests(legacy_requests)
-    if "app.open_and_safe_shortcut" not in legacy_tools:
-        return False
-    for request in legacy_requests:
-        if str(request.get("tool") or "").strip() != "desktop.safe_shortcut":
-            continue
-        payload = request.get("input") if isinstance(request.get("input"), dict) else {}
-        if str(payload.get("action") or "").strip() == "paste":
-            return True
-    return False
-
-
-def _legacy_clipboard_link_open_override_requests(
-    legacy_requests: list[dict[str, Any]],
-    planner_requests: list[dict[str, Any]],
-) -> bool:
-    if not legacy_requests or not planner_requests:
-        return False
-    legacy_first = legacy_requests[0]
-    planner_first = planner_requests[0]
-    if str(legacy_first.get("tool") or "").strip() != "app.open_and_safe_shortcut":
-        return False
-    if str(planner_first.get("tool") or "").strip() != "desktop.safe_shortcut":
-        return False
-    legacy_input = legacy_first.get("input") if isinstance(legacy_first.get("input"), dict) else {}
-    planner_input = planner_first.get("input") if isinstance(planner_first.get("input"), dict) else {}
-    if str(legacy_input.get("action") or "").strip() != "focus_address_bar":
-        return False
-    if str(planner_input.get("action") or "").strip() != "focus_address_bar":
-        return False
-    return _tool_names_for_requests(planner_requests) == [
-        "desktop.safe_shortcut",
-        "desktop.safe_shortcut",
-        "desktop.search_submit",
-    ]
-
-
 def _legacy_requests_with_type_sequence_verification(
     requests: list[dict[str, Any]],
     allowed_tools: list[str],
@@ -744,26 +602,10 @@ class LegacyChatTaskStarter:
                 planning_prompt,
                 allowed_entrypoint_tools,
                 metadata=metadata,
-                legacy_tool_requests=lambda value, tools: daily_desktop_entrypoint_requests(
-                    value,
-                    metadata=metadata,
-                    allowed_tools=tools,
-                ),
             )
             planner_decision = selection.decision
             selection_requests = selection.requests
             selected_source = selection.selected_source
-            legacy_override_requests: list[dict[str, Any]] = []
-            if selected_source != "runtime_planner":
-                legacy_override_requests = _legacy_direct_execution_override_requests(
-                    prompt or execution_prompt,
-                    metadata,
-                    allowed_entrypoint_tools,
-                    selection_requests,
-                )
-            if legacy_override_requests:
-                selection_requests = legacy_override_requests
-                selected_source = "daily_desktop_intent"
             selected_requests = _apply_legacy_search_field_target_label(
                 prompt or execution_prompt,
                 selection_requests,

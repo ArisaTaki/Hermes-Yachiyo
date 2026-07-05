@@ -1080,11 +1080,18 @@ def desktop_tool_missing_permissions(
     capability_id: str,
     missing_permissions: Mapping[str, Iterable[str]],
 ) -> list[str]:
-    return _tool_missing_permissions(
+    missing = _tool_missing_permissions(
         tool,
         capability_id=capability_id,
         missing_by_capability=missing_permissions,
     )
+    if _tool_degrades_with_permissions(
+        tool,
+        missing,
+        missing_by_capability=missing_permissions,
+    ):
+        return []
+    return missing
 
 
 def _tool_blocking_conditions(

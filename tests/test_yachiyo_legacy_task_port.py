@@ -1928,14 +1928,12 @@ def test_legacy_chat_task_starter_uses_runtime_execution_envelope_requests() -> 
 def test_legacy_chat_task_starter_does_not_override_runtime_planner_selection(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    from apps.shell.yachiyo_agent import legacy_ports
-
     def fail_legacy_override(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
-        raise AssertionError("legacy override should not run after runtime planner wins")
+        raise AssertionError("legacy parser should not run after runtime planner wins")
 
     monkeypatch.setattr(
-        legacy_ports,
-        "_legacy_direct_execution_override_requests",
+        legacy_ports_module,
+        "daily_desktop_entrypoint_requests",
         fail_legacy_override,
     )
     app_runtime = _FakeAppRuntime()
@@ -2356,7 +2354,17 @@ def test_legacy_chat_task_starter_uses_generic_planner_coverage_for_legacy_timel
     assert {event["source"] for event in media_timeline} == {"runtime_planner"}
 
 
-def test_legacy_chat_task_starter_records_known_site_selection_on_runtime_planner() -> None:
+def test_legacy_chat_task_starter_records_known_site_selection_on_runtime_planner(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_legacy_entrypoint(*_args: Any, **_kwargs: Any) -> list[dict[str, Any]]:
+        raise AssertionError("known site opening should be owned by runtime planner")
+
+    monkeypatch.setattr(
+        legacy_ports_module,
+        "daily_desktop_entrypoint_requests",
+        fail_legacy_entrypoint,
+    )
     app_runtime = _FakeAppRuntime()
     runtime = _MainChatPlannerEventRuntime()
     starter = LegacyChatTaskStarter(app_runtime, runtime)
@@ -2369,10 +2377,10 @@ def test_legacy_chat_task_starter_records_known_site_selection_on_runtime_planne
 
     assert task is not None
     metadata = app_runtime.chat_session.metadata_calls[0]["metadata"]
-    assert metadata["daily_desktop_source"] == "daily_desktop_intent"
+    assert metadata["daily_desktop_source"] == "runtime_planner"
     assert metadata["daily_desktop_tool"] == "browser.open_url"
-    assert metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
-    assert metadata["entrypoint_plan_source"] == "daily_desktop_intent"
+    assert metadata["daily_desktop_planning_reason"] == "planner_fallback_web_research"
+    assert metadata["entrypoint_plan_source"] == "runtime_planner"
     assert metadata["entrypoint_plan_tool"] == "browser.open_url"
     run_events = [call for call in runtime.calls if call[0] == "append_run_event"]
     run_event_types = [event[1]["event_type"] for event in run_events]
@@ -2386,8 +2394,8 @@ def test_legacy_chat_task_starter_records_known_site_selection_on_runtime_planne
     selection_events = [
         event for event in run_events if event[1]["event_type"] == "agent.plan.selection"
     ]
-    assert selection_events[0][1]["payload"]["selection_source"] == "daily_desktop_intent"
-    assert selection_events[0][1]["payload"]["legacy_request_count"] == 1
+    assert selection_events[0][1]["payload"]["selection_source"] == "runtime_planner"
+    assert selection_events[0][1]["payload"]["legacy_request_count"] == 0
     assert selection_events[0][1]["payload"]["selected_tools"] == ["browser.open_url"]
     model_loop_call = [
         call for call in runtime.calls if call[0] == "execute_main_chat_model_loop"
