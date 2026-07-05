@@ -3,10 +3,12 @@ import { useCallback, useEffect, useState } from 'react';
 import { RuntimeApprovalCard } from '../../runtime-shared/components/RuntimeApprovalCard';
 import { RuntimeArtifactList } from '../../runtime-shared/components/RuntimeArtifactList';
 import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
+import { RuntimeExecutionEnvelopeSummary } from '../../runtime-shared/components/RuntimeExecutionEnvelopeSummary';
 import { RuntimeTimelineSummary } from '../../runtime-shared/components/RuntimeTimelineSummary';
 import { listYachiyoGroupRunEvents } from '../../yachiyo-studio/api';
 import type { GroupRunSnapshot, RunEventPageSnapshot } from '../../yachiyo-studio/types';
 import { runStatusLabel, runStatusTone } from '../utils/runs';
+import { TaskCoreInspector, TaskProgressInspector } from './PlannerTraceInspector';
 
 type GroupRunPanelProps = {
   agentGroupRunGoal: string;
@@ -87,6 +89,15 @@ export function GroupRunPanel({
   const latestStatus = latestAgentGroupRun?.status || 'unknown';
   const pendingApprovals = latestAgentGroupRun?.pending_approvals || [];
   const sharedArtifacts = latestAgentGroupRun?.shared_artifacts || [];
+  const latestRuntimeEnvelope = latestAgentGroupRun?.runtime_execution_envelope || null;
+  const latestTaskCore = latestAgentGroupRun?.task_core || null;
+  const latestTaskProgress = latestAgentGroupRun?.task_progress || null;
+  const latestReplanRecoveries = latestAgentGroupRun?.replan_recoveries || [];
+  const latestHasTaskWorkspace = Boolean(
+    latestTaskCore
+    || latestTaskProgress
+    || latestReplanRecoveries.length,
+  );
   return (
     <section className="group-run-panel" data-testid="agent-group-run-panel">
       <label>
@@ -128,6 +139,42 @@ export function GroupRunPanel({
             summary={latestAgentGroupRun.runtime_debug}
             testId="agent-group-run-runtime-debug"
           />
+          <RuntimeExecutionEnvelopeSummary
+            className="group-run-runtime-section group-run-latest-runtime-execution"
+            debugPillsTestId="agent-group-run-runtime-execution-debug-pills"
+            envelope={latestRuntimeEnvelope}
+            requestLimit={6}
+            requestListTestId="agent-group-run-runtime-execution-requests"
+            requestTestId="agent-group-run-runtime-execution-request"
+            showRequests
+            sourceLabel="GroupRun latest runtime execution envelope"
+            testId="agent-group-run-runtime-execution-envelope"
+            title="GroupRun Runtime Execution"
+            variant="studio"
+          />
+          {latestHasTaskWorkspace ? (
+            <section
+              className="group-run-runtime-section group-run-latest-task-workspace"
+              data-core-id={latestTaskCore?.core_id || ''}
+              data-task-progress-status={latestTaskProgress?.status || ''}
+              data-testid="agent-group-run-task-workspace"
+              data-workspace-id={latestTaskCore?.workspace?.workspace_id || latestTaskProgress?.workspace_id || ''}
+            >
+              <div className="group-run-runtime-section-head">
+                <strong>Task Workspace</strong>
+                <span>{latestTaskProgress?.progress_text || latestTaskCore?.workspace?.title || 'workspace / todos / checkpoints / replan'}</span>
+              </div>
+              <div className="studio-task-workspace">
+                {latestTaskCore ? <TaskCoreInspector taskCore={latestTaskCore} /> : null}
+                {latestTaskProgress || latestReplanRecoveries.length ? (
+                  <TaskProgressInspector
+                    replanRecoveries={latestReplanRecoveries}
+                    taskProgress={latestTaskProgress}
+                  />
+                ) : null}
+              </div>
+            </section>
+          ) : null}
           {latestEvents.length ? (
             <RuntimeTimelineSummary
               className="group-run-event-summary"
