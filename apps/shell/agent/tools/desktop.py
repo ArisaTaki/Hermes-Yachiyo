@@ -2928,12 +2928,15 @@ def _installed_app_match_candidates(query_name: str) -> list[dict[str, Any]]:
         candidate = bundle.stem
         metadata = _app_bundle_metadata(bundle)
         capability_match = _installed_app_capability_match(query, metadata)
-        score = _installed_app_match_score(query, candidate, metadata)
+        name_match = _installed_app_name_match(query, candidate, metadata)
+        name_score = int(name_match.get("score") or 0)
+        capability_score = int(capability_match.get("score") or 0)
+        score = max(name_score, capability_score)
         if score <= 0:
             continue
         match_reason = _installed_app_match_reason(score)
         matched_capability = ""
-        if capability_match and int(capability_match.get("score") or 0) >= score:
+        if capability_match and capability_score >= score:
             match_reason = str(capability_match.get("reason") or match_reason)
             matched_capability = str(capability_match.get("capability") or "")
         candidate_payload = {
@@ -2944,6 +2947,12 @@ def _installed_app_match_candidates(query_name: str) -> list[dict[str, Any]]:
             "match_reason": match_reason,
             "normalized_name": _compact_app_match_name(candidate),
         }
+        matched_name = str(name_match.get("matched_name") or "").strip()
+        matched_name_source = str(name_match.get("matched_name_source") or "").strip()
+        if matched_name:
+            candidate_payload["matched_name"] = matched_name
+        if matched_name_source:
+            candidate_payload["matched_name_source"] = matched_name_source
         if matched_capability:
             candidate_payload["matched_capability"] = matched_capability
         metadata_preview = _app_bundle_metadata_preview(metadata)
@@ -3000,6 +3009,15 @@ def _app_resolution_metadata_from_match(
     reason = str(match.get("match_reason") or "").strip()
     if reason:
         metadata["app_resolution_reason"] = reason
+    matched_name = str(match.get("matched_name") or "").strip()
+    if matched_name:
+        metadata["app_resolution_matched_name"] = matched_name
+    matched_name_source = str(match.get("matched_name_source") or "").strip()
+    if matched_name_source:
+        metadata["app_resolution_matched_name_source"] = matched_name_source
+    matched_capability = str(match.get("matched_capability") or "").strip()
+    if matched_capability:
+        metadata["app_resolution_matched_capability"] = matched_capability
     path = str(match.get("path") or "").strip()
     if path:
         metadata["resolved_app_path"] = path
@@ -3090,14 +3108,14 @@ def _app_bundle_metadata(bundle: Path) -> dict[str, Any]:
                 raw = loaded
         except (OSError, ValueError, plistlib.InvalidFileException):
             raw = {}
-    names = _app_metadata_text_values(
-        [
-            bundle.stem,
-            raw.get("CFBundleName"),
-            raw.get("CFBundleDisplayName"),
-            raw.get("CFBundleExecutable"),
-        ]
-    )
+    raw_names = [
+        bundle.stem,
+        raw.get("CFBundleName"),
+        raw.get("CFBundleDisplayName"),
+        raw.get("CFBundleExecutable"),
+    ]
+    names = _app_metadata_text_values(raw_names)
+    display_names = _app_metadata_display_values(raw_names)
     schemes: set[str] = set()
     for url_type in raw.get("CFBundleURLTypes") or []:
         if isinstance(url_type, Mapping):
@@ -3113,6 +3131,7 @@ def _app_bundle_metadata(bundle: Path) -> dict[str, Any]:
         "bundle_id": str(raw.get("CFBundleIdentifier") or "").strip(),
         "category": str(raw.get("LSApplicationCategoryType") or "").strip(),
         "names": names,
+        "display_names": display_names,
         "schemes": schemes,
         "documents": documents,
     }
@@ -3128,6 +3147,19 @@ def _app_metadata_text_values(values: Any) -> set[str]:
         text = str(value or "").strip()
         if text:
             result.add(text.casefold())
+    return result
+
+
+def _app_metadata_display_values(values: Any) -> list[str]:
+    if isinstance(values, str):
+        values = [values]
+    if not isinstance(values, (list, tuple, set)):
+        return []
+    result: list[str] = []
+    for value in values:
+        text = str(value or "").strip()
+        if text and text not in result:
+            result.append(text)
     return result
 
 
@@ -3153,27 +3185,46 @@ def _installed_app_match_score(
     candidate_name: str,
     metadata: Mapping[str, Any] | None = None,
 ) -> int:
-    name_score = max(
-        [
-            _installed_app_name_match_score(query_name, candidate)
-            for candidate in _installed_app_match_names(candidate_name, metadata or {})
-        ]
-        or [0]
-    )
+    name_match = _installed_app_name_match(query_name, candidate_name, metadata or {})
+    name_score = int(name_match.get("score") or 0)
     capability_match = _installed_app_capability_match(query_name, metadata or {})
     capability_score = int(capability_match.get("score") or 0)
     return max(name_score, capability_score)
 
 
-def _installed_app_match_names(
+def _installed_app_name_match(
+    query_name: str,
     candidate_name: str,
     metadata: Mapping[str, Any],
-) -> list[str]:
-    names = [str(candidate_name or "").strip()]
+) -> dict[str, Any]:
+    best: dict[str, Any] = {}
+    for candidate in _installed_app_match_name_candidates(candidate_name, metadata):
+        score = _installed_app_name_match_score(query_name, candidate["name"])
+        if score <= 0 or score <= int(best.get("score") or 0):
+            continue
+        best = {
+            "score": score,
+            "matched_name": candidate["name"],
+            "matched_name_source": candidate["source"],
+        }
+    return best
+
+
+def _installed_app_match_name_candidates(
+    candidate_name: str,
+    metadata: Mapping[str, Any],
+) -> list[dict[str, str]]:
+    names = [
+        {"name": str(candidate_name or "").strip(), "source": "bundle_name"},
+    ]
+    for value in metadata.get("display_names") or []:
+        text = str(value or "").strip()
+        if text and all(item["name"] != text for item in names):
+            names.append({"name": text, "source": "bundle_metadata"})
     for value in metadata.get("names") or []:
         text = str(value or "").strip()
-        if text and text not in names:
-            names.append(text)
+        if text and all(item["name"] != text for item in names):
+            names.append({"name": text, "source": "bundle_metadata_normalized"})
     return names
 
 
