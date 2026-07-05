@@ -3812,6 +3812,48 @@ def test_runtime_planner_clicks_selected_discovered_app_search_results() -> None
         "selection_source": "desktop.list_apps",
         "query": "mail",
     }
+    assert mail.plan.task_core is not None
+    result_workspace_item = next(
+        item
+        for item in mail.plan.task_core.workspace.items
+        if item.source_step_id == "select-app-search-result"
+    )
+    assert result_workspace_item.metadata["action_target"] == {
+        "kind": "desktop_ui",
+        "action": "click",
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "mail",
+        "target": "第一封邮件",
+        "limit": 80,
+        "click_count": 1,
+    }
+    verify_workspace_item = next(
+        item
+        for item in mail.plan.task_core.workspace.items
+        if item.source_step_id == "verify-desktop-result"
+    )
+    assert verify_workspace_item.metadata["action_target"] == {
+        "kind": "verification",
+        "action": "read_ui",
+        "app_name": "<selected app from desktop.list_apps>",
+        "selection_source": "desktop.list_apps",
+        "query": "mail",
+    }
+    assert verify_workspace_item.metadata["verified_step_ids"] == [
+        "select-app-search-result"
+    ]
+    verify_checkpoint = next(
+        checkpoint
+        for checkpoint in mail.plan.task_core.checkpoints
+        if checkpoint.after_step_id == "verify-desktop-result"
+    )
+    assert verify_checkpoint.payload["verified_step_ids"] == [
+        "select-app-search-result"
+    ]
+    assert verify_checkpoint.payload["verification_target_kind"] == (
+        "post_action_observation"
+    )
 
     assert project.selected_intent.inputs["app_search_hint"] == {
         "query": "login bug",

@@ -14536,6 +14536,7 @@ def _task_workspace_items(
                     "approval_required": step.approval_required,
                     "input_preview": dict(step.input_preview),
                     **_runtime_dov_step_metadata(step),
+                    **_task_step_target_metadata(step),
                 },
             )
         )
@@ -14734,6 +14735,7 @@ def _task_checkpoints(
                     "approval_required": step.approval_required,
                     "risk_level": step.risk_level,
                     **_runtime_dov_step_metadata(step),
+                    **_task_step_target_metadata(step),
                 },
             )
         )
@@ -14796,6 +14798,117 @@ def _task_replan_signals(steps: list[ToolPlanStepSnapshot]) -> list[ReplanSignal
                 )
             )
     return signals
+
+
+def _task_step_target_metadata(step: ToolPlanStepSnapshot) -> dict[str, Any]:
+    runtime_metadata = _runtime_dov_step_metadata(step)
+    input_preview = step.input_preview if isinstance(step.input_preview, Mapping) else {}
+    action_target = _task_step_action_target(step, input_preview, runtime_metadata)
+    metadata: dict[str, Any] = {}
+    if action_target:
+        metadata["action_target"] = action_target
+    stage = str(runtime_metadata.get("runtime_stage") or "").strip()
+    verified_step_ids = [
+        str(item or "").strip()
+        for item in list(step.depends_on or [])
+        if str(item or "").strip()
+    ]
+    if stage == "verify" and verified_step_ids:
+        metadata["verified_step_ids"] = verified_step_ids
+        metadata["verification_target_kind"] = "post_action_observation"
+    return metadata
+
+
+def _task_step_action_target(
+    step: ToolPlanStepSnapshot,
+    input_preview: Mapping[str, Any],
+    runtime_metadata: Mapping[str, Any],
+) -> dict[str, Any]:
+    target: dict[str, Any] = {}
+    kind = _task_step_target_kind(step, input_preview, runtime_metadata)
+    if kind:
+        target["kind"] = kind
+    action = str(step.action or "").strip()
+    if action:
+        target["action"] = action
+    for key in (
+        "app_name",
+        "selection_source",
+        "query",
+        "target",
+        "role_filter",
+        "window_title",
+        "path",
+        "target_path",
+        "url",
+        "artifact_path",
+        "recipient",
+        "command",
+        "key",
+        "direction",
+        "x",
+        "y",
+        "limit",
+        "click_count",
+        "pages",
+        "format",
+    ):
+        value = input_preview.get(key)
+        if value not in (None, "", [], {}):
+            target[key] = value
+    if len(target) <= (1 if kind else 0):
+        return {}
+    return target
+
+
+def _task_step_target_kind(
+    step: ToolPlanStepSnapshot,
+    input_preview: Mapping[str, Any],
+    runtime_metadata: Mapping[str, Any],
+) -> str:
+    stage = str(runtime_metadata.get("runtime_stage") or "").strip()
+    if stage == "verify":
+        return "verification"
+    tool_name = str(step.tool_name or "").strip()
+    action = str(step.action or "").strip()
+    capability_id = str(step.capability_id or "").strip()
+    if tool_name.startswith(("app.", "desktop.")):
+        if action in {
+            "click",
+            "safe_click",
+            "type",
+            "safe_type",
+            "submit",
+            "shortcut",
+            "safe_shortcut",
+            "hotkey",
+            "key",
+            "safe_key",
+            "scroll",
+            "safe_scroll",
+            "read_ui",
+        } or any(
+            input_preview.get(key) not in (None, "", [], {})
+            for key in ("target", "role_filter", "x", "y", "key", "direction")
+        ):
+            return "desktop_ui"
+        return "desktop_app"
+    if tool_name.startswith(("workspace.", "fs.")) or any(
+        input_preview.get(key) not in (None, "", [], {})
+        for key in ("path", "target_path")
+    ):
+        return "workspace_file"
+    if tool_name.startswith("browser.") or input_preview.get("url"):
+        return "web"
+    if tool_name.startswith(("data.", "terminal.")):
+        return "local_compute"
+    if tool_name.startswith("artifact."):
+        return "artifact"
+    if tool_name.startswith(("workflow.", "group.")) or tool_name == "agent.group_run":
+        return "orchestration"
+    if capability_id:
+        return capability_id.split(".", 1)[0]
+    return ""
 
 
 def _step_requires_post_action_verification(step: ToolPlanStepSnapshot) -> bool:
