@@ -1099,6 +1099,17 @@ def test_yachiyo_agent_service_starts_chat_with_full_runtime_execution_envelope(
     assert task.runtime_debug.runtime_stage == "discover"
     assert task.runtime_debug.runtime_role == "inspect_workspace"
     assert task.runtime_debug.current_capability_id == "file.workspace_read"
+    assert task.runtime_debug.runtime_request_count == 3
+    assert (
+        task.runtime_debug.pending_runtime_request_count
+        + task.runtime_debug.waiting_runtime_request_count
+    ) == 3
+    assert task.runtime_debug.current_request_id
+    assert task.runtime_debug.current_request_tool_name == "workspace.read"
+    assert task.runtime_debug.current_request_status == "planned"
+    assert task.runtime_debug.latest_request_id
+    assert task.runtime_debug.latest_request_tool_name == "artifact.write"
+    assert task.runtime_debug.latest_request_status == "planned"
     assert task.runtime_debug.latest_tool_name == "workspace.write_patch"
     assert task.runtime_debug.latest_tool_status == "waiting_approval"
     assert task.runtime_debug.latest_approval_tool_name == "workspace.write_patch"

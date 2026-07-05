@@ -43,13 +43,18 @@ export function RuntimeDebugSummary({
       data-has-user-action={String(Boolean(summary?.needs_user_action))}
       data-intent-kind={summary?.intent_kind || ''}
       data-latest-deferred-tool={summary?.latest_deferred_tool || ''}
+      data-latest-request-id={summary?.latest_request_id || ''}
+      data-latest-request-tool-name={summary?.latest_request_tool_name || ''}
       data-latest-recovery-tool={summary?.latest_recovery_tool || ''}
       data-latest-replan-request-id={summary?.latest_replan_request_id || ''}
       data-latest-replan-trigger={summary?.latest_replan_trigger || ''}
       data-needs-replan={String(Boolean(summary?.needs_replan))}
       data-plan-capabilities={(summary?.plan_capabilities || []).join(',')}
       data-plan-tools={(summary?.plan_tools || []).join(',')}
+      data-current-request-id={summary?.current_request_id || ''}
+      data-current-request-tool-name={summary?.current_request_tool_name || ''}
       data-runtime-doctrine={summary?.runtime_doctrine || ''}
+      data-runtime-request-count={String(summary?.runtime_request_count || 0)}
       data-runtime-role={summary?.runtime_role || ''}
       data-runtime-stage={summary?.runtime_stage || ''}
       data-source={summary?.source || ''}
@@ -120,6 +125,12 @@ export function runtimeDebugSummaryHasContent(summary?: RuntimeDebugSummarySnaps
     || summary.current_step_id
     || summary.current_step_title
     || summary.current_tool_name
+    || summary.current_request_id
+    || summary.current_request_tool_name
+    || summary.current_request_status
+    || summary.latest_request_id
+    || summary.latest_request_tool_name
+    || summary.latest_request_status
     || summary.runtime_doctrine
     || summary.runtime_stage
     || summary.runtime_role
@@ -148,6 +159,12 @@ export function runtimeDebugSummaryHasContent(summary?: RuntimeDebugSummarySnaps
 function runtimeDebugMetrics(summary: RuntimeDebugSummarySnapshot): RuntimeDebugMetric[] {
   const metrics: RuntimeDebugMetric[] = [];
   addMetric(metrics, 'events', 'events', summary.event_count);
+  addMetric(metrics, 'runtime_requests', 'requests', summary.runtime_request_count);
+  addMetric(metrics, 'pending_runtime_requests', 'pending reqs', summary.pending_runtime_request_count);
+  addMetric(metrics, 'completed_runtime_requests', 'done reqs', summary.completed_runtime_request_count, 'ready');
+  addMetric(metrics, 'failed_runtime_requests', 'failed reqs', summary.failed_runtime_request_count, 'danger');
+  addMetric(metrics, 'blocked_runtime_requests', 'blocked reqs', summary.blocked_runtime_request_count, 'warning');
+  addMetric(metrics, 'waiting_runtime_requests', 'waiting reqs', summary.waiting_runtime_request_count, 'warning');
   addMetric(metrics, 'tools', 'tools', summary.tool_call_count);
   addMetric(metrics, 'completed_tools', 'done', summary.completed_tool_call_count, 'ready');
   addMetric(metrics, 'failed_tools', 'failed', summary.failed_tool_call_count, 'danger');
@@ -215,12 +232,18 @@ function runtimeDebugLatestFacts(summary?: RuntimeDebugSummarySnapshot | null): 
     summary.task_status ? `task ${summary.task_status}` : '',
     summary.current_step_title ? `step ${summary.current_step_title}` : '',
     summary.current_tool_name ? `current tool ${summary.current_tool_name}` : '',
+    summary.current_request_id ? `current request ${summary.current_request_id}` : '',
+    summary.current_request_tool_name ? `request tool ${summary.current_request_tool_name}` : '',
+    summary.current_request_status ? `request status ${summary.current_request_status}` : '',
     summary.runtime_doctrine ? `doctrine ${summary.runtime_doctrine}` : '',
     summary.runtime_stage ? `stage ${summary.runtime_stage}` : '',
     summary.runtime_role ? `role ${summary.runtime_role}` : '',
     summary.current_capability_id ? `capability ${summary.current_capability_id}` : '',
     summary.route_to_studio ? 'route Studio' : '',
     summary.latest_event_type ? `event ${summary.latest_event_type}` : '',
+    summary.latest_request_id ? `latest request ${summary.latest_request_id}` : '',
+    summary.latest_request_tool_name ? `latest request tool ${summary.latest_request_tool_name}` : '',
+    summary.latest_request_status ? `latest request status ${summary.latest_request_status}` : '',
     summary.latest_replan_request_id ? `replan ${summary.latest_replan_request_id}` : '',
     summary.latest_replan_trigger ? `trigger ${summary.latest_replan_trigger}` : '',
     summary.latest_replan_status ? `replan status ${summary.latest_replan_status}` : '',

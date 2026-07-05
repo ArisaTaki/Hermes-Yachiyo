@@ -92,12 +92,21 @@ def test_frontend_runtime_debug_summary_exposes_runtime_trace_facts() -> None:
             "data-runtime-doctrine={summary?.runtime_doctrine || ''}",
             "data-runtime-stage={summary?.runtime_stage || ''}",
             "data-current-capability-id={summary?.current_capability_id || ''}",
+            "data-current-request-id={summary?.current_request_id || ''}",
+            "data-current-request-tool-name={summary?.current_request_tool_name || ''}",
+            "data-latest-request-id={summary?.latest_request_id || ''}",
+            "data-latest-request-tool-name={summary?.latest_request_tool_name || ''}",
+            "data-runtime-request-count={String(summary?.runtime_request_count || 0)}",
             "data-intent-kind={summary?.intent_kind || ''}",
             "data-plan-capabilities={(summary?.plan_capabilities || []).join(',')}",
             "data-plan-tools={(summary?.plan_tools || []).join(',')}",
             "data-latest-replan-request-id={summary?.latest_replan_request_id || ''}",
             "data-latest-deferred-tool={summary?.latest_deferred_tool || ''}",
             "summary.runtime_doctrine ? `doctrine ${summary.runtime_doctrine}` : ''",
+            "summary.current_request_tool_name ? "
+            "`request tool ${summary.current_request_tool_name}` : ''",
+            "summary.latest_request_tool_name ? "
+            "`latest request tool ${summary.latest_request_tool_name}` : ''",
             "summary.current_capability_id ? `capability ${summary.current_capability_id}` : ''",
             "summary.latest_approval_tool_name ? "
             "`approval tool ${summary.latest_approval_tool_name}` : ''",

@@ -7,6 +7,22 @@ from typing import Any
 
 from .contracts import RuntimeDebugSummarySnapshot
 
+_TERMINAL_RUNTIME_REQUEST_STATUSES = {
+    "blocked",
+    "cancelled",
+    "canceled",
+    "completed",
+    "failed",
+    "skipped",
+}
+
+_WAITING_RUNTIME_REQUEST_STATUSES = {
+    "approval_required",
+    "waiting",
+    "waiting_approval",
+    "waiting_user",
+}
+
 
 def runtime_debug_summary_from_runtime_objects(
     *,
@@ -75,7 +91,8 @@ def runtime_debug_summary_from_runtime_objects(
         request_items,
         step_id=current_step_id,
         tool_name=current_tool_name,
-    )
+    ) or _active_runtime_request(request_items)
+    request_statuses = [_text(_field(item, "status")) for item in request_items]
     runtime_context_items = [
         latest_tool,
         latest_approval,
@@ -155,6 +172,28 @@ def runtime_debug_summary_from_runtime_objects(
         ),
         plan_tools=plan_tools,
         plan_capabilities=plan_capabilities,
+        runtime_request_count=len(request_items),
+        pending_runtime_request_count=sum(
+            _is_pending_runtime_request(request) for request in request_items
+        ),
+        completed_runtime_request_count=sum(
+            status == "completed" for status in request_statuses
+        ),
+        failed_runtime_request_count=sum(
+            status == "failed" for status in request_statuses
+        ),
+        blocked_runtime_request_count=sum(
+            status == "blocked" for status in request_statuses
+        ),
+        waiting_runtime_request_count=sum(
+            _is_waiting_runtime_request(request) for request in request_items
+        ),
+        current_request_id=_optional_text(_field(current_request, "request_id")),
+        current_request_tool_name=_optional_text(_field(current_request, "tool_name")),
+        current_request_status=_optional_text(_field(current_request, "status")),
+        latest_request_id=_optional_text(_field(latest_request, "request_id")),
+        latest_request_tool_name=_optional_text(_field(latest_request, "tool_name")),
+        latest_request_status=_optional_text(_field(latest_request, "status")),
         event_count=len(event_items),
         tool_call_count=len(tool_items),
         completed_tool_call_count=sum(status == "completed" for status in tool_statuses),
@@ -466,6 +505,31 @@ def _matching_runtime_request(
             if _text(_field(request, "tool_name")) == tool_name:
                 return request
     return None
+
+
+def _active_runtime_request(requests: list[Any]) -> Any | None:
+    for request in requests:
+        if _text(_field(request, "status")) not in _TERMINAL_RUNTIME_REQUEST_STATUSES:
+            return request
+    return requests[-1] if requests else None
+
+
+def _is_pending_runtime_request(request: Any) -> bool:
+    status = _text(_field(request, "status"))
+    if not status:
+        return False
+    if status in _TERMINAL_RUNTIME_REQUEST_STATUSES:
+        return False
+    return not _is_waiting_runtime_request(request)
+
+
+def _is_waiting_runtime_request(request: Any) -> bool:
+    status = _text(_field(request, "status"))
+    if status in _TERMINAL_RUNTIME_REQUEST_STATUSES:
+        return False
+    return status in _WAITING_RUNTIME_REQUEST_STATUSES or (
+        _field(request, "approval_required") is True
+    )
 
 
 def _items(values: Iterable[Any] | None) -> list[Any]:

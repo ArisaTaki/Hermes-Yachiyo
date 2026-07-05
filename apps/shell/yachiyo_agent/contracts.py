@@ -697,6 +697,18 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     runtime_role: str | None = None
     plan_tools: list[str] = Field(default_factory=list)
     plan_capabilities: list[str] = Field(default_factory=list)
+    runtime_request_count: int = 0
+    pending_runtime_request_count: int = 0
+    completed_runtime_request_count: int = 0
+    failed_runtime_request_count: int = 0
+    blocked_runtime_request_count: int = 0
+    waiting_runtime_request_count: int = 0
+    current_request_id: str | None = None
+    current_request_tool_name: str | None = None
+    current_request_status: str | None = None
+    latest_request_id: str | None = None
+    latest_request_tool_name: str | None = None
+    latest_request_status: str | None = None
     event_count: int = 0
     tool_call_count: int = 0
     completed_tool_call_count: int = 0

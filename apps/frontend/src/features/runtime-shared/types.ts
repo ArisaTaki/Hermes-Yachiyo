@@ -609,6 +609,18 @@ export type RuntimeDebugSummarySnapshot = {
   runtime_role?: string | null;
   plan_tools?: string[];
   plan_capabilities?: string[];
+  runtime_request_count?: number;
+  pending_runtime_request_count?: number;
+  completed_runtime_request_count?: number;
+  failed_runtime_request_count?: number;
+  blocked_runtime_request_count?: number;
+  waiting_runtime_request_count?: number;
+  current_request_id?: string | null;
+  current_request_tool_name?: string | null;
+  current_request_status?: string | null;
+  latest_request_id?: string | null;
+  latest_request_tool_name?: string | null;
+  latest_request_status?: string | null;
   event_count?: number;
   tool_call_count?: number;
   completed_tool_call_count?: number;
