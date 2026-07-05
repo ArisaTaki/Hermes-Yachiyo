@@ -132,18 +132,54 @@ def _signoff_report() -> dict[str, object]:
     }
 
 
+def _oha_desktop_agent_smoke_report() -> dict[str, object]:
+    return {
+        "ok": True,
+        "mode": parity.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE,
+        "section_count": len(parity.OHA_DESKTOP_AGENT_REQUIRED_SECTIONS),
+        "failed_sections": [],
+        "checks": {"all_sections_passed": True},
+        "sections": [
+            {
+                "id": section_id,
+                "objective": f"cover {section_id}",
+                "ok": True,
+                "mode": section_id,
+                "report": {"ok": True},
+            }
+            for section_id in parity.OHA_DESKTOP_AGENT_REQUIRED_SECTIONS
+        ],
+    }
+
+
+def _write_oha_smoke_report(root: Path, label: str = "abc12345") -> Path:
+    report_path = (
+        root / "tmp" / f"rc-verification-{label}-oha-desktop-agent-release-smoke.json"
+    )
+    report_path.parent.mkdir(parents=True, exist_ok=True)
+    report_path.write_text(
+        json.dumps(_oha_desktop_agent_smoke_report()),
+        encoding="utf-8",
+    )
+    return report_path
+
+
 def test_oha_parity_summary_reports_remaining_release_blockers(tmp_path):
     _write_product_identity_files(tmp_path)
-    report_path = tmp_path / "tmp" / "signoff.json"
+    report_path = tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
     report_path.parent.mkdir()
     report_path.write_text(json.dumps(_signoff_report()), encoding="utf-8")
+    _write_oha_smoke_report(tmp_path)
 
-    summary = parity.summarize_parity(tmp_path, Path("tmp/signoff.json"))
+    summary = parity.summarize_parity(
+        tmp_path,
+        Path("tmp/rc-signoff-abc12345-current.json"),
+    )
 
     assert summary["ok"] is False
     assert summary["status"] == "incomplete"
-    assert summary["area_count"] == 9
-    assert summary["passed_area_count"] == 7
+    assert summary["area_count"] == 10
+    assert summary["passed_area_count"] == 8
     assert summary["incomplete_area_ids"] == [
         "gatekeeper_first_launch",
         "external_integrations",
@@ -152,6 +188,13 @@ def test_oha_parity_summary_reports_remaining_release_blockers(tmp_path):
     assert areas["product_release_identity"]["status"] == "passed"
     assert areas["native_agent_capability_matrix"]["status"] == "passed"
     assert areas["native_agent_capability_matrix"]["capability_count"] == 13
+    assert areas["oha_desktop_agent_product"]["status"] == "passed"
+    assert areas["oha_desktop_agent_product"]["passed_section_count"] == len(
+        parity.OHA_DESKTOP_AGENT_REQUIRED_SECTIONS
+    )
+    assert areas["oha_desktop_agent_product"]["source_report"] == (
+        "tmp/rc-verification-abc12345-oha-desktop-agent-release-smoke.json"
+    )
     assert areas["gatekeeper_first_launch"]["required_evidence"] == (
         "Record Finder Control-click -> Open evidence."
     )
@@ -173,10 +216,15 @@ def test_oha_parity_summary_marks_missing_product_identity_requirement(tmp_path)
         "branches:\n  - main\n  - develop\n",
         encoding="utf-8",
     )
-    report_path = tmp_path / "signoff.json"
+    report_path = tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
+    report_path.parent.mkdir(parents=True)
     report_path.write_text(json.dumps(_signoff_report()), encoding="utf-8")
+    _write_oha_smoke_report(tmp_path)
 
-    summary = parity.summarize_parity(tmp_path, Path("signoff.json"))
+    summary = parity.summarize_parity(
+        tmp_path,
+        Path("tmp/rc-signoff-abc12345-current.json"),
+    )
 
     areas = {area["id"]: area for area in summary["areas"]}
     product = areas["product_release_identity"]
@@ -185,11 +233,60 @@ def test_oha_parity_summary_marks_missing_product_identity_requirement(tmp_path)
     assert "product_release_identity" in summary["incomplete_area_ids"]
 
 
+def test_oha_parity_summary_marks_missing_oha_product_smoke(tmp_path):
+    _write_product_identity_files(tmp_path)
+    report_path = tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
+    report_path.parent.mkdir(parents=True)
+    report_path.write_text(json.dumps(_signoff_report()), encoding="utf-8")
+
+    summary = parity.summarize_parity(
+        tmp_path,
+        Path("tmp/rc-signoff-abc12345-current.json"),
+    )
+
+    areas = {area["id"]: area for area in summary["areas"]}
+    oha_product = areas["oha_desktop_agent_product"]
+    assert oha_product["status"] == "missing"
+    assert "DeepAgent Core" in oha_product["required_evidence"]
+    assert "scripts/smoke_oha_desktop_agent_release.py" in oha_product["next_action"]
+    assert "oha_desktop_agent_product" in summary["incomplete_area_ids"]
+
+
+def test_oha_parity_summary_can_read_release_smoke_oha_item(tmp_path):
+    _write_product_identity_files(tmp_path)
+    report = _signoff_report()
+    report["items"] = [
+        {
+            "id": "oha_desktop_agent_product",
+            "status": "passed",
+            "required_evidence_ids": [parity.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE],
+            "present_evidence_ids": [parity.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE],
+            "missing_evidence_ids": [],
+            "related_evidence_ids": ["oha_deepagent_core", "oha_agent_studio_orchestration"],
+            "next_action": parity.OHA_DESKTOP_AGENT_NEXT_ACTION,
+        }
+    ]
+    report_path = tmp_path / "release-smoke.json"
+    report_path.write_text(json.dumps(report), encoding="utf-8")
+
+    summary = parity.summarize_parity(tmp_path, Path("release-smoke.json"))
+
+    areas = {area["id"]: area for area in summary["areas"]}
+    oha_product = areas["oha_desktop_agent_product"]
+    assert oha_product["status"] == "passed"
+    assert oha_product["present_evidence_ids"] == [
+        parity.OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE
+    ]
+    assert oha_product["related_evidence_count"] == 2
+
+
 def test_oha_parity_summary_cli_writes_json(tmp_path, monkeypatch):
     _write_product_identity_files(tmp_path)
-    report_path = tmp_path / "signoff.json"
+    report_path = tmp_path / "tmp" / "rc-signoff-abc12345-current.json"
     output_path = tmp_path / "parity.json"
+    report_path.parent.mkdir(parents=True)
     report_path.write_text(json.dumps(_signoff_report()), encoding="utf-8")
+    _write_oha_smoke_report(tmp_path)
     monkeypatch.setattr(parity, "PROJECT_ROOT", tmp_path)
 
     assert parity.main([str(report_path), "--output-json", str(output_path)]) == 1

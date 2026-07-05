@@ -7,7 +7,7 @@ import argparse
 import json
 import sys
 from pathlib import Path
-from typing import Any, Sequence
+from typing import Any, Mapping, Sequence
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 if str(PROJECT_ROOT) not in sys.path:
@@ -102,6 +102,26 @@ SIGNOFF_AREAS: tuple[dict[str, str], ...] = (
 )
 
 
+OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE = "oha_desktop_agent_release_smoke"
+OHA_DESKTOP_AGENT_REQUIRED_SECTIONS: tuple[str, ...] = (
+    "deepagent_core",
+    "shared_daily_surfaces",
+    "desktop_executor_before_model",
+    "legacy_facade_planner_ownership",
+    "capability_planner_tool_parity",
+    "data_analysis_artifacts",
+    "agent_studio_orchestration",
+    "group_run_timeline",
+    "workflow_run_timeline",
+    "approval_policy_gate",
+    "studio_tool_catalog",
+)
+OHA_DESKTOP_AGENT_NEXT_ACTION = (
+    "python scripts/smoke_oha_desktop_agent_release.py "
+    "--report-json tmp/oha-desktop-agent-release-smoke.json"
+)
+
+
 def _project_file(root: Path, relative_path: str) -> Path:
     candidate = (root / relative_path).resolve(strict=False)
     root_path = root.resolve(strict=False)
@@ -118,6 +138,32 @@ def _load_report(root: Path, path: Path) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ValueError(f"report must be a JSON object: {path}")
     return data
+
+
+def _display_path(root: Path, path: Path) -> str:
+    try:
+        return str(path.resolve(strict=False).relative_to(root.resolve(strict=False)))
+    except ValueError:
+        return str(path)
+
+
+def _optional_report(root: Path, path: Path) -> dict[str, Any] | None:
+    try:
+        return _load_report(root, path)
+    except (OSError, json.JSONDecodeError, ValueError):
+        return None
+
+
+def _dict_list(value: Any) -> list[dict[str, Any]]:
+    if not isinstance(value, list):
+        return []
+    return [dict(item) for item in value if isinstance(item, Mapping)]
+
+
+def _string_list(value: Any) -> list[str]:
+    if not isinstance(value, list):
+        return []
+    return [str(item) for item in value if str(item or "").strip()]
 
 
 def _checks_by_id(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
@@ -240,6 +286,178 @@ def _native_agent_area(report: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _source_label_from_report_path(report_path: Path) -> str:
+    name = report_path.name
+    shapes = (
+        ("rc-signoff-", "-current.json"),
+        ("rc-signoff-", "-final.json"),
+        ("rc-signoff-", "-preview.json"),
+        ("rc-verification-", "-release-smoke.json"),
+        ("rc-verification-", "-release-readiness.json"),
+        ("rc-verification-", "-native-capability-matrix.json"),
+        ("rc-verification-", "-source-capabilities.json"),
+        ("rc-verification-", "-packaged-batch.json"),
+        ("rc-verification-", "-screen.json"),
+    )
+    for prefix, suffix in shapes:
+        if name.startswith(prefix) and name.endswith(suffix):
+            return name[len(prefix) : -len(suffix)]
+    return ""
+
+
+def _candidate_oha_desktop_agent_smoke_paths(root: Path, report_path: Path) -> list[Path]:
+    report = report_path if report_path.is_absolute() else root / report_path
+    label = _source_label_from_report_path(report)
+    candidates: list[Path] = []
+    if label:
+        filename = f"rc-verification-{label}-oha-desktop-agent-release-smoke.json"
+        candidates.extend([report.parent / filename, root / "tmp" / filename])
+    candidates.extend(
+        [
+            report.parent / "oha-desktop-agent-release-smoke.json",
+            root / "tmp" / "oha-desktop-agent-release-smoke.json",
+        ]
+    )
+    unique: list[Path] = []
+    seen: set[str] = set()
+    for candidate in candidates:
+        key = str(candidate.resolve(strict=False))
+        if key not in seen:
+            seen.add(key)
+            unique.append(candidate)
+    return unique
+
+
+def _embedded_oha_desktop_agent_smoke(
+    report: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]] | None:
+    if report.get("mode") == OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE:
+        return "input_report", dict(report)
+    for key in ("oha_desktop_agent_release_smoke", "oha_desktop_agent_smoke"):
+        nested = report.get(key)
+        if isinstance(nested, Mapping):
+            return key, dict(nested)
+    return None
+
+
+def _release_smoke_oha_item(report: Mapping[str, Any]) -> dict[str, Any]:
+    for item in _dict_list(report.get("items")):
+        if str(item.get("id") or "").strip() == "oha_desktop_agent_product":
+            return item
+    return {}
+
+
+def _load_oha_desktop_agent_smoke(
+    root: Path,
+    report_path: Path,
+    report: Mapping[str, Any],
+) -> tuple[str, dict[str, Any]] | None:
+    embedded = _embedded_oha_desktop_agent_smoke(report)
+    if embedded is not None:
+        return embedded
+    for candidate in _candidate_oha_desktop_agent_smoke_paths(root, report_path):
+        payload = _optional_report(root, candidate)
+        if isinstance(payload, dict):
+            return (_display_path(root, candidate), payload)
+    return None
+
+
+def _oha_desktop_agent_product_area_from_smoke(
+    source: str,
+    smoke: Mapping[str, Any],
+) -> dict[str, Any]:
+    sections = {
+        str(section.get("id") or "").strip(): section
+        for section in _dict_list(smoke.get("sections"))
+        if str(section.get("id") or "").strip()
+    }
+    passed_sections = [
+        section_id
+        for section_id in OHA_DESKTOP_AGENT_REQUIRED_SECTIONS
+        if sections.get(section_id, {}).get("ok") is True
+    ]
+    missing_sections = [
+        section_id
+        for section_id in OHA_DESKTOP_AGENT_REQUIRED_SECTIONS
+        if section_id not in passed_sections
+    ]
+    failed_sections = _string_list(smoke.get("failed_sections"))
+    for section_id in missing_sections:
+        if section_id in sections and section_id not in failed_sections:
+            failed_sections.append(section_id)
+    ok = (
+        smoke.get("mode") == OHA_DESKTOP_AGENT_RELEASE_SMOKE_MODE
+        and smoke.get("ok") is True
+        and not missing_sections
+    )
+    status = "passed" if ok else "failed" if failed_sections else "missing"
+    area: dict[str, Any] = {
+        "id": "oha_desktop_agent_product",
+        "label": "Oha desktop-agent Core, Executor, and Studio product smoke",
+        "status": status,
+        "parity_surface": "desktop agent product",
+        "source_report": source,
+        "mode": str(smoke.get("mode") or ""),
+        "required_section_count": len(OHA_DESKTOP_AGENT_REQUIRED_SECTIONS),
+        "passed_section_count": len(passed_sections),
+        "section_count": smoke.get("section_count", len(sections)),
+        "passed_section_ids": passed_sections,
+        "missing_section_ids": missing_sections,
+        "failed_section_ids": failed_sections,
+        "next_action": OHA_DESKTOP_AGENT_NEXT_ACTION,
+    }
+    checks = smoke.get("checks")
+    if isinstance(checks, Mapping):
+        area["checks"] = sanitize_sensitive_value(dict(checks), max_depth=4)
+    return area
+
+
+def _oha_desktop_agent_product_area_from_release_smoke_item(
+    item: Mapping[str, Any],
+) -> dict[str, Any]:
+    status = str(item.get("status") or "").strip() or "missing"
+    related = _string_list(item.get("related_evidence_ids"))
+    return {
+        "id": "oha_desktop_agent_product",
+        "label": "Oha desktop-agent Core, Executor, and Studio product smoke",
+        "status": "passed" if status == "passed" else "missing",
+        "parity_surface": "desktop agent product",
+        "required_evidence_ids": _string_list(item.get("required_evidence_ids")),
+        "present_evidence_ids": _string_list(item.get("present_evidence_ids")),
+        "missing_evidence_ids": _string_list(item.get("missing_evidence_ids")),
+        "related_evidence_count": len(related),
+        "related_evidence_ids": related,
+        "next_action": str(item.get("next_action") or OHA_DESKTOP_AGENT_NEXT_ACTION),
+    }
+
+
+def _oha_desktop_agent_product_area(
+    root: Path,
+    report_path: Path,
+    report: Mapping[str, Any],
+) -> dict[str, Any]:
+    loaded = _load_oha_desktop_agent_smoke(root, report_path, report)
+    if loaded is not None:
+        source, smoke = loaded
+        return _oha_desktop_agent_product_area_from_smoke(source, smoke)
+    release_item = _release_smoke_oha_item(report)
+    if release_item:
+        return _oha_desktop_agent_product_area_from_release_smoke_item(release_item)
+    return {
+        "id": "oha_desktop_agent_product",
+        "label": "Oha desktop-agent Core, Executor, and Studio product smoke",
+        "status": "missing",
+        "parity_surface": "desktop agent product",
+        "required_before": "public_release_signoff",
+        "required_evidence": (
+            "Run the Oha desktop-agent release smoke so DeepAgent Core, "
+            "desktop executor, Agent Studio, Groups, Workflow, Approval, and "
+            "Artifact paths are visible in the parity summary."
+        ),
+        "next_action": OHA_DESKTOP_AGENT_NEXT_ACTION,
+    }
+
+
 def _signoff_areas(
     checks_by_id: dict[str, dict[str, Any]],
     manual_summary: dict[str, Any],
@@ -296,6 +514,7 @@ def summarize_parity(root: Path, report_path: Path) -> dict[str, Any]:
     areas = [
         _product_identity_area(root),
         _native_agent_area(report),
+        _oha_desktop_agent_product_area(root, report_path, report),
         *_signoff_areas(checks, manual_summary),
     ]
     incomplete_area_ids = [
