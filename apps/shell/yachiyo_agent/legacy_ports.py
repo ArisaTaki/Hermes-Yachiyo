@@ -81,6 +81,7 @@ from .runtime_progress import (
 )
 from .groups import group_run_snapshot_from_payload
 from .tool_catalog import runtime_tool_catalog_snapshot
+from .workflow_run_snapshots import workflow_run_snapshot_from_payload
 
 _LEGACY_RUN_PROJECTOR = LegacyRunPayloadProjector()
 _DAILY_DESKTOP_METADATA_DISCOVERY_TOOLS = {
@@ -1479,16 +1480,23 @@ class LegacyStudioPort:
         run_id: str,
         decision: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        self._assert_run_approval(run_id, decision)
-        return self._runtime.approve_run_approval(run_id)
+        target_run_id = self._run_id_for_run_approval(run_id, decision)
+        self._assert_run_approval(target_run_id, decision)
+        approved = self._runtime.approve_run_approval(target_run_id)
+        return self._timeline_after_child_action(run_id, target_run_id, approved)
 
     def reject_run_approval(
         self,
         run_id: str,
         decision: dict[str, Any] | str | None = None,
     ) -> dict[str, Any]:
-        self._assert_run_approval(run_id, decision)
-        return self._runtime.reject_run_approval(run_id, _rejection_reason(decision))
+        target_run_id = self._run_id_for_run_approval(run_id, decision)
+        self._assert_run_approval(target_run_id, decision)
+        rejected = self._runtime.reject_run_approval(
+            target_run_id,
+            _rejection_reason(decision),
+        )
+        return self._timeline_after_child_action(run_id, target_run_id, rejected)
 
     def _assert_run_approval(
         self,
@@ -1504,7 +1512,20 @@ class LegacyStudioPort:
         )
 
     def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
-        return self._runtime.read_run_artifact(run_id, artifact_path)
+        artifact_run_id = _workflow_artifact_source_run_id(
+            self._runtime,
+            run_id,
+            artifact_path,
+        ) or run_id
+        payload = self._runtime.read_run_artifact(artifact_run_id, artifact_path)
+        if artifact_run_id == run_id:
+            return payload
+        return {
+            **payload,
+            "run_id": payload.get("run_id") or artifact_run_id,
+            "workflow_run_id": payload.get("workflow_run_id") or run_id,
+            "path": payload.get("path") or artifact_path,
+        }
 
     def get_run_event_stream(self, run_id: str) -> dict[str, Any]:
         return self._runtime.list_run_events(run_id)
@@ -1530,6 +1551,49 @@ class LegacyStudioPort:
             after_sequence=after_sequence,
             limit=limit,
         )
+
+    def _run_id_for_run_approval(
+        self,
+        run_id: str,
+        decision: dict[str, Any] | str | None,
+    ) -> str:
+        requested_approval_id = _approval_id_from_decision(decision)
+        try:
+            run = self._runtime.get_run(run_id)
+        except KeyError:
+            return run_id
+        if _pending_approval_id(run) and (
+            not requested_approval_id
+            or _pending_approval_id(run) == requested_approval_id
+        ):
+            return run_id
+        if str(run.get("kind") or "").strip() != "workflow_run":
+            return run_id
+        child_runs = _workflow_child_runs_for_parent_run(run, self._runtime)
+        if requested_approval_id:
+            for child in child_runs:
+                child_run_id = str(child.get("run_id") or "").strip()
+                if child_run_id and _pending_approval_id(child) == requested_approval_id:
+                    return child_run_id
+            return run_id
+        for child in child_runs:
+            child_run_id = str(child.get("run_id") or "").strip()
+            if child_run_id and _pending_approval_id(child):
+                return child_run_id
+        return run_id
+
+    def _timeline_after_child_action(
+        self,
+        run_id: str,
+        target_run_id: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any]:
+        if target_run_id == run_id:
+            return payload
+        try:
+            return self.get_run_timeline(run_id)
+        except KeyError:
+            return payload
 
     def _append_planner_run_events(
         self,
@@ -3100,22 +3164,24 @@ def _workflow_run_with_child_runs(run: dict[str, Any], runtime: Any) -> dict[str
         return run
     run_id = str(run.get("run_id") or run.get("workflow_run_id") or "").strip()
     run_group_id = str(run.get("run_group_id") or run.get("group_run_id") or "").strip()
-    if not run_id or not run_group_id:
-        return run
-    try:
-        run_group = runtime.get_run_group(run_group_id)
-    except (AttributeError, KeyError):
-        return run
-    if not isinstance(run_group, dict):
+    if not run_id:
         return run
     existing_children = [
         dict(item)
         for item in run.get("runs") or run.get("child_runs") or []
         if isinstance(item, dict)
     ]
+    run_group_children: list[dict[str, Any]] = []
+    if run_group_id:
+        try:
+            run_group = runtime.get_run_group(run_group_id)
+        except (AttributeError, KeyError):
+            run_group = None
+        if isinstance(run_group, dict):
+            run_group_children = _child_runs_for_run_group(run_group, runtime)
     children = [
         child
-        for child in [*existing_children, *_child_runs_for_run_group(run_group, runtime)]
+        for child in [*existing_children, *run_group_children]
         if str(child.get("run_id") or "").strip()
         and str(child.get("run_id") or "").strip() != run_id
     ]
@@ -3130,3 +3196,55 @@ def _workflow_run_with_child_runs(run: dict[str, Any], runtime: Any) -> dict[str
         seen.add(child_run_id)
         unique_children.append(child)
     return {**run, "runs": unique_children}
+
+
+def _workflow_child_runs_for_parent_run(run: dict[str, Any], runtime: Any) -> list[dict[str, Any]]:
+    return [
+        dict(item)
+        for item in _workflow_run_with_child_runs(run, runtime).get("runs") or []
+        if isinstance(item, dict)
+    ]
+
+
+def _pending_approval_id(payload: dict[str, Any]) -> str:
+    pending = payload.get("pending_approval")
+    if isinstance(pending, dict):
+        approval_id = str(pending.get("approval_id") or "").strip()
+        if approval_id:
+            return approval_id
+    for approval in payload.get("pending_approvals") or []:
+        if not isinstance(approval, dict):
+            continue
+        approval_id = str(approval.get("approval_id") or "").strip()
+        if approval_id:
+            return approval_id
+    return ""
+
+
+def _workflow_artifact_source_run_id(
+    runtime: Any,
+    run_id: str,
+    artifact_path: str,
+) -> str:
+    clean_path = str(artifact_path or "").strip()
+    if not clean_path:
+        return ""
+    try:
+        run = runtime.get_run(run_id)
+    except (AttributeError, KeyError):
+        return ""
+    if str(run.get("kind") or "").strip() != "workflow_run":
+        return ""
+    workflow_run = workflow_run_snapshot_from_payload(
+        _workflow_run_with_child_runs(
+            _run_with_replay_events(run, runtime),
+            runtime,
+        )
+    )
+    for artifact in workflow_run.artifacts:
+        if str(artifact.path or "").strip() != clean_path:
+            continue
+        source_run_id = str(artifact.source_run_id or artifact.run_id or "").strip()
+        if source_run_id and source_run_id != run_id:
+            return source_run_id
+    return ""

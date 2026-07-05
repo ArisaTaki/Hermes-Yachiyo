@@ -406,6 +406,114 @@ def test_legacy_studio_port_rejects_mismatched_approval_id() -> None:
     assert runtime.last_approve_request is None
 
 
+def test_legacy_studio_port_routes_workflow_parent_approval_to_child_run() -> None:
+    runtime = _FakeGroupRuntime()
+    runtime.child_run_ids = ["workflow-run-1", "workflow-child-1"]
+    runtime.runs["workflow-run-1"] = {
+        "kind": "workflow_run",
+        "pending_approval": None,
+        "run_group_id": "workflow-group-1",
+        "run_id": "workflow-run-1",
+        "runnable_id": "workflow-1",
+        "status": "approval_required",
+        "timeline": [
+            {
+                "event_type": "workflow.node.agent",
+                "payload": {
+                    "child_run_id": "workflow-child-1",
+                    "workflow_id": "workflow-1",
+                    "workflow_run_id": "workflow-run-1",
+                    "workflow_node_id": "analyze",
+                    "workflow_node_label": "Analyze data",
+                },
+            }
+        ],
+        "user_goal": "Build report",
+    }
+    runtime.runs["workflow-child-1"] = {
+        "artifacts": [
+            {
+                "artifact_id": "artifact-child",
+                "kind": "markdown",
+                "path": "analysis.md",
+            }
+        ],
+        "kind": "agent_run",
+        "pending_approval": {"approval_id": "approval-child", "tool": "terminal.run"},
+        "run_group_id": "workflow-group-1",
+        "run_id": "workflow-child-1",
+        "status": "approval_required",
+        "timeline": [],
+        "user_goal": "Analyze data",
+    }
+    port = LegacyStudioPort(runtime)
+
+    approved = port.approve_run_approval("workflow-run-1")
+    rejected = port.reject_run_approval(
+        "workflow-run-1",
+        {"approval_id": "approval-child", "reason": "No"},
+    )
+
+    assert runtime.last_approve_request == {"run_id": "workflow-child-1"}
+    assert runtime.last_reject_request == {"run_id": "workflow-child-1", "reason": "No"}
+    assert approved["run_id"] == "workflow-run-1"
+    assert rejected["run_id"] == "workflow-run-1"
+    assert approved["runs"][0]["run_id"] == "workflow-child-1"
+
+
+def test_legacy_studio_port_reads_workflow_child_artifact_from_source_run() -> None:
+    runtime = _FakeGroupRuntime()
+    runtime.child_run_ids = ["workflow-run-1", "workflow-child-1"]
+    runtime.runs["workflow-run-1"] = {
+        "artifacts": [],
+        "kind": "workflow_run",
+        "pending_approval": None,
+        "run_group_id": "workflow-group-1",
+        "run_id": "workflow-run-1",
+        "runnable_id": "workflow-1",
+        "status": "completed",
+        "timeline": [
+            {
+                "event_type": "workflow.node.agent",
+                "payload": {
+                    "child_run_id": "workflow-child-1",
+                    "workflow_id": "workflow-1",
+                    "workflow_run_id": "workflow-run-1",
+                    "workflow_node_id": "analyze",
+                    "workflow_node_label": "Analyze data",
+                },
+            }
+        ],
+        "user_goal": "Build report",
+    }
+    runtime.runs["workflow-child-1"] = {
+        "artifacts": [
+            {
+                "artifact_id": "artifact-child",
+                "kind": "markdown",
+                "path": "analysis.md",
+            }
+        ],
+        "kind": "agent_run",
+        "pending_approval": None,
+        "run_group_id": "workflow-group-1",
+        "run_id": "workflow-child-1",
+        "status": "completed",
+        "timeline": [],
+        "user_goal": "Analyze data",
+    }
+    port = LegacyStudioPort(runtime)
+
+    artifact = port.read_run_artifact("workflow-run-1", "analysis.md")
+
+    assert artifact["run_id"] == "workflow-child-1"
+    assert artifact["workflow_run_id"] == "workflow-run-1"
+    assert runtime.last_artifact_request == {
+        "run_id": "workflow-child-1",
+        "artifact_path": "analysis.md",
+    }
+
+
 class _FakeStudioRunRuntime:
     def __init__(self) -> None:
         self.agent_run_payload: dict[str, Any] | None = None
@@ -464,6 +572,7 @@ class _FakeGroupRuntime:
         self.child_run_ids: list[str] = []
         self.events: dict[str, list[dict[str, Any]]] = {}
         self.last_approve_request: dict[str, Any] | None = None
+        self.last_artifact_request: dict[str, Any] | None = None
         self.last_event_page_request: dict[str, Any] | None = None
         self.last_reject_request: dict[str, Any] | None = None
         self.runs: dict[str, dict[str, Any]] = {}
@@ -590,4 +699,16 @@ class _FakeGroupRuntime:
             "run_id": run_id,
             "status": "completed",
             "user_goal": "Approved",
+        }
+
+    def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
+        self.last_artifact_request = {
+            "run_id": run_id,
+            "artifact_path": artifact_path,
+        }
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "path": artifact_path,
+            "content": "# Report",
         }
