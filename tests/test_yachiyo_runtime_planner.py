@@ -10149,6 +10149,40 @@ def test_runtime_planner_routes_dynamic_context_url_open_actions() -> None:
     )
 
 
+def test_runtime_planner_routes_running_browser_page_summary_to_report_generation() -> None:
+    allowed_tools = [
+        "desktop.running_apps",
+        "app.focus",
+        "browser.extract_text",
+        "artifact.write",
+        "desktop.ui_elements",
+    ]
+
+    decision = RuntimePlanner().decision(
+        "打开我正在运行的浏览器，读取当前页面内容，然后总结成报告",
+        allowed_tools=allowed_tools,
+    )
+
+    assert decision.selected_intent.kind == "report_generation"
+    assert decision.selected_intent.inputs == {
+        "context_source": "current_page_content",
+        "running_browser_app_hint": {
+            "query": "browser",
+            "description": "browser",
+        },
+    }
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "discover-running-browser-app",
+        "focus-running-browser-app",
+        "read-report-context",
+        "write-report-artifact",
+    ]
+    assert _step_by_id(decision, "write-report-artifact").input_preview == {
+        "path": "report.md",
+        "body_source": "current_page_content",
+    }
+
+
 def test_runtime_planner_report_generation_prefers_workspace_list_for_context() -> None:
     decision = RuntimePlanner().decision(
         "写一份项目总结报告",
@@ -10460,7 +10494,7 @@ def test_runtime_planner_report_generation_prefers_workspace_list_for_context() 
         "limit": 80,
     }
     assert _step_by_id(current_window_markdown, "write-report-artifact").input_preview == {
-        "path": "report.md",
+        "path": "summary.md",
         "body_source": "visible_text",
     }
     assert current_window_markdown_export.selected_intent.kind == "report_generation"

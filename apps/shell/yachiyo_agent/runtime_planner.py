@@ -1461,6 +1461,30 @@ class TaskIntentRouter:
         if _desktop_window_text_context_hint(text):
             return _empty_intent("web_research", text)
         if (
+            _context_artifact_source_hint(text) == "visible_text"
+            and _looks_like_context_artifact_request(text)
+        ):
+            return _empty_intent("web_research", text)
+        if _running_browser_page_context_hint(text) and (
+            _looks_like_context_artifact_request(text)
+            or _looks_like_standalone_report_artifact_request(text)
+            or _contains_any(
+                text,
+                (
+                    "report",
+                    "summary",
+                    "markdown",
+                    "document",
+                    "报告",
+                    "总结",
+                    "摘要",
+                    "文档",
+                    "文件",
+                ),
+            )
+        ):
+            return _empty_intent("web_research", text)
+        if (
             _dynamic_context_transform_target_hint(text)
             or _dynamic_context_ui_transfer_hint(text)
             or _blocked_dynamic_context_ui_transfer_hint(text)
@@ -14960,6 +14984,8 @@ def _report_artifact_filename(text: str) -> str:
         return "annual-report.md"
     if _contains_any(value, ("发布说明", "变更说明", "更新说明", "release notes", "changelog")):
         return "release-notes.md"
+    if _contains_any(value, ("报告", "report")):
+        return "report.md"
     if _contains_any(value, ("总结", "摘要", "概括", "summary", "summarize", "summarise")):
         return "summary.md"
     return "report.md"
