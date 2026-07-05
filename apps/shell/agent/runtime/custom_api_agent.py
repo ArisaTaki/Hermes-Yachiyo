@@ -3800,6 +3800,9 @@ class RuntimeCustomApiAgentLoop:
                 statuses=skip_statuses,
             ):
                 continue
+            todo = todos_by_step.get(step_id)
+            if todo is not None and not _task_core_todo_matches_request(todo, request):
+                continue
             source_event = {
                 "event": str(tool_event.get("event") or ""),
                 "detail": str(tool_event.get("detail") or ""),
@@ -3822,6 +3825,7 @@ class RuntimeCustomApiAgentLoop:
                     decision_id=decision_id,
                     plan_id=plan_id,
                 )
+                or _runtime_task_progress_context_from_mapping(followup_context)
             )
             for workspace_item in workspace_items_by_step.get(step_id, []):
                 item_payload = dict(workspace_item)
@@ -3848,7 +3852,6 @@ class RuntimeCustomApiAgentLoop:
                     append_run_event=self._append_run_event,
                     run_id=run_id,
                 )
-            todo = todos_by_step.get(step_id)
             if todo is not None:
                 todo_payload = dict(todo)
                 todo_payload["status"] = todo_status

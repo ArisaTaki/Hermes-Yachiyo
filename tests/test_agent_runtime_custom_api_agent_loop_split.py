@@ -5095,6 +5095,96 @@ def test_auto_replan_focus_recovery_updates_task_progress_from_context() -> None
     ]
 
 
+def test_auto_replan_recovery_task_progress_uses_workflow_scope_from_context() -> None:
+    payloads = [
+        {
+            "request_id": "replan-workflow-focus",
+            "trigger": "verification_failed",
+            "decision_id": "decision-workflow",
+            "plan_id": "plan-workflow",
+            "workflow_id": "workflow-1",
+            "workflow_run_id": "workflow-run-1",
+            "workflow_node_id": "node-verify",
+            "workflow_node_label": "Verify desktop",
+            "source_step_id": "verify-desktop-result",
+            "source_tool_name": "desktop.active_window",
+            "target_capability_id": "desktop.app_discovery",
+            "failure_detail": "foreground_focus_unverified",
+            "metadata": {
+                "expected_app_name": "PixelForge",
+                "blocking_conditions": ["foreground_focus_unverified"],
+                "task_core_context": {
+                    "core_id": "task-core-workflow",
+                    "workspace_id": "task-workspace-workflow",
+                    "source_step_id": "verify-desktop-result",
+                    "todos": [
+                        {
+                            "todo_id": "todo-workflow-focus",
+                            "step_id": "verify-desktop-result",
+                            "title": "Verify workflow desktop focus",
+                            "status": "pending",
+                            "tool_name": "desktop.active_window",
+                            "capability_id": "desktop.app_discovery",
+                        }
+                    ],
+                    "checkpoints": [
+                        {
+                            "checkpoint_id": "checkpoint-workflow-focus",
+                            "after_step_id": "verify-desktop-result",
+                            "title": "Workflow desktop focused",
+                            "status": "planned",
+                        }
+                    ],
+                },
+            },
+        }
+    ]
+    requests = custom_api_agent_module._auto_replan_recovery_requests_with_task_context(
+        payloads,
+        ["app.focus", "desktop.active_window"],
+        [],
+    )
+    assert requests[1]["workflow_run_id"] == "workflow-run-1"
+    assert requests[1]["task_todo"]["todo_id"] == "todo-workflow-focus"
+
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.focus",
+            input_preview={"app_name": "PixelForge"},
+            result={"ok": True},
+        ),
+        _timeline(
+            "agent.tool.call",
+            "desktop.active_window",
+            input_preview={},
+            result={"ok": True, "data": {"app_name": "PixelForge"}},
+        ),
+    ]
+    loop = _private_runtime_loop()
+    loop._record_tool_request_task_progress_events(
+        requests,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-workflow-focus",
+    )
+
+    todo_event = next(
+        event for event in timeline if event["event"] == "workflow.run.task.todo.updated"
+    )
+    checkpoint_event = next(
+        event
+        for event in timeline
+        if event["event"] == "workflow.run.task.checkpoint.updated"
+    )
+    assert todo_event["workflow_run_id"] == "workflow-run-1"
+    assert todo_event["planner_scope"] == "workflow.run"
+    assert todo_event["planner_event_type"] == "agent.task.todo.updated"
+    assert todo_event["status"] == "completed"
+    assert checkpoint_event["workflow_node_id"] == "node-verify"
+    assert checkpoint_event["planner_scope"] == "workflow.run"
+
+
 def test_auto_replan_focus_recovery_reopens_when_focus_tool_unavailable() -> None:
     requests = custom_api_agent_module._auto_replan_recovery_requests_with_task_context(
         [
