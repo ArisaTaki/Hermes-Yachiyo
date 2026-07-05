@@ -22,15 +22,21 @@ def test_legacy_studio_agent_run_appends_runtime_planner_events() -> None:
     )
 
     assert run["run_id"] == "agent-run-1"
-    assert runtime.agent_run_payload == {
-        "agent_id": "agent-1",
-        "user_goal": "请分析 data/sales.csv 并输出报告",
-        "source": "yachiyo_studio",
-        "client_run_id": "client-agent-run-1",
-        "run_group_id": None,
-        "daily_desktop_policy_overlay": True,
-        "runtime_planner_entrypoint": True,
-    }
+    assert runtime.agent_run_payload is not None
+    assert runtime.agent_run_payload["agent_id"] == "agent-1"
+    assert runtime.agent_run_payload["user_goal"] == "请分析 data/sales.csv 并输出报告"
+    assert runtime.agent_run_payload["source"] == "yachiyo_studio"
+    assert runtime.agent_run_payload["client_run_id"] == "client-agent-run-1"
+    assert runtime.agent_run_payload["run_group_id"] is None
+    assert runtime.agent_run_payload["daily_desktop_policy_overlay"] is True
+    assert runtime.agent_run_payload["runtime_planner_entrypoint"] is True
+    assert runtime.agent_run_payload["daily_desktop_planning_context"] == (
+        "请分析 data/sales.csv 并输出报告"
+    )
+    direct_requests = runtime.agent_run_payload["direct_tool_requests"]
+    assert [request["tool"] for request in direct_requests] == ["data.analyze"]
+    assert direct_requests[0]["input"]["path"] == "data/sales.csv"
+    assert direct_requests[0]["step_id"] == "analyze-data-file"
     events = runtime.events["agent-run-1"]
     assert [event["event_type"] for event in events[:4]] == [
         "agent.intent.selected",

@@ -1232,6 +1232,12 @@ class LegacyStudioPort:
         metadata = request.get("metadata") if isinstance(request.get("metadata"), dict) else {}
         planner_metadata = _planner_metadata_with_desktop_readiness(metadata)
         agent_id = request.get("agent_id")
+        allowed_tools = _agent_allowed_tools(self._runtime, agent_id)
+        planner_decision = runtime_planner_decision(
+            user_goal,
+            allowed_tools=allowed_tools,
+            metadata=planner_metadata,
+        )
         run_payload: dict[str, Any] = {
             "agent_id": agent_id,
             "user_goal": user_goal,
@@ -1252,14 +1258,19 @@ class LegacyStudioPort:
         planning_context = str(request.get("daily_desktop_planning_context") or "").strip()
         if planning_context:
             run_payload["daily_desktop_planning_context"] = planning_context
+        if "direct_tool_request" not in run_payload and "direct_tool_requests" not in run_payload:
+            planner_direct_requests = _planner_direct_tool_requests_for_agent_run(
+                planner_decision,
+                allowed_tools=allowed_tools,
+                event_context={"agent_id": str(agent_id or "").strip()},
+            )
+            if planner_direct_requests:
+                run_payload["direct_tool_requests"] = planner_direct_requests
+                run_payload.setdefault("daily_desktop_planning_context", user_goal)
         run = self._runtime.create_agent_run(run_payload)
         self._append_planner_run_events(
             _run_id_from_payload(run),
-            runtime_planner_decision(
-                user_goal,
-                allowed_tools=_agent_allowed_tools(self._runtime, agent_id),
-                metadata=planner_metadata,
-            ),
+            planner_decision,
         )
         return run
 
@@ -1623,6 +1634,30 @@ def _request_allowed_tools(request: Mapping[str, Any]) -> list[str] | None:
         return None
     tools = [str(tool or "").strip() for tool in value if str(tool or "").strip()]
     return tools or None
+
+
+def _planner_direct_tool_requests_for_agent_run(
+    planner_decision: Any | None,
+    *,
+    allowed_tools: list[str] | None,
+    event_context: Mapping[str, Any] | None = None,
+) -> list[dict[str, Any]]:
+    if planner_decision is None:
+        return []
+    metadata = runtime_planner_metadata(
+        planner_decision,
+        allowed_tools=allowed_tools,
+    )
+    envelope = metadata.get("yachiyo_execution_envelope")
+    if isinstance(envelope, Mapping):
+        envelope = runtime_execution_envelope_payload_with_request_context(
+            envelope,
+            event_context,
+        )
+    return runtime_execution_requests_from_envelope_payload(
+        envelope,
+        allowed_tools=allowed_tools,
+    )
 
 
 def _safe_runtime_planner_tool_requests(
