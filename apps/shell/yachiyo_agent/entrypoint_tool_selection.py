@@ -190,8 +190,6 @@ def _should_consult_legacy(prompt: str, requests: list[dict[str, Any]]) -> bool:
         return True
     if any(tool.startswith("clipboard.") for tool in tools):
         return True
-    if any(tool in {"media.apple_music_play", "media.system_control"} for tool in tools):
-        return True
     if len(requests) != 1:
         return False
     tool_name = tools[0]
