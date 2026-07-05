@@ -2258,6 +2258,12 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
     model_selected_step_ids = _model_selected_desktop_step_ids(steps)
     for step in steps:
         if not _step_available(step):
+            unavailable_verification = _unavailable_desktop_verification_request(
+                step,
+                allowed,
+            )
+            if unavailable_verification:
+                requests.append(unavailable_verification)
             continue
         step_id = str(getattr(step, "step_id", "") or "").strip()
         tool_name = str(getattr(step, "tool_name", "") or "").strip()
@@ -2290,6 +2296,56 @@ def _desktop_tool_requests(decision: Any, allowed: set[str]) -> list[dict[str, A
     if _weak_desktop_discovery_plan(decision, requests):
         return []
     return requests
+
+
+def _unavailable_desktop_verification_request(
+    step: Any,
+    allowed: set[str],
+) -> dict[str, Any]:
+    step_id = str(getattr(step, "step_id", "") or "").strip()
+    tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if not step_id.startswith("verify-") or tool_name not in _EXECUTION_VERIFICATION_TOOLS:
+        return {}
+    if tool_name not in allowed:
+        return {}
+    input_preview = getattr(step, "input_preview", None)
+    payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+    request = _request(
+        tool_name,
+        _desktop_request_payload(tool_name, payload),
+        planning_reason=_desktop_step_planning_reason(step, tool_name),
+    )
+    request["source"] = "runtime_verification"
+    request["status"] = "unavailable"
+    request["continue_to_model"] = True
+    request["runtime_doctrine"] = "discover_operate_verify"
+    request["runtime_stage"] = "verify"
+    request["runtime_role"] = "verify_result"
+    request["replan_triggers"] = ["verification_unavailable"]
+    raw_blockers = payload.get("blocking_conditions", [])
+    raw_missing_permissions = payload.get("missing_permissions", [])
+    blockers = [
+        str(item or "").strip()
+        for item in (
+            raw_blockers
+            if isinstance(raw_blockers, (list, tuple, set))
+            else [raw_blockers]
+        )
+        if str(item or "").strip()
+    ]
+    missing_permissions = [
+        str(item or "").strip()
+        for item in (
+            raw_missing_permissions
+            if isinstance(raw_missing_permissions, (list, tuple, set))
+            else [raw_missing_permissions]
+        )
+        if str(item or "").strip()
+    ]
+    if blockers or missing_permissions:
+        request["policy_reason"] = ", ".join([*blockers, *missing_permissions])
+    _attach_basic_step_metadata(request, step)
+    return request
 
 
 def _desktop_request_needs_basic_step_metadata(decision: Any, step_id: str) -> bool:

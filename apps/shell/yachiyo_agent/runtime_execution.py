@@ -30,6 +30,7 @@ _NON_EXECUTABLE_REQUEST_STATUSES = {
     "rejected",
     "recovered",
     "skipped",
+    "unavailable",
 }
 
 

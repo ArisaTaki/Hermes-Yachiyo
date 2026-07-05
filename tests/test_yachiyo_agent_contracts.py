@@ -110,6 +110,10 @@ from apps.shell.yachiyo_agent.events import public_run_event_from_payload
 from apps.shell.yachiyo_agent.group_run_snapshots import group_run_snapshot_from_payload
 from apps.shell.yachiyo_agent.planner_execution import planner_direct_tool_requests
 from apps.shell.yachiyo_agent.planner_projection import planner_run_event_payloads
+from apps.shell.yachiyo_agent.runtime_execution import (
+    runtime_execution_envelope_from_decision,
+    runtime_execution_requests_from_envelope_payload,
+)
 from apps.shell.yachiyo_agent.run_snapshots import run_timeline_snapshot_from_payload
 from apps.shell.yachiyo_agent.runtime_execution_status import (
     runtime_execution_envelope_with_status_overlay,
@@ -5840,6 +5844,47 @@ def test_runtime_tool_catalog_does_not_root_block_app_launch_or_discovery() -> N
     assert tools["app.open"].blocking_conditions == []
     assert tools["desktop.active_window"].blocking_conditions == ["screen_capture_blank"]
     assert tools["desktop.ui_elements"].blocking_conditions == ["screen_capture_blank"]
+
+
+def test_desktop_execution_envelope_keeps_blocked_verification_non_executable() -> None:
+    tools = runtime_execution_tool_names(
+        intent_kind="desktop_operation",
+        prefer_low_level=True,
+    )
+    decision = RuntimePlanner().decision(
+        "打开 PixelForge",
+        allowed_tools=tools,
+        metadata={
+            "desktop_blocking_conditions_by_capability": {
+                "desktop_execution": ["screen_capture_blank"],
+                "active_window": ["screen_capture_blank"],
+                "foreground_input": ["screen_capture_blank"],
+            }
+        },
+    )
+    envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=tools,
+    )
+    assert envelope is not None
+    requests = envelope.requests
+
+    assert [(request.tool_name, request.status) for request in requests] == [
+        ("desktop.list_apps", "planned"),
+        ("app.open", "planned"),
+        ("desktop.active_window", "unavailable"),
+    ]
+    assert requests[2].step_id == "verify-desktop-result"
+    assert requests[2].policy_reason == "screen_capture_blank"
+
+    executable = runtime_execution_requests_from_envelope_payload(
+        envelope.model_dump(mode="json"),
+        allowed_tools=tools,
+    )
+    assert [request["tool"] for request in executable] == [
+        "desktop.list_apps",
+        "app.open",
+    ]
 
 
 def test_runtime_tool_catalog_surfaces_restricted_plugin_metadata_and_uninstall() -> None:
