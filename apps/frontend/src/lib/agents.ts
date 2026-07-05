@@ -4,8 +4,17 @@ import type {
   YachiyoRunTimelineSnapshot,
 } from '../features/yachiyo-studio/types';
 import type {
+  AgentGroupMemberSnapshot,
+  ApprovalCardSnapshot,
+  ArtifactSnapshot,
+  PlannerTraceSummarySnapshot,
   PublicRunEvent,
+  ReplanRecoverySnapshot,
+  RuntimeDebugSummarySnapshot,
+  RuntimeExecutionEnvelopeSnapshot,
   RunEventPageSnapshot,
+  TaskCoreSnapshot,
+  TaskProgressSummarySnapshot,
 } from '../features/runtime-shared/types';
 import {
   publicGroupRunToRunGroupSpec,
@@ -213,11 +222,24 @@ export type RunEventsPage = RunEventPageSnapshot;
 
 export type RunGroupSpec = {
   run_group_id: string;
+  group_id?: string;
   title: string;
   source?: string;
   workspace_dir?: string;
   status: string;
+  objective?: string;
   summary?: string;
+  participants?: AgentGroupMemberSnapshot[];
+  events?: PublicRunEvent[];
+  pending_approvals?: ApprovalCardSnapshot[];
+  shared_artifacts?: ArtifactSnapshot[];
+  planner_summary?: PlannerTraceSummarySnapshot | null;
+  runtime_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
+  runtime_debug?: RuntimeDebugSummarySnapshot | null;
+  task_core?: TaskCoreSnapshot | null;
+  task_progress?: TaskProgressSummarySnapshot | null;
+  replan_recoveries?: ReplanRecoverySnapshot[];
+  final_answer?: string;
   child_run_ids?: string[];
   created_at?: string;
   updated_at?: string;

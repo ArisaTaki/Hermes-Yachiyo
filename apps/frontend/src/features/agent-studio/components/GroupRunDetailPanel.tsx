@@ -124,7 +124,15 @@ export function GroupRunDetailPanel({
     ? selectedGroupRunSnapshot.shared_artifacts
     : selectedRunGroup?.shared_artifacts || [];
   const groupRunRuntimeDebug = selectedGroupRunSnapshot?.runtime_debug || selectedRunGroup?.runtime_debug || null;
+  const groupRunRuntimeEnvelope = selectedGroupRunSnapshot?.runtime_execution_envelope
+    || selectedRunGroup?.runtime_execution_envelope
+    || null;
   const groupRunPlannerSummary = selectedGroupRunSnapshot?.planner_summary || selectedRunGroup?.planner_summary || null;
+  const groupRunTaskCore = selectedGroupRunSnapshot?.task_core || selectedRunGroup?.task_core || null;
+  const groupRunTaskProgress = selectedGroupRunSnapshot?.task_progress || selectedRunGroup?.task_progress || null;
+  const groupRunReplanRecoveries = selectedGroupRunSnapshot?.replan_recoveries
+    || selectedRunGroup?.replan_recoveries
+    || [];
   const replayApprovals = replayEvents.length ? approvalsFromRunEventReplay(replayEvents) : [];
   const replayArtifacts = replayEvents.length ? artifactsFromRunEventReplay(replayEvents) : [];
   const replayToolCalls = replayEvents.length ? toolCallsFromRunEventReplay(replayEvents) : [];
@@ -144,9 +152,9 @@ export function GroupRunDetailPanel({
     : groupRunChildSkillTraces(selectedGroupRunSnapshot?.runs || []);
   const groupRunFinalAnswer = selectedGroupRunSnapshot?.final_answer || selectedRunGroup?.final_answer || '';
   const groupRunHasTaskWorkspace = Boolean(
-    selectedGroupRunSnapshot?.task_core
-    || selectedGroupRunSnapshot?.task_progress
-    || selectedGroupRunSnapshot?.replan_recoveries?.length,
+    groupRunTaskCore
+    || groupRunTaskProgress
+    || groupRunReplanRecoveries.length,
   );
   const handleGroupRunReplanRecoveryAction = groupOverviewId
     ? (requestId: string, action: RuntimeToolRecoveryAction) => {
@@ -213,7 +221,7 @@ export function GroupRunDetailPanel({
       <RuntimeExecutionEnvelopeSummary
         className="group-run-runtime-section group-run-runtime-execution-envelope"
         debugPillsTestId="agent-run-detail-group-run-runtime-execution-debug-pills"
-        envelope={selectedGroupRunSnapshot?.runtime_execution_envelope}
+        envelope={groupRunRuntimeEnvelope}
         requestLimit={8}
         requestListTestId="agent-run-detail-group-run-runtime-execution-requests"
         requestTestId="agent-run-detail-group-run-runtime-execution-request"
@@ -226,25 +234,25 @@ export function GroupRunDetailPanel({
       {groupRunHasTaskWorkspace ? (
         <section
           className="group-run-runtime-section group-run-task-workspace"
-          data-core-id={selectedGroupRunSnapshot?.task_core?.core_id || ''}
-          data-task-progress-status={selectedGroupRunSnapshot?.task_progress?.status || ''}
+          data-core-id={groupRunTaskCore?.core_id || ''}
+          data-task-progress-status={groupRunTaskProgress?.status || ''}
           data-testid="agent-run-detail-group-run-task-workspace"
-          data-workspace-id={selectedGroupRunSnapshot?.task_core?.workspace?.workspace_id || selectedGroupRunSnapshot?.task_progress?.workspace_id || ''}
+          data-workspace-id={groupRunTaskCore?.workspace?.workspace_id || groupRunTaskProgress?.workspace_id || ''}
         >
           <div className="group-run-runtime-section-head">
             <strong>GroupRun Task Workspace</strong>
-            <span>{selectedGroupRunSnapshot?.task_progress?.progress_text || selectedGroupRunSnapshot?.task_core?.workspace?.title || 'workspace / todos / checkpoints / replan'}</span>
+            <span>{groupRunTaskProgress?.progress_text || groupRunTaskCore?.workspace?.title || 'workspace / todos / checkpoints / replan'}</span>
           </div>
           <div className="studio-task-workspace">
-            {selectedGroupRunSnapshot?.task_core ? (
-              <TaskCoreInspector taskCore={selectedGroupRunSnapshot.task_core} />
+            {groupRunTaskCore ? (
+              <TaskCoreInspector taskCore={groupRunTaskCore} />
             ) : null}
-            {selectedGroupRunSnapshot?.task_progress || selectedGroupRunSnapshot?.replan_recoveries?.length ? (
+            {groupRunTaskProgress || groupRunReplanRecoveries.length ? (
               <TaskProgressInspector
                 onRunReplanRecoveryAction={handleGroupRunReplanRecoveryAction}
                 recoveryActionDisabled={recoveryActionDisabled || !onRunGroupReplanRecoveryAction}
-                replanRecoveries={selectedGroupRunSnapshot?.replan_recoveries || []}
-                taskProgress={selectedGroupRunSnapshot?.task_progress || null}
+                replanRecoveries={groupRunReplanRecoveries}
+                taskProgress={groupRunTaskProgress}
               />
             ) : null}
           </div>
@@ -285,11 +293,11 @@ export function GroupRunDetailPanel({
         onRunReplanRecoveryAction={handleGroupRunReplanRecoveryAction}
         plannerSummary={groupRunPlannerSummary}
         recoveryActionDisabled={recoveryActionDisabled || !onRunGroupReplanRecoveryAction}
-        replanRecoveries={selectedGroupRunSnapshot?.replan_recoveries || []}
+        replanRecoveries={groupRunReplanRecoveries}
         showTaskWorkspace={!groupRunHasTaskWorkspace}
         sourceLabel="GroupRun planner facts · Intent / Capability / Plan / Selection"
-        taskCore={selectedGroupRunSnapshot?.task_core}
-        taskProgress={selectedGroupRunSnapshot?.task_progress || null}
+        taskCore={groupRunTaskCore}
+        taskProgress={groupRunTaskProgress}
         testId="agent-run-detail-group-run-planner-trace"
       />
       {groupRunApprovalFacts.length ? (

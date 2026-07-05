@@ -5,7 +5,11 @@ import type {
   PlannerTraceSummarySnapshot,
   PublicRunEvent,
   RecoveryRunProvenanceSnapshot,
+  ReplanRecoverySnapshot,
   RuntimeDebugSummarySnapshot,
+  RuntimeExecutionEnvelopeSnapshot,
+  TaskCoreSnapshot,
+  TaskProgressSummarySnapshot,
 } from '../runtime-shared/types';
 
 export type AgentModelMode = 'follow_main' | 'profile' | 'custom_api';
@@ -248,7 +252,11 @@ export type RunGroupSpec = {
   pending_approvals?: ApprovalCardSnapshot[];
   shared_artifacts?: ArtifactSnapshot[];
   planner_summary?: PlannerTraceSummarySnapshot | null;
+  runtime_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
   runtime_debug?: RuntimeDebugSummarySnapshot | null;
+  task_core?: TaskCoreSnapshot | null;
+  task_progress?: TaskProgressSummarySnapshot | null;
+  replan_recoveries?: ReplanRecoverySnapshot[];
   final_answer?: string;
   child_run_ids?: string[];
   created_at?: string;
