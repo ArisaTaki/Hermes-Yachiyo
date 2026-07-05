@@ -582,6 +582,113 @@ def test_agent_studio_group_run_uses_native_run_group_events_and_children(tmp_pa
         runtime.close()
 
 
+def test_chat_task_timeline_aggregates_native_group_run_context(tmp_path) -> None:
+    credential_store = MemoryCredentialStore()
+    runtime = NativeRunEngine(
+        db_path=tmp_path / "agent-runtime-chat-group.db",
+        workspace_dir=tmp_path / "runtime-chat-group",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    try:
+        run_group = runtime._insert_run_group(
+            title="Native chat group",
+            source="agent_group",
+            workspace_dir=str(tmp_path / "chat-group-workspace"),
+        )
+        planner_run = runtime._insert_run(
+            kind="agent_run",
+            runnable_id="agent-planner",
+            user_goal="Compare options",
+            run_group_id=run_group["run_group_id"],
+        )
+        reviewer_run = runtime._insert_run(
+            kind="agent_run",
+            runnable_id="agent-reviewer",
+            user_goal="Compare options",
+            run_group_id=run_group["run_group_id"],
+        )
+        approval = {
+            "approval_id": "approval-chat-group",
+            "tool": "terminal.run",
+            "title": "Approve planner command",
+        }
+        artifact_path = runtime.agent_artifacts_dir / planner_run["run_id"] / "team-plan.md"
+        artifact_path.parent.mkdir(parents=True, exist_ok=True)
+        artifact_path.write_text("# Team plan", encoding="utf-8")
+        runtime._update_run(
+            planner_run["run_id"],
+            status="approval_required",
+            artifacts=[
+                {
+                    "artifact_id": "artifact-chat-group",
+                    "kind": "markdown",
+                    "path": "team-plan.md",
+                }
+            ],
+            pending_approval=approval,
+        )
+        runtime._update_run(reviewer_run["run_id"], status="completed", result="Looks good")
+        runtime._update_run_group(
+            run_group["run_group_id"],
+            status="running",
+            summary="Compare options",
+        )
+        runtime.append_run_event(
+            planner_run["run_id"],
+            "group.run.started",
+            {
+                "group_id": "group-chat-native",
+                "group_run_id": run_group["run_group_id"],
+                "run_group_id": run_group["run_group_id"],
+                "objective": "Compare options",
+                "participant_count": 2,
+                "child_run_ids": [planner_run["run_id"], reviewer_run["run_id"]],
+            },
+        )
+        runtime.append_run_event(
+            reviewer_run["run_id"],
+            "group.member.completed",
+            {
+                "agent_id": "agent-reviewer",
+                "group_id": "group-chat-native",
+                "group_run_id": run_group["run_group_id"],
+                "run_group_id": run_group["run_group_id"],
+                "run_id": reviewer_run["run_id"],
+                "status": "completed",
+            },
+        )
+        runtime.link_task_run(
+            task_id="task-chat-group",
+            run_id=planner_run["run_id"],
+            session_id="chat-native-group",
+        )
+
+        chat = YachiyoAgentService(LegacyRuntimePort(runtime))
+
+        task = chat.get_task_snapshot("task-chat-group")
+        timeline = chat.get_task_timeline("task-chat-group")
+        event_page = chat.get_task_event_page("task-chat-group", limit=2)
+        artifact = chat.read_task_artifact("task-chat-group", "team-plan.md")
+
+        assert task.task_id == "task-chat-group"
+        assert task.conversation_id == "chat-native-group"
+        assert task.status == "waiting_approval"
+        assert task.metadata["runnable_kind"] == "group"
+        assert task.metadata["group_id"] == "group-chat-native"
+        assert task.metadata["run_group_id"] == run_group["run_group_id"]
+        assert task.pending_approvals[0].approval_id == "approval-chat-group"
+        assert task.artifacts[0].path == "team-plan.md"
+        assert task.artifacts[0].source_run_id == planner_run["run_id"]
+        assert timeline.group_run_id == run_group["run_group_id"]
+        assert "group.run.started" in [event.event_type for event in timeline.events]
+        assert "group.member.completed" in [event.event_type for event in timeline.events]
+        assert event_page.events[0].event_type == "group.run.started"
+        assert artifact.run_id == planner_run["run_id"]
+    finally:
+        runtime.close()
+
+
 def test_agent_studio_start_group_run_records_native_group_replay(tmp_path, monkeypatch) -> None:
     credential_store = MemoryCredentialStore()
     runtime = NativeRunEngine(

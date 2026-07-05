@@ -393,6 +393,14 @@ class LegacyRuntimePort:
                 except Exception:
                     pass
 
+        pending_approvals = [
+            dict(item)
+            for item in group_run.get("pending_approvals") or []
+            if isinstance(item, dict)
+        ]
+        status = str(group_run.get("status") or "running").strip()
+        if pending_approvals and status in {"", "queued", "running", "processing"}:
+            status = "approval_required"
         payload = {
             **group_run,
             "run_id": run_id,
@@ -400,8 +408,11 @@ class LegacyRuntimePort:
             "session_id": conversation_id,
             "conversation_id": conversation_id,
             "user_goal": prompt,
+            "status": status,
             "summary": group_run.get("summary") or group_run.get("final_answer") or "",
             "artifacts": group_run.get("artifacts") or group_run.get("shared_artifacts") or [],
+            "pending_approvals": pending_approvals,
+            "pending_approval": pending_approvals[0] if pending_approvals else None,
             "metadata": {
                 **dict(metadata),
                 "runnable_kind": "group",
@@ -429,6 +440,12 @@ class LegacyRuntimePort:
     def get_task_snapshot(self, task_id: str) -> dict[str, Any]:
         run_id = self._run_id_for_task(task_id)
         payload = self._payload_with_task_link(task_id, self._runtime.get_run(run_id))
+        group_payload = self._group_chat_task_payload(task_id, payload)
+        if group_payload is not None:
+            return self._projector.chat_task_payload(
+                group_payload,
+                runtime=self._runtime,
+            )
         if not payload.get("task_id"):
             payload = {**payload, "task_id": task_id}
         return self._projector.chat_task_payload(
@@ -439,6 +456,9 @@ class LegacyRuntimePort:
     def get_task_timeline(self, task_id: str) -> dict[str, Any]:
         run_id = self._run_id_for_task(task_id)
         payload = self._payload_with_task_link(task_id, self._runtime.get_run(run_id))
+        group_payload = self._group_chat_task_payload(task_id, payload)
+        if group_payload is not None:
+            return group_payload
         if not payload.get("task_id"):
             payload = {**payload, "task_id": task_id}
         events = self._projector.chat_events_for_run(payload, self._runtime)
@@ -448,6 +468,33 @@ class LegacyRuntimePort:
 
     def get_task_event_stream(self, task_id: str) -> dict[str, Any]:
         run_id = self._run_id_for_task(task_id)
+        try:
+            payload = self._payload_with_task_link(task_id, self._runtime.get_run(run_id))
+        except KeyError:
+            payload = {}
+        group_payload = self._group_chat_task_payload(task_id, payload)
+        if group_payload is not None:
+            group_run_id = str(
+                group_payload.get("group_run_id") or group_payload.get("run_group_id") or ""
+            ).strip()
+            list_group_run_events = getattr(self._runtime, "list_group_run_events", None)
+            if group_run_id and callable(list_group_run_events):
+                stream = list_group_run_events(group_run_id, limit=500)
+                if isinstance(stream, dict):
+                    return {
+                        **stream,
+                        "run_id": stream.get("run_id") or group_run_id,
+                        "task_id": stream.get("task_id") or task_id,
+                        "group_run_id": stream.get("group_run_id") or group_run_id,
+                        "run_group_id": stream.get("run_group_id") or group_run_id,
+                    }
+            return {
+                "run_id": group_run_id or run_id,
+                "task_id": task_id,
+                "group_run_id": group_run_id,
+                "run_group_id": group_run_id,
+                "events": list(group_payload.get("events") or []),
+            }
         list_run_events = getattr(self._runtime, "list_run_events", None)
         if callable(list_run_events):
             payload = list_run_events(run_id)
@@ -467,6 +514,40 @@ class LegacyRuntimePort:
         run_id = self._run_id_for_task(task_id)
         clean_after_sequence = max(0, int(after_sequence or 0))
         clean_limit = max(1, min(500, int(limit or 200)))
+        try:
+            payload = self._payload_with_task_link(task_id, self._runtime.get_run(run_id))
+        except KeyError:
+            payload = {}
+        group_payload = self._group_chat_task_payload(task_id, payload)
+        if group_payload is not None:
+            group_run_id = str(
+                group_payload.get("group_run_id") or group_payload.get("run_group_id") or ""
+            ).strip()
+            list_group_run_events = getattr(self._runtime, "list_group_run_events", None)
+            if group_run_id and callable(list_group_run_events):
+                page = list_group_run_events(
+                    group_run_id,
+                    after_sequence=clean_after_sequence,
+                    limit=clean_limit,
+                )
+                if isinstance(page, dict):
+                    return {
+                        **page,
+                        "run_id": page.get("run_id") or group_run_id,
+                        "task_id": page.get("task_id") or task_id,
+                        "group_run_id": page.get("group_run_id") or group_run_id,
+                        "run_group_id": page.get("run_group_id") or group_run_id,
+                        "after_sequence": page.get("after_sequence", clean_after_sequence),
+                        "limit": page.get("limit", clean_limit),
+                    }
+            return self._event_page_from_events(
+                group_payload.get("events"),
+                run_id=group_run_id or run_id,
+                task_id=task_id,
+                after_sequence=clean_after_sequence,
+                limit=clean_limit,
+                group_run_id=group_run_id,
+            )
         get_run_event_page = getattr(self._runtime, "get_run_event_page", None)
         if callable(get_run_event_page):
             payload = get_run_event_page(
@@ -511,11 +592,21 @@ class LegacyRuntimePort:
 
     def read_task_artifact(self, task_id: str, artifact_path: str) -> dict[str, Any]:
         run_id = self._run_id_for_task(task_id)
-        payload = self._runtime.read_run_artifact(run_id, artifact_path)
+        try:
+            task_payload = self._payload_with_task_link(task_id, self._runtime.get_run(run_id))
+        except KeyError:
+            task_payload = {}
+        group_payload = self._group_chat_task_payload(task_id, task_payload)
+        artifact_run_id = self._group_artifact_source_run_id(group_payload, artifact_path) or run_id
+        payload = self._runtime.read_run_artifact(artifact_run_id, artifact_path)
         return {
             **payload,
-            "run_id": payload.get("run_id") or run_id,
+            "run_id": payload.get("run_id") or artifact_run_id,
             "task_id": payload.get("task_id") or task_id,
+            "group_run_id": payload.get("group_run_id")
+            or (group_payload or {}).get("group_run_id"),
+            "run_group_id": payload.get("run_group_id")
+            or (group_payload or {}).get("run_group_id"),
             "path": payload.get("path") or artifact_path,
         }
 
@@ -542,30 +633,31 @@ class LegacyRuntimePort:
         ]
 
     def approve(self, task_id: str, decision: dict[str, Any] | None = None) -> dict[str, Any]:
-        run_id = self._run_id_for_task(task_id)
+        run_id = self._run_id_for_task_approval(task_id, decision)
         self._assert_task_approval(run_id, decision)
         approved = self._run_action_payload(run_id, self._runtime.approve_run_approval(run_id))
         approved = self._complete_main_chat_daily_desktop_approval_if_ready(run_id, approved)
+        payload = self._payload_with_task_link(task_id, approved)
+        group_payload = self._group_chat_task_payload(task_id, payload)
         return self._projector.chat_task_payload(
-            self._payload_with_task_link(
-                task_id,
-                approved,
-            ),
+            group_payload or payload,
             runtime=self._runtime,
         )
 
     def reject(self, task_id: str, decision: dict[str, Any] | str | None = None) -> dict[str, Any]:
-        run_id = self._run_id_for_task(task_id)
+        run_id = self._run_id_for_task_approval(task_id, decision)
         self._assert_task_approval(run_id, decision)
         reason = _rejection_reason(decision)
-        return self._projector.chat_task_payload(
-            self._payload_with_task_link(
-                task_id,
-                self._run_action_payload(
-                    run_id,
-                    self._runtime.reject_run_approval(run_id, reason),
-                ),
+        payload = self._payload_with_task_link(
+            task_id,
+            self._run_action_payload(
+                run_id,
+                self._runtime.reject_run_approval(run_id, reason),
             ),
+        )
+        group_payload = self._group_chat_task_payload(task_id, payload)
+        return self._projector.chat_task_payload(
+            group_payload or payload,
             runtime=self._runtime,
         )
 
@@ -592,6 +684,27 @@ class LegacyRuntimePort:
             requested_approval_id,
         )
 
+    def _run_id_for_task_approval(
+        self,
+        task_id: str,
+        decision: dict[str, Any] | str | None,
+    ) -> str:
+        run_id = self._run_id_for_task(task_id)
+        requested_approval_id = _approval_id_from_decision(decision)
+        if not requested_approval_id:
+            return run_id
+        try:
+            run = self._runtime.get_run(run_id)
+        except KeyError:
+            return run_id
+        if self._payload_pending_approval_id(run) == requested_approval_id:
+            return run_id
+        for child in self._group_child_runs_for_run(run):
+            child_run_id = str(child.get("run_id") or "").strip()
+            if child_run_id and self._payload_pending_approval_id(child) == requested_approval_id:
+                return child_run_id
+        return run_id
+
     def _run_id_for_task(self, task_id: str) -> str:
         get_task_run_link = getattr(self._runtime, "get_task_run_link", None)
         if callable(get_task_run_link):
@@ -613,6 +726,118 @@ class LegacyRuntimePort:
         except KeyError:
             return run
         return self._run_with_task_link(task_id, run, link)
+
+    def _group_chat_task_payload(
+        self,
+        task_id: str,
+        run: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        run_group_id = str(run.get("run_group_id") or run.get("group_run_id") or "").strip()
+        if not run_group_id:
+            return None
+        group_run = self._group_run_payload_for_task(run_group_id)
+        if group_run is None or not self._is_agent_group_run_payload(group_run):
+            return None
+
+        events = list(group_run.get("events") or [])
+        shared_artifacts = list(group_run.get("shared_artifacts") or [])
+        pending_approvals = [
+            dict(item)
+            for item in group_run.get("pending_approvals") or []
+            if isinstance(item, dict)
+        ]
+        status = str(group_run.get("status") or run.get("status") or "running").strip()
+        if pending_approvals and status in {"", "queued", "running", "processing"}:
+            status = "approval_required"
+        group_id = str(group_run.get("group_id") or "").strip()
+        metadata = dict(run.get("metadata")) if isinstance(run.get("metadata"), dict) else {}
+        metadata.update(
+            {
+                "runnable_kind": "group",
+                "group_id": group_id,
+                "group_run_id": run_group_id,
+                "run_group_id": run_group_id,
+            }
+        )
+        run_id = str(run.get("run_id") or "").strip() or self._first_group_child_run_id(group_run)
+        return {
+            **group_run,
+            "run_id": run_id or run_group_id,
+            "task_id": task_id,
+            "session_id": run.get("session_id") or run.get("conversation_id") or "",
+            "conversation_id": run.get("conversation_id") or run.get("session_id") or "",
+            "user_goal": group_run.get("objective") or run.get("user_goal") or "",
+            "title": group_run.get("title") or run.get("user_goal") or "Group run",
+            "status": status,
+            "summary": group_run.get("summary") or group_run.get("final_answer") or run.get("summary") or "",
+            "events": events,
+            "recent_events": events,
+            "timeline": events,
+            "artifacts": shared_artifacts or run.get("artifacts") or [],
+            "pending_approvals": pending_approvals,
+            "pending_approval": run.get("pending_approval")
+            or (pending_approvals[0] if pending_approvals else None),
+            "metadata": metadata,
+        }
+
+    def _group_run_payload_for_task(self, run_group_id: str) -> dict[str, Any] | None:
+        try:
+            run_group = self._runtime.get_run_group(run_group_id)
+        except (KeyError, AttributeError):
+            return None
+        if not isinstance(run_group, dict):
+            return None
+        return self._projector.group_run_from_legacy_run_group(run_group, self._runtime)
+
+    def _is_agent_group_run_payload(self, group_run: dict[str, Any]) -> bool:
+        if str(group_run.get("group_id") or "").strip():
+            return True
+        for event in group_run.get("events") or []:
+            if not isinstance(event, dict):
+                continue
+            event_type = str(event.get("event_type") or event.get("event") or "").strip()
+            if event_type.startswith("group."):
+                return True
+        return False
+
+    def _group_child_runs_for_run(self, run: dict[str, Any]) -> list[dict[str, Any]]:
+        run_group_id = str(run.get("run_group_id") or run.get("group_run_id") or "").strip()
+        if not run_group_id:
+            return []
+        group_run = self._group_run_payload_for_task(run_group_id)
+        if group_run is None or not self._is_agent_group_run_payload(group_run):
+            return []
+        return [dict(item) for item in group_run.get("runs") or [] if isinstance(item, dict)]
+
+    def _payload_pending_approval_id(self, payload: dict[str, Any]) -> str:
+        pending = payload.get("pending_approval")
+        if isinstance(pending, dict):
+            return str(pending.get("approval_id") or "").strip()
+        for item in payload.get("pending_approvals") or []:
+            if not isinstance(item, dict):
+                continue
+            approval_id = str(item.get("approval_id") or "").strip()
+            if approval_id:
+                return approval_id
+        return ""
+
+    def _group_artifact_source_run_id(
+        self,
+        group_payload: dict[str, Any] | None,
+        artifact_path: str,
+    ) -> str:
+        if not isinstance(group_payload, dict):
+            return ""
+        clean_path = str(artifact_path or "").strip()
+        for artifact in group_payload.get("artifacts") or group_payload.get("shared_artifacts") or []:
+            if not isinstance(artifact, dict):
+                continue
+            if str(artifact.get("path") or "").strip() != clean_path:
+                continue
+            source_run_id = str(artifact.get("source_run_id") or "").strip()
+            if source_run_id:
+                return source_run_id
+        return ""
 
     def _run_with_task_link(
         self,
@@ -742,6 +967,37 @@ class LegacyRuntimePort:
             if run_id:
                 return run_id
         return ""
+
+    def _event_page_from_events(
+        self,
+        raw_events: Any,
+        *,
+        run_id: str,
+        task_id: str,
+        after_sequence: int,
+        limit: int,
+        group_run_id: str = "",
+    ) -> dict[str, Any]:
+        events = [dict(event) for event in raw_events or [] if isinstance(event, dict)]
+        filtered_events = []
+        for index, event in enumerate(events):
+            event_sequence = self._event_sequence(event, index)
+            if event_sequence > after_sequence:
+                filtered_events.append((event_sequence, event))
+        page_pairs = filtered_events[:limit]
+        page = [event for _, event in page_pairs]
+        next_after_sequence = max([sequence for sequence, _ in page_pairs] or [after_sequence])
+        return {
+            "run_id": run_id,
+            "task_id": task_id,
+            "group_run_id": group_run_id,
+            "run_group_id": group_run_id,
+            "after_sequence": after_sequence,
+            "limit": limit,
+            "next_after_sequence": next_after_sequence,
+            "has_more": len(filtered_events) > limit,
+            "events": page,
+        }
 
     def _event_sequence(self, event: dict[str, Any], index: int) -> int:
         try:

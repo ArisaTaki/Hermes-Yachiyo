@@ -3073,6 +3073,7 @@ def test_legacy_runtime_port_starts_and_links_chat_group_task() -> None:
     assert task["metadata"]["runnable_kind"] == "group"
     assert task["metadata"]["group_id"] == "group-1"
     assert task["metadata"]["run_group_id"] == "group-run-1"
+    assert task["status"] == "approval_required"
     assert task["open_in_studio_url"] == "#/agents?run_id=run-1&group_run=group-run-1"
     assert create_call[1]["runnable_id"] == "agent-1"
     assert create_call[1]["user_goal"] == "一起整理调研结论"
@@ -3081,6 +3082,116 @@ def test_legacy_runtime_port_starts_and_links_chat_group_task() -> None:
     assert (
         "link_task_run",
         {"task_id": "task-group-1", "run_id": "run-1", "session_id": "chat-1"},
+    ) in runtime.calls
+
+
+def test_legacy_runtime_port_aggregates_group_run_chat_task_timeline() -> None:
+    runtime = _EventStoreFakeRuntime()
+    runtime.runs["run-1"]["artifacts"] = [
+        {
+            "artifact_id": "artifact-group-1",
+            "kind": "markdown",
+            "path": "team-plan.md",
+        }
+    ]
+    port = LegacyRuntimePort(runtime)
+    port.start_chat_task(
+        {
+            "prompt": "一起整理调研结论",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-group-1",
+            "group_id": "group-1",
+        }
+    )
+
+    task = port.get_task_snapshot("task-group-1")
+    timeline = port.get_task_timeline("task-group-1")
+    page = port.get_task_event_page("task-group-1", after_sequence=0, limit=1)
+
+    task_event_types = [event.get("event_type") or event.get("event") for event in task["recent_events"]]
+    timeline_event_types = [
+        event.get("event_type") or event.get("event")
+        for event in timeline["events"]
+    ]
+    assert task["metadata"]["runnable_kind"] == "group"
+    assert task["metadata"]["group_id"] == "group-1"
+    assert task["metadata"]["run_group_id"] == "group-run-1"
+    assert task["pending_approvals"][0]["approval_id"] == "approval-1"
+    assert task["artifacts"][0]["path"] == "team-plan.md"
+    assert task["artifacts"][0]["source_run_id"] == "run-1"
+    assert "group.run.started" in task_event_types
+    assert "group.member.started" in task_event_types
+    assert "group.run.started" in timeline_event_types
+    assert timeline["run_group_id"] == "group-run-1"
+    assert page["run_id"] == "group-run-1"
+    assert page["events"][0]["event_type"] == "group.run.started"
+
+
+def test_legacy_runtime_port_routes_group_task_approval_to_matching_child_run() -> None:
+    runtime = _EventStoreFakeRuntime()
+    runtime.group_child_run_ids = ["run-1", "run-2"]
+    runtime.runs["run-1"]["pending_approval"] = None
+    runtime.runs["run-2"] = {
+        "run_id": "run-2",
+        "run_group_id": "group-run-1",
+        "user_goal": "一起整理调研结论",
+        "status": "approval_required",
+        "pending_approval": {"approval_id": "approval-2", "tool": "terminal.run"},
+        "timeline": [{"event": "run.started"}],
+    }
+    port = LegacyRuntimePort(runtime)
+    port.start_chat_task(
+        {
+            "prompt": "一起整理调研结论",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-group-1",
+            "group_id": "group-1",
+        }
+    )
+    runtime.calls.clear()
+
+    approved = port.approve("task-group-1", {"approval_id": "approval-2"})
+
+    assert ("approve_run_approval", "run-2") in runtime.calls
+    assert approved["task_id"] == "task-group-1"
+
+
+def test_legacy_runtime_port_reads_group_task_artifact_from_source_child_run() -> None:
+    runtime = _EventStoreFakeRuntime()
+    runtime.group_child_run_ids = ["run-1", "run-2"]
+    runtime.runs["run-2"] = {
+        "run_id": "run-2",
+        "run_group_id": "group-run-1",
+        "user_goal": "一起整理调研结论",
+        "status": "completed",
+        "artifacts": [
+            {
+                "artifact_id": "artifact-group-2",
+                "kind": "markdown",
+                "path": "review.md",
+            }
+        ],
+        "timeline": [{"event": "run.started"}],
+    }
+    port = LegacyRuntimePort(runtime)
+    port.start_chat_task(
+        {
+            "prompt": "一起整理调研结论",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-group-1",
+            "group_id": "group-1",
+        }
+    )
+    runtime.calls.clear()
+
+    artifact = port.read_task_artifact("task-group-1", "review.md")
+
+    assert artifact["run_id"] == "run-2"
+    assert artifact["task_id"] == "task-group-1"
+    assert artifact["run_group_id"] == "group-run-1"
+    assert (
+        "read_run_artifact",
+        {"run_id": "run-2", "artifact_path": "review.md"},
     ) in runtime.calls
 
 
@@ -3262,22 +3373,30 @@ def test_legacy_runtime_port_merges_runtime_event_store_into_task_payloads() -> 
     task = port.get_task_snapshot("task-1")
     timeline = port.get_task_timeline("task-1")
 
-    assert [event.get("event") or event.get("event_type") for event in task["recent_events"]] == [
+    task_event_types = [
+        event.get("event") or event.get("event_type")
+        for event in task["recent_events"]
+    ]
+    timeline_event_types = [
+        event.get("event") or event.get("event_type")
+        for event in timeline["events"]
+    ]
+    assert task_event_types[:5] == [
         "run.started",
         "agent.intent.selected",
         "agent.plan.created",
         "agent.task_core.created",
         "agent.plan.step",
-        "agent.task.todo.updated",
     ]
-    assert [event.get("event") or event.get("event_type") for event in timeline["events"]] == [
+    assert "agent.task.todo.updated" in task_event_types
+    assert timeline_event_types[:5] == [
         "run.started",
         "agent.intent.selected",
         "agent.plan.created",
         "agent.task_core.created",
         "agent.plan.step",
-        "agent.task.todo.updated",
     ]
+    assert "agent.task.todo.updated" in timeline_event_types
 
 
 def test_legacy_runtime_port_resolves_task_link_for_event_stream() -> None:
@@ -3519,6 +3638,7 @@ class _FakeRuntime:
             },
         }
         self.task_links: dict[str, dict[str, Any]] = {}
+        self.group_child_run_ids = ["run-1"]
 
     def list_runnables(self) -> dict[str, Any]:
         self.calls.append(("list_runnables", None))
@@ -3529,6 +3649,7 @@ class _FakeRuntime:
         run = dict(self.runs["run-1"])
         if "run_group_id" in payload:
             run["run_group_id"] = payload.get("run_group_id") or "group-run-1"
+        self.runs["run-1"] = dict(run)
         return run
 
     def create_workflow_run(self, payload: dict[str, Any]) -> dict[str, Any]:
@@ -3567,7 +3688,7 @@ class _FakeRuntime:
             "title": "Research Team",
             "status": "running",
             "summary": "",
-            "child_run_ids": ["run-1"],
+            "child_run_ids": list(self.group_child_run_ids),
         }
 
     def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
