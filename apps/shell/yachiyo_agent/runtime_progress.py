@@ -8,6 +8,9 @@ from typing import Any, Literal
 from apps.shell.agent.runtime.task_progress import (
     append_task_progress_events_for_tool_result as _append_task_progress_events,
 )
+from apps.shell.agent.runtime.event_scopes import (
+    runtime_progress_base_event_type as _runtime_progress_base_event_type,
+)
 
 from .contracts import PlannerDecisionSnapshot, PublicRunEvent
 from .events import public_run_event_from_payload
@@ -211,9 +214,15 @@ def _scoped_progress_event(
     event_scope: ProgressEventScope,
 ) -> dict[str, Any]:
     scoped = dict(event)
-    event_type = str(scoped.get("event_type") or scoped.get("event") or "").strip()
+    raw_event_type = str(scoped.get("event_type") or scoped.get("event") or "").strip()
+    event_type = _runtime_progress_base_event_type(raw_event_type)
     scoped_type = _SCOPED_PROGRESS_EVENT_TYPES.get(event_scope, {}).get(event_type)
     if not scoped_type:
+        if event_type and event_type != raw_event_type:
+            if "event_type" in scoped:
+                scoped["event_type"] = event_type
+            else:
+                scoped["event"] = event_type
         return scoped
     if "event_type" in scoped:
         scoped["event_type"] = scoped_type

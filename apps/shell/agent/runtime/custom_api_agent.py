@@ -2092,6 +2092,8 @@ class RuntimeCustomApiAgentLoop:
                 messages.append(self._tool_loop_projection.assistant_message_for_history(message))
             else:
                 messages.append({"role": "assistant", "content": content})
+            followup_context = _latest_model_followup_context(timeline)
+            tool_timeline_start = len(timeline)
             self._run_tool_requests(
                 tool_requests,
                 allowed_tools,
@@ -2103,6 +2105,115 @@ class RuntimeCustomApiAgentLoop:
                 run_id=run_id,
                 budget=budget,
             )
+            if followup_context:
+                self._record_model_followup_pending_plan_progress_events(
+                    followup_context,
+                    tool_requests,
+                    timeline=timeline,
+                    tool_timeline_start=tool_timeline_start,
+                    run_id=run_id,
+                )
+                auto_pending_continuation_requests = (
+                    _model_followup_pending_plan_continuation_requests(
+                        followup_context,
+                        tool_requests,
+                        allowed_tools,
+                        timeline,
+                        tool_timeline_start=tool_timeline_start,
+                    )
+                )
+                if auto_pending_continuation_requests:
+                    self._record_auto_model_followup_app_write_plan(
+                        auto_pending_continuation_requests,
+                        timeline=timeline,
+                        run_id=run_id,
+                    )
+                    self._record_desktop_permission_preflight(
+                        auto_pending_continuation_requests,
+                        broker,
+                        timeline=timeline,
+                        run_id=run_id,
+                    )
+                    self._record_desktop_tool_policy_decisions(
+                        auto_pending_continuation_requests,
+                        allowed_tools=allowed_tools,
+                        agent=agent,
+                        run_id=run_id,
+                    )
+                    continuation_timeline_start = len(timeline)
+                    try:
+                        self._run_tool_requests(
+                            auto_pending_continuation_requests,
+                            allowed_tools,
+                            broker,
+                            messages,
+                            timeline,
+                            artifacts,
+                            next_iteration=iteration + 1,
+                            run_id=run_id,
+                            budget=budget,
+                        )
+                    except AgentApprovalRequired as exc:
+                        self._record_model_followup_pending_plan_progress_events(
+                            followup_context,
+                            auto_pending_continuation_requests,
+                            timeline=timeline,
+                            tool_timeline_start=continuation_timeline_start,
+                            run_id=run_id,
+                        )
+                        pending_approval = (
+                            exc.pending_approval if isinstance(exc.pending_approval, dict) else {}
+                        )
+                        planned_tool = str(
+                            pending_approval.get("tool")
+                            or auto_pending_continuation_requests[0].get("tool")
+                            or ""
+                        )
+                        approval_request = self._planned_request_for_tool(
+                            auto_pending_continuation_requests,
+                            planned_tool,
+                        )
+                        planned_input = self._pending_approval_input_preview(
+                            pending_approval,
+                            approval_request,
+                            (
+                                auto_pending_continuation_requests[0]
+                                if auto_pending_continuation_requests
+                                else {}
+                            ),
+                        )
+                        self._record_desktop_intent_approval_required(
+                            planned_tool,
+                            planned_input,
+                            pending_approval=exc.pending_approval,
+                            timeline=timeline,
+                            run_id=run_id,
+                            planned_request=approval_request,
+                            source=self._approval_event_source(
+                                approval_request,
+                                planned_tool,
+                            ),
+                            planning_reason=self._approval_event_planning_reason(
+                                approval_request,
+                                planned_tool,
+                            ),
+                        )
+                        raise
+                    self._record_model_followup_pending_plan_progress_events(
+                        followup_context,
+                        auto_pending_continuation_requests,
+                        timeline=timeline,
+                        tool_timeline_start=continuation_timeline_start,
+                        run_id=run_id,
+                    )
+                    direct_result = self._direct_daily_desktop_sequence_result(
+                        auto_pending_continuation_requests,
+                        timeline,
+                        tool_timeline_start=continuation_timeline_start,
+                        run_id=run_id,
+                    )
+                    if direct_result:
+                        return direct_result
         artifact_completion = self._tool_loop_projection.artifact_completion(timeline, artifacts)
         if artifact_completion:
             timeline.append(
@@ -7985,6 +8096,53 @@ def _runtime_replan_task_progress_summary(
     todos_by_step: dict[str, dict[str, Any]] = {}
     checkpoints_by_step: dict[str, dict[str, Any]] = {}
     workspace_items_by_id: dict[str, dict[str, Any]] = {}
+    for payload in replan_payloads:
+        if not isinstance(payload, Mapping):
+            continue
+        metadata = payload.get("metadata") if isinstance(payload.get("metadata"), Mapping) else {}
+        task_context = (
+            metadata.get("task_core_context")
+            if isinstance(metadata.get("task_core_context"), Mapping)
+            else {}
+        )
+        if not task_context:
+            continue
+        workspace_items_by_id.update(
+            {
+                _runtime_workspace_item_key(item): item
+                for item in _runtime_workspace_item_summaries(
+                    task_context.get("workspace_items")
+                )
+                if _runtime_workspace_item_key(item)
+            }
+        )
+        for todo in task_context.get("todos", []):
+            if not isinstance(todo, Mapping):
+                continue
+            step_id = str(todo.get("step_id") or "").strip()
+            if not step_id:
+                continue
+            todos_by_step[step_id] = {
+                "step_id": step_id,
+                "title": str(todo.get("title") or step_id).strip(),
+                "status": str(todo.get("status") or "").strip(),
+                "tool": str(todo.get("tool_name") or "").strip(),
+                "approval_required": bool(todo.get("approval_required")),
+            }
+        for checkpoint in task_context.get("checkpoints", []):
+            if not isinstance(checkpoint, Mapping):
+                continue
+            step_id = str(
+                checkpoint.get("after_step_id") or checkpoint.get("step_id") or ""
+            ).strip()
+            if not step_id:
+                continue
+            checkpoints_by_step[step_id] = {
+                "step_id": step_id,
+                "title": str(checkpoint.get("title") or step_id).strip(),
+                "status": str(checkpoint.get("status") or "").strip(),
+                "checkpoint_id": str(checkpoint.get("checkpoint_id") or "").strip(),
+            }
     for event in timeline:
         if not isinstance(event, Mapping):
             continue
@@ -18422,6 +18580,171 @@ def _model_followup_pending_plan_requests(
         if len(requests) >= _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS:
             break
     return requests
+
+
+def _model_followup_pending_plan_continuation_requests(
+    followup_context: Mapping[str, Any] | None,
+    completed_tool_requests: Iterable[Mapping[str, Any]],
+    allowed_tools: Iterable[str],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> list[dict[str, Any]]:
+    if not isinstance(followup_context, Mapping):
+        return []
+    steps = [
+        step
+        for step in _model_followup_pending_trace_items(followup_context)
+        if isinstance(step, Mapping)
+    ]
+    if not steps:
+        return []
+    completed_requests = [
+        request for request in completed_tool_requests if isinstance(request, Mapping)
+    ]
+    if not completed_requests:
+        return []
+    completed_step_ids = _model_followup_completed_step_ids(
+        completed_requests,
+        timeline,
+        tool_timeline_start=tool_timeline_start,
+    )
+    if not completed_step_ids:
+        return []
+    last_completed_index = _model_followup_last_completed_step_index(
+        completed_requests,
+        steps,
+        timeline,
+        tool_timeline_start=tool_timeline_start,
+    )
+    if last_completed_index < 0:
+        return []
+    completed_step_ids.update(
+        _model_followup_completed_step_ids_from_timeline(
+            timeline,
+            steps,
+        )
+    )
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    planning_reason = str(
+        followup_context.get("planning_reason") or "planner_followup_pending_plan"
+    ).strip()
+    requests: list[dict[str, Any]] = []
+    for step in steps[last_completed_index + 1 :]:
+        step_id = str(step.get("step_id") or "").strip()
+        if step_id and step_id in completed_step_ids:
+            continue
+        dependencies = _string_list(step.get("depends_on"))
+        if any(dependency not in completed_step_ids for dependency in dependencies):
+            break
+        request = _model_followup_pending_plan_request(
+            step,
+            allowed,
+            planning_reason=planning_reason,
+            followup_context=followup_context,
+        )
+        if not request:
+            break
+        _attach_model_followup_pending_plan_trace_metadata(
+            request,
+            step,
+            followup_context,
+        )
+        request = _pending_plan_request_with_timeline_resolved_app(
+            request,
+            step,
+            followup_context,
+            timeline,
+        )
+        requests.append(request)
+        if len(requests) >= _MODEL_FOLLOWUP_MAX_AUTO_PENDING_REQUESTS:
+            break
+    return requests
+
+
+def _model_followup_completed_step_ids(
+    completed_tool_requests: Iterable[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> set[str]:
+    completed: set[str] = set()
+    for request in completed_tool_requests:
+        if not isinstance(request, Mapping):
+            continue
+        if not _runtime_planner_tool_request_completed(
+            request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        ):
+            continue
+        step_id = str(
+            request.get("step_id") or request.get("planner_step_id") or ""
+        ).strip()
+        if step_id:
+            completed.add(step_id)
+    return completed
+
+
+def _model_followup_last_completed_step_index(
+    completed_tool_requests: Iterable[Mapping[str, Any]],
+    steps: list[Mapping[str, Any]],
+    timeline: list[dict[str, Any]],
+    *,
+    tool_timeline_start: int,
+) -> int:
+    last_index = -1
+    for request in completed_tool_requests:
+        if not isinstance(request, Mapping):
+            continue
+        if not _runtime_planner_tool_request_completed(
+            request,
+            timeline,
+            tool_timeline_start=tool_timeline_start,
+        ):
+            continue
+        step_index, _step = _next_matching_model_followup_pending_step(
+            request,
+            steps,
+            start_index=0,
+        )
+        if step_index >= 0:
+            last_index = max(last_index, step_index)
+    return last_index
+
+
+def _model_followup_completed_step_ids_from_timeline(
+    timeline: list[dict[str, Any]],
+    steps: list[Mapping[str, Any]],
+) -> set[str]:
+    known_steps = {
+        str(step.get("step_id") or "").strip()
+        for step in steps
+        if str(step.get("step_id") or "").strip()
+    }
+    if not known_steps:
+        return set()
+    completed: set[str] = set()
+    for event in timeline:
+        if not isinstance(event, Mapping):
+            continue
+        step_id = str(event.get("step_id") or event.get("planner_step_id") or "").strip()
+        if not step_id or step_id not in known_steps:
+            continue
+        event_type = str(event.get("event") or event.get("event_type") or "").strip()
+        if event_type in {
+            "agent.task.todo.updated",
+            "agent.task.checkpoint.updated",
+            "agent.task.workspace_item.updated",
+        } and str(event.get("status") or "").strip() == "completed":
+            completed.add(step_id)
+            continue
+        if event_type != "agent.tool.call":
+            continue
+        result = event.get("result") if isinstance(event.get("result"), Mapping) else {}
+        if result.get("ok") is True and not result.get("approval_required"):
+            completed.add(step_id)
+    return completed
 
 
 def _attach_model_followup_pending_plan_trace_metadata(
