@@ -5,9 +5,13 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any, Protocol
 
-from .contracts import PlannerDecisionSnapshot
+from .contracts import PlannerDecisionSnapshot, TaskCoreSnapshot
 from .planner_projection import planner_run_event_payloads
 from .runtime_execution import runtime_execution_envelope_payload_with_request_context
+from .task_core_event_projection import (
+    task_core_initial_progress_event_payloads,
+    task_core_progress_event_detail,
+)
 
 
 class StartPayloadPlanner(Protocol):
@@ -50,6 +54,7 @@ def start_payload_with_planner_events(
         run_id=_started_run_id(payload),
         after_sequence=_max_event_sequence(payload),
         event_context=event_context,
+        source_payload=payload,
     )
     if not planner_events:
         return payload
@@ -83,6 +88,7 @@ def start_payload_with_planner_decision_events(
         run_id=_started_run_id(payload),
         after_sequence=_max_event_sequence(payload),
         event_context=event_context,
+        source_payload=payload,
     )
     if not planner_events:
         return payload
@@ -202,6 +208,7 @@ def _planner_public_events_for_start_payload(
     run_id: str,
     after_sequence: int,
     event_context: Mapping[str, Any] | None = None,
+    source_payload: Mapping[str, Any] | None = None,
 ) -> list[dict[str, Any]]:
     events: list[dict[str, Any]] = []
     sequence = after_sequence + 1
@@ -215,7 +222,139 @@ def _planner_public_events_for_start_payload(
             event["run_id"] = run_id
         events.append(event)
         sequence += 1
-    return events
+    events = _planner_events_with_execution_task_core(
+        events,
+        source_payload,
+        run_id=run_id,
+    )
+    return _renumber_planner_events(events, after_sequence)
+
+
+def _planner_events_with_execution_task_core(
+    events: list[dict[str, Any]],
+    source_payload: Mapping[str, Any] | None,
+    *,
+    run_id: str,
+) -> list[dict[str, Any]]:
+    task_core = _execution_task_core_from_payload(source_payload)
+    if task_core is None:
+        return events
+
+    context = _task_core_event_context(events)
+    created_event = {
+        "event_type": "agent.task_core.created",
+        "payload": _task_core_created_payload(task_core, context),
+    }
+    if run_id:
+        created_event["run_id"] = run_id
+
+    rebuilt: list[dict[str, Any]] = []
+    inserted_created = False
+    for event in events:
+        event_type = str(event.get("event_type") or event.get("event") or "").strip()
+        if event_type == "agent.task_core.created":
+            replacement = {**event, **created_event}
+            rebuilt.append(replacement)
+            inserted_created = True
+            continue
+        if event_type in {"agent.task.todo.updated", "agent.task.checkpoint.updated"}:
+            continue
+        rebuilt.append(dict(event))
+
+    if not inserted_created:
+        insert_at = _task_core_insert_index(rebuilt)
+        rebuilt = [*rebuilt[:insert_at], created_event, *rebuilt[insert_at:]]
+
+    for event_type, payload in task_core_initial_progress_event_payloads(
+        task_core,
+        source=context["source"],
+        decision_id=context["decision_id"],
+        plan_id=context["plan_id"],
+    ):
+        event = {
+            "event_type": event_type,
+            "detail": task_core_progress_event_detail(event_type, payload),
+            "payload": payload,
+        }
+        if run_id:
+            event["run_id"] = run_id
+        rebuilt.append(event)
+    return rebuilt
+
+
+def _renumber_planner_events(
+    events: list[dict[str, Any]],
+    after_sequence: int,
+) -> list[dict[str, Any]]:
+    renumbered: list[dict[str, Any]] = []
+    for index, event in enumerate(events, start=after_sequence + 1):
+        renumbered.append({**event, "sequence": index})
+    return renumbered
+
+
+def _execution_task_core_from_payload(
+    source_payload: Mapping[str, Any] | None,
+) -> TaskCoreSnapshot | None:
+    if not isinstance(source_payload, Mapping):
+        return None
+    for envelope in _execution_envelope_candidates(source_payload):
+        task_core = envelope.get("task_core")
+        if not isinstance(task_core, Mapping):
+            continue
+        try:
+            return TaskCoreSnapshot.model_validate(task_core)
+        except ValueError:
+            continue
+    return None
+
+
+def _execution_envelope_candidates(
+    source_payload: Mapping[str, Any],
+) -> Iterable[Mapping[str, Any]]:
+    for key in ("runtime_execution_envelope", "yachiyo_execution_envelope", "execution_envelope"):
+        envelope = source_payload.get(key)
+        if isinstance(envelope, Mapping):
+            yield envelope
+    metadata = source_payload.get("metadata")
+    if isinstance(metadata, Mapping):
+        envelope = metadata.get("yachiyo_execution_envelope")
+        if isinstance(envelope, Mapping):
+            yield envelope
+
+
+def _task_core_event_context(events: list[dict[str, Any]]) -> dict[str, str]:
+    context = {"source": "", "decision_id": "", "plan_id": ""}
+    for event in events:
+        payload = event.get("payload") if isinstance(event.get("payload"), Mapping) else {}
+        for key in context:
+            value = str(payload.get(key) or "").strip()
+            if value and not context[key]:
+                context[key] = value
+    return context
+
+
+def _task_core_created_payload(
+    task_core: TaskCoreSnapshot,
+    context: Mapping[str, str],
+) -> dict[str, Any]:
+    return {
+        "source": str(context.get("source") or "").strip(),
+        "decision_id": str(context.get("decision_id") or "").strip(),
+        "plan_id": str(context.get("plan_id") or "").strip(),
+        "core_id": task_core.core_id,
+        "task_core": task_core.model_dump(mode="json"),
+        "todo_count": len(task_core.todos),
+        "checkpoint_count": len(task_core.checkpoints),
+        "replan_signal_count": len(task_core.replan_signals),
+    }
+
+
+def _task_core_insert_index(events: list[dict[str, Any]]) -> int:
+    for index, event in enumerate(events):
+        event_type = str(event.get("event_type") or event.get("event") or "").strip()
+        if event_type == "agent.plan.created":
+            return index + 1
+    return len(events)
 
 
 def _planner_payload_with_event_context(

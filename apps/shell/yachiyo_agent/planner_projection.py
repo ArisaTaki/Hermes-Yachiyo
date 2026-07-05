@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from typing import Any
 
-from .contracts import PlannerDecisionSnapshot
+from .contracts import PlannerDecisionSnapshot, TaskCoreSnapshot
 from .capability_registry import runtime_execution_tool_names
 from .desktop_plan_hints import (
     discovered_app_open_needs_model_followup,
@@ -214,6 +214,24 @@ def _apply_execution_envelope_metadata(
         payload["yachiyo_execution_request_previews"] = execution_previews
     else:
         payload.pop("yachiyo_execution_request_previews", None)
+    task_core = _execution_envelope_task_core(envelope)
+    if task_core is not None:
+        payload["yachiyo_task_core"] = task_core.model_dump(mode="json")
+        task_progress = task_progress_summary_from_task_core(task_core)
+        if task_progress is not None:
+            payload["yachiyo_task_progress"] = task_progress.model_dump(mode="json")
+
+
+def _execution_envelope_task_core(
+    envelope: Mapping[str, Any],
+) -> TaskCoreSnapshot | None:
+    task_core = envelope.get("task_core")
+    if not isinstance(task_core, Mapping):
+        return None
+    try:
+        return TaskCoreSnapshot.model_validate(task_core)
+    except ValueError:
+        return None
 
 
 def _execution_request_previews(

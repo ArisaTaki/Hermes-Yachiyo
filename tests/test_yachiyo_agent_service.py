@@ -1188,17 +1188,19 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     assert metadata["yachiyo_task_progress"]["workspace_id"] == (
         metadata["yachiyo_task_core"]["workspace"]["workspace_id"]
     )
-    assert metadata["yachiyo_task_progress"]["total_todos"] == 2
-    assert metadata["yachiyo_task_progress"]["current_step_id"] == "read-data-source"
+    assert metadata["yachiyo_task_progress"]["total_todos"] == 3
+    assert metadata["yachiyo_task_progress"]["current_step_id"] == "inspect-data-source"
     assert [todo["step_id"] for todo in metadata["yachiyo_task_core"]["todos"]] == [
-        "read-data-source",
-        "analyze-data-file"
+        "inspect-data-source",
+        "run-analysis",
+        "write-analysis-artifact",
     ]
     assert task.task_core is not None
     assert task.task_core.workspace.workspace_id == metadata["yachiyo_task_core"]["workspace"]["workspace_id"]
     assert [todo.step_id for todo in task.task_core.todos] == [
-        "read-data-source",
-        "analyze-data-file",
+        "inspect-data-source",
+        "run-analysis",
+        "write-analysis-artifact",
     ]
     assert task.task_progress is not None
     assert task.task_progress.workspace_id == metadata["yachiyo_task_progress"]["workspace_id"]
@@ -1271,8 +1273,8 @@ def test_yachiyo_agent_service_starts_chat_with_full_runtime_execution_envelope(
     assert task.runtime_debug.latest_approval_status == "pending"
     assert task.runtime_debug.latest_artifact_id == "artifact-1"
     assert task.runtime_debug.latest_artifact_kind == "markdown"
-    assert task.runtime_debug.plan_tools == ["data.analyze"]
-    assert task.runtime_debug.plan_capabilities == ["data.analysis"]
+    assert task.runtime_debug.plan_tools == ["workspace.read", "data.analyze"]
+    assert task.runtime_debug.plan_capabilities == ["file.workspace_read", "data.analysis"]
     assert "planner" in task.runtime_debug.debug_surfaces
     assert "task" in task.runtime_debug.debug_surfaces
 

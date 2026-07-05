@@ -55,6 +55,10 @@ def runtime_execution_envelope_with_status_overlay(
 
     current_step_id = _text(getattr(task_progress, "current_step_id", None))
     active_status = _active_task_request_status(task_progress)
+    active_step_ids = _active_task_request_step_ids(
+        task_progress,
+        fallback_step_id=current_step_id,
+    )
     requests: list[RuntimeExecutionRequestSnapshot] = []
     for request in envelope.requests:
         status = _observed_request_status(
@@ -62,7 +66,7 @@ def runtime_execution_envelope_with_status_overlay(
             tool_calls=tool_items,
             approvals=approval_items,
             replan_recoveries=recovery_items,
-            current_step_id=current_step_id,
+            active_step_ids=active_step_ids,
             active_status=active_status,
         )
         request_update: dict[str, Any] = {}
@@ -101,7 +105,7 @@ def _observed_request_status(
     tool_calls: list[ToolCallSnapshot],
     approvals: list[ApprovalCardSnapshot],
     replan_recoveries: list[ReplanRecoverySnapshot],
-    current_step_id: str,
+    active_step_ids: set[str],
     active_status: str,
 ) -> str:
     approval = _matching_approval(request, approvals)
@@ -118,7 +122,7 @@ def _observed_request_status(
     if tool_call is not None and _text(tool_call.status):
         return _tool_request_status(tool_call.status)
 
-    if active_status and current_step_id and _text(request.step_id) == current_step_id:
+    if active_status and _text(request.step_id) in active_step_ids:
         return active_status
 
     return _text(request.status) or "planned"
@@ -537,6 +541,23 @@ def _active_task_request_status(
     if status in {"waiting_approval", "approval_required"}:
         return "waiting_approval"
     return ""
+
+
+def _active_task_request_step_ids(
+    task_progress: TaskProgressSummarySnapshot | None,
+    *,
+    fallback_step_id: str,
+) -> set[str]:
+    status = _text(getattr(task_progress, "status", None))
+    if status in {"waiting_approval", "approval_required"}:
+        approval_step_ids = {
+            _text(item)
+            for item in getattr(task_progress, "approval_step_ids", []) or []
+            if _text(item)
+        }
+        if approval_step_ids:
+            return approval_step_ids
+    return {_text(fallback_step_id)} if _text(fallback_step_id) else set()
 
 
 def _preferred_task_progress(
