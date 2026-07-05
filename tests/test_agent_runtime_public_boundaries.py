@@ -77,6 +77,26 @@ def test_tools_package_exports_broker_policy_and_dispatch_boundaries() -> None:
     assert RuntimePolicyCompiler.default_tool_policy("coding")["approval_required"]["terminal.run"] is True
 
 
+def test_planner_core_tools_are_registered_for_dispatch() -> None:
+    planner_core_tools = {
+        "workspace.list",
+        "workspace.read",
+        "data.analyze",
+        "artifact.write",
+        "terminal.run",
+        "python.run",
+        "desktop.list_apps",
+        "app.open",
+        "desktop.active_window",
+        "desktop.ui_elements",
+        "app.open_and_safe_shortcut",
+        "app.open_and_safe_type_text",
+        "app.open_and_click_ui_element",
+    }
+
+    assert planner_core_tools <= set(TOOL_DISPATCH_REGISTRY)
+
+
 def test_desktop_operation_aliases_dispatch_to_stable_runtime_tools() -> None:
     class FakeBroker:
         def __init__(self) -> None:
