@@ -3686,6 +3686,20 @@ class RuntimeCustomApiAgentLoop:
                     append_run_event=self._append_run_event,
                     run_id=run_id,
                 )
+            _append_runtime_task_verification_target_progress_events(
+                _runtime_planner_verification_targets(
+                    step,
+                    checkpoints,
+                    todo_by_step,
+                    checkpoints_by_step,
+                ),
+                base_payload,
+                result,
+                timeline=timeline,
+                timeline_factory=self._timeline,
+                append_run_event=self._append_run_event,
+                run_id=run_id,
+            )
 
     def _record_model_followup_pending_plan_progress_events(
         self,
@@ -3924,6 +3938,20 @@ class RuntimeCustomApiAgentLoop:
                     append_run_event=self._append_run_event,
                     run_id=run_id,
                 )
+            _append_runtime_task_verification_target_progress_events(
+                _model_followup_verification_targets(
+                    request,
+                    checkpoints,
+                    todos_by_step,
+                    checkpoints_by_step,
+                ),
+                base_payload,
+                result,
+                timeline=timeline,
+                timeline_factory=self._timeline,
+                append_run_event=self._append_run_event,
+                run_id=run_id,
+            )
 
     def _record_unavailable_desktop_intent(
         self,
@@ -10332,6 +10360,295 @@ def _task_progress_mapping_requires_post_action_verification(value: Any) -> bool
         if isinstance(nested, Mapping) and nested.get("requires_post_action_verification") is True:
             return True
     return False
+
+
+def _runtime_planner_verification_targets(
+    step: Any,
+    checkpoints: Iterable[Any],
+    todos_by_step: Mapping[str, Any],
+    checkpoints_by_step: Mapping[str, list[Any]],
+) -> list[dict[str, Any]]:
+    target_step_ids = _task_progress_verified_step_ids(step, *list(checkpoints))
+    targets: list[dict[str, Any]] = []
+    for target_step_id in target_step_ids:
+        target: dict[str, Any] = {"step_id": target_step_id}
+        todo = todos_by_step.get(target_step_id)
+        if _task_progress_has_value(todo):
+            target["todo"] = todo
+        target_checkpoints = checkpoints_by_step.get(target_step_id, [])
+        if target_checkpoints:
+            target["checkpoints"] = list(target_checkpoints)
+        if len(target) > 1:
+            targets.append(target)
+    return targets
+
+
+def _model_followup_verification_targets(
+    request: Mapping[str, Any],
+    checkpoints: Iterable[Mapping[str, Any]],
+    todos_by_step: Mapping[str, Mapping[str, Any]],
+    checkpoints_by_step: Mapping[str, list[Mapping[str, Any]]],
+) -> list[dict[str, Any]]:
+    explicit_targets = _mapping_list(request.get("task_verification_targets"))
+    if not explicit_targets:
+        explicit_targets = _mapping_list(request.get("verification_targets"))
+    target_step_ids = [
+        str(target.get("step_id") or "").strip()
+        for target in explicit_targets
+        if str(target.get("step_id") or "").strip()
+    ]
+    if not target_step_ids:
+        target_step_ids = _task_progress_verified_step_ids(request, *list(checkpoints))
+    targets: list[dict[str, Any]] = []
+    explicit_by_step = {
+        str(target.get("step_id") or "").strip(): target
+        for target in explicit_targets
+        if str(target.get("step_id") or "").strip()
+    }
+    for target_step_id in target_step_ids:
+        explicit_target = explicit_by_step.get(target_step_id, {})
+        target: dict[str, Any] = {"step_id": target_step_id}
+        todo = (
+            explicit_target.get("todo")
+            if isinstance(explicit_target.get("todo"), Mapping)
+            else todos_by_step.get(target_step_id)
+            or _task_progress_todo_from_target(explicit_target)
+        )
+        if _task_progress_has_value(todo):
+            target["todo"] = todo
+        target_checkpoints = (
+            _mapping_list(explicit_target.get("checkpoints"))
+            or checkpoints_by_step.get(target_step_id, [])
+            or _task_progress_checkpoints_from_target(explicit_target)
+        )
+        if target_checkpoints:
+            target["checkpoints"] = list(target_checkpoints)
+        if len(target) > 1:
+            targets.append(target)
+    return targets
+
+
+def _task_progress_todo_from_target(target: Mapping[str, Any]) -> dict[str, Any]:
+    todo_id = str(target.get("todo_id") or "").strip()
+    step_id = str(target.get("step_id") or "").strip()
+    if not todo_id or not step_id:
+        return {}
+    return {
+        key: value
+        for key, value in {
+            "todo_id": todo_id,
+            "step_id": step_id,
+            "title": str(target.get("todo_title") or target.get("title") or step_id).strip(),
+            "status": str(target.get("status") or "in_progress").strip(),
+            "tool_name": str(target.get("tool_name") or target.get("tool") or "").strip(),
+        }.items()
+        if value
+    }
+
+
+def _task_progress_checkpoints_from_target(target: Mapping[str, Any]) -> list[dict[str, Any]]:
+    checkpoint_ids = _string_list(target.get("checkpoint_ids"))
+    if not checkpoint_ids:
+        return []
+    checkpoint_titles = _string_list(target.get("checkpoint_titles"))
+    step_id = str(target.get("step_id") or "").strip()
+    return [
+        {
+            "checkpoint_id": checkpoint_id,
+            "after_step_id": step_id,
+            "title": (
+                checkpoint_titles[index]
+                if index < len(checkpoint_titles)
+                else checkpoint_id
+            ),
+            "status": "ready",
+        }
+        for index, checkpoint_id in enumerate(checkpoint_ids)
+    ]
+
+
+def _task_progress_verified_step_ids(*values: Any) -> list[str]:
+    ids: list[str] = []
+    for value in values:
+        for step_id in _string_list(_task_progress_nested_value(value, "verified_step_ids")):
+            ids.append(step_id)
+    if ids:
+        return _ordered_text_list(ids)
+    if _task_progress_runtime_stage(*values) != "verify":
+        return []
+    for value in values:
+        depends_on = (
+            value.get("depends_on")
+            if isinstance(value, Mapping)
+            else getattr(value, "depends_on", None)
+        )
+        for step_id in _string_list(depends_on):
+            ids.append(step_id)
+    return _ordered_text_list(ids)
+
+
+def _task_progress_runtime_stage(*values: Any) -> str:
+    for value in values:
+        stage = str(_task_progress_nested_value(value, "runtime_stage") or "").strip()
+        if stage:
+            return stage
+    return ""
+
+
+def _task_progress_nested_value(value: Any, key: str) -> Any:
+    if isinstance(value, Mapping):
+        if value.get(key) not in (None, "", [], {}):
+            return value.get(key)
+        for nested_key in ("metadata", "payload", "checkpoint_policy", "desktop_loop"):
+            nested = value.get(nested_key)
+            if isinstance(nested, Mapping) and nested.get(key) not in (None, "", [], {}):
+                return nested.get(key)
+        return None
+    raw_value = getattr(value, key, None)
+    if raw_value not in (None, "", [], {}):
+        return raw_value
+    for attr in ("metadata", "payload", "checkpoint_policy", "desktop_loop"):
+        nested = getattr(value, attr, None)
+        if isinstance(nested, Mapping) and nested.get(key) not in (None, "", [], {}):
+            return nested.get(key)
+    return None
+
+
+def _append_runtime_task_verification_target_progress_events(
+    targets: Iterable[Mapping[str, Any]],
+    base_payload: Mapping[str, Any],
+    result: Mapping[str, Any],
+    *,
+    timeline: list[dict[str, Any]],
+    timeline_factory: Callable[..., dict[str, Any]],
+    append_run_event: Callable[[str, str, dict[str, Any]], Any] | None,
+    run_id: str,
+) -> None:
+    target_todo_status = _task_verification_target_todo_status(result)
+    target_checkpoint_status = _task_verification_target_checkpoint_status(result)
+    verification_status = _task_verification_target_status(result)
+    verify_step_id = str(base_payload.get("step_id") or "").strip()
+    verify_tool = str(base_payload.get("tool") or "").strip()
+    for target in targets:
+        target_step_id = str(target.get("step_id") or "").strip()
+        if not target_step_id:
+            continue
+        target_base_payload = {
+            **dict(base_payload),
+            "step_id": target_step_id,
+            "verified_by_step_id": verify_step_id,
+            "verification_tool": verify_tool,
+            "verification_status": verification_status,
+            "verification_result": _task_progress_result_preview(result),
+        }
+        todo = target.get("todo")
+        if _task_progress_has_value(todo):
+            todo_payload = _snapshot_payload(todo)
+            todo_payload["status"] = target_todo_status
+            _task_progress_apply_nested_context(
+                todo_payload,
+                "metadata",
+                target_base_payload,
+            )
+            payload = {
+                **target_base_payload,
+                "todo_id": _task_progress_text(todo, "todo_id"),
+                "status": target_todo_status,
+                "previous_status": _task_progress_text(todo, "status") or "pending",
+                "todo": todo_payload,
+            }
+            _append_runtime_task_progress_event(
+                "agent.task.todo.updated",
+                _task_progress_text(todo, "title") or target_step_id,
+                payload,
+                timeline=timeline,
+                timeline_factory=timeline_factory,
+                append_run_event=append_run_event,
+                run_id=run_id,
+            )
+        for checkpoint in list(target.get("checkpoints") or []):
+            if not _task_progress_has_value(checkpoint):
+                continue
+            checkpoint_payload = _snapshot_payload(checkpoint)
+            checkpoint_payload["status"] = target_checkpoint_status
+            _task_progress_apply_nested_context(
+                checkpoint_payload,
+                "payload",
+                target_base_payload,
+            )
+            payload = {
+                **target_base_payload,
+                "checkpoint_id": _task_progress_text(checkpoint, "checkpoint_id"),
+                "status": target_checkpoint_status,
+                "previous_status": _task_progress_text(checkpoint, "status") or "planned",
+                "checkpoint": checkpoint_payload,
+            }
+            _append_runtime_task_progress_event(
+                "agent.task.checkpoint.updated",
+                _task_progress_text(checkpoint, "title") or target_step_id,
+                payload,
+                timeline=timeline,
+                timeline_factory=timeline_factory,
+                append_run_event=append_run_event,
+                run_id=run_id,
+            )
+
+
+def _task_verification_target_todo_status(result: Mapping[str, Any]) -> str:
+    if not isinstance(result, Mapping):
+        return "blocked"
+    if result.get("approval_required") or result.get("verification_failed") is True:
+        return "blocked"
+    return "completed" if result.get("ok") is True else "blocked"
+
+
+def _task_verification_target_checkpoint_status(result: Mapping[str, Any]) -> str:
+    if isinstance(result, Mapping) and result.get("approval_required"):
+        return "waiting_approval"
+    if isinstance(result, Mapping) and result.get("verification_failed") is True:
+        return "blocked"
+    return "completed" if isinstance(result, Mapping) and result.get("ok") is True else "blocked"
+
+
+def _task_verification_target_status(result: Mapping[str, Any]) -> str:
+    if isinstance(result, Mapping) and result.get("approval_required"):
+        return "waiting_approval"
+    if isinstance(result, Mapping) and result.get("verification_failed") is True:
+        return "verification_failed"
+    return "verified" if isinstance(result, Mapping) and result.get("ok") is True else "verification_failed"
+
+
+def _task_progress_apply_nested_context(
+    payload: dict[str, Any],
+    key: str,
+    source: Mapping[str, Any],
+) -> None:
+    nested = payload.get(key) if isinstance(payload.get(key), Mapping) else {}
+    payload[key] = {**dict(nested), **_task_progress_nested_context(source)}
+
+
+def _task_progress_nested_context(source: Mapping[str, Any]) -> dict[str, Any]:
+    context: dict[str, Any] = {}
+    for key in (
+        "verification_status",
+        "verified_by_step_id",
+        "verification_tool",
+        "verification_result",
+    ):
+        value = source.get(key)
+        if value not in (None, "", [], {}):
+            context[key] = dict(value) if isinstance(value, Mapping) else value
+    return context
+
+
+def _task_progress_text(value: Any, key: str) -> str:
+    if isinstance(value, Mapping):
+        return str(value.get(key) or "").strip()
+    return str(getattr(value, key, "") or "").strip()
+
+
+def _task_progress_has_value(value: Any) -> bool:
+    return value not in (None, "", [], {})
 
 
 def _task_progress_result_preview(result: Mapping[str, Any]) -> dict[str, Any]:

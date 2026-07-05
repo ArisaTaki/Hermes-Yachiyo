@@ -24574,6 +24574,71 @@ def test_runtime_planner_task_progress_keeps_operate_step_pending_verification()
     ] is True
 
 
+def test_runtime_planner_verify_step_completes_verified_operate_step() -> None:
+    decision = RuntimePlanner().decision(
+        "在 Notion 点击 New Page",
+        allowed_tools=[
+            "desktop.inspect_app",
+            "app.focus_and_click_ui_element",
+            "desktop.ui_elements",
+        ],
+    )
+    loop = _private_runtime_loop()
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "app.focus_and_click_ui_element",
+            input_preview={"app_name": "Notion", "target": "New Page"},
+            result={"ok": True, "summary": "clicked"},
+            status="completed",
+        )
+    ]
+    loop._record_runtime_planner_task_progress_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-click-verify-completes-target",
+    )
+    verify_start = len(timeline)
+    timeline.append(
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            input_preview={"app_name": "Notion"},
+            result={"ok": True, "summary": "New Page is visible"},
+            status="completed",
+        )
+    )
+
+    loop._record_runtime_planner_task_progress_events(
+        decision,
+        timeline=timeline,
+        tool_timeline_start=verify_start,
+        run_id="run-click-verify-completes-target",
+    )
+
+    completed_todo = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["step_id"] == "operate-foreground-ui"
+        and event["status"] == "completed"
+    ][0]
+    completed_checkpoint = [
+        event
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event["step_id"] == "operate-foreground-ui"
+        and event["status"] == "completed"
+    ][0]
+    assert completed_todo["verified_by_step_id"] == "verify-desktop-result"
+    assert completed_todo["verification_tool"] == "desktop.ui_elements"
+    assert completed_todo["todo"]["metadata"]["verification_status"] == "verified"
+    assert completed_checkpoint["checkpoint"]["payload"]["verification_status"] == (
+        "verified"
+    )
+
+
 def test_model_followup_task_progress_keeps_operate_step_pending_verification() -> None:
     loop = _private_runtime_loop()
     followup_context = {
@@ -24642,6 +24707,81 @@ def test_model_followup_task_progress_keeps_operate_step_pending_verification() 
     )
     assert todo_event["status"] == "in_progress"
     assert checkpoint_event["status"] == "ready"
+
+
+def test_model_followup_verify_step_completes_explicit_target() -> None:
+    loop = _private_runtime_loop()
+    target_todo = {
+        "todo_id": "todo-followup-click",
+        "step_id": "operate-foreground-ui",
+        "title": "Click New Page",
+        "status": "in_progress",
+        "tool_name": "app.focus_and_click_ui_element",
+    }
+    target_checkpoint = {
+        "checkpoint_id": "checkpoint-followup-click",
+        "after_step_id": "operate-foreground-ui",
+        "title": "Click awaits verification",
+        "status": "ready",
+    }
+    followup_context = {
+        "decision_id": "decision-followup-click",
+        "plan_id": "plan-followup-click",
+        "task_core": {
+            "core_id": "task-core-followup-click",
+            "workspace": {"workspace_id": "task-workspace-followup-click"},
+            "todos": [target_todo],
+            "checkpoints": [target_checkpoint],
+        },
+    }
+    requests = [
+        {
+            "tool": "desktop.ui_elements",
+            "step_id": "verify-desktop-result",
+            "runtime_stage": "verify",
+            "task_verification_targets": [
+                {
+                    "step_id": "operate-foreground-ui",
+                    "todo": target_todo,
+                    "checkpoints": [target_checkpoint],
+                }
+            ],
+        }
+    ]
+    timeline = [
+        _timeline(
+            "agent.tool.call",
+            "desktop.ui_elements",
+            input_preview={"app_name": "Notion"},
+            result={"ok": True, "summary": "New Page is visible"},
+            status="completed",
+        )
+    ]
+
+    loop._record_model_followup_pending_plan_progress_events(
+        followup_context,
+        requests,
+        timeline=timeline,
+        tool_timeline_start=0,
+        run_id="run-followup-verify-completes-target",
+    )
+
+    completed_todo = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.task.todo.updated"
+        and event["step_id"] == "operate-foreground-ui"
+    )
+    completed_checkpoint = next(
+        event
+        for event in timeline
+        if event["event"] == "agent.task.checkpoint.updated"
+        and event["step_id"] == "operate-foreground-ui"
+    )
+    assert completed_todo["status"] == "completed"
+    assert completed_todo["verified_by_step_id"] == "verify-desktop-result"
+    assert completed_todo["verification_tool"] == "desktop.ui_elements"
+    assert completed_checkpoint["status"] == "completed"
 
 
 def test_auto_replan_fallback_recovery_reuses_safe_file_inputs() -> None:
