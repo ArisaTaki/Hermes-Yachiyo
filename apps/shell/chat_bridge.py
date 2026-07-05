@@ -504,6 +504,12 @@ class ChatBridge:
             allowed_tools=planner_allowed_tools,
         )
         if desktop_candidates:
+            agent_task = self._agent_task_snapshot_for_quick_message(
+                task_id,
+                has_desktop_intent=True,
+            )
+            if agent_task is not None:
+                return {**result, "agent_task": agent_task}
             executed_task = self._execute_yachiyo_desktop_quick_task(
                 task_id,
                 text,

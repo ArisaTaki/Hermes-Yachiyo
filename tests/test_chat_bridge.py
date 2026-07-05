@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import time
 from datetime import date, timedelta
 from types import SimpleNamespace
 from typing import Any
@@ -273,6 +274,15 @@ def test_chat_bridge_quick_message_returns_agent_task_snapshot_for_lightweight_e
         store.close()
 
 
+def _wait_for_agent_run(service: AgentRuntimeService, run_id: str) -> dict:
+    for _ in range(50):
+        run = service.get_run(run_id)
+        if run["status"] != "running":
+            return run
+        time.sleep(0.05)
+    return service.get_run(run_id)
+
+
 def test_chat_bridge_agent_session_quick_message_uses_daily_desktop_overlay_for_lightweight_entrypoints(tmp_path, monkeypatch):
     for mode in ("bubble", "live2d"):
         store = ChatStore(db_path=str(tmp_path / f"{mode}-chat.db"))
@@ -354,6 +364,195 @@ def test_chat_bridge_agent_session_quick_message_uses_daily_desktop_overlay_for_
             assert user.metadata["daily_desktop_tool"] == "media.music_app_open_and_play"
         finally:
             store.close()
+
+
+def test_chat_bridge_agent_session_executes_daily_desktop_followup_without_model(
+    tmp_path,
+    monkeypatch,
+):
+    store = ChatStore(db_path=str(tmp_path / "chat.db"))
+    runtime = _runtime_with_chat_store(store)
+    service = AgentRuntimeService(
+        db_path=tmp_path / "agent-runtime.db",
+        workspace_dir=tmp_path / "runtime",
+        credential_store=MemoryCredentialStore(),
+        seed_templates=False,
+    )
+    service.create_agent(
+        {
+            "name": "Native Agent",
+            "model_mode": "profile",
+            "model_profile_id": "",
+            "tool_policy": {
+                "allowed_tools": ["workspace.read"],
+                "approval_required": {},
+            },
+        }
+    )
+    runtime.agent_runtime_service = service
+    play_calls: list[str] = []
+    list_app_queries: list[str] = []
+    shortcut_calls: list[tuple[str, str]] = []
+    typed_text: list[str] = []
+    submitted_searches: list[bool] = []
+
+    def fake_music_app_open_and_play(app_name: str) -> dict:
+        play_calls.append(app_name)
+        return {
+            "ok": True,
+            "action": "media.music_app_open_and_play",
+            "summary": f"Opened {app_name} and started playback",
+            "data": {
+                "app_name": app_name,
+                "player_state": "playing",
+            },
+        }
+
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict:
+        list_app_queries.append(str(query or ""))
+        return {
+            "ok": True,
+            "action": "desktop.list_apps",
+            "summary": "Installed apps matching Music: Music",
+            "data": {
+                "query": str(query or ""),
+                "apps": [
+                    {
+                        "name": "Music",
+                        "path": "/Applications/Music.app",
+                        "match_score": 100,
+                    }
+                ],
+                "count": 1,
+                "total_count": 1,
+                "truncated": False,
+                "best_match": {
+                    "name": "Music",
+                    "path": "/Applications/Music.app",
+                    "match_score": 100,
+                },
+                "resolution": {
+                    "resolved_app_name": "Music",
+                    "matched_name": "Music",
+                    "matched_name_source": "desktop.list_apps",
+                    "confidence": "high",
+                },
+            },
+            "permission_error": False,
+            "fallback_used": False,
+        }
+
+    def fake_app_open(app_name: str) -> dict:
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {"app_name": app_name},
+        }
+
+    def fake_app_focus(app_name: str) -> dict:
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {"app_name": app_name, "focus_verified": True},
+        }
+
+    def fake_safe_shortcut(action: str) -> dict:
+        shortcut_calls.append(("Music", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": f"Ran {action}",
+            "data": {"shortcut_action": action},
+        }
+
+    def fake_safe_type_text(text: str) -> dict:
+        typed_text.append(text)
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": f"Typed {len(text)} chars",
+            "data": {"text": text},
+        }
+
+    def fake_search_submit() -> dict:
+        submitted_searches.append(True)
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "summary": "Submitted search",
+            "data": {"submitted": True},
+        }
+
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.list_apps",
+        fake_list_apps,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.app_open",
+        fake_app_open,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.app_focus",
+        fake_app_focus,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
+        fake_safe_shortcut,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_type_text",
+        fake_safe_type_text,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_search_submit",
+        fake_search_submit,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.music_app_open_and_play",
+        fake_music_app_open_and_play,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.get_model_profile_service",
+        lambda: _FakeNoDefaultProfileService(),
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent_runtime.openai_compatible_chat_message",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("agent daily desktop follow-up should not call model")
+        ),
+    )
+    bridge = ChatBridge(runtime)
+    try:
+        first = bridge.send_quick_message("@Native Agent 能否帮我播放 Apple Music?")
+        assert first["ok"] is True
+        first_run = _wait_for_agent_run(service, first["run_id"])
+        assert first_run["status"] == "completed"
+
+        second = bridge.send_quick_message("超时空辉夜姬吧")
+        assert second["ok"] is True
+        second_run = _wait_for_agent_run(service, second["run_id"])
+        second_events = service.list_run_events(second["run_id"])["events"]
+        second_event_types = [event["event_type"] for event in second_events]
+        second_user = [
+            message for message in runtime.chat_session.get_messages() if message.role == "user"
+        ][-1]
+
+        assert play_calls == ["Music", "Music"]
+        assert "Music" in list_app_queries
+        assert shortcut_calls == [("Music", "find")]
+        assert typed_text == ["超时空辉夜姬"]
+        assert submitted_searches == [True]
+        assert second_run["status"] == "completed"
+        assert "agent.intent.selected" in second_event_types
+        assert "agent.desktop.intent_planned" in second_event_types
+        assert "agent.tool.call" in second_event_types
+        assert "model.request.started" not in second_event_types
+        assert second_user.metadata["daily_desktop_intent"] is True
+        assert "media.music_app_open_and_play" in second_user.metadata["daily_desktop_tools"]
+    finally:
+        store.close()
 
 
 def test_chat_bridge_quick_message_plans_structured_recovery_for_lightweight_entrypoints(tmp_path):

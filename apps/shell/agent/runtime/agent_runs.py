@@ -388,12 +388,16 @@ def _with_entrypoint_runtime_planner(agent: dict[str, Any], payload: dict[str, A
     if not payload.get("runtime_planner_entrypoint"):
         return agent
     user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
-    if _looks_like_daily_desktop_howto_question(user_goal):
+    planning_goal = _payload_daily_desktop_planning_context(payload) or user_goal
+    if (
+        _looks_like_daily_desktop_howto_question(user_goal)
+        or _looks_like_daily_desktop_howto_question(planning_goal)
+    ):
         return agent
     policy = agent.get("tool_policy") if isinstance(agent.get("tool_policy"), dict) else {}
     allowed = _string_list(policy.get("allowed_tools"))
     _decision, direct_requests = planner_first_direct_decision_and_tool_requests(
-        user_goal,
+        planning_goal,
         allowed,
     )
     if not direct_requests:
@@ -401,6 +405,7 @@ def _with_entrypoint_runtime_planner(agent: dict[str, Any], payload: dict[str, A
     return {
         **agent,
         "_runtime_planner_entrypoint": True,
+        "_runtime_planner_entrypoint_context": planning_goal,
     }
 
 
@@ -408,12 +413,16 @@ def _with_daily_desktop_policy_overlay(agent: dict[str, Any], payload: dict[str,
     if not payload.get("daily_desktop_policy_overlay"):
         return agent
     user_goal = str(payload.get("user_goal") or payload.get("goal") or "").strip()
-    if _looks_like_daily_desktop_howto_question(user_goal):
+    planning_goal = _payload_daily_desktop_planning_context(payload) or user_goal
+    if (
+        _looks_like_daily_desktop_howto_question(user_goal)
+        or _looks_like_daily_desktop_howto_question(planning_goal)
+    ):
         return agent
     direct_requests = _payload_direct_tool_requests(payload)
     if not direct_requests:
         _decision, direct_requests = planner_first_direct_decision_and_tool_requests(
-            user_goal,
+            planning_goal,
             list(DAILY_DESKTOP_TOOL_NAMES),
             legacy_tool_requests=daily_desktop_entrypoint_tool_requests,
         )
@@ -431,6 +440,10 @@ def _with_daily_desktop_policy_overlay(agent: dict[str, Any], payload: dict[str,
             "approval_required": approval_required,
         },
     }
+
+
+def _payload_daily_desktop_planning_context(payload: dict[str, Any]) -> str:
+    return str(payload.get("daily_desktop_planning_context") or "").strip()
 
 
 def _agent_run_execution_options(payload: dict[str, Any]) -> dict[str, Any]:

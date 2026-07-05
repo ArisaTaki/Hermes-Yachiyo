@@ -769,6 +769,7 @@ class ChatAPI:
         task_id: str,
         prompt: str,
         metadata: dict[str, Any] | None = None,
+        direct_tool_requests: list[dict[str, Any]] | None = None,
     ) -> dict[str, Any] | None:
         try:
             service = self._agent_runtime_service()
@@ -783,6 +784,7 @@ class ChatAPI:
                 conversation_id=str(getattr(self._session, "session_id", "") or ""),
                 prompt=prompt,
                 metadata=metadata,
+                direct_tool_requests=direct_tool_requests,
             )
             if payload is None:
                 return None
@@ -1280,7 +1282,7 @@ class ChatAPI:
     ) -> str:
         """Resolve short daily desktop follow-ups into executable intents."""
 
-        if current_context.get("conversation_kind") != "main":
+        if current_context.get("conversation_kind") not in {"main", "agent"}:
             return text
         browser_followup = self._daily_desktop_browser_followup_goal_text(text)
         if browser_followup:
@@ -1293,9 +1295,10 @@ class ChatAPI:
             return text
         if self._planner_first_daily_desktop_requests(text):
             return text
-        if not self._has_recent_daily_desktop_music_context():
+        music_app = self._recent_daily_desktop_music_context_app_name()
+        if not music_app:
             return text
-        return f"播放{query}"
+        return f"用{music_app}播放{query}"
 
     def _daily_desktop_browser_followup_goal_text(self, text: str) -> str:
         candidate = self._daily_desktop_browser_followup_candidate(text)
@@ -1538,6 +1541,9 @@ class ChatAPI:
         return query
 
     def _has_recent_daily_desktop_music_context(self) -> bool:
+        return bool(self._recent_daily_desktop_music_context_app_name())
+
+    def _recent_daily_desktop_music_context_app_name(self) -> str:
         for message in self._recent_daily_desktop_context_messages(
             _DAILY_DESKTOP_MUSIC_FOLLOWUP_RECENT_LIMIT
         ):
@@ -1546,11 +1552,13 @@ class ChatAPI:
             content = str(getattr(message, "content", "") or "").strip()
             if not content:
                 continue
-            if role == MessageRole.USER.value and self._message_has_daily_desktop_music_intent(content):
-                return True
+            if role == MessageRole.USER.value:
+                app_name = self._message_daily_desktop_music_context_app_name(content)
+                if app_name:
+                    return app_name
             if role == MessageRole.ASSISTANT.value and self._assistant_mentions_music_followup(content):
-                return True
-        return False
+                return "Apple Music"
+        return ""
 
     def _recent_daily_desktop_context_messages(self, limit: int) -> list[Any]:
         try:
@@ -1566,6 +1574,10 @@ class ChatAPI:
 
     @staticmethod
     def _message_has_daily_desktop_music_intent(content: str) -> bool:
+        return bool(ChatAPI._message_daily_desktop_music_context_app_name(content))
+
+    @staticmethod
+    def _message_daily_desktop_music_context_app_name(content: str) -> str:
         requests = ChatAPI._planner_first_daily_desktop_requests(
             ChatAPI._main_model_goal_text(content),
         )
@@ -1576,14 +1588,19 @@ class ChatAPI:
                 "media.apple_music_open_and_play",
                 "media.apple_music_play",
                 "media.apple_music_control",
-                "media.music_app_open_and_play",
-                "media.music_app_control",
                 "media.system_control",
             }:
-                return True
-            if tool in {"app.open", "app.focus", "app.show"} and str(payload.get("app_name") or "") == "Music":
-                return True
-        return False
+                return "Apple Music"
+            if tool in {"media.music_app_open_and_play", "media.music_app_control"}:
+                app_name = str(payload.get("app_name") or "").strip()
+                if app_name and not app_name.startswith("<"):
+                    return "Apple Music" if app_name == "Music" else app_name
+                return "Apple Music"
+            if tool in {"app.open", "app.focus", "app.show"}:
+                app_name = str(payload.get("app_name") or "").strip()
+                if app_name == "Music":
+                    return "Apple Music"
+        return ""
 
     @staticmethod
     def _assistant_mentions_music_followup(content: str) -> bool:
@@ -1814,6 +1831,7 @@ class ChatAPI:
                     task_id=task_id,
                     prompt=task_text,
                     metadata=user_metadata,
+                    direct_tool_requests=daily_desktop_requests,
                 )
             direct_planner_orchestration_task: dict[str, Any] | None = None
             if direct_planner_orchestration_intent and direct_daily_desktop_task is None:
@@ -2141,6 +2159,7 @@ class ChatAPI:
         }
         user_metadata = self._merge_user_metadata(user_metadata, metadata) or {}
         runnable_daily_desktop_requests: list[dict[str, Any]] = []
+        runnable_planning_goal = user_goal
         if (
             runnable.get("kind") == "agent"
             and (
@@ -2148,8 +2167,12 @@ class ChatAPI:
                 or keep_manual_group
             )
         ):
-            runnable_daily_desktop_requests = self._daily_desktop_entrypoint_requests(
+            runnable_planning_goal = self._daily_desktop_followup_goal_text(
                 user_goal,
+                current_context,
+            )
+            runnable_daily_desktop_requests = self._daily_desktop_entrypoint_requests(
+                runnable_planning_goal,
                 metadata=user_metadata,
             )
             if runnable_daily_desktop_requests:
@@ -2318,6 +2341,8 @@ class ChatAPI:
             if runnable_daily_desktop_requests:
                 run_kwargs["daily_desktop_policy_overlay"] = True
                 run_kwargs["runtime_planner_entrypoint"] = True
+                if runnable_planning_goal != user_goal:
+                    run_kwargs["daily_desktop_planning_context"] = runnable_planning_goal
             run = service.create_run_for_runnable_async(**run_kwargs)
         except AgentRuntimeError as exc:
             content = redact_api_error_text(exc)
