@@ -180,7 +180,7 @@ export function ChatComposer({
                   onMouseEnter={() => onMentionHover(index)}
                 >
                   <span className="composer-mention-avatar">
-                    {option.kind === 'workflow' ? (
+                    {option.kind === 'workflow' || option.kind === 'group' ? (
                       <AvatarStack participants={option.participants || []} />
                     ) : (
                       participantAvatarContent(option, option.kind === 'main' ? '月' : 'A')

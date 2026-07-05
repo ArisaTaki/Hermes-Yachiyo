@@ -7527,11 +7527,12 @@ def test_future_task_snapshots_keep_runtime_schedule_fields() -> None:
     assert triggered_payload["run"]["run_id"] == "run-1"
 
 
-def test_start_chat_task_request_keeps_workflow_target_field() -> None:
+def test_start_chat_task_request_keeps_runnable_target_fields() -> None:
     request = StartChatTaskRequest(
         prompt="Build report",
         conversation_id="chat-1",
         workflow_id="workflow-1",
+        group_id="group-1",
         metadata={"client_task_id": "task-workflow-1"},
     )
 
@@ -7541,6 +7542,7 @@ def test_start_chat_task_request_keeps_workflow_target_field() -> None:
         "prompt": "Build report",
         "conversation_id": "chat-1",
         "workflow_id": "workflow-1",
+        "group_id": "group-1",
         "metadata": {"client_task_id": "task-workflow-1"},
     }
 

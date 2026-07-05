@@ -11,12 +11,12 @@ export type MentionOption = {
   name: string;
   nickname?: string;
   avatar_url?: string;
-  kind: 'main' | 'agent' | 'workflow';
+  kind: 'main' | 'agent' | 'workflow' | 'group';
   participants?: MentionParticipant[];
 };
 
 export type PublicTaskMentionTarget = MentionOption & {
-  kind: 'agent' | 'workflow';
+  kind: 'agent' | 'workflow' | 'group';
 };
 
 export type MentionRunnable = {
@@ -97,6 +97,9 @@ export function allMentionOptions(
     ...runnables
       .filter((item) => item.kind === 'workflow')
       .map(mentionOptionFromRunnable),
+    ...runnables
+      .filter((item) => item.kind === 'group')
+      .map(mentionOptionFromRunnable),
   ];
   return options;
 }
@@ -106,6 +109,10 @@ export function mentionKindLabel(option: MentionOption) {
   if (option.kind === 'workflow') {
     const count = option.participants?.length || 0;
     return count ? `Workflow · ${count} Agents` : 'Workflow';
+  }
+  if (option.kind === 'group') {
+    const count = option.participants?.length || 0;
+    return count ? `Group · ${count} Agents` : 'Group';
   }
   return 'Agent';
 }
@@ -188,7 +195,7 @@ function mentionOptionFromRunnable(item: MentionRunnable): MentionOption {
     name: item.name,
     nickname: item.nickname,
     avatar_url: item.avatar_url,
-    kind: item.kind as 'agent' | 'workflow',
+    kind: item.kind as 'agent' | 'workflow' | 'group',
     participants: (item.participants || []).map((participant) => ({
       id: participant.id,
       name: participant.name,

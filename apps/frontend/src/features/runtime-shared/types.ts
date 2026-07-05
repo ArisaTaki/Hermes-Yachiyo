@@ -1404,6 +1404,7 @@ export type StartChatTaskRequest = {
   title?: string | null;
   agent_id?: string | null;
   workflow_id?: string | null;
+  group_id?: string | null;
   metadata?: Record<string, unknown>;
 };
 

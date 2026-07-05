@@ -2715,6 +2715,24 @@ def test_yachiyo_agent_service_falls_back_to_runtime_port_without_chat_backed_ta
     assert port.calls[0][0] == "start_chat_task"
 
 
+def test_yachiyo_agent_service_preserves_group_target_when_starting_chat_task() -> None:
+    port = _FakeRuntimePort()
+    starter = _FakeChatTaskStarter()
+    service = YachiyoAgentService(port, chat_task_starter=starter)
+
+    service.start_chat_task(
+        StartChatTaskRequest(
+            prompt="一起整理调研结论",
+            conversation_id="chat-1",
+            group_id="group-1",
+        )
+    )
+
+    assert starter.calls[0]["group_id"] == "group-1"
+    assert port.calls[0][0] == "start_chat_task"
+    assert port.calls[0][1]["group_id"] == "group-1"
+
+
 def test_yachiyo_agent_service_delegates_approval_and_cancel_to_runtime_port() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)

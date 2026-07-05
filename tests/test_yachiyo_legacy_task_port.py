@@ -3053,6 +3053,37 @@ def test_legacy_runtime_port_starts_and_links_chat_workflow_task() -> None:
     ) in runtime.calls
 
 
+def test_legacy_runtime_port_starts_and_links_chat_group_task() -> None:
+    runtime = _FakeRuntime()
+
+    task = LegacyRuntimePort(runtime).start_chat_task(
+        {
+            "prompt": "一起整理调研结论",
+            "conversation_id": "chat-1",
+            "client_task_id": "task-group-1",
+            "group_id": "group-1",
+        }
+    )
+
+    create_call = next(
+        call for call in runtime.calls if call[0] == "create_run_for_runnable_async"
+    )
+    assert task["task_id"] == "task-group-1"
+    assert task["conversation_id"] == "chat-1"
+    assert task["metadata"]["runnable_kind"] == "group"
+    assert task["metadata"]["group_id"] == "group-1"
+    assert task["metadata"]["run_group_id"] == "group-run-1"
+    assert task["open_in_studio_url"] == "#/agents?run_id=run-1&group_run=group-run-1"
+    assert create_call[1]["runnable_id"] == "agent-1"
+    assert create_call[1]["user_goal"] == "一起整理调研结论"
+    assert create_call[1]["runtime_planner_entrypoint"] is True
+    assert create_call[1]["daily_desktop_planning_context"] == "一起整理调研结论"
+    assert (
+        "link_task_run",
+        {"task_id": "task-group-1", "run_id": "run-1", "session_id": "chat-1"},
+    ) in runtime.calls
+
+
 def test_legacy_runtime_port_forwards_runtime_execution_plan_to_workflow_run() -> None:
     runtime = _FakeRuntime()
     request = planner_enriched_chat_request(
@@ -3495,7 +3526,10 @@ class _FakeRuntime:
 
     def create_run_for_runnable_async(self, **payload: Any) -> dict[str, Any]:
         self.calls.append(("create_run_for_runnable_async", payload))
-        return dict(self.runs["run-1"])
+        run = dict(self.runs["run-1"])
+        if "run_group_id" in payload:
+            run["run_group_id"] = payload.get("run_group_id") or "group-run-1"
+        return run
 
     def create_workflow_run(self, payload: dict[str, Any]) -> dict[str, Any]:
         self.calls.append(("create_workflow_run", payload))
@@ -3508,6 +3542,33 @@ class _FakeRuntime:
     def list_run_events(self, run_id: str) -> dict[str, Any]:
         self.calls.append(("list_run_events", run_id))
         return {"events": list(self.runs[run_id]["timeline"])}
+
+    def get_agent(self, agent_id: str) -> dict[str, Any]:
+        return {
+            "agent_id": agent_id,
+            "name": agent_id,
+            "tool_policy": {"allowed_tools": ["workspace.read"], "approval_required": {}},
+        }
+
+    def get_agent_group(self, group_id: str) -> dict[str, Any]:
+        self.calls.append(("get_agent_group", group_id))
+        return {
+            "group_id": group_id,
+            "name": "Research Team",
+            "members": [{"agent_id": "agent-1", "name": "Planner"}],
+            "mode": "parallel",
+            "memory_scope": "shared",
+        }
+
+    def get_run_group(self, run_group_id: str) -> dict[str, Any]:
+        self.calls.append(("get_run_group", run_group_id))
+        return {
+            "run_group_id": run_group_id,
+            "title": "Research Team",
+            "status": "running",
+            "summary": "",
+            "child_run_ids": ["run-1"],
+        }
 
     def read_run_artifact(self, run_id: str, artifact_path: str) -> dict[str, Any]:
         self.calls.append(

@@ -11,7 +11,12 @@ from .desktop_permissions import (
     desktop_permission_missing_by_capability,
     desktop_runtime_blocking_conditions_by_capability,
 )
-from .legacy_groups import chat_group_snapshots, group_definition_from_run_group
+from .legacy_groups import (
+    chat_group_snapshot,
+    chat_group_snapshots,
+    group_definition_from_run_group,
+)
+from .legacy_group_runs import start_legacy_group_run
 from .legacy_runs import LegacyRunPayloadProjector
 from .planner_projection import (
     planner_run_event_payloads,
@@ -269,6 +274,7 @@ class LegacyRuntimePort:
     def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any]:
         prompt = str(request.get("prompt") or request.get("goal") or "").strip()
         workflow_id = str(request.get("workflow_id") or "").strip()
+        group_id = str(request.get("group_id") or request.get("agent_group_id") or "").strip()
         runnable_id = str(
             request.get("agent_id") or request.get("runnable_id") or MAIN_CHAT_AGENT_ID
         )
@@ -289,6 +295,16 @@ class LegacyRuntimePort:
             or metadata.get("client_task_id")
             or ""
         ).strip()
+        if group_id:
+            return self._start_group_chat_task(
+                request,
+                group_id=group_id,
+                prompt=prompt,
+                conversation_id=conversation_id,
+                metadata=metadata,
+                execution_kwargs=execution_kwargs,
+                requested_task_id=requested_task_id,
+            )
         if workflow_id:
             run = self._runtime.create_workflow_run(
                 {
@@ -329,6 +345,73 @@ class LegacyRuntimePort:
                 run = {**run, "task_id": task_id, "session_id": conversation_id}
         return self._projector.chat_task_payload(
             run,
+            conversation_id=conversation_id,
+            runtime=self._runtime,
+        )
+
+    def _start_group_chat_task(
+        self,
+        request: dict[str, Any],
+        *,
+        group_id: str,
+        prompt: str,
+        conversation_id: str,
+        metadata: dict[str, Any],
+        execution_kwargs: dict[str, Any],
+        requested_task_id: str,
+    ) -> dict[str, Any]:
+        group_request = {
+            **request,
+            "group_id": group_id,
+            "objective": prompt,
+            "goal": prompt,
+            "title": request.get("title") or prompt,
+            "client_run_id": request.get("client_run_id") or requested_task_id or None,
+            **execution_kwargs,
+        }
+        start_agent_group_run = getattr(self._runtime, "start_agent_group_run", None)
+        if callable(start_agent_group_run):
+            group_run = start_agent_group_run(group_request)
+        else:
+            group_run = start_legacy_group_run(
+                self._runtime,
+                group_request,
+                get_group=self._get_group_for_run,
+                projector=self._projector,
+            )
+
+        run_group_id = str(
+            group_run.get("run_group_id") or group_run.get("group_run_id") or ""
+        ).strip()
+        run_id = self._first_group_child_run_id(group_run) or run_group_id
+        task_id = requested_task_id or run_id or run_group_id
+        if task_id and run_id:
+            link_task_run = getattr(self._runtime, "link_task_run", None)
+            if callable(link_task_run):
+                try:
+                    link_task_run(task_id=task_id, run_id=run_id, session_id=conversation_id)
+                except Exception:
+                    pass
+
+        payload = {
+            **group_run,
+            "run_id": run_id,
+            "task_id": task_id,
+            "session_id": conversation_id,
+            "conversation_id": conversation_id,
+            "user_goal": prompt,
+            "summary": group_run.get("summary") or group_run.get("final_answer") or "",
+            "artifacts": group_run.get("artifacts") or group_run.get("shared_artifacts") or [],
+            "metadata": {
+                **dict(metadata),
+                "runnable_kind": "group",
+                "group_id": group_id,
+                "group_run_id": group_run.get("group_run_id") or run_group_id,
+                "run_group_id": run_group_id,
+            },
+        }
+        return self._projector.chat_task_payload(
+            payload,
             conversation_id=conversation_id,
             runtime=self._runtime,
         )
@@ -634,6 +717,31 @@ class LegacyRuntimePort:
                 for item in self._payload_items(payload, "run_groups")
             ]
         return []
+
+    def _get_group_for_run(self, group_id: str) -> dict[str, Any]:
+        get_agent_group = getattr(self._runtime, "get_agent_group", None)
+        if callable(get_agent_group):
+            return get_agent_group(group_id)
+
+        chat_group = chat_group_snapshot(group_id, self._runtime)
+        if chat_group is not None:
+            return chat_group
+
+        run_group = self._runtime.get_run_group(group_id)
+        return group_definition_from_run_group(run_group, self._runtime)
+
+    def _first_group_child_run_id(self, group_run: dict[str, Any]) -> str:
+        for item in group_run.get("runs") or []:
+            if not isinstance(item, dict):
+                continue
+            run_id = str(item.get("run_id") or "").strip()
+            if run_id:
+                return run_id
+        for item in group_run.get("child_run_ids") or []:
+            run_id = str(item or "").strip()
+            if run_id:
+                return run_id
+        return ""
 
     def _event_sequence(self, event: dict[str, Any], index: int) -> int:
         try:

@@ -397,6 +397,8 @@ class LegacyChatTaskStarter:
     def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any] | None:
         if str(request.get("workflow_id") or "").strip():
             return None
+        if str(request.get("group_id") or request.get("agent_group_id") or "").strip():
+            return None
         agent_id = str(request.get("agent_id") or request.get("runnable_id") or "").strip()
         if not agent_id:
             agent_id = MAIN_CHAT_AGENT_ID

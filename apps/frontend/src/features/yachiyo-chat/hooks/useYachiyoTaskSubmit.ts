@@ -12,7 +12,7 @@ type StartPublicYachiyoTaskRequest = {
   metadata?: Record<string, unknown>;
   prompt: string;
   runnableId?: string | null;
-  runnableKind?: 'agent' | 'workflow' | 'main';
+  runnableKind?: 'agent' | 'workflow' | 'group' | 'main';
 };
 
 type UseYachiyoTaskSubmitOptions = {
@@ -50,13 +50,22 @@ export function useYachiyoTaskSubmit({
     runnableKind,
   }: StartPublicYachiyoTaskRequest) => {
     try {
-      const runnableLabel = runnableKind === 'workflow' ? 'Workflow' : runnableKind === 'agent' ? 'Agent' : '八千代';
+      const runnableLabel = runnableKind === 'workflow'
+        ? 'Workflow'
+        : runnableKind === 'group'
+          ? 'Group'
+          : runnableKind === 'agent'
+            ? 'Agent'
+            : '八千代';
       const cleanRunnableId = String(runnableId || (runnableKind === 'main' ? MAIN_CHAT_AGENT_ID : '')).trim();
       const task = await startYachiyoTask({
         prompt,
         conversation_id: conversationId,
         ...(runnableKind === 'workflow' && cleanRunnableId
           ? { workflow_id: cleanRunnableId }
+          : {}),
+        ...(runnableKind === 'group' && cleanRunnableId
+          ? { group_id: cleanRunnableId }
           : {}),
         ...((runnableKind === 'agent' || runnableKind === 'main') && cleanRunnableId
           ? { agent_id: cleanRunnableId }
