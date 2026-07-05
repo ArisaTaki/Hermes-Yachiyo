@@ -20,6 +20,7 @@ from .daily_desktop import (
     daily_desktop_entrypoint_requests,
     daily_desktop_planned_timeline,
     daily_desktop_recovery_execution_prompt,
+    direct_browser_entrypoint_requests,
     entrypoint_plan_user_metadata,
     main_chat_entrypoint_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
@@ -1659,6 +1660,9 @@ def _safe_runtime_planner_tool_requests(
             allowed_tools,
             metadata=metadata,
         ) or list(selected_requests)
+        direct_browser_requests = direct_browser_entrypoint_requests(requests, prompt)
+        if direct_browser_requests:
+            requests = direct_browser_requests
         approval_sequence = _runtime_planner_direct_approval_sequence_requests(
             requests,
             allowed_tools,

@@ -48,6 +48,7 @@ from apps.shell.native_capabilities import get_native_image_input_capability
 from apps.shell.yachiyo_agent.daily_desktop import (
     daily_desktop_allowed_tools,
     daily_desktop_runtime_execution_envelope,
+    direct_browser_entrypoint_requests,
     entrypoint_plan_user_metadata,
     main_chat_entrypoint_allowed_tools,
     planner_first_daily_desktop_entrypoint_requests,
@@ -4325,6 +4326,8 @@ class ChatAPI:
             text,
             metadata=metadata,
         ):
+            return True
+        if direct_browser_entrypoint_requests(requests, text):
             return True
         if self._can_direct_execute_deferred_observed_ui(requests):
             return True

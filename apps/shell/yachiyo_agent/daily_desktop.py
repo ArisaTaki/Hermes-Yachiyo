@@ -63,6 +63,20 @@ _ENTRYPOINT_TIMELINE_CONTEXT_KEYS = (
     "task_workspace_items",
     "task_verification_targets",
 )
+_DESKTOP_AGENT_ENTRYPOINT_EXTRA_TOOLS = (
+    "workspace.list",
+    "workspace.read",
+    "data.analyze",
+    "workspace.write_patch",
+    "file.organize",
+    "terminal.run",
+)
+_DIRECT_BROWSER_ENTRYPOINT_TOOLS = frozenset(
+    {
+        "browser.open_url",
+        "browser.open_url_and_extract_text",
+    }
+)
 
 
 def daily_desktop_allowed_tools(
@@ -77,6 +91,64 @@ def daily_desktop_allowed_tools(
     ]
 
 
+def desktop_agent_entrypoint_allowed_tools(
+    allowed_tools: Sequence[str] | None = None,
+) -> list[str]:
+    """Fallback tool boundary for Chat/Bubble/Live2D as desktop agent entrypoints."""
+
+    allowed = daily_desktop_allowed_tools(allowed_tools)
+    result: list[str] = []
+    seen: set[str] = set()
+    for tool in [*allowed, *_DESKTOP_AGENT_ENTRYPOINT_EXTRA_TOOLS]:
+        clean = str(tool or "").strip()
+        if not clean or clean in seen:
+            continue
+        seen.add(clean)
+        result.append(clean)
+    return result
+
+
+def direct_browser_entrypoint_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+    text: str = "",
+) -> list[dict[str, Any]]:
+    """Return direct low-risk browser requests even when artifact tools are available."""
+
+    request_list = [request for request in requests or [] if isinstance(request, Mapping)]
+    if len(request_list) != 1:
+        return []
+    if _looks_like_browser_artifact_request(text):
+        return []
+    request = request_list[0]
+    tool_name = str(request.get("tool") or "").strip()
+    if tool_name not in _DIRECT_BROWSER_ENTRYPOINT_TOOLS:
+        return []
+    if str(request.get("source") or "").strip() != "runtime_planner":
+        return []
+    if str(request.get("planning_reason") or "").strip() != "planner_fallback_web_research":
+        return []
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    if not str(payload.get("url") or "").strip():
+        return []
+    normalized = dict(request)
+    normalized.pop("continue_to_model", None)
+    return [normalized]
+
+
+def _looks_like_browser_artifact_request(text: str) -> bool:
+    value = str(text or "").strip()
+    if not value:
+        return False
+    return bool(
+        re.search(
+            r"(?:报告|文档|文件|产出|输出|导出|保存|生成\s*(?:一份)?\s*(?:报告|文档|文件)|"
+            r"\breport\b|\bartifact\b|\bsave\b|\bexport\b)",
+            value,
+            flags=re.IGNORECASE,
+        )
+    )
+
+
 def main_chat_entrypoint_allowed_tools(
     runtime: Any | None,
     *,
@@ -86,7 +158,7 @@ def main_chat_entrypoint_allowed_tools(
         allowed = policy.get("allowed_tools") if isinstance(policy, Mapping) else None
         if allowed:
             return daily_desktop_allowed_tools(allowed)
-    return daily_desktop_allowed_tools(fallback)
+    return desktop_agent_entrypoint_allowed_tools(fallback)
 
 
 def daily_desktop_entrypoint_requests(

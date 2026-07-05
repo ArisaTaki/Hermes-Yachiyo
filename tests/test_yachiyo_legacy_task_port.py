@@ -9,7 +9,13 @@ from typing import Any
 import pytest
 
 from apps.shell.agent.runtime.errors import AgentRuntimeError
-from apps.shell.yachiyo_agent.daily_desktop import daily_desktop_allowed_tools
+from apps.shell.yachiyo_agent.daily_desktop import (
+    daily_desktop_allowed_tools,
+    desktop_agent_entrypoint_allowed_tools,
+    direct_browser_entrypoint_requests,
+    main_chat_entrypoint_allowed_tools,
+    planner_first_daily_desktop_entrypoint_requests,
+)
 from apps.shell.yachiyo_agent import legacy_ports as legacy_ports_module
 from apps.shell.yachiyo_agent.legacy_ports import (
     LegacyChatTaskStarter,
@@ -27,6 +33,66 @@ from apps.shell.yachiyo_agent.entrypoint_tool_selection import (
 )
 from apps.shell.yachiyo_agent.planner_projection import planner_enriched_chat_request
 from apps.shell.yachiyo_agent.runtime_planner import RuntimePlanner
+
+
+def test_desktop_agent_entrypoint_fallback_includes_analysis_tools() -> None:
+    allowed_tools = desktop_agent_entrypoint_allowed_tools()
+
+    assert "desktop.list_apps" in allowed_tools
+    assert "app.open" in allowed_tools
+    assert "workspace.read" in allowed_tools
+    assert "data.analyze" in allowed_tools
+    assert "terminal.run" in allowed_tools
+    assert len(allowed_tools) == len(set(allowed_tools))
+
+
+def test_main_chat_entrypoint_preserves_explicit_runtime_tool_policy() -> None:
+    class Runtime:
+        @staticmethod
+        def _main_chat_tool_policy() -> dict[str, Any]:
+            return {"allowed_tools": ["workspace.read"]}
+
+    assert main_chat_entrypoint_allowed_tools(Runtime()) == ["workspace.read"]
+
+
+def test_desktop_agent_entrypoint_fallback_routes_data_analysis() -> None:
+    requests = planner_first_daily_desktop_entrypoint_requests(
+        "请分析 data/sales.csv 并输出报告",
+        allowed_tools=desktop_agent_entrypoint_allowed_tools(),
+    )
+
+    assert [request["tool"] for request in requests] == ["data.analyze"]
+    assert requests[0]["input"] == {
+        "path": "data/sales.csv",
+        "artifact_path": "analysis-report.md",
+        "source_kind": "csv",
+        "requested_outputs": ["report"],
+        "artifact_manifest": [{"path": "analysis-report.md", "kind": "markdown"}],
+    }
+
+
+def test_direct_browser_entrypoint_ignores_artifact_followup_for_simple_open() -> None:
+    requests = [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://github.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+            "continue_to_model": True,
+        }
+    ]
+
+    assert direct_browser_entrypoint_requests(requests, "打开 GitHub") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.open_url",
+            "input": {"url": "https://github.com"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_fallback_web_research",
+        }
+    ]
+    assert direct_browser_entrypoint_requests(requests, "调研 GitHub 并输出报告") == []
 
 
 def _recording_legacy_requests(
