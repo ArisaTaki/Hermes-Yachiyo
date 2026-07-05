@@ -73,6 +73,24 @@ def test_desktop_agent_entrypoint_fallback_routes_data_analysis() -> None:
     }
 
 
+def test_desktop_agent_entrypoint_prefetches_report_research_context() -> None:
+    requests = planner_first_daily_desktop_entrypoint_requests(
+        "创建一份竞品分析报告，保存成 markdown",
+        allowed_tools=desktop_agent_entrypoint_allowed_tools(),
+    )
+
+    assert requests == [
+        {
+            "protocol": "json_fallback",
+            "tool": "browser.search",
+            "input": {"query": "竞品分析"},
+            "source": "runtime_planner",
+            "planning_reason": "planner_prefetch_report_context",
+            "continue_to_model": True,
+        }
+    ]
+
+
 def test_direct_browser_entrypoint_ignores_artifact_followup_for_simple_open() -> None:
     requests = [
         {

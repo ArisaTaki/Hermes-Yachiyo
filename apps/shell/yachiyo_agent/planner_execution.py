@@ -1611,6 +1611,13 @@ def _tool_requests_for_decision(
                 planning_reason="planner_prefetch_report_context",
                 allow_unavailable=allow_unavailable_context,
             )
+        research_requests = _report_research_tool_requests(
+            decision,
+            allowed,
+            allow_unavailable=allow_unavailable_context,
+        )
+        if research_requests:
+            return research_requests
         return _context_prefetch_tool_requests(
             decision,
             allowed,
@@ -5514,6 +5521,42 @@ def _web_open_readback_tool_requests(decision: Any, allowed: set[str]) -> list[d
         request["presentation"] = presentation
     if _web_read_request_needs_model_followup(decision, tool_name, presentation):
         request["continue_to_model"] = True
+    return [request]
+
+
+def _report_research_tool_requests(
+    decision: Any,
+    allowed: set[str],
+    *,
+    allow_unavailable: bool = False,
+) -> list[dict[str, Any]]:
+    step = _tool_plan_step(decision, "research-report-context")
+    tool_name = str(getattr(step, "tool_name", "") or "").strip()
+    if not allow_unavailable and not _step_available(step):
+        return []
+    if tool_name not in allowed:
+        return []
+    input_preview = getattr(step, "input_preview", None)
+    payload = dict(input_preview) if isinstance(input_preview, Mapping) else {}
+    request_payload: dict[str, Any]
+    if tool_name == "browser.search":
+        query = str(payload.get("query") or "").strip()
+        if not query:
+            return []
+        request_payload = {"query": query}
+    elif tool_name in {"browser.open_url", "browser.open_url_and_extract_text"}:
+        url = str(payload.get("url") or "").strip()
+        if not url:
+            return []
+        request_payload = {"url": url}
+    else:
+        return []
+    request = _request(
+        tool_name,
+        request_payload,
+        planning_reason="planner_prefetch_report_context",
+    )
+    request["continue_to_model"] = True
     return [request]
 
 
