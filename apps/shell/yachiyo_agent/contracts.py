@@ -1390,6 +1390,7 @@ class ChatRunnableParticipantSnapshot(_PublicSnapshot):
     runnable_id: str
     agent_id: str | None = None
     workflow_id: str | None = None
+    group_id: str | None = None
     kind: Literal["agent", "workflow"]
     name: str
     nickname: str | None = None
@@ -1402,7 +1403,8 @@ class ChatRunnableSnapshot(_PublicSnapshot):
     runnable_id: str
     agent_id: str | None = None
     workflow_id: str | None = None
-    kind: Literal["agent", "workflow"]
+    group_id: str | None = None
+    kind: Literal["agent", "workflow", "group"]
     name: str
     nickname: str | None = None
     description: str | None = None
@@ -1418,6 +1420,7 @@ class ChatRunnableSnapshot(_PublicSnapshot):
 class ChatRunnableCatalogSnapshot(_PublicSnapshot):
     agents: list[ChatRunnableSnapshot] = Field(default_factory=list)
     workflows: list[ChatRunnableSnapshot] = Field(default_factory=list)
+    groups: list[ChatRunnableSnapshot] = Field(default_factory=list)
 
 
 class WorkflowRunSnapshot(RunTimelineSnapshot):

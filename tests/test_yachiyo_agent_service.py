@@ -50,6 +50,15 @@ class _FakeRuntimePort:
                     "edges": [{"source": "start", "target": "review"}],
                 }
             ],
+            "groups": [
+                {
+                    "group_id": "group-1",
+                    "name": "Review group",
+                    "members": [
+                        {"agent_id": "agent-1", "role": "reviewer"},
+                    ],
+                }
+            ],
         }
 
     def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -2408,7 +2417,43 @@ def test_yachiyo_agent_service_maps_chat_runnable_catalog() -> None:
     assert catalog.workflows[0].workflow_id == "workflow-1"
     assert catalog.workflows[0].kind == "workflow"
     assert catalog.workflows[0].participants[0].runnable_id == "agent-1"
+    assert catalog.groups[0].runnable_id == "group-1"
+    assert catalog.groups[0].group_id == "group-1"
+    assert catalog.groups[0].kind == "group"
+    assert catalog.groups[0].output_contract == "group_run"
+    assert catalog.groups[0].participants[0].runnable_id == "agent-1"
     assert port.calls == [("list_runnable_catalog", None)]
+
+
+def test_yachiyo_agent_service_falls_back_to_port_groups_for_runnable_catalog() -> None:
+    class _PortWithGroups(_FakeRuntimePort):
+        def list_runnable_catalog(self) -> dict[str, Any]:
+            self.calls.append(("list_runnable_catalog", None))
+            payload = super().list_runnable_catalog()
+            self.calls.pop()
+            payload.pop("groups", None)
+            return payload
+
+        def list_groups(self) -> dict[str, Any]:
+            self.calls.append(("list_groups", None))
+            return {
+                "groups": [
+                    {
+                        "group_id": "group-fallback",
+                        "name": "Fallback group",
+                        "members": [{"agent_id": "agent-1"}],
+                    }
+                ]
+            }
+
+    port = _PortWithGroups()
+    service = YachiyoAgentService(port)
+
+    catalog = service.list_runnable_catalog()
+
+    assert catalog.groups[0].group_id == "group-fallback"
+    assert catalog.groups[0].participants[0].agent_id == "agent-1"
+    assert port.calls == [("list_runnable_catalog", None), ("list_groups", None)]
 
 
 def test_yachiyo_agent_service_maps_task_timeline_snapshot() -> None:

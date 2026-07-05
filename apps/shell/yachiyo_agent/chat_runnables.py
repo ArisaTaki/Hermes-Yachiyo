@@ -15,6 +15,7 @@ from .contracts import (
 def chat_runnable_catalog_from_payloads(
     agent_payloads: Iterable[Mapping[str, Any]],
     workflow_payloads: Iterable[Mapping[str, Any]],
+    group_payloads: Iterable[Mapping[str, Any]] = (),
 ) -> ChatRunnableCatalogSnapshot:
     agents = [chat_agent_runnable_from_payload(payload) for payload in agent_payloads]
     agents_by_id = {agent.runnable_id: agent for agent in agents if agent.runnable_id}
@@ -22,7 +23,11 @@ def chat_runnable_catalog_from_payloads(
         chat_workflow_runnable_from_payload(payload, agents_by_id)
         for payload in workflow_payloads
     ]
-    return ChatRunnableCatalogSnapshot(agents=agents, workflows=workflows)
+    groups = [
+        chat_group_runnable_from_payload(payload, agents_by_id)
+        for payload in group_payloads
+    ]
+    return ChatRunnableCatalogSnapshot(agents=agents, workflows=workflows, groups=groups)
 
 
 def chat_agent_runnable_from_payload(payload: Mapping[str, Any]) -> ChatRunnableSnapshot:
@@ -61,6 +66,24 @@ def chat_workflow_runnable_from_payload(
     )
 
 
+def chat_group_runnable_from_payload(
+    payload: Mapping[str, Any],
+    agents_by_id: Mapping[str, ChatRunnableSnapshot],
+) -> ChatRunnableSnapshot:
+    group_id = _text(payload.get("group_id") or payload.get("agent_group_id") or payload.get("id"))
+    return ChatRunnableSnapshot(
+        runnable_id=group_id,
+        group_id=group_id,
+        kind="group",
+        name=_text(payload.get("name") or group_id or "Agent Group"),
+        description=_optional_text(payload.get("description")),
+        avatar_url=_optional_text(payload.get("avatar_url")),
+        output_contract="group_run",
+        enabled=bool(payload.get("enabled", True)),
+        participants=_group_participants(payload, agents_by_id),
+    )
+
+
 def _workflow_participants(
     payload: Mapping[str, Any],
     agents_by_id: Mapping[str, ChatRunnableSnapshot],
@@ -89,6 +112,42 @@ def _workflow_participants(
                 avatar_url=agent.avatar_url,
                 category=agent.category,
                 enabled=agent.enabled,
+            )
+        )
+    return participants
+
+
+def _group_participants(
+    payload: Mapping[str, Any],
+    agents_by_id: Mapping[str, ChatRunnableSnapshot],
+) -> list[ChatRunnableParticipantSnapshot]:
+    participants: list[ChatRunnableParticipantSnapshot] = []
+    seen: set[str] = set()
+    members = payload.get("members") if isinstance(payload.get("members"), list) else []
+    for item in members:
+        if not isinstance(item, Mapping):
+            continue
+        agent_id = _text(item.get("agent_id") or item.get("id"))
+        if not agent_id or agent_id in seen:
+            continue
+        seen.add(agent_id)
+        agent = agents_by_id.get(agent_id)
+        fallback_name = _text(item.get("name") or (agent.name if agent is not None else ""))
+        participants.append(
+            ChatRunnableParticipantSnapshot(
+                runnable_id=agent.runnable_id if agent is not None else agent_id,
+                agent_id=agent.agent_id if agent is not None else agent_id,
+                workflow_id=agent.workflow_id if agent is not None else None,
+                kind="agent",
+                name=fallback_name or agent_id,
+                nickname=(
+                    agent.nickname if agent is not None else _optional_text(item.get("nickname"))
+                ),
+                avatar_url=(
+                    agent.avatar_url if agent is not None else _optional_text(item.get("avatar_url"))
+                ),
+                category=agent.category if agent is not None else _optional_text(item.get("role")),
+                enabled=bool(item.get("enabled", True)),
             )
         )
     return participants

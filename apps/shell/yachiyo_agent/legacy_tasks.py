@@ -11,6 +11,7 @@ from .desktop_permissions import (
     desktop_permission_missing_by_capability,
     desktop_runtime_blocking_conditions_by_capability,
 )
+from .legacy_groups import chat_group_snapshots, group_definition_from_run_group
 from .legacy_runs import LegacyRunPayloadProjector
 from .planner_projection import (
     planner_run_event_payloads,
@@ -262,6 +263,7 @@ class LegacyRuntimePort:
         return {
             "agents": self._payload_items(self._runtime.list_agents(), "agents"),
             "workflows": self._payload_items(self._runtime.list_workflows(), "workflows"),
+            "groups": self._list_groups_for_catalog(),
         }
 
     def start_chat_task(self, request: dict[str, Any]) -> dict[str, Any]:
@@ -614,6 +616,24 @@ class LegacyRuntimePort:
     def _payload_items(self, payload: Any, key: str) -> list[dict[str, Any]]:
         items = payload.get(key) if isinstance(payload, dict) else payload
         return [dict(item) for item in items or [] if isinstance(item, dict)]
+
+    def _list_groups_for_catalog(self) -> list[dict[str, Any]]:
+        list_agent_groups = getattr(self._runtime, "list_agent_groups", None)
+        if callable(list_agent_groups):
+            return self._payload_items(list_agent_groups(), "groups")
+
+        chat_groups = chat_group_snapshots(self._runtime)
+        if chat_groups:
+            return chat_groups
+
+        list_run_groups = getattr(self._runtime, "list_run_groups", None)
+        if callable(list_run_groups):
+            payload = list_run_groups(50)
+            return [
+                group_definition_from_run_group(item, self._runtime)
+                for item in self._payload_items(payload, "run_groups")
+            ]
+        return []
 
     def _event_sequence(self, event: dict[str, Any], index: int) -> int:
         try:

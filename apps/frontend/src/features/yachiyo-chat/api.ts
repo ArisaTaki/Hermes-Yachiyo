@@ -219,6 +219,7 @@ export async function listYachiyoChatRunnableCatalog(): Promise<ChatRunnableCata
   return {
     agents: payload.agents || [],
     workflows: payload.workflows || [],
+    groups: payload.groups || [],
   };
 }
 

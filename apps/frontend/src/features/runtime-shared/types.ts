@@ -1332,6 +1332,7 @@ export type ChatRunnableParticipantSnapshot = {
   runnable_id: string;
   agent_id?: string | null;
   workflow_id?: string | null;
+  group_id?: string | null;
   kind: 'agent' | 'workflow';
   name: string;
   nickname?: string | null;
@@ -1344,7 +1345,8 @@ export type ChatRunnableSnapshot = {
   runnable_id: string;
   agent_id?: string | null;
   workflow_id?: string | null;
-  kind: 'agent' | 'workflow';
+  group_id?: string | null;
+  kind: 'agent' | 'workflow' | 'group';
   name: string;
   nickname?: string | null;
   description?: string | null;
@@ -1360,6 +1362,7 @@ export type ChatRunnableSnapshot = {
 export type ChatRunnableCatalogSnapshot = {
   agents: ChatRunnableSnapshot[];
   workflows: ChatRunnableSnapshot[];
+  groups: ChatRunnableSnapshot[];
 };
 
 export type WorkflowRunSnapshot = RunTimelineSnapshot & {

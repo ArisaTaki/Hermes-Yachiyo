@@ -13,7 +13,7 @@ export type ChatRunnableSummary = {
   avatar_url?: string;
   category?: string;
   output_contract?: 'chat' | 'markdown' | 'diff' | 'report' | 'artifacts' | 'workflow' | string;
-  kind: 'agent' | 'workflow';
+  kind: 'agent' | 'workflow' | 'group';
   enabled?: boolean;
   tool_capabilities?: string[];
   approval_required_tools?: string[];
@@ -23,7 +23,7 @@ export type ChatRunnableSummary = {
 export async function listYachiyoChatRunnables(): Promise<ChatRunnableSummary[]> {
   try {
     const catalog = await listYachiyoChatRunnableCatalog();
-    return chatRunnablesFromPublicSnapshots(catalog.agents, catalog.workflows);
+    return chatRunnablesFromPublicSnapshots(catalog.agents, catalog.workflows, catalog.groups);
   } catch {
     return chatRunnablesFromLegacySummaries(await listLegacyRunnables());
   }
@@ -32,15 +32,17 @@ export async function listYachiyoChatRunnables(): Promise<ChatRunnableSummary[]>
 export function chatRunnablesFromPublicSnapshots(
   agents: ChatRunnableSnapshot[],
   workflows: ChatRunnableSnapshot[],
+  groups: ChatRunnableSnapshot[] = [],
 ): ChatRunnableSummary[] {
   const agentRunnables = agents.map(chatRunnableSummary);
   const workflowRunnables = workflows.map(chatRunnableSummary);
-  return [...agentRunnables, ...workflowRunnables];
+  const groupRunnables = groups.map(chatRunnableSummary);
+  return [...agentRunnables, ...workflowRunnables, ...groupRunnables];
 }
 
 function chatRunnableSummary(runnable: ChatRunnableSnapshot): ChatRunnableSummary {
   return {
-    id: runnable.runnable_id || runnable.agent_id || runnable.workflow_id || '',
+    id: runnable.runnable_id || runnable.agent_id || runnable.workflow_id || runnable.group_id || '',
     name: runnable.name,
     nickname: runnable.nickname || undefined,
     description: runnable.description || undefined,
@@ -57,7 +59,7 @@ function chatRunnableSummary(runnable: ChatRunnableSnapshot): ChatRunnableSummar
 
 function chatParticipantRunnable(participant: ChatRunnableParticipantSnapshot): ChatRunnableSummary {
   return {
-    id: participant.runnable_id || participant.agent_id || participant.workflow_id || '',
+    id: participant.runnable_id || participant.agent_id || participant.workflow_id || participant.group_id || '',
     name: participant.name,
     nickname: participant.nickname || undefined,
     avatar_url: participant.avatar_url || undefined,

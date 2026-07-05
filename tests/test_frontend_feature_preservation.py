@@ -6655,7 +6655,7 @@ def test_chat_ui_preserves_delegated_summary_processing_state_wiring() -> None:
             "from './api';",
             "from './types';",
             "const catalog = await listYachiyoChatRunnableCatalog();",
-            "return chatRunnablesFromPublicSnapshots(catalog.agents, catalog.workflows)",
+            "return chatRunnablesFromPublicSnapshots(catalog.agents, catalog.workflows, catalog.groups)",
             "return chatRunnablesFromLegacySummaries(await listLegacyRunnables())",
             "participants: (runnable.participants || []).map(chatParticipantRunnable)",
             "tool_capabilities: normalizedStringList(runnable.tool_capabilities)",

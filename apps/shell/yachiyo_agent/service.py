@@ -60,9 +60,15 @@ class YachiyoAgentService:
 
     def list_runnable_catalog(self) -> ChatRunnableCatalogSnapshot:
         payload = self._runtime_port.list_runnable_catalog()
+        group_payloads = _payload_items(payload, "groups")
+        if not group_payloads:
+            list_groups = getattr(self._runtime_port, "list_groups", None)
+            if callable(list_groups):
+                group_payloads = _payload_items(list_groups(), "groups")
         return chat_runnable_catalog_from_payloads(
             _payload_items(payload, "agents"),
             _payload_items(payload, "workflows"),
+            group_payloads,
         )
 
     def plan_chat_task(

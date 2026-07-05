@@ -6016,15 +6016,33 @@ def test_chat_runnable_catalog_snapshot_json_shape_is_stable() -> None:
                 ],
             )
         ],
+        groups=[
+            ChatRunnableSnapshot(
+                runnable_id="group-1",
+                group_id="group-1",
+                kind="group",
+                name="Review group",
+                output_contract="group_run",
+                participants=[
+                    ChatRunnableParticipantSnapshot(
+                        runnable_id="agent-1",
+                        agent_id="agent-1",
+                        kind="agent",
+                        name="Planner",
+                    )
+                ],
+            )
+        ],
     )
 
     payload = _json(snapshot)
 
-    assert list(payload) == ["agents", "workflows"]
+    assert list(payload) == ["agents", "workflows", "groups"]
     assert list(payload["agents"][0]) == [
         "runnable_id",
         "agent_id",
         "workflow_id",
+        "group_id",
         "kind",
         "name",
         "nickname",
@@ -6042,6 +6060,8 @@ def test_chat_runnable_catalog_snapshot_json_shape_is_stable() -> None:
     assert payload["agents"][0]["approval_required_tools"] == ["workspace.write_patch"]
     assert payload["workflows"][0]["workflow_id"] == "workflow-1"
     assert payload["workflows"][0]["participants"][0]["agent_id"] == "agent-1"
+    assert payload["groups"][0]["group_id"] == "group-1"
+    assert payload["groups"][0]["output_contract"] == "group_run"
     assert "tool_policy" not in payload["agents"][0]
     assert "nodes" not in payload["workflows"][0]
     assert "edges" not in payload["workflows"][0]
