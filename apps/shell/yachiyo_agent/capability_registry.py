@@ -50,6 +50,25 @@ class CapabilityDefinition:
         )
 
 
+MEDIA_PLAYBACK_PRIMARY_TOOLS: tuple[str, ...] = (
+    "media.music_app_open_and_play",
+    "media.music_app_control",
+    "media.system_control",
+)
+
+LEGACY_APPLE_MUSIC_FALLBACK_TOOLS: tuple[str, ...] = (
+    "media.apple_music_play",
+    "media.apple_music_status",
+    "media.apple_music_open_and_play",
+    "media.apple_music_control",
+)
+
+MEDIA_PLAYBACK_TOOLS: tuple[str, ...] = (
+    *MEDIA_PLAYBACK_PRIMARY_TOOLS,
+    *LEGACY_APPLE_MUSIC_FALLBACK_TOOLS,
+)
+
+
 CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
     CapabilityDefinition(
         capability_id="desktop.app_discovery",
@@ -376,15 +395,7 @@ CAPABILITY_DEFINITIONS: tuple[CapabilityDefinition, ...] = (
             "Open or focus named music apps, start playback, search via app UI when available, "
             "and use Apple Music-specific tools as compatibility fallbacks."
         ),
-        tools=(
-            "media.music_app_open_and_play",
-            "media.music_app_control",
-            "media.system_control",
-            "media.apple_music_play",
-            "media.apple_music_status",
-            "media.apple_music_open_and_play",
-            "media.apple_music_control",
-        ),
+        tools=MEDIA_PLAYBACK_TOOLS,
         discovery_actions=("read_playback_status",),
         execution_actions=("play", "pause", "next", "previous", "open_music_app"),
         output_kinds=("media_state",),

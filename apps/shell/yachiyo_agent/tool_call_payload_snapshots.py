@@ -8,13 +8,12 @@ from typing import Any
 
 from apps.shell.agent.runtime.events import redact_run_event_payload, redact_secrets
 
+from .capability_registry import LEGACY_APPLE_MUSIC_FALLBACK_TOOLS
 from .contracts import ToolCallSnapshot
 
-_LEGACY_APPLE_MUSIC_AFFECTED_TOOLS = [
-    "media.apple_music_play",
-    "media.apple_music_open_and_play",
-    "media.apple_music_control",
-]
+_LEGACY_APPLE_MUSIC_AFFECTED_TOOLS = tuple(
+    tool for tool in LEGACY_APPLE_MUSIC_FALLBACK_TOOLS if tool != "media.apple_music_status"
+)
 _PLANNER_TRACE_KEYS = (
     "source",
     "planning_reason",
