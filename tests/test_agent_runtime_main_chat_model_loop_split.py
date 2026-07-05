@@ -7,6 +7,7 @@ from typing import Any
 import pytest
 
 from apps.shell import agent_runtime
+from apps.shell.agent.runtime import main_chat_model_loop
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.runtime.main_chat_model_loop import (
     MainChatModelLoopRunner,
@@ -198,19 +199,10 @@ def test_main_chat_model_loop_runner_passes_approval_policy_to_broker() -> None:
 
 
 def test_main_chat_model_loop_runner_uses_runtime_planner_without_profile_before_legacy(
-    monkeypatch,
 ) -> None:
-    def fail_legacy_daily_planner(*_args: Any, **_kwargs: Any) -> Any:
-        raise AssertionError("legacy desktop planner should not run before runtime planner")
-
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.main_chat_model_loop.daily_desktop_intent_tool_request",
-        fail_legacy_daily_planner,
-    )
-    monkeypatch.setattr(
-        "apps.shell.agent.runtime.main_chat_model_loop.daily_desktop_intent_candidates",
-        fail_legacy_daily_planner,
-    )
+    assert not hasattr(main_chat_model_loop, "daily_desktop_intent_tool_request")
+    assert not hasattr(main_chat_model_loop, "daily_desktop_intent_tool_requests")
+    assert not hasattr(main_chat_model_loop, "daily_desktop_intent_candidates")
 
     continue_calls: list[dict[str, Any]] = []
     runner, state = _runner()

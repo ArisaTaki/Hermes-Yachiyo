@@ -2149,8 +2149,8 @@ async def test_yachiyo_task_route_executes_main_daily_desktop_intent_without_mod
         assert user.task_id == started["task_id"]
         assert user_metadata["client_message_id"] == "route-main-daily-1"
         assert user_metadata["daily_desktop_intent"] is True
-        assert user_metadata["daily_desktop_source"] == "daily_desktop_intent"
-        assert user_metadata["daily_desktop_planning_reason"] == "clear_daily_desktop_intent"
+        assert user_metadata["daily_desktop_source"] == "runtime_planner"
+        assert user_metadata["daily_desktop_planning_reason"] == "planner_desktop_operation"
         assert user_metadata["daily_desktop_tool"] == "app.open"
         assert user_metadata["daily_desktop_tools"] == ["app.open"]
         assert assistant.task_id == started["task_id"]
@@ -2874,7 +2874,7 @@ async def test_yachiyo_task_route_executes_media_play_daily_desktop_intent_witho
         store=store,
     )
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(runtime=app_runtime)))
-    play_calls: list[str] = []
+    desktop_calls: list[tuple[Any, ...]] = []
     monkeypatch.setattr(
         "apps.shell.agent_runtime.get_model_profile_service",
         lambda: SimpleNamespace(
@@ -2889,22 +2889,148 @@ async def test_yachiyo_task_route_executes_media_play_daily_desktop_intent_witho
         ),
     )
 
-    def fake_apple_music_play(query: str) -> dict[str, Any]:
-        play_calls.append(query)
+    def fake_list_apps(query: str = "", limit: Any = 200) -> dict[str, Any]:
+        desktop_calls.append(("list_apps", query, limit))
+        app = {
+            "name": "Music",
+            "path": "/Applications/Music.app",
+            "match_score": 100,
+        }
         return {
             "ok": True,
-            "action": "media.apple_music_play",
-            "summary": f"Apple Music playing {query}",
+            "action": "desktop.list_apps",
+            "summary": "Installed apps matching music: Music",
             "data": {
                 "query": query,
-                "track": query,
+                "apps": [app],
+                "total_count": 1,
+                "best_match": app,
+                "resolved_app_name": "Music",
+            },
+        }
+
+    def fake_app_open(app_name: str) -> dict[str, Any]:
+        desktop_calls.append(("app_open", app_name))
+        return {
+            "ok": True,
+            "action": "app.open",
+            "summary": f"Opened {app_name}",
+            "data": {
+                "app_name": app_name,
+                "launch_verified": True,
+            },
+        }
+
+    def fake_app_focus(app_name: str) -> dict[str, Any]:
+        desktop_calls.append(("app_focus", app_name))
+        return {
+            "ok": True,
+            "action": "app.focus",
+            "summary": f"Focused {app_name}",
+            "data": {
+                "app_name": app_name,
+            },
+        }
+
+    def fake_safe_shortcut(action: str) -> dict[str, Any]:
+        desktop_calls.append(("safe_shortcut", action))
+        return {
+            "ok": True,
+            "action": "desktop.safe_shortcut",
+            "summary": f"Shortcut {action}",
+            "data": {
+                "action": action,
+            },
+        }
+
+    def fake_safe_type_text(text: str) -> dict[str, Any]:
+        desktop_calls.append(("safe_type_text", text))
+        return {
+            "ok": True,
+            "action": "desktop.safe_type_text",
+            "summary": f"Typed {text}",
+            "data": {
+                "text": text,
+            },
+        }
+
+    def fake_search_submit() -> dict[str, Any]:
+        desktop_calls.append(("search_submit",))
+        return {
+            "ok": True,
+            "action": "desktop.search_submit",
+            "summary": "Submitted search",
+            "data": {
+                "submitted": True,
+            },
+        }
+
+    def fake_music_app_open_and_play(app_name: str) -> dict[str, Any]:
+        desktop_calls.append(("music_app_open_and_play", app_name))
+        return {
+            "ok": True,
+            "action": "media.music_app_open_and_play",
+            "summary": f"Music app playing in {app_name}",
+            "data": {
+                "app_name": app_name,
+                "track": "超时空辉夜姬",
                 "artist": "Yachiyo",
+                "playback_state_unverified": False,
+            },
+        }
+
+    def fake_ui_elements(
+        role_filter: str = "",
+        limit: Any = 80,
+        app_name: str = "",
+    ) -> dict[str, Any]:
+        desktop_calls.append(("ui_elements", role_filter, limit, app_name))
+        return {
+            "ok": True,
+            "action": "desktop.ui_elements",
+            "summary": "Music UI contains result",
+            "data": {
+                "app_name": app_name,
+                "elements": [
+                    {
+                        "role": "AXStaticText",
+                        "title": "超时空辉夜姬",
+                    }
+                ],
             },
         }
 
     monkeypatch.setattr(
-        "apps.shell.agent.tools.desktop.apple_music_play",
-        fake_apple_music_play,
+        "apps.shell.agent.tools.desktop.list_apps",
+        fake_list_apps,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.app_open",
+        fake_app_open,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.app_focus",
+        fake_app_focus,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_shortcut",
+        fake_safe_shortcut,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_safe_type_text",
+        fake_safe_type_text,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.desktop_search_submit",
+        fake_search_submit,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.music_app_open_and_play",
+        fake_music_app_open_and_play,
+    )
+    monkeypatch.setattr(
+        "apps.shell.agent.tools.desktop.ui_elements",
+        fake_ui_elements,
     )
     try:
         started = await yachiyo.start_task(
@@ -2930,13 +3056,32 @@ async def test_yachiyo_task_route_executes_media_play_daily_desktop_intent_witho
             if message.role == "assistant"
         )
 
-        assert play_calls == ["超时空辉夜姬"]
+        assert desktop_calls == [
+            ("list_apps", "music", 20),
+            ("app_open", "Music"),
+            ("app_focus", "Music"),
+            ("safe_shortcut", "find"),
+            ("safe_type_text", "超时空辉夜姬"),
+            ("search_submit",),
+            ("music_app_open_and_play", "Music"),
+            ("ui_elements", "", 80, "Music"),
+        ]
         assert started["status"] == "completed"
-        assert started["summary"] == "已在 Apple Music 播放：超时空辉夜姬 - Yachiyo。"
-        assert started["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+        assert (
+            started["summary"]
+            == "已打开 Music 并打开查找。 已向前台输入文字（6 个字符）。 已提交前台搜索。 "
+            "已打开 Apple Music，并开始播放。当前：超时空辉夜姬 - Yachiyo。"
+        )
+        assert [call["tool_name"] for call in started["tool_calls"]] == [
+            "app.open_and_safe_shortcut",
+            "desktop.safe_type_text",
+            "desktop.search_submit",
+            "media.music_app_open_and_play",
+        ]
+        assert started["tool_calls"][-1]["tool_name"] == "media.music_app_open_and_play"
         assert started["tool_calls"][-1]["status"] == "completed"
-        assert started["tool_calls"][-1]["input_preview"]["query"] == "超时空辉夜姬"
-        assert timeline["tool_calls"][-1]["tool_name"] == "media.apple_music_play"
+        assert started["tool_calls"][-1]["input_preview"]["app_name"] == "Music"
+        assert timeline["tool_calls"][-1]["tool_name"] == "media.music_app_open_and_play"
         assert timeline["tool_calls"][-1]["output_preview"]["data"]["track"] == "超时空辉夜姬"
         assert "agent.desktop.intent_planned" in event_types
         assert "agent.tool.call" in event_types

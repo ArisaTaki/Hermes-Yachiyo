@@ -4,11 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Callable
 
-from apps.shell.agent.runtime.desktop_intents import (
-    daily_desktop_intent_candidates,
-    daily_desktop_intent_tool_request,
-    daily_desktop_intent_tool_requests,
-)
 from apps.shell.agent.runtime.errors import AgentApprovalRequired
 from apps.shell.agent.runtime.errors import AgentRuntimeError
 from apps.shell.agent.runtime.events import redact_secrets
@@ -287,7 +282,6 @@ class MainChatModelLoopRunner:
             selection = planner_first_direct_tool_selection(
                 intent_text,
                 allowed_tools,
-                legacy_tool_requests=daily_desktop_intent_tool_requests,
             )
             planned_requests = selection.requests
             if planned_requests:
@@ -305,9 +299,7 @@ class MainChatModelLoopRunner:
                 )
         except Exception:
             pass
-        if daily_desktop_intent_tool_request(intent_text, allowed_tools):
-            return True
-        return bool(daily_desktop_intent_candidates(intent_text))
+        return False
 
 
 def _latest_user_intent_text(messages: list[dict[str, Any]]) -> str:

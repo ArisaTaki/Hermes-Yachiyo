@@ -454,6 +454,10 @@ class RuntimeCustomApiAgentLoop:
                 execution_tool_requests = _split_model_materialization_tool_requests(
                     execution_tool_requests
                 )[0]
+                execution_tool_requests = _split_combined_foreground_app_requests(
+                    execution_tool_requests,
+                    allowed_tools,
+                )
                 self._record_desktop_permission_preflight(
                     execution_tool_requests,
                     broker,
@@ -11805,6 +11809,102 @@ def _runtime_planner_full_plan_should_defer_to_context_prefetch(
     }
 
 
+def _split_combined_foreground_app_requests(
+    requests: list[dict[str, Any]],
+    allowed_tools: Iterable[str],
+) -> list[dict[str, Any]]:
+    allowed = {str(tool or "").strip() for tool in allowed_tools if str(tool or "").strip()}
+    split_requests: list[dict[str, Any]] = []
+    changed = False
+    for request in requests:
+        tool_name = str(request.get("tool") or request.get("tool_name") or "").strip()
+        payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+        app_name = str(payload.get("app_name") or "").strip()
+        if tool_name in {"app.open_and_safe_shortcut", "app.focus_and_safe_shortcut"}:
+            action = str(payload.get("action") or "").strip()
+            replacement = _split_combined_app_prefix_requests(
+                request,
+                app_name=app_name,
+                starts_open=tool_name.startswith("app.open"),
+                allowed=allowed,
+            )
+            if replacement and action and "desktop.safe_shortcut" in allowed:
+                replacement.append(
+                    _derived_foreground_request(
+                        request,
+                        "desktop.safe_shortcut",
+                        {"action": action},
+                    )
+                )
+                split_requests.extend(replacement)
+                changed = True
+                continue
+        if tool_name in {"app.open_and_safe_type_text", "app.focus_and_safe_type_text"}:
+            text = str(payload.get("text") or "").strip()
+            replacement = _split_combined_app_prefix_requests(
+                request,
+                app_name=app_name,
+                starts_open=tool_name.startswith("app.open"),
+                allowed=allowed,
+            )
+            if replacement and text and "desktop.safe_type_text" in allowed:
+                replacement.append(
+                    _derived_foreground_request(
+                        request,
+                        "desktop.safe_type_text",
+                        {"text": text},
+                    )
+                )
+                split_requests.extend(replacement)
+                changed = True
+                continue
+        split_requests.append(request)
+    return split_requests if changed else requests
+
+
+def _split_combined_app_prefix_requests(
+    request: Mapping[str, Any],
+    *,
+    app_name: str,
+    starts_open: bool,
+    allowed: set[str],
+) -> list[dict[str, Any]]:
+    if not app_name:
+        return []
+    prefix: list[dict[str, Any]] = []
+    selection = _app_selection_input(request, app_name)
+    if starts_open:
+        if "app.open" not in allowed:
+            return []
+        prefix.append(_derived_foreground_request(request, "app.open", selection))
+    if "app.focus" not in allowed:
+        return []
+    prefix.append(_derived_foreground_request(request, "app.focus", selection))
+    return prefix
+
+
+def _app_selection_input(request: Mapping[str, Any], app_name: str) -> dict[str, Any]:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    result = {"app_name": app_name}
+    for key in ("selection_source", "query"):
+        value = str(payload.get(key) or "").strip()
+        if value:
+            result[key] = value
+    return result
+
+
+def _derived_foreground_request(
+    source_request: Mapping[str, Any],
+    tool_name: str,
+    payload: Mapping[str, Any],
+) -> dict[str, Any]:
+    derived = dict(source_request)
+    derived["tool"] = tool_name
+    derived.pop("tool_name", None)
+    derived["input"] = dict(payload)
+    return derived
+
+
 def _dedupe_runtime_planner_full_plan_requests(
     requests: Iterable[Mapping[str, Any]],
 ) -> list[dict[str, Any]]:
@@ -19346,20 +19446,25 @@ def _coalesced_open_focus_find_summary_steps(
         focus_step = visible_steps[index + 1]
         shortcut_step = visible_steps[index + 2]
         app_name = _summary_step_app_name(open_step)
+        shortcut_action = _summary_step_shortcut_action(shortcut_step)
+        shortcut_summary = {
+            "find": "打开查找",
+            "new_document": "新建文档",
+        }.get(shortcut_action, "")
         if (
             str(open_step.get("tool") or "") in {"app.open", "desktop.open_app"}
             and str(focus_step.get("tool") or "") in {"app.focus", "desktop.focus_app"}
             and str(shortcut_step.get("tool") or "") == "desktop.safe_shortcut"
             and app_name
             and _summary_step_app_name(focus_step) == app_name
-            and _summary_step_shortcut_action(shortcut_step) == "find"
+            and shortcut_summary
         ):
             coalesced.append(
                 {
                     **shortcut_step,
                     "tool": "app.open_and_safe_shortcut",
-                    "input_preview": {"app_name": app_name, "action": "find"},
-                    "summary": f"已打开{_display_target_name(app_name, '并打开查找')}。",
+                    "input_preview": {"app_name": app_name, "action": shortcut_action},
+                    "summary": f"已打开{_display_target_name(app_name, f'并{shortcut_summary}')}。",
                 }
             )
             index += 3

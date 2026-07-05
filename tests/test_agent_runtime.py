@@ -5714,11 +5714,13 @@ def test_main_chat_model_loop_creates_app_task_without_chat_model_profile(
         ]
         assert completed_event["payload"]["tools"] == [
             "desktop.list_apps",
-            "app.open_and_safe_shortcut",
+            "app.open",
+            "app.focus",
+            "desktop.safe_shortcut",
             "desktop.safe_type_text",
             "desktop.ui_elements",
         ]
-        assert completed_event["payload"]["planning_reason"] == "planner_desktop_operation"
+        assert completed_event["payload"]["planning_reason"] == "planner_full_plan_desktop_operation"
         assert "已打开 Linear 并新建文档" in updated["result"]
         assert "已向前台输入文字" in updated["result"]
     finally:
