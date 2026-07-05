@@ -451,6 +451,15 @@ function runtimeTimelineReplanRecoveryUpdateDetail(event: RuntimeTimelineEventSn
   const checkpointStatus = runtimeTimelineFirstRecordString(['checkpoint_status'], record, payload);
   const permissionTarget = runtimeTimelineFirstRecordString(['permission_target'], record, payload);
   const riskLevel = runtimeTimelineFirstRecordString(['risk_level'], record, payload);
+  const pendingApproval = runtimeTimelineRecordObject(payload, 'pending_approval');
+  const approval = runtimeTimelineRecordObject(payload, 'approval');
+  const policyReason = runtimeTimelineFirstRecordString(
+    ['policy_reason', 'approval_reason', 'reason'],
+    record,
+    payload,
+    pendingApproval,
+    approval,
+  );
   const resultSummary = runtimeTimelineFirstRecordString(
     ['summary', 'error', 'hint'],
     resultPreview,
@@ -462,6 +471,7 @@ function runtimeTimelineReplanRecoveryUpdateDetail(event: RuntimeTimelineEventSn
     checkpointStatus ? `checkpoint ${checkpointStatus}` : '',
     permissionTarget ? `permission ${permissionTarget}` : '',
     riskLevel ? `risk ${riskLevel}` : '',
+    policyReason ? `policy ${policyReason}` : '',
     resultSummary,
   ].filter(Boolean).join(' · ');
 }

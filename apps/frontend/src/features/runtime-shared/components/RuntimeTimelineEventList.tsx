@@ -69,6 +69,7 @@ export function RuntimeTimelineEventList({
           const runtimeContext = runtimeEventRuntimeContext(event, payloadRecord);
           const recoveryTarget = runtimeEventRecoveryTarget(event, payloadRecord);
           const observedContext = runtimeEventObservedContext(event, payloadRecord);
+          const policyReason = eventIsSecret ? '' : runtimeEventPolicyReason(event, payloadRecord);
           const contentSnapshots = eventIsSecret ? [] : runtimeEventContentSnapshots(payloadRecord);
           const capabilityRecovery = eventIsSecret ? [] : runtimeEventCapabilityRecovery(payloadRecord);
           const eventMetadata = runtimeEventMetadata(
@@ -109,6 +110,7 @@ export function RuntimeTimelineEventList({
               data-run-event-replan-request-id={runtimeContext.replanRequestId}
               data-run-event-replan-signal-ids={runtimeContext.replanSignalIds.join(',')}
               data-run-event-replan-trigger={runtimeContext.replanTrigger || runtimeContext.replanTriggers[0] || ''}
+              data-run-event-policy-reason={policyReason}
               data-run-event-observed-action-evidence={observedContext.observationEvidence}
               data-run-event-observed-action-target={observedContext.actionTarget}
               data-run-event-observed-center={observedContext.observedCenter}
@@ -457,6 +459,7 @@ function runtimeEventMetadata(
     { label: 'todo', value: runtimeEventString(event, payload, 'todo_status') },
     { label: 'checkpoint', value: runtimeEventString(event, payload, 'checkpoint_status') },
     { label: 'risk', value: runtimeEventString(event, payload, 'risk_level') },
+    { label: 'policy', value: runtimeEventPolicyReason(event, payload) },
     { label: 'action', value: observedContext.actionTarget },
     { label: 'observed', value: observedContext.observationEvidence },
     { label: 'center', value: observedContext.observedCenter },
@@ -977,6 +980,18 @@ function runtimeEventSkillId(
   return runtimeEventString(event, payload, 'skill_id')
     || runtimeEventNestedString(payload, 'result', 'skill_id')
     || runtimeEventNestedString(payload, 'result', 'name');
+}
+
+function runtimeEventPolicyReason(
+  event: RuntimeTimelineEventRecord,
+  payload: RuntimeTimelineEventRecord,
+): string {
+  return runtimeEventString(event, payload, 'policy_reason')
+    || runtimeEventString(event, payload, 'approval_reason')
+    || runtimeEventNestedString(payload, 'pending_approval', 'policy_reason')
+    || runtimeEventNestedString(payload, 'approval', 'policy_reason')
+    || runtimeEventNestedString(payload, 'pending_approval', 'reason')
+    || runtimeEventNestedString(payload, 'approval', 'reason');
 }
 
 function runtimeEventNestedString(
