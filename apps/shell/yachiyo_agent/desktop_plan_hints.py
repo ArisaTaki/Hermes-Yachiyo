@@ -1123,6 +1123,7 @@ def media_app_query_search_plan(
     type_tool = _first_allowed(
         (
             "desktop.safe_type_text",
+            "desktop.type",
             "app.focus_and_safe_type_text",
             "app.open_and_safe_type_text",
             "desktop.type_text",
@@ -1141,6 +1142,8 @@ def media_app_query_search_plan(
         (
             "desktop.search_submit",
             "desktop.submit_foreground",
+            "desktop.safe_key",
+            "desktop.key",
             "desktop.shortcut",
             "desktop.hotkey",
         ),
@@ -1219,7 +1222,13 @@ def media_app_query_search_plan(
         _append_media_app_verify_step(plan, allowed)
         return plan
 
-    if app_tool and type_tool and _media_observed_type_fallback_available(allowed):
+    observed_type_tool = _first_allowed(("desktop.type_into_ui_element",), allowed)
+    if (
+        app_tool
+        and type_tool
+        and observed_type_tool
+        and _media_observed_type_fallback_available(allowed)
+    ):
         type_into_payload = {
             "app_name": app_name,
             **selected_app_payload,
@@ -1231,7 +1240,7 @@ def media_app_query_search_plan(
         plan = [
             *discovery_step,
             (app_tool, {"app_name": app_name, **selected_app_payload}),
-            ("desktop.type_into_ui_element", type_into_payload),
+            (observed_type_tool, type_into_payload),
             *submit_step,
         ]
         _append_media_search_result_play_step(
@@ -1276,6 +1285,8 @@ def _media_search_shortcut_payload(tool_name: str | None) -> dict[str, Any]:
 def _media_search_submit_payload(tool_name: str | None) -> dict[str, Any]:
     if tool_name == "desktop.submit_foreground":
         return {"action": "confirm"}
+    if tool_name in {"desktop.safe_key", "desktop.key"}:
+        return {"key": "return", "modifiers": []}
     if tool_name in {"desktop.shortcut", "desktop.hotkey"}:
         return {"key": "return", "modifiers": []}
     return {}

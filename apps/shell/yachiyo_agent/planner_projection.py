@@ -88,16 +88,7 @@ def runtime_planner_metadata(
         allowed_tools=allowed_tools,
     )
     if execution_envelope:
-        execution_requests = _execution_request_payloads(execution_envelope)
-        payload["yachiyo_execution_envelope"] = execution_envelope
-        payload["yachiyo_execution_requests"] = [
-            request.get("tool_name")
-            for request in execution_requests
-            if request.get("tool_name")
-        ]
-        execution_previews = _execution_request_previews(execution_requests)
-        if execution_previews:
-            payload["yachiyo_execution_request_previews"] = execution_previews
+        _apply_execution_envelope_metadata(payload, execution_envelope)
     followup_target = _selection_followup_target_payload(decision)
     if followup_target:
         payload["yachiyo_followup_target"] = followup_target
@@ -150,6 +141,11 @@ def planner_enriched_chat_request(
         allowed_tools=execution_allowed_tools,
         full_plan=True,
     )
+    if runtime_execution_envelope:
+        _apply_execution_envelope_metadata(
+            planner_metadata,
+            runtime_execution_envelope,
+        )
     compatible_plan_tools = _daily_desktop_compatible_plan_tools(decision, metadata)
     if compatible_plan_tools:
         planner_metadata["yachiyo_plan_tools"] = compatible_plan_tools
@@ -200,6 +196,24 @@ def _execution_request_payloads(envelope: Mapping[str, Any]) -> list[Mapping[str
     if not isinstance(requests, list):
         return []
     return [request for request in requests if isinstance(request, Mapping)]
+
+
+def _apply_execution_envelope_metadata(
+    payload: dict[str, Any],
+    envelope: Mapping[str, Any],
+) -> None:
+    execution_requests = _execution_request_payloads(envelope)
+    payload["yachiyo_execution_envelope"] = dict(envelope)
+    payload["yachiyo_execution_requests"] = [
+        request.get("tool_name")
+        for request in execution_requests
+        if request.get("tool_name")
+    ]
+    execution_previews = _execution_request_previews(execution_requests)
+    if execution_previews:
+        payload["yachiyo_execution_request_previews"] = execution_previews
+    else:
+        payload.pop("yachiyo_execution_request_previews", None)
 
 
 def _execution_request_previews(

@@ -1018,6 +1018,54 @@ def test_yachiyo_agent_service_surfaces_desktop_execution_request_previews() -> 
     ]
 
 
+def test_yachiyo_agent_service_plans_media_query_with_generic_desktop_tools() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    service.start_chat_task(
+        {
+            "prompt": "用 Apple Music 播放超时空辉夜姬",
+            "conversation_id": "chat-1",
+            "allowed_tools": [
+                "desktop.list_apps",
+                "app.open",
+                "desktop.safe_shortcut",
+                "desktop.type",
+                "desktop.safe_key",
+                "desktop.click_ui_element",
+                "desktop.ui_elements",
+            ],
+        }
+    )
+
+    request = port.calls[0][1]
+    tools = [item["tool"] for item in request["direct_tool_requests"]]
+    assert tools == [
+        "desktop.list_apps",
+        "app.open",
+        "desktop.safe_shortcut",
+        "desktop.type",
+        "desktop.safe_key",
+        "desktop.click_ui_element",
+        "desktop.ui_elements",
+    ]
+    assert "desktop.type_into_ui_element" not in tools
+    direct_requests = request["direct_tool_requests"]
+    assert direct_requests[0]["input"] == {"query": "Music", "limit": 20}
+    assert direct_requests[1]["input"] == {
+        "app_name": "Music",
+        "selection_source": "desktop.list_apps",
+        "query": "Music",
+    }
+    assert direct_requests[2]["input"] == {"action": "find"}
+    assert direct_requests[3]["input"] == {"text": "超时空辉夜姬"}
+    assert direct_requests[4]["input"] == {"key": "return", "modifiers": []}
+    assert direct_requests[5]["input"]["target"] == "first result"
+    assert direct_requests[-1]["runtime_stage"] == "verify"
+    assert request["metadata"]["yachiyo_intent_kind"] == "media_playback"
+    assert request["metadata"]["yachiyo_execution_requests"] == tools
+
+
 def test_yachiyo_agent_service_returns_runtime_planner_metadata_on_chat_task() -> None:
     port = _FakeRuntimePort()
     service = YachiyoAgentService(port)
