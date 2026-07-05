@@ -3274,7 +3274,13 @@ def test_legacy_runtime_port_aggregates_workflow_child_debug_state_for_chat_task
 
     task = port.get_task_snapshot("task-workflow-1")
     timeline = port.get_task_timeline("task-workflow-1")
-    page = port.get_task_event_page("task-workflow-1", after_sequence=0, limit=10)
+    page = port.get_task_event_page("task-workflow-1", after_sequence=0, limit=20)
+    workflow_events = timeline["events"]
+    child_approval_events = [
+        event
+        for event in workflow_events
+        if event.get("event_type") == "workflow.run.tool.approval_required"
+    ]
 
     assert task["metadata"]["runnable_kind"] == "workflow"
     assert task["metadata"]["workflow_run_id"] == "workflow-run-1"
@@ -3286,8 +3292,15 @@ def test_legacy_runtime_port_aggregates_workflow_child_debug_state_for_chat_task
     assert timeline["children"][0]["workflow_node_id"] == "analyze"
     assert timeline["pending_approval"]["run_id"] == "workflow-child-1"
     assert timeline["artifacts"][0]["source_run_id"] == "workflow-child-1"
+    assert child_approval_events
+    assert child_approval_events[0]["run_id"] == "workflow-run-1"
+    assert child_approval_events[0]["payload"]["source_run_id"] == "workflow-child-1"
+    assert child_approval_events[0]["payload"]["workflow_node_id"] == "analyze"
     assert page["run_id"] == "workflow-run-1"
     assert page["workflow_run_id"] == "workflow-run-1"
+    assert "workflow.run.tool.approval_required" in [
+        event.get("event_type") for event in page["events"]
+    ]
 
 
 def test_legacy_runtime_port_routes_workflow_task_approval_and_artifact_to_child_run() -> None:

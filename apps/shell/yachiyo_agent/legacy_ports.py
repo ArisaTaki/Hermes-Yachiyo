@@ -1456,7 +1456,10 @@ class LegacyStudioPort:
         return self._runtime.list_runs(limit)
 
     def get_run_timeline(self, run_id: str) -> dict[str, Any]:
-        return _run_with_replay_events(self._runtime.get_run(run_id), self._runtime)
+        return _workflow_run_with_child_runs(
+            _run_with_replay_events(self._runtime.get_run(run_id), self._runtime),
+            self._runtime,
+        )
 
     def rerun_run(
         self,
@@ -3090,3 +3093,40 @@ def _group_run_from_legacy_run_group(
 
 def _child_runs_for_run_group(run_group: dict[str, Any], runtime: Any) -> list[dict[str, Any]]:
     return _LEGACY_RUN_PROJECTOR.child_runs_for_run_group(run_group, runtime)
+
+
+def _workflow_run_with_child_runs(run: dict[str, Any], runtime: Any) -> dict[str, Any]:
+    if str(run.get("kind") or "").strip() != "workflow_run":
+        return run
+    run_id = str(run.get("run_id") or run.get("workflow_run_id") or "").strip()
+    run_group_id = str(run.get("run_group_id") or run.get("group_run_id") or "").strip()
+    if not run_id or not run_group_id:
+        return run
+    try:
+        run_group = runtime.get_run_group(run_group_id)
+    except (AttributeError, KeyError):
+        return run
+    if not isinstance(run_group, dict):
+        return run
+    existing_children = [
+        dict(item)
+        for item in run.get("runs") or run.get("child_runs") or []
+        if isinstance(item, dict)
+    ]
+    children = [
+        child
+        for child in [*existing_children, *_child_runs_for_run_group(run_group, runtime)]
+        if str(child.get("run_id") or "").strip()
+        and str(child.get("run_id") or "").strip() != run_id
+    ]
+    if not children:
+        return run
+    unique_children = []
+    seen: set[str] = set()
+    for child in children:
+        child_run_id = str(child.get("run_id") or "").strip()
+        if child_run_id in seen:
+            continue
+        seen.add(child_run_id)
+        unique_children.append(child)
+    return {**run, "runs": unique_children}

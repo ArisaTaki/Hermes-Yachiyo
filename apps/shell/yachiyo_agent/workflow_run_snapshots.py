@@ -69,7 +69,10 @@ def workflow_run_snapshot_from_payload(
                 lambda item: item.approval_id,
             ),
             "pending_approval": _workflow_context_approval(
-                timeline.pending_approval,
+                _preferred_workflow_pending_approval(
+                    timeline.pending_approval,
+                    child_approvals,
+                ),
                 workflow_id=workflow_id or "",
                 workflow_run_id=workflow_run_id,
             ),
@@ -114,7 +117,10 @@ def workflow_run_snapshot_from_payload(
                     lambda item: item.approval_id,
                 ),
                 "pending_approval": _workflow_context_approval(
-                    timeline.pending_approval or _first_pending(child_approvals),
+                    _preferred_workflow_pending_approval(
+                        timeline.pending_approval,
+                        child_approvals,
+                    ),
                     workflow_id=workflow_id or "",
                     workflow_run_id=workflow_run_id,
                 ),
@@ -359,6 +365,26 @@ def _first_pending(items: list[Any]) -> Any | None:
         if getattr(item, "status", "") == "pending":
             return item
     return None
+
+
+def _preferred_workflow_pending_approval(
+    timeline_pending: ApprovalCardSnapshot | None,
+    child_approvals: list[Any],
+) -> ApprovalCardSnapshot | None:
+    if timeline_pending is None:
+        return _first_pending(child_approvals)
+    approval_id = _text(timeline_pending.approval_id)
+    source_run_id = _text(timeline_pending.source_run_id)
+    if not approval_id or not source_run_id:
+        return timeline_pending
+    for approval in child_approvals:
+        if getattr(approval, "status", "") != "pending":
+            continue
+        if _text(getattr(approval, "approval_id", "")) != approval_id:
+            continue
+        if _text(getattr(approval, "run_id", "")) == source_run_id:
+            return approval
+    return timeline_pending
 
 
 def _workflow_context_tool_calls(

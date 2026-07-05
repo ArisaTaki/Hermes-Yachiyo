@@ -907,6 +907,11 @@ class LegacyRuntimePort:
         parent = self._payload_with_task_link(task_id, parent)
         workflow_events = self._projector.chat_events_for_run(parent, self._runtime)
         child_runs = self._workflow_child_runs_for_parent(parent, events=workflow_events)
+        workflow_events = self._workflow_events_with_child_replay(
+            parent,
+            workflow_events,
+            child_runs,
+        )
         workflow_payload = {
             **parent,
             "run_id": parent_run_id,
@@ -916,14 +921,29 @@ class LegacyRuntimePort:
             "runs": child_runs,
         }
         snapshot = workflow_run_snapshot_from_payload(workflow_payload).model_dump(mode="python")
-        pending_approvals = [
+        approvals = [
             dict(item)
             for item in snapshot.get("approvals") or []
-            if isinstance(item, dict) and str(item.get("status") or "pending") == "pending"
+            if isinstance(item, dict)
         ]
         pending = snapshot.get("pending_approval")
-        if isinstance(pending, dict) and pending not in pending_approvals:
-            pending_approvals.insert(0, dict(pending))
+        if isinstance(pending, dict):
+            pending_id = str(pending.get("approval_id") or "").strip()
+            pending_run_id = str(pending.get("run_id") or "").strip()
+            approvals = [
+                dict(pending),
+                *[
+                    item
+                    for item in approvals
+                    if str(item.get("approval_id") or "").strip() != pending_id
+                    or str(item.get("run_id") or "").strip() != pending_run_id
+                ],
+            ]
+        pending_approvals = [
+            dict(item)
+            for item in approvals
+            if str(item.get("status") or "pending") == "pending"
+        ]
         status = str(snapshot.get("status") or parent.get("status") or "running").strip()
         if pending_approvals and status in {"", "queued", "running", "processing"}:
             status = "approval_required"
@@ -956,6 +976,7 @@ class LegacyRuntimePort:
             "recent_events": snapshot.get("events") or [],
             "timeline": snapshot.get("events") or [],
             "artifacts": snapshot.get("artifacts") or [],
+            "approvals": approvals,
             "pending_approvals": pending_approvals,
             "pending_approval": pending if isinstance(pending, dict) else None,
             "metadata": metadata,
@@ -1098,6 +1119,79 @@ class LegacyRuntimePort:
             if item:
                 context.setdefault(child_run_id, {}).update(item)
         return context
+
+    def _workflow_events_with_child_replay(
+        self,
+        parent: dict[str, Any],
+        parent_events: list[dict[str, Any]],
+        child_runs: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        parent_run_id = str(parent.get("run_id") or parent.get("workflow_run_id") or "").strip()
+        if not parent_run_id:
+            return parent_events
+        workflow_id = str(parent.get("workflow_id") or parent.get("runnable_id") or "").strip()
+        context_by_child = self._workflow_child_context_by_run_id(
+            parent,
+            events=parent_events,
+        )
+        events = [dict(event) for event in parent_events if isinstance(event, dict)]
+        for child in child_runs:
+            child_run_id = str(child.get("run_id") or "").strip()
+            if not child_run_id:
+                continue
+            context = context_by_child.get(child_run_id) or {}
+            for event in self._events_from_payload(child):
+                events.append(
+                    self._workflow_child_replay_event(
+                        event,
+                        parent_run_id=parent_run_id,
+                        workflow_id=workflow_id,
+                        child_run_id=child_run_id,
+                        context=context,
+                    )
+                )
+        return self._resequence_events(events)
+
+    def _workflow_child_replay_event(
+        self,
+        event: dict[str, Any],
+        *,
+        parent_run_id: str,
+        workflow_id: str,
+        child_run_id: str,
+        context: dict[str, str],
+    ) -> dict[str, Any]:
+        item = dict(event)
+        payload = dict(item.get("payload")) if isinstance(item.get("payload"), dict) else {}
+        source_sequence = str(item.get("sequence") or "").strip()
+        source_event_id = str(item.get("event_id") or "").strip()
+        payload.setdefault("source_run_id", child_run_id)
+        if source_sequence:
+            payload.setdefault("source_sequence", source_sequence)
+        if source_event_id:
+            payload.setdefault("source_event_id", source_event_id)
+        if workflow_id:
+            payload.setdefault("workflow_id", workflow_id)
+        payload.setdefault("workflow_run_id", parent_run_id)
+        for key, value in context.items():
+            if value:
+                payload.setdefault(key, value)
+        item["run_id"] = parent_run_id
+        item["payload"] = payload
+        return item
+
+    def _events_from_payload(self, payload: dict[str, Any]) -> list[dict[str, Any]]:
+        for key in ("events", "run_events", "recent_events", "timeline"):
+            value = payload.get(key)
+            if isinstance(value, list) and value:
+                return [dict(item) for item in value if isinstance(item, dict)]
+        return []
+
+    def _resequence_events(self, events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        resequenced = []
+        for index, event in enumerate(events, start=1):
+            resequenced.append({**event, "sequence": index})
+        return resequenced
 
     def _payload_pending_approval_id(self, payload: dict[str, Any]) -> str:
         pending = payload.get("pending_approval")

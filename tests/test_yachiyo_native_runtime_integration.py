@@ -1130,7 +1130,109 @@ def test_yachiyo_chat_workflow_task_rolls_native_child_debug_state(tmp_path) -> 
         assert timeline.pending_approval is not None
         assert timeline.pending_approval.run_id == child_run["run_id"]
         assert timeline.artifacts[0].source_run_id == child_run["run_id"]
+        assert any(
+            event.event_type == "workflow.run.tool.approval_required"
+            and event.source_run_id == child_run["run_id"]
+            and event.workflow_node_id == "analyze"
+            for event in timeline.events
+        )
         assert page.run_id == workflow_run["run_id"]
+        assert any(
+            event.event_type == "workflow.run.tool.approval_required"
+            and event.source_run_id == child_run["run_id"]
+            for event in page.events
+        )
+    finally:
+        runtime.close()
+
+
+def test_agent_studio_workflow_timeline_rolls_native_child_debug_state(tmp_path) -> None:
+    credential_store = MemoryCredentialStore()
+    runtime = NativeRunEngine(
+        db_path=tmp_path / "agent-runtime-studio-workflow-child.db",
+        workspace_dir=tmp_path / "runtime-studio-workflow-child",
+        credential_store=credential_store,
+        seed_templates=False,
+    )
+    try:
+        run_group = runtime._insert_run_group(
+            title="Native studio workflow",
+            source="workflow",
+            workspace_dir=str(tmp_path / "workflow-workspace"),
+        )
+        workflow_run = runtime._insert_run(
+            kind="workflow_run",
+            runnable_id="workflow-native-studio-1",
+            user_goal="Build workflow report",
+            run_group_id=run_group["run_group_id"],
+        )
+        child_run = runtime._insert_run(
+            kind="agent_run",
+            runnable_id="agent-analysis",
+            user_goal="Analyze data",
+            run_group_id=run_group["run_group_id"],
+        )
+        runtime._update_run(
+            workflow_run["run_id"],
+            status="approval_required",
+            timeline=[
+                {
+                    "event_type": "workflow.node.agent",
+                    "payload": {
+                        "child_run_id": child_run["run_id"],
+                        "workflow_id": "workflow-native-studio-1",
+                        "workflow_run_id": workflow_run["run_id"],
+                        "workflow_node_id": "analyze",
+                        "workflow_node_label": "Analyze data",
+                    },
+                }
+            ],
+            pending_approval=None,
+        )
+        runtime._update_run(
+            child_run["run_id"],
+            status="approval_required",
+            pending_approval={
+                "approval_id": "approval-studio-child",
+                "tool": "terminal.run",
+                "title": "Run analysis",
+                "workflow_id": "workflow-native-studio-1",
+                "workflow_run_id": workflow_run["run_id"],
+                "workflow_node_id": "analyze",
+                "workflow_node_label": "Analyze data",
+            },
+            artifacts=[
+                {
+                    "artifact_id": "artifact-studio-child",
+                    "kind": "markdown",
+                    "path": "analysis.md",
+                }
+            ],
+            timeline=[
+                {
+                    "event_type": "agent.tool.approval_required",
+                    "payload": {
+                        "approval_id": "approval-studio-child",
+                        "tool_name": "terminal.run",
+                        "title": "Run analysis",
+                    },
+                },
+            ],
+        )
+
+        studio = AgentStudioService(LegacyStudioPort(runtime))
+
+        timeline = studio.get_run_timeline(workflow_run["run_id"])
+
+        assert timeline.workflow_run_id == workflow_run["run_id"]
+        assert timeline.children[0].run_id == child_run["run_id"]
+        assert timeline.pending_approval is not None
+        assert timeline.pending_approval.run_id == child_run["run_id"]
+        assert timeline.pending_approval.workflow_node_id == "analyze"
+        assert timeline.artifacts[0].source_run_id == child_run["run_id"]
+        assert timeline.runtime_debug is not None
+        assert timeline.runtime_debug.child_run_count == 1
+        assert timeline.runtime_debug.pending_approval_count == 1
     finally:
         runtime.close()
 
