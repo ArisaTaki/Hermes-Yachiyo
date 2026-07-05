@@ -1318,6 +1318,51 @@ def test_yachiyo_agent_service_starts_data_analysis_with_observable_read_step() 
     ] == ["read-data-source", "analyze-data-file"]
 
 
+def test_yachiyo_agent_service_plans_csv_summary_artifact() -> None:
+    port = _FakeRuntimePort()
+    service = YachiyoAgentService(port)
+
+    service.start_chat_task(
+        {
+            "prompt": "读取 ~/Downloads/sales.xlsx 做数据分析，输出 markdown 报告和 csv 摘要",
+            "conversation_id": "chat-1",
+            "allowed_tools": [
+                "workspace.read",
+                "data.analyze",
+                "terminal.run",
+                "artifact.write",
+            ],
+        }
+    )
+
+    request_payload = port.calls[0][1]
+    direct_requests = request_payload["direct_tool_requests"]
+    assert [request["tool"] for request in direct_requests] == [
+        "workspace.read",
+        "data.analyze",
+    ]
+    analysis_input = direct_requests[1]["input"]
+    assert analysis_input["requested_outputs"] == ["report", "table"]
+    assert analysis_input["artifact_paths"] == [
+        "analysis-report.md",
+        "analysis-summary.csv",
+    ]
+    assert analysis_input["artifact_manifest"] == [
+        {"path": "analysis-report.md", "kind": "markdown"},
+        {"path": "analysis-summary.csv", "kind": "csv"},
+    ]
+    metadata = request_payload["metadata"]
+    assert metadata["yachiyo_plan_artifacts_expected"] == [
+        "analysis-report.md",
+        "analysis-summary.csv",
+    ]
+    assert [
+        item["path"]
+        for item in metadata["yachiyo_task_core"]["workspace"]["items"]
+        if item["kind"] == "artifact"
+    ] == ["analysis-report.md", "analysis-summary.csv"]
+
+
 def test_yachiyo_agent_service_plans_shared_chat_execution_envelope() -> None:
     service = YachiyoAgentService(_FakeRuntimePort())
 
