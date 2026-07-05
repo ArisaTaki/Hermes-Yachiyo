@@ -61,6 +61,7 @@ export type RuntimeToolCallCardSnapshot = {
   tool_name: string;
   status: string;
   risk_level?: string | null;
+  policy_reason?: string | null;
   input_preview?: Record<string, unknown>;
   output_preview?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
@@ -155,6 +156,7 @@ export function RuntimeToolCallCard({
       data-tool-call-id={toolCall.tool_call_id}
       data-tool-family={runtimeToolFamily(toolCall.tool_name)}
       data-tool-name={toolCall.tool_name}
+      data-tool-policy-reason={toolCall.policy_reason || ''}
       data-tool-status={toolCall.status}
       data-workflow-id={toolCall.workflow_id || ''}
       data-workflow-node-id={toolCall.workflow_node_id || ''}
@@ -163,7 +165,9 @@ export function RuntimeToolCallCard({
       <span>{toolCall.status || 'tool'}</span>
       <strong>{displayName}</strong>
       {rawToolName && rawToolName !== displayName ? <small>{rawToolName}</small> : null}
-      {toolCall.risk_level ? <em>{toolCall.risk_level}</em> : null}
+      {toolCall.risk_level ? (
+        <em title={toolCall.policy_reason || undefined}>{toolCall.risk_level}</em>
+      ) : null}
       {target ? <code>{target}</code> : null}
       {output ? <p>{output}</p> : null}
       {metadata.length ? (

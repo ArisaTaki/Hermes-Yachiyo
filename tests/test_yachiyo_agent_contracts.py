@@ -6038,6 +6038,7 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
         tool_name="workspace.read",
         status="completed",
         risk_level="low",
+        policy_reason="Read-only workspace inspection.",
         input_preview={"path": "README.md"},
         output_preview={"ok": True},
         approval_id="approval-1",
@@ -6089,6 +6090,7 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
         "tool_name",
         "status",
         "risk_level",
+        "policy_reason",
         "input_preview",
         "output_preview",
         "metadata",
@@ -6104,9 +6106,43 @@ def test_tool_call_snapshot_keeps_runtime_trace_fields() -> None:
     assert payload["workflow_node_id"] == "read"
     assert payload["group_run_id"] == "group-run-1"
     assert payload["runtime_stage"] == "operate"
+    assert payload["policy_reason"] == "Read-only workspace inspection."
     assert payload["requires_post_action_verification"] is True
     assert payload["deferred_tool"] == "desktop.click_ui_element"
     assert payload["deferred_input"] == {"target": "Export", "limit": 80}
+
+
+def test_tool_call_snapshot_from_event_keeps_policy_reason() -> None:
+    from apps.shell.yachiyo_agent.tool_call_event_snapshots import (
+        tool_call_snapshots_from_events,
+    )
+
+    calls = tool_call_snapshots_from_events(
+        [
+            PublicRunEvent(
+                event_id="event-1",
+                run_id="run-1",
+                sequence=1,
+                event_type="agent.tool.approval_required",
+                detail="desktop.click_ui_element",
+                payload={
+                    "tool_call_id": "call-1",
+                    "tool_name": "desktop.click_ui_element",
+                    "input_preview": {"target": "Export"},
+                    "risk_level": "medium",
+                    "policy_reason": "Clicking a foreground UI element needs approval.",
+                },
+                created_at="2026-06-14T00:00:00Z",
+            )
+        ]
+    )
+
+    assert len(calls) == 1
+    assert calls[0].risk_level == "medium"
+    assert calls[0].policy_reason == "Clicking a foreground UI element needs approval."
+    assert calls[0].input_preview["policy_reason"] == (
+        "Clicking a foreground UI element needs approval."
+    )
 
 
 def test_memory_trace_snapshot_keeps_runtime_trace_fields() -> None:

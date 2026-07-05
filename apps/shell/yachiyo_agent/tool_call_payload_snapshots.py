@@ -157,7 +157,18 @@ def tool_call_snapshot_from_payload(
         ),
         tool_name=tool_name,
         status=status,
-        risk_level=_optional_text(payload.get("risk_level") or payload.get("risk")),
+        risk_level=_optional_text(
+            payload.get("risk_level")
+            or payload.get("risk")
+            or input_preview.get("risk_level")
+            or input_preview.get("risk")
+        ),
+        policy_reason=_optional_text(
+            payload.get("policy_reason")
+            or payload.get("approval_reason")
+            or input_preview.get("policy_reason")
+            or input_preview.get("approval_reason")
+        ),
         input_preview=input_preview,
         output_preview=output_preview,
         metadata=tool_call_metadata(payload),
@@ -304,6 +315,7 @@ def _redacted_tool_call_snapshot(snapshot: ToolCallSnapshot) -> ToolCallSnapshot
             "tool_name": _text(snapshot.tool_name),
             "status": _text(snapshot.status),
             "risk_level": _optional_text(snapshot.risk_level),
+            "policy_reason": _optional_text(snapshot.policy_reason),
             "input_preview": _mapping(snapshot.input_preview),
             "output_preview": _mapping(snapshot.output_preview),
             "metadata": _mapping(snapshot.metadata),

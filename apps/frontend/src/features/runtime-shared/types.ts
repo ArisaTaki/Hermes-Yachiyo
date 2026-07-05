@@ -855,6 +855,7 @@ export type ToolCallSnapshot = {
   tool_name: string;
   status: string;
   risk_level?: string | null;
+  policy_reason?: string | null;
   input_preview?: Record<string, unknown>;
   output_preview?: Record<string, unknown>;
   metadata?: Record<string, unknown>;

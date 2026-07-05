@@ -136,6 +136,8 @@ def tool_call_payload_from_event(event: PublicRunEvent) -> dict[str, Any]:
         normalized.setdefault("approval_id", approval_id)
     if risk_level:
         normalized.setdefault("risk_level", risk_level)
+    if policy_reason:
+        normalized.setdefault("policy_reason", policy_reason)
     merge_tool_trace_context(normalized, payload)
     trace_context = {
         "approval_id": approval_id,
@@ -381,6 +383,7 @@ def merge_tool_call_snapshots(
         tool_name=current.tool_name or next_call.tool_name,
         status=next_call.status or current.status,
         risk_level=current.risk_level or next_call.risk_level,
+        policy_reason=current.policy_reason or next_call.policy_reason,
         input_preview=_merge_input_previews(current.input_preview, next_call.input_preview),
         output_preview=output_preview,
         metadata=metadata,

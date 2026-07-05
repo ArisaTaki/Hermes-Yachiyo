@@ -900,6 +900,7 @@ class ToolCallSnapshot(_PublicSnapshot):
     tool_name: str
     status: str
     risk_level: str | None = None
+    policy_reason: str | None = None
     input_preview: dict[str, Any] = Field(default_factory=dict)
     output_preview: dict[str, Any] = Field(default_factory=dict)
     metadata: dict[str, Any] = Field(default_factory=dict)

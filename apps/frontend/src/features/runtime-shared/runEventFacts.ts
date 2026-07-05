@@ -433,6 +433,7 @@ function toolCallFromRunEvent(event: PublicRunEvent): ToolCallSnapshot | null {
     tool_name: toolName,
     status,
     risk_level: riskLevel || null,
+    policy_reason: policyReason || null,
     input_preview: inputPreview,
     output_preview: outputPreview,
     metadata: toolCallMetadata(payload),
@@ -736,6 +737,7 @@ function mergeToolCallTrace(current: ToolCallSnapshot, incoming: ToolCallSnapsho
       current.task_verification_targets,
       incoming.task_verification_targets,
     ),
+    policy_reason: current.policy_reason || incoming.policy_reason || null,
     metadata: {
       ...(incoming.metadata || {}),
       ...(current.metadata || {}),
@@ -811,6 +813,7 @@ function mergeToolCallReplayTrace(current: ToolCallSnapshot, incoming: ToolCallS
     ),
     status: incoming.status || current.status,
     risk_level: current.risk_level || incoming.risk_level || null,
+    policy_reason: current.policy_reason || incoming.policy_reason || null,
     input_preview: {
       ...(current.input_preview || {}),
       ...(incoming.input_preview || {}),
