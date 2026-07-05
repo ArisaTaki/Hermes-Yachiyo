@@ -180,7 +180,11 @@ def _legacy_compatible_simple_entrypoint_requests(
         return []
     if not any(
         str(request.get("planning_reason") or "").strip()
-        in {"planner_desktop_operation", "planner_fallback_file_access"}
+        in {
+            "planner_desktop_operation",
+            "planner_fallback_file_access",
+            "planner_fallback_web_research",
+        }
         for request in items
     ):
         return []
@@ -203,6 +207,7 @@ _LEGACY_COMPATIBLE_SIMPLE_PLANNER_TOOLS = frozenset(
         "app.focus",
         "app.open",
         "app.status",
+        "browser.open_url",
         "desktop.open_path",
         "desktop.reveal_path",
         "desktop.running_apps",
@@ -214,6 +219,8 @@ def _legacy_compatible_simple_request(text: str, request: Mapping[str, Any]) -> 
     tool_name = str(request.get("tool") or "").strip()
     if tool_name in {"desktop.open_path", "desktop.reveal_path", "desktop.running_apps"}:
         return True
+    if tool_name == "browser.open_url":
+        return _legacy_compatible_browser_open_request(text, request)
     if tool_name == "app.status":
         payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
         return bool(str(payload.get("app_name") or "").strip())
@@ -239,6 +246,18 @@ def _generic_non_app_name(app_name: str) -> bool:
         "仓库",
         "工作区",
     }
+
+
+def _legacy_compatible_browser_open_request(text: str, request: Mapping[str, Any]) -> bool:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    url = str(payload.get("url") or "").strip().lower()
+    if not url:
+        return False
+    if re.search(r"(?:搜索|搜|聚焦|spotlight|\bsearch\b|\bfind\b)", str(text or ""), flags=re.IGNORECASE):
+        return False
+    if "google.com/search" in url or "/search?" in url:
+        return False
+    return True
 
 
 def _app_prompt_has_non_launch_followup(text: str) -> bool:

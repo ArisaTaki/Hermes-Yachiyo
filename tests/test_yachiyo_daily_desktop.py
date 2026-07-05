@@ -2181,6 +2181,52 @@ def test_daily_desktop_entrypoint_requests_use_planner_for_simple_app_and_file(m
         assert daily_desktop_entrypoint_requests(prompt) == expected
 
 
+def test_daily_desktop_entrypoint_requests_use_planner_for_direct_browser_navigation(monkeypatch) -> None:
+    def fail_legacy(*_args, **_kwargs):
+        raise AssertionError("legacy desktop parser should not own compatible browser navigation")
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.daily_desktop.daily_desktop_entrypoint_tool_requests",
+        fail_legacy,
+    )
+
+    cases = (
+        (
+            "打开 GitHub 首页",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "browser.open_url",
+                    "input": {"url": "https://github.com"},
+                },
+            ],
+        ),
+        (
+            "上 B 站",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "browser.open_url",
+                    "input": {"url": "https://www.bilibili.com"},
+                },
+            ],
+        ),
+        (
+            "打开贴吧",
+            [
+                {
+                    "protocol": "json_fallback",
+                    "tool": "browser.open_url",
+                    "input": {"url": "https://tieba.baidu.com"},
+                },
+            ],
+        ),
+    )
+
+    for prompt, expected in cases:
+        assert daily_desktop_entrypoint_requests(prompt) == expected
+
+
 def test_planner_first_daily_desktop_entrypoint_verifies_simple_media_playback() -> None:
     requests = planner_first_daily_desktop_entrypoint_requests(
         "能帮我播放 Apple Music 吗",
