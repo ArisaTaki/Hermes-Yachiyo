@@ -43,6 +43,7 @@ from .contracts import (
     StartGroupRunRequest,
     StartPlannerOrchestrationRequest,
     StartWorkflowRunRequest,
+    TaskCoreSnapshot,
     ToolCatalogSnapshot,
     ToolCallSnapshot,
     UpdateRestrictedToolPluginRequest,
@@ -79,6 +80,7 @@ from .start_event_enrichment import (
     start_payload_with_planner_decision_events,
     start_payload_with_planner_events,
 )
+from .task_progress_snapshots import task_progress_summary_from_task_core
 from .skills import (
     skill_folder_snapshot_from_payload,
     skill_snapshot_from_payload,
@@ -1434,27 +1436,112 @@ def _planner_enriched_start_payload(
         return start_payload
     metadata = _planner_start_metadata(start_payload, source=metadata_source)
     metadata.update(runtime_planner_metadata(decision, allowed_tools=allowed_tools))
-    envelope = metadata.get("yachiyo_execution_envelope")
+    full_plan_envelope = runtime_execution_envelope_from_decision(
+        decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+    envelope = (
+        full_plan_envelope.model_dump(mode="json")
+        if full_plan_envelope is not None
+        else metadata.get("yachiyo_execution_envelope")
+    )
     if isinstance(envelope, Mapping):
-        metadata["yachiyo_execution_envelope"] = (
-            runtime_execution_envelope_payload_with_request_context(
-                envelope,
-                execution_context,
-            )
+        enriched_envelope = runtime_execution_envelope_payload_with_request_context(
+            envelope,
+            execution_context,
         )
+        _apply_start_execution_envelope_metadata(metadata, enriched_envelope)
         start_payload.setdefault(
             "runtime_execution_envelope",
-            dict(metadata["yachiyo_execution_envelope"]),
+            dict(enriched_envelope),
         )
         if "direct_tool_requests" not in start_payload:
             direct_tool_requests = runtime_execution_requests_from_envelope_payload(
-                metadata["yachiyo_execution_envelope"],
+                enriched_envelope,
                 allowed_tools=allowed_tools,
             )
             if direct_tool_requests:
                 start_payload["direct_tool_requests"] = direct_tool_requests
     start_payload["metadata"] = metadata
     return start_payload
+
+
+def _apply_start_execution_envelope_metadata(
+    metadata: dict[str, Any],
+    envelope: Mapping[str, Any],
+) -> None:
+    metadata["yachiyo_execution_envelope"] = dict(envelope)
+    requests = [
+        request
+        for request in envelope.get("requests", [])
+        if isinstance(request, Mapping)
+    ]
+    metadata["yachiyo_execution_requests"] = [
+        request.get("tool_name")
+        for request in requests
+        if request.get("tool_name")
+    ]
+    previews = _start_execution_request_previews(requests)
+    if previews:
+        metadata["yachiyo_execution_request_previews"] = previews
+    task_core = _start_execution_task_core(envelope)
+    if task_core is not None:
+        metadata["yachiyo_task_core"] = task_core.model_dump(mode="json")
+        task_progress = task_progress_summary_from_task_core(task_core)
+        if task_progress is not None:
+            metadata["yachiyo_task_progress"] = task_progress.model_dump(mode="json")
+
+
+def _start_execution_task_core(envelope: Mapping[str, Any]) -> TaskCoreSnapshot | None:
+    task_core = envelope.get("task_core")
+    if not isinstance(task_core, Mapping):
+        return None
+    try:
+        return TaskCoreSnapshot.model_validate(task_core)
+    except ValueError:
+        return None
+
+
+def _start_execution_request_previews(
+    requests: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    previews: list[dict[str, Any]] = []
+    for request in requests:
+        tool_name = str(request.get("tool_name") or request.get("tool") or "").strip()
+        if not tool_name:
+            continue
+        preview: dict[str, Any] = {"tool_name": tool_name}
+        for key in (
+            "request_id",
+            "step_id",
+            "capability_id",
+            "runtime_stage",
+            "runtime_role",
+            "status",
+            "planning_reason",
+            "source",
+        ):
+            value = request.get(key)
+            if value not in (None, "", [], {}):
+                preview[key] = value
+        request_input = request.get("input")
+        if isinstance(request_input, Mapping) and request_input:
+            preview["input"] = dict(request_input)
+        for key in (
+            "approval_required",
+            "continue_to_model",
+            "requires_observation",
+            "requires_post_action_verification",
+        ):
+            if bool(request.get(key)):
+                preview[key] = True
+        for key in ("depends_on", "fallback_tools", "replan_signal_ids", "replan_triggers"):
+            value = request.get(key)
+            if isinstance(value, list) and value:
+                preview[key] = list(value)
+        previews.append(preview)
+    return previews
 
 
 def _find_replan_recovery_action(

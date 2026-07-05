@@ -32,9 +32,18 @@ def test_studio_start_agent_run_enriches_bare_port_payload_with_planner_events()
     start_payload = port.agent_run_payloads[0]
     assert "runtime_execution_envelope" in start_payload
     assert [request["tool"] for request in start_payload["direct_tool_requests"]] == [
+        "workspace.read",
         "data.analyze",
     ]
-    assert start_payload["direct_tool_requests"][0]["step_id"] == "analyze-data-file"
+    assert [request["step_id"] for request in start_payload["direct_tool_requests"]] == [
+        "read-data-source",
+        "analyze-data-file",
+    ]
+    assert run.task_core is not None
+    assert [todo.step_id for todo in run.task_core.todos] == [
+        "read-data-source",
+        "analyze-data-file",
+    ]
 
 
 def test_studio_start_group_run_enriches_bare_port_payload_with_group_scoped_events() -> None:
