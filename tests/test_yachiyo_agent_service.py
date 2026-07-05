@@ -1170,9 +1170,15 @@ def test_yachiyo_agent_service_attaches_planner_outputs_to_chat_task() -> None:
     assert metadata["yachiyo_plan_artifacts_expected"] == ["analysis-report.md"]
     assert metadata["yachiyo_plan_open_questions"] == []
     assert metadata["yachiyo_missing_capabilities"] == []
-    assert metadata["yachiyo_execution_requests"] == ["data.analyze"]
+    assert metadata["yachiyo_execution_requests"] == [
+        "workspace.read",
+        "python.run",
+        "artifact.write",
+    ]
     assert metadata["yachiyo_execution_envelope"]["intent_kind"] == "data_analysis"
-    assert metadata["yachiyo_execution_envelope"]["requests"][0]["tool_name"] == "data.analyze"
+    assert metadata["yachiyo_execution_envelope"]["requests"][0]["tool_name"] == (
+        "workspace.read"
+    )
     assert metadata["yachiyo_execution_envelope"]["task_core"]["core_id"] == (
         metadata["yachiyo_task_core"]["core_id"]
     )
@@ -1220,7 +1226,9 @@ def test_yachiyo_agent_service_starts_chat_with_full_runtime_execution_envelope(
         "produce",
     ]
     assert [request["tool_name"] for request in metadata["yachiyo_execution_envelope"]["requests"]] == [
-        "data.analyze",
+        "workspace.read",
+        "python.run",
+        "artifact.write",
     ]
     assert task.runtime_execution_envelope is not None
     assert [request.tool_name for request in task.runtime_execution_envelope.requests] == [
