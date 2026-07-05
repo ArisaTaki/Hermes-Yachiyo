@@ -5,6 +5,7 @@ import type {
   YachiyoRunTimelineSnapshot,
 } from '../../yachiyo-studio/types';
 import { RuntimeDebugSummary } from '../../runtime-shared/components/RuntimeDebugSummary';
+import { RuntimeExecutionEnvelopeSummary } from '../../runtime-shared/components/RuntimeExecutionEnvelopeSummary';
 import type { RunSpec } from '../types';
 
 type WorkflowRunDetailPanelProps = {
@@ -114,6 +115,19 @@ export function WorkflowRunDetailPanel({
         sourceLabel={publicSnapshotName}
         summary={selectedPublicRunTimeline.runtime_debug}
         testId="agent-run-detail-public-runtime-debug"
+      />
+      <RuntimeExecutionEnvelopeSummary
+        className="run-public-runtime-execution-envelope"
+        debugPillsTestId="agent-run-detail-public-runtime-execution-debug-pills"
+        envelope={runtimeEnvelope}
+        requestLimit={8}
+        requestListTestId="agent-run-detail-public-runtime-execution-requests"
+        requestTestId="agent-run-detail-public-runtime-execution-request"
+        showRequests
+        sourceLabel={`${publicSnapshotName} runtime execution envelope`}
+        testId="agent-run-detail-public-runtime-execution-envelope"
+        title="Workflow Runtime Execution"
+        variant="studio"
       />
       {childSnapshots.length ? (
         <div className="run-group-overview-children run-public-child-list" data-testid="agent-run-detail-public-children">
