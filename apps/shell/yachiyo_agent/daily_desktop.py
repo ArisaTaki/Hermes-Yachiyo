@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -95,11 +96,137 @@ def daily_desktop_entrypoint_requests(
     allowed_tools: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
     allowed = daily_desktop_allowed_tools(allowed_tools)
+    planner_requests = _planner_owned_legacy_compatible_entrypoint_requests(
+        str(text or ""),
+        allowed,
+        metadata=metadata,
+    )
+    if planner_requests:
+        return planner_requests
     return daily_desktop_entrypoint_tool_requests(
         str(text or ""),
         allowed,
         metadata=metadata,
     )
+
+
+def _planner_owned_legacy_compatible_entrypoint_requests(
+    text: str,
+    allowed: Sequence[str],
+    *,
+    metadata: Mapping[str, Any] | None,
+) -> list[dict[str, Any]]:
+    try:
+        from .planner_execution import planner_tool_requests
+
+        planner_requests = planner_tool_requests(
+            str(text or ""),
+            allowed,
+            metadata=metadata,
+        )
+    except Exception:
+        logger.debug("Runtime planner legacy-compatible entrypoint unavailable", exc_info=True)
+        return []
+    return _legacy_compatible_media_entrypoint_requests(planner_requests, text=text)
+
+
+def _legacy_compatible_media_entrypoint_requests(
+    requests: Sequence[Mapping[str, Any]] | None,
+    *,
+    text: str,
+) -> list[dict[str, Any]]:
+    if not requests:
+        return []
+    items = [dict(request) for request in requests if isinstance(request, Mapping)]
+    if not items:
+        return []
+    if not any(
+        str(request.get("planning_reason") or "").strip() == "planner_fallback_media_playback"
+        for request in items
+    ):
+        return []
+    visible = [
+        request
+        for request in _visible_entrypoint_plan_requests(items)
+        if str(request.get("tool") or "").strip() not in {"desktop.ui_elements"}
+    ]
+    if not visible:
+        return []
+    if any(_request_has_selected_app_placeholder(request) for request in visible):
+        return []
+    tools = [str(request.get("tool") or "").strip() for request in visible]
+    if _legacy_compatible_simple_media_request(tools):
+        return [_legacy_shape_request(visible[0])]
+    if _legacy_compatible_named_music_search_sequence(visible, tools, text=text):
+        return [_legacy_shape_request(request) for request in visible]
+    return []
+
+
+def _legacy_compatible_simple_media_request(tools: Sequence[str]) -> bool:
+    return len(tools) == 1 and tools[0] in {
+        "media.apple_music_play",
+        "media.apple_music_status",
+        "media.music_app_open_and_play",
+    }
+
+
+def _legacy_compatible_named_music_search_sequence(
+    requests: Sequence[Mapping[str, Any]],
+    tools: Sequence[str],
+    *,
+    text: str,
+) -> bool:
+    if not _explicit_music_search_play_prompt(text):
+        return False
+    if list(tools) != [
+        "app.open_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "media.music_app_open_and_play",
+    ] and list(tools) != [
+        "app.focus_and_safe_shortcut",
+        "desktop.safe_type_text",
+        "desktop.search_submit",
+        "media.music_app_open_and_play",
+    ]:
+        return False
+    first_input = requests[0].get("input") if isinstance(requests[0].get("input"), Mapping) else {}
+    final_input = requests[-1].get("input") if isinstance(requests[-1].get("input"), Mapping) else {}
+    first_app = str(first_input.get("app_name") or "").strip()
+    final_app = str(final_input.get("app_name") or "").strip()
+    return bool(first_app and final_app and first_app == final_app and first_app != "Music")
+
+
+def _explicit_music_search_play_prompt(text: str) -> bool:
+    value = str(text or "")
+    has_search = bool(
+        "搜索" in value
+        or "搜" in value
+        or re.search(r"\b(?:search|find)\b", value, flags=re.IGNORECASE)
+    )
+    if not has_search:
+        return False
+    return bool(
+        re.search(r"(?:打开|启动|运行|拉起|开启)", value)
+        or re.search(r"\b(?:open|launch|start)\b", value, flags=re.IGNORECASE)
+    )
+
+
+def _legacy_shape_request(request: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "protocol": str(request.get("protocol") or "json_fallback"),
+        "tool": str(request.get("tool") or "").strip(),
+        "input": dict(request.get("input") if isinstance(request.get("input"), Mapping) else {}),
+    }
+
+
+def _request_has_selected_app_placeholder(request: Mapping[str, Any]) -> bool:
+    payload = request.get("input") if isinstance(request.get("input"), Mapping) else {}
+    for value in payload.values():
+        text = str(value or "").strip()
+        if text.startswith("<selected app from "):
+            return True
+    return False
 
 
 def planner_first_daily_desktop_entrypoint_requests(

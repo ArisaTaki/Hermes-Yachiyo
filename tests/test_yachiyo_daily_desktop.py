@@ -349,7 +349,12 @@ def test_planner_first_daily_desktop_entrypoint_discovers_apps_by_capability() -
         {
             "protocol": "json_fallback",
             "tool": "desktop.ui_elements",
-            "input": {"limit": 80},
+            "input": {
+                "app_name": "<selected app from desktop.list_apps>",
+                "limit": 80,
+                "selection_source": "desktop.list_apps",
+                "query": "markdown",
+            },
             "source": "runtime_planner",
             "planning_reason": "planner_desktop_operation",
         },
@@ -2064,7 +2069,45 @@ def test_planner_first_daily_desktop_entrypoint_requests_keep_legacy_fallback(mo
             "protocol": "json_fallback",
             "tool": "app.open",
             "input": {"app_name": "Microsoft Word"},
+            "legacy_fallback": True,
+            "compatibility_boundary": "legacy_daily_desktop_intent",
         }
+    ]
+
+
+def test_daily_desktop_entrypoint_requests_use_planner_for_compatible_media(monkeypatch) -> None:
+    def fail_legacy(*_args, **_kwargs):
+        raise AssertionError("legacy desktop media parser should not own compatible media playback")
+
+    monkeypatch.setattr(
+        "apps.shell.yachiyo_agent.daily_desktop.daily_desktop_entrypoint_tool_requests",
+        fail_legacy,
+    )
+
+    assert daily_desktop_entrypoint_requests("能帮我播放 Apple Music 吗") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Music"},
+        }
+    ]
+    assert daily_desktop_entrypoint_requests("打开 Spotify 搜索 Taylor Swift 并播放") == [
+        {
+            "protocol": "json_fallback",
+            "tool": "app.open_and_safe_shortcut",
+            "input": {"app_name": "Spotify", "action": "find"},
+        },
+        {
+            "protocol": "json_fallback",
+            "tool": "desktop.safe_type_text",
+            "input": {"text": "Taylor Swift"},
+        },
+        {"protocol": "json_fallback", "tool": "desktop.search_submit", "input": {}},
+        {
+            "protocol": "json_fallback",
+            "tool": "media.music_app_open_and_play",
+            "input": {"app_name": "Spotify"},
+        },
     ]
 
 
