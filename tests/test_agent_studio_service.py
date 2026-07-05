@@ -1799,9 +1799,17 @@ def test_agent_studio_service_preserves_deferred_replan_recovery_context() -> No
         "limit": 80,
     }
     assert direct_request["deferred_context"] == {"step_id": "operate-foreground-ui"}
-    assert direct_request["deferred_continuation"] == [
-        {"tool": "desktop.ui_elements", "step_id": "verify-desktop-result"}
-    ]
+    continuation = direct_request["deferred_continuation"][0]
+    assert continuation["tool"] == "desktop.ui_elements"
+    assert continuation["step_id"] == "verify-desktop-result"
+    assert continuation["source"] == "agent_studio_replan_recovery"
+    assert continuation["planning_reason"] == "planner_replan_deferred_continuation"
+    assert continuation["replan_request_id"] == "replan-1"
+    assert continuation["replan_recovery_action_id"] == (
+        "replan-1:action:1:desktop.list_apps"
+    )
+    assert continuation["core_id"] == "task-core-1"
+    assert continuation["task_verification_targets"][0]["step_id"] == "open-app"
 
 
 def test_agent_studio_service_starts_runtime_envelope_retry_action_direct_run() -> None:

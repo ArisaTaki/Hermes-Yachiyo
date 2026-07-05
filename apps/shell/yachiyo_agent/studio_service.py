@@ -1868,7 +1868,13 @@ def _replan_recovery_action_direct_request(
         action.deferred_continuation or recovery.deferred_continuation
     )
     if deferred_continuation:
-        request["deferred_continuation"] = deferred_continuation
+        request["deferred_continuation"] = _replan_recovery_deferred_continuation_requests(
+            recovery,
+            action,
+            deferred_continuation,
+            task_context=task_context,
+            source=source,
+        )
     action_metadata = _mapping(action.metadata)
     desktop_loop = _mapping(action_metadata.get("desktop_loop"))
     if desktop_loop:
@@ -1882,6 +1888,53 @@ def _replan_recovery_action_direct_request(
         request["verification_targets"] = [dict(target) for target in verification_targets]
     _apply_replan_recovery_task_context(request, task_context)
     return request
+
+
+def _replan_recovery_deferred_continuation_requests(
+    recovery: ReplanRecoverySnapshot,
+    action: ReplanRecoveryActionSnapshot,
+    continuation: Iterable[Mapping[str, Any]],
+    *,
+    task_context: Mapping[str, Any],
+    source: str,
+) -> list[dict[str, Any]]:
+    requests: list[dict[str, Any]] = []
+    for index, item in enumerate(continuation, start=1):
+        tool_name = _first_text(item.get("tool"), item.get("tool_name"))
+        if not tool_name:
+            continue
+        request = dict(item)
+        request["tool"] = tool_name
+        request.setdefault("source", str(source or "agent_studio_replan_recovery").strip())
+        request.setdefault("planning_reason", "planner_replan_deferred_continuation")
+        request.setdefault("replan_request_id", str(recovery.request_id or ""))
+        request.setdefault("replan_trigger", str(recovery.trigger or ""))
+        if action.action_id:
+            request.setdefault("replan_recovery_action_id", str(action.action_id or ""))
+        if recovery.source_step_id:
+            request.setdefault("source_step_id", recovery.source_step_id)
+        if recovery.source_tool_name:
+            request.setdefault("source_tool_name", recovery.source_tool_name)
+        if recovery.target_capability_id:
+            request.setdefault("target_capability_id", recovery.target_capability_id)
+            request.setdefault("capability_id", recovery.target_capability_id)
+        replan_triggers = _replan_recovery_action_triggers(recovery, action)
+        if replan_triggers and "replan_triggers" not in request:
+            request["replan_triggers"] = replan_triggers
+        replan_signal_ids = _replan_recovery_action_signal_ids(action)
+        if replan_signal_ids and "replan_signal_ids" not in request:
+            request["replan_signal_ids"] = replan_signal_ids
+        request.setdefault(
+            "request_id",
+            "replan-continuation:{}:{}:{}".format(
+                str(recovery.request_id or "").strip(),
+                index,
+                tool_name,
+            ),
+        )
+        _apply_replan_recovery_task_context(request, task_context)
+        requests.append(request)
+    return requests
 
 
 def _replan_recovery_action_triggers(
