@@ -162,6 +162,7 @@ function runtimeDebugMetrics(summary: RuntimeDebugSummarySnapshot): RuntimeDebug
   addMetric(metrics, 'runtime_requests', 'requests', summary.runtime_request_count);
   addMetric(metrics, 'pending_runtime_requests', 'pending reqs', summary.pending_runtime_request_count);
   addMetric(metrics, 'completed_runtime_requests', 'done reqs', summary.completed_runtime_request_count, 'ready');
+  addMetric(metrics, 'recovered_runtime_requests', 'recovered reqs', summary.recovered_runtime_request_count, 'ready');
   addMetric(metrics, 'failed_runtime_requests', 'failed reqs', summary.failed_runtime_request_count, 'danger');
   addMetric(metrics, 'blocked_runtime_requests', 'blocked reqs', summary.blocked_runtime_request_count, 'warning');
   addMetric(metrics, 'waiting_runtime_requests', 'waiting reqs', summary.waiting_runtime_request_count, 'warning');

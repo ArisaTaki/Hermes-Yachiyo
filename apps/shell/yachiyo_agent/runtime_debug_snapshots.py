@@ -185,6 +185,9 @@ def runtime_debug_summary_from_runtime_objects(
         completed_runtime_request_count=sum(
             status == "completed" for status in request_statuses
         ),
+        recovered_runtime_request_count=sum(
+            status == "recovered" for status in request_statuses
+        ),
         failed_runtime_request_count=sum(
             status == "failed" for status in request_statuses
         ),

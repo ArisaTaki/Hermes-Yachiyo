@@ -3674,6 +3674,7 @@ def test_agent_task_snapshot_marks_recovered_runtime_request_after_recovery_succ
     assert snapshot.task_progress.needs_replan is False
     assert snapshot.runtime_debug is not None
     assert snapshot.runtime_debug.needs_replan is False
+    assert snapshot.runtime_debug.recovered_runtime_request_count == 1
     assert snapshot.runtime_debug.failed_runtime_request_count == 0
     assert snapshot.runtime_debug.pending_runtime_request_count == 0
     assert snapshot.replan_recoveries[0].status == "completed"

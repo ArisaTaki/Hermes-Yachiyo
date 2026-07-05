@@ -331,6 +331,7 @@ def test_run_timeline_marks_runtime_request_recovered_after_recovery_update() ->
     assert timeline.runtime_execution_envelope.requests[0].status == "recovered"
     assert timeline.runtime_debug is not None
     assert timeline.runtime_debug.needs_replan is False
+    assert timeline.runtime_debug.recovered_runtime_request_count == 1
     assert timeline.runtime_debug.failed_runtime_request_count == 0
     assert timeline.replan_recoveries[0].status == "completed"
 

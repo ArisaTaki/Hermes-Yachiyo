@@ -612,6 +612,7 @@ export type RuntimeDebugSummarySnapshot = {
   runtime_request_count?: number;
   pending_runtime_request_count?: number;
   completed_runtime_request_count?: number;
+  recovered_runtime_request_count?: number;
   failed_runtime_request_count?: number;
   blocked_runtime_request_count?: number;
   waiting_runtime_request_count?: number;

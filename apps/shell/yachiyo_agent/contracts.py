@@ -700,6 +700,7 @@ class RuntimeDebugSummarySnapshot(_PublicSnapshot):
     runtime_request_count: int = 0
     pending_runtime_request_count: int = 0
     completed_runtime_request_count: int = 0
+    recovered_runtime_request_count: int = 0
     failed_runtime_request_count: int = 0
     blocked_runtime_request_count: int = 0
     waiting_runtime_request_count: int = 0
