@@ -1005,6 +1005,8 @@ class AgentTaskLightSnapshot(_PublicSnapshot):
     needs_user_action: bool = False
     pending_approval: ApprovalCardSnapshot | None = None
     task_progress: TaskProgressSummarySnapshot | None = None
+    runtime_debug: RuntimeDebugSummarySnapshot | None = None
+    runtime_execution_envelope: RuntimeExecutionEnvelopeSnapshot | None = None
     open_in_studio_url: str | None = None
     created_at: str = ""
     updated_at: str = ""

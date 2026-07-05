@@ -958,6 +958,8 @@ export type AgentTaskLightSnapshot = {
   needs_user_action?: boolean;
   pending_approval?: ApprovalCardSnapshot | null;
   task_progress?: TaskProgressSummarySnapshot | null;
+  runtime_debug?: RuntimeDebugSummarySnapshot | null;
+  runtime_execution_envelope?: RuntimeExecutionEnvelopeSnapshot | null;
   open_in_studio_url?: string | null;
   created_at?: string;
   updated_at?: string;

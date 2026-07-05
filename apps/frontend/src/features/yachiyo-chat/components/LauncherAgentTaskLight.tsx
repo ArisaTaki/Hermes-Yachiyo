@@ -293,6 +293,8 @@ export function launcherAgentTaskLightSnapshot(task: LauncherAgentTask): AgentTa
     needs_user_action: Boolean(task.needs_user_action || approval),
     pending_approval: approval,
     task_progress: task.task_progress || null,
+    runtime_debug: task.runtime_debug || null,
+    runtime_execution_envelope: task.runtime_execution_envelope || null,
     open_in_studio_url: yachiyoTaskStudioUrl(task) || null,
     created_at: task.created_at || '',
     updated_at: task.updated_at || '',

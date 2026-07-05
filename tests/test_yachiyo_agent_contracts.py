@@ -3764,6 +3764,30 @@ def test_agent_task_light_snapshot_json_shape_is_stable() -> None:
             needs_user_action=True,
             progress_text="1/2 todos completed",
         ),
+        runtime_debug=RuntimeDebugSummarySnapshot(
+            run_id="run-1",
+            task_id="task-1",
+            intent_kind="desktop_operation",
+            runtime_stage="operate",
+            runtime_role="desktop_ui_action",
+            latest_tool_name="desktop.click_ui_element",
+            debug_surfaces=["runtime"],
+        ),
+        runtime_execution_envelope=RuntimeExecutionEnvelopeSnapshot(
+            envelope_id="envelope-1",
+            decision_id="decision-1",
+            plan_id="plan-1",
+            intent_kind="desktop_operation",
+            requests=[
+                RuntimeExecutionRequestSnapshot(
+                    request_id="request-1",
+                    tool_name="desktop.click_ui_element",
+                    risk_level="medium",
+                    policy_reason="Foreground UI click needs approval.",
+                )
+            ],
+            runtime_stage_counts={"operate": 1},
+        ),
         open_in_studio_url="#/agents?run_id=run-1",
         created_at="2026-06-14T00:00:00Z",
         updated_at="2026-06-14T00:00:01Z",
@@ -3780,6 +3804,8 @@ def test_agent_task_light_snapshot_json_shape_is_stable() -> None:
         "needs_user_action",
         "pending_approval",
         "task_progress",
+        "runtime_debug",
+        "runtime_execution_envelope",
         "open_in_studio_url",
         "created_at",
         "updated_at",
@@ -3787,6 +3813,8 @@ def test_agent_task_light_snapshot_json_shape_is_stable() -> None:
     assert payload["pending_approval"]["approval_id"] == "approval-1"
     assert payload["task_progress"]["workspace_id"] == "workspace-1"
     assert payload["task_progress"]["progress_text"] == "1/2 todos completed"
+    assert payload["runtime_debug"]["runtime_stage"] == "operate"
+    assert payload["runtime_execution_envelope"]["requests"][0]["risk_level"] == "medium"
     assert payload["open_in_studio_url"] == "#/agents?run_id=run-1"
 
 
@@ -3826,6 +3854,29 @@ def test_agent_task_light_snapshot_projects_full_task_for_launcher_surfaces() ->
             needs_user_action=True,
             progress_text="1/2 todos completed",
         ),
+        runtime_debug=RuntimeDebugSummarySnapshot(
+            run_id="run-1",
+            task_id="task-1",
+            intent_kind="desktop_operation",
+            runtime_stage="operate",
+            runtime_role="desktop_ui_action",
+            latest_tool_name="desktop.click_ui_element",
+        ),
+        runtime_execution_envelope=RuntimeExecutionEnvelopeSnapshot(
+            envelope_id="envelope-1",
+            decision_id="decision-1",
+            plan_id="plan-1",
+            intent_kind="desktop_operation",
+            requests=[
+                RuntimeExecutionRequestSnapshot(
+                    request_id="request-1",
+                    tool_name="desktop.click_ui_element",
+                    risk_level="medium",
+                    policy_reason="Foreground UI click needs approval.",
+                )
+            ],
+            runtime_stage_counts={"operate": 1},
+        ),
         open_in_studio_url="#/agents?run_id=run-1",
         created_at="2026-06-14T00:00:00Z",
         updated_at="2026-06-14T00:00:01Z",
@@ -3841,6 +3892,10 @@ def test_agent_task_light_snapshot_projects_full_task_for_launcher_surfaces() ->
     assert light.task_progress is not None
     assert light.task_progress.workspace_id == "workspace-1"
     assert light.task_progress.needs_replan is True
+    assert light.runtime_debug is not None
+    assert light.runtime_debug.runtime_stage == "operate"
+    assert light.runtime_execution_envelope is not None
+    assert light.runtime_execution_envelope.requests[0].risk_level == "medium"
     assert light.open_in_studio_url == "#/agents?run_id=run-1"
 
 
