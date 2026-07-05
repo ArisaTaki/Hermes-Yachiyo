@@ -14,6 +14,7 @@ from apps.shell.agent.runtime.agent_runs import (
     RuntimeAgentRunCoordinator,
     RuntimeAgentRunExecutor,
     RuntimeAgentRunStarter,
+    _agent_run_execution_options,
     _with_entrypoint_runtime_planner,
 )
 from apps.shell.agent_runtime import AgentRuntimeService
@@ -351,6 +352,33 @@ def test_agent_run_direct_request_approval_promotes_temporary_policy() -> None:
 
     assert agent["tool_policy"]["approval_required"] == {}
     assert enriched["tool_policy"]["allowed_tools"] == ["python.run"]
+    assert enriched["tool_policy"]["approval_required"]["python.run"] is True
+
+
+def test_agent_run_direct_request_tool_name_alias_is_normalized() -> None:
+    agent = {
+        "agent_id": "agent-yachiyo",
+        "name": "Yachiyo",
+        "tool_policy": {
+            "allowed_tools": ["python.run"],
+            "approval_required": {},
+        },
+    }
+    payload = {
+        "user_goal": "分析 sales.csv",
+        "direct_tool_request": {
+            "request_id": "request-run-analysis",
+            "tool_name": "python.run",
+            "input": {"code": "print('analysis')"},
+            "approval_required": True,
+        },
+    }
+
+    enriched = _with_entrypoint_runtime_planner(agent, payload)
+    options = _agent_run_execution_options(payload)
+
+    assert options["direct_tool_request"]["tool"] == "python.run"
+    assert options["direct_tool_requests"][0]["tool"] == "python.run"
     assert enriched["tool_policy"]["approval_required"]["python.run"] is True
 
 

@@ -503,9 +503,11 @@ def _payload_daily_desktop_planning_context(payload: dict[str, Any]) -> str:
 
 def _agent_run_execution_options(payload: dict[str, Any]) -> dict[str, Any]:
     options: dict[str, Any] = {}
-    direct_tool_request = payload.get("direct_tool_request")
-    if isinstance(direct_tool_request, dict):
-        options["direct_tool_request"] = dict(direct_tool_request)
+    direct_tool_request = _normalized_payload_direct_tool_request(
+        payload.get("direct_tool_request"),
+    )
+    if direct_tool_request:
+        options["direct_tool_request"] = direct_tool_request
     direct_tool_requests = _payload_direct_tool_requests(payload)
     if direct_tool_requests:
         options["direct_tool_requests"] = direct_tool_requests
@@ -524,14 +526,20 @@ def _payload_direct_tool_requests(payload: dict[str, Any]) -> list[dict[str, Any
         raw_items.insert(0, single)
     requests: list[dict[str, Any]] = []
     for item in raw_items:
-        if not isinstance(item, dict):
-            continue
-        tool_name = str(item.get("tool") or "").strip()
-        if not tool_name:
-            continue
-        request_input = item.get("input") if isinstance(item.get("input"), dict) else {}
-        requests.append({**item, "tool": tool_name, "input": dict(request_input)})
+        request = _normalized_payload_direct_tool_request(item)
+        if request:
+            requests.append(request)
     return requests
+
+
+def _normalized_payload_direct_tool_request(value: Any) -> dict[str, Any] | None:
+    if not isinstance(value, dict):
+        return None
+    tool_name = str(value.get("tool") or value.get("tool_name") or "").strip()
+    if not tool_name:
+        return None
+    request_input = value.get("input") if isinstance(value.get("input"), dict) else {}
+    return {**value, "tool": tool_name, "input": dict(request_input)}
 
 
 def _looks_like_daily_desktop_howto_question(text: str) -> bool:
