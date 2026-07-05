@@ -1366,6 +1366,10 @@ def test_runtime_planner_routes_research_deliverables_to_web_search_not_app_sear
         "做一份市场分析，找资料、总结重点、输出报告",
         allowed_tools=["browser.search", "artifact.write", "desktop.list_apps"],
     )
+    market_research_extract = RuntimePlanner().decision(
+        "做一份市场分析，找资料、总结重点、输出报告",
+        allowed_tools=["browser.open_url_and_extract_text", "artifact.write", "desktop.list_apps"],
+    )
     competitor_research = RuntimePlanner().decision(
         "帮我做一份竞品分析报告，调研 Notion 和 Obsidian 的区别，输出 markdown",
         allowed_tools=["browser.search", "artifact.write", "desktop.list_apps"],
@@ -1393,6 +1397,15 @@ def test_runtime_planner_routes_research_deliverables_to_web_search_not_app_sear
         "browser.research",
         "artifact.write",
     ]
+    assert market_research_extract.selected_intent.kind == "web_research"
+    assert market_research_extract.selected_intent.inputs == {
+        "url_hint": "https://www.google.com/search?q=%E5%B8%82%E5%9C%BA%E5%88%86%E6%9E%90",
+        "browser_action": "open_url_extract",
+        "query": "市场分析",
+    }
+    assert _step_by_id(market_research_extract, "extract-web-url-text").tool_name == (
+        "browser.open_url_and_extract_text"
+    )
 
     assert competitor_research.selected_intent.kind == "web_research"
     assert competitor_research.selected_intent.inputs["query"] == (
@@ -35106,6 +35119,10 @@ def test_runtime_execution_envelope_can_project_full_web_research_plan() -> None
         "研究一下 OpenAI 最新的 Agent SDK 变化并输出总结",
         allowed_tools=allowed_tools,
     )
+    market_research_decision = RuntimePlanner().decision(
+        "做一份市场分析，找资料、总结重点、输出报告",
+        allowed_tools=allowed_tools,
+    )
     open_research_envelope = runtime_execution_envelope_from_decision(
         open_research_decision,
         allowed_tools=allowed_tools,
@@ -35125,6 +35142,23 @@ def test_runtime_execution_envelope_can_project_full_web_research_plan() -> None
     assert open_research_envelope.requests[1].input == {
         "path": "research-summary.md",
     }
+
+    market_research_envelope = runtime_execution_envelope_from_decision(
+        market_research_decision,
+        allowed_tools=allowed_tools,
+        full_plan=True,
+    )
+
+    assert market_research_envelope is not None
+    assert [request.tool_name for request in market_research_envelope.requests] == [
+        "browser.open_url_and_extract_text",
+        "artifact.write",
+    ]
+    assert [request.runtime_stage for request in market_research_envelope.requests] == [
+        "discover",
+        "produce",
+    ]
+    assert market_research_envelope.requests[1].continue_to_model is True
 
 
 def test_runtime_execution_envelope_can_project_full_report_app_write_plan() -> None:

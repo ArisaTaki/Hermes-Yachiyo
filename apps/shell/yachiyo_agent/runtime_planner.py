@@ -1497,6 +1497,7 @@ class TaskIntentRouter:
                     "query": generic_research_query,
                     "url_hint": _web_search_url(engine, generic_research_query),
                 }
+                web_search.update(_web_search_results_output_hint(text))
         browser_interaction = _browser_type_text_hint(text) or _browser_click_hint(text)
         app_scoped_safe_operation = _app_scoped_safe_operation_hint(text)
         app_scoped_desktop_operation = _app_scoped_desktop_operation_hint(text)
@@ -25305,6 +25306,15 @@ def _plain_web_search_deliverable_extract_requested(text: str) -> bool:
         or re.search(
             r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
             r"(?:研究|调研|查研究|做(?:一份)?(?:调研|研究)|写(?:一份)?(?:关于)?.*?(?:分析|报告))",
+            value,
+            flags=re.IGNORECASE,
+        )
+        or re.search(
+            r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:直接)?"
+            r"(?:做|制作|写|生成|输出|整理)\s*(?:一份|一个|一篇|个)?"
+            r"[^，,。！？!?]{0,40}(?:分析|报告|调研|研究)[^。！？!?]{0,80}"
+            r"(?:找资料|查资料|搜集资料|收集资料|总结|摘要|输出报告|输出总结|"
+            r"markdown|文档)",
             value,
             flags=re.IGNORECASE,
         )
