@@ -6484,6 +6484,89 @@ class RuntimePlanner:
                 artifact_paths=[] if _task_output_target_hint(intent.user_goal) == "clipboard" else [artifact_path],
                 depends_on="write-report-artifact",
             )
+        research_query = _report_external_research_query_hint(intent.user_goal)
+        if research_query and _task_output_target_hint(intent.user_goal) != "clipboard":
+            research_tool = _first_allowed(
+                ("browser.search", "browser.open_url_and_extract_text", "browser.open_url"),
+                allowed,
+            )
+            artifact_tool = _first_allowed(("artifact.write",), allowed)
+            if research_tool and artifact_tool:
+                artifact_path = _artifact_output_path(
+                    intent.user_goal,
+                    _report_artifact_filename(intent.user_goal),
+                )
+                research_input = (
+                    {"query": research_query}
+                    if research_tool == "browser.search"
+                    else {
+                        "url": _web_search_url(
+                            _web_search_engine_hint(intent.user_goal),
+                            research_query,
+                        )
+                    }
+                )
+                research_step_id = "research-report-context"
+                steps = [
+                    _step(
+                        intent,
+                        research_step_id,
+                        "Research report context",
+                        "browser.research",
+                        research_tool,
+                        input_preview=research_input,
+                        action="search" if research_tool == "browser.search" else "open_url",
+                        reason=(
+                            "Gather external source context before producing the requested "
+                            "research-style report artifact."
+                        ),
+                    )
+                ]
+                if research_tool == "browser.open_url":
+                    extract_tool = _first_allowed(
+                        ("browser.extract_text", "browser.current_page", "browser.extract"),
+                        allowed,
+                    )
+                    if extract_tool:
+                        steps.append(
+                            _step(
+                                intent,
+                                "extract-report-research-context",
+                                "Extract report research context",
+                                "browser.research",
+                                extract_tool,
+                                input_preview={},
+                                depends_on=[research_step_id],
+                                action="extract_text",
+                                reason=(
+                                    "Read the opened search result before writing the "
+                                    "requested report artifact."
+                                ),
+                            )
+                        )
+                        research_step_id = "extract-report-research-context"
+                steps.append(
+                    _step(
+                        intent,
+                        "write-report-artifact",
+                        "Write report artifact",
+                        "artifact.write",
+                        artifact_tool,
+                        input_preview={
+                            "path": artifact_path,
+                            "body_source": "web_research",
+                        },
+                        depends_on=[research_step_id],
+                        reason="Produce the requested durable report from researched context.",
+                    )
+                )
+                return _append_artifact_reveal_step(
+                    intent,
+                    allowed,
+                    steps,
+                    artifact_paths=[artifact_path],
+                    depends_on="write-report-artifact",
+                )
         steps = [
             _step(
                 intent,
@@ -25754,6 +25837,90 @@ def _external_research_report_query(text: str) -> str:
             if query:
                 return query
     return ""
+
+
+def _report_external_research_query_hint(text: str) -> str:
+    value = _clean_prompt(text)
+    if not value:
+        return ""
+    query = _external_research_report_query(value) or _generic_web_research_query_hint(value)
+    if query:
+        return query
+    if not _contains_any(
+        value,
+        (
+            "report",
+            "summary",
+            "brief",
+            "document",
+            "markdown",
+            "报告",
+            "总结",
+            "简报",
+            "文档",
+        ),
+    ):
+        return ""
+    if not (
+        _contains_any(
+            value,
+            (
+                "competitive",
+                "competitor",
+                "market",
+                "research",
+                "latest",
+                "current",
+                "news",
+                "pricing",
+                "price",
+                "竞品",
+                "竞争",
+                "市场",
+                "调研",
+                "研究",
+                "最新",
+                "当前",
+                "新闻",
+                "价格",
+                "定价",
+            ),
+        )
+        or _looks_like_external_info_lookup(value)
+    ):
+        return ""
+    fallback = (
+        "竞品分析"
+        if _contains_any(value, ("竞品", "竞争"))
+        else "market analysis"
+        if _contains_any(value, ("market", "市场"))
+        else "research report"
+    )
+    return _clean_report_research_query(value, fallback=fallback)
+
+
+def _clean_report_research_query(text: str, *, fallback: str) -> str:
+    value = _clean_web_search_query(text)
+    value = re.sub(
+        r"^(?:帮我|请|麻烦|能否|能不能|可以)?(?:做|制作|写|生成|输出|整理|创建|新建|create|make|write|generate|produce)?"
+        r"(?:一份|一个|一篇|个|a|an)?",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(
+        r"(?:并|然后|，|,)?\s*(?:输出|生成|写成|整理成|保存成|导出|save|export|output|write).*$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    value = re.sub(
+        r"(?:报告|总结|简报|文档|markdown|\bmd\b|report|summary|brief|document)$",
+        "",
+        value,
+        flags=re.IGNORECASE,
+    ).strip()
+    return value or fallback
 
 
 def _direct_web_search_query(text: str) -> str:

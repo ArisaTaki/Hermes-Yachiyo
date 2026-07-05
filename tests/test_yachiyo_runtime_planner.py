@@ -11223,6 +11223,44 @@ def test_runtime_planner_reveals_generated_artifacts_in_finder() -> None:
     ]
 
 
+def test_runtime_planner_researches_external_report_context_before_writing() -> None:
+    decision = RuntimePlanner().decision(
+        "创建一份竞品分析报告，保存成 markdown",
+        allowed_tools=[
+            "workspace.read",
+            "workspace.list",
+            "browser.search",
+            "browser.open_url",
+            "browser.extract_text",
+            "artifact.write",
+        ],
+    )
+    local_report = RuntimePlanner().decision(
+        "写一份项目总结报告",
+        allowed_tools=[
+            "workspace.read",
+            "workspace.list",
+            "browser.search",
+            "artifact.write",
+        ],
+    )
+
+    assert decision.selected_intent.kind == "report_generation"
+    assert [step.step_id for step in decision.plan.tool_plan.steps] == [
+        "research-report-context",
+        "write-report-artifact",
+    ]
+    assert _step_by_id(decision, "research-report-context").tool_name == "browser.search"
+    assert _step_by_id(decision, "research-report-context").input_preview == {
+        "query": "竞品分析"
+    }
+    assert _step_by_id(decision, "write-report-artifact").input_preview == {
+        "path": "report.md",
+        "body_source": "web_research",
+    }
+    assert _step_by_id(local_report, "gather-context").tool_name == "workspace.list"
+
+
 def test_runtime_planner_routes_local_file_report_to_file_terminal_artifact_plan() -> None:
     decision = RuntimePlanner().decision(
         "查找 Downloads 里的 PDF 并生成摘要报告",
