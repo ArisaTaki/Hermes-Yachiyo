@@ -79,6 +79,25 @@ _DIRECT_DAILY_DESKTOP_TOOLS = {
     "terminal.run",
 }
 
+_RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS = {
+    "app.focus",
+    "app.open",
+    "browser.current_page",
+    "browser.screenshot",
+    "desktop.active_window",
+    "desktop.focus_app",
+    "desktop.list_apps",
+    "desktop.open_app",
+    "desktop.read_ui",
+    "desktop.running_apps",
+    "desktop.ui_elements",
+    "desktop.windows",
+    "file.read",
+    "fs.read_file",
+    "screen.capture",
+    "workspace.read",
+}
+
 _DAILY_DESKTOP_DISCOVERY_TOOLS = {
     "desktop.list_apps",
     "desktop.running_apps",
@@ -14518,6 +14537,8 @@ def _auto_replan_runtime_recovery_action_requests(
             tool_name = str(action.get("tool") or "").strip()
             if not tool_name or tool_name not in allowed:
                 continue
+            if _runtime_replan_action_auto_start_blocked(action):
+                continue
             request_input = (
                 dict(action.get("input"))
                 if isinstance(action.get("input"), Mapping)
@@ -14583,6 +14604,39 @@ def _auto_replan_runtime_recovery_action_requests(
             _attach_replan_payload_trace_metadata(request, payload)
             requests.append(request)
     return _dedupe_replan_recovery_requests(requests)
+
+
+def _runtime_replan_action_auto_start_blocked(action: Mapping[str, Any]) -> bool:
+    metadata = action.get("metadata") if isinstance(action.get("metadata"), Mapping) else {}
+    explicit = metadata.get("runtime_replan_auto_start_eligible")
+    if isinstance(explicit, bool):
+        return not explicit
+    explicit = metadata.get("auto_start_eligible")
+    if isinstance(explicit, bool):
+        return not explicit
+    blockers = metadata.get("runtime_replan_auto_start_blockers")
+    if isinstance(blockers, list) and blockers:
+        return True
+    blockers = metadata.get("auto_start_blockers")
+    if isinstance(blockers, list) and blockers:
+        return True
+
+    tool_name = str(action.get("tool") or action.get("tool_name") or "").strip()
+    risk_level = str(action.get("risk_level") or "").strip().lower()
+    approval_required = bool(action.get("approval_required")) or str(
+        action.get("approval_status") or ""
+    ).strip().lower() in {
+        "pending",
+        "required",
+        "approval_required",
+        "waiting_approval",
+    }
+    return bool(
+        not tool_name
+        or approval_required
+        or risk_level in {"high", "critical"}
+        or tool_name not in _RUNTIME_REPLAN_ACTION_AUTO_SAFE_TOOLS
+    )
 
 
 def _replan_fallback_request_needs_model_followup(

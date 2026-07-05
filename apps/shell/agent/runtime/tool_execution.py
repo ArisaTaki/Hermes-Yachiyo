@@ -2632,6 +2632,10 @@ def _runtime_replan_enrich_recovery_context(
 
     recovery_actions = _dedupe_runtime_replan_recovery_actions(recovery_actions)
     if recovery_actions:
+        recovery_actions = [
+            _runtime_replan_recovery_action_with_auto_start_context(action)
+            for action in recovery_actions
+        ]
         metadata["recovery_actions"] = recovery_actions
 
 
@@ -2973,6 +2977,25 @@ _RUNTIME_OBSERVATION_RETRY_TOOLS = {
     "screen.capture",
 }
 
+_RUNTIME_REPLAN_AUTO_SAFE_TOOLS = {
+    "app.focus",
+    "app.open",
+    "browser.current_page",
+    "browser.screenshot",
+    "desktop.active_window",
+    "desktop.focus_app",
+    "desktop.list_apps",
+    "desktop.open_app",
+    "desktop.read_ui",
+    "desktop.running_apps",
+    "desktop.ui_elements",
+    "desktop.windows",
+    "file.read",
+    "fs.read_file",
+    "screen.capture",
+    "workspace.read",
+}
+
 
 def _runtime_observation_retry_recovery_action(
     *,
@@ -3049,6 +3072,56 @@ def _dedupe_runtime_replan_recovery_actions(
         seen.add(signature)
         deduped.append(dict(action))
     return deduped
+
+
+def _runtime_replan_recovery_action_with_auto_start_context(
+    action: Mapping[str, Any],
+) -> dict[str, Any]:
+    payload = dict(action)
+    metadata = (
+        dict(payload.get("metadata"))
+        if isinstance(payload.get("metadata"), Mapping)
+        else {}
+    )
+    auto_start = _runtime_replan_recovery_action_auto_start_context(payload)
+    metadata["runtime_replan_auto_start_eligible"] = auto_start["eligible"]
+    metadata["runtime_replan_auto_start_reason"] = auto_start["reason"]
+    metadata["runtime_replan_auto_start_blockers"] = list(auto_start["blockers"])
+    payload["metadata"] = metadata
+    return payload
+
+
+def _runtime_replan_recovery_action_auto_start_context(
+    action: Mapping[str, Any],
+) -> dict[str, Any]:
+    blockers: list[str] = []
+    tool_name = str(action.get("tool") or action.get("tool_name") or "").strip()
+    risk_level = str(action.get("risk_level") or "").strip().lower()
+    approval_required = bool(action.get("approval_required")) or str(
+        action.get("approval_status") or ""
+    ).strip().lower() in {
+        "pending",
+        "required",
+        "approval_required",
+        "waiting_approval",
+    }
+    if not tool_name:
+        blockers.append("missing_tool")
+    if approval_required:
+        blockers.append("approval_required")
+    if risk_level in {"high", "critical"}:
+        blockers.append("high_risk")
+    if tool_name and tool_name not in _RUNTIME_REPLAN_AUTO_SAFE_TOOLS:
+        blockers.append("tool_not_auto_safe")
+    return {
+        "eligible": not blockers,
+        "reason": (
+            "safe_low_risk_runtime_replan_recovery"
+            if not blockers
+            else "manual_runtime_replan_recovery_required"
+        ),
+        "blockers": blockers,
+    }
 
 
 def _first_mapping(*values: Any) -> dict[str, Any]:

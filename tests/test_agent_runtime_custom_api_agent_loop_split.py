@@ -892,6 +892,55 @@ def test_recovery_actions_projects_retry_input_contract_fields() -> None:
     ]
 
 
+def test_auto_replan_runtime_recovery_actions_respect_manual_auto_start_metadata() -> None:
+    requests = custom_api_agent_module._auto_replan_runtime_recovery_action_requests(
+        [
+            {
+                "request_id": "replan-safe",
+                "trigger": "tool_failure",
+                "metadata": {
+                    "recovery_actions": [
+                        {
+                            "label": "Discover app again",
+                            "tool": "desktop.list_apps",
+                            "input": {"query": "PixelForge", "limit": 20},
+                            "risk_level": "low",
+                            "metadata": {
+                                "runtime_replan_auto_start_eligible": True,
+                                "runtime_replan_auto_start_blockers": [],
+                            },
+                        },
+                        {
+                            "label": "Run fallback script",
+                            "tool": "terminal.run",
+                            "input": {"command": "python analyze_sales.py"},
+                            "risk_level": "high",
+                            "metadata": {
+                                "runtime_replan_auto_start_eligible": False,
+                                "runtime_replan_auto_start_blockers": [
+                                    "high_risk",
+                                    "tool_not_auto_safe",
+                                ],
+                            },
+                        },
+                        {
+                            "label": "Raw script action without metadata",
+                            "tool": "terminal.run",
+                            "input": {"command": "python raw_recovery.py"},
+                            "risk_level": "low",
+                        },
+                    ]
+                },
+            }
+        ],
+        ["desktop.list_apps", "terminal.run"],
+    )
+
+    assert [request["tool"] for request in requests] == ["desktop.list_apps"]
+    assert requests[0]["input"] == {"query": "PixelForge", "limit": 20}
+    assert requests[0]["replan_request_id"] == "replan-safe"
+
+
 def test_daily_desktop_sequence_summary_includes_runtime_readiness_skips() -> None:
     loop = RuntimeCustomApiAgentLoop(
         agent_model_config_private=lambda _agent: {},

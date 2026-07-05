@@ -1154,6 +1154,13 @@ def test_runtime_tool_request_runner_synthesizes_observation_retry_recovery_acti
             "observation_retry": observation_retry,
             "action_target": action_target,
             "observation_evidence": observation_evidence,
+            "metadata": {
+                "runtime_replan_auto_start_eligible": True,
+                "runtime_replan_auto_start_reason": (
+                    "safe_low_risk_runtime_replan_recovery"
+                ),
+                "runtime_replan_auto_start_blockers": [],
+            },
         }
     ]
     run_replan_event = next(
@@ -1162,6 +1169,62 @@ def test_runtime_tool_request_runner_synthesizes_observation_retry_recovery_acti
         if event_type == "agent.replan.requested"
     )
     assert run_replan_event["metadata"]["recovery_actions"] == payload["metadata"]["recovery_actions"]
+
+
+def test_runtime_tool_request_runner_marks_unsafe_recovery_actions_manual() -> None:
+    run_events: list[tuple[str, str, dict[str, Any]]] = []
+    timeline: list[dict[str, Any]] = []
+
+    runner = _runner(
+        call_agent_tool=lambda *_args, **_kwargs: {
+            "ok": False,
+            "error": "terminal retry failed",
+        },
+        run_events=run_events,
+    )
+
+    runner.run(
+        [
+            {
+                "tool": "data.analyze",
+                "input": {"path": "sales.csv"},
+                "source": "runtime_planner",
+                "step_id": "analyze-data",
+                "capability_id": "data.analysis",
+                "requires_observation": True,
+                "replan_triggers": ["tool_failure"],
+                "recovery_actions": [
+                    {
+                        "label": "Run fallback script",
+                        "tool": "terminal.run",
+                        "input": {"command": "python analyze_sales.py"},
+                        "risk_level": "high",
+                        "approval_required": True,
+                    }
+                ],
+            }
+        ],
+        ["data.analyze", "terminal.run"],
+        FakeBroker({"ok": True}),
+        [{"role": "user", "content": "Analyze sales.csv"}],
+        timeline,
+        [],
+        next_iteration=1,
+        run_id="run-unsafe-recovery",
+        budget=FakeBudget(),
+    )
+
+    replan_event = next(event for event in timeline if event["event"] == "agent.replan.requested")
+    action_metadata = replan_event["payload"]["metadata"]["recovery_actions"][0]["metadata"]
+    assert action_metadata["runtime_replan_auto_start_eligible"] is False
+    assert action_metadata["runtime_replan_auto_start_reason"] == (
+        "manual_runtime_replan_recovery_required"
+    )
+    assert action_metadata["runtime_replan_auto_start_blockers"] == [
+        "approval_required",
+        "high_risk",
+        "tool_not_auto_safe",
+    ]
 
 
 def test_runtime_tool_request_runner_records_explicit_desktop_verification_target() -> None:
